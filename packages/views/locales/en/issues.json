@@ -45,6 +45,7 @@
     "section_label": "Label",
     "members_group": "Members",
     "agents_group": "Agents",
+    "squads_group": "Squads",
     "issue_count_one": "{{count}} issue",
     "issue_count_other": "{{count}} issues",
     "reset": "Reset all filters"
@@ -173,6 +174,13 @@
     "task_completed_other": "completed the task ({{count}} times)",
     "task_failed_one": "task failed",
     "task_failed_other": "task failed ({{count}} times)",
+    "squad_leader_evaluated": "evaluated the squad trigger",
+    "squad_leader_action": "evaluated and took action",
+    "squad_leader_action_reason": "evaluated and took action: {{reason}}",
+    "squad_leader_no_action": "evaluated: no action needed",
+    "squad_leader_no_action_reason": "evaluated: no action needed ({{reason}})",
+    "squad_leader_failed": "evaluation failed",
+    "squad_leader_failed_reason": "evaluation failed: {{reason}}",
     "coalesced_badge": "×{{count}}"
   },
   "comment": {
@@ -311,7 +319,8 @@
       "trigger_unassigned": "Unassigned",
       "search_placeholder": "Assign to...",
       "members_group": "Members",
-      "agents_group": "Agents"
+      "agents_group": "Agents",
+      "squads_group": "Squads"
     },
     "due_date": {
       "trigger_label": "Due date",

@@ -419,3 +419,149 @@ if resp[0].CommentID != nil {
 t.Fatalf("expected issue-level attachment comment_id to be nil, got %v", *resp[0].CommentID)
 }
 }
+
+func TestGetAttachmentContent_HappyPath_Markdown(t *testing.T) {
+	store := &mockStorage{}
+	origStorage := testHandler.Storage
+	testHandler.Storage = store
+	defer func() { testHandler.Storage = origStorage }()
+
+	body := []byte("# heading\n\nbody text\n")
+	id := seedPreviewAttachment(t, store, "preview-md-key.md", "preview.md", "text/markdown", body)
+
+	req, w := newPreviewRequest(t, id, testWorkspaceID)
+	testHandler.GetAttachmentContent(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Body.String(); got != string(body) {
+		t.Errorf("body = %q, want %q", got, body)
+	}
+	if got := w.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want text/plain; charset=utf-8", got)
+	}
+	if got := w.Header().Get("X-Original-Content-Type"); got != "text/markdown" {
+		t.Errorf("X-Original-Content-Type = %q, want text/markdown", got)
+	}
+	if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+}
+
+// Even when http.DetectContentType returned "text/plain" instead of "text/markdown"
+// (a known sniffer quirk), the extension whitelist still grants access.
+func TestGetAttachmentContent_AcceptsByExtensionWhenContentTypeIsGeneric(t *testing.T) {
+	store := &mockStorage{}
+	origStorage := testHandler.Storage
+	testHandler.Storage = store
+	defer func() { testHandler.Storage = origStorage }()
+
+	body := []byte("package main\n")
+	id := seedPreviewAttachment(t, store, "main-go-key.go", "main.go", "application/octet-stream", body)
+
+	req, w := newPreviewRequest(t, id, testWorkspaceID)
+	testHandler.GetAttachmentContent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetAttachmentContent_Unsupported_PDF(t *testing.T) {
+	store := &mockStorage{}
+	origStorage := testHandler.Storage
+	testHandler.Storage = store
+	defer func() { testHandler.Storage = origStorage }()
+
+	id := seedPreviewAttachment(t, store, "pdf-key.pdf", "manual.pdf", "application/pdf", []byte("%PDF-1.4\n"))
+
+	req, w := newPreviewRequest(t, id, testWorkspaceID)
+	testHandler.GetAttachmentContent(w, req)
+	if w.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetAttachmentContent_TooLarge(t *testing.T) {
+	store := &mockStorage{}
+	origStorage := testHandler.Storage
+	testHandler.Storage = store
+	defer func() { testHandler.Storage = origStorage }()
+
+	// One byte over the limit. Allocate ASCII so io.ReadAll has work to do.
+	big := bytes.Repeat([]byte("a"), maxPreviewTextSize+1)
+	id := seedPreviewAttachment(t, store, "huge-key.txt", "huge.txt", "text/plain", big)
+
+	req, w := newPreviewRequest(t, id, testWorkspaceID)
+	testHandler.GetAttachmentContent(w, req)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetAttachmentContent_ForeignWorkspace(t *testing.T) {
+	store := &mockStorage{}
+	origStorage := testHandler.Storage
+	testHandler.Storage = store
+	defer func() { testHandler.Storage = origStorage }()
+
+	id := seedPreviewAttachment(t, store, "ws-mismatch.md", "note.md", "text/markdown", []byte("# secret\n"))
+
+	// Same attachment id, but request comes in scoped to a different workspace.
+	foreign := "00000000-0000-0000-0000-000000000099"
+	req, w := newPreviewRequest(t, id, foreign)
+	testHandler.GetAttachmentContent(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetAttachmentContent_NotFound(t *testing.T) {
+	store := &mockStorage{}
+	origStorage := testHandler.Storage
+	testHandler.Storage = store
+	defer func() { testHandler.Storage = origStorage }()
+
+	req, w := newPreviewRequest(t, "00000000-0000-0000-0000-000000000abc", testWorkspaceID)
+	testHandler.GetAttachmentContent(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", w.Code, w.Body.String())
+	}
+}
+
+// isTextPreviewable is the whitelist linkpin between the proxy and the
+// client-side dispatcher. Regress against the most common content types so
+// drifting one of the lists alone fails loud.
+func TestIsTextPreviewable(t *testing.T) {
+	t.Helper()
+	cases := []struct {
+		name        string
+		contentType string
+		filename    string
+		want        bool
+	}{
+		{"markdown by ext", "application/octet-stream", "README.md", true},
+		{"markdown by mime", "text/markdown", "README", true},
+		{"plain text", "text/plain", "log.txt", true},
+		{"json by mime", "application/json", "data.json", true},
+		{"yaml by ext", "application/octet-stream", "config.yml", true},
+		{"go source", "text/plain", "main.go", true},
+		{"typescript", "application/octet-stream", "index.ts", true},
+		{"html", "text/html", "page.html", true},
+		{"dockerfile no ext", "application/octet-stream", "Dockerfile", true},
+
+		{"pdf rejected", "application/pdf", "doc.pdf", false},
+		{"png rejected", "image/png", "shot.png", false},
+		{"video rejected", "video/mp4", "clip.mp4", false},
+		{"binary fallthrough", "application/octet-stream", "blob.bin", false},
+		{"docx rejected", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "report.docx", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isTextPreviewable(tc.contentType, tc.filename); got != tc.want {
+				t.Errorf("isTextPreviewable(%q, %q) = %v, want %v", tc.contentType, tc.filename, got, tc.want)
+			}
+		})
+	}
+}
+

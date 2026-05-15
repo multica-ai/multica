@@ -2,8 +2,27 @@ import { forwardRef, useRef, useImperativeHandle } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
+import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import enCommon from "../../locales/en/common.json";
 import enChat from "../../locales/en/chat.json";
+
+function makeUpload(overrides: Partial<UploadResult> & { id: string; link: string; filename: string }): UploadResult {
+  return {
+    workspace_id: "ws-1",
+    issue_id: null,
+    comment_id: null,
+    chat_session_id: null,
+    chat_message_id: null,
+    uploader_type: "member",
+    uploader_id: "user-1",
+    url: overrides.link,
+    download_url: overrides.link,
+    content_type: "image/png",
+    size_bytes: 1,
+    created_at: new Date(0).toISOString(),
+    ...overrides,
+  };
+}
 
 const TEST_RESOURCES = { en: { common: enCommon, chat: enChat } };
 
@@ -28,7 +47,7 @@ vi.mock("../../editor", () => ({
       defaultValue?: string;
       onUpdate?: (md: string) => void;
       placeholder?: string;
-      onUploadFile?: (file: File) => Promise<{ id: string; link: string; filename: string } | null>;
+      onUploadFile?: (file: File) => Promise<UploadResult | null>;
     },
     ref: React.Ref<unknown>,
   ) {
@@ -95,11 +114,9 @@ function renderInput(props: Partial<React.ComponentProps<typeof ChatInput>> = {}
   const onSend = props.onSend ?? vi.fn();
   const onUploadFile =
     props.onUploadFile ??
-    vi.fn(async (_file: File) => ({
-      id: "att-1",
-      link: "https://cdn.example/att-1.png",
-      filename: "img.png",
-    }));
+    vi.fn(async (_file: File) =>
+      makeUpload({ id: "att-1", link: "https://cdn.example/att-1.png", filename: "img.png" }),
+    );
   render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <ChatInput onSend={onSend} onUploadFile={onUploadFile} agentName="Multica" {...props} />
@@ -122,11 +139,9 @@ describe("ChatInput attachment wiring", () => {
 
   it("passes attachment_ids to onSend for uploads still referenced in the content", async () => {
     const onSend = vi.fn();
-    const onUploadFile = vi.fn(async (_file: File) => ({
-      id: "att-42",
-      link: "https://cdn.example/att-42.png",
-      filename: "x.png",
-    }));
+    const onUploadFile = vi.fn(async (_file: File) =>
+      makeUpload({ id: "att-42", link: "https://cdn.example/att-42.png", filename: "x.png" }),
+    );
     renderInput({ onSend, onUploadFile });
 
     // Simulate the drop → editor.uploadFile → onUploadFile happy path. The
@@ -152,8 +167,8 @@ describe("ChatInput attachment wiring", () => {
   });
 
   it("disables send while an upload is in flight, re-enables after it resolves", async () => {
-    let resolveUpload: (v: { id: string; link: string; filename: string }) => void;
-    const uploadPromise = new Promise<{ id: string; link: string; filename: string }>((res) => {
+    let resolveUpload: (v: UploadResult) => void;
+    const uploadPromise = new Promise<UploadResult>((res) => {
       resolveUpload = res;
     });
     const onSend = vi.fn();
@@ -177,11 +192,7 @@ describe("ChatInput attachment wiring", () => {
       expect(sendButton).toBeDisabled();
     });
 
-    resolveUpload!({
-      id: "att-slow",
-      link: "https://cdn.example/att-slow.png",
-      filename: "slow.png",
-    });
+    resolveUpload!(makeUpload({ id: "att-slow", link: "https://cdn.example/att-slow.png", filename: "slow.png" }));
 
     let sendButton: HTMLElement;
     await waitFor(() => {

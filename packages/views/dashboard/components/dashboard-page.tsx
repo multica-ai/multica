@@ -22,14 +22,19 @@ import {
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { PageHeader } from "../../layout/page-header";
 import { KpiCard } from "../../runtimes/components/shared";
-import { DailyCostChart } from "../../runtimes/components/charts";
+import { DailyCostChart, DailyTokensChart } from "../../runtimes/components/charts";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
+import {
+  TimezoneSelect,
+  browserTimezone,
+} from "../../common/timezone-select";
 import { formatTokens } from "../../runtimes/utils";
 import { useT } from "../../i18n";
 import {
   aggregateAgentTokens,
   aggregateDailyCost,
+  aggregateDailyTokens,
   computeDailyTotals,
   formatDuration,
   mergeAgentDashboardRows,
@@ -106,9 +111,14 @@ function Segmented<T extends string | number>({
  */
 export function DashboardPage() {
   const { t } = useT("usage");
+  const { t: tRuntimes } = useT("runtimes");
   const wsId = useWorkspaceId();
   const [days, setDays] = useState<TimeRange>(30);
   const [projectValue, setProjectValue] = useState<string>(ALL_PROJECTS);
+  // Default to the browser's resolved zone so day-boundary buckets match the
+  // user's local clock on first render. Pure client-state — the rollup queries
+  // are zone-agnostic today; this is the UI affordance the user can pin.
+  const [timezone, setTimezone] = useState<string>(() => browserTimezone());
 
   // The user can save model prices from the runtimes page; re-render when
   // they do so the dashboard reflects the new rates.
@@ -151,6 +161,7 @@ export function DashboardPage() {
   // Cost / token math — re-derived when usage, days, or pricings change.
   const totals = useMemo(() => computeDailyTotals(dailyUsage), [dailyUsage]);
   const dailyCost = useMemo(() => aggregateDailyCost(dailyUsage), [dailyUsage]);
+  const dailyTokens = useMemo(() => aggregateDailyTokens(dailyUsage), [dailyUsage]);
   const agentTokenRows = useMemo(
     () => aggregateAgentTokens(byAgentUsage),
     [byAgentUsage],
@@ -176,12 +187,18 @@ export function DashboardPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader className="justify-between px-5">
-        <div className="flex items-center gap-2">
-          <BarChart3 className="h-4 w-4 text-muted-foreground" />
-          <h1 className="text-sm font-medium">{t(($) => $.title)}</h1>
+      {/* h-auto + min-h-12 + flex-wrap: the toolbar (project filter, range
+          switch, timezone select) overflows the single h-12 row on narrow
+          and medium widths once the timezone picker is added — letting the
+          right cluster wrap underneath keeps every control reachable
+          without an off-screen bleed. Wider viewports still render the
+          original single row. */}
+      <PageHeader className="h-auto min-h-12 flex-wrap justify-between gap-y-1.5 px-5 py-1.5 sm:py-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <BarChart3 className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <h1 className="truncate text-sm font-medium">{t(($) => $.title)}</h1>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <ProjectFilter
             projects={projects}
             value={projectValue}
@@ -191,6 +208,12 @@ export function DashboardPage() {
             value={days}
             onChange={setDays}
             options={TIME_RANGES.map((r) => ({ label: r.label, value: r.days }))}
+          />
+          <TimezoneSelect
+            value={timezone}
+            onValueChange={setTimezone}
+            browserSuffix={tRuntimes(($) => $.detail.timezone_browser_suffix)}
+            triggerClassName="rounded-md font-mono text-xs"
           />
         </div>
       </PageHeader>
@@ -242,8 +265,10 @@ export function DashboardPage() {
                 />
               </div>
 
-              {/* Daily cost chart — reuses the runtime DailyCostChart. */}
-              <DailyCostBlock dailyCost={dailyCost} />
+              {/* Daily trend chart — toggle picks Cost vs Tokens axis,
+                  mirroring the runtime-detail Usage section so both
+                  surfaces share one chart language. */}
+              <DailyTrendBlock dailyCost={dailyCost} dailyTokens={dailyTokens} />
 
               {/* Per-agent leaderboard — user picks the ranking metric;
                   the progress bar and column emphasis follow the metric. */}
@@ -317,28 +342,58 @@ function ProjectFilter({
   );
 }
 
-function DailyCostBlock({
+type DailyMetric = "cost" | "tokens";
+
+function DailyTrendBlock({
   dailyCost,
+  dailyTokens,
 }: {
   dailyCost: ReturnType<typeof aggregateDailyCost>;
+  dailyTokens: ReturnType<typeof aggregateDailyTokens>;
 }) {
   const { t } = useT("usage");
-  const total = dailyCost.reduce((sum, d) => sum + d.total, 0);
+  const [metric, setMetric] = useState<DailyMetric>("tokens");
+
+  // Empty-state is per-metric so a workspace that recorded tokens but
+  // has no priced models (unmapped) still gets a real Tokens chart while
+  // its Cost view falls through to the empty-state — same convention as
+  // the runtimes-side DailyTab in usage-section.tsx.
+  const totalCost = dailyCost.reduce((sum, d) => sum + d.total, 0);
+  const totalTokens = dailyTokens.reduce(
+    (sum, d) => sum + d.input + d.output + d.cacheRead + d.cacheWrite,
+    0,
+  );
+  const isEmpty = metric === "cost" ? totalCost === 0 : totalTokens === 0;
+
   return (
     <div className="rounded-lg border bg-card p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h4 className="text-sm font-semibold">{t(($) => $.daily.title)}</h4>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <h4 className="text-sm font-semibold">
+          {metric === "cost"
+            ? t(($) => $.daily.title_cost)
+            : t(($) => $.daily.title_tokens)}
+        </h4>
+        <Segmented
+          value={metric}
+          onChange={setMetric}
+          options={[
+            { label: t(($) => $.daily.metric_tokens), value: "tokens" as const },
+            { label: t(($) => $.daily.metric_cost), value: "cost" as const },
+          ]}
+        />
       </div>
       <div className="min-h-[240px]">
-        {total === 0 ? (
+        {isEmpty ? (
           <div className="flex aspect-[3/1] flex-col items-center justify-center gap-2 rounded-md border border-dashed bg-muted/20 p-6 text-center">
             <BarChart3 className="h-5 w-5 text-muted-foreground/50" />
             <p className="text-xs text-muted-foreground">
               {t(($) => $.daily.no_data)}
             </p>
           </div>
-        ) : (
+        ) : metric === "cost" ? (
           <DailyCostChart data={dailyCost} />
+        ) : (
+          <DailyTokensChart data={dailyTokens} />
         )}
       </div>
     </div>

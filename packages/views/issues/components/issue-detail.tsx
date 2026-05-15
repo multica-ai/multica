@@ -61,7 +61,7 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
-import type { Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
+import type { Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
@@ -100,7 +100,90 @@ import { timeAgo } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
+
+function SubscriberPopoverContent({
+  members,
+  agents,
+  subscribers,
+  toggleSubscriber,
+  t,
+}: {
+  members: { user_id: string; name: string }[];
+  agents: { id: string; name: string; archived_at?: string | null }[];
+  subscribers: { user_type: string; user_id: string }[];
+  toggleSubscriber: (id: string, type: "member" | "agent", subscribed: boolean) => void;
+  t: ActivityT;
+}) {
+  const [search, setSearch] = useState("");
+  const q = search.trim().toLowerCase();
+
+  const uniqueMembers = members.filter((m, i, arr) => arr.findIndex((x) => x.user_id === m.user_id) === i);
+  const activeAgents = agents.filter((a) => !a.archived_at);
+
+  const filteredMembers = q
+    ? uniqueMembers.filter((m) => m.name.toLowerCase().includes(q) || matchesPinyin(m.name, q))
+    : uniqueMembers;
+  const filteredAgents = q
+    ? activeAgents.filter((a) => a.name.toLowerCase().includes(q) || matchesPinyin(a.name, q))
+    : activeAgents;
+
+  return (
+    <PopoverContent align="end" className="w-64 p-0">
+      <Command shouldFilter={false}>
+        <CommandInput
+          placeholder={t(($) => $.detail.change_subscribers_placeholder)}
+          value={search}
+          onValueChange={setSearch}
+        />
+        <CommandList className="max-h-64">
+          {filteredMembers.length === 0 && filteredAgents.length === 0 && (
+            <CommandEmpty>{t(($) => $.detail.no_subscribers_results)}</CommandEmpty>
+          )}
+          {filteredMembers.length > 0 && (
+            <CommandGroup heading={t(($) => $.detail.members_group)}>
+              {filteredMembers.map((m) => {
+                const sub = subscribers.find((s) => s.user_type === "member" && s.user_id === m.user_id);
+                const isSubbed = !!sub;
+                return (
+                  <CommandItem
+                    key={`member-${m.user_id}`}
+                    onSelect={() => toggleSubscriber(m.user_id, "member", isSubbed)}
+                    className="flex items-center gap-2.5"
+                  >
+                    <Checkbox checked={isSubbed} className="pointer-events-none" />
+                    <ActorAvatar actorType="member" actorId={m.user_id} size={22} />
+                    <span className="truncate flex-1">{m.name}</span>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          )}
+          {filteredAgents.length > 0 && (
+            <CommandGroup heading={t(($) => $.detail.agents_group)}>
+              {filteredAgents.map((a) => {
+                const sub = subscribers.find((s) => s.user_type === "agent" && s.user_id === a.id);
+                const isSubbed = !!sub;
+                return (
+                  <CommandItem
+                    key={`agent-${a.id}`}
+                    onSelect={() => toggleSubscriber(a.id, "agent", isSubbed)}
+                    className="flex items-center gap-2.5"
+                  >
+                    <Checkbox checked={isSubbed} className="pointer-events-none" />
+                    <ActorAvatar actorType="agent" actorId={a.id} size={22} showStatusDot />
+                    <span className="truncate flex-1">{a.name}</span>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          )}
+        </CommandList>
+      </Command>
+    </PopoverContent>
+  );
+}
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
@@ -171,6 +254,25 @@ function formatActivity(
       return t(($) => $.activity.task_completed, { count: entry.coalesced_count ?? 1 });
     case "task_failed":
       return t(($) => $.activity.task_failed, { count: entry.coalesced_count ?? 1 });
+    case "squad_leader_evaluated": {
+      const reason = details.reason?.trim();
+      switch (details.outcome) {
+        case "action":
+          return reason
+            ? t(($) => $.activity.squad_leader_action_reason, { reason })
+            : t(($) => $.activity.squad_leader_action);
+        case "no_action":
+          return reason
+            ? t(($) => $.activity.squad_leader_no_action_reason, { reason })
+            : t(($) => $.activity.squad_leader_no_action);
+        case "failed":
+          return reason
+            ? t(($) => $.activity.squad_leader_failed_reason, { reason })
+            : t(($) => $.activity.squad_leader_failed);
+        default:
+          return t(($) => $.activity.squad_leader_evaluated);
+      }
+    }
     default:
       return entry.action ?? "";
   }
@@ -680,13 +782,16 @@ export function IssueDetail({
     // Coalesce consecutive activities from the same actor + action.
     // - task_completed / task_failed: no time limit (these repeat across runs)
     // - all other actions: within a 2-minute window
+    // - squad_leader_evaluated: never coalesce; outcome/reason are audit data
     const COALESCE_MS = 2 * 60 * 1000;
     const NO_TIME_LIMIT_ACTIONS = new Set(["task_completed", "task_failed"]);
+    const NEVER_COALESCE_ACTIONS = new Set(["squad_leader_evaluated"]);
     const coalesced: TimelineEntry[] = [];
     for (const entry of topLevel) {
       if (entry.type === "activity") {
         const prev = coalesced[coalesced.length - 1];
         if (
+          !NEVER_COALESCE_ACTIONS.has(entry.action!) &&
           prev?.type === "activity" &&
           prev.action === entry.action &&
           prev.actor_type === entry.actor_type &&
@@ -882,10 +987,21 @@ export function IssueDetail({
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
   });
-  // Description uploads don't pass issueId — the URL lives in the markdown.
-  // This avoids stale attachment records when users delete images from the editor.
+  // Pending uploads in the description editor. We don't pass `issueId` on
+  // upload (to avoid orphaning attachments when the user deletes the file
+  // from the markdown), so they start unattached and we re-bind them via
+  // `attachment_ids` on the next description save. Drives editor previews
+  // so text/code attachments show an Eye before the bind round-trips.
+  const [descPendingAttachments, setDescPendingAttachments] = useState<Attachment[]>([]);
+  const descEditorAttachments = descPendingAttachments.length > 0
+    ? [...(issueAttachments ?? []), ...descPendingAttachments]
+    : issueAttachments;
   const handleDescriptionUpload = useCallback(
-    (file: File) => uploadWithToast(file),
+    async (file: File) => {
+      const result = await uploadWithToast(file);
+      if (result) setDescPendingAttachments((prev) => [...prev, result]);
+      return result;
+    },
     [uploadWithToast],
   );
 
@@ -1473,6 +1589,7 @@ export function IssueDetail({
                   actions={actions}
                   primitives={dropdownPrimitives}
                   onDeletedNavigateTo={onDelete ? undefined : paths.issues()}
+                  onOpenAssignee={() => {}}
                 />
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => setClearHistoryDialogOpen(true)}>
@@ -1548,11 +1665,19 @@ export function IssueDetail({
               key={id}
               defaultValue={issue.description || ""}
               placeholder={t(($) => $.detail.desc_placeholder)}
-              onUpdate={(md) => handleUpdateField({ description: md })}
+              onUpdate={(md) => {
+                // Bind any pending uploads still referenced in the markdown
+                // so they appear in `issueAttachments` after refresh and the
+                // editor's text/code preview keeps working past reload.
+                const ids = descPendingAttachments
+                  .filter((a) => md.includes(a.url))
+                  .map((a) => a.id);
+                handleUpdateField({ description: md, attachment_ids: ids.length > 0 ? ids : undefined });
+              }}
               onUploadFile={handleDescriptionUpload}
               debounceMs={1500}
               currentIssueId={resolvedId}
-              attachments={issueAttachments}
+              attachments={descEditorAttachments}
               selectionQuoteActions={{
                 onQuoteToNewComment: handleEditorQuoteToNewComment,
                 onQuoteToReplyTarget: handleEditorQuoteToReplyTarget,
@@ -1699,54 +1824,13 @@ export function IssueDetail({
                       </span>
                     )}
                   </PopoverTrigger>
-                  <PopoverContent align="end" className="w-64 p-0">
-                    <Command>
-                      <CommandInput placeholder={t(($) => $.detail.change_subscribers_placeholder)} />
-                      <CommandList className="max-h-64">
-                        <CommandEmpty>{t(($) => $.detail.no_subscribers_results)}</CommandEmpty>
-                        {members.length > 0 && (
-                          <CommandGroup heading={t(($) => $.detail.members_group)}>
-                            {members.filter((m, i, arr) => arr.findIndex((x) => x.user_id === m.user_id) === i).map((m) => {
-                              const sub = subscribers.find((s) => s.user_type === "member" && s.user_id === m.user_id);
-                              const isSubbed = !!sub;
-                              return (
-                                <CommandItem
-                                  key={`member-${m.user_id}`}
-                                  onSelect={() => toggleSubscriber(m.user_id, "member", isSubbed)}
-                                  className="flex items-center gap-2.5"
-                                >
-                                  <Checkbox checked={isSubbed} className="pointer-events-none" />
-                                  <ActorAvatar actorType="member" actorId={m.user_id} size={22} />
-                                  <span className="truncate flex-1">{m.name}</span>
-
-                                </CommandItem>
-                              );
-                            })}
-                          </CommandGroup>
-                        )}
-                        {agents.filter((a) => !a.archived_at).length > 0 && (
-                          <CommandGroup heading={t(($) => $.detail.agents_group)}>
-                            {agents.filter((a) => !a.archived_at).map((a) => {
-                              const sub = subscribers.find((s) => s.user_type === "agent" && s.user_id === a.id);
-                              const isSubbed = !!sub;
-                              return (
-                                <CommandItem
-                                  key={`agent-${a.id}`}
-                                  onSelect={() => toggleSubscriber(a.id, "agent", isSubbed)}
-                                  className="flex items-center gap-2.5"
-                                >
-                                  <Checkbox checked={isSubbed} className="pointer-events-none" />
-                                  <ActorAvatar actorType="agent" actorId={a.id} size={22} showStatusDot />
-                                  <span className="truncate flex-1">{a.name}</span>
-
-                                </CommandItem>
-                              );
-                            })}
-                          </CommandGroup>
-                        )}
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
+                  <SubscriberPopoverContent
+                    members={members}
+                    agents={agents}
+                    subscribers={subscribers}
+                    toggleSubscriber={toggleSubscriber}
+                    t={t}
+                  />
                 </Popover>
               </div>
             </div>

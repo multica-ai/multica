@@ -63,6 +63,7 @@ type TaskContextForEnv struct {
 	AutopilotTriggerPayload string
 	QuickCreatePrompt       string // non-empty for quick-create tasks
 	RuntimeConfig           json.RawMessage // agent runtime_config, used by provider-specific env setup
+	IsSquadLeader           bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

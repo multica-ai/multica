@@ -241,13 +241,14 @@ function ManualForm({
 // URL import form
 // ---------------------------------------------------------------------------
 
-type DetectedSource = "clawhub" | "skills.sh" | "github" | null;
+type DetectedSource = "clawhub" | "skills.sh" | "github" | "gitee" | null;
 
 function detectUrlSource(url: string): DetectedSource {
   const u = url.trim().toLowerCase();
   if (u.includes("clawhub.ai")) return "clawhub";
   if (u.includes("skills.sh")) return "skills.sh";
   if (u.includes("github.com")) return "github";
+  if (u.includes("gitee.com")) return "gitee";
   return null;
 }
 
@@ -318,6 +319,7 @@ function UrlForm({
     if (source === "clawhub") return t(($) => $.create.url.importing_clawhub);
     if (source === "skills.sh") return t(($) => $.create.url.importing_skills_sh);
     if (source === "github") return t(($) => $.create.url.importing_github);
+    if (source === "gitee") return t(($) => $.create.url.importing_gitee);
     return t(($) => $.create.url.importing);
   })();
 
@@ -352,7 +354,7 @@ function UrlForm({
           <p className="mb-2 text-xs text-muted-foreground">
             {t(($) => $.create.url.supported_sources)}
           </p>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             <SourceCard
               label="ClawHub"
               exampleHost="clawhub.ai/owner/skill"
@@ -370,6 +372,12 @@ function UrlForm({
               exampleHost="github.com/owner/repo"
               browseUrl="https://github.com"
               active={source === "github"}
+            />
+            <SourceCard
+              label="Gitee"
+              exampleHost="gitee.com/owner/repo"
+              browseUrl="https://gitee.com"
+              active={source === "gitee"}
             />
           </div>
         </div>

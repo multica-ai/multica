@@ -16,7 +16,10 @@
     "tasks_hint": "{{failed}} failed"
   },
   "daily": {
-    "title": "Daily cost",
+    "title_cost": "Daily cost",
+    "title_tokens": "Daily tokens",
+    "metric_cost": "Cost",
+    "metric_tokens": "Tokens",
     "no_data": "No usage in this window."
   },
   "leaderboard": {

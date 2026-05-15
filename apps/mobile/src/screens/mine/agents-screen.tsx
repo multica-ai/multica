@@ -31,7 +31,6 @@ import type {
   CreateAgentRequest,
   MemberWithUser,
   RuntimeDevice,
-  AgentSkillSummary,
   SkillSummary,
   UpdateAgentRequest,
 } from "@multica/core/types";
