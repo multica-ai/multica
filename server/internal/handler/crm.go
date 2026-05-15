@@ -496,27 +496,43 @@ type CRMIMAPSettingResponse struct {
 	LastTestStatus  *string `json:"last_test_status"`
 	LastTestMessage *string `json:"last_test_message"`
 	LastTestedAt    *string `json:"last_tested_at"`
+	OwnerType       *string `json:"owner_type"`
+	OwnerID         *string `json:"owner_id"`
+	SMTPHost        *string `json:"smtp_host"`
+	SMTPPort        *int32  `json:"smtp_port"`
+	SMTPTLSMode     *string `json:"smtp_tls_mode"`
+	SMTPUsername    *string `json:"smtp_username"`
+	SMTPSecretRef   *string `json:"smtp_secret_ref"`
 	CreatedAt       string  `json:"created_at"`
 	UpdatedAt       string  `json:"updated_at"`
 }
 
 type UpsertCRMIMAPSettingRequest struct {
-	ID          *string `json:"id"`
-	Label       string  `json:"label"`
-	Email       string  `json:"email"`
-	Host        string  `json:"host"`
-	Port        int32   `json:"port"`
-	TLSMode     string  `json:"tls_mode"`
-	Username    string  `json:"username"`
-	SecretRef   *string `json:"secret_ref"`
-	Secret      *string `json:"secret"`
-	SyncEnabled bool    `json:"sync_enabled"`
+	ID            *string `json:"id"`
+	Label         string  `json:"label"`
+	Email         string  `json:"email"`
+	Host          string  `json:"host"`
+	Port          int32   `json:"port"`
+	TLSMode       string  `json:"tls_mode"`
+	Username      string  `json:"username"`
+	SecretRef     *string `json:"secret_ref"`
+	Secret        *string `json:"secret"`
+	SyncEnabled   bool    `json:"sync_enabled"`
+	OwnerType     *string `json:"owner_type"`
+	OwnerID       *string `json:"owner_id"`
+	SMTPHost      *string `json:"smtp_host"`
+	SMTPPort      *int32  `json:"smtp_port"`
+	SMTPTLSMode   *string `json:"smtp_tls_mode"`
+	SMTPUsername  *string `json:"smtp_username"`
+	SMTPSecretRef *string `json:"smtp_secret_ref"`
+	SMTPSecret    *string `json:"smtp_secret"`
 }
 
 type CRMIMAPPreviewRequest struct {
 	MailboxID *string `json:"mailbox_id"`
 	Folder    *string `json:"folder"`
 	Limit     int     `json:"limit"`
+	RangeDays int     `json:"range_days"`
 }
 
 type CRMIMAPImportRequest struct {
@@ -524,6 +540,7 @@ type CRMIMAPImportRequest struct {
 	Folder    *string  `json:"folder"`
 	UIDs      []string `json:"uids"`
 	Limit     int      `json:"limit"`
+	RangeDays int      `json:"range_days"`
 }
 
 type CRMIMAPPreviewMessageResponse struct {
@@ -537,6 +554,32 @@ type CRMIMAPPreviewMessageResponse struct {
 	ReceivedAt        *string  `json:"received_at"`
 	Snippet           string   `json:"snippet"`
 	RawSize           int      `json:"raw_size"`
+}
+
+type CRMEmailDraftResponse struct {
+	ID          string   `json:"id"`
+	MailboxID   *string  `json:"mailbox_id"`
+	ThreadID    *string  `json:"thread_id"`
+	ToEmails    []string `json:"to_emails"`
+	CcEmails    []string `json:"cc_emails"`
+	BccEmails   []string `json:"bcc_emails"`
+	Subject     string   `json:"subject"`
+	BodyText    string   `json:"body_text"`
+	Status      string   `json:"status"`
+	AIGenerated bool     `json:"ai_generated"`
+	CreatedAt   string   `json:"created_at"`
+	UpdatedAt   string   `json:"updated_at"`
+}
+
+type CreateCRMEmailDraftRequest struct {
+	MailboxID   *string  `json:"mailbox_id"`
+	ThreadID    *string  `json:"thread_id"`
+	ToEmails    []string `json:"to_emails"`
+	CcEmails    []string `json:"cc_emails"`
+	BccEmails   []string `json:"bcc_emails"`
+	Subject     string   `json:"subject"`
+	BodyText    string   `json:"body_text"`
+	AIGenerated bool     `json:"ai_generated"`
 }
 type CRMProfileSuggestionResponse struct {
 	ID          string          `json:"id"`
@@ -1518,15 +1561,27 @@ func (h *Handler) UpdateCRMEmailThreadAssociation(w http.ResponseWriter, r *http
 func scanCRMIMAPSetting(row pgx.Row) (CRMIMAPSettingResponse, error) {
 	var r CRMIMAPSettingResponse
 	var id, ws pgtype.UUID
-	var secretRef, status, msg pgtype.Text
+	var secretRef, status, msg, ownerType, smtpHost, smtpTLSMode, smtpUsername, smtpSecretRef pgtype.Text
+	var ownerID pgtype.UUID
+	var smtpPort pgtype.Int4
 	var tested, created, updated pgtype.Timestamptz
-	err := row.Scan(&id, &ws, &r.Label, &r.Email, &r.Host, &r.Port, &r.TLSMode, &r.Username, &secretRef, &r.SyncEnabled, &status, &msg, &tested, &created, &updated)
+	err := row.Scan(&id, &ws, &r.Label, &r.Email, &r.Host, &r.Port, &r.TLSMode, &r.Username, &secretRef, &r.SyncEnabled, &status, &msg, &tested, &ownerType, &ownerID, &smtpHost, &smtpPort, &smtpTLSMode, &smtpUsername, &smtpSecretRef, &created, &updated)
 	r.ID = uuidToString(id)
 	r.WorkspaceID = uuidToString(ws)
 	r.SecretRef = textToPtr(secretRef)
 	r.LastTestStatus = textToPtr(status)
 	r.LastTestMessage = textToPtr(msg)
 	r.LastTestedAt = timestampToPtr(tested)
+	r.OwnerType = textToPtr(ownerType)
+	r.OwnerID = uuidToPtr(ownerID)
+	r.SMTPHost = textToPtr(smtpHost)
+	if smtpPort.Valid {
+		v := int32(smtpPort.Int32)
+		r.SMTPPort = &v
+	}
+	r.SMTPTLSMode = textToPtr(smtpTLSMode)
+	r.SMTPUsername = textToPtr(smtpUsername)
+	r.SMTPSecretRef = textToPtr(smtpSecretRef)
 	r.CreatedAt = timestampToString(created)
 	r.UpdatedAt = timestampToString(updated)
 	return r, err
@@ -1537,7 +1592,7 @@ func (h *Handler) ListCRMIMAPSettings(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := h.DB.Query(r.Context(), `SELECT id, workspace_id, label, email, host, port, tls_mode, username, secret_ref, sync_enabled, last_test_status, last_test_message, last_tested_at, created_at, updated_at FROM crm_imap_setting WHERE workspace_id=$1 ORDER BY updated_at DESC`, workspaceID)
+	rows, err := h.DB.Query(r.Context(), `SELECT id, workspace_id, label, email, host, port, tls_mode, username, secret_ref, sync_enabled, last_test_status, last_test_message, last_tested_at, owner_type, owner_id, smtp_host, smtp_port, smtp_tls_mode, smtp_username, smtp_secret_ref, created_at, updated_at FROM crm_imap_setting WHERE workspace_id=$1 ORDER BY updated_at DESC`, workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list CRM IMAP settings")
 		return
@@ -1585,15 +1640,31 @@ func (h *Handler) UpsertCRMIMAPSetting(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid tls_mode")
 		return
 	}
+	ownerType := cleanOptionalText(req.OwnerType)
+	ownerID, ok := optionalUUID(w, req.OwnerID, "owner_id")
+	if !ok {
+		return
+	}
+	smtpHost := cleanOptionalText(req.SMTPHost)
+	smtpPort := pgtype.Int4{}
+	if req.SMTPPort != nil && *req.SMTPPort > 0 {
+		smtpPort = pgtype.Int4{Int32: *req.SMTPPort, Valid: true}
+	}
+	smtpTLSMode := cleanOptionalText(req.SMTPTLSMode)
+	smtpUsername := cleanOptionalText(req.SMTPUsername)
+	smtpSecretRef := cleanOptionalText(req.SMTPSecretRef)
+	if req.SMTPSecret != nil && strings.TrimSpace(*req.SMTPSecret) != "" {
+		smtpSecretRef = pgtype.Text{String: encodeCRMIMAPInlineSecret(strings.TrimSpace(*req.SMTPSecret)), Valid: true}
+	}
 	id, ok := optionalUUID(w, req.ID, "id")
 	if !ok {
 		return
 	}
 	var row pgx.Row
 	if id.Valid {
-		row = h.DB.QueryRow(r.Context(), `UPDATE crm_imap_setting SET label=$3,email=$4,host=$5,port=$6,tls_mode=$7,username=$8,secret_ref=$9,sync_enabled=$10,updated_at=now() WHERE id=$1 AND workspace_id=$2 RETURNING id, workspace_id, label, email, host, port, tls_mode, username, secret_ref, sync_enabled, last_test_status, last_test_message, last_tested_at, created_at, updated_at`, id, workspaceID, label, email, host, req.Port, tlsMode, user, secretRef, req.SyncEnabled)
+		row = h.DB.QueryRow(r.Context(), `UPDATE crm_imap_setting SET label=$3,email=$4,host=$5,port=$6,tls_mode=$7,username=$8,secret_ref=$9,sync_enabled=$10,owner_type=$11,owner_id=$12,smtp_host=$13,smtp_port=$14,smtp_tls_mode=$15,smtp_username=$16,smtp_secret_ref=$17,updated_at=now() WHERE id=$1 AND workspace_id=$2 RETURNING id, workspace_id, label, email, host, port, tls_mode, username, secret_ref, sync_enabled, last_test_status, last_test_message, last_tested_at, owner_type, owner_id, smtp_host, smtp_port, smtp_tls_mode, smtp_username, smtp_secret_ref, created_at, updated_at`, id, workspaceID, label, email, host, req.Port, tlsMode, user, secretRef, req.SyncEnabled, ownerType, ownerID, smtpHost, smtpPort, smtpTLSMode, smtpUsername, smtpSecretRef)
 	} else {
-		row = h.DB.QueryRow(r.Context(), `INSERT INTO crm_imap_setting (workspace_id,label,email,host,port,tls_mode,username,secret_ref,sync_enabled) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, workspace_id, label, email, host, port, tls_mode, username, secret_ref, sync_enabled, last_test_status, last_test_message, last_tested_at, created_at, updated_at`, workspaceID, label, email, host, req.Port, tlsMode, user, secretRef, req.SyncEnabled)
+		row = h.DB.QueryRow(r.Context(), `INSERT INTO crm_imap_setting (workspace_id,label,email,host,port,tls_mode,username,secret_ref,sync_enabled,owner_type,owner_id,smtp_host,smtp_port,smtp_tls_mode,smtp_username,smtp_secret_ref) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id, workspace_id, label, email, host, port, tls_mode, username, secret_ref, sync_enabled, last_test_status, last_test_message, last_tested_at, owner_type, owner_id, smtp_host, smtp_port, smtp_tls_mode, smtp_username, smtp_secret_ref, created_at, updated_at`, workspaceID, label, email, host, req.Port, tlsMode, user, secretRef, req.SyncEnabled, ownerType, ownerID, smtpHost, smtpPort, smtpTLSMode, smtpUsername, smtpSecretRef)
 	}
 	item, err := scanCRMIMAPSetting(row)
 	if err != nil {
@@ -1616,7 +1687,7 @@ func (h *Handler) TestCRMIMAPSetting(w http.ResponseWriter, r *http.Request) {
 
 	status := "ok"
 	msg := "IMAP connection successful"
-	if _, err := fetchCRMIMAPMessages(cfg, "INBOX", 1, nil); err != nil {
+	if _, err := fetchCRMIMAPMessages(cfg, "INBOX", 1, 0, nil); err != nil {
 		status = "failed"
 		msg = "IMAP connection failed: " + err.Error()
 	}
@@ -1632,14 +1703,14 @@ func (h *Handler) PreviewCRMIMAP(w http.ResponseWriter, r *http.Request) {
 	var req CRMIMAPPreviewRequest
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	limit := req.Limit
-	if limit <= 0 || limit > 20 {
-		limit = 10
+	if limit <= 0 || limit > 500 {
+		limit = 100
 	}
 	cfg, ok := h.loadCRMIMAPConfig(w, r, workspaceID, req.MailboxID)
 	if !ok {
 		return
 	}
-	messages, err := fetchCRMIMAPMessages(cfg, cleanCRMIMAPFolder(req.Folder), limit, nil)
+	messages, err := fetchCRMIMAPMessages(cfg, cleanCRMIMAPFolder(req.Folder), limit, req.RangeDays, nil)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "failed to fetch IMAP messages: "+err.Error())
 		return
@@ -1665,7 +1736,7 @@ func (h *Handler) ImportCRMIMAP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	messages, err := fetchCRMIMAPMessages(cfg, cleanCRMIMAPFolder(req.Folder), len(req.UIDs), req.UIDs)
+	messages, err := fetchCRMIMAPMessages(cfg, cleanCRMIMAPFolder(req.Folder), len(req.UIDs), 0, req.UIDs)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "failed to fetch IMAP messages: "+err.Error())
 		return
@@ -1686,8 +1757,8 @@ func (h *Handler) SyncCRMIMAP(w http.ResponseWriter, r *http.Request) {
 	var req CRMIMAPImportRequest
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	limit := req.Limit
-	if limit <= 0 || limit > 50 {
-		limit = 20
+	if limit <= 0 || limit > 500 {
+		limit = 100
 	}
 	cfg, ok := h.loadCRMIMAPConfig(w, r, workspaceID, req.MailboxID)
 	if !ok {
@@ -1696,7 +1767,7 @@ func (h *Handler) SyncCRMIMAP(w http.ResponseWriter, r *http.Request) {
 	folder := cleanCRMIMAPFolder(req.Folder)
 	var runID pgtype.UUID
 	_ = h.DB.QueryRow(r.Context(), `INSERT INTO crm_imap_sync_run (workspace_id, mailbox_id, folder, requested_limit) VALUES ($1,$2,$3,$4) RETURNING id`, workspaceID, cfg.UUID, folder, limit).Scan(&runID)
-	messages, err := fetchCRMIMAPMessages(cfg, folder, limit, nil)
+	messages, err := fetchCRMIMAPMessages(cfg, folder, limit, req.RangeDays, nil)
 	if err != nil {
 		_, _ = h.DB.Exec(r.Context(), `UPDATE crm_imap_sync_run SET status='failed', error_message=$2, finished_at=now(), updated_at=now() WHERE id=$1`, runID, err.Error())
 		writeError(w, http.StatusBadGateway, "failed to fetch IMAP messages: "+err.Error())
@@ -1724,7 +1795,7 @@ func (h *Handler) loadCRMIMAPConfig(w http.ResponseWriter, r *http.Request, work
 	if !ok {
 		return crmIMAPMailboxConfig{}, false
 	}
-	query := `SELECT id, label, email, host, port, tls_mode, username, secret_ref FROM crm_imap_setting WHERE workspace_id=$1`
+	query := `SELECT id, label, email, host, port, tls_mode, username, secret_ref, owner_type, owner_id, smtp_host, smtp_port, smtp_tls_mode, smtp_username, smtp_secret_ref FROM crm_imap_setting WHERE workspace_id=$1`
 	args := []any{workspaceID}
 	if mailboxID.Valid {
 		query += ` AND id=$2`
@@ -1733,14 +1804,25 @@ func (h *Handler) loadCRMIMAPConfig(w http.ResponseWriter, r *http.Request, work
 	query += ` ORDER BY updated_at DESC LIMIT 1`
 	var cfg crmIMAPMailboxConfig
 	var id pgtype.UUID
-	var secretRef pgtype.Text
-	if err := h.DB.QueryRow(r.Context(), query, args...).Scan(&id, &cfg.Label, &cfg.Email, &cfg.Host, &cfg.Port, &cfg.TLSMode, &cfg.Username, &secretRef); err != nil {
+	var secretRef, ownerType, smtpHost, smtpTLSMode, smtpUsername, smtpSecretRef pgtype.Text
+	var ownerID pgtype.UUID
+	var smtpPort pgtype.Int4
+	if err := h.DB.QueryRow(r.Context(), query, args...).Scan(&id, &cfg.Label, &cfg.Email, &cfg.Host, &cfg.Port, &cfg.TLSMode, &cfg.Username, &secretRef, &ownerType, &ownerID, &smtpHost, &smtpPort, &smtpTLSMode, &smtpUsername, &smtpSecretRef); err != nil {
 		writeError(w, http.StatusNotFound, "CRM IMAP setting not found")
 		return crmIMAPMailboxConfig{}, false
 	}
 	cfg.UUID = id
 	cfg.ID = uuidToString(id)
 	cfg.SecretRef = crmTextValue(secretRef)
+	cfg.OwnerType = crmTextValue(ownerType)
+	cfg.OwnerID = uuidToString(ownerID)
+	cfg.SMTPHost = crmTextValue(smtpHost)
+	if smtpPort.Valid {
+		cfg.SMTPPort = smtpPort.Int32
+	}
+	cfg.SMTPTLSMode = crmTextValue(smtpTLSMode)
+	cfg.SMTPUsername = crmTextValue(smtpUsername)
+	cfg.SMTPSecretRef = crmTextValue(smtpSecretRef)
 	return cfg, true
 }
 
@@ -1807,6 +1889,89 @@ func (h *Handler) importCRMIMAPMessages(ctx context.Context, workspaceID pgtype.
 		imported++
 	}
 	return imported, skipped, nil
+}
+
+func (h *Handler) ListCRMEmailDrafts(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.crmWorkspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	rows, err := h.DB.Query(r.Context(), `SELECT id, mailbox_id, thread_id, to_emails, cc_emails, bcc_emails, subject, body_text, status, ai_generated, created_at, updated_at FROM crm_email_draft WHERE workspace_id=$1 ORDER BY updated_at DESC LIMIT 100`, workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list CRM email drafts")
+		return
+	}
+	defer rows.Close()
+	items := []CRMEmailDraftResponse{}
+	for rows.Next() {
+		var id, mailboxID, threadID pgtype.UUID
+		var subject, body, status string
+		var toEmails, ccEmails, bccEmails []string
+		var ai bool
+		var created, updated pgtype.Timestamptz
+		if err := rows.Scan(&id, &mailboxID, &threadID, &toEmails, &ccEmails, &bccEmails, &subject, &body, &status, &ai, &created, &updated); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to scan CRM email draft")
+			return
+		}
+		items = append(items, CRMEmailDraftResponse{ID: uuidToString(id), MailboxID: uuidToPtr(mailboxID), ThreadID: uuidToPtr(threadID), ToEmails: toEmails, CcEmails: ccEmails, BccEmails: bccEmails, Subject: subject, BodyText: body, Status: status, AIGenerated: ai, CreatedAt: timestampToString(created), UpdatedAt: timestampToString(updated)})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"drafts": items, "total": len(items)})
+}
+
+func (h *Handler) CreateCRMEmailDraft(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.crmWorkspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	var req CreateCRMEmailDraftRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	mailboxID, ok := optionalUUID(w, req.MailboxID, "mailbox_id")
+	if !ok {
+		return
+	}
+	threadID, ok := optionalUUID(w, req.ThreadID, "thread_id")
+	if !ok {
+		return
+	}
+	var id pgtype.UUID
+	if err := h.DB.QueryRow(r.Context(), `INSERT INTO crm_email_draft (workspace_id, mailbox_id, thread_id, to_emails, cc_emails, bcc_emails, subject, body_text, ai_generated) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, workspaceID, mailboxID, threadID, req.ToEmails, req.CcEmails, req.BccEmails, req.Subject, req.BodyText, req.AIGenerated).Scan(&id); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create CRM email draft")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": uuidToString(id)})
+}
+
+func (h *Handler) SendCRMEmailDraft(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.crmWorkspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	draftID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "draftId"), "draft_id")
+	if !ok {
+		return
+	}
+	var mailboxID pgtype.UUID
+	var toEmails, ccEmails, bccEmails []string
+	var subject, body string
+	if err := h.DB.QueryRow(r.Context(), `SELECT mailbox_id, to_emails, cc_emails, bcc_emails, subject, body_text FROM crm_email_draft WHERE id=$1 AND workspace_id=$2`, draftID, workspaceID).Scan(&mailboxID, &toEmails, &ccEmails, &bccEmails, &subject, &body); err != nil {
+		writeError(w, http.StatusNotFound, "CRM email draft not found")
+		return
+	}
+	mailboxIDString := uuidToString(mailboxID)
+	cfg, ok := h.loadCRMIMAPConfig(w, r, workspaceID, &mailboxIDString)
+	if !ok {
+		return
+	}
+	if err := sendCRMSMTP(cfg, toEmails, ccEmails, bccEmails, subject, body); err != nil {
+		_, _ = h.DB.Exec(r.Context(), `UPDATE crm_email_draft SET status='failed', error_message=$3, updated_at=now() WHERE id=$1 AND workspace_id=$2`, draftID, workspaceID, err.Error())
+		writeError(w, http.StatusBadGateway, "failed to send CRM email draft: "+err.Error())
+		return
+	}
+	_, _ = h.DB.Exec(r.Context(), `UPDATE crm_email_draft SET status='sent', sent_at=now(), updated_at=now() WHERE id=$1 AND workspace_id=$2`, draftID, workspaceID)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "sent"})
 }
 
 func crmTextValue(t pgtype.Text) string {

@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArrowRight, Building2, Inbox, Link2, Mail, MailOpen, Search, Settings, Star, UserRound } from "lucide-react";
+import { Archive, ArrowRight, Building2, Inbox, Link2, Mail, MailOpen, Search, Send, Settings, Star, UserRound } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueKeys, useIssueDraftStore } from "@multica/core/issues";
@@ -35,13 +35,13 @@ type AssociationDraft = {
 
 type EmailLinkDraft = { projectId: string; issueIds: string[] };
 
-type MailboxDraft = { id?: string | null; label: string; email: string; host: string; port: string; tls_mode: "ssl" | "starttls" | "none"; username: string; secret_ref: string; secret: string; sync_enabled: boolean };
+type MailboxDraft = { id?: string | null; label: string; email: string; host: string; port: string; tls_mode: "ssl" | "starttls" | "none"; username: string; secret_ref: string; secret: string; sync_enabled: boolean; owner_type: string; owner_id: string; smtp_host: string; smtp_port: string; smtp_tls_mode: string; smtp_username: string; smtp_secret_ref: string; smtp_secret: string };
 
-const emptyMailboxDraft: MailboxDraft = { label: "", email: "", host: "", port: "993", tls_mode: "ssl", username: "", secret_ref: "", secret: "", sync_enabled: false };
+const emptyMailboxDraft: MailboxDraft = { label: "", email: "", host: "", port: "993", tls_mode: "ssl", username: "", secret_ref: "", secret: "", sync_enabled: false, owner_type: "", owner_id: "", smtp_host: "", smtp_port: "465", smtp_tls_mode: "ssl", smtp_username: "", smtp_secret_ref: "", smtp_secret: "" };
 
 function mailboxToDraft(setting?: CRMIMAPSetting | null): MailboxDraft {
   if (!setting) return emptyMailboxDraft;
-  return { id: setting.id, label: setting.label, email: setting.email, host: setting.host, port: String(setting.port), tls_mode: setting.tls_mode, username: setting.username, secret_ref: setting.secret_ref ?? "", secret: "", sync_enabled: setting.sync_enabled };
+  return { id: setting.id, label: setting.label, email: setting.email, host: setting.host, port: String(setting.port), tls_mode: setting.tls_mode, username: setting.username, secret_ref: setting.secret_ref ?? "", secret: "", sync_enabled: setting.sync_enabled, owner_type: setting.owner_type ?? "", owner_id: setting.owner_id ?? "", smtp_host: setting.smtp_host ?? "", smtp_port: String(setting.smtp_port ?? 465), smtp_tls_mode: setting.smtp_tls_mode ?? "ssl", smtp_username: setting.smtp_username ?? "", smtp_secret_ref: setting.smtp_secret_ref ?? "", smtp_secret: "" };
 }
 
 function messageTime(value?: string | null) {
@@ -88,12 +88,13 @@ export function CRMEmailsPage() {
   const paths = useWorkspacePaths();
   const { t } = useT("crm");
   const [search, setSearch] = useState("");
-  const [activeFolder, setActiveFolder] = useState<"inbox" | "sent" | "archived" | "starred" | "unlinked">("inbox");
+  const [activeFolder, setActiveFolder] = useState<"inbox" | "sent" | "drafts" | "archived" | "starred" | "unlinked">("inbox");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mailboxDraft, setMailboxDraft] = useState<MailboxDraft>(emptyMailboxDraft);
   const [mailboxStatus, setMailboxStatus] = useState<string | null>(null);
   const [previewMessages, setPreviewMessages] = useState<CRMIMAPPreviewMessage[]>([]);
   const [selectedPreviewUIDs, setSelectedPreviewUIDs] = useState<string[]>([]);
+  const [importRangeDays, setImportRangeDays] = useState(30);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [detailDialog, setDetailDialog] = useState<{ type: "account"; account: CRMAccount } | { type: "contact"; contact: CRMContact } | null>(null);
   const [associationDraft, setAssociationDraft] = useState<AssociationDraft | null>(null);
@@ -103,12 +104,16 @@ export function CRMEmailsPage() {
   const clearIssueDraft = useIssueDraftStore((state) => state.clearDraft);
   const { data: threads = [], isLoading } = useQuery(crmEmailThreadListOptions(wsId));
   const { data: accounts = [] } = useQuery(crmAccountListOptions(wsId, { sort: "name" }));
+  const { data: members = [] } = useQuery({ queryKey: ["workspace", wsId, "members", "crm-mailbox"], queryFn: () => api.listMembers(wsId), enabled: Boolean(wsId) });
+  const { data: agents = [] } = useQuery({ queryKey: ["agents", wsId, "crm-mailbox"], queryFn: () => api.listAgents({ workspace_id: wsId }), enabled: Boolean(wsId) });
+  const { data: draftsData } = useQuery({ queryKey: ["crm", wsId, "email-drafts"], queryFn: () => api.listCRMEmailDrafts(), enabled: Boolean(wsId) });
   const { data: mailboxData } = useQuery({
     queryKey: ["crm", wsId, "imap-settings"],
     queryFn: () => api.listCRMIMAPSettings(),
     enabled: Boolean(wsId),
   });
   const mailboxes = mailboxData?.settings ?? [];
+  const emailDrafts = draftsData?.drafts ?? [];
 
   const folderThreads = useMemo(() => {
     return threads.filter((thread) => {
@@ -133,10 +138,11 @@ export function CRMEmailsPage() {
   const folderCounts = useMemo(() => ({
     inbox: threads.filter((thread) => thread.status !== "archived" && thread.direction !== "outbound").length,
     sent: threads.filter((thread) => thread.direction === "outbound").length,
+    drafts: emailDrafts.filter((draft: any) => draft.status !== "sent" && draft.status !== "discarded").length,
     archived: threads.filter((thread) => thread.status === "archived").length,
     starred: 0,
     unlinked: threads.filter((thread) => !thread.account_id).length,
-  }), [threads]);
+  }), [threads, emailDrafts]);
 
   const saveMailbox = useMutation({
     mutationFn: () => api.upsertCRMIMAPSetting({
@@ -150,6 +156,14 @@ export function CRMEmailsPage() {
       secret_ref: mailboxDraft.secret_ref || null,
       secret: mailboxDraft.secret || null,
       sync_enabled: false,
+      owner_type: mailboxDraft.owner_type || null,
+      owner_id: mailboxDraft.owner_id || null,
+      smtp_host: mailboxDraft.smtp_host || null,
+      smtp_port: Number(mailboxDraft.smtp_port) || null,
+      smtp_tls_mode: mailboxDraft.smtp_tls_mode || null,
+      smtp_username: mailboxDraft.smtp_username || null,
+      smtp_secret_ref: mailboxDraft.smtp_secret_ref || null,
+      smtp_secret: mailboxDraft.smtp_secret || null,
     }),
     onSuccess: (setting) => {
       setMailboxDraft(mailboxToDraft(setting));
@@ -170,7 +184,7 @@ export function CRMEmailsPage() {
   });
 
   const previewMailbox = useMutation({
-    mutationFn: () => api.previewCRMIMAP({ mailbox_id: mailboxDraft.id, folder: activeFolder, limit: 10 }),
+    mutationFn: () => api.previewCRMIMAP({ mailbox_id: mailboxDraft.id, folder: "INBOX", limit: 500, range_days: importRangeDays }),
     onSuccess: (result) => {
       setPreviewMessages(result.messages);
       setSelectedPreviewUIDs(result.messages.map((message) => message.uid));
@@ -179,7 +193,7 @@ export function CRMEmailsPage() {
   });
 
   const importPreviewMessages = useMutation({
-    mutationFn: () => api.importCRMIMAP({ mailbox_id: mailboxDraft.id, folder: activeFolder, uids: selectedPreviewUIDs }),
+    mutationFn: () => api.importCRMIMAP({ mailbox_id: mailboxDraft.id, folder: "INBOX", uids: selectedPreviewUIDs }),
     onSuccess: (result) => {
       setMailboxStatus(`Imported ${result.imported}; skipped ${result.skipped}.`);
       setPreviewMessages([]);
@@ -189,9 +203,32 @@ export function CRMEmailsPage() {
   });
 
   const syncMailbox = useMutation({
-    mutationFn: () => api.syncCRMIMAP({ mailbox_id: mailboxDraft.id, folder: activeFolder, limit: 20 }),
+    mutationFn: () => api.syncCRMIMAP({ mailbox_id: mailboxDraft.id, folder: "INBOX", limit: 500, range_days: importRangeDays }),
     onSuccess: (result) => {
       setMailboxStatus(`Sync complete. Fetched ${result.fetched}; imported ${result.imported}; skipped ${result.skipped}.`);
+      queryClient.invalidateQueries({ queryKey: crmKeys.emailThreads(wsId) });
+    },
+  });
+
+  const saveAndImportMailbox = async () => {
+    setMailboxStatus("Saving mailbox and importing selected range…");
+    const setting = await saveMailbox.mutateAsync();
+    const preview = await api.previewCRMIMAP({ mailbox_id: setting.id, folder: "INBOX", limit: 500, range_days: importRangeDays });
+    const uids = preview.messages.map((message) => message.uid);
+    setPreviewMessages(preview.messages);
+    setSelectedPreviewUIDs(uids);
+    if (!uids.length) { setMailboxStatus("Mailbox saved. No messages found in selected range."); return; }
+    const result = await api.importCRMIMAP({ mailbox_id: setting.id, folder: "INBOX", uids });
+    setMailboxStatus(`Mailbox saved. Imported ${result.imported}; skipped ${result.skipped}.`);
+    queryClient.invalidateQueries({ queryKey: crmKeys.emailThreads(wsId) });
+    queryClient.invalidateQueries({ queryKey: ["crm", wsId, "imap-settings"] });
+  };
+
+  const sendDraft = useMutation({
+    mutationFn: (draftId: string) => api.sendCRMEmailDraft(draftId),
+    onSuccess: () => {
+      setMailboxStatus("Draft sent.");
+      queryClient.invalidateQueries({ queryKey: ["crm", wsId, "email-drafts"] });
       queryClient.invalidateQueries({ queryKey: crmKeys.emailThreads(wsId) });
     },
   });
@@ -357,6 +394,7 @@ export function CRMEmailsPage() {
             {([
               ["inbox", Inbox, t(($) => $.emails.folder_inbox)],
               ["sent", MailOpen, t(($) => $.emails.folder_sent)],
+              ["drafts", Send, "Drafts"],
               ["archived", Archive, t(($) => $.emails.folder_archived)],
               ["starred", Star, t(($) => $.emails.folder_starred)],
               ["unlinked", Link2, t(($) => $.emails.folder_unlinked)],
@@ -386,6 +424,22 @@ export function CRMEmailsPage() {
             <section className="space-y-2 p-3">
               <Skeleton className="h-16 w-full" />
               <Skeleton className="h-16 w-full" />
+            </section>
+          ) : activeFolder === "drafts" ? (
+            <section className="min-h-0 flex-1 overflow-y-auto p-3">
+              {emailDrafts.length === 0 ? <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">No drafts yet. AI-generated replies will appear here before sending.</div> : emailDrafts.map((draft: any) => (
+                <div key={draft.id} className="mb-2 rounded-lg border bg-card p-3 text-sm">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate font-medium">{draft.subject || "(no subject)"}</div>
+                      <div className="truncate text-xs text-muted-foreground">To: {(draft.to_emails ?? []).join(", ") || "—"}</div>
+                    </div>
+                    <Badge variant="outline">{draft.status}</Badge>
+                  </div>
+                  <p className="mt-2 line-clamp-3 text-xs text-muted-foreground">{draft.body_text}</p>
+                  <Button className="mt-3" size="sm" variant="outline" disabled={draft.status === "sent" || sendDraft.isPending} onClick={() => sendDraft.mutate(draft.id)}>Send</Button>
+                </div>
+              ))}
             </section>
           ) : filteredThreads.length === 0 ? (
             <section className="m-3 rounded-lg border border-dashed bg-card p-10 text-center">
@@ -634,16 +688,38 @@ export function CRMEmailsPage() {
             </select>
             <Input aria-label={t(($) => $.emails.username)} placeholder={t(($) => $.emails.username)} value={mailboxDraft.username} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, username: event.target.value }))} />
             <Input className="sm:col-span-2" aria-label={t(($) => $.emails.secret_reference)} placeholder={t(($) => $.emails.secret_reference_placeholder)} value={mailboxDraft.secret_ref} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, secret_ref: event.target.value }))} />
+            <label className="space-y-1 text-sm sm:col-span-2">
+              <span className="text-xs font-medium text-muted-foreground">Bind mailbox to member or AI agent</span>
+              <select className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={`${mailboxDraft.owner_type}:${mailboxDraft.owner_id}`} onChange={(event) => { const [owner_type, owner_id] = event.target.value.split(":"); setMailboxDraft((draft) => ({ ...draft, owner_type: owner_type || "", owner_id: owner_id || "" })); }}>
+                <option value=":">Unassigned</option>
+                {members.map((member: any) => <option key={`user-${member.id}`} value={`user:${member.user_id ?? member.id}`}>Member · {member.user?.name ?? member.user?.email ?? member.email ?? member.id}</option>)}
+                {agents.map((agent: any) => <option key={`agent-${agent.id}`} value={`agent:${agent.id}`}>AI agent · {agent.name}</option>)}
+              </select>
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="text-xs font-medium text-muted-foreground">Import range</span>
+              <select className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={importRangeDays} onChange={(event) => setImportRangeDays(Number(event.target.value))}>
+                <option value={7}>Recent 7 days</option>
+                <option value={30}>Recent 30 days</option>
+                <option value={90}>Recent 90 days</option>
+                <option value={365}>Recent 1 year</option>
+              </select>
+            </label>
+            <Input aria-label="SMTP host" placeholder="smtp.gmail.com" value={mailboxDraft.smtp_host} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_host: event.target.value }))} />
+            <Input aria-label="SMTP port" placeholder="465" value={mailboxDraft.smtp_port} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_port: event.target.value }))} />
+            <select aria-label="SMTP TLS mode" className="h-9 rounded-md border bg-background px-3 text-sm" value={mailboxDraft.smtp_tls_mode} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_tls_mode: event.target.value }))}>
+              <option value="ssl">SMTP SSL</option>
+              <option value="starttls">SMTP STARTTLS</option>
+            </select>
+            <Input aria-label="SMTP username" placeholder="SMTP username" value={mailboxDraft.smtp_username} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_username: event.target.value }))} />
+            <Input className="sm:col-span-2" aria-label="SMTP password" placeholder="SMTP app password (optional; defaults to IMAP password)" value={mailboxDraft.smtp_secret} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_secret: event.target.value }))} />
           </div>
           <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">{t(($) => $.emails.imap_security_note)}</p>
           {mailboxStatus ? <p className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">{mailboxStatus}</p> : null}
           {previewMessages.length > 0 ? (
             <div className="max-h-80 space-y-2 overflow-y-auto rounded-md border bg-muted/20 p-3">
               <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>{previewMessages.length} live IMAP messages</span>
-                <Button size="sm" disabled={selectedPreviewUIDs.length === 0 || importPreviewMessages.isPending} onClick={() => importPreviewMessages.mutate()}>
-                  Import selected ({selectedPreviewUIDs.length})
-                </Button>
+                <span>{previewMessages.length} live IMAP messages · selected by default</span>
               </div>
               {previewMessages.map((message) => {
                 const checked = selectedPreviewUIDs.includes(message.uid);
@@ -667,9 +743,7 @@ export function CRMEmailsPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => { setSettingsOpen(false); setMailboxStatus(null); }}>{t(($) => $.actions.cancel)}</Button>
             <Button variant="outline" disabled={testMailbox.isPending || saveMailbox.isPending || !mailboxDraft.host} onClick={() => testMailbox.mutate()}>{t(($) => $.emails.test_connection)}</Button>
-            <Button variant="outline" disabled={previewMailbox.isPending || !mailboxDraft.id} onClick={() => previewMailbox.mutate()}>{t(($) => $.emails.preview_import)}</Button>
-            <Button variant="outline" disabled={syncMailbox.isPending || !mailboxDraft.id} onClick={() => syncMailbox.mutate()}>Sync now</Button>
-            <Button disabled={saveMailbox.isPending || !mailboxDraft.label || !mailboxDraft.email || !mailboxDraft.host || !mailboxDraft.username} onClick={() => saveMailbox.mutate()}>{t(($) => $.actions.save)}</Button>
+            <Button disabled={saveMailbox.isPending || previewMailbox.isPending || importPreviewMessages.isPending || !mailboxDraft.label || !mailboxDraft.email || !mailboxDraft.host || !mailboxDraft.username} onClick={() => void saveAndImportMailbox()}>Save and import</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

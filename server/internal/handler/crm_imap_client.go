@@ -1,11 +1,16 @@
 package handler
 
 import (
+	"bufio"
+	"bytes"
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
+	"html"
 	"io"
 	"mime"
+	"mime/multipart"
+	"mime/quotedprintable"
 	"net"
 	"net/mail"
 	"net/textproto"
@@ -20,15 +25,22 @@ import (
 )
 
 type crmIMAPMailboxConfig struct {
-	ID        string
-	UUID      pgtype.UUID
-	Label     string
-	Email     string
-	Host      string
-	Port      int32
-	TLSMode   string
-	Username  string
-	SecretRef string
+	ID            string
+	UUID          pgtype.UUID
+	Label         string
+	Email         string
+	Host          string
+	Port          int32
+	TLSMode       string
+	Username      string
+	SecretRef     string
+	SMTPHost      string
+	SMTPPort      int32
+	SMTPTLSMode   string
+	SMTPUsername  string
+	SMTPSecretRef string
+	OwnerType     string
+	OwnerID       string
 }
 
 type crmIMAPFetchedMessage struct {
@@ -162,9 +174,9 @@ func imapQuote(value string) string {
 	return "\"" + value + "\""
 }
 
-func fetchCRMIMAPMessages(cfg crmIMAPMailboxConfig, folder string, limit int, requestedUIDs []string) ([]crmIMAPFetchedMessage, error) {
-	if limit <= 0 || limit > 50 {
-		limit = 10
+func fetchCRMIMAPMessages(cfg crmIMAPMailboxConfig, folder string, limit int, rangeDays int, requestedUIDs []string) ([]crmIMAPFetchedMessage, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
 	}
 	folder = strings.TrimSpace(folder)
 	if folder == "" || strings.EqualFold(folder, "inbox") {
@@ -187,7 +199,12 @@ func fetchCRMIMAPMessages(cfg crmIMAPMailboxConfig, folder string, limit int, re
 	}
 	uids := requestedUIDs
 	if len(uids) == 0 {
-		lines, err := client.command("UID SEARCH", "ALL")
+		args := []string{"ALL"}
+		if rangeDays > 0 {
+			since := time.Now().AddDate(0, 0, -rangeDays).Format("02-Jan-2006")
+			args = []string{"SINCE", since}
+		}
+		lines, err := client.command("UID SEARCH", args...)
 		if err != nil {
 			return nil, fmt.Errorf("IMAP search failed: %w", err)
 		}
@@ -265,9 +282,84 @@ func parseCRMIMAPMessage(uid, raw string) crmIMAPFetchedMessage {
 		msg.Date = date
 	}
 	body, _ := io.ReadAll(parsed.Body)
-	msg.BodyText = string(body)
+	contentType := parsed.Header.Get("Content-Type")
+	msg.BodyText, msg.BodyHTML = extractReadableEmailBodies(contentType, body)
+	if strings.TrimSpace(msg.BodyText) == "" && strings.TrimSpace(msg.BodyHTML) != "" {
+		msg.BodyText = htmlToPlainText(msg.BodyHTML)
+	}
+	if strings.TrimSpace(msg.BodyText) == "" {
+		msg.BodyText = string(body)
+	}
 	msg.Snippet = makeSnippet(msg.BodyText)
 	return msg
+}
+
+func extractReadableEmailBodies(contentType string, body []byte) (string, string) {
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return decodeTransferBody(body, ""), ""
+	}
+	if strings.HasPrefix(mediaType, "multipart/") {
+		mr := multipart.NewReader(bytes.NewReader(body), params["boundary"])
+		var textBody, htmlBody string
+		for {
+			part, err := mr.NextPart()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				break
+			}
+			partType := part.Header.Get("Content-Type")
+			partBody, _ := io.ReadAll(part)
+			pt, _, _ := mime.ParseMediaType(partType)
+			decoded := decodeTransferBody(partBody, part.Header.Get("Content-Transfer-Encoding"))
+			if strings.HasPrefix(pt, "multipart/") {
+				nestedText, nestedHTML := extractReadableEmailBodies(partType, partBody)
+				if textBody == "" {
+					textBody = nestedText
+				}
+				if htmlBody == "" {
+					htmlBody = nestedHTML
+				}
+			} else if strings.EqualFold(pt, "text/plain") && textBody == "" {
+				textBody = decoded
+			} else if strings.EqualFold(pt, "text/html") && htmlBody == "" {
+				htmlBody = decoded
+			}
+		}
+		return textBody, htmlBody
+	}
+	decoded := decodeTransferBody(body, "")
+	if strings.EqualFold(mediaType, "text/html") {
+		return htmlToPlainText(decoded), decoded
+	}
+	return decoded, ""
+}
+
+func decodeTransferBody(body []byte, encoding string) string {
+	switch strings.ToLower(strings.TrimSpace(encoding)) {
+	case "base64":
+		decoded, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(string(body)), ""))
+		if err == nil {
+			return string(decoded)
+		}
+	case "quoted-printable":
+		decoded, err := io.ReadAll(quotedprintable.NewReader(bufio.NewReader(bytes.NewReader(body))))
+		if err == nil {
+			return string(decoded)
+		}
+	}
+	return string(body)
+}
+
+func htmlToPlainText(value string) string {
+	value = regexp.MustCompile(`(?is)<(script|style)[^>]*>.*?</\1>`).ReplaceAllString(value, " ")
+	value = regexp.MustCompile(`(?i)<br\s*/?>`).ReplaceAllString(value, "\n")
+	value = regexp.MustCompile(`(?i)</p>`).ReplaceAllString(value, "\n")
+	value = regexp.MustCompile(`(?s)<[^>]+>`).ReplaceAllString(value, " ")
+	value = html.UnescapeString(value)
+	return strings.Join(strings.Fields(value), " ")
 }
 
 func headerEmails(header mail.Header, key string) []string {

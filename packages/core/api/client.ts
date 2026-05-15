@@ -1287,7 +1287,7 @@ export class ApiClient {
     return this.fetch(`/api/crm/imap-settings/${mailboxId}/test`, { method: "POST" });
   }
 
-  async previewCRMIMAP(data: { mailbox_id?: string | null; folder?: string | null; limit?: number }): Promise<CRMIMAPPreviewResponse> {
+  async previewCRMIMAP(data: { mailbox_id?: string | null; folder?: string | null; limit?: number; range_days?: number }): Promise<CRMIMAPPreviewResponse> {
     const raw = await this.fetch<unknown>("/api/crm/imap/preview", {
       method: "POST",
       body: JSON.stringify(data),
@@ -1307,7 +1307,7 @@ export class ApiClient {
     });
   }
 
-  async syncCRMIMAP(data: { mailbox_id?: string | null; folder?: string | null; limit?: number }): Promise<CRMIMAPImportResponse> {
+  async syncCRMIMAP(data: { mailbox_id?: string | null; folder?: string | null; limit?: number; range_days?: number }): Promise<CRMIMAPImportResponse> {
     const raw = await this.fetch<unknown>("/api/crm/imap/sync", {
       method: "POST",
       body: JSON.stringify(data),
@@ -1327,6 +1327,18 @@ export class ApiClient {
 
   async applyCRMAccountProfileSuggestion(accountId: string, suggestionId: string): Promise<{ ok: boolean }> {
     return this.fetch(`/api/crm/accounts/${accountId}/profile/suggestions/${suggestionId}/apply`, { method: "POST" });
+  }
+
+  async listCRMEmailDrafts(): Promise<{ drafts: any[]; total: number }> {
+    return this.fetch("/api/crm/email-drafts");
+  }
+
+  async createCRMEmailDraft(data: Record<string, unknown>): Promise<{ ok: boolean; id: string }> {
+    return this.fetch("/api/crm/email-drafts", { method: "POST", body: JSON.stringify(data) });
+  }
+
+  async sendCRMEmailDraft(draftId: string): Promise<{ ok: boolean; status: string }> {
+    return this.fetch(`/api/crm/email-drafts/${draftId}/send`, { method: "POST" });
   }
 
   async listCRMEmailThreads(params?: { account_id?: string }): Promise<ListCRMEmailThreadsResponse> {

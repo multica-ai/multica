@@ -326,6 +326,13 @@ export interface CRMIMAPSetting {
   last_test_status?: string | null;
   last_test_message?: string | null;
   last_tested_at?: string | null;
+  owner_type?: string | null;
+  owner_id?: string | null;
+  smtp_host?: string | null;
+  smtp_port?: number | null;
+  smtp_tls_mode?: string | null;
+  smtp_username?: string | null;
+  smtp_secret_ref?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -346,6 +353,14 @@ export interface UpsertCRMIMAPSettingRequest {
   secret_ref?: string | null;
   secret?: string | null;
   sync_enabled?: boolean;
+  owner_type?: string | null;
+  owner_id?: string | null;
+  smtp_host?: string | null;
+  smtp_port?: number | null;
+  smtp_tls_mode?: string | null;
+  smtp_username?: string | null;
+  smtp_secret_ref?: string | null;
+  smtp_secret?: string | null;
 }
 
 export interface CRMIMAPTestResponse {
