@@ -163,6 +163,31 @@ RUN groupadd -g "${GID}" agent \
  && mkdir -p /home/agent/.multica /home/agent/multica_workspaces \
  && chown -R agent:agent /home/agent
 
+# G2 LLM proxy defaults — route Anthropic + OpenAI through llmproxy.g2.com.
+# Per-CLI override surface (most authoritative one is seeded):
+#   claude / opencode / hermes — env vars (hermes consults PROVIDER_REGISTRY
+#                                .base_url_env_var in hermes_cli/auth.py).
+#   codex / pi                 — config file (no env-var override exists).
+# URL suffixes: Anthropic at root (SDK appends /v1/messages); OpenAI at /v1
+# (OpenAI-compatible clients expect /v1 in the base). Matches
+# add-llm-proxy-ssm-params.sh.
+ENV ANTHROPIC_BASE_URL=https://llmproxy.g2.com \
+    OPENAI_BASE_URL=https://llmproxy.g2.com/v1
+
+# Pre-create per-CLI config dirs with agent ownership. COPY --chown and
+# `install -d` only chown the deepest path component — every intermediate
+# parent must be listed explicitly or it stays root-owned, and the CLIs
+# write siblings into these dirs at runtime (codex caches, pi state).
+# Hermes reads ANTHROPIC_BASE_URL directly and creates ~/.hermes itself.
+RUN install -d -o agent -g agent -m 755 \
+      /home/agent/.codex \
+      /home/agent/.pi \
+      /home/agent/.pi/agent \
+      /home/agent/.pi/agent/extensions
+
+COPY --chown=agent:agent docker/agent-runtime-base/llmproxy/codex/config.toml   /home/agent/.codex/config.toml
+COPY --chown=agent:agent docker/agent-runtime-base/llmproxy/pi/llmproxy.ts      /home/agent/.pi/agent/extensions/llmproxy.ts
+
 # Smoke-test every tool answers at build time. hermes uses python-fire which
 # doesn't surface a stable --version flag; `hermes --help` is the documented
 # substitute. Failing the build fast here is cheaper than a runtime miss.

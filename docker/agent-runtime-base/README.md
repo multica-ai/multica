@@ -169,6 +169,73 @@ one of the baked tools:
    tag in `gitops/`, so the base-image PR itself produces no kubechecks
    diff.
 
+## LLM proxy routing
+
+Every CLI baked into this image defaults its Anthropic and OpenAI traffic
+to G2's internal LLM proxy at `https://llmproxy.g2.com`. The URL suffix
+conventions match `add-llm-proxy-ssm-params.sh` (the script that
+configures G2's existing SSM-driven services):
+
+| Provider  | Base URL                          | Why this suffix                                                                |
+|-----------|-----------------------------------|--------------------------------------------------------------------------------|
+| Anthropic | `https://llmproxy.g2.com`         | Anthropic SDK appends `/v1/messages` itself — base URL must NOT include `/v1`. |
+| OpenAI    | `https://llmproxy.g2.com/v1`      | OpenAI-compatible clients expect the base URL to already include `/v1`.        |
+
+Each CLI exposes a different override surface. The image seeds the most
+authoritative one for each:
+
+| CLI       | Override surface seeded                                | Source of truth                                      |
+|-----------|--------------------------------------------------------|------------------------------------------------------|
+| `claude`  | `ANTHROPIC_BASE_URL` env var                           | Claude Code env-vars reference                       |
+| `opencode`| `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` env vars      | opencode delegates to Vercel AI SDK provider packages |
+| `codex`   | `openai_base_url` in `~/.codex/config.toml`            | Codex has no env-var override for the built-in OpenAI provider |
+| `pi`      | TS extension at `~/.pi/agent/extensions/llmproxy.ts`   | Pi exposes no base-URL env var; extension API is the only override |
+| `hermes`  | `ANTHROPIC_BASE_URL` env var                           | `PROVIDER_REGISTRY` in `hermes_cli/auth.py` declares a `base_url_env_var` per provider; `get_api_key_provider_status` consults it at runtime and overrides the baked-in `inference_base_url` |
+
+The seeded files live at `docker/agent-runtime-base/llmproxy/{codex,pi}/`
+in this repo and are copied into the image's `agent` home at build time.
+Hermes has no seeded file — it consumes `ANTHROPIC_BASE_URL` directly and
+creates `~/.hermes/` on first run.
+
+### Hermes OpenAI note
+
+Hermes does not register a native `openai` provider — running
+`hermes -z --provider openai` raises `AuthError: Unknown provider 'openai'`.
+OpenAI-compatible access in Hermes goes through `openai-codex` (OAuth),
+`ai-gateway` (uses `AI_GATEWAY_BASE_URL`), `copilot`, `lmstudio`, custom
+YAML providers, etc. The base image therefore does not seed any OpenAI
+routing for Hermes; consumers that need it should add a custom provider
+entry in their own `~/.hermes/config.yaml` or set the relevant
+`<NAME>_BASE_URL` env var for whichever Hermes provider they use.
+
+### Overriding downstream
+
+Every default is overridable. Pick the layer that matches the change you
+need:
+
+1. **Re-export env vars at container start** (claude, opencode, hermes) —
+   Kustomize `env:` patches, devenv pod spec, or `docker run -e`. Highest
+   priority.
+2. **Replace a seeded config file** (codex, pi) — bind-mount or `COPY` over
+   `/home/agent/.codex/config.toml` or
+   `/home/agent/.pi/agent/extensions/llmproxy.ts`. The CLIs read these on
+   startup; no rebuild needed if you mount.
+3. **Delete the seeded config entirely** — `rm` the file in a downstream
+   layer if a consumer doesn't want any proxy redirection for codex / pi.
+   The env vars alone don't affect those two CLIs, so deleting the config
+   files puts them back to vendor defaults.
+4. **Re-bake the base** — only needed if every consumer needs a different
+   proxy URL. Edit the `ENV` block and the two seeded files together.
+
+### Bypassing the proxy entirely
+
+To send a single CLI direct to the vendor (debugging, vendor-side issue
+reproduction): unset the relevant env var (claude / opencode / hermes) or
+replace the seeded config file with the upstream default (codex / pi). The
+proxy is a default, not a hard requirement — none of the CLIs fail closed
+if the proxy is unreachable, they just hit the configured URL and surface
+the error.
+
 ## Open questions / follow-ups
 
 - **Hermes versioning.** ~~The project ships from git only. If/when they cut

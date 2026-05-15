@@ -1,0 +1,7 @@
+# Codex (~/.codex/config.toml) — routes the built-in `openai` provider
+# through G2's LLM proxy. Codex has no OPENAI_BASE_URL env var; per
+# https://developers.openai.com/codex/config-advanced, `openai_base_url`
+# is the only override for the built-in provider (the `openai` ID is
+# reserved, so a [model_providers.openai] block would be rejected).
+# The /v1 suffix matches add-llm-proxy-ssm-params.sh.
+openai_base_url = "https://llmproxy.g2.com/v1"
