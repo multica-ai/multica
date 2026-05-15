@@ -246,6 +246,15 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		if finalStatus == "completed" && output.Len() == 0 {
 			finalError = formatEmptyOutputReason(exitCode, unparseableCount, firstUnparseable, stderrBuf.Tail())
 		}
+		// CEREBRO-PATCH(agent-claude-provider-limit-output): Claude Code can
+		// emit provider quota exhaustion as a normal assistant text turn and
+		// exit 0. Treat a short standalone limit message as task failure so the
+		// runtime auto-pause path sees the error instead of posting it as a
+		// successful agent reply.
+		if finalStatus == "completed" && finalError == "" && isClaudeProviderLimitOutput(output.String()) {
+			finalStatus = "failed"
+			finalError = output.String()
+		}
 
 		// cmd.Wait() has returned — os/exec's stderr copy goroutine has
 		// observed every byte claude wrote to stderr before exiting, so
@@ -263,7 +272,6 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			"exit_code", exitCode,
 			"unparseable_lines", unparseableCount,
 		)
-
 
 		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed")
 		if reportedSessionID != sessionID {
@@ -284,6 +292,16 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func isClaudeProviderLimitOutput(output string) bool {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" || len(trimmed) > 500 {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	return strings.Contains(lower, "org's monthly usage limit") ||
+		strings.Contains(lower, "monthly usage limit")
 }
 
 func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, output *strings.Builder, usage map[string]TokenUsage) {

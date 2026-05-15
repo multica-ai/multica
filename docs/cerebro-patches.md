@@ -78,6 +78,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `firtal-gateway-model-discovery` | server/internal/handler/runtime_models.go<br>server/pkg/agent/firtal_gateway.go<br>server/internal/cerebro/firtalgateway/model_discovery.go (new)<br>server/internal/cerebro/firtalgateway/model_discovery_test.go (new) | 14 inline + 171 new | JEH-1356 — small handler hook routes server-owned Firtal Gateway cloud runtimes to Cerebro-zone model discovery, using workspace gateway settings instead of daemon heartbeat pickup. |
 | `agent-codex-semantic-inactivity-test` | server/pkg/agent/codex_test.go | 3 | Make semantic-inactivity progress tests scheduler-tolerant while still verifying real inactivity timeouts |
 | `agent-claude-cerebro` | server/pkg/agent/claude.go | 123 | Cerebro additions to agent runtime |
+| `agent-claude-provider-limit-output` | server/pkg/agent/claude.go<br>server/pkg/agent/claude_test.go | 50 | JEH-1442 — classify short standalone Claude monthly usage-cap output emitted as assistant text with exit 0 as a failed task so the existing runtime auto-pause path runs. |
 | `agent-copilot-cerebro` | server/pkg/agent/copilot.go | 13 | Cerebro additions to agent runtime |
 | `agent-cursor-cerebro` | server/pkg/agent/cursor.go | 13 | Cerebro additions to agent runtime |
 | `agent-gemini-cerebro` | server/pkg/agent/gemini.go | 13 | Cerebro additions to agent runtime |

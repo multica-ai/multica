@@ -179,6 +179,59 @@ func TestClaudeHandleAssistantInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestClaudeProviderLimitOutput(t *testing.T) {
+	t.Parallel()
+
+	// CEREBRO-PATCH(agent-claude-provider-limit-output): regression coverage
+	// for Claude Code emitting provider limits as successful assistant text.
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{
+			name: "anthropic monthly usage limit",
+			in:   "You've hit your org's monthly usage limit",
+			want: true,
+		},
+		{
+			name: "synthetic http usage limit belongs to error paths",
+			in:   "API call failed after 3 retries: HTTP 429: The usage limit has been reached",
+			want: false,
+		},
+		{
+			name: "short answer mentioning 429",
+			in:   "Got a 429 from the GitHub API while checking CI.",
+			want: false,
+		},
+		{
+			name: "short answer mentioning rate limit",
+			in:   "Task complete. Note: we're near the rate limit.",
+			want: false,
+		},
+		{
+			name: "ordinary answer mentioning limit in context",
+			in:   strings.Repeat("This report explains why a workspace can hit its monthly usage limit without immediately pausing a runtime. ", 8),
+			want: false,
+		},
+		{
+			name: "ordinary answer",
+			in:   "Finished the layout updates and verified the screenshots.",
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isClaudeProviderLimitOutput(tc.in); got != tc.want {
+				t.Fatalf("isClaudeProviderLimitOutput(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestTrySendDropsWhenFull(t *testing.T) {
 	t.Parallel()
 
