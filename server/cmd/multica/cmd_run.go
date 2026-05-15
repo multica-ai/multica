@@ -17,7 +17,6 @@ import (
 	"github.com/creack/pty"
 	"github.com/multica-ai/multica/server/pkg/redact"
 	"github.com/spf13/cobra"
-	"golang.org/x/sys/unix"
 )
 
 var runCmd = &cobra.Command{
