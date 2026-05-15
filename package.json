@@ -12,6 +12,7 @@
     "dev:mobile:staging": "pnpm -C apps/mobile dev:staging",
     "ios:mobile:device": "pnpm -C apps/mobile ios:device",
     "ios:mobile:device:staging": "pnpm -C apps/mobile ios:device:staging",
+    "ios:mobile:device:staging:release": "pnpm -C apps/mobile ios:device:staging:release",
     "build": "turbo build --filter=!@multica/mobile",
     "typecheck": "turbo typecheck --filter=!@multica/mobile",
     "test": "turbo test --filter=!@multica/mobile",

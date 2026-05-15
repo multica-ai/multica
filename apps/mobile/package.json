@@ -8,6 +8,7 @@
     "dev:staging": "dotenv -e .env.staging -- cross-env APP_ENV=staging expo start",
     "ios:device": "expo run:ios --device",
     "ios:device:staging": "dotenv -e .env.staging -- cross-env APP_ENV=staging expo run:ios --device",
+    "ios:device:staging:release": "dotenv -e .env.staging -- cross-env APP_ENV=staging expo run:ios --device --configuration Release",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit"
   },
