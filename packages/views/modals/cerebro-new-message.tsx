@@ -4,6 +4,7 @@
 // new-message modal can be triggered from the sidebar (and anywhere else).
 
 import { useModalStore } from "@multica/core/modals";
+import { useChatStore } from "@multica/core/chat"; // CEREBRO-PATCH(sidebar-agent-chat-start): JEH-1443 selected sidebar agent opens a new inbox chat.
 import { useNavigation } from "../navigation";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { NewMessageModal } from "../channels";
@@ -19,9 +20,11 @@ export function CerebroNewMessageModal() {
     push(p.issueDetail(channel.id));
   };
 
-  const handleAgentChatStarted = () => {
+  const handleAgentChatStarted = (agentId: string) => {
+    // CEREBRO-PATCH(sidebar-agent-chat-start): carry the selected agent into the inbox chat surface.
+    useChatStore.getState().setSelectedAgentId(agentId);
     close();
-    push(p.inbox());
+    push(`${p.inbox()}?chat=new-chat`);
   };
 
   return (
