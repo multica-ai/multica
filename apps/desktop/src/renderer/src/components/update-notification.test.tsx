@@ -5,7 +5,7 @@ import { UpdateNotification } from "./update-notification";
 
 type UpdateAvailableCallback = (info: { version: string; releaseNotes?: string }) => void;
 type DownloadProgressCallback = (progress: { percent: number }) => void;
-type UpdateDownloadedCallback = () => void;
+type UpdateDownloadedCallback = (info: { version: string; releaseNotes?: string }) => void;
 
 const callbacks = {
   updateAvailable: null as UpdateAvailableCallback | null,
@@ -72,7 +72,7 @@ describe("UpdateNotification", () => {
     render(<UpdateNotification />);
 
     act(() => {
-      callbacks.updateDownloaded?.();
+      callbacks.updateDownloaded?.({ version: "0.2.25" });
     });
 
     const restartButton = await screen.findByRole("button", { name: "Restart now" });
