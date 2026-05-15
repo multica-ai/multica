@@ -190,6 +190,9 @@ const MODEL_PRICING: Record<
   "gemini-2.5-flash-lite":         { input: 0.10, output: 0.40,  cacheRead: 0.025, cacheWrite: 0.10 },
   "gemini-2.5-flash":              { input: 0.30, output: 2.50,  cacheRead: 0.075, cacheWrite: 0.30 },
   "gemini-2.5-pro":                { input: 1.25, output: 10.00, cacheRead: 0.31,  cacheWrite: 1.25 },
+
+	  // -- MiniMax: M2.7. Pricing sourced from minimax.io API docs. --
+	  "minimax-m2.7":                   { input: 0.30, output: 1.20,  cacheRead: 0.06,  cacheWrite: 0.30 },
 };
 
 // Resolve a model string to its pricing tier. Exact match, with one
