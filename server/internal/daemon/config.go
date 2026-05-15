@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"os/exec"
@@ -65,6 +66,7 @@ type Config struct {
 	CodexSemanticInactivityTimeout time.Duration
 	ClaudeArgs                     []string
 	CodexArgs                      []string
+	a2aRegistry                    *a2aRegistryConf
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -87,6 +89,16 @@ type Overrides struct {
 // LoadConfig builds the daemon configuration from environment variables
 // and optional CLI flag overrides.
 func LoadConfig(overrides Overrides) (Config, error) {
+	ctx := context.Background()
+	return LoadConfigWithContext(ctx, overrides)
+}
+
+// LoadConfigWithContext is like LoadConfig but accepts a context for A2A
+// Agent Card network fetches during startup.
+func LoadConfigWithContext(ctx context.Context, overrides Overrides) (Config, error) {
+	// Profile (resolved early for A2A config loading).
+	profile := overrides.Profile
+
 	// Server URL: override > env > default
 	rawServerURL := envOrDefault("MULTICA_SERVER_URL", DefaultServerURL)
 	if overrides.ServerURL != "" {
@@ -180,8 +192,24 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
 	}
+	// Load A2A config to extract registry settings.
+	var regConf *a2aRegistryConf
+	if a2aCfg, err := loadA2AConfig(profile); err == nil && a2aCfg != nil {
+		regConf = a2aCfg.Registry
+	}
+
+	// Discover A2A agents from config file + port scan.
+	a2aAgents := discoverA2AAgents(ctx, profile, slog.Default())
+	for name, entry := range a2aAgents {
+		if _, exists := agents[name]; exists {
+			slog.Default().Warn("a2a: agent name conflicts with CLI provider, skipping", "name", name)
+			continue
+		}
+		agents[name] = entry
+	}
+
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH, or configure A2A agents in ~/.multica/a2a-agents.yaml")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -239,9 +267,6 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if overrides.MaxConcurrentTasks > 0 {
 		maxConcurrentTasks = overrides.MaxConcurrentTasks
 	}
-
-	// Profile
-	profile := overrides.Profile
 
 	// daemon_id resolution: override > env > persistent UUID on disk.
 	// The persistent UUID is written once to `<profile-dir>/daemon.id` and
@@ -350,6 +375,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
 		ClaudeArgs:                     claudeArgs,
 		CodexArgs:                      codexArgs,
+		a2aRegistry:                    regConf,
 	}, nil
 }
 
