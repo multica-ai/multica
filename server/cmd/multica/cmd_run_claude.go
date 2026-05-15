@@ -37,7 +37,7 @@ func init() {
 	claudeSessionHookCmd.Flags().IntVar(&claudeSessionHookPort, "port", 0, "Claude hook receiver port")
 }
 
-func (claudeLocalRunProvider) Run(args []string, cwd string, env localCLIEnv, initialPrompt string, reporter *localRunReporter) (int, error) {
+func (claudeLocalRunProvider) Run(args []string, cwd string, env localCLIEnv, _ string, reporter *localRunReporter) (int, error) {
 	if len(args) == 0 {
 		return 1, fmt.Errorf("missing Claude command")
 	}
@@ -45,7 +45,7 @@ func (claudeLocalRunProvider) Run(args []string, cwd string, env localCLIEnv, in
 		return 1, err
 	}
 
-	tracker := newClaudeTranscriptTracker(reporter, cwd, initialPrompt, time.Now())
+	tracker := newClaudeTranscriptTracker(reporter, cwd, "", time.Now())
 	tracker.Start()
 	defer tracker.Close()
 
@@ -61,12 +61,40 @@ func (claudeLocalRunProvider) Run(args []string, cwd string, env localCLIEnv, in
 	}
 	defer cleanupSettings()
 
+	systemPrompt := claudeLocalRunSystemPrompt(env.IssueID)
+	childArgs := claudeLocalRunChildArgs(args, settingsPath, systemPrompt)
+	return runProviderPTY(childArgs, cwd, env, "")
+}
+
+func claudeLocalRunChildArgs(args []string, settingsPath string, systemPrompt string) []string {
 	childArgs := append([]string{args[0]}, args[1:]...)
 	childArgs = append(childArgs, "--settings", settingsPath)
-	if strings.TrimSpace(initialPrompt) != "" {
-		childArgs = append(childArgs, initialPrompt)
+	if strings.TrimSpace(systemPrompt) != "" {
+		childArgs = append(childArgs, "--append-system-prompt", systemPrompt)
 	}
-	return runProviderPTY(childArgs, cwd, env, "")
+	return childArgs
+}
+
+func claudeLocalRunSystemPrompt(issueID string) string {
+	issueID = strings.TrimSpace(issueID)
+	var b strings.Builder
+	b.WriteString("Multica local run context:\n")
+	b.WriteString("You can read the Multica issue bound to this local run when the user explicitly asks about it. This is context access, not a startup task.\n\n")
+	if issueID != "" {
+		fmt.Fprintf(&b, "Bound Multica issue ID: %s\n\n", issueID)
+		b.WriteString("Read-only commands for this bound issue:\n")
+		fmt.Fprintf(&b, "- Get issue details: multica issue get %s --output json\n", issueID)
+		fmt.Fprintf(&b, "- Get issue comments: multica issue comment list %s --output json\n\n", issueID)
+	} else {
+		b.WriteString("No bound Multica issue ID was provided in the local run environment.\n\n")
+	}
+	b.WriteString("Use those commands only when the user clearly asks about the current or bound Multica issue, issue details, issue status, issue description, task background, issue comments, what was said in comments, or previous discussion in the Multica issue.\n\n")
+	b.WriteString("Do not use those commands for ordinary greetings, food, preferences, casual chat, slash commands, exit commands, local command output, or general coding questions that do not mention the Multica issue.\n\n")
+	b.WriteString("If the user says comments and clearly means code comments, git commit messages, GitHub PR comments, or GitHub issue comments, do not assume they mean the bound Multica issue.\n\n")
+	b.WriteString("After reading the issue or comments, answer only the user's current question. Do not offer next-step menus, ask what to do next, or suggest modifying, assigning, labeling, or changing priority unless explicitly asked.\n\n")
+	b.WriteString("For later unrelated questions, answer normally and do not continue summarizing the issue. If the user asks whether you remember issue comments, answer from conversation history when sufficient; read comments again only if fresh details are needed.\n\n")
+	b.WriteString("When reading comments, ignore local command pseudo-messages such as local-command-caveat, command-name, and local-command-stdout unless the user explicitly asks about local command output.\n")
+	return b.String()
 }
 
 func validateClaudeLocalRunArgs(args []string) error {
@@ -377,10 +405,16 @@ func (t *claudeTranscriptTracker) mapLineLocked(session *claudeTrackedSession, r
 }
 
 func (t *claudeTranscriptTracker) mapUserLineLocked(session *claudeTrackedSession, raw map[string]any, key string) {
+	if isTrue(raw["isMeta"]) {
+		return
+	}
 	msg := nestedMap(raw, "message")
 	blocks := claudeContentBlocks(msg["content"])
 	if len(blocks) == 0 {
 		if content := strings.TrimSpace(stringValue(msg["content"])); content != "" {
+			if isClaudeLocalCommandUserContent(content) {
+				return
+			}
 			t.recordClaudeUserPromptLocked(session, content, key)
 		}
 		return
@@ -470,7 +504,7 @@ func (t *claudeTranscriptTracker) mapAssistantLineLocked(session *claudeTrackedS
 		Content:   content,
 		SourceKey: t.sourceKey(session, key, "text"),
 	})
-	if t.currentTurnReply && !isStatusOnly(content) {
+	if t.currentTurnReply && claudeStopReason(msg) == "end_turn" && !isStatusOnly(content) {
 		t.post(localCLIMessage{
 			Type:      "final",
 			Content:   content,
@@ -478,6 +512,27 @@ func (t *claudeTranscriptTracker) mapAssistantLineLocked(session *claudeTrackedS
 		})
 		t.currentTurnReply = false
 	}
+}
+
+func isClaudeLocalCommandUserContent(content string) bool {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return false
+	}
+	for _, prefix := range []string{
+		"<local-command-caveat>",
+		"<command-name>",
+		"<local-command-stdout>",
+	} {
+		if strings.HasPrefix(content, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func claudeStopReason(msg map[string]any) string {
+	return firstString(msg, "stop_reason", "stopReason")
 }
 
 func (t *claudeTranscriptTracker) mapResultLineLocked(session *claudeTrackedSession, raw map[string]any, key string) {

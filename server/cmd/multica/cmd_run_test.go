@@ -602,6 +602,71 @@ func TestClaudeHookForwarderReportsSessionToServer(t *testing.T) {
 	}
 }
 
+func TestClaudeLocalRunChildArgsUseSystemPromptNotSkillDirOrUserPrompt(t *testing.T) {
+	systemPrompt := claudeLocalRunSystemPrompt("issue-1")
+	args := claudeLocalRunChildArgs(
+		[]string{"claude", "--model", "sonnet"},
+		"/tmp/settings.json",
+		systemPrompt,
+	)
+	joined := "\n" + strings.Join(args, "\n") + "\n"
+	if !containsAll(joined, []string{
+		"\nclaude\n",
+		"\n--model\n",
+		"\nsonnet\n",
+		"\n--settings\n",
+		"\n/tmp/settings.json\n",
+		"\n--append-system-prompt\n",
+		systemPrompt,
+	}) {
+		t.Fatalf("claude args missing managed settings/system prompt: %v", args)
+	}
+	for _, forbidden := range []string{"\n--add-dir\n", "bootstrap mode", "produce no output", "wait silently", "Reference context is available"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("claude args contain forbidden always-on context %q: %v", forbidden, args)
+		}
+	}
+}
+
+func TestClaudeLocalRunSystemPromptIsBoundIssueContextOnly(t *testing.T) {
+	content := claudeLocalRunSystemPrompt("issue-1")
+	if !containsAll(content, []string{
+		"Multica local run context",
+		"not a startup task",
+		"Bound Multica issue ID: issue-1",
+		"Get issue details: multica issue get issue-1 --output json",
+		"Get issue comments: multica issue comment list issue-1 --output json",
+		"current or bound Multica issue",
+		"issue details",
+		"issue comments",
+		"what was said in comments",
+		"Do not use those commands for ordinary greetings, food, preferences, casual chat",
+		"general coding questions that do not mention the Multica issue",
+		"code comments, git commit messages, GitHub PR comments, or GitHub issue comments",
+		"answer only the user's current question",
+		"Do not offer next-step menus",
+		"do not continue summarizing the issue",
+		"ignore local command pseudo-messages",
+	}) {
+		t.Fatalf("system prompt missing required guidance:\n%s", content)
+	}
+	for _, forbidden := range []string{
+		"name: multica-issue-context",
+		"context: fork",
+		"allowed-tools: Bash",
+		"bootstrap mode",
+		"produce no output",
+		"wait silently",
+		"I can continue",
+		"choose one",
+		"choose an option",
+	} {
+		if strings.Contains(content, forbidden) {
+			t.Fatalf("system prompt contains forbidden instruction %q:\n%s", forbidden, content)
+		}
+	}
+}
+
 func TestClaudeTranscriptTrackerMapsUserToolResultAndFinal(t *testing.T) {
 	tmp := t.TempDir()
 	sessionPath := filepath.Join(tmp, "sess-1.jsonl")
@@ -617,7 +682,7 @@ func TestClaudeTranscriptTrackerMapsUserToolResultAndFinal(t *testing.T) {
 		`{"type":"user","uuid":"u1","timestamp":"2026-05-14T12:00:01Z","message":{"role":"user","content":"帮我运行测试"}}`,
 		`{"type":"assistant","uuid":"a1","timestamp":"2026-05-14T12:00:02Z","message":{"role":"assistant","content":[{"type":"thinking","text":"I should run tests"},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"go test ./cmd/multica"}}]}}`,
 		`{"type":"user","uuid":"tr1","timestamp":"2026-05-14T12:00:03Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok\n"}]}}`,
-		`{"type":"assistant","uuid":"a2","timestamp":"2026-05-14T12:00:04Z","message":{"role":"assistant","content":[{"type":"text","text":"完成"}]}}`,
+		`{"type":"assistant","uuid":"a2","timestamp":"2026-05-14T12:00:04Z","message":{"role":"assistant","content":[{"type":"text","text":"完成"}],"stop_reason":"end_turn"}}`,
 	})
 	tracker.Sync()
 	reporter.Close()
@@ -642,6 +707,61 @@ func TestClaudeTranscriptTrackerMapsUserToolResultAndFinal(t *testing.T) {
 	finals := finalMessages(messages)
 	if len(finals) != 1 || finals[0].Content != "完成" {
 		t.Fatalf("finals = %+v, want Claude final reply", finals)
+	}
+}
+
+func TestClaudeTranscriptTrackerFinalUsesEndTurnAssistantText(t *testing.T) {
+	tmp := t.TempDir()
+	sessionPath := filepath.Join(tmp, "sess-1.jsonl")
+	if err := os.WriteFile(sessionPath, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	tracker := newClaudeTranscriptTracker(reporter, tmp, "", time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
+	tracker.ObserveSessionHook(claudeSessionHookPayload{SessionID: "sess-1", TranscriptPath: sessionPath, Cwd: tmp})
+
+	writeClaudeJSONLLines(t, sessionPath, []string{
+		`{"type":"user","uuid":"u1","timestamp":"2026-05-14T12:00:01Z","message":{"role":"user","content":"看下 issue"}}`,
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-05-14T12:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"我先读取上下文。"}]}}`,
+		`{"type":"assistant","uuid":"a2","timestamp":"2026-05-14T12:00:03Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"multica issue get issue-1 --output json"}}],"stop_reason":"tool_use"}}`,
+		`{"type":"user","uuid":"tr1","timestamp":"2026-05-14T12:00:04Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"{}"}]}}`,
+		`{"type":"assistant","uuid":"a3","timestamp":"2026-05-14T12:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"最终总结。"}],"stop_reason":"end_turn"}}`,
+	})
+	tracker.Sync()
+	reporter.Close()
+
+	finals := finalMessages(poster.messages())
+	if len(finals) != 1 || finals[0].Content != "最终总结。" {
+		t.Fatalf("finals = %+v, want only end_turn assistant text as final", finals)
+	}
+	texts := localMessagesByType(poster.messages(), "text")
+	if len(texts) != 2 || texts[0].Content != "我先读取上下文。" || texts[1].Content != "最终总结。" {
+		t.Fatalf("texts = %+v, want preamble and final in execution log", texts)
+	}
+}
+
+func TestClaudeTranscriptTrackerSkipsLocalCommandPseudoUserLines(t *testing.T) {
+	tmp := t.TempDir()
+	sessionPath := filepath.Join(tmp, "sess-1.jsonl")
+	if err := os.WriteFile(sessionPath, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	tracker := newClaudeTranscriptTracker(reporter, tmp, "", time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
+	tracker.ObserveSessionHook(claudeSessionHookPayload{SessionID: "sess-1", TranscriptPath: sessionPath, Cwd: tmp})
+
+	writeClaudeJSONLLines(t, sessionPath, []string{
+		`{"type":"user","uuid":"meta","timestamp":"2026-05-14T12:00:01Z","isMeta":true,"message":{"role":"user","content":"<local-command-caveat>Caveat</local-command-caveat>"}}`,
+		`{"type":"user","uuid":"cmd","timestamp":"2026-05-14T12:00:02Z","message":{"role":"user","content":"<command-name>/exit</command-name>\n<command-message>exit</command-message>"}}`,
+		`{"type":"user","uuid":"stdout","timestamp":"2026-05-14T12:00:03Z","message":{"role":"user","content":"<local-command-stdout>Goodbye!</local-command-stdout>"}}`,
+	})
+	tracker.Sync()
+	reporter.Close()
+
+	if messages := poster.messages(); len(messages) != 0 {
+		t.Fatalf("messages = %+v, want local command pseudo user lines skipped", messages)
 	}
 }
 
