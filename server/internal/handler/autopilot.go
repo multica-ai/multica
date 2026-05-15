@@ -634,6 +634,21 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Kind-specific validation. Mirrors the create-path discipline: cron
+	// and timezone only make sense on schedule triggers, so reject loudly
+	// rather than persisting fields that no code path reads. enabled and
+	// label remain valid on every kind.
+	if prev.Kind != "schedule" {
+		if req.CronExpression != nil {
+			writeError(w, http.StatusBadRequest, "cron_expression is only valid for schedule triggers")
+			return
+		}
+		if req.Timezone != nil {
+			writeError(w, http.StatusBadRequest, "timezone is only valid for schedule triggers")
+			return
+		}
+	}
+
 	params := db.UpdateAutopilotTriggerParams{
 		ID:             prev.ID,
 		CronExpression: prev.CronExpression,
