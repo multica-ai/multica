@@ -1689,7 +1689,9 @@ func (s *TaskService) notifyTaskAvailable(task db.AgentTaskQueue) {
 	// just-queued task until the TTL expires. The cache itself bounds
 	// every Redis call with a short timeout so a wedged Redis cannot
 	// block enqueue.
-	s.EmptyClaim.Bump(context.Background(), runtimeKey)
+	if s.EmptyClaim != nil {
+		s.EmptyClaim.Bump(context.Background(), runtimeKey)
+	}
 	if s.Wakeup == nil {
 		return
 	}

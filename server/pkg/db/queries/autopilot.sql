@@ -167,13 +167,22 @@ INSERT INTO autopilot_run (
     sqlc.narg('squad_id')
 ) RETURNING *;
 
+-- name: CreateSkippedAutopilotRun :one
+INSERT INTO autopilot_run (
+    autopilot_id, trigger_id, source, status, completed_at, failure_reason, trigger_payload, squad_id
+) VALUES (
+    $1, sqlc.narg('trigger_id'), $2, 'skipped', now(), $3, sqlc.narg('trigger_payload'), sqlc.narg('squad_id')
+) RETURNING *;
+
 -- name: LockAutopilotDispatch :exec
 SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0));
 
--- name: CountActiveAutopilotRuns :one
-SELECT count(*) FROM autopilot_run
-WHERE autopilot_id = $1
-  AND status IN ('issue_created', 'running');
+-- name: HasActiveAutopilotRun :one
+SELECT EXISTS (
+    SELECT 1 FROM autopilot_run
+    WHERE autopilot_id = $1
+      AND status IN ('issue_created', 'running')
+);
 
 -- name: GetAutopilotRun :one
 SELECT * FROM autopilot_run
@@ -228,6 +237,20 @@ SET status = 'skipped',
     failure_reason = $2,
     result = sqlc.narg('result')
 WHERE id = $1
+RETURNING *;
+
+-- name: FailStaleAutopilotAdmissionRuns :many
+-- Fails admission placeholders left behind by a server crash between
+-- admission commit and dispatch completion. Fully linked issue/task runs are
+-- intentionally excluded: those can be long-running real work.
+UPDATE autopilot_run
+SET status = 'failed',
+    completed_at = now(),
+    failure_reason = 'autopilot dispatch did not complete before timeout'
+WHERE status = 'running'
+  AND issue_id IS NULL
+  AND task_id IS NULL
+  AND created_at < now() - make_interval(secs => @stale_seconds::double precision)
 RETURNING *;
 
 -- =====================

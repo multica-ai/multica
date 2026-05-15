@@ -31,7 +31,7 @@ type AutopilotService struct {
 	TaskSvc   *TaskService
 }
 
-const activeAutopilotRunSkipReason = "autopilot already has an active run"
+const ActiveAutopilotRunSkipReason = "autopilot already has an active run"
 
 func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService) *AutopilotService {
 	return &AutopilotService{Queries: q, TxStarter: tx, Bus: bus, TaskSvc: taskSvc}
@@ -66,7 +66,7 @@ func (s *AutopilotService) DispatchAutopilot(
 		return nil, fmt.Errorf("create run: %w", err)
 	}
 	if skipped {
-		s.finishSkippedRun(ctx, autopilot, *run, source, activeAutopilotRunSkipReason)
+		s.finishSkippedRun(ctx, autopilot, *run, source, ActiveAutopilotRunSkipReason)
 		return run, nil
 	}
 	s.captureAutopilotRunStarted(autopilot, *run, source)
@@ -122,15 +122,29 @@ func (s *AutopilotService) createAdmittedRun(
 	source string,
 	payload []byte,
 ) (*db.AutopilotRun, bool, error) {
-	if s.TxStarter == nil {
-		return nil, false, fmt.Errorf("tx starter is required")
-	}
-
 	initialStatus := "issue_created"
 	if autopilot.ExecutionMode == "run_only" {
 		initialStatus = "running"
 	}
 
+	if !autopilot.SkipIfRunning {
+		run, err := s.Queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
+			AutopilotID:    autopilot.ID,
+			TriggerID:      triggerID,
+			Source:         source,
+			Status:         initialStatus,
+			TriggerPayload: payload,
+			SquadID:        autopilotSquadAttribution(autopilot),
+		})
+		if err != nil {
+			return nil, false, err
+		}
+		return &run, false, nil
+	}
+
+	if s.TxStarter == nil {
+		return nil, false, fmt.Errorf("tx starter is required")
+	}
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
 		return nil, false, fmt.Errorf("begin tx: %w", err)
@@ -142,37 +156,36 @@ func (s *AutopilotService) createAdmittedRun(
 		return nil, false, fmt.Errorf("lock dispatch: %w", err)
 	}
 
-	activeRuns, err := qtx.CountActiveAutopilotRuns(ctx, autopilot.ID)
+	hasActiveRun, err := qtx.HasActiveAutopilotRun(ctx, autopilot.ID)
 	if err != nil {
-		return nil, false, fmt.Errorf("count active runs: %w", err)
+		return nil, false, fmt.Errorf("check active runs: %w", err)
 	}
 
-	status := initialStatus
-	skipped := false
-	if autopilot.SkipIfRunning && activeRuns > 0 {
-		status = "skipped"
-		skipped = true
-	}
-
-	run, err := qtx.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
-		AutopilotID:    autopilot.ID,
-		TriggerID:      triggerID,
-		Source:         source,
-		Status:         status,
-		TriggerPayload: payload,
-		SquadID:        autopilotSquadAttribution(autopilot),
-	})
-	if err != nil {
-		return nil, false, err
-	}
-
+	var run db.AutopilotRun
+	skipped := hasActiveRun
 	if skipped {
-		run, err = qtx.UpdateAutopilotRunSkipped(ctx, db.UpdateAutopilotRunSkippedParams{
-			ID:            run.ID,
-			FailureReason: pgtype.Text{String: activeAutopilotRunSkipReason, Valid: true},
+		run, err = qtx.CreateSkippedAutopilotRun(ctx, db.CreateSkippedAutopilotRunParams{
+			AutopilotID:    autopilot.ID,
+			TriggerID:      triggerID,
+			Source:         source,
+			FailureReason:  pgtype.Text{String: ActiveAutopilotRunSkipReason, Valid: true},
+			TriggerPayload: payload,
+			SquadID:        autopilotSquadAttribution(autopilot),
 		})
 		if err != nil {
-			return nil, false, fmt.Errorf("mark skipped run: %w", err)
+			return nil, false, fmt.Errorf("create skipped run: %w", err)
+		}
+	} else {
+		run, err = qtx.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
+			AutopilotID:    autopilot.ID,
+			TriggerID:      triggerID,
+			Source:         source,
+			Status:         initialStatus,
+			TriggerPayload: payload,
+			SquadID:        autopilotSquadAttribution(autopilot),
+		})
+		if err != nil {
+			return nil, false, err
 		}
 	}
 
@@ -187,14 +200,16 @@ func (s *AutopilotService) createAdmittedRun(
 //
 // When the autopilot is assigned to a squad (Path A from MUL-2429), the
 // created issue inherits assignee_type='squad' + assignee_id=squad. The
-// existing issue listener chain (shouldEnqueueSquadLeaderOnAssign →
-// enqueueSquadLeaderTask) then routes the work to the squad leader, exactly
-// as a human manually assigning the issue to that squad would.
+// task row is created for the resolved squad leader, exactly as a human
+// manually assigning the issue to that squad would.
 //
 // Creator on the issue is always the agent that will actually do the work
 // (the resolved leader for a squad autopilot, otherwise the assignee agent
 // itself), so activity / mentions render with the right author identity.
 func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun) error {
+	if s.TaskSvc == nil {
+		return fmt.Errorf("task service is required")
+	}
 	leader, _, err := s.resolveAutopilotLeader(ctx, ap)
 	if err != nil {
 		return fmt.Errorf("resolve leader: %w", err)
@@ -244,24 +259,32 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("create issue: %w", err)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit tx: %w", err)
-	}
-
-	// Update run with the linked issue.
-	updatedRun, err := s.Queries.UpdateAutopilotRunIssueCreated(ctx, db.UpdateAutopilotRunIssueCreatedParams{
+	updatedRun, err := qtx.UpdateAutopilotRunIssueCreated(ctx, db.UpdateAutopilotRunIssueCreatedParams{
 		ID:      run.ID,
 		IssueID: issue.ID,
 	})
 	if err != nil {
 		return fmt.Errorf("link run to issue: %w", err)
 	}
+
+	task, err := qtx.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+		AgentID:      leader.ID,
+		RuntimeID:    leader.RuntimeID,
+		IssueID:      issue.ID,
+		Priority:     priorityToInt(issue.Priority),
+		IsLeaderTask: pgtype.Bool{Bool: ap.AssigneeType == "squad", Valid: ap.AssigneeType == "squad"},
+	})
+	if err != nil {
+		return fmt.Errorf("create task: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
 	*run = updatedRun
 
-	// Publish issue:created so the existing event chain fires
-	// (subscriber listeners, activity listeners, notification listeners). For
-	// squad autopilots, this is what triggers shouldEnqueueSquadLeaderOnAssign
-	// → enqueueSquadLeaderTask — no separate squad-routing code needed here.
+	// Publish issue:created after the durable issue/run/task rows are linked,
+	// so clients observe the issue only after its execution task exists.
 	prefix := s.getIssuePrefix(ap.WorkspaceID)
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventIssueCreated,
@@ -274,19 +297,8 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	})
 	s.captureIssueCreatedFromAutopilot(ap, run, issue, leader.ID)
 
-	// Enqueue agent task via the existing flow. Squad-assigned autopilots
-	// route to the resolved leader as the executing agent (Path A from
-	// MUL-2429); agent-assigned autopilots go through the standard issue
-	// path. Both code paths land in agent_task_queue with agent_id = leader.
-	if ap.AssigneeType == "squad" {
-		if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, pgtype.UUID{}); err != nil {
-			return fmt.Errorf("enqueue squad leader task: %w", err)
-		}
-	} else {
-		if _, err := s.TaskSvc.EnqueueTaskForIssue(ctx, issue); err != nil {
-			return fmt.Errorf("enqueue task for issue: %w", err)
-		}
-	}
+	s.TaskSvc.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.TaskSvc.NotifyTaskEnqueued(ctx, task)
 
 	slog.Info("autopilot dispatched (create_issue)",
 		"autopilot_id", util.UUIDToString(ap.ID),
@@ -323,6 +335,9 @@ func (e *errDispatchSkipped) Error() string { return e.reason }
 // admission and dispatch, or the runtime went offline in the gap, we still
 // fail closed instead of enqueueing a doomed task.
 func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun) error {
+	if s.TaskSvc == nil {
+		return fmt.Errorf("task service is required")
+	}
 	agent, _, err := s.resolveAutopilotLeader(ctx, ap)
 	if err != nil {
 		// Same admission-vs-failure classification as shouldSkipDispatch:
@@ -333,6 +348,13 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		}
 		return fmt.Errorf("resolve leader: %w", err)
 	}
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := s.Queries.WithTx(tx)
 	ready, reason, err := AgentReadiness(ctx, s.Queries, agent)
 	if err != nil {
 		return fmt.Errorf("check agent readiness: %w", err)
@@ -341,7 +363,7 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		return &errDispatchSkipped{reason: formatAdmissionReason(ap, reason)}
 	}
 
-	task, err := s.Queries.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{
+	task, err := qtx.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{
 		AgentID:        agent.ID,
 		RuntimeID:      agent.RuntimeID,
 		Priority:       0,
@@ -358,16 +380,17 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		return fmt.Errorf("create autopilot task: %w", err)
 	}
 
-	// Update run with task reference.
-	updatedRun, err := s.Queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
+	updatedRun, err := qtx.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
 		ID:     run.ID,
 		TaskID: task.ID,
 	})
 	if err != nil {
-		slog.Warn("failed to update run with task_id", "run_id", util.UUIDToString(run.ID), "error", err)
-	} else {
-		*run = updatedRun
+		return fmt.Errorf("link run to task: %w", err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
+	*run = updatedRun
 
 	// Drop the empty-claim cache and wake the daemon. dispatchRunOnly
 	// inserts the task row directly via Queries.CreateAutopilotTask
@@ -382,6 +405,35 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		"run_id", util.UUIDToString(run.ID),
 	)
 	return nil
+}
+
+func (s *AutopilotService) SweepStaleAdmissionRuns(ctx context.Context, timeout time.Duration) (int, error) {
+	if timeout <= 0 {
+		return 0, nil
+	}
+
+	runs, err := s.Queries.FailStaleAutopilotAdmissionRuns(ctx, timeout.Seconds())
+	if err != nil {
+		return 0, err
+	}
+	for _, run := range runs {
+		autopilot, err := s.Queries.GetAutopilot(ctx, run.AutopilotID)
+		if err != nil {
+			slog.Warn("autopilot admission sweeper: failed to load autopilot",
+				"run_id", util.UUIDToString(run.ID),
+				"autopilot_id", util.UUIDToString(run.AutopilotID),
+				"error", err,
+			)
+			continue
+		}
+		reason := "autopilot dispatch did not complete before timeout"
+		if run.FailureReason.Valid && run.FailureReason.String != "" {
+			reason = run.FailureReason.String
+		}
+		s.captureAutopilotRunFailed(autopilot, run, run.Source, reason)
+		s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), run, "failed")
+	}
+	return len(runs), nil
 }
 
 // SyncRunFromIssue updates the autopilot run when its linked issue reaches a terminal status.
@@ -714,27 +766,16 @@ func (s *AutopilotService) recordSkippedRun(
 	payload []byte,
 	reason string,
 ) (*db.AutopilotRun, error) {
-	run, err := s.Queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
+	run, err := s.Queries.CreateSkippedAutopilotRun(ctx, db.CreateSkippedAutopilotRunParams{
 		AutopilotID:    autopilot.ID,
 		TriggerID:      triggerID,
 		Source:         source,
-		Status:         "skipped",
+		FailureReason:  pgtype.Text{String: reason, Valid: reason != ""},
 		TriggerPayload: payload,
 		SquadID:        autopilotSquadAttribution(autopilot),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create skipped run: %w", err)
-	}
-
-	updated, err := s.Queries.UpdateAutopilotRunSkipped(ctx, db.UpdateAutopilotRunSkippedParams{
-		ID:            run.ID,
-		FailureReason: pgtype.Text{String: reason, Valid: true},
-	})
-	if err == nil {
-		run = updated
-	} else {
-		slog.Warn("failed to set skip reason on autopilot run",
-			"run_id", util.UUIDToString(run.ID), "error", err)
 	}
 
 	s.finishSkippedRun(ctx, autopilot, run, source, reason)

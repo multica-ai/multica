@@ -223,7 +223,11 @@ func runAutopilotList(cmd *cobra.Command, _ []string) error {
 }
 
 func boolDisplay(v any) string {
-	if b, ok := v.(bool); ok && b {
+	b, ok := v.(bool)
+	if !ok {
+		return "-"
+	}
+	if b {
 		return "yes"
 	}
 	return "no"

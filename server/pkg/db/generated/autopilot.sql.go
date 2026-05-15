@@ -102,19 +102,6 @@ func (q *Queries) ClaimDueScheduleTriggers(ctx context.Context) ([]ClaimDueSched
 	return items, nil
 }
 
-const countActiveAutopilotRuns = `-- name: CountActiveAutopilotRuns :one
-SELECT count(*) FROM autopilot_run
-WHERE autopilot_id = $1
-  AND status IN ('issue_created', 'running')
-`
-
-func (q *Queries) CountActiveAutopilotRuns(ctx context.Context, autopilotID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countActiveAutopilotRuns, autopilotID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createAutopilot = `-- name: CreateAutopilot :one
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_type, assignee_id,
@@ -346,6 +333,52 @@ func (q *Queries) CreateAutopilotTrigger(ctx context.Context, arg CreateAutopilo
 	return i, err
 }
 
+const createSkippedAutopilotRun = `-- name: CreateSkippedAutopilotRun :one
+INSERT INTO autopilot_run (
+    autopilot_id, trigger_id, source, status, completed_at, failure_reason, trigger_payload, squad_id
+) VALUES (
+    $1, $4, $2, 'skipped', now(), $3, $5, $6
+) RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
+`
+
+type CreateSkippedAutopilotRunParams struct {
+	AutopilotID    pgtype.UUID `json:"autopilot_id"`
+	Source         string      `json:"source"`
+	FailureReason  pgtype.Text `json:"failure_reason"`
+	TriggerID      pgtype.UUID `json:"trigger_id"`
+	TriggerPayload []byte      `json:"trigger_payload"`
+	SquadID        pgtype.UUID `json:"squad_id"`
+}
+
+func (q *Queries) CreateSkippedAutopilotRun(ctx context.Context, arg CreateSkippedAutopilotRunParams) (AutopilotRun, error) {
+	row := q.db.QueryRow(ctx, createSkippedAutopilotRun,
+		arg.AutopilotID,
+		arg.Source,
+		arg.FailureReason,
+		arg.TriggerID,
+		arg.TriggerPayload,
+		arg.SquadID,
+	)
+	var i AutopilotRun
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.TriggerID,
+		&i.Source,
+		&i.Status,
+		&i.IssueID,
+		&i.TaskID,
+		&i.TriggeredAt,
+		&i.CompletedAt,
+		&i.FailureReason,
+		&i.TriggerPayload,
+		&i.Result,
+		&i.CreatedAt,
+		&i.SquadID,
+	)
+	return i, err
+}
+
 const deleteAutopilot = `-- name: DeleteAutopilot :exec
 DELETE FROM autopilot WHERE id = $1
 `
@@ -376,6 +409,56 @@ WHERE issue_id = $1
 func (q *Queries) FailAutopilotRunsByIssue(ctx context.Context, issueID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, failAutopilotRunsByIssue, issueID)
 	return err
+}
+
+const failStaleAutopilotAdmissionRuns = `-- name: FailStaleAutopilotAdmissionRuns :many
+UPDATE autopilot_run
+SET status = 'failed',
+    completed_at = now(),
+    failure_reason = 'autopilot dispatch did not complete before timeout'
+WHERE status = 'running'
+  AND issue_id IS NULL
+  AND task_id IS NULL
+  AND created_at < now() - make_interval(secs => $1::double precision)
+RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
+`
+
+// Fails admission placeholders left behind by a server crash between
+// admission commit and dispatch completion. Fully linked issue/task runs are
+// intentionally excluded: those can be long-running real work.
+func (q *Queries) FailStaleAutopilotAdmissionRuns(ctx context.Context, staleSeconds float64) ([]AutopilotRun, error) {
+	rows, err := q.db.Query(ctx, failStaleAutopilotAdmissionRuns, staleSeconds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AutopilotRun{}
+	for rows.Next() {
+		var i AutopilotRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.AutopilotID,
+			&i.TriggerID,
+			&i.Source,
+			&i.Status,
+			&i.IssueID,
+			&i.TaskID,
+			&i.TriggeredAt,
+			&i.CompletedAt,
+			&i.FailureReason,
+			&i.TriggerPayload,
+			&i.Result,
+			&i.CreatedAt,
+			&i.SquadID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getAutopilot = `-- name: GetAutopilot :one
@@ -579,6 +662,21 @@ func (q *Queries) GetWebhookTriggerByToken(ctx context.Context, webhookToken pgt
 		&i.AutopilotWorkspaceID,
 	)
 	return i, err
+}
+
+const hasActiveAutopilotRun = `-- name: HasActiveAutopilotRun :one
+SELECT EXISTS (
+    SELECT 1 FROM autopilot_run
+    WHERE autopilot_id = $1
+      AND status IN ('issue_created', 'running')
+)
+`
+
+func (q *Queries) HasActiveAutopilotRun(ctx context.Context, autopilotID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, hasActiveAutopilotRun, autopilotID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const listAutopilotRuns = `-- name: ListAutopilotRuns :many
