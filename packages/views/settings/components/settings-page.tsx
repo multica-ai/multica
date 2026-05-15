@@ -42,6 +42,7 @@ import {
   CerebroMobileTabNav,
   type CerebroMobileTabNavGroup,
 } from "./cerebro-mobile-tab-nav";
+import type { MembersTabCerebroExtrasProp } from "./members-tab";
 
 const ACCOUNT_TAB_KEYS = ["profile", "preferences", "notifications", "tokens"] as const;
 const ACCOUNT_TAB_ICONS = {
@@ -90,11 +91,14 @@ interface SettingsPageProps {
    * When omitted, the Documentation tab is hidden entirely.
    */
   documentationContent?: React.ReactNode;
+  /** CEREBRO-PATCH(settings-page-cerebro-members-extras): JEH-1067 Groups column/filter slot for MembersTab */
+  membersTabCerebroExtras?: MembersTabCerebroExtrasProp;
 }
 
 export function SettingsPage({
   extraAccountTabs,
   documentationContent,
+  membersTabCerebroExtras,
 }: SettingsPageProps = {}) {
   const { t } = useT("settings");
   const workspaceName = useCurrentWorkspace()?.name;
@@ -299,7 +303,8 @@ export function SettingsPage({
             <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
             <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
             <TabsContent value="labs"><LabsTab /></TabsContent>
-            <TabsContent value="members"><MembersTab /></TabsContent>
+            {/* CEREBRO-PATCH(settings-page-cerebro-members-extras): JEH-1067 inject Groups column + filter */}
+            <TabsContent value="members"><MembersTab cerebroExtras={membersTabCerebroExtras} /></TabsContent>
             {/* CEREBRO-PATCH(settings-page-groups-tab): JEH-1006/JEH-1067 workspace groups list + detail navigation */}
             {groupsEnabled && (
               <TabsContent value={GROUPS_TAB_VALUE}><GroupsTab onSelectGroup={(id) => navigation.push(`/${workspaceSlug}/groups/${id}`)} /></TabsContent>

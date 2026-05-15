@@ -84,6 +84,8 @@ function MemberRow({
   busy,
   onRoleChange,
   onRemove,
+  // CEREBRO-PATCH(member-row-cerebro-extras): JEH-1067 per-row slot used by cerebro Groups column
+  extras,
 }: {
   member: MemberWithUser;
   workspaceSlug: string;
@@ -96,6 +98,8 @@ function MemberRow({
   busy: boolean;
   onRoleChange: (role: MemberRole) => void;
   onRemove: () => void;
+  // CEREBRO-PATCH(member-row-cerebro-extras): JEH-1067 per-row slot used by cerebro Groups column
+  extras?: React.ReactNode;
 }) {
   const { t } = useT("settings");
   const roleConfig = useRoleLabels();
@@ -116,6 +120,8 @@ function MemberRow({
         <div className="text-sm font-medium truncate">{member.name}</div>
         <div className="text-xs text-muted-foreground truncate">{member.email}</div>
       </AppLink>
+      {/* CEREBRO-PATCH(member-row-cerebro-extras-render): JEH-1067 cerebro Groups chips */}
+      {extras}
       {showMenu && (
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -234,7 +240,17 @@ function InvitationRow({
   );
 }
 
-export function MembersTab() {
+// CEREBRO-PATCH(members-tab-cerebro-extras-type): JEH-1067 single slot prop type
+export interface MembersTabCerebroExtrasProp {
+  toolbar?: React.ReactNode;
+  filterMember?: (m: MemberWithUser) => boolean;
+  renderRowExtras?: (m: MemberWithUser) => React.ReactNode;
+}
+
+export function MembersTab({
+  // CEREBRO-PATCH(members-tab-cerebro-extras-prop): JEH-1067 single slot prop (toolbar + filter + row extras)
+  cerebroExtras,
+}: { cerebroExtras?: MembersTabCerebroExtrasProp } = {}) {
   const { t } = useT("settings");
   const roleConfig = useRoleLabels();
   const user = useAuthStore((s) => s.user);
@@ -383,9 +399,12 @@ export function MembersTab() {
           </Card>
         )}
 
+        {/* CEREBRO-PATCH(members-tab-cerebro-toolbar): JEH-1067 cerebro filter toolbar slot */}
+        {cerebroExtras?.toolbar}
         {members.length > 0 ? (
           <div className="overflow-hidden rounded-xl ring-1 ring-foreground/10">
-            {members.map((m, i) => (
+            {/* CEREBRO-PATCH(members-tab-cerebro-filter): JEH-1067 optional client-side filter */}
+            {members.filter((m) => cerebroExtras?.filterMember?.(m) ?? true).map((m, i) => (
               <div key={m.id} className={i > 0 ? "border-t border-border/50" : ""}>
                 <MemberRow
                   member={m}
@@ -397,6 +416,8 @@ export function MembersTab() {
                   busy={memberActionId === m.id}
                   onRoleChange={(role) => handleRoleChange(m.id, role)}
                   onRemove={() => handleRemoveMember(m)}
+                  // CEREBRO-PATCH(members-tab-cerebro-row-extras-call): JEH-1067 forward cerebro row extras
+                  extras={cerebroExtras?.renderRowExtras?.(m)}
                 />
               </div>
             ))}

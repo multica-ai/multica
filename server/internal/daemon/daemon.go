@@ -1201,6 +1201,97 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 	d.handleHeartbeatActions(ctx, rid, resp)
 }
 
+// CEREBRO-PATCH(daemon-handle-ping): handlePing executes a ping request from
+// the server. sandboxOverride is the per-runtime sandbox setting (JEH-418)
+// carried in the heartbeat's pending ping payload — it lets an admin's UI
+// toggle take effect for pings as well as task execution, so an unsandboxed
+// runtime doesn't suddenly fail health checks because the ping path ran
+// sandboxed against the env-var default.
+func (d *Daemon) handlePing(ctx context.Context, rt Runtime, pingID string, sandboxOverride *bool) {
+	d.logger.Info("ping requested", "runtime_id", rt.ID, "ping_id", pingID, "provider", rt.Provider)
+
+	start := time.Now()
+
+	entry, ok := d.cfg.Agents[rt.Provider]
+	if !ok {
+		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
+			"status":      "failed",
+			"error":       fmt.Sprintf("no agent configured for provider %q", rt.Provider),
+			"duration_ms": time.Since(start).Milliseconds(),
+		})
+		return
+	}
+
+	backend, err := agent.New(rt.Provider, agent.Config{
+		ExecutablePath: entry.Path,
+		Logger:         d.logger,
+		Sandbox:        d.buildSandboxConfig(rt.Provider, sandboxOverride, nil),
+	})
+	if err != nil {
+		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
+			"status":      "failed",
+			"error":       err.Error(),
+			"duration_ms": time.Since(start).Milliseconds(),
+		})
+		return
+	}
+
+	pingCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(pingCtx, "Respond with exactly one word: pong", agent.ExecOptions{
+		MaxTurns: 1,
+		Timeout:  60 * time.Second,
+	})
+	if err != nil {
+		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
+			"status":      "failed",
+			"error":       err.Error(),
+			"duration_ms": time.Since(start).Milliseconds(),
+		})
+		return
+	}
+
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	var result agent.Result
+	select {
+	case result = <-session.Result:
+	case <-pingCtx.Done():
+		d.logger.Warn("ping timed out waiting for result", "runtime_id", rt.ID, "ping_id", pingID)
+		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
+			"status":      "failed",
+			"error":       "ping context cancelled while waiting for result",
+			"duration_ms": time.Since(start).Milliseconds(),
+		})
+		return
+	}
+	durationMs := time.Since(start).Milliseconds()
+
+	if result.Status == "completed" {
+		d.logger.Info("ping completed", "runtime_id", rt.ID, "ping_id", pingID, "duration_ms", durationMs)
+		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
+			"status":      "completed",
+			"output":      result.Output,
+			"duration_ms": durationMs,
+		})
+	} else {
+		errMsg := result.Error
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("agent returned status: %s", result.Status)
+		}
+		d.logger.Warn("ping failed", "runtime_id", rt.ID, "ping_id", pingID, "error", errMsg)
+		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
+			"status":      "failed",
+			"error":       errMsg,
+			"duration_ms": durationMs,
+		})
+	}
+}
+
 // handleHeartbeatActions dispatches the pending-action set returned by either
 // transport (HTTP POST /api/daemon/heartbeat or WS daemon:heartbeat_ack).
 // Each action is dispatched in its own goroutine so a slow handler cannot
@@ -1211,6 +1302,13 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	}
 	if resp.PendingUpdate != nil {
 		go d.handleUpdate(ctx, runtimeID, resp.PendingUpdate)
+	}
+	// CEREBRO-PATCH(daemon-pending-ping-dispatch): dispatch the cerebro
+	// PendingPing action alongside upstream's pending-action set.
+	if resp.PendingPing != nil {
+		if rt := d.findRuntime(runtimeID); rt != nil {
+			go d.handlePing(ctx, *rt, resp.PendingPing.ID, resp.PendingPing.SandboxEnabled)
+		}
 	}
 	if resp.PendingModelList != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
