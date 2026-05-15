@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -63,6 +64,43 @@ func TestApprovedMulticaMCPToolNamesCoversAllNonExcludedTools(t *testing.T) {
 	for _, name := range names {
 		if !allowed[name] {
 			t.Fatalf("callable name %q is not implemented/newly_implemented metadata", name)
+		}
+	}
+}
+
+// CEREBRO-PATCH(firtal-gateway-anthropic-tool-schema): guard Anthropic schema compatibility for built-in runtime tools.
+func TestAnthropicToolSchemasDefineArrayItems(t *testing.T) {
+	reg := NewDefaultRegistry(nil, nil, ToolContext{})
+	for name, tool := range reg.tools {
+		assertArraySchemasHaveItems(t, name, tool.InputSchema(), name)
+	}
+}
+
+func assertArraySchemasHaveItems(t *testing.T, toolName string, node any, path string) {
+	t.Helper()
+
+	m, ok := node.(map[string]any)
+	if !ok {
+		return
+	}
+	if typ, _ := m["type"].(string); typ == "array" {
+		if _, ok := m["items"]; !ok {
+			t.Fatalf("tool %q schema path %s has type=array without items; Anthropic rejects malformed array schemas", toolName, path)
+		}
+	}
+	for key, child := range m {
+		switch v := child.(type) {
+		case map[string]any:
+			assertArraySchemasHaveItems(t, toolName, v, path+"."+key)
+		case []any:
+			for i, item := range v {
+				assertArraySchemasHaveItems(t, toolName, item, fmt.Sprintf("%s.%s[%d]", path, key, i))
+			}
+		}
+	}
+	if props, ok := m["properties"].(map[string]any); ok {
+		for key, child := range props {
+			assertArraySchemasHaveItems(t, toolName, child, path+".properties."+key)
 		}
 	}
 }

@@ -597,7 +597,8 @@ func (t *SheetsWriteTool) InputSchema() map[string]any {
 				"type":        "array",
 				"description": "2D array of values to write (rows × columns)",
 				"items": map[string]any{
-					"type": "array",
+					"type":  "array",
+					"items": map[string]any{"type": "string"}, // CEREBRO-PATCH(firtal-gateway-anthropic-tool-schema): Anthropic rejects array schemas without item definitions.
 				},
 			},
 		},
