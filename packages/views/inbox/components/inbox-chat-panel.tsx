@@ -2,7 +2,7 @@
 
 // CEREBRO-PATCH(inbox-chat-panel): cerebro modification of upstream file
 
-import { useCallback, useMemo, useEffect } from "react";
+import { useCallback, useMemo, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
@@ -40,9 +40,11 @@ import {
  */
 export function InboxChatPanel({
   sessionId,
+  initialAgentId,
   onSessionCreated,
 }: {
   sessionId: string | null;
+  initialAgentId?: string | null;
   onSessionCreated?: (id: string) => void;
 }) {
   const wsId = useWorkspaceId();
@@ -58,6 +60,19 @@ export function InboxChatPanel({
   // Agent selection — stored in chat store so it persists
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
+  const [newChatAgentId, setNewChatAgentId] = useState<string | null>(
+    () => initialAgentId ?? null,
+  );
+
+  useEffect(() => {
+    if (sessionId || !initialAgentId) return;
+    // CEREBRO-PATCH(sidebar-agent-chat-start-url): URL agent wins over the
+    // previously persisted chat agent when entering the sidebar new-chat flow.
+    setNewChatAgentId(initialAgentId);
+    if (selectedAgentId !== initialAgentId) {
+      setSelectedAgentId(initialAgentId);
+    }
+  }, [sessionId, initialAgentId, selectedAgentId, setSelectedAgentId]);
 
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
@@ -74,7 +89,9 @@ export function InboxChatPanel({
   // their own agent instead of the workspace-global selected agent.
   const activeAgent = currentSession
     ? agents.find((a) => a.id === currentSession?.agent_id) ?? null
-    : availableAgents.find((a) => a.id === selectedAgentId) ?? availableAgents[0] ?? null;
+    : availableAgents.find((a) => a.id === (newChatAgentId ?? selectedAgentId)) ??
+      availableAgents[0] ??
+      null;
 
   useEffect(() => {
     if (!currentSession || selectedAgentId === currentSession.agent_id) return;
@@ -164,6 +181,7 @@ export function InboxChatPanel({
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
       if (activeAgent && agent.id === activeAgent.id) return;
+      setNewChatAgentId(agent.id);
       setSelectedAgentId(agent.id);
     },
     [activeAgent, setSelectedAgentId],
