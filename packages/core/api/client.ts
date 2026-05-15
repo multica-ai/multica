@@ -72,6 +72,7 @@ import type {
   CRMIMAPSetting,
   CRMIMAPTestResponse,
   CRMIMAPPreviewResponse,
+  CRMIMAPImportResponse,
   UpsertCRMIMAPSettingRequest,
   ListCRMIMAPSettingsResponse,
   CreateCRMAccountRequest,
@@ -117,6 +118,10 @@ import { parseWithFallback } from "./schema";
 import {
   ChildIssuesResponseSchema,
   CommentsListSchema,
+  CRMIMAPImportResponseSchema,
+  CRMIMAPPreviewResponseSchema,
+  EMPTY_CRM_IMAP_IMPORT_RESPONSE,
+  EMPTY_CRM_IMAP_PREVIEW_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_TIMELINE_PAGE,
   ListIssuesResponseSchema,
@@ -1283,9 +1288,32 @@ export class ApiClient {
   }
 
   async previewCRMIMAP(data: { mailbox_id?: string | null; folder?: string | null; limit?: number }): Promise<CRMIMAPPreviewResponse> {
-    return this.fetch("/api/crm/imap/preview", {
+    const raw = await this.fetch<unknown>("/api/crm/imap/preview", {
       method: "POST",
       body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, CRMIMAPPreviewResponseSchema, EMPTY_CRM_IMAP_PREVIEW_RESPONSE, {
+      endpoint: "POST /api/crm/imap/preview",
+    });
+  }
+
+  async importCRMIMAP(data: { mailbox_id?: string | null; folder?: string | null; uids: string[]; limit?: number }): Promise<CRMIMAPImportResponse> {
+    const raw = await this.fetch<unknown>("/api/crm/imap/import", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, CRMIMAPImportResponseSchema, EMPTY_CRM_IMAP_IMPORT_RESPONSE, {
+      endpoint: "POST /api/crm/imap/import",
+    });
+  }
+
+  async syncCRMIMAP(data: { mailbox_id?: string | null; folder?: string | null; limit?: number }): Promise<CRMIMAPImportResponse> {
+    const raw = await this.fetch<unknown>("/api/crm/imap/sync", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, CRMIMAPImportResponseSchema, EMPTY_CRM_IMAP_IMPORT_RESPONSE, {
+      endpoint: "POST /api/crm/imap/sync",
     });
   }
 

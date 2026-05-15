@@ -9,7 +9,7 @@ import { issueKeys, useIssueDraftStore } from "@multica/core/issues";
 import { useModalStore } from "@multica/core/modals";
 import { crmAccountListOptions, crmContactListOptions, crmEmailMessageListOptions, crmEmailThreadListOptions, crmKeys } from "@multica/core/crm/queries";
 import { useWorkspacePaths } from "@multica/core/paths";
-import type { CRMAccount, CRMContact, CRMEmailThread, CRMIMAPSetting, CreateCRMContactRequest, Issue, Project } from "@multica/core/types";
+import type { CRMAccount, CRMContact, CRMEmailThread, CRMIMAPPreviewMessage, CRMIMAPSetting, CreateCRMContactRequest, Issue, Project } from "@multica/core/types";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -92,6 +92,8 @@ export function CRMEmailsPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mailboxDraft, setMailboxDraft] = useState<MailboxDraft>(emptyMailboxDraft);
   const [mailboxStatus, setMailboxStatus] = useState<string | null>(null);
+  const [previewMessages, setPreviewMessages] = useState<CRMIMAPPreviewMessage[]>([]);
+  const [selectedPreviewUIDs, setSelectedPreviewUIDs] = useState<string[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [detailDialog, setDetailDialog] = useState<{ type: "account"; account: CRMAccount } | { type: "contact"; contact: CRMContact } | null>(null);
   const [associationDraft, setAssociationDraft] = useState<AssociationDraft | null>(null);
@@ -169,7 +171,29 @@ export function CRMEmailsPage() {
 
   const previewMailbox = useMutation({
     mutationFn: () => api.previewCRMIMAP({ mailbox_id: mailboxDraft.id, folder: activeFolder, limit: 10 }),
-    onSuccess: (result) => setMailboxStatus(result.note),
+    onSuccess: (result) => {
+      setPreviewMessages(result.messages);
+      setSelectedPreviewUIDs(result.messages.map((message) => message.uid));
+      setMailboxStatus(`${result.note} ${result.total} messages fetched.`);
+    },
+  });
+
+  const importPreviewMessages = useMutation({
+    mutationFn: () => api.importCRMIMAP({ mailbox_id: mailboxDraft.id, folder: activeFolder, uids: selectedPreviewUIDs }),
+    onSuccess: (result) => {
+      setMailboxStatus(`Imported ${result.imported}; skipped ${result.skipped}.`);
+      setPreviewMessages([]);
+      setSelectedPreviewUIDs([]);
+      queryClient.invalidateQueries({ queryKey: crmKeys.emailThreads(wsId) });
+    },
+  });
+
+  const syncMailbox = useMutation({
+    mutationFn: () => api.syncCRMIMAP({ mailbox_id: mailboxDraft.id, folder: activeFolder, limit: 20 }),
+    onSuccess: (result) => {
+      setMailboxStatus(`Sync complete. Fetched ${result.fetched}; imported ${result.imported}; skipped ${result.skipped}.`);
+      queryClient.invalidateQueries({ queryKey: crmKeys.emailThreads(wsId) });
+    },
   });
 
   const selectedThread = useMemo<CRMEmailThread | null>(() => {
@@ -613,10 +637,38 @@ export function CRMEmailsPage() {
           </div>
           <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">{t(($) => $.emails.imap_security_note)}</p>
           {mailboxStatus ? <p className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">{mailboxStatus}</p> : null}
+          {previewMessages.length > 0 ? (
+            <div className="max-h-80 space-y-2 overflow-y-auto rounded-md border bg-muted/20 p-3">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>{previewMessages.length} live IMAP messages</span>
+                <Button size="sm" disabled={selectedPreviewUIDs.length === 0 || importPreviewMessages.isPending} onClick={() => importPreviewMessages.mutate()}>
+                  Import selected ({selectedPreviewUIDs.length})
+                </Button>
+              </div>
+              {previewMessages.map((message) => {
+                const checked = selectedPreviewUIDs.includes(message.uid);
+                return (
+                  <label key={message.uid} className="flex gap-2 rounded border bg-background p-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(event) => setSelectedPreviewUIDs((uids) => event.target.checked ? [...uids, message.uid] : uids.filter((uid) => uid !== message.uid))}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium">{message.subject || "(no subject)"}</span>
+                      <span className="block truncate text-muted-foreground">{message.from_name || message.from_email || "unknown"} · {messageTime(message.received_at)}</span>
+                      <span className="mt-1 block line-clamp-2 text-muted-foreground">{message.snippet}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          ) : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => { setSettingsOpen(false); setMailboxStatus(null); }}>{t(($) => $.actions.cancel)}</Button>
             <Button variant="outline" disabled={testMailbox.isPending || saveMailbox.isPending || !mailboxDraft.host} onClick={() => testMailbox.mutate()}>{t(($) => $.emails.test_connection)}</Button>
             <Button variant="outline" disabled={previewMailbox.isPending || !mailboxDraft.id} onClick={() => previewMailbox.mutate()}>{t(($) => $.emails.preview_import)}</Button>
+            <Button variant="outline" disabled={syncMailbox.isPending || !mailboxDraft.id} onClick={() => syncMailbox.mutate()}>Sync now</Button>
             <Button disabled={saveMailbox.isPending || !mailboxDraft.label || !mailboxDraft.email || !mailboxDraft.host || !mailboxDraft.username} onClick={() => saveMailbox.mutate()}>{t(($) => $.actions.save)}</Button>
           </DialogFooter>
         </DialogContent>

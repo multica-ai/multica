@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ListIssuesResponse, TimelinePage } from "../types";
+import type { CRMIMAPImportResponse, CRMIMAPPreviewResponse, ListIssuesResponse, TimelinePage } from "../types";
 
 // ---------------------------------------------------------------------------
 // Schemas for the highest-risk API endpoints — those whose responses drive
@@ -145,3 +145,47 @@ export const SubscribersListSchema = z.array(SubscriberSchema);
 export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
 }).loose();
+
+export const CRMIMAPPreviewMessageSchema = z.object({
+  uid: z.string(),
+  external_message_id: z.string().default(""),
+  subject: z.string().default(""),
+  from_email: z.string().default(""),
+  from_name: z.string().default(""),
+  to_emails: z.array(z.string()).default([]),
+  cc_emails: z.array(z.string()).default([]),
+  received_at: z.string().nullable().optional(),
+  snippet: z.string().default(""),
+  raw_size: z.number().default(0),
+}).loose();
+
+export const CRMIMAPPreviewResponseSchema = z.object({
+  messages: z.array(CRMIMAPPreviewMessageSchema).default([]),
+  total: z.number().default(0),
+  limit: z.number().default(0),
+  sync_enabled: z.boolean().default(false),
+  note: z.string().default(""),
+}).loose();
+
+export const EMPTY_CRM_IMAP_PREVIEW_RESPONSE: CRMIMAPPreviewResponse = {
+  messages: [],
+  total: 0,
+  limit: 0,
+  sync_enabled: false,
+  note: "",
+};
+
+export const CRMIMAPImportResponseSchema = z.object({
+  ok: z.boolean().default(false),
+  run_id: z.string().optional(),
+  fetched: z.number().default(0),
+  imported: z.number().default(0),
+  skipped: z.number().default(0),
+}).loose();
+
+export const EMPTY_CRM_IMAP_IMPORT_RESPONSE: CRMIMAPImportResponse = {
+  ok: false,
+  fetched: 0,
+  imported: 0,
+  skipped: 0,
+};

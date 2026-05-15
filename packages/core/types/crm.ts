@@ -354,12 +354,33 @@ export interface CRMIMAPTestResponse {
   message: string;
 }
 
+export interface CRMIMAPPreviewMessage {
+  uid: string;
+  external_message_id: string;
+  subject: string;
+  from_email: string;
+  from_name: string;
+  to_emails: string[];
+  cc_emails: string[];
+  received_at?: string | null;
+  snippet: string;
+  raw_size: number;
+}
+
 export interface CRMIMAPPreviewResponse {
-  messages: CRMEmailMessage[];
+  messages: CRMIMAPPreviewMessage[];
   total: number;
   limit: number;
   sync_enabled: boolean;
   note: string;
+}
+
+export interface CRMIMAPImportResponse {
+  ok: boolean;
+  run_id?: string;
+  fetched: number;
+  imported: number;
+  skipped: number;
 }
 
 export interface CRMProfileSuggestion {

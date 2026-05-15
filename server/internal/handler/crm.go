@@ -518,6 +518,26 @@ type CRMIMAPPreviewRequest struct {
 	Folder    *string `json:"folder"`
 	Limit     int     `json:"limit"`
 }
+
+type CRMIMAPImportRequest struct {
+	MailboxID *string  `json:"mailbox_id"`
+	Folder    *string  `json:"folder"`
+	UIDs      []string `json:"uids"`
+	Limit     int      `json:"limit"`
+}
+
+type CRMIMAPPreviewMessageResponse struct {
+	UID               string   `json:"uid"`
+	ExternalMessageID string   `json:"external_message_id"`
+	Subject           string   `json:"subject"`
+	FromEmail         string   `json:"from_email"`
+	FromName          string   `json:"from_name"`
+	ToEmails          []string `json:"to_emails"`
+	CcEmails          []string `json:"cc_emails"`
+	ReceivedAt        *string  `json:"received_at"`
+	Snippet           string   `json:"snippet"`
+	RawSize           int      `json:"raw_size"`
+}
 type CRMProfileSuggestionResponse struct {
 	ID          string          `json:"id"`
 	WorkspaceID string          `json:"workspace_id"`
@@ -1557,6 +1577,10 @@ func (h *Handler) UpsertCRMIMAPSetting(w http.ResponseWriter, r *http.Request) {
 	if req.Port <= 0 {
 		req.Port = 993
 	}
+	secretRef := cleanOptionalText(req.SecretRef)
+	if req.Secret != nil && strings.TrimSpace(*req.Secret) != "" {
+		secretRef = pgtype.Text{String: encodeCRMIMAPInlineSecret(strings.TrimSpace(*req.Secret)), Valid: true}
+	}
 	if tlsMode != "ssl" && tlsMode != "starttls" && tlsMode != "none" {
 		writeError(w, http.StatusBadRequest, "invalid tls_mode")
 		return
@@ -1567,9 +1591,9 @@ func (h *Handler) UpsertCRMIMAPSetting(w http.ResponseWriter, r *http.Request) {
 	}
 	var row pgx.Row
 	if id.Valid {
-		row = h.DB.QueryRow(r.Context(), `UPDATE crm_imap_setting SET label=$3,email=$4,host=$5,port=$6,tls_mode=$7,username=$8,secret_ref=$9,sync_enabled=$10,updated_at=now() WHERE id=$1 AND workspace_id=$2 RETURNING id, workspace_id, label, email, host, port, tls_mode, username, secret_ref, sync_enabled, last_test_status, last_test_message, last_tested_at, created_at, updated_at`, id, workspaceID, label, email, host, req.Port, tlsMode, user, cleanOptionalText(req.SecretRef), req.SyncEnabled)
+		row = h.DB.QueryRow(r.Context(), `UPDATE crm_imap_setting SET label=$3,email=$4,host=$5,port=$6,tls_mode=$7,username=$8,secret_ref=$9,sync_enabled=$10,updated_at=now() WHERE id=$1 AND workspace_id=$2 RETURNING id, workspace_id, label, email, host, port, tls_mode, username, secret_ref, sync_enabled, last_test_status, last_test_message, last_tested_at, created_at, updated_at`, id, workspaceID, label, email, host, req.Port, tlsMode, user, secretRef, req.SyncEnabled)
 	} else {
-		row = h.DB.QueryRow(r.Context(), `INSERT INTO crm_imap_setting (workspace_id,label,email,host,port,tls_mode,username,secret_ref,sync_enabled) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, workspace_id, label, email, host, port, tls_mode, username, secret_ref, sync_enabled, last_test_status, last_test_message, last_tested_at, created_at, updated_at`, workspaceID, label, email, host, req.Port, tlsMode, user, cleanOptionalText(req.SecretRef), req.SyncEnabled)
+		row = h.DB.QueryRow(r.Context(), `INSERT INTO crm_imap_setting (workspace_id,label,email,host,port,tls_mode,username,secret_ref,sync_enabled) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, workspace_id, label, email, host, port, tls_mode, username, secret_ref, sync_enabled, last_test_status, last_test_message, last_tested_at, created_at, updated_at`, workspaceID, label, email, host, req.Port, tlsMode, user, secretRef, req.SyncEnabled)
 	}
 	item, err := scanCRMIMAPSetting(row)
 	if err != nil {
@@ -1617,21 +1641,178 @@ func (h *Handler) PreviewCRMIMAP(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 20 {
 		limit = 10
 	}
-	if req.MailboxID != nil {
-		mailboxID, ok := optionalUUID(w, req.MailboxID, "mailbox_id")
-		if !ok {
-			return
+	cfg, ok := h.loadCRMIMAPConfig(w, r, workspaceID, req.MailboxID)
+	if !ok {
+		return
+	}
+	messages, err := fetchCRMIMAPMessages(cfg, cleanCRMIMAPFolder(req.Folder), limit, nil)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to fetch IMAP messages: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": crmIMAPPreviewMessagesToResponse(messages), "total": len(messages), "limit": limit, "sync_enabled": false, "note": "Fetched live IMAP messages for manual preview; no messages imported yet."})
+}
+
+func (h *Handler) ImportCRMIMAP(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.crmWorkspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	var req CRMIMAPImportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.UIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "uids are required")
+		return
+	}
+	cfg, ok := h.loadCRMIMAPConfig(w, r, workspaceID, req.MailboxID)
+	if !ok {
+		return
+	}
+	messages, err := fetchCRMIMAPMessages(cfg, cleanCRMIMAPFolder(req.Folder), len(req.UIDs), req.UIDs)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to fetch IMAP messages: "+err.Error())
+		return
+	}
+	imported, skipped, err := h.importCRMIMAPMessages(r.Context(), workspaceID, cfg, messages)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to import IMAP messages")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "fetched": len(messages), "imported": imported, "skipped": skipped})
+}
+
+func (h *Handler) SyncCRMIMAP(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.crmWorkspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	var req CRMIMAPImportRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	limit := req.Limit
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	cfg, ok := h.loadCRMIMAPConfig(w, r, workspaceID, req.MailboxID)
+	if !ok {
+		return
+	}
+	folder := cleanCRMIMAPFolder(req.Folder)
+	var runID pgtype.UUID
+	_ = h.DB.QueryRow(r.Context(), `INSERT INTO crm_imap_sync_run (workspace_id, mailbox_id, folder, requested_limit) VALUES ($1,$2,$3,$4) RETURNING id`, workspaceID, cfg.UUID, folder, limit).Scan(&runID)
+	messages, err := fetchCRMIMAPMessages(cfg, folder, limit, nil)
+	if err != nil {
+		_, _ = h.DB.Exec(r.Context(), `UPDATE crm_imap_sync_run SET status='failed', error_message=$2, finished_at=now(), updated_at=now() WHERE id=$1`, runID, err.Error())
+		writeError(w, http.StatusBadGateway, "failed to fetch IMAP messages: "+err.Error())
+		return
+	}
+	imported, skipped, err := h.importCRMIMAPMessages(r.Context(), workspaceID, cfg, messages)
+	if err != nil {
+		_, _ = h.DB.Exec(r.Context(), `UPDATE crm_imap_sync_run SET status='failed', fetched_count=$2, error_message=$3, finished_at=now(), updated_at=now() WHERE id=$1`, runID, len(messages), err.Error())
+		writeError(w, http.StatusInternalServerError, "failed to import IMAP messages")
+		return
+	}
+	_, _ = h.DB.Exec(r.Context(), `UPDATE crm_imap_sync_run SET status='ok', fetched_count=$2, imported_count=$3, skipped_count=$4, finished_at=now(), updated_at=now() WHERE id=$1`, runID, len(messages), imported, skipped)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "run_id": uuidToString(runID), "fetched": len(messages), "imported": imported, "skipped": skipped})
+}
+
+func cleanCRMIMAPFolder(value *string) string {
+	if value == nil || strings.TrimSpace(*value) == "" || strings.EqualFold(strings.TrimSpace(*value), "inbox") {
+		return "INBOX"
+	}
+	return strings.TrimSpace(*value)
+}
+
+func (h *Handler) loadCRMIMAPConfig(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, mailboxIDValue *string) (crmIMAPMailboxConfig, bool) {
+	mailboxID, ok := optionalUUID(w, mailboxIDValue, "mailbox_id")
+	if !ok {
+		return crmIMAPMailboxConfig{}, false
+	}
+	query := `SELECT id, label, email, host, port, tls_mode, username, secret_ref FROM crm_imap_setting WHERE workspace_id=$1`
+	args := []any{workspaceID}
+	if mailboxID.Valid {
+		query += ` AND id=$2`
+		args = append(args, mailboxID)
+	}
+	query += ` ORDER BY updated_at DESC LIMIT 1`
+	var cfg crmIMAPMailboxConfig
+	var id pgtype.UUID
+	var secretRef pgtype.Text
+	if err := h.DB.QueryRow(r.Context(), query, args...).Scan(&id, &cfg.Label, &cfg.Email, &cfg.Host, &cfg.Port, &cfg.TLSMode, &cfg.Username, &secretRef); err != nil {
+		writeError(w, http.StatusNotFound, "CRM IMAP setting not found")
+		return crmIMAPMailboxConfig{}, false
+	}
+	cfg.UUID = id
+	cfg.ID = uuidToString(id)
+	cfg.SecretRef = crmTextValue(secretRef)
+	return cfg, true
+}
+
+func crmIMAPPreviewMessagesToResponse(messages []crmIMAPFetchedMessage) []CRMIMAPPreviewMessageResponse {
+	out := make([]CRMIMAPPreviewMessageResponse, 0, len(messages))
+	for _, message := range messages {
+		var receivedAt *string
+		if !message.Date.IsZero() {
+			value := message.Date.UTC().Format(time.RFC3339)
+			receivedAt = &value
 		}
-		if mailboxID.Valid {
-			var exists bool
-			_ = h.DB.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM crm_imap_setting WHERE id=$1 AND workspace_id=$2)`, mailboxID, workspaceID).Scan(&exists)
-			if !exists {
-				writeError(w, http.StatusNotFound, "CRM IMAP setting not found")
-				return
+		out = append(out, CRMIMAPPreviewMessageResponse{
+			UID: message.UID, ExternalMessageID: message.MessageID, Subject: message.Subject,
+			FromEmail: message.FromEmail, FromName: message.FromName, ToEmails: message.ToEmails,
+			CcEmails: message.CcEmails, ReceivedAt: receivedAt, Snippet: message.Snippet, RawSize: message.RawSize,
+		})
+	}
+	return out
+}
+
+func (h *Handler) importCRMIMAPMessages(ctx context.Context, workspaceID pgtype.UUID, cfg crmIMAPMailboxConfig, messages []crmIMAPFetchedMessage) (int, int, error) {
+	imported := 0
+	skipped := 0
+	for _, message := range messages {
+		externalID := message.MessageID
+		if externalID == "" {
+			externalID = cfg.ID + ":" + message.UID
+		}
+		var exists bool
+		if err := h.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM crm_email_message WHERE workspace_id=$1 AND external_message_id=$2)`, workspaceID, externalID).Scan(&exists); err != nil {
+			return imported, skipped, err
+		}
+		if exists {
+			skipped++
+			continue
+		}
+		subject := strings.TrimSpace(message.Subject)
+		if subject == "" {
+			subject = "(no subject)"
+		}
+		var threadID pgtype.UUID
+		threadExternalID := cfg.ID + ":" + subject
+		if err := h.DB.QueryRow(ctx, `SELECT id FROM crm_email_thread WHERE workspace_id=$1 AND external_thread_id=$2 LIMIT 1`, workspaceID, threadExternalID).Scan(&threadID); err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return imported, skipped, err
+			}
+			lastAt := pgtype.Timestamptz{}
+			if !message.Date.IsZero() {
+				lastAt = pgtype.Timestamptz{Time: message.Date, Valid: true}
+			}
+			if err := h.DB.QueryRow(ctx, `INSERT INTO crm_email_thread (workspace_id, subject, external_thread_id, mailbox, direction, status, last_message_at) VALUES ($1,$2,$3,$4,'inbound','open',$5) RETURNING id`, workspaceID, subject, threadExternalID, cfg.Email, lastAt).Scan(&threadID); err != nil {
+				return imported, skipped, err
 			}
 		}
+		receivedAt := pgtype.Timestamptz{}
+		if !message.Date.IsZero() {
+			receivedAt = pgtype.Timestamptz{Time: message.Date, Valid: true}
+		}
+		_, err := h.DB.Exec(ctx, `INSERT INTO crm_email_message (workspace_id, thread_id, external_message_id, from_email, from_name, to_emails, cc_emails, subject, received_at, body_text, body_html, snippet, direction) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'inbound')`, workspaceID, threadID, externalID, cleanOptionalText(&message.FromEmail), cleanOptionalText(&message.FromName), message.ToEmails, message.CcEmails, cleanOptionalText(&subject), receivedAt, cleanOptionalText(&message.BodyText), cleanOptionalText(&message.BodyHTML), cleanOptionalText(&message.Snippet))
+		if err != nil {
+			return imported, skipped, err
+		}
+		_, _ = h.DB.Exec(ctx, `UPDATE crm_email_thread SET last_message_at=COALESCE($3,last_message_at,now()), updated_at=now() WHERE id=$1 AND workspace_id=$2`, threadID, workspaceID, receivedAt)
+		imported++
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"messages": []any{}, "total": 0, "limit": limit, "sync_enabled": false, "note": "Manual preview only; automatic IMAP sync is disabled."})
+	return imported, skipped, nil
 }
 
 func crmTextValue(t pgtype.Text) string {

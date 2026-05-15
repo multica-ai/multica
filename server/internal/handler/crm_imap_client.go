@@ -1,0 +1,297 @@
+package handler
+
+import (
+	"crypto/tls"
+	"encoding/base64"
+	"fmt"
+	"io"
+	"mime"
+	"net"
+	"net/mail"
+	"net/textproto"
+	"os"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
+type crmIMAPMailboxConfig struct {
+	ID        string
+	UUID      pgtype.UUID
+	Label     string
+	Email     string
+	Host      string
+	Port      int32
+	TLSMode   string
+	Username  string
+	SecretRef string
+}
+
+type crmIMAPFetchedMessage struct {
+	UID       string
+	MessageID string
+	Subject   string
+	FromEmail string
+	FromName  string
+	ToEmails  []string
+	CcEmails  []string
+	Date      time.Time
+	BodyText  string
+	BodyHTML  string
+	Snippet   string
+	RawSize   int
+}
+
+type crmIMAPClient struct {
+	conn *textproto.Conn
+	tag  int
+}
+
+func resolveCRMIMAPSecret(ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", fmt.Errorf("IMAP password is missing")
+	}
+	if strings.HasPrefix(ref, "inline:") {
+		decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(ref, "inline:"))
+		if err != nil {
+			return "", fmt.Errorf("invalid inline IMAP secret")
+		}
+		return string(decoded), nil
+	}
+	if strings.HasPrefix(ref, "env:") {
+		name := strings.TrimSpace(strings.TrimPrefix(ref, "env:"))
+		if name == "" {
+			return "", fmt.Errorf("invalid IMAP secret env ref")
+		}
+		value := os.Getenv(name)
+		if value == "" {
+			return "", fmt.Errorf("IMAP secret env var is empty")
+		}
+		return value, nil
+	}
+	return "", fmt.Errorf("unsupported IMAP secret_ref")
+}
+
+func encodeCRMIMAPInlineSecret(secret string) string {
+	return "inline:" + base64.StdEncoding.EncodeToString([]byte(secret))
+}
+
+func dialCRMIMAP(cfg crmIMAPMailboxConfig) (*crmIMAPClient, error) {
+	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(int(cfg.Port)))
+	dialer := &net.Dialer{Timeout: 15 * time.Second}
+	var c net.Conn
+	var err error
+	if cfg.TLSMode == "ssl" {
+		c, err = tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{ServerName: cfg.Host, MinVersion: tls.VersionTLS12})
+	} else {
+		c, err = dialer.Dial("tcp", addr)
+	}
+	if err != nil {
+		return nil, err
+	}
+	client := &crmIMAPClient{conn: textproto.NewConn(c)}
+	if _, err := client.conn.ReadLine(); err != nil {
+		_ = client.Close()
+		return nil, err
+	}
+	if cfg.TLSMode == "starttls" {
+		if err := client.simple("STARTTLS"); err != nil {
+			_ = client.Close()
+			return nil, err
+		}
+		tlsConn := tls.Client(c, &tls.Config{ServerName: cfg.Host, MinVersion: tls.VersionTLS12})
+		if err := tlsConn.Handshake(); err != nil {
+			_ = c.Close()
+			return nil, err
+		}
+		client.conn = textproto.NewConn(tlsConn)
+	}
+	return client, nil
+}
+
+func (c *crmIMAPClient) Close() error {
+	if c == nil || c.conn == nil {
+		return nil
+	}
+	_ = c.simple("LOGOUT")
+	return c.conn.Close()
+}
+
+func (c *crmIMAPClient) nextTag() string {
+	c.tag++
+	return fmt.Sprintf("A%04d", c.tag)
+}
+
+func (c *crmIMAPClient) simple(command string, args ...string) error {
+	_, err := c.command(command, args...)
+	return err
+}
+
+func (c *crmIMAPClient) command(command string, args ...string) ([]string, error) {
+	tag := c.nextTag()
+	parts := append([]string{tag, command}, args...)
+	if err := c.conn.PrintfLine("%s", strings.Join(parts, " ")); err != nil {
+		return nil, err
+	}
+	var lines []string
+	for {
+		line, err := c.conn.ReadLine()
+		if err != nil {
+			return lines, err
+		}
+		lines = append(lines, line)
+		if strings.HasPrefix(line, tag+" ") {
+			upper := strings.ToUpper(line)
+			if strings.Contains(upper, " OK") || strings.HasPrefix(upper, tag+" OK") {
+				return lines, nil
+			}
+			return lines, fmt.Errorf("%s", line)
+		}
+	}
+}
+
+func imapQuote(value string) string {
+	value = strings.ReplaceAll(value, "\\", "\\\\")
+	value = strings.ReplaceAll(value, "\"", "\\\"")
+	return "\"" + value + "\""
+}
+
+func fetchCRMIMAPMessages(cfg crmIMAPMailboxConfig, folder string, limit int, requestedUIDs []string) ([]crmIMAPFetchedMessage, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	folder = strings.TrimSpace(folder)
+	if folder == "" || strings.EqualFold(folder, "inbox") {
+		folder = "INBOX"
+	}
+	password, err := resolveCRMIMAPSecret(cfg.SecretRef)
+	if err != nil {
+		return nil, err
+	}
+	client, err := dialCRMIMAP(cfg)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+	if err := client.simple("LOGIN", imapQuote(cfg.Username), imapQuote(password)); err != nil {
+		return nil, fmt.Errorf("IMAP login failed: %w", err)
+	}
+	if _, err := client.command("SELECT", imapQuote(folder)); err != nil {
+		return nil, fmt.Errorf("IMAP select failed: %w", err)
+	}
+	uids := requestedUIDs
+	if len(uids) == 0 {
+		lines, err := client.command("UID SEARCH", "ALL")
+		if err != nil {
+			return nil, fmt.Errorf("IMAP search failed: %w", err)
+		}
+		uids = parseIMAPSearchUIDs(lines)
+		if len(uids) > limit {
+			uids = uids[len(uids)-limit:]
+		}
+	}
+	if len(uids) == 0 {
+		return []crmIMAPFetchedMessage{}, nil
+	}
+	// newest first for UI preview
+	sort.SliceStable(uids, func(i, j int) bool { return atoiSafe(uids[i]) > atoiSafe(uids[j]) })
+	messages := make([]crmIMAPFetchedMessage, 0, len(uids))
+	for _, uid := range uids {
+		lines, err := client.command("UID FETCH", uid, "(UID BODY.PEEK[])")
+		if err != nil {
+			return messages, err
+		}
+		raw := extractIMAPLiteral(lines)
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		msg := parseCRMIMAPMessage(uid, raw)
+		messages = append(messages, msg)
+	}
+	return messages, nil
+}
+
+func parseIMAPSearchUIDs(lines []string) []string {
+	for _, line := range lines {
+		if strings.HasPrefix(line, "* SEARCH") {
+			fields := strings.Fields(strings.TrimPrefix(line, "* SEARCH"))
+			return fields
+		}
+	}
+	return nil
+}
+
+func extractIMAPLiteral(lines []string) string {
+	if len(lines) <= 1 {
+		return ""
+	}
+	var body []string
+	for _, line := range lines {
+		if strings.HasPrefix(line, "*") || regexp.MustCompile(`^A\d+ `).MatchString(line) {
+			continue
+		}
+		body = append(body, line)
+	}
+	return strings.Join(body, "\r\n")
+}
+
+func parseCRMIMAPMessage(uid, raw string) crmIMAPFetchedMessage {
+	msg := crmIMAPFetchedMessage{UID: uid, RawSize: len(raw)}
+	parsed, err := mail.ReadMessage(strings.NewReader(raw))
+	if err != nil {
+		msg.BodyText = raw
+		msg.Snippet = makeSnippet(raw)
+		return msg
+	}
+	decode := new(mime.WordDecoder).DecodeHeader
+	msg.MessageID = strings.Trim(parsed.Header.Get("Message-Id"), " <>")
+	if msg.MessageID == "" {
+		msg.MessageID = uid
+	}
+	msg.Subject, _ = decode(parsed.Header.Get("Subject"))
+	if froms, err := parsed.Header.AddressList("From"); err == nil && len(froms) > 0 {
+		msg.FromEmail = froms[0].Address
+		msg.FromName, _ = decode(froms[0].Name)
+	}
+	msg.ToEmails = headerEmails(parsed.Header, "To")
+	msg.CcEmails = headerEmails(parsed.Header, "Cc")
+	if date, err := parsed.Header.Date(); err == nil {
+		msg.Date = date
+	}
+	body, _ := io.ReadAll(parsed.Body)
+	msg.BodyText = string(body)
+	msg.Snippet = makeSnippet(msg.BodyText)
+	return msg
+}
+
+func headerEmails(header mail.Header, key string) []string {
+	addresses, err := header.AddressList(key)
+	if err != nil {
+		return []string{}
+	}
+	out := make([]string, 0, len(addresses))
+	for _, address := range addresses {
+		if address.Address != "" {
+			out = append(out, address.Address)
+		}
+	}
+	return out
+}
+
+func makeSnippet(body string) string {
+	body = strings.Join(strings.Fields(body), " ")
+	if len(body) > 240 {
+		return body[:240]
+	}
+	return body
+}
+
+func atoiSafe(v string) int {
+	n, _ := strconv.Atoi(v)
+	return n
+}

@@ -405,6 +405,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/{mailboxId}/test", h.TestCRMIMAPSetting)
 				})
 				r.Post("/imap/preview", h.PreviewCRMIMAP)
+				r.Post("/imap/import", h.ImportCRMIMAP)
+				r.Post("/imap/sync", h.SyncCRMIMAP)
 				r.Route("/email-threads", func(r chi.Router) {
 					r.Get("/", h.ListCRMEmailThreads)
 					r.Post("/", h.CreateCRMEmailThread)
