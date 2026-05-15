@@ -965,13 +965,137 @@ func TestExecuteAndDrain_NoRetryWhenSessionEstablished(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// SessionID is set → session was established → should NOT retry.
-	shouldRetry := result.Status == "failed" && result.SessionID == ""
+	// SessionID is set and the error is not a stale-resume signal → should NOT retry.
+	resumeUnrecoverable := result.SessionID == "" || isStaleResumeError(result.Error)
+	shouldRetry := result.Status == "failed" && resumeUnrecoverable
 	if shouldRetry {
-		t.Fatal("should not retry when SessionID is present")
+		t.Fatal("should not retry when SessionID is present and error is not a stale-resume signal")
 	}
 	if int(fb.idx.Load()) != 1 {
 		t.Fatalf("expected 1 call, got %d", fb.idx.Load())
+	}
+}
+
+// TestExecuteAndDrain_StaleThinkingBlockFallback covers the case where the
+// resumed session is established (claude emits a session_id) but the very
+// first turn fails with Anthropic 400 "Invalid `signature` in `thinking`
+// block" — the saved history carries a thinking block whose signature is
+// tied to a different model/key/turn boundary. The session is unrecoverable;
+// the daemon must retry with --resume "". Regression coverage for XIM-615.
+func TestExecuteAndDrain_StaleThinkingBlockFallback(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	taskLog := slog.Default()
+
+	staleSessionErr := "API Error: 400 {\"type\":\"error\",\"error\":{" +
+		"\"type\":\"invalid_request_error\"," +
+		"\"message\":\"messages.1.content.0: Invalid `signature` in `thinking` block\"" +
+		"}, \"request_id\":\"req_011CayMypaLNs8duFTfpgLdt\"}"
+
+	fb := &fakeBackend{
+		results: []agent.Result{
+			// First attempt: resume lands (SessionID populated), API errors on
+			// the stale thinking-block signature.
+			{Status: "failed", Error: staleSessionErr, SessionID: "stale-but-loaded-sess",
+				Usage: map[string]agent.TokenUsage{
+					"m1": {InputTokens: 5},
+				}},
+			// Retry with --resume "" succeeds.
+			{Status: "completed", Output: "done", SessionID: "fresh-sess",
+				Usage: map[string]agent.TokenUsage{
+					"m1": {InputTokens: 10, OutputTokens: 20},
+				}},
+		},
+	}
+
+	priorSessionID := "stale-but-loaded-sess"
+	opts := agent.ExecOptions{ResumeSessionID: priorSessionID}
+	result, _, err := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1")
+	if err != nil {
+		t.Fatalf("first call error: %v", err)
+	}
+	if result.Status != "failed" || result.SessionID != "stale-but-loaded-sess" {
+		t.Fatalf("expected failed result with stale SessionID, got %+v", result)
+	}
+
+	// Mirror the runTask gate: SessionID set BUT error is stale-resume → retry.
+	resumeUnrecoverable := result.SessionID == "" || isStaleResumeError(result.Error)
+	if !resumeUnrecoverable {
+		t.Fatal("expected resumeUnrecoverable=true for thinking-block signature error")
+	}
+	if result.Status == "failed" && priorSessionID != "" && resumeUnrecoverable {
+		firstUsage := result.Usage
+		opts.ResumeSessionID = ""
+		retryResult, _, retryErr := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1")
+		if retryErr != nil {
+			t.Fatalf("retry error: %v", retryErr)
+		}
+		result = retryResult
+		result.Usage = mergeUsage(firstUsage, result.Usage)
+	}
+
+	if result.Status != "completed" || result.Output != "done" {
+		t.Fatalf("expected completed result after retry, got %+v", result)
+	}
+	if result.SessionID != "fresh-sess" {
+		t.Fatalf("expected fresh-sess, got %s", result.SessionID)
+	}
+	if u := result.Usage["m1"]; u.InputTokens != 15 || u.OutputTokens != 20 {
+		t.Fatalf("expected merged usage {15,20}, got %+v", u)
+	}
+	if fb.calls[1].ResumeSessionID != "" {
+		t.Fatal("retry should not have ResumeSessionID")
+	}
+}
+
+func TestIsStaleResumeError(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		err  string
+		want bool
+	}{
+		{
+			name: "thinking block invalid signature",
+			err:  "API Error: 400 {\"error\":{\"message\":\"messages.1.content.0: Invalid `signature` in `thinking` block\"}}",
+			want: true,
+		},
+		{
+			name: "redacted_thinking block invalid signature",
+			err:  "messages.2.content.0: Invalid `signature` in `redacted_thinking` block",
+			want: true,
+		},
+		{
+			name: "unrelated 400",
+			err:  "API Error: 400 {\"error\":{\"message\":\"messages.0.content: Empty text\"}}",
+			want: false,
+		},
+		{
+			name: "rate limit",
+			err:  "API Error: 429 Rate limit reached for requests",
+			want: false,
+		},
+		{
+			name: "session not found",
+			err:  "No conversation found with session ID: abc-123",
+			want: false,
+		},
+		{
+			name: "empty",
+			err:  "",
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isStaleResumeError(tc.err); got != tc.want {
+				t.Fatalf("isStaleResumeError(%q) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }
 

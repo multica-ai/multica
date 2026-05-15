@@ -2271,7 +2271,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Fallback: if session resume failed before establishing a session, retry
 	// with a fresh session. We check SessionID == "" to distinguish a resume
 	// failure (no session established) from a failure during actual execution.
-	if result.Status == "failed" && task.PriorSessionID != "" && result.SessionID == "" {
+	//
+	// Also retry when the resumed session was established but the very first
+	// API call failed because the stored history carries a `thinking` block
+	// (extended thinking) whose signature is no longer valid in this run —
+	// Anthropic ties that signature to (model, api key, request_id), so any
+	// retry after a model swap, key rotation, or attempt boundary will 400
+	// on the first turn forever. The session file is unrecoverable; the only
+	// way out is to drop the resume and start fresh.
+	resumeUnrecoverable := result.SessionID == "" || isStaleResumeError(result.Error)
+	if result.Status == "failed" && task.PriorSessionID != "" && resumeUnrecoverable {
 		firstUsage := result.Usage
 		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
 		execOpts.ResumeSessionID = ""
@@ -2614,6 +2623,24 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 			Error:  "agent did not produce result within drain timeout",
 		}, toolCount.Load(), nil
 	}
+}
+
+// isStaleResumeError reports whether result.Error indicates the resumed
+// session carries an Anthropic `thinking` block (extended thinking) whose
+// signature is no longer valid in this run. The signature is bound to
+// (model_version, api_key, request_id) and never re-validates across model
+// swaps, key rotations, or attempt boundaries — so the only viable recovery
+// is to drop --resume and start a fresh session.
+//
+// The matched substring is what Claude Code prints verbatim when it relays
+// the upstream Anthropic 400. See XIM-615 for the failing run that motivated
+// this check.
+func isStaleResumeError(errMsg string) bool {
+	if errMsg == "" {
+		return false
+	}
+	return strings.Contains(errMsg, "Invalid `signature` in `thinking` block") ||
+		strings.Contains(errMsg, "Invalid `signature` in `redacted_thinking` block")
 }
 
 func mergeUsage(a, b map[string]agent.TokenUsage) map[string]agent.TokenUsage {
