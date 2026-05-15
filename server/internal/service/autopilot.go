@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	// CEREBRO-PATCH(autopilot-model-import): per-autopilot model override (JEH-1310).
+	"github.com/multica-ai/multica/server/internal/cerebro/autopilotmodel"
 	// CEREBRO-PATCH(autopilot-recovery-preflight): Firtal issue-recovery autopilots get platform-generated worklists; title templates support Firtal's Go-style date tokens.
 	cerebroautopilot "github.com/multica-ai/multica/server/internal/cerebro/autopilotutil"
 	issuerecovery "github.com/multica-ai/multica/server/internal/cerebro/issue_recovery"
@@ -182,8 +184,13 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	s.captureIssueCreatedFromAutopilot(ap, run, issue)
 
 	// Enqueue agent task via the existing flow.
-	if _, err := s.TaskSvc.EnqueueTaskForIssue(ctx, issue); err != nil {
+	task, err := s.TaskSvc.EnqueueTaskForIssue(ctx, issue)
+	if err != nil {
 		return fmt.Errorf("enqueue task for issue: %w", err)
+	}
+	// CEREBRO-PATCH(autopilot-model-dispatch-create-issue): propagate model to task (JEH-1310).
+	if err := autopilotmodel.SetOnTask(ctx, s.Queries, task.ID, ap.Model.String); err != nil {
+		slog.Warn("apply autopilot model to task failed", "task_id", util.UUIDToString(task.ID), "error", err)
 	}
 
 	slog.Info("autopilot dispatched (create_issue)",
@@ -222,6 +229,10 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	})
 	if err != nil {
 		return fmt.Errorf("create autopilot task: %w", err)
+	}
+	// CEREBRO-PATCH(autopilot-model-dispatch-run-only): propagate model to task (JEH-1310).
+	if err := autopilotmodel.SetOnTask(ctx, s.Queries, task.ID, ap.Model.String); err != nil {
+		slog.Warn("apply autopilot model to task failed", "task_id", util.UUIDToString(task.ID), "error", err)
 	}
 
 	// Update run with task reference.

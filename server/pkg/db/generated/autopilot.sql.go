@@ -107,7 +107,7 @@ INSERT INTO autopilot (
     $1, $2, $8, $3,
     $4, $5, $9,
     $6, $7
-) RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id
+) RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model
 `
 
 type CreateAutopilotParams struct {
@@ -152,6 +152,7 @@ func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams
 		&i.Scope,
 		&i.OwnerUserID,
 		&i.GroupID,
+		&i.Model,
 	)
 	return i, err
 }
@@ -207,7 +208,7 @@ const createAutopilotTask = `-- name: CreateAutopilotTask :one
 
 INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary)
 VALUES ($1, $2, NULL, 'queued', $3, $4, $5)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, title
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, title, model_override
 `
 
 type CreateAutopilotTaskParams struct {
@@ -257,6 +258,7 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		&i.ForceFreshSession,
 		&i.IsLeaderTask,
 		&i.Title,
+		&i.ModelOverride,
 	)
 	return i, err
 }
@@ -344,7 +346,7 @@ func (q *Queries) FailAutopilotRunsByIssue(ctx context.Context, issueID pgtype.U
 }
 
 const getAutopilot = `-- name: GetAutopilot :one
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model FROM autopilot
 WHERE id = $1
 `
 
@@ -368,12 +370,13 @@ func (q *Queries) GetAutopilot(ctx context.Context, id pgtype.UUID) (Autopilot, 
 		&i.Scope,
 		&i.OwnerUserID,
 		&i.GroupID,
+		&i.Model,
 	)
 	return i, err
 }
 
 const getAutopilotInWorkspace = `-- name: GetAutopilotInWorkspace :one
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model FROM autopilot
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -402,6 +405,7 @@ func (q *Queries) GetAutopilotInWorkspace(ctx context.Context, arg GetAutopilotI
 		&i.Scope,
 		&i.OwnerUserID,
 		&i.GroupID,
+		&i.Model,
 	)
 	return i, err
 }
@@ -580,7 +584,7 @@ func (q *Queries) ListAutopilotTriggers(ctx context.Context, autopilotID pgtype.
 
 const listAutopilots = `-- name: ListAutopilots :many
 
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model FROM autopilot
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
 ORDER BY created_at DESC
@@ -620,6 +624,7 @@ func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) 
 			&i.Scope,
 			&i.OwnerUserID,
 			&i.GroupID,
+			&i.Model,
 		); err != nil {
 			return nil, err
 		}
@@ -633,7 +638,7 @@ func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) 
 
 const listAutopilotsForUser = `-- name: ListAutopilotsForUser :many
 
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model FROM autopilot
 WHERE workspace_id = $1::uuid
   AND ($2::text IS NULL OR status = $2)
   AND (
@@ -694,6 +699,7 @@ func (q *Queries) ListAutopilotsForUser(ctx context.Context, arg ListAutopilotsF
 			&i.Scope,
 			&i.OwnerUserID,
 			&i.GroupID,
+			&i.Model,
 		); err != nil {
 			return nil, err
 		}
@@ -855,6 +861,49 @@ func (q *Queries) SelectAutopilotsExceedingFailureThreshold(ctx context.Context,
 	return items, nil
 }
 
+const setAgentTaskModelOverride = `-- name: SetAgentTaskModelOverride :exec
+UPDATE agent_task_queue
+SET model_override = NULLIF($1::text, '')
+WHERE id = $2::uuid
+`
+
+type SetAgentTaskModelOverrideParams struct {
+	ModelOverride string      `json:"model_override"`
+	ID            pgtype.UUID `json:"id"`
+}
+
+// Applied immediately after the autopilot dispatcher creates an agent_task_queue
+// row when the source autopilot carries a model override. NULL/empty means the
+// daemon falls back to agent.model (then env, then CLI default) at run time.
+func (q *Queries) SetAgentTaskModelOverride(ctx context.Context, arg SetAgentTaskModelOverrideParams) error {
+	_, err := q.db.Exec(ctx, setAgentTaskModelOverride, arg.ModelOverride, arg.ID)
+	return err
+}
+
+const setAutopilotModel = `-- name: SetAutopilotModel :exec
+
+UPDATE autopilot
+SET model      = NULLIF($1::text, ''),
+    updated_at = now()
+WHERE id = $2::uuid
+`
+
+type SetAutopilotModelParams struct {
+	Model string      `json:"model"`
+	ID    pgtype.UUID `json:"id"`
+}
+
+// =====================
+// CEREBRO-PATCH(sqlc-autopilot-model): per-autopilot model override (JEH-1310).
+// Same UPDATE-after-create pattern as SetAutopilotScope so the upstream
+// CreateAutopilot signature stays untouched. Passing model = ” clears the
+// override (NULL in DB), reverting to the agent's default model.
+// =====================
+func (q *Queries) SetAutopilotModel(ctx context.Context, arg SetAutopilotModelParams) error {
+	_, err := q.db.Exec(ctx, setAutopilotModel, arg.Model, arg.ID)
+	return err
+}
+
 const setAutopilotScope = `-- name: SetAutopilotScope :exec
 UPDATE autopilot
 SET scope         = $1::text,
@@ -888,7 +937,7 @@ const systemPauseAutopilot = `-- name: SystemPauseAutopilot :one
 UPDATE autopilot
 SET status = 'paused', updated_at = now()
 WHERE id = $1 AND status = 'active'
-RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id
+RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model
 `
 
 // Atomically pauses an autopilot only if it is currently active. Returns no
@@ -915,6 +964,7 @@ func (q *Queries) SystemPauseAutopilot(ctx context.Context, id pgtype.UUID) (Aut
 		&i.Scope,
 		&i.OwnerUserID,
 		&i.GroupID,
+		&i.Model,
 	)
 	return i, err
 }
@@ -929,7 +979,7 @@ UPDATE autopilot SET
     issue_title_template = $7,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id
+RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model
 `
 
 type UpdateAutopilotParams struct {
@@ -970,6 +1020,7 @@ func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams
 		&i.Scope,
 		&i.OwnerUserID,
 		&i.GroupID,
+		&i.Model,
 	)
 	return i, err
 }

@@ -42,6 +42,8 @@ type AutopilotResponse struct {
 	Scope       string  `json:"scope"`
 	OwnerUserID *string `json:"owner_user_id"`
 	GroupID     *string `json:"group_id"`
+	// CEREBRO-PATCH(autopilot-model-response): per-autopilot model override (JEH-1310).
+	Model *string `json:"model"`
 }
 
 type AutopilotTriggerResponse struct {
@@ -96,6 +98,8 @@ func autopilotToResponse(a db.Autopilot) AutopilotResponse {
 		Scope:       a.Scope,
 		OwnerUserID: uuidToPtr(a.OwnerUserID),
 		GroupID:     uuidToPtr(a.GroupID),
+		// CEREBRO-PATCH(autopilot-model-response-field): model override from JEH-1310.
+		Model: textToPtr(a.Model),
 	}
 }
 
@@ -154,6 +158,8 @@ type CreateAutopilotRequest struct {
 	Scope       *string `json:"scope"`
 	OwnerUserID *string `json:"owner_user_id"`
 	GroupID     *string `json:"group_id"`
+	// CEREBRO-PATCH(autopilot-model-create-req): optional model override (JEH-1310).
+	Model *string `json:"model"`
 }
 
 type UpdateAutopilotRequest struct {
@@ -163,6 +169,8 @@ type UpdateAutopilotRequest struct {
 	Status             *string `json:"status"`
 	ExecutionMode      *string `json:"execution_mode"`
 	IssueTitleTemplate *string `json:"issue_title_template"`
+	// CEREBRO-PATCH(autopilot-model-update-req): optional model override (JEH-1310).
+	Model *string `json:"model"`
 }
 
 type CreateAutopilotTriggerRequest struct {
@@ -329,6 +337,12 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 	} else {
 		return
 	}
+	// CEREBRO-PATCH(autopilot-model-create): apply model override after create (JEH-1310).
+	if updated, ok := h.cerebroApplyModelOnCreate(w, r, autopilot, &req); ok {
+		autopilot = updated
+	} else {
+		return
+	}
 
 	resp := autopilotToResponse(autopilot)
 	h.publish(protocol.EventAutopilotCreated, workspaceID, "member", userID, map[string]any{"autopilot": resp})
@@ -407,6 +421,12 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 	autopilot, err := h.Queries.UpdateAutopilot(r.Context(), params)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update autopilot")
+		return
+	}
+	// CEREBRO-PATCH(autopilot-model-update): apply model override on update (JEH-1310).
+	if updated, ok := h.cerebroApplyModelOnUpdate(w, r, autopilot, &req, rawFields); ok {
+		autopilot = updated
+	} else {
 		return
 	}
 

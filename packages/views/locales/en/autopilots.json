@@ -148,6 +148,13 @@
     "select_agent": "Select agent",
     "section_output_mode": "Output mode",
     "section_schedule": "Schedule",
+    "cerebro_model": {
+      "_comment": "CEREBRO-PATCH(autopilot-model-i18n-en): JEH-1310 — model picker labels.",
+      "label": "Model override",
+      "agent_default_label": "Agent default",
+      "agent_default_hint": "Use whatever model the assignee agent is configured with",
+      "footnote": "Wins over the agent default for every run of this autopilot. Use to ship cheap pings on Haiku without cloning the agent."
+    },
     "schedule_disabled_reason": "This autopilot has multiple schedules — edit them in the detail page.",
     "next_run_label": "Next run:",
     "output_modes": {

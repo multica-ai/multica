@@ -110,6 +110,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n\n")
 	}
 
+	// CEREBRO-PATCH(execenv-current-model-doc): tell the agent which model it is running on (JEH-1310 Phase 2a).
+	b.WriteString("## Current Model\n\nThe model picked for this run is exposed via the `MULTICA_CURRENT_MODEL` env var. When unset, the agent CLI's own default is in use.\n\n")
+
 	// User communication profile (JEH-304). The user has explicitly configured
 	// how they want the agent to talk to them. Place this near the top so the
 	// model weights it heavily — agents repeatedly drift back to defaults if it

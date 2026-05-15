@@ -115,6 +115,7 @@ type AgentTaskQueue struct {
 	ForceFreshSession bool               `json:"force_fresh_session"`
 	IsLeaderTask      bool               `json:"is_leader_task"`
 	Title             pgtype.Text        `json:"title"`
+	ModelOverride     pgtype.Text        `json:"model_override"`
 }
 
 type AgentToolGrant struct {
@@ -190,6 +191,7 @@ type Autopilot struct {
 	Scope              string             `json:"scope"`
 	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
 	GroupID            pgtype.UUID        `json:"group_id"`
+	Model              pgtype.Text        `json:"model"`
 }
 
 type AutopilotRun struct {
