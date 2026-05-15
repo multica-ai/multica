@@ -2,6 +2,7 @@ package issueguard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -49,6 +50,9 @@ func LockAndFindActiveDuplicate(
 	allowDuplicate bool,
 ) (db.Issue, bool, error) {
 	normalizedTitle := NormalizeTitle(title)
+	if normalizedTitle == "" {
+		return db.Issue{}, false, nil
+	}
 	if err := q.LockIssueDuplicateKey(ctx, lockKey(workspaceID, projectID, parentIssueID, normalizedTitle)); err != nil {
 		return db.Issue{}, false, err
 	}
@@ -63,7 +67,7 @@ func LockAndFindActiveDuplicate(
 		NormalizedTitle: normalizedTitle,
 	})
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return db.Issue{}, false, nil
 		}
 		return db.Issue{}, false, err
