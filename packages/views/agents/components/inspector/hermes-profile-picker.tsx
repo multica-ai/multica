@@ -42,7 +42,7 @@ export function HermesProfilePicker({
     setOpen(false);
     const trimmed = draft.trim();
     if (trimmed === (value ?? "")) return;
-    await onChange(trimmed || null);
+    await onChange(trimmed || "");
   };
 
   const displayValue = value ?? t(($) => $.pickers.hermes_profile_default);
