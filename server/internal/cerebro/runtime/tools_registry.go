@@ -117,13 +117,51 @@ func (r *Registry) ToAnthropicTools(tools []Tool) []AnthropicTool {
 		out[i] = AnthropicTool{
 			Name:        t.Name(),
 			Description: t.Description(),
-			InputSchema: t.InputSchema(),
+			InputSchema: normalizeAnthropicToolSchema(t.InputSchema()), // CEREBRO-PATCH(firtal-gateway-anthropic-tool-schema): strip provider-rejected empty schema fields before Anthropic requests.
 		}
 	}
 	if len(out) > 0 {
 		out[len(out)-1].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
 	}
 	return out
+}
+
+func normalizeAnthropicToolSchema(schema map[string]any) map[string]any {
+	return normalizeAnthropicSchemaNode(schema).(map[string]any)
+}
+
+func normalizeAnthropicSchemaNode(node any) any {
+	switch v := node.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, child := range v {
+			normalized := normalizeAnthropicSchemaNode(child)
+			if key == "required" {
+				if values, ok := normalized.([]any); ok && len(values) == 0 {
+					continue
+				}
+				if values, ok := normalized.([]string); ok && len(values) == 0 {
+					continue
+				}
+			}
+			out[key] = normalized
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, child := range v {
+			out[i] = normalizeAnthropicSchemaNode(child)
+		}
+		return out
+	case []string:
+		out := make([]any, len(v))
+		for i, child := range v {
+			out[i] = child
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // GrantAgentTool upserts an agent_tool_grant row. Pass nil configJSON for no

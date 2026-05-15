@@ -76,6 +76,19 @@ func TestAnthropicToolSchemasDefineArrayItems(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(firtal-gateway-anthropic-tool-schema): guard provider-safe normalized tool schemas, not only raw registry schemas.
+func TestAnthropicToolSchemasOmitEmptyRequiredLists(t *testing.T) {
+	reg := NewDefaultRegistry(nil, nil, ToolContext{})
+	tools := make([]Tool, 0, len(reg.tools))
+	for _, tool := range reg.tools {
+		tools = append(tools, tool)
+	}
+
+	for _, tool := range reg.ToAnthropicTools(tools) {
+		assertNoEmptyRequiredLists(t, tool.Name, tool.InputSchema, tool.Name)
+	}
+}
+
 func assertArraySchemasHaveItems(t *testing.T, toolName string, node any, path string) {
 	t.Helper()
 
@@ -101,6 +114,37 @@ func assertArraySchemasHaveItems(t *testing.T, toolName string, node any, path s
 	if props, ok := m["properties"].(map[string]any); ok {
 		for key, child := range props {
 			assertArraySchemasHaveItems(t, toolName, child, path+".properties."+key)
+		}
+	}
+}
+
+func assertNoEmptyRequiredLists(t *testing.T, toolName string, node any, path string) {
+	t.Helper()
+
+	m, ok := node.(map[string]any)
+	if !ok {
+		return
+	}
+	if required, ok := m["required"]; ok {
+		switch v := required.(type) {
+		case []any:
+			if len(v) == 0 {
+				t.Fatalf("tool %q schema path %s has empty required list; omit required when no fields are mandatory", toolName, path)
+			}
+		case []string:
+			if len(v) == 0 {
+				t.Fatalf("tool %q schema path %s has empty required list; omit required when no fields are mandatory", toolName, path)
+			}
+		}
+	}
+	for key, child := range m {
+		switch v := child.(type) {
+		case map[string]any:
+			assertNoEmptyRequiredLists(t, toolName, v, path+"."+key)
+		case []any:
+			for i, item := range v {
+				assertNoEmptyRequiredLists(t, toolName, item, fmt.Sprintf("%s.%s[%d]", path, key, i))
+			}
 		}
 	}
 }
