@@ -12,6 +12,7 @@ import {
   type ChartConfig,
 } from "@multica/ui/components/ui/chart";
 import type { DailyCostStackData } from "../../utils";
+import { useT } from "../../../i18n";
 
 // Three-segment stack (input / output / cache write) — keeps the user's
 // attention on what's actually driving spend. Cache reads are excluded
@@ -29,6 +30,7 @@ export const costStackConfig = {
 } satisfies ChartConfig;
 
 export function DailyCostChart({ data }: { data: DailyCostStackData[] }) {
+  const { t } = useT("runtimes");
   // No internal empty-state — the parent decides what to show in place of
   // the chart (often a diagnostic explaining *why* there's no cost). Letting
   // recharts render an empty axis would be both ugly and uninformative.
@@ -67,7 +69,7 @@ export function DailyCostChart({ data }: { data: DailyCostStackData[] }) {
                 );
                 return (
                   <div className="flex items-center justify-between gap-2 font-medium">
-                    <span>Total</span>
+                    <span>{t(($) => $.charts.tooltip_total)}</span>
                     <span className="font-mono tabular-nums">
                       ${total.toFixed(2)}
                     </span>

@@ -154,7 +154,8 @@
   },
   "charts": {
     "heatmap_less": "Less",
-    "heatmap_more": "More"
+    "heatmap_more": "More",
+    "tooltip_total": "Total"
   },
   "list": {
     "col_runtime": "Runtime",
