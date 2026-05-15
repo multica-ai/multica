@@ -200,6 +200,48 @@ describe("useDictation", () => {
     expect(onTranscribed).toHaveBeenCalledWith("hej streaming");
   });
 
+  it("recovers to error state when streaming fails while recording", async () => {
+    const recorder = createFakeRecorder();
+    installFakeMediaRecorder(recorder);
+    installGetUserMedia(() => Promise.resolve(fakeStream()));
+    let streamOptions: StreamingTranscriberOptions | undefined;
+    const streamTranscribe = vi.fn((options: StreamingTranscriberOptions) => {
+      streamOptions = options;
+      return {
+        sendAudio: vi.fn(),
+        endUtterance: vi.fn(),
+        cancel: vi.fn(),
+        finished: new Promise<void>(() => {}),
+      };
+    });
+
+    const { result } = renderHook(() => useDictation({ streamTranscribe }));
+
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(result.current.status).toBe("recording");
+
+    act(() => {
+      streamOptions?.onError?.(
+        new Error("Dictation streaming backend is not configured."),
+        {
+          type: "error",
+          code: "backend_not_configured",
+          message: "Dictation streaming backend is not configured.",
+        },
+      );
+    });
+
+    await waitFor(() => {
+      expect(result.current.status).toBe("error");
+    });
+    expect(result.current.error?.kind).toBe("streaming-failed");
+    expect(result.current.error?.message).toBe(
+      "Dictation streaming backend is not configured.",
+    );
+  });
+
   it("surfaces a permission-denied error when getUserMedia rejects with NotAllowedError", async () => {
     installFakeMediaRecorder(createFakeRecorder());
     installGetUserMedia(() =>

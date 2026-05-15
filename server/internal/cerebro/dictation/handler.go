@@ -11,8 +11,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 const (
@@ -25,11 +30,15 @@ type Handler struct {
 	streamURL string
 	dialer    *websocket.Dialer
 	upgrader  websocket.Upgrader
+	queries   *db.Queries
+	patCache  *auth.PATCache
 }
 
 type Options struct {
 	StreamURL string
 	Dialer    *websocket.Dialer
+	Queries   *db.Queries
+	PATCache  *auth.PATCache
 }
 
 type outboundError struct {
@@ -38,9 +47,11 @@ type outboundError struct {
 	Message string `json:"message"`
 }
 
-func NewFromEnv() *Handler {
+func NewFromEnv(queries *db.Queries, patCache *auth.PATCache) *Handler {
 	return New(Options{
 		StreamURL: os.Getenv(envStreamURL),
+		Queries:   queries,
+		PATCache:  patCache,
 	})
 }
 
@@ -52,6 +63,8 @@ func New(opts Options) *Handler {
 	return &Handler{
 		streamURL: strings.TrimSpace(opts.StreamURL),
 		dialer:    dialer,
+		queries:   opts.Queries,
+		patCache:  opts.PATCache,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: checkOrigin,
 		},
@@ -66,9 +79,34 @@ func (h *Handler) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	workspaceID := middleware.WorkspaceIDFromContext(r.Context())
-	userID := r.Header.Get("X-User-ID")
-	if workspaceID == "" || userID == "" {
+	workspaceID := h.workspaceIDFromRequest(r)
+	if workspaceID == "" {
+		writeError(conn, "unauthorized", "Dictation requires a workspace.")
+		return
+	}
+	userID, err := h.userIDFromRequest(r)
+	if err != nil {
+		slog.Warn("dictation websocket auth failed", "error", err)
+		writeError(conn, "unauthorized", "Dictation requires an authenticated workspace member.")
+		return
+	}
+	if userID == "" {
+		tokenString, err := readAuthMessage(conn)
+		if err != nil {
+			writeError(conn, "unauthorized", "Dictation requires an authenticated workspace member.")
+			return
+		}
+		userID, err = h.authenticateToken(r.Context(), tokenString)
+		if err != nil {
+			slog.Warn("dictation websocket token auth failed", "error", err)
+			writeError(conn, "unauthorized", "Dictation requires an authenticated workspace member.")
+			return
+		}
+		if err := writeFrame(conn, websocket.TextMessage, []byte(`{"type":"auth_ack"}`)); err != nil {
+			return
+		}
+	}
+	if !h.isWorkspaceMember(r.Context(), userID, workspaceID) {
 		writeError(conn, "unauthorized", "Dictation requires an authenticated workspace member.")
 		return
 	}
@@ -105,6 +143,127 @@ func (h *Handler) Stream(w http.ResponseWriter, r *http.Request) {
 	cancel()
 	closeWebSocket(conn)
 	closeWebSocket(upstream)
+}
+
+func (h *Handler) workspaceIDFromRequest(r *http.Request) string {
+	if workspaceID := middleware.WorkspaceIDFromContext(r.Context()); workspaceID != "" {
+		return workspaceID
+	}
+	return strings.TrimSpace(chi.URLParam(r, "id"))
+}
+
+func (h *Handler) userIDFromRequest(r *http.Request) (string, error) {
+	tokenString := tokenFromRequest(r)
+	if tokenString == "" {
+		return "", nil
+	}
+	return h.authenticateToken(r.Context(), tokenString)
+}
+
+func tokenFromRequest(r *http.Request) string {
+	if authHeader := r.Header.Get("Authorization"); authHeader != "" {
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		if tokenString != authHeader {
+			return tokenString
+		}
+	}
+	if cookie, err := r.Cookie(auth.AuthCookieName); err == nil && cookie.Value != "" {
+		return cookie.Value
+	}
+	return ""
+}
+
+type authFrame struct {
+	Type    string `json:"type"`
+	Payload struct {
+		Token string `json:"token"`
+	} `json:"payload"`
+}
+
+func readAuthMessage(conn *websocket.Conn) (string, error) {
+	_ = conn.SetReadDeadline(time.Now().Add(writeWait))
+	defer conn.SetReadDeadline(time.Time{})
+	messageType, payload, err := conn.ReadMessage()
+	if err != nil {
+		return "", err
+	}
+	if messageType != websocket.TextMessage {
+		return "", http.ErrNoCookie
+	}
+	var frame authFrame
+	if err := json.Unmarshal(payload, &frame); err != nil {
+		return "", err
+	}
+	token := strings.TrimSpace(frame.Payload.Token)
+	if frame.Type != "auth" || token == "" {
+		return "", http.ErrNoCookie
+	}
+	return token, nil
+}
+
+func (h *Handler) authenticateToken(ctx context.Context, tokenString string) (string, error) {
+	if strings.HasPrefix(tokenString, "mul_") {
+		hash := auth.HashToken(tokenString)
+		if h.patCache != nil {
+			if userID, ok := h.patCache.Get(ctx, hash); ok {
+				return userID, nil
+			}
+		}
+		if h.queries == nil {
+			return "", http.ErrNoCookie
+		}
+		pat, err := h.queries.GetPersonalAccessTokenByHash(ctx, hash)
+		if err != nil {
+			return "", err
+		}
+		userID := util.UUIDToString(pat.UserID)
+		if h.patCache != nil {
+			var expiresAt time.Time
+			if pat.ExpiresAt.Valid {
+				expiresAt = pat.ExpiresAt.Time
+			}
+			h.patCache.Set(ctx, hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
+		}
+		return userID, nil
+	}
+
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrSignatureInvalid
+		}
+		return auth.JWTSecret(), nil
+	})
+	if err != nil || !token.Valid {
+		return "", jwt.ErrSignatureInvalid
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", jwt.ErrInvalidKey
+	}
+	sub, ok := claims["sub"].(string)
+	if !ok || strings.TrimSpace(sub) == "" {
+		return "", jwt.ErrInvalidKey
+	}
+	return sub, nil
+}
+
+func (h *Handler) isWorkspaceMember(ctx context.Context, userID, workspaceID string) bool {
+	if h.queries == nil {
+		return false
+	}
+	userUUID, err := util.ParseUUID(userID)
+	if err != nil {
+		return false
+	}
+	workspaceUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return false
+	}
+	_, err = h.queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      userUUID,
+		WorkspaceID: workspaceUUID,
+	})
+	return err == nil
 }
 
 func (h *Handler) buildUpstreamURL(workspaceID, userID string) (string, error) {

@@ -57,6 +57,7 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
   const abortRef = useRef<AbortController | null>(null);
   const streamingSessionRef = useRef<StreamingTranscriberSession | null>(null);
   const streamingFinalRef = useRef<string | null>(null);
+  const streamingErrorRef = useRef<DictationError | null>(null);
   const stopResolveRef = useRef<(() => void) | null>(null);
   const cancelledRef = useRef(false);
   // Forward reference so the max-duration timer in `start` can call the
@@ -166,6 +167,7 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
     setStatus("requesting-permission");
     cancelledRef.current = false;
     streamingFinalRef.current = null;
+    streamingErrorRef.current = null;
 
     let stream: MediaStream;
     try {
@@ -236,11 +238,14 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
       },
       onError: (cause) => {
         if (cancelledRef.current) return;
-        reportError({
+        const nextError: DictationError = {
           kind: "streaming-failed",
           message: cause.message,
           cause,
-        });
+        };
+        streamingErrorRef.current = nextError;
+        reportError(nextError);
+        teardown();
       },
     });
     streamingSessionRef.current = streamingSession ?? null;
@@ -324,11 +329,13 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
 
     if (streamingSession) {
       streamingSession.endUtterance();
-      teardown();
+      let hasStreamingFinal = false;
       try {
         await streamingSession.finished;
+        hasStreamingFinal = Boolean(streamingFinalRef.current);
       } catch (cause) {
         if (cancelledRef.current) return;
+        if (streamingErrorRef.current) return;
         reportError({
           kind: "streaming-failed",
           message: cause instanceof Error ? cause.message : "Dictation stream failed.",
@@ -337,8 +344,9 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
         return;
       } finally {
         abortRef.current = null;
+        teardown();
       }
-      if (!streamingFinalRef.current && !cancelledRef.current) {
+      if (!hasStreamingFinal && !cancelledRef.current) {
         setStatus("idle");
       }
       return;
@@ -393,6 +401,7 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
 
   const cancel = useCallback(() => {
     cancelledRef.current = true;
+    streamingErrorRef.current = null;
     abortRef.current?.abort();
     streamingSessionRef.current?.cancel();
     teardown();

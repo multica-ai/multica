@@ -209,7 +209,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler instance
 	cerebroDashboardHandler := cerebrodashboard.New(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-dictation-routes): JEH-729 workspace-scoped WebSocket proxy; inference deploy stays out of this slice.
-	cerebroDictationHandler := cerebrodictation.NewFromEnv()
+	cerebroDictationHandler := cerebrodictation.NewFromEnv(queries, patCache)
 	// CEREBRO-PATCH(cerebro-groups-routes): JEH-721 workspace groups handler
 	cerebroGroupsHandler := cerebrogroups.New(cerebroQueries, queries, bus)
 	// CEREBRO-PATCH(cerebro-group-permissions-routes): JEH-1008 group permission model handler
@@ -315,6 +315,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
 		realtime.HandleWebSocket(hub, mc, pr, slugResolver, w, r)
 	})
+	// CEREBRO-PATCH(cerebro-dictation-ws-auth): browsers cannot attach Authorization headers to WebSocket upgrades.
+	r.Get("/api/workspaces/{id}/cerebro/dictation/stream", cerebroDictationHandler.Stream)
 
 	// Local file serving (when using local storage)
 	if local, ok := store.(*storage.LocalStorage); ok {
@@ -528,8 +530,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(feature-flags-routes): per-user feature-flag overrides
 					r.Get("/feature-flags", featureFlagsHandler.List)
 					r.Put("/feature-flags/{key}", featureFlagsHandler.Upsert)
-					// CEREBRO-PATCH(cerebro-dictation-routes): JEH-729 streaming dictation proxy.
-					r.Get("/cerebro/dictation/stream", cerebroDictationHandler.Stream)
 					// CEREBRO-PATCH(cerebro-groups-routes): workspace group list (member-level).
 					r.Get("/groups", cerebroGroupsHandler.List)
 					// CEREBRO-PATCH(cerebro-grants-routes): JEH-1179 grant reads (any member).

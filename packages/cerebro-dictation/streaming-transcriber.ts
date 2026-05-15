@@ -21,6 +21,8 @@ function createSession(
   const socket = new WebSocket(url);
   const queuedAudio: Blob[] = [];
   let settled = false;
+  let receivedFinal = false;
+  let receivedBackendError = false;
   let finishedResolve: (() => void) | undefined;
   let finishedReject: ((error: Error) => void) | undefined;
 
@@ -46,6 +48,10 @@ function createSession(
   };
 
   socket.addEventListener("open", () => {
+    const token = readBrowserAuthToken();
+    if (token) {
+      sendJson({ type: "auth", payload: { token } });
+    }
     sendJson({ type: "start", mime_type: options.mimeType });
     for (const audio of queuedAudio.splice(0)) {
       socket.send(audio);
@@ -61,21 +67,31 @@ function createSession(
       return;
     }
     if (event.type === "final") {
+      receivedFinal = true;
       options.onFinal?.(event.text, event);
       settleResolve();
       return;
     }
+    receivedBackendError = true;
     const error = new Error(event.message);
     options.onError?.(error, event);
     settleReject(error);
   });
 
   socket.addEventListener("error", () => {
-    settleReject(new Error("Dictation WebSocket failed."));
+    const error = new Error("Dictation WebSocket failed.");
+    options.onError?.(error);
+    settleReject(error);
   });
 
   socket.addEventListener("close", () => {
-    settleResolve();
+    if (receivedFinal || receivedBackendError || settled) {
+      settleResolve();
+      return;
+    }
+    const error = new Error("Dictation stream closed before it returned a result.");
+    options.onError?.(error);
+    settleReject(error);
   });
 
   options.signal.addEventListener("abort", () => {
@@ -103,6 +119,15 @@ function createSession(
     },
     finished,
   };
+}
+
+function readBrowserAuthToken(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem("multica_token");
+  } catch {
+    return null;
+  }
 }
 
 function parseEvent(raw: string): DictationStreamEvent | null {
