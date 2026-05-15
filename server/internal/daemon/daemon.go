@@ -1216,7 +1216,14 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 			go d.handleLocalSkillList(ctx, *rt, resp.PendingLocalSkills.ID)
 		}
 	}
-	if resp.PendingLocalSkillImport != nil {
+	// Prefer the batch field (new backend); fall back to singular (old backend).
+	if len(resp.PendingLocalSkillImports) > 0 {
+		if rt := d.findRuntime(runtimeID); rt != nil {
+			for _, imp := range resp.PendingLocalSkillImports {
+				go d.handleLocalSkillImport(ctx, *rt, imp)
+			}
+		}
+	} else if resp.PendingLocalSkillImport != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
 			go d.handleLocalSkillImport(ctx, *rt, *resp.PendingLocalSkillImport)
 		}
