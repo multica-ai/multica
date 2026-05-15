@@ -24,6 +24,7 @@
       "tokens": "API Token",
       "general": "通用",
       "repositories": "代码仓库",
+      "integrations": "集成",
       "labs": "实验室",
       "members": "成员"
     }
@@ -153,6 +154,22 @@
     "co_authored_by_description_prefix": "自动给智能体的 commit 加上",
     "co_authored_by_description_suffix": "。",
     "toast_failed": "更新设置失败"
+  },
+  "integrations": {
+    "section_title": "集成",
+    "github_title": "GitHub",
+    "github_description_prefix": "自动把 issue 关联到 Pull Request。当 PR 的分支、标题或正文中包含",
+    "github_description_suffix": "并被合并时，对应的 issue 会自动转为",
+    "github_description_done": "Done",
+    "github_identifier_example": "MUL-123",
+    "connect_github": "连接 GitHub",
+    "connect_opening": "正在打开…",
+    "connect_disabled_tooltip": "服务端未配置 GitHub App",
+    "not_configured": "当前部署没有配置 GitHub 集成。运维需要设置",
+    "not_configured_and": "和",
+    "manage_hint": "只有管理员和所有者可以管理集成。",
+    "toast_not_configured": "当前部署未配置 GitHub 集成",
+    "toast_open_failed": "打开 GitHub 安装页失败"
   },
   "repositories": {
     "section_title": "代码仓库",

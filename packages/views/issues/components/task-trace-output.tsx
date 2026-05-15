@@ -1172,6 +1172,7 @@ function TraceInteractionCard({
   const [responding, setResponding] = useState<string | null>(null);
   const [revisionMessage, setRevisionMessage] = useState("");
   const isPlanApproval = interaction.type === "plan_approval";
+  const isUserInputRequest = interaction.type === "user_input_request";
   const options =
     interaction.options.length > 0
       ? interaction.options
@@ -1198,11 +1199,15 @@ function TraceInteractionCard({
       "mb-2 rounded border p-2 text-xs",
       isPlanApproval
         ? "border-indigo-300/50 bg-indigo-500/10 dark:border-indigo-800/60 dark:bg-indigo-950/30"
-        : "border-warning/30 bg-warning/10",
+        : isUserInputRequest
+          ? "border-info/30 bg-info/10"
+          : "border-warning/30 bg-warning/10",
     )}>
       <div className="flex items-start gap-2">
         {isPlanApproval ? (
           <ClipboardList className="mt-0.5 h-4 w-4 shrink-0 text-indigo-500" />
+        ) : isUserInputRequest ? (
+          <Radio className="mt-0.5 h-4 w-4 shrink-0 text-info" />
         ) : (
           <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
         )}
@@ -1210,6 +1215,12 @@ function TraceInteractionCard({
           <div className="font-medium text-foreground">{interaction.title}</div>
           {interaction.detail && (
             isPlanApproval ? (
+              <div className="mt-2 max-h-80 overflow-auto rounded border border-info/20 bg-background/70 px-2 py-1.5">
+                <Markdown mode="minimal" className="text-[13px] leading-5">
+                  {redactSecrets(interaction.detail)}
+                </Markdown>
+              </div>
+            ) : isUserInputRequest ? (
               <div className="mt-2 max-h-80 overflow-auto rounded border border-info/20 bg-background/70 px-2 py-1.5">
                 <Markdown mode="minimal" className="text-[13px] leading-5">
                   {redactSecrets(interaction.detail)}
@@ -1241,7 +1252,9 @@ function TraceInteractionCard({
                   onClick={() => handleRespond(option.id)}
                   disabled={responding !== null}
                   className={
-                    destructive
+                    isUserInputRequest
+                      ? "flex items-center gap-1 rounded bg-info/10 px-2 py-0.5 font-medium text-info transition-colors hover:bg-info/20 disabled:opacity-50"
+                      : destructive
                       ? "flex items-center gap-1 rounded bg-destructive/10 px-2 py-0.5 font-medium text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-50"
                       : revise
                         ? "flex items-center gap-1 rounded bg-warning/10 px-2 py-0.5 font-medium text-warning transition-colors hover:bg-warning/20 disabled:opacity-50"

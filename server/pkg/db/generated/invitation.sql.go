@@ -241,6 +241,62 @@ func (q *Queries) DeleteInviteLink(ctx context.Context, arg DeleteInviteLinkPara
 	return err
 }
 
+const deleteExpiredInviteLinks = `-- name: DeleteExpiredInviteLinks :many
+WITH expired AS (
+    SELECT id
+    FROM workspace_invitation
+    WHERE invite_type = 'link'
+      AND status = 'pending'
+      AND revoked_at IS NULL
+      AND expires_at <= now()
+    ORDER BY expires_at ASC
+    LIMIT $1
+)
+DELETE FROM workspace_invitation wi
+USING expired
+WHERE wi.id = expired.id
+RETURNING wi.id, wi.workspace_id, wi.inviter_id, wi.invitee_email, wi.invitee_user_id, wi.role, wi.status, wi.created_at, wi.updated_at, wi.expires_at, wi.invite_type, wi.token_hash, wi.max_uses, wi.used_count, wi.revoked_at, wi.last_used_at, wi.created_by_ip, wi.created_by_user_agent
+`
+
+func (q *Queries) DeleteExpiredInviteLinks(ctx context.Context, limit int32) ([]WorkspaceInvitation, error) {
+	rows, err := q.db.Query(ctx, deleteExpiredInviteLinks, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorkspaceInvitation
+	for rows.Next() {
+		var i WorkspaceInvitation
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.InviterID,
+			&i.InviteeEmail,
+			&i.InviteeUserID,
+			&i.Role,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ExpiresAt,
+			&i.InviteType,
+			&i.TokenHash,
+			&i.MaxUses,
+			&i.UsedCount,
+			&i.RevokedAt,
+			&i.LastUsedAt,
+			&i.CreatedByIp,
+			&i.CreatedByUserAgent,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const expireStalePendingInvitations = `-- name: ExpireStalePendingInvitations :exec
 UPDATE workspace_invitation
 SET status = 'expired', updated_at = now()

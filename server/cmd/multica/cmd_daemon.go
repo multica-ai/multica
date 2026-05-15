@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon"
 	logger_pkg "github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 var daemonCmd = &cobra.Command{
@@ -309,6 +310,8 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 }
 
 func runDaemonForeground(cmd *cobra.Command) error {
+	util.EnsureHiddenConsole()
+
 	profile := resolveProfile(cmd)
 	configPath := resolveConfigPath(cmd)
 

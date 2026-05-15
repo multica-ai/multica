@@ -23,6 +23,11 @@
       "tooltip": "Create sub-issue from selection",
       "created": "Created {{identifier}}",
       "create_failed": "Failed to create sub-issue"
+    },
+    "quote_actions": {
+      "tooltip": "Quote selection",
+      "add_to_new_comment": "Add to new comment",
+      "add_to_reply": "Add to reply"
     }
   },
   "image": {
@@ -32,6 +37,15 @@
     "delete": "Delete",
     "link_copied": "Link copied",
     "copy_link_failed": "Failed to copy link"
+  },
+  "attachment": {
+    "download_failed": "Couldn't fetch a download link. Try again in a moment.",
+    "preview": "Preview",
+    "preview_loading": "Loading preview…",
+    "preview_failed": "Couldn't load preview",
+    "preview_too_large": "File is too large to preview. Please download.",
+    "preview_unsupported": "This file type can't be previewed.",
+    "close": "Close"
   },
   "link_hover": {
     "copy_link": "Copy link",

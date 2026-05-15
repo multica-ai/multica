@@ -409,46 +409,36 @@ func TestBuildClaudeArgsAutoIgnoresControlledPlanMode(t *testing.T) {
 	t.Fatalf("missing --permission-mode: %v", args)
 }
 
-func TestClaudeSDKBridgeApprovalRequestUsesSDKPromptFields(t *testing.T) {
+func TestAskUserQuestionBecomesUserInputRequest(t *testing.T) {
 	t.Parallel()
 
-	req := bridgeApprovalRequest(claudeSDKBridgeEvent{
-		ToolName: "Bash",
-		Input:    mustMarshal(t, map[string]any{"command": "ls"}),
-		Title:    "Claude wants to run a command",
-		Desc:     "The command reads the workspace.",
-	})
+	req := buildClaudeSDKUserInputRequest(mustMarshal(t, map[string]any{
+		"questions": []map[string]any{
+			{
+				"header":   "Delete",
+				"question": "Delete the temp directory?",
+				"options": []map[string]any{
+					{"label": "Allow", "description": "Delete it now"},
+					{"label": "Cancel", "description": "Keep the directory"},
+				},
+			},
+		},
+	}))
 
-	if req.Type != "permission_request" {
-		t.Fatalf("type = %q, want permission_request", req.Type)
+	if req.Type != "user_input_request" {
+		t.Fatalf("type = %q, want user_input_request", req.Type)
 	}
-	if req.Title != "Claude wants to run a command" {
+	if req.Title != "Delete" {
 		t.Fatalf("title = %q", req.Title)
 	}
-	if !strings.Contains(req.Detail, "The command reads the workspace.") || !strings.Contains(req.Detail, `"command":"ls"`) {
-		t.Fatalf("detail missing SDK prompt fields: %q", req.Detail)
+	if req.DefaultOption != "Allow" {
+		t.Fatalf("default option = %q, want Allow", req.DefaultOption)
 	}
-	if len(req.Options) != 3 || req.Options[1].ID != "accept_similar" {
+	if len(req.Options) != 2 || req.Options[0].ID != "Allow" || req.Options[1].ID != "Cancel" {
 		t.Fatalf("unexpected options: %+v", req.Options)
 	}
-}
-
-func TestClaudeSDKBridgeExitPlanModeBecomesPlanApproval(t *testing.T) {
-	t.Parallel()
-
-	req := bridgeApprovalRequest(claudeSDKBridgeEvent{
-		ToolName: "ExitPlanMode",
-		Input:    mustMarshal(t, map[string]any{"plan": "1. inspect\n2. change"}),
-	})
-
-	if req.Type != "plan_approval" {
-		t.Fatalf("type = %q, want plan_approval", req.Type)
-	}
-	if req.Title != "Plan ready" {
-		t.Fatalf("title = %q", req.Title)
-	}
-	if len(req.Options) != 3 || req.Options[0].Label != "Run this plan" || req.Options[1].ID != "revise" || req.Options[2].ID != "deny" {
-		t.Fatalf("unexpected options: %+v", req.Options)
+	if !strings.Contains(req.Detail, "Delete the temp directory?") || !strings.Contains(req.Detail, "Delete it now") {
+		t.Fatalf("detail missing question context: %q", req.Detail)
 	}
 }
 

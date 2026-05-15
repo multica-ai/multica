@@ -19,6 +19,12 @@ export type {
   RuntimeDevice,
   CopyAgentRequest,
   CreateAgentRequest,
+  AgentTemplate,
+  AgentTemplateSummary,
+  AgentTemplateSkillRef,
+  CreateAgentFromTemplateRequest,
+  CreateAgentFromTemplateResponse,
+  CreateAgentFromTemplateFailure,
   UpdateAgentRequest,
   Skill,
   SkillSummary,
@@ -32,6 +38,9 @@ export type {
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
+  DashboardUsageDaily,
+  DashboardUsageByAgent,
+  DashboardAgentRunTime,
   RuntimeUpdate,
   RuntimeUpdateStatus,
   CLIUpdateManifest,
@@ -103,6 +112,13 @@ export type {
 } from "./project";
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
 export type {
+  GitHubInstallation,
+  GitHubPullRequest,
+  GitHubPullRequestState,
+  ListGitHubInstallationsResponse,
+  GitHubConnectResponse,
+} from "./github";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,
@@ -128,3 +144,16 @@ export type {
   UpdateWikiPageRequest,
   ReorderWikiPagesRequest,
 } from "./wiki";
+export type {
+  Squad,
+  SquadMember,
+  SquadMemberType,
+  SquadActivityLog,
+  SquadActivityOutcome,
+  CreateSquadRequest,
+  UpdateSquadRequest,
+  AddSquadMemberRequest,
+  RemoveSquadMemberRequest,
+  UpdateSquadMemberRoleRequest,
+  CreateSquadActivityLogRequest,
+} from "./squad";

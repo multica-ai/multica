@@ -70,6 +70,7 @@ const (
 	EventChatDone           = "chat:done"
 	EventChatSessionRead    = "chat:session_read"
 	EventChatSessionDeleted = "chat:session_deleted"
+	EventChatSessionUpdated = "chat:session_updated"
 
 	// Project events
 	EventProjectCreated         = "project:created"
@@ -108,6 +109,11 @@ const (
 	EventAutopilotRunStart = "autopilot:run_start"
 	EventAutopilotRunDone  = "autopilot:run_done"
 
+	// Squad events
+	EventSquadCreated = "squad:created"
+	EventSquadUpdated = "squad:updated"
+	EventSquadDeleted = "squad:deleted"
+
 	// Daemon events
 	EventDaemonHeartbeat     = "daemon:heartbeat"
 	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"
@@ -119,4 +125,11 @@ const (
 
 	// Chat message deleted event
 	EventChatMessageDeleted = "chat:message_deleted"
+
+	// GitHub integration events
+	EventGitHubInstallationCreated = "github_installation:created"
+	EventGitHubInstallationDeleted = "github_installation:deleted"
+	EventPullRequestLinked         = "pull_request:linked"
+	EventPullRequestUpdated        = "pull_request:updated"
+	EventPullRequestUnlinked       = "pull_request:unlinked"
 )
