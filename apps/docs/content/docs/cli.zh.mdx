@@ -79,6 +79,20 @@ Token 类型的详细区分见 [认证与令牌](/auth-tokens)。
 | `multica skill import ...` | 从 GitHub / ClawHub / 本机导入 Skill |
 | `multica skill files ...` | 嵌套：管理 Skill 的文件 |
 
+## 小队
+
+| 命令 | 用途 |
+|---|---|
+| `multica squad list` | 列出工作区里的小队 |
+| `multica squad get <id>` | 查看一个小队 |
+| `multica squad create --name "..." --leader <agent>` | 创建小队（owner / admin）|
+| `multica squad update <id> ...` | 修改名字、描述、instructions、队长、头像 |
+| `multica squad delete <id>` | 归档（软删除）—— 同时把分配给小队的 issue 转给队长 |
+| `multica squad member list/add/remove <squad-id>` | 管理小队成员 |
+| `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | 队长智能体每轮结束时调用，记录 evaluation |
+
+完整模型见 [小队](/squads)。
+
 ## Autopilots
 
 | 命令 | 用途 |

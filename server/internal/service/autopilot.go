@@ -383,6 +383,27 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 	if rt.Status != "online" {
 		return "agent runtime is " + rt.Status + " at dispatch time", true
 	}
+	// Private-agent gate at the autopilot layer. Caller identity = the
+	// autopilot's creator: if the creator no longer has access to the
+	// (now-private) target agent, the dispatch is recorded as `skipped`.
+	// Agent-created autopilots bypass the gate to preserve A2A
+	// collaboration. Errors loading the workspace member fail closed —
+	// without an authoritative role the gate cannot grant access.
+	if agent.Visibility == "private" && ap.CreatedByType == "member" {
+		creatorID := util.UUIDToString(ap.CreatedByID)
+		if util.UUIDToString(agent.OwnerID) != creatorID {
+			member, err := s.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+				UserID:      ap.CreatedByID,
+				WorkspaceID: ap.WorkspaceID,
+			})
+			if err != nil {
+				return "autopilot creator no longer in workspace", true
+			}
+			if member.Role != "owner" && member.Role != "admin" {
+				return "autopilot creator lacks access to private assignee agent", true
+			}
+		}
+	}
 	return "", false
 }
 

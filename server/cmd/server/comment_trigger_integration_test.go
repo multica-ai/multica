@@ -10,8 +10,12 @@ import (
 	"testing"
 )
 
-// authRequestWithAgent makes an authenticated request with X-Agent-ID header,
-// causing the server to resolve the actor as an agent instead of a member.
+// authRequestWithAgent makes an authenticated request with X-Agent-ID +
+// X-Task-ID headers, causing the server to resolve the actor as an agent
+// instead of a member. resolveActor requires both headers to grant agent
+// identity (defense against header forgery — see #2359 PR review), so we
+// seed a queued task for the agent on demand and pass its UUID as
+// X-Task-ID. The task is best-effort cleaned up via test teardown elsewhere.
 func authRequestWithAgent(t *testing.T, method, path string, body any, agentID string) *http.Response {
 	t.Helper()
 	var bodyReader io.Reader
@@ -27,12 +31,44 @@ func authRequestWithAgent(t *testing.T, method, path string, body any, agentID s
 	req.Header.Set("Authorization", "Bearer "+testToken)
 	req.Header.Set("X-Workspace-ID", testWorkspaceID)
 	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", ensureAgentTask(t, agentID))
 
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
 	return r
+}
+
+// ensureAgentTask returns a queued task UUID belonging to the given agent,
+// inserting one if none exists. Used by authRequestWithAgent so callers
+// can keep treating "set X-Agent-ID" as the single knob for posing as an
+// agent — resolveActor's pair-required policy is satisfied transparently.
+func ensureAgentTask(t *testing.T, agentID string) string {
+	t.Helper()
+	ctx := context.Background()
+	var taskID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text FROM agent_task_queue WHERE agent_id = $1 LIMIT 1`,
+		agentID,
+	).Scan(&taskID); err == nil && taskID != "" {
+		return taskID
+	}
+	var runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT runtime_id::text FROM agent WHERE id = $1`,
+		agentID,
+	).Scan(&runtimeID); err != nil {
+		t.Fatalf("ensureAgentTask: load runtime_id for agent %s: %v", agentID, err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
+		VALUES ($1, $2, 'queued', 0)
+		RETURNING id::text
+	`, agentID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("ensureAgentTask: insert task for agent %s: %v", agentID, err)
+	}
+	return taskID
 }
 
 // countPendingTasks returns the number of queued/dispatched tasks for an issue.

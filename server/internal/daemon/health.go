@@ -229,6 +229,12 @@ func (d *Daemon) applyTraceCORS(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Vary", "Origin")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	// Chrome Private Network Access: required when a public site (https)
+	// fetches from a loopback address (127.0.0.1). Without this header the
+	// preflight is rejected with "permission denied for loopback".
+	if r.Header.Get("Access-Control-Request-Private-Network") == "true" {
+		w.Header().Set("Access-Control-Allow-Private-Network", "true")
+	}
 }
 
 func (d *Daemon) isAllowedTraceOrigin(origin string) bool {

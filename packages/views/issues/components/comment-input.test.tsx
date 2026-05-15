@@ -105,6 +105,11 @@ vi.mock("../../editor", () => ({
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
       setMarkdown: setEditorValue,
+      appendMarkdown: (markdown: string) => setEditorValue(
+        valueRef.current.trimEnd()
+          ? `${valueRef.current.trimEnd()}\n\n${markdown.trimEnd()}`
+          : markdown.trimEnd(),
+      ),
       clearContent: () => setEditorValue(""),
       focus: () => {},
       uploadFile: () => {},
@@ -181,7 +186,7 @@ describe("CommentInput drafts", () => {
     fireEvent.click(screen.getByLabelText("Submit comment"));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith("restored draft", undefined);
+      expect(onSubmit).toHaveBeenCalledWith("restored draft", undefined, "comment");
     });
     expect(window.localStorage.getItem(draftKey)).toBeNull();
   });
@@ -200,7 +205,7 @@ describe("CommentInput drafts", () => {
       fireEvent.click(screen.getByLabelText("Submit comment"));
     });
 
-    expect(onSubmit).toHaveBeenCalledWith("do not lose me", undefined);
+    expect(onSubmit).toHaveBeenCalledWith("do not lose me", undefined, "comment");
     expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}")).toMatchObject({
       content: "do not lose me",
     });
