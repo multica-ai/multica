@@ -107,6 +107,29 @@ export function applyChatDoneToCache(
   qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
 }
 
+/**
+ * Invalidates all workspace-scoped queries. Used after reconnect and when a
+ * new WSClient instance is detected (workspace switch) to recover events
+ * missed while disconnected.
+ */
+function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
+  const wsId = getCurrentWsId();
+  if (wsId) {
+    qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
+    qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: agentActivityKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
+  }
+  qc.invalidateQueries({ queryKey: workspaceKeys.list() });
+}
+
 export interface RealtimeSyncStores {
   authStore: UseBoundStore<StoreApi<AuthState>>;
 }
@@ -833,21 +856,7 @@ export function useRealtimeSync(
     const unsub = ws.onReconnect(async () => {
       logger.info("reconnected, refetching all data");
       try {
-        const wsId = getCurrentWsId();
-        if (wsId) {
-          qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-          qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
-          qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-          qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: agentActivityKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
-        }
-        qc.invalidateQueries({ queryKey: workspaceKeys.list() });
+        invalidateWorkspaceScopedQueries(qc);
       } catch (e) {
         logger.error("reconnect refetch failed", e);
       }
@@ -871,20 +880,6 @@ export function useRealtimeSync(
     wsInstanceRef.current = ws;
 
     logger.info("new WSClient instance detected, invalidating workspace queries");
-    const wsId = getCurrentWsId();
-    if (wsId) {
-      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
-      qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
-      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
-      qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-      qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
-      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
-      qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
-      qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
-      qc.invalidateQueries({ queryKey: agentActivityKeys.all(wsId) });
-      qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
-    }
-    qc.invalidateQueries({ queryKey: workspaceKeys.list() });
+    invalidateWorkspaceScopedQueries(qc);
   }, [ws, qc]);
 }
