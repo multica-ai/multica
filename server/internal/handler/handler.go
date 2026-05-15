@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/netip"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -78,6 +79,14 @@ type Config struct {
 	// the server into minting webhook URLs pointing at an attacker-controlled
 	// host.
 	PublicURL string
+	// TrustedProxies are CIDRs whose source IP we trust to set
+	// X-Forwarded-For / X-Real-IP. Empty means "trust nothing": the rate
+	// limiter uses r.RemoteAddr exclusively. Populated via the
+	// MULTICA_TRUSTED_PROXIES env var (comma-separated CIDRs, e.g.
+	// "10.0.0.0/8,127.0.0.1/32"). This is specifically to keep the per-IP
+	// webhook limiter from being bypassed by a spoofed XFF on deployments
+	// without a header-stripping reverse proxy in front.
+	TrustedProxies []netip.Prefix
 }
 
 type Handler struct {

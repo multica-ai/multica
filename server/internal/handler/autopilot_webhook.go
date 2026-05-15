@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -208,7 +209,7 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 	//    fresh per-token bucket, so without this gate a spray turns the
 	//    handler into an unauthenticated index probe.
 	if h.WebhookIPRateLimiter != nil {
-		if ip := clientIPForRateLimit(r); ip != "" {
+		if ip := h.clientIPForRateLimit(r); ip != "" {
 			if !h.WebhookIPRateLimiter.Allow(r.Context(), ip) {
 				writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 				return
@@ -234,8 +235,10 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 
 	// Stash the resolved trigger ID on the request context so the request
 	// logger can include it in the audit line without revealing the bearer
-	// token in the URL path.
-	r = middleware.SetWebhookTriggerID(r, uuidToString(trigRow.ID))
+	// token in the URL path. SetWebhookTriggerID mutates *r in place so the
+	// wrapping RequestLogger middleware reads the value back after
+	// ServeHTTP returns — see its doc comment for why.
+	middleware.SetWebhookTriggerID(r, uuidToString(trigRow.ID))
 
 	// 3. Per-token rate limit.
 	if h.WebhookRateLimiter != nil {
@@ -254,10 +257,24 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 5. Load Autopilot and cross-check workspace consistency.
+	// 5. Load Autopilot and cross-check workspace consistency. Same
+	//    ErrNoRows-vs-DB-error split as the token lookup above: a transient
+	//    DB hiccup must NOT degrade to 404, otherwise providers like GitHub
+	//    drop the event silently (no 5xx retry).
 	autopilot, err := h.Queries.GetAutopilot(r.Context(), trigRow.AutopilotID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "webhook not found")
+		if errors.Is(err, pgx.ErrNoRows) {
+			// FK invariant violation (trigger references a non-existent
+			// autopilot). The FK constraint should prevent this; treat
+			// as 404 if it ever happens.
+			writeError(w, http.StatusNotFound, "webhook not found")
+			return
+		}
+		slog.Error("webhook: autopilot lookup failed",
+			"error", err,
+			"trigger_id", uuidToString(trigRow.ID),
+		)
+		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	if uuidToString(autopilot.WorkspaceID) != uuidToString(trigRow.AutopilotWorkspaceID) {
@@ -363,17 +380,28 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 }
 
 // clientIPForRateLimit returns the IP used as a rate-limit bucket key.
-// Order: X-Forwarded-For's first entry (the original client when the
-// reverse proxy appends downstream hops), then X-Real-IP, then
-// RemoteAddr's host portion. Returns "" if nothing usable is found so
-// the caller can decide to fail-open rather than rate-limit "".
 //
-// We trust X-Forwarded-For here because the public webhook ingress is
-// expected to sit behind a known reverse proxy (Cloudflare, ALB, Caddy).
-// If an attacker controls XFF directly, they can already pick any IP —
-// but the IP limiter is a safety net, not a security boundary; the
-// per-token limiter and token-secrecy are.
-func clientIPForRateLimit(r *http.Request) string {
+// Default behaviour: use the host portion of r.RemoteAddr. Forwarded
+// headers (X-Forwarded-For, X-Real-IP) are IGNORED unless the operator
+// has explicitly opted in via MULTICA_TRUSTED_PROXIES — and even then
+// only when r.RemoteAddr is itself inside one of the listed CIDRs.
+//
+// Why this matters: the job of THIS limiter is to gate unauthenticated
+// token spraying before it hits the autopilot_trigger unique index. If
+// we honored XFF from anyone, an attacker could rotate the header on
+// every request, the per-IP bucket would effectively become per-request,
+// and the limiter would be bypassed. The CIDR gate forces trust to come
+// from where the operator says it does.
+func (h *Handler) clientIPForRateLimit(r *http.Request) string {
+	remoteIP := remoteAddrHost(r.RemoteAddr)
+	if len(h.cfg.TrustedProxies) == 0 {
+		return remoteIP
+	}
+	remoteAddr, ok := parseNetIPAddr(remoteIP)
+	if !ok || !addrInPrefixes(remoteAddr, h.cfg.TrustedProxies) {
+		// Source isn't a trusted proxy — headers can't be believed.
+		return remoteIP
+	}
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		if i := strings.IndexByte(xff, ','); i >= 0 {
 			return strings.TrimSpace(xff[:i])
@@ -383,9 +411,51 @@ func clientIPForRateLimit(r *http.Request) string {
 	if xri := r.Header.Get("X-Real-IP"); xri != "" {
 		return strings.TrimSpace(xri)
 	}
-	remote := r.RemoteAddr
-	if i := strings.LastIndexByte(remote, ':'); i >= 0 {
-		return remote[:i]
+	return remoteIP
+}
+
+// remoteAddrHost returns the host portion of an "addr" or "host:port" string.
+// IPv6 with port is "[::1]:8080" — we strip the brackets so the result is a
+// parseable IP. If the input has no port, it is returned unchanged.
+func remoteAddrHost(remote string) string {
+	if remote == "" {
+		return ""
+	}
+	// IPv6 "[::1]:port" → "::1"
+	if strings.HasPrefix(remote, "[") {
+		if end := strings.IndexByte(remote, ']'); end > 0 {
+			return remote[1:end]
+		}
+	}
+	// IPv4 "host:port" → "host"; bare IPv4 stays.
+	if i := strings.LastIndexByte(remote, ':'); i >= 0 && !strings.Contains(remote, "]") {
+		// Only treat the trailing ":<digits>" as a port. If there are
+		// multiple colons (bare IPv6) we leave the string alone.
+		if strings.Count(remote, ":") == 1 {
+			return remote[:i]
+		}
 	}
 	return remote
+}
+
+// parseNetIPAddr parses an IP literal, tolerating IPv6 zone suffixes.
+func parseNetIPAddr(s string) (netip.Addr, bool) {
+	if s == "" {
+		return netip.Addr{}, false
+	}
+	addr, err := netip.ParseAddr(s)
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	return addr.Unmap(), true
+}
+
+// addrInPrefixes reports whether addr falls into any of the CIDRs.
+func addrInPrefixes(addr netip.Addr, prefixes []netip.Prefix) bool {
+	for _, p := range prefixes {
+		if p.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }
