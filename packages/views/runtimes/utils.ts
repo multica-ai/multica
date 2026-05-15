@@ -2,6 +2,7 @@ import type {
   RuntimeUsage,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
+  RuntimeRunDuration,
 } from "@multica/core/types";
 import { getCustomPricing } from "@multica/core/runtimes/custom-pricing-store";
 
@@ -97,6 +98,27 @@ export function isVersionNewer(latest: string, current: string): boolean {
     if (lv < cv) return false;
   }
   return false;
+}
+
+// Smart-unit duration formatter. Picks the largest unit that gives a
+// non-zero leading number so a 2-hour 3-minute span reads as `2h 3m`
+// rather than `7380s`, while sub-minute spikes keep second-precision.
+// Negative or NaN inputs collapse to `0s` so a bad row never renders as
+// `-` or `NaN`.
+export function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0s";
+  const s = Math.floor(seconds);
+  if (s >= 3600) {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  }
+  if (s >= 60) {
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return r > 0 ? `${m}m ${r}s` : `${m}m`;
+  }
+  return `${s}s`;
 }
 
 export function formatTokens(n: number): string {
@@ -345,6 +367,39 @@ export interface DailyCostStackData {
   output: number;
   cacheWrite: number;
   total: number;
+}
+
+export interface DailyDurationData {
+  date: string;
+  label: string;
+  seconds: number;
+  hours: number;
+}
+
+// Sort-and-label helper for the Daily Runtime Duration chart. Mirrors the
+// `${month}/${day}` label format used by daily-tokens / daily-cost so all
+// three metrics share an X axis at the same window. `hours` is the chart
+// payload (Recharts plots numeric series; we want a tidy Y axis like 0.5
+// rather than 1800), and the tooltip falls back to `seconds` to apply
+// `formatDuration` for human-readable spans across magnitudes.
+export function buildDailyDurationSeries(
+  rows: RuntimeRunDuration[],
+): DailyDurationData[] {
+  const formatLabel = (d: string) => {
+    const date = new Date(d + "T00:00:00");
+    return `${date.getMonth() + 1}/${date.getDate()}`;
+  };
+  return [...rows]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((r) => {
+      const seconds = Math.max(0, r.duration_seconds);
+      return {
+        date: r.date,
+        label: formatLabel(r.date),
+        seconds,
+        hours: Math.round((seconds / 3600) * 100) / 100,
+      };
+    });
 }
 
 export interface ModelDistribution {

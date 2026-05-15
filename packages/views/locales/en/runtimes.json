@@ -187,6 +187,7 @@
     "when_tab_heatmap": "Heatmap",
     "daily_metric_cost": "Cost",
     "daily_metric_tokens": "Tokens",
+    "daily_metric_duration": "Duration",
     "heatmap_caption": "Last 26 weeks · daily $ intensity (period selector ignored here)",
     "legend_input": "Input",
     "legend_output": "Output",

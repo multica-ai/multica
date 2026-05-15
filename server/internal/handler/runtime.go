@@ -320,6 +320,62 @@ func (h *Handler) GetRuntimeUsageByHour(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// RuntimeRunDurationResponse is one (date, duration_seconds) row of the
+// Daily Runtime Duration chart. Each row is the total wall-clock duration
+// of terminal runs (completed / failed) whose completed_at fell on `date`
+// in the runtime's local tz. See GetRuntimeRunDurationByDay query for the
+// bucket semantics — cross-midnight runs are attributed to their
+// completion day, not split.
+type RuntimeRunDurationResponse struct {
+	Date            string `json:"date"`
+	DurationSeconds int64  `json:"duration_seconds"`
+}
+
+// GetRuntimeRunDuration returns per-day total run duration for a runtime.
+// Drives the Duration metric in the runtime-detail Daily tab. The data
+// comes straight from agent_task_queue (no rollup table): the source table
+// is small enough that direct scans are fine, and the partial index from
+// migration 091 keeps the working set bounded.
+func (h *Handler) GetRuntimeRunDuration(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	if !ok {
+		return
+	}
+
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+
+	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found"); !ok {
+		return
+	}
+
+	since := parseSinceParamInTZ(r, 90, rt.Timezone)
+
+	rows, err := h.Queries.GetRuntimeRunDurationByDay(r.Context(), db.GetRuntimeRunDurationByDayParams{
+		RuntimeID: rt.ID,
+		Tz:        rt.Timezone,
+		Since:     since,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get runtime duration")
+		return
+	}
+
+	resp := make([]RuntimeRunDurationResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = RuntimeRunDurationResponse{
+			Date:            row.Day.Time.Format("2006-01-02"),
+			DurationSeconds: row.DurationSeconds,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // GetWorkspaceUsageByDay returns daily token usage aggregated by model for the workspace.
 func (h *Handler) GetWorkspaceUsageByDay(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)

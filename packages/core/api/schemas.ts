@@ -238,6 +238,16 @@ const DashboardAgentRunTimeSchema = z.object({
 
 export const DashboardAgentRunTimeListSchema = z.array(DashboardAgentRunTimeSchema);
 
+// Daily runtime duration — one row per local-tz day, total seconds of
+// terminal runs that finished that day. The chart treats missing days as
+// zero, so a malformed row is safer to drop than to render as NaN.
+const RuntimeRunDurationSchema = z.object({
+  date: z.string(),
+  duration_seconds: z.number().default(0),
+}).loose();
+
+export const RuntimeRunDurationListSchema = z.array(RuntimeRunDurationSchema);
+
 // ---------------------------------------------------------------------------
 // Agent template catalog — `/api/agent-templates*` and the
 // create-from-template response. The desktop app's create-agent picker

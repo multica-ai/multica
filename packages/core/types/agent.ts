@@ -359,6 +359,16 @@ export interface RuntimeUsageByHour {
   task_count: number;
 }
 
+// One day of total run-duration (seconds) for the Daily Runtime Duration
+// chart on the runtime detail page. The server aggregates terminal
+// (completed / failed) runs by completed_at-day in the runtime's local tz
+// — see GetRuntimeRunDurationByDay for the bucket semantics. Days with no
+// terminal runs are omitted; clients should treat absent dates as zero.
+export interface RuntimeRunDuration {
+  date: string;
+  duration_seconds: number;
+}
+
 // One (date, model) bucket of token usage for the workspace dashboard.
 // Same shape as RuntimeUsage but workspace-scoped (no runtime_id, no
 // provider field on the wire) and optionally narrowed to a single project

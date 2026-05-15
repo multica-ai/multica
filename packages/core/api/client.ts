@@ -44,6 +44,7 @@ import type {
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
+  RuntimeRunDuration,
   DashboardUsageDaily,
   DashboardUsageByAgent,
   DashboardAgentRunTime,
@@ -111,6 +112,7 @@ import {
   DashboardAgentRunTimeListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
+  RuntimeRunDurationListSchema,
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_ATTACHMENT,
@@ -835,6 +837,23 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));
     return this.fetch(`/api/runtimes/${runtimeId}/usage/by-hour?${search}`);
+  }
+
+  async getRuntimeRunDuration(
+    runtimeId: string,
+    params?: { days?: number },
+  ): Promise<RuntimeRunDuration[]> {
+    const search = new URLSearchParams();
+    if (params?.days) search.set("days", String(params.days));
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/usage/duration?${search}`,
+    );
+    return parseWithFallback<RuntimeRunDuration[]>(
+      raw,
+      RuntimeRunDurationListSchema,
+      [],
+      { endpoint: "GET /api/runtimes/:id/usage/duration" },
+    );
   }
 
   // ---------------------------------------------------------------------------

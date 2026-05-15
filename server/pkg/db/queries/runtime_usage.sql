@@ -91,6 +91,32 @@ WHERE atq.runtime_id = $1
 GROUP BY atq.agent_id, tu.model
 ORDER BY atq.agent_id, tu.model;
 
+-- name: GetRuntimeRunDurationByDay :many
+-- Per-day total run duration (seconds) for a runtime since a cutoff. Powers
+-- the "Daily Runtime Duration" metric on the runtime detail page. Bucket
+-- semantics: each terminal run's entire (completed_at - started_at) span
+-- is attributed to the day that contains its completed_at in the runtime's
+-- local tz. Cross-midnight runs are NOT split across days — this aligns
+-- with the dashboard's existing "completed window" treatment and avoids
+-- the cost of generate_series range slicing for an outlier case.
+--
+-- Only terminal rows ('completed' / 'failed') with both timestamps set
+-- are counted; same eligibility as ListDashboardAgentRunTime. Backed by
+-- the partial index idx_agent_task_queue_terminal_completed (migration
+-- 091); make sure to keep the WHERE clause aligned with the index
+-- predicate so the planner can use it.
+SELECT
+    date_trunc('day', completed_at AT TIME ZONE @tz::text)::date AS day,
+    SUM(EXTRACT(EPOCH FROM (completed_at - started_at)))::bigint AS duration_seconds
+FROM agent_task_queue
+WHERE runtime_id = $1
+  AND status IN ('completed', 'failed')
+  AND started_at IS NOT NULL
+  AND completed_at IS NOT NULL
+  AND completed_at >= @since::timestamptz
+GROUP BY 1
+ORDER BY 1;
+
 -- name: GetRuntimeUsageByHour :many
 -- Per-(hour, model) token aggregates (hour ∈ 0..23) for a runtime since a
 -- cutoff. Powers the "By hour" tab — shows when in the day this runtime is

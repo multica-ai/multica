@@ -11,6 +11,64 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getRuntimeRunDurationByDay = `-- name: GetRuntimeRunDurationByDay :many
+SELECT
+    date_trunc('day', completed_at AT TIME ZONE $2::text)::date AS day,
+    SUM(EXTRACT(EPOCH FROM (completed_at - started_at)))::bigint AS duration_seconds
+FROM agent_task_queue
+WHERE runtime_id = $1
+  AND status IN ('completed', 'failed')
+  AND started_at IS NOT NULL
+  AND completed_at IS NOT NULL
+  AND completed_at >= $3::timestamptz
+GROUP BY 1
+ORDER BY 1
+`
+
+type GetRuntimeRunDurationByDayParams struct {
+	RuntimeID pgtype.UUID        `json:"runtime_id"`
+	Tz        string             `json:"tz"`
+	Since     pgtype.Timestamptz `json:"since"`
+}
+
+type GetRuntimeRunDurationByDayRow struct {
+	Day             pgtype.Date `json:"day"`
+	DurationSeconds int64       `json:"duration_seconds"`
+}
+
+// Per-day total run duration (seconds) for a runtime since a cutoff. Powers
+// the "Daily Runtime Duration" metric on the runtime detail page. Bucket
+// semantics: each terminal run's entire (completed_at - started_at) span
+// is attributed to the day that contains its completed_at in the runtime's
+// local tz. Cross-midnight runs are NOT split across days — this aligns
+// with the dashboard's existing "completed window" treatment and avoids
+// the cost of generate_series range slicing for an outlier case.
+//
+// Only terminal rows ('completed' / 'failed') with both timestamps set
+// are counted; same eligibility as ListDashboardAgentRunTime. Backed by
+// the partial index idx_agent_task_queue_terminal_completed (migration
+// 091); make sure to keep the WHERE clause aligned with the index
+// predicate so the planner can use it.
+func (q *Queries) GetRuntimeRunDurationByDay(ctx context.Context, arg GetRuntimeRunDurationByDayParams) ([]GetRuntimeRunDurationByDayRow, error) {
+	rows, err := q.db.Query(ctx, getRuntimeRunDurationByDay, arg.RuntimeID, arg.Tz, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetRuntimeRunDurationByDayRow{}
+	for rows.Next() {
+		var i GetRuntimeRunDurationByDayRow
+		if err := rows.Scan(&i.Day, &i.DurationSeconds); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getRuntimeTaskHourlyActivity = `-- name: GetRuntimeTaskHourlyActivity :many
 SELECT EXTRACT(HOUR FROM started_at AT TIME ZONE $2::text)::int AS hour,
        COUNT(*)::int AS count

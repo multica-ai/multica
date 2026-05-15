@@ -182,6 +182,7 @@
     "when_tab_heatmap": "热力图",
     "daily_metric_cost": "费用",
     "daily_metric_tokens": "Token",
+    "daily_metric_duration": "时长",
     "heatmap_caption": "最近 26 周 · 每日 $ 强度（此处忽略上方时间范围）",
     "legend_input": "输入",
     "legend_output": "输出",

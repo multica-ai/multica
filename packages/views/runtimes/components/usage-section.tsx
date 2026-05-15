@@ -7,11 +7,12 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions } from "@multica/core/workspace/queries";
-import type { RuntimeUsage } from "@multica/core/types";
+import type { RuntimeUsage, RuntimeRunDuration } from "@multica/core/types";
 import {
   runtimeUsageOptions,
   runtimeUsageByAgentOptions,
   runtimeUsageByHourOptions,
+  runtimeUsageDurationOptions,
 } from "@multica/core/runtimes/queries";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import {
@@ -22,6 +23,7 @@ import {
   aggregateCostByAgent,
   aggregateCostByModel,
   aggregateCostByHour,
+  buildDailyDurationSeries,
   collectUnmappedModels,
   pctChange,
   type CostByKey,
@@ -31,6 +33,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import {
   DailyCostChart,
   DailyTokensChart,
+  DailyDurationChart,
   HourlyActivityChart,
   ActivityHeatmap,
 } from "./charts";
@@ -111,6 +114,14 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
   const { data: usage = [], isLoading: loading } = useQuery(
     runtimeUsageOptions(runtimeId, 180),
   );
+  // Duration prefetch lives at the top so the empty-state check below
+  // doesn't trip on runtimes that have only failed / zero-token runs but
+  // still recorded execution time. Same 180d window as the token cache so
+  // WhenChart's slicing logic can stay symmetric. The downstream Daily tab
+  // reads through the same query key — TanStack dedupes.
+  const { data: duration = [] } = useQuery(
+    runtimeUsageDurationOptions(runtimeId, 180),
+  );
   const [days, setDays] = useState<TimeRange>(30);
   // Subscribe so the KPI cards (which call estimateCost at render-time, not
   // through a memo) re-evaluate when the user saves a custom rate. The
@@ -119,13 +130,14 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
   useCustomPricingStore((s) => s.pricings);
 
   if (loading) return <UsageSkeleton />;
-  if (usage.length === 0) return <UsageEmpty />;
+  if (usage.length === 0 && duration.length === 0) return <UsageEmpty />;
 
   // Slice the cached 90-day window into the user's selected sub-window AND
   // the immediately prior window of equal length. The KPI delta ("+18% vs
   // prev") then compares like-for-like ranges instead of "this period vs
   // all of history".
   const { filtered, prevFiltered } = sliceWindow(usage, days);
+  const filteredDuration = sliceDurationWindow(duration, days);
   const totals = computeTotals(filtered);
   const prevTotals = computeTotals(prevFiltered);
 
@@ -223,6 +235,7 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
         runtimeId={runtimeId}
         usage={usage}
         filtered={filtered}
+        duration={filteredDuration}
         days={days}
       />
 
@@ -246,17 +259,19 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
 // ---------------------------------------------------------------------------
 
 type WhenTab = "daily" | "hourly" | "heatmap";
-type DailyMetric = "cost" | "tokens";
+type DailyMetric = "cost" | "tokens" | "duration";
 
 function WhenChart({
   runtimeId,
   usage,
   filtered,
+  duration,
   days,
 }: {
   runtimeId: string;
   usage: RuntimeUsage[];
   filtered: RuntimeUsage[];
+  duration: RuntimeRunDuration[];
   days: TimeRange;
 }) {
   const { t } = useT("runtimes");
@@ -280,6 +295,10 @@ function WhenChart({
   const { dailyCostStack, dailyTokens } = useMemo(
     () => aggregateByDate(filtered),
     [filtered, pricings],
+  );
+  const dailyDuration = useMemo(
+    () => buildDailyDurationSeries(duration),
+    [duration],
   );
   const hourlyCost = useMemo(
     () =>
@@ -318,12 +337,13 @@ function WhenChart({
                 [
                   { label: t(($) => $.usage.daily_metric_cost), value: "cost" },
                   { label: t(($) => $.usage.daily_metric_tokens), value: "tokens" },
+                  { label: t(($) => $.usage.daily_metric_duration), value: "duration" },
                 ] as const
               }
             />
           )}
         </div>
-        {tab !== "heatmap" && (
+        {tab !== "heatmap" && !(tab === "daily" && dailyMetric === "duration") && (
           <ChartLegend includeCacheRead={tab === "daily" && dailyMetric === "tokens"} />
         )}
       </div>
@@ -346,6 +366,7 @@ function WhenChart({
             metric={dailyMetric}
             costData={dailyCostStack}
             tokensData={dailyTokens}
+            durationData={dailyDuration}
             usage={filtered}
           />
         )}
@@ -360,11 +381,13 @@ function DailyTab({
   metric,
   costData,
   tokensData,
+  durationData,
   usage,
 }: {
   metric: DailyMetric;
   costData: Parameters<typeof DailyCostChart>[0]["data"];
   tokensData: Parameters<typeof DailyTokensChart>[0]["data"];
+  durationData: Parameters<typeof DailyDurationChart>[0]["data"];
   usage: RuntimeUsage[];
 }) {
   if (metric === "tokens") {
@@ -377,6 +400,15 @@ function DailyTab({
     );
     if (totalTokens === 0) return <EmptyChartState usage={usage} />;
     return <DailyTokensChart data={tokensData} />;
+  }
+  if (metric === "duration") {
+    // Duration is independent of token / cost data — show the empty hint
+    // only when no terminal run finished in-window. Unmapped-pricing
+    // diagnostics don't apply here, but EmptyChartState already handles
+    // the "no usage" copy without surfacing a pricing CTA.
+    const totalSeconds = durationData.reduce((s, d) => s + d.seconds, 0);
+    if (totalSeconds === 0) return <EmptyChartState usage={usage} />;
+    return <DailyDurationChart data={durationData} />;
   }
   const totalCost = costData.reduce((s, d) => s + d.total, 0);
   if (totalCost === 0) return <EmptyChartState usage={usage} />;
@@ -791,6 +823,16 @@ function sliceWindow(usage: RuntimeUsage[], days: number) {
       (u) => u.date >= isoPrev && u.date < isoCurrent,
     ),
   };
+}
+
+function sliceDurationWindow(
+  duration: RuntimeRunDuration[],
+  days: number,
+): RuntimeRunDuration[] {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  const iso = cutoff.toISOString().slice(0, 10);
+  return duration.filter((d) => d.date >= iso);
 }
 
 interface UsageTotals {

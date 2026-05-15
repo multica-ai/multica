@@ -11,6 +11,8 @@ export const runtimeKeys = {
     ["runtimes", "usage", "by-agent", rid, days] as const,
   usageByHour: (rid: string, days: number) =>
     ["runtimes", "usage", "by-hour", rid, days] as const,
+  usageDuration: (rid: string, days: number) =>
+    ["runtimes", "usage", "duration", rid, days] as const,
   latestVersion: () => ["runtimes", "latestVersion"] as const,
 };
 
@@ -42,6 +44,18 @@ export function runtimeUsageByHourOptions(runtimeId: string, days: number) {
   return queryOptions({
     queryKey: runtimeKeys.usageByHour(runtimeId, days),
     queryFn: () => api.getRuntimeUsageByHour(runtimeId, { days }),
+    staleTime: 60 * 1000,
+  });
+}
+
+// Daily total run-duration (seconds) for one runtime — drives the
+// Duration metric on the Daily tab. Fetched at the top of UsageSection
+// alongside the token cache so the page-level empty-state check can
+// consider duration data (a failed / zero-token run still has duration).
+export function runtimeUsageDurationOptions(runtimeId: string, days: number) {
+  return queryOptions({
+    queryKey: runtimeKeys.usageDuration(runtimeId, days),
+    queryFn: () => api.getRuntimeRunDuration(runtimeId, { days }),
     staleTime: 60 * 1000,
   });
 }

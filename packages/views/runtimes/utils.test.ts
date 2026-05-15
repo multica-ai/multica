@@ -5,6 +5,7 @@ import {
   aggregateCostByModel,
   collectUnmappedModels,
   estimateCost,
+  formatDuration,
   isModelPriced,
 } from "./utils";
 
@@ -348,5 +349,33 @@ describe("user-supplied custom pricing", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const after = aggregateCostByModel(rows as any);
     expect(after[0]?.cost).toBeCloseTo(2, 5);
+  });
+});
+
+describe("formatDuration", () => {
+  it("renders sub-minute spans in seconds", () => {
+    expect(formatDuration(0)).toBe("0s");
+    expect(formatDuration(1)).toBe("1s");
+    expect(formatDuration(59)).toBe("59s");
+  });
+
+  it("renders minute spans with second remainder", () => {
+    expect(formatDuration(60)).toBe("1m");
+    expect(formatDuration(61)).toBe("1m 1s");
+    expect(formatDuration(3599)).toBe("59m 59s");
+  });
+
+  it("renders hour spans with minute remainder", () => {
+    expect(formatDuration(3600)).toBe("1h");
+    expect(formatDuration(3601)).toBe("1h");
+    expect(formatDuration(3660)).toBe("1h 1m");
+    // 12h 8m
+    expect(formatDuration(12 * 3600 + 8 * 60)).toBe("12h 8m");
+  });
+
+  it("guards against malformed input", () => {
+    expect(formatDuration(NaN)).toBe("0s");
+    expect(formatDuration(-1)).toBe("0s");
+    expect(formatDuration(Infinity)).toBe("0s");
   });
 });
