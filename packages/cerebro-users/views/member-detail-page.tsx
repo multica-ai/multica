@@ -3,7 +3,8 @@
 import { ArrowLeft, Wallet, Crown, Shield, User as UserIcon, UserMinus } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { useState } from "react";
+import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { ActorAvatar } from "@multica/views/common/actor-avatar";
 import type { MemberRole, MemberWithUser } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -35,6 +36,7 @@ import {
   OverridesPlaceholder,
 } from "@multica/cerebro-members/views";
 import { useAuthStore } from "@multica/core/auth";
+import { useChatStore } from "@multica/core/chat";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, paths } from "@multica/core/paths";
 import {
@@ -44,7 +46,7 @@ import {
 } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import { AppLink } from "@multica/views/navigation";
-import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
+import { PageHeader } from "@multica/views/layout/page-header";
 
 const roleConfig: Record<MemberRole, { label: string; icon: typeof Crown }> = {
   owner: { label: "Owner", icon: Crown },
@@ -63,15 +65,17 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const member = members.find((m) => m.id === memberId);
+  const member = members.find((m) => m.id === memberId || m.user_id === memberId);
+  const resolvedMemberId = member?.id ?? memberId;
   const { data: usage } = useQuery({
-    ...memberUsageOptions(wsId, memberId),
+    ...memberUsageOptions(wsId, resolvedMemberId),
     enabled: !!member,
   });
 
   const [busy, setBusy] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const navigation = useNavigation();
+  const setHideFloatingChat = useChatStore((s) => s.setHideFloatingChat);
 
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManage = currentMember?.role === "owner" || currentMember?.role === "admin";
@@ -80,22 +84,26 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
   const canEditRole = canManage && !isSelf && (member?.role !== "owner" || isOwner);
   const canRemove = canManage && !isSelf && (member?.role !== "owner" || isOwner);
 
+  // CEREBRO-PATCH(member-detail-mobile-shell): JEH-1067 mobile Bundle B
+  // Member detail is dense admin content; the floating chat covers the new
+  // Bundle B sections on mobile and blocks scroll/clicks.
+  useEffect(() => {
+    setHideFloatingChat(true);
+    return () => setHideFloatingChat(false);
+  }, [setHideFloatingChat]);
+
   if (!workspace) return null;
 
   if (!member) {
     return (
-      <div className="mx-auto max-w-2xl p-6">
-        <div className="flex items-center gap-2">
-          <MobileSidebarTrigger className="mr-0" />
-          <AppLink
-            href={`${paths.workspace(workspace.slug).settings()}?tab=members`}
-            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="h-4 w-4" /> Back to Members
-          </AppLink>
+      <MemberDetailShell title="Member">
+        <div className="mx-auto max-w-2xl p-4 md:p-6">
+          <BackToMembersLink workspaceSlug={workspace.slug} />
+          <p className="mt-4 text-sm text-muted-foreground">
+            Member not found in this workspace.
+          </p>
         </div>
-        <p className="mt-4 text-sm text-muted-foreground">Member not found in this workspace.</p>
-      </div>
+      </MemberDetailShell>
     );
   }
 
@@ -150,16 +158,9 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
   };
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 p-6">
-      <div className="flex items-center gap-2">
-        <MobileSidebarTrigger className="mr-0" />
-        <AppLink
-          href={`${paths.workspace(workspace.slug).settings()}?tab=members`}
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" /> Back to Members
-        </AppLink>
-      </div>
+    <MemberDetailShell title={member.name}>
+      <div className="mx-auto max-w-3xl space-y-6 p-4 md:p-6">
+        <BackToMembersLink workspaceSlug={workspace.slug} />
 
       <header className="flex items-center gap-4">
         <ActorAvatar actorType="member" actorId={member.user_id} size={48} />
@@ -310,7 +311,36 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      </div>
+    </MemberDetailShell>
+  );
+}
+
+function MemberDetailShell({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex h-full min-h-0 flex-1 flex-col">
+      <PageHeader className="justify-between gap-3 px-4">
+        <h1 className="min-w-0 truncate text-sm font-semibold">{title}</h1>
+      </PageHeader>
+      <div className="flex-1 min-h-0 overflow-y-auto">{children}</div>
     </div>
+  );
+}
+
+function BackToMembersLink({ workspaceSlug }: { workspaceSlug: string }) {
+  return (
+    <AppLink
+      href={`${paths.workspace(workspaceSlug).settings()}?tab=members`}
+      className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+    >
+      <ArrowLeft className="h-4 w-4" /> Back to Members
+    </AppLink>
   );
 }
 

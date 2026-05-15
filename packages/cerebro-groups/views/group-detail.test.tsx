@@ -62,6 +62,11 @@ vi.mock("@multica/core/auth", () => ({
   ),
 }));
 
+vi.mock("@multica/core/chat", () => ({
+  useChatStore: (selector: (s: { setHideFloatingChat: (hide: boolean) => void }) => unknown) =>
+    selector({ setHideFloatingChat: vi.fn() }),
+}));
+
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));

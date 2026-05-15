@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useCurrentWorkspace } from "@multica/core/paths";
+import { useChatStore } from "@multica/core/chat";
 import { useNavigation } from "../../navigation";
 import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
@@ -105,6 +106,14 @@ export function SettingsPage({
   // CEREBRO-PATCH(settings-page-groups-slug): JEH-1067 slug for groups detail nav
   const workspaceSlug = useCurrentWorkspace()?.slug ?? "";
   const navigation = useNavigation();
+  // CEREBRO-PATCH(settings-page-mobile-admin-chat-hide): JEH-1067 mobile Bundle B
+  // Settings admin flows need the full narrow viewport; the floating chat
+  // otherwise covers member/group rows and blocks filter/detail clicks.
+  const setHideFloatingChat = useChatStore((s) => s.setHideFloatingChat);
+  React.useEffect(() => {
+    setHideFloatingChat(true);
+    return () => setHideFloatingChat(false);
+  }, [setHideFloatingChat]);
   // CEREBRO-PATCH(settings-page-groups-tab): JEH-1006 feature-flagged Groups tab
   const groupsEnabled = useFeatureFlag("cerebro_groups_enabled");
   // Whitelist of valid tab values; unknown ?tab=… values silently fall back to

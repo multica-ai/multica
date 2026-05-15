@@ -9,7 +9,8 @@
 // runtime. Picking an agent whose runtime is missing prompts the admin to
 // "Tilføj begge" via a confirmation dialog (server still does two writes).
 
-import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -23,6 +24,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
+import { useChatStore } from "@multica/core/chat";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { Agent, RuntimeDevice } from "@multica/core/types";
 import {
@@ -35,6 +37,11 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
+import {
+  SidebarTrigger,
+  useSidebar,
+} from "@multica/ui/components/ui/sidebar";
+import { cn } from "@multica/ui/lib/utils";
 import {
   Tooltip,
   TooltipContent,
@@ -99,6 +106,7 @@ export function GroupDetailView({ groupId, onBack }: GroupDetailViewProps) {
   const enabled = useFeatureFlag("cerebro_groups_enabled");
   const wsId = useWorkspaceId();
   const user = useAuthStore((s) => s.user);
+  const setHideFloatingChat = useChatStore((s) => s.setHideFloatingChat);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: groups = [], isPending } = useQuery(groupListOptions(wsId));
 
@@ -107,44 +115,90 @@ export function GroupDetailView({ groupId, onBack }: GroupDetailViewProps) {
   const isAdmin =
     currentMember?.role === "owner" || currentMember?.role === "admin";
 
+  // CEREBRO-PATCH(group-detail-mobile-shell): JEH-1067 mobile Bundle B
+  // Group detail is a full-page admin view; hide the floating chat so it does
+  // not cover the bottom sections or intercept mobile scroll/clicks.
+  useEffect(() => {
+    setHideFloatingChat(true);
+    return () => setHideFloatingChat(false);
+  }, [setHideFloatingChat]);
+
   if (!enabled) return null;
 
   if (isPending) {
     return (
-      <div className="p-6 text-sm text-muted-foreground">Loading group…</div>
+      <GroupDetailShell title="Group">
+        <div className="p-4 text-sm text-muted-foreground md:p-6">
+          Loading group…
+        </div>
+      </GroupDetailShell>
     );
   }
 
   if (!group) {
     return (
-      <div className="p-6 space-y-3" data-testid="group-detail-missing">
-        <BackButton onBack={onBack} />
-        <div className="rounded-md border border-dashed border-border p-6 text-sm text-muted-foreground">
-          Group not found. It may have been deleted or you no longer have
-          access.
+      <GroupDetailShell title="Group">
+        <div
+          className="mx-auto w-full max-w-3xl space-y-3 p-4 md:p-6"
+          data-testid="group-detail-missing"
+        >
+          <BackButton onBack={onBack} />
+          <div className="rounded-md border border-dashed border-border p-6 text-sm text-muted-foreground">
+            Group not found. It may have been deleted or you no longer have
+            access.
+          </div>
         </div>
-      </div>
+      </GroupDetailShell>
     );
   }
 
   return (
-    <div
-      className="mx-auto w-full max-w-3xl space-y-6 p-4 md:p-6"
-      data-testid="group-detail"
-    >
-      <BackButton onBack={onBack} />
+    <GroupDetailShell title={group.name}>
+      <div
+        className="mx-auto w-full max-w-3xl space-y-6 p-4 md:p-6"
+        data-testid="group-detail"
+      >
+        <BackButton onBack={onBack} />
 
-      <GroupHeader group={group} isAdmin={isAdmin} onDeleted={onBack} />
+        <GroupHeader group={group} isAdmin={isAdmin} onDeleted={onBack} />
 
-      <MembersSection groupId={groupId} isAdmin={isAdmin} />
+        <MembersSection groupId={groupId} isAdmin={isAdmin} />
 
-      <AgentsSection groupId={groupId} isAdmin={isAdmin} />
+        <AgentsSection groupId={groupId} isAdmin={isAdmin} />
 
-      <RuntimesSection groupId={groupId} isAdmin={isAdmin} />
+        <RuntimesSection groupId={groupId} isAdmin={isAdmin} />
 
-      <CapabilitiesSection groupId={groupId} isAdmin={isAdmin} />
+        <CapabilitiesSection groupId={groupId} isAdmin={isAdmin} />
+      </div>
+    </GroupDetailShell>
+  );
+}
+
+function GroupDetailShell({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex h-full min-h-0 flex-1 flex-col">
+      <div className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-3 overflow-x-auto border-b bg-background px-4">
+        <GroupMobileSidebarTrigger />
+        <h1 className="min-w-0 truncate text-sm font-semibold">{title}</h1>
+      </div>
+      <div className="flex-1 min-h-0 overflow-y-auto">{children}</div>
     </div>
   );
+}
+
+function GroupMobileSidebarTrigger({ className }: { className?: string }) {
+  try {
+    useSidebar();
+  } catch {
+    return null;
+  }
+  return <SidebarTrigger className={cn("mr-0 shrink-0 md:hidden", className)} />;
 }
 
 function BackButton({ onBack }: { onBack: () => void }) {
