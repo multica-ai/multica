@@ -1,32 +1,62 @@
-import { useState } from "react";
-import { KeyboardAvoidingView, Platform, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { KeyboardAvoidingView, Platform, Pressable, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { Text } from "@/components/ui/text";
-import { Input } from "@/components/ui/input";
+import { OtpInput, type OtpInputRef } from "@/components/ui/otp-input";
 import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/data/auth-store";
 
+const CODE_LENGTH = 6;
+const RESEND_COOLDOWN_SECONDS = 60;
+
 export default function Verify() {
+  const sendCode = useAuthStore((s) => s.sendCode);
   const verifyCode = useAuthStore((s) => s.verifyCode);
   const { email = "" } = useLocalSearchParams<{ email?: string }>();
   const [code, setCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cooldown, setCooldown] = useState(RESEND_COOLDOWN_SECONDS);
+  const [resending, setResending] = useState(false);
+  const otpRef = useRef<OtpInputRef>(null);
 
-  const onSubmit = async () => {
-    const trimmed = code.trim();
-    if (!trimmed || !email) return;
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setInterval(() => {
+      setCooldown((c) => (c <= 1 ? 0 : c - 1));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [cooldown]);
+
+  const submit = async (value: string) => {
+    if (!value || !email || submitting) return;
     setSubmitting(true);
     setError(null);
     try {
-      await verifyCode(email, trimmed);
-      // Successful verify: route to the entry redirect, which decides where
-      // to go based on auth + persisted workspace slug.
+      await verifyCode(email, value);
       router.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invalid code");
       setSubmitting(false);
+      otpRef.current?.clear();
+      setCode("");
+    }
+  };
+
+  const onResend = async () => {
+    if (cooldown > 0 || resending || !email) return;
+    setResending(true);
+    setError(null);
+    try {
+      await sendCode(email);
+      setCooldown(RESEND_COOLDOWN_SECONDS);
+      otpRef.current?.clear();
+      setCode("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to resend code");
+    } finally {
+      setResending(false);
     }
   };
 
@@ -36,27 +66,25 @@ export default function Verify() {
         className="flex-1"
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <View className="flex-1 justify-center px-6 gap-6">
+        <View className="flex-1 justify-center px-6 gap-8">
           <View className="gap-2">
             <Text className="text-3xl font-bold text-foreground">
               Enter verification code
             </Text>
             <Text className="text-base text-muted-foreground">
-              We sent a code to {email}
+              We sent a 6-digit code to {email}
             </Text>
           </View>
 
-          <View className="gap-3">
-            <Input
-              autoCapitalize="none"
-              keyboardType="number-pad"
-              placeholder="6-digit code"
+          <View className="gap-3 items-center">
+            <OtpInput
+              ref={otpRef}
+              numberOfDigits={CODE_LENGTH}
               value={code}
-              onChangeText={setCode}
-              onSubmitEditing={onSubmit}
-              returnKeyType="go"
+              onChange={setCode}
+              onComplete={submit}
+              autoFocus
               editable={!submitting}
-              maxLength={8}
             />
             {error ? (
               <Text className="text-sm text-destructive">{error}</Text>
@@ -65,17 +93,38 @@ export default function Verify() {
 
           <View className="gap-3">
             <Button
-              disabled={submitting || !code.trim()}
-              onPress={onSubmit}
+              disabled={submitting || code.length < CODE_LENGTH}
+              onPress={() => submit(code)}
             >
               {submitting ? "Verifying..." : "Verify"}
             </Button>
+
+            <Pressable
+              onPress={onResend}
+              disabled={cooldown > 0 || resending}
+              className="py-2 items-center"
+            >
+              <Text
+                className={
+                  cooldown > 0 || resending
+                    ? "text-sm text-muted-foreground"
+                    : "text-sm text-primary"
+                }
+              >
+                {resending
+                  ? "Sending..."
+                  : cooldown > 0
+                    ? `Resend code in ${cooldown}s`
+                    : "Resend code"}
+              </Text>
+            </Pressable>
+
             <Button
               variant="outline"
               disabled={submitting}
               onPress={() => router.back()}
             >
-              Back
+              Use a different email
             </Button>
           </View>
         </View>

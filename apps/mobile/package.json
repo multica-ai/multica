@@ -36,6 +36,7 @@
     "expo-secure-store": "~55.0.13",
     "expo-status-bar": "~55.0.0",
     "expo-system-ui": "~55.0.0",
+    "input-otp-native": "^0.5.0",
     "marked": "^18.0.3",
     "nativewind": "^4.1.23",
     "react": "19.2.0",
