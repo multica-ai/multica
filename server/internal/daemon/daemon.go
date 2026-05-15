@@ -2387,6 +2387,25 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			FailureReason: "timeout",
 			Usage:         usageEntries,
 		}, nil
+	case "idle_watchdog":
+		// The idle watchdog force-stopped the run because the backend
+		// went silent (e.g. claude blocked on a tool call against a
+		// frozen child process). Route through the blocked path with a
+		// dedicated failure_reason so the run leaves "running" state and
+		// operators can tell idle-stop apart from a real timeout.
+		comment := result.Error
+		if comment == "" {
+			comment = idleWatchdogReason(d.cfg.AgentIdleWatchdog)
+		}
+		return TaskResult{
+			Status:        "blocked",
+			Comment:       comment,
+			SessionID:     result.SessionID,
+			WorkDir:       env.WorkDir,
+			EnvRoot:       env.RootDir,
+			FailureReason: "idle_watchdog",
+			Usage:         usageEntries,
+		}, nil
 	case "cancelled":
 		// Server cancelled the task (e.g. issue reassignment, user cancel).
 		// handleTask's cancelledByPoll branch already discards this result,
@@ -2439,7 +2458,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 // executeAndDrain runs a backend, drains its message stream (forwarding to the
 // server), and waits for the final result.
 func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID string) (agent.Result, int32, error) {
-	session, err := backend.Execute(ctx, prompt, opts)
+	// Wrap the caller's ctx so the idle watchdog (below) can interrupt both
+	// the agent subprocess (via the ctx passed to backend.Execute) AND the
+	// drain loop with a single cancel. Without this layer the backend would
+	// stay tied to the parent ctx and our cancellation could only abort
+	// drain, leaving the subprocess running.
+	agentCtx, agentCancel := context.WithCancel(ctx)
+	defer agentCancel()
+
+	session, err := backend.Execute(agentCtx, prompt, opts)
 	if err != nil {
 		return agent.Result{}, 0, err
 	}
@@ -2452,10 +2479,29 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	if opts.Timeout == 0 {
 		drainTimeout = 21 * time.Minute
 	}
-	drainCtx, drainCancel := context.WithTimeout(ctx, drainTimeout)
+	drainCtx, drainCancel := context.WithTimeout(agentCtx, drainTimeout)
 	defer drainCancel()
 
 	var toolCount atomic.Int32
+	// lastActivityAt records (as unix nanos) when the drain loop most
+	// recently received a message from the backend. The idle watchdog
+	// reads this to decide whether the agent has gone silent for too long.
+	// Initialise to the start so a backend that never emits a single
+	// message also trips the watchdog.
+	var lastActivityAt atomic.Int64
+	lastActivityAt.Store(time.Now().UnixNano())
+	// inFlightTools counts tool_use messages that haven't yet been paired
+	// with a matching tool_result. A non-zero count means the agent is
+	// legitimately waiting on a tool (e.g. `npm install`, `docker build`)
+	// that may run far longer than the idle window without emitting any
+	// message — so the watchdog must not interpret that silence as a hang.
+	var inFlightTools atomic.Int32
+	var idleWatchdogFired atomic.Bool
+	idleWindow := d.cfg.AgentIdleWatchdog
+	if idleWindow > 0 {
+		go d.runIdleWatchdog(agentCtx, idleWindow, &lastActivityAt, &inFlightTools, &idleWatchdogFired, agentCancel, session.Messages, taskLog, taskID)
+	}
+
 	go func() {
 		var seq atomic.Int32
 		var mu sync.Mutex
@@ -2521,6 +2567,12 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				if !ok {
 					goto drainDone
 				}
+				// Stamp activity as soon as a message lands. The idle
+				// watchdog reads this to decide whether the backend has
+				// gone silent — stamping before processing makes sure a
+				// slow downstream call (mu.Lock contention, batch resize)
+				// can't be misattributed to backend silence.
+				lastActivityAt.Store(time.Now().UnixNano())
 				switch msg.Type {
 				case agent.MessageStatus:
 					// Persist the session/work_dir as soon as the backend
@@ -2540,6 +2592,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					}
 				case agent.MessageToolUse:
 					n := toolCount.Add(1)
+					inFlightTools.Add(1)
 					taskLog.Info(fmt.Sprintf("tool #%d: %s", n, msg.Tool))
 					if msg.CallID != "" {
 						mu.Lock()
@@ -2556,6 +2609,20 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					})
 					mu.Unlock()
 				case agent.MessageToolResult:
+					// Decrement only when the count would stay >= 0. A stray
+					// tool_result with no matching tool_use (backend bug or
+					// reconnect mid-stream) shouldn't push the counter
+					// negative — that would re-arm the watchdog one tool_use
+					// too early on the next call.
+					for {
+						cur := inFlightTools.Load()
+						if cur <= 0 {
+							break
+						}
+						if inFlightTools.CompareAndSwap(cur, cur-1) {
+							break
+						}
+					}
 					s := seq.Add(1)
 					output := msg.Output
 					if len(output) > 8192 {
@@ -2611,8 +2678,29 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 
 	select {
 	case result := <-session.Result:
+		if idleWatchdogFired.Load() {
+			// The backend's wait goroutine (e.g. claude.go) translates the
+			// SIGKILL we delivered via agentCancel into Status="aborted".
+			// Re-tag it as "idle_watchdog" so runTask routes the
+			// disposition through a dedicated failure_reason, not the
+			// generic "agent_error" bucket the aborted path falls into.
+			result.Status = "idle_watchdog"
+			if result.Error == "" {
+				result.Error = idleWatchdogReason(idleWindow)
+			}
+		}
 		return result, toolCount.Load(), nil
 	case <-drainCtx.Done():
+		// Idle watchdog cancels via agentCancel(), which propagates here as
+		// context.Canceled. Check this BEFORE the generic cancelled/timeout
+		// classifiers so a watchdog-induced stop isn't misreported as
+		// "task cancelled by server".
+		if idleWatchdogFired.Load() {
+			return agent.Result{
+				Status: "idle_watchdog",
+				Error:  idleWatchdogReason(idleWindow),
+			}, toolCount.Load(), nil
+		}
 		// Distinguish external cancellation (e.g. server-initiated cancel
 		// because the issue was reassigned, or the user invoked CancelTask)
 		// from genuine drain-deadline timeouts. context.Canceled means the
@@ -2628,6 +2716,76 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 			Status: "timeout",
 			Error:  "agent did not produce result within drain timeout",
 		}, toolCount.Load(), nil
+	}
+}
+
+// idleWatchdogReason formats the human-facing explanation surfaced on
+// idle_watchdog dispositions. Centralised so the result-arrival branch and the
+// drain-timeout branch in executeAndDrain emit identical wording.
+func idleWatchdogReason(window time.Duration) string {
+	return fmt.Sprintf("agent produced no new messages for %s and message queue was empty; force-stopped by idle watchdog", window)
+}
+
+// runIdleWatchdog ticks until either agentCtx is cancelled or the backend has
+// been silent for at least window with no in-flight tool call. On firing, it
+// sets fired and calls cancel, which propagates to the agent subprocess (via
+// the ctx passed to backend.Execute) and to drainCtx. The check requires:
+//
+//  1. inFlightTools == 0 — the backend has emitted a tool_use whose
+//     matching tool_result hasn't arrived yet, meaning a real tool (e.g.
+//     `npm install`, `docker build`) is legitimately running. Long tool
+//     calls produce no messages between use and result; killing here would
+//     yank the agent mid-build. AND
+//  2. time since lastActivityAt exceeds window — the drain loop is single
+//     reader, so a stale stamp means no message has actually arrived; AND
+//  3. session.Messages buffer is empty — defensive against a hypothetical
+//     drain stall where unprocessed messages would still imply progress.
+//
+// Tick interval is window/2 (floored at 30 s in production, but the floor only
+// kicks in for windows >= 1 min so tests can pass tiny windows like 50 ms and
+// see the watchdog fire within a few ticks).
+func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window time.Duration, lastActivityAt *atomic.Int64, inFlightTools *atomic.Int32, fired *atomic.Bool, cancel context.CancelFunc, messages <-chan agent.Message, taskLog *slog.Logger, taskID string) {
+	interval := window / 2
+	if window >= time.Minute && interval < 30*time.Second {
+		interval = 30 * time.Second
+	}
+	if interval <= 0 {
+		interval = window
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-agentCtx.Done():
+			return
+		case <-ticker.C:
+			// In-flight tool call: the agent has emitted tool_use and
+			// the corresponding tool_result hasn't landed yet. A long
+			// build/install/test can sit here silently for many minutes
+			// — that is forward progress, not a hang.
+			if inFlightTools.Load() > 0 {
+				continue
+			}
+			last := time.Unix(0, lastActivityAt.Load())
+			idleFor := time.Since(last)
+			if idleFor < window {
+				continue
+			}
+			// A buffered-but-undrained message means the drain loop is
+			// behind, not the backend. Wait one more tick rather than
+			// killing a backend that is still producing output.
+			if len(messages) > 0 {
+				continue
+			}
+			taskLog.Warn("idle watchdog firing: no agent activity, force-stopping run",
+				"task", shortID(taskID),
+				"idle_for", idleFor.Round(time.Second).String(),
+				"threshold", window.String(),
+			)
+			fired.Store(true)
+			cancel()
+			return
+		}
 	}
 }
 
