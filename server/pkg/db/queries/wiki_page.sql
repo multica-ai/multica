@@ -12,7 +12,7 @@ WHERE id = $1 AND workspace_id = $2;
 WITH RECURSIVE descendants AS (
     SELECT id
     FROM wiki_page
-    WHERE parent_id = $1 AND workspace_id = $2
+    WHERE wiki_page.parent_id = $1 AND wiki_page.workspace_id = $2
   UNION ALL
     SELECT child.id
     FROM wiki_page child

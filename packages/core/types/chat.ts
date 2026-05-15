@@ -29,6 +29,14 @@ export interface ChatMessage {
   task_id: string | null;
   created_at: string;
   /**
+   * Attachments linked to this message via the attachment table's
+   * chat_message_id FK. Populated by ListChatMessages. UI renders these
+   * as file/image cards inside the bubble; the markdown URL inline in
+   * `content` may have an expiring signature, while attachment metadata
+   * here is stable and the source of truth for click-time download.
+   */
+  attachments?: import("./attachment").Attachment[];
+  /**
    * When set, this is an assistant message synthesized by the server's
    * FailTask fallback (mirrors the issue path's failure system comment).
    * `content` carries the raw daemon-reported errMsg; the front-end maps

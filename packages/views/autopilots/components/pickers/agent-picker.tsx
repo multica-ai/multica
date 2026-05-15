@@ -5,6 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Bot } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions } from "@multica/core/workspace/queries";
+import { useAuthStore } from "@multica/core/auth";
+import { isAgentSelectable } from "@multica/core/permissions";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import {
   PropertyPicker,
@@ -12,6 +14,7 @@ import {
   PickerEmpty,
 } from "../../../issues/components/pickers/property-picker";
 import { useT } from "../../../i18n";
+import { matchesPinyin } from "../../../editor/extensions/pinyin-match";
 
 export function AgentPicker({
   agentId,
@@ -31,12 +34,13 @@ export function AgentPicker({
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const active = agents.filter((a) => !a.archived_at);
+  const user = useAuthStore((s) => s.user);
+  const active = agents.filter((a) => isAgentSelectable(a, user?.id ?? null));
   const selected = active.find((a) => a.id === agentId);
 
   const query = filter.trim().toLowerCase();
   const filteredAgents = query
-    ? active.filter((a) => a.name.toLowerCase().includes(query))
+    ? active.filter((a) => a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query))
     : active;
 
   return (

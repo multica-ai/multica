@@ -68,6 +68,16 @@ UPDATE agent SET archived_at = now(), archived_by = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- name: ArchiveAgentsByRuntime :many
+-- Bulk-archives every active agent bound to any runtime in the given set.
+-- Used when revoking a leaving member's runtimes so agents pinned to those
+-- runtimes can no longer be assigned new work. Returns the affected rows so
+-- the caller can broadcast agent:archived per agent.
+UPDATE agent
+SET archived_at = now(), archived_by = @archived_by, updated_at = now()
+WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND archived_at IS NULL
+RETURNING *;
+
 -- name: RestoreAgent :one
 UPDATE agent SET archived_at = NULL, archived_by = NULL, updated_at = now()
 WHERE id = $1
@@ -80,12 +90,12 @@ ORDER BY created_at DESC;
 
 -- name: CreateAgentTask :one
 INSERT INTO agent_task_queue (
-    agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
+    agent_id, runtime_id, issue_id, status, priority, trigger_comment_id, context,
     trigger_source, trigger_actor_type, trigger_actor_id,
     trigger_summary, force_fresh_session
 )
 VALUES (
-    $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
+    $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id), sqlc.narg(context),
     $5, $6, $7,
     sqlc.narg(trigger_summary),
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE)

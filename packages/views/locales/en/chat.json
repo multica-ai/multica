@@ -9,7 +9,9 @@
     "placeholder_no_agent": "Create an agent to start chatting",
     "placeholder_archived": "This session is archived",
     "placeholder_named": "Tell {{name}} what to do…",
-    "placeholder_default": "Tell me what to do…"
+    "placeholder_default": "Tell me what to do…",
+    "send_tooltip": "Send",
+    "stop_tooltip": "Stop"
   },
   "message_list": {
     "show_details": "Show details",
@@ -35,6 +37,7 @@
       "days": "{{count}}d ago"
     },
     "row_delete_aria": "Delete chat session",
+    "row_rename_aria": "Rename chat session",
     "delete_dialog": {
       "title": "Delete chat session",
       "description_with_title": "\"{{title}}\" and its messages will be permanently removed. This action cannot be undone.",

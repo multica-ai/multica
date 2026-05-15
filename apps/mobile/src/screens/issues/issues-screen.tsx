@@ -12,9 +12,8 @@ import { useLoadMoreByStatusForWorkspace } from "@multica/core/issues/mutations"
 import {
   useMobileIssuesFilterStore,
   useRehydrateMobileIssuesFilters,
-  type ActorFilterValue,
 } from "@multica/core/issues/stores";
-import { filterIssues } from "@multica/core/issues/utils/filter";
+import { filterIssues, type ActorFilterValue } from "@multica/core/issues/utils/filter";
 import { useAuthStore } from "@multica/core/auth";
 import { useMemberList, useAgentList } from "@multica/core/workspace/hooks";
 import { useProjectList } from "@multica/core/projects/hooks";

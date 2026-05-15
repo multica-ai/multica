@@ -30,7 +30,7 @@ func TestClaudeHandleAssistantText(t *testing.T) {
 		}),
 	}
 
-	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage))
+	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage), nil)
 
 	if output.String() != "Hello world" {
 		t.Fatalf("expected output 'Hello world', got %q", output.String())
@@ -67,7 +67,7 @@ func TestClaudeHandleAssistantToolUse(t *testing.T) {
 		}),
 	}
 
-	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage))
+	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage), nil)
 
 	if output.String() != "" {
 		t.Fatalf("tool_use should not add to output, got %q", output.String())
@@ -105,7 +105,7 @@ func TestClaudeHandleUserToolResult(t *testing.T) {
 		}),
 	}
 
-	b.handleUser(msg, ch)
+	b.handleUser(msg, ch, nil)
 
 	select {
 	case m := <-ch:
@@ -114,6 +114,38 @@ func TestClaudeHandleUserToolResult(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected message on channel")
+	}
+}
+
+func TestClaudeHandleUserDetectsPermissionNotGrantedText(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 10)
+
+	msg := claudeSDKMessage{
+		Type: "user",
+		Message: mustMarshal(t, claudeMessageContent{
+			Role: "user",
+			Content: []claudeContentBlock{
+				{
+					Type:      "tool_result",
+					ToolUseID: "call-1",
+					Content:   mustMarshal(t, "Claude requested permissions to write to /tmp/example.txt, but you haven't granted it yet."),
+				},
+			},
+		}),
+	}
+
+	if !b.handleUser(msg, ch, nil) {
+		t.Fatal("expected permission-not-granted text to be detected")
+	}
+}
+
+func TestClaudePermissionNotGrantedMatcherIgnoresNormalOutput(t *testing.T) {
+	t.Parallel()
+	if isClaudePermissionNotGranted("normal tool output") {
+		t.Fatal("normal output should not match permission-not-granted text")
 	}
 }
 
@@ -134,7 +166,8 @@ func TestClaudeHandleControlRequestAutoApproves(t *testing.T) {
 		}),
 	}
 
-	b.handleControlRequest(msg, &written)
+	// nil callback = auto mode
+	b.handleControlRequest(context.Background(), msg, &written, nil)
 
 	var resp map[string]any
 	if err := json.Unmarshal(bytes.TrimSpace(written.Bytes()), &resp); err != nil {
@@ -154,6 +187,69 @@ func TestClaudeHandleControlRequestAutoApproves(t *testing.T) {
 	}
 }
 
+func TestClaudeHandleControlRequestPromptAllow(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	var written bytes.Buffer
+
+	msg := claudeSDKMessage{
+		Type:      "control_request",
+		RequestID: "req-99",
+		Request: mustMarshal(t, claudeControlRequestPayload{
+			Subtype:  "tool_use",
+			ToolName: "Bash",
+			Input:    mustMarshal(t, map[string]any{"command": "rm -rf /tmp/test"}),
+		}),
+	}
+
+	callback := func(_ context.Context, req ApprovalRequest) (string, bool, error) {
+		if req.Type != "permission_request" {
+			t.Errorf("expected type permission_request, got %q", req.Type)
+		}
+		return "allow", true, nil
+	}
+
+	b.handleControlRequest(context.Background(), msg, &written, callback)
+
+	var resp map[string]any
+	json.Unmarshal(bytes.TrimSpace(written.Bytes()), &resp)
+	inner := resp["response"].(map[string]any)["response"].(map[string]any)
+	if inner["behavior"] != "allow" {
+		t.Fatalf("expected behavior allow, got %v", inner["behavior"])
+	}
+}
+
+func TestClaudeHandleControlRequestPromptDeny(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	var written bytes.Buffer
+
+	msg := claudeSDKMessage{
+		Type:      "control_request",
+		RequestID: "req-100",
+		Request: mustMarshal(t, claudeControlRequestPayload{
+			Subtype:  "tool_use",
+			ToolName: "Bash",
+			Input:    mustMarshal(t, map[string]any{"command": "rm -rf /"}),
+		}),
+	}
+
+	callback := func(_ context.Context, _ ApprovalRequest) (string, bool, error) {
+		return "deny", false, nil
+	}
+
+	b.handleControlRequest(context.Background(), msg, &written, callback)
+
+	var resp map[string]any
+	json.Unmarshal(bytes.TrimSpace(written.Bytes()), &resp)
+	inner := resp["response"].(map[string]any)["response"].(map[string]any)
+	if inner["behavior"] != "deny" {
+		t.Fatalf("expected behavior deny, got %v", inner["behavior"])
+	}
+}
+
 func TestClaudeHandleAssistantInvalidJSON(t *testing.T) {
 	t.Parallel()
 
@@ -167,7 +263,7 @@ func TestClaudeHandleAssistantInvalidJSON(t *testing.T) {
 	}
 
 	// Should not panic
-	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage))
+	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage), nil)
 
 	if output.String() != "" {
 		t.Fatalf("expected empty output for invalid JSON, got %q", output.String())
@@ -219,6 +315,168 @@ func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
 		if args[i] != want {
 			t.Fatalf("expected args[%d] = %q, got %q", i, want, args[i])
 		}
+	}
+}
+
+func TestBuildClaudeArgsPromptModeUsesDefault(t *testing.T) {
+	t.Parallel()
+
+	dummyCallback := func(_ context.Context, _ ApprovalRequest) (string, bool, error) {
+		return "allow", true, nil
+	}
+	args := buildClaudeArgs(ExecOptions{OnApproval: dummyCallback}, slog.Default())
+
+	foundDefault := false
+	for i, a := range args {
+		if a == "--permission-mode" && i+1 < len(args) {
+			if args[i+1] == "default" {
+				foundDefault = true
+			} else if args[i+1] == "bypassPermissions" {
+				t.Fatalf("prompt mode should not use bypassPermissions: %v", args)
+			}
+		}
+	}
+	if !foundDefault {
+		t.Fatalf("expected --permission-mode default in prompt mode args: %v", args)
+	}
+}
+
+func TestBuildClaudeArgsPromptModeBlocksCustomPermissionMode(t *testing.T) {
+	t.Parallel()
+
+	dummyCallback := func(_ context.Context, _ ApprovalRequest) (string, bool, error) {
+		return "allow", true, nil
+	}
+	args := buildClaudeArgs(ExecOptions{
+		OnApproval: dummyCallback,
+		CustomArgs: []string{"--permission-mode", "bypassPermissions", "--model", "o3"},
+	}, slog.Default())
+
+	// --permission-mode should be "default" (set by daemon), not "bypassPermissions" (from custom args).
+	for i, a := range args {
+		if a == "--permission-mode" && i+1 < len(args) {
+			if args[i+1] != "default" {
+				t.Fatalf("prompt mode should force --permission-mode default, got %q: %v", args[i+1], args)
+			}
+		}
+	}
+	// --model o3 should still pass through.
+	foundModel := false
+	for i, a := range args {
+		if a == "--model" && i+1 < len(args) && args[i+1] == "o3" {
+			foundModel = true
+		}
+	}
+	if !foundModel {
+		t.Fatalf("expected --model o3 to pass through: %v", args)
+	}
+}
+
+func TestBuildClaudeArgsPromptModeAllowsControlledPlanMode(t *testing.T) {
+	t.Parallel()
+
+	dummyCallback := func(_ context.Context, _ ApprovalRequest) (string, bool, error) {
+		return "allow", true, nil
+	}
+	args := buildClaudeArgs(ExecOptions{
+		OnApproval:           dummyCallback,
+		ClaudePermissionMode: "plan",
+	}, slog.Default())
+
+	for i, a := range args {
+		if a == "--permission-mode" && i+1 < len(args) {
+			if args[i+1] != "plan" {
+				t.Fatalf("expected controlled plan mode, got %q: %v", args[i+1], args)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing --permission-mode: %v", args)
+}
+
+func TestBuildClaudeArgsAutoIgnoresControlledPlanMode(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs(ExecOptions{ClaudePermissionMode: "plan"}, slog.Default())
+	for i, a := range args {
+		if a == "--permission-mode" && i+1 < len(args) {
+			if args[i+1] != "bypassPermissions" {
+				t.Fatalf("auto mode should keep bypassPermissions, got %q: %v", args[i+1], args)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing --permission-mode: %v", args)
+}
+
+func TestAskUserQuestionBecomesUserInputRequest(t *testing.T) {
+	t.Parallel()
+
+	req := buildClaudeSDKUserInputRequest(mustMarshal(t, map[string]any{
+		"questions": []map[string]any{
+			{
+				"header":   "Delete",
+				"question": "Delete the temp directory?",
+				"options": []map[string]any{
+					{"label": "Allow", "description": "Delete it now"},
+					{"label": "Cancel", "description": "Keep the directory"},
+				},
+			},
+		},
+	}))
+
+	if req.Type != "user_input_request" {
+		t.Fatalf("type = %q, want user_input_request", req.Type)
+	}
+	if req.Title != "Delete" {
+		t.Fatalf("title = %q", req.Title)
+	}
+	if req.DefaultOption != "Allow" {
+		t.Fatalf("default option = %q, want Allow", req.DefaultOption)
+	}
+	if len(req.Options) != 2 || req.Options[0].ID != "Allow" || req.Options[1].ID != "Cancel" {
+		t.Fatalf("unexpected options: %+v", req.Options)
+	}
+	if !strings.Contains(req.Detail, "Delete the temp directory?") || !strings.Contains(req.Detail, "Delete it now") {
+		t.Fatalf("detail missing question context: %q", req.Detail)
+	}
+}
+
+func TestApprovalChoiceCarriesResponseMessage(t *testing.T) {
+	t.Parallel()
+
+	encoded := EncodeApprovalChoice("revise", "focus on phase 1")
+	chosen, message := SplitApprovalChoice(encoded)
+
+	if chosen != "revise" {
+		t.Fatalf("chosen = %q, want revise", chosen)
+	}
+	if message != "focus on phase 1" {
+		t.Fatalf("message = %q", message)
+	}
+}
+
+func TestClaudeSDKBridgeExtractsExitPlanText(t *testing.T) {
+	t.Parallel()
+
+	got := extractExitPlanText(mustMarshal(t, map[string]any{"plan": "# Plan\n\n1. Inspect\n2. Implement"}))
+
+	if !strings.Contains(got, "# Plan") || !strings.Contains(got, "Implement") {
+		t.Fatalf("unexpected plan text: %q", got)
+	}
+}
+
+func TestClaudeSDKBridgePlanApprovalRejectAbortsLocally(t *testing.T) {
+	t.Parallel()
+
+	if !shouldAbortPlanApproval("deny", nil) {
+		t.Fatal("deny should abort plan approval locally")
+	}
+	if shouldAbortPlanApproval("revise", nil) {
+		t.Fatal("revise should stay in the Claude plan session")
+	}
+	if shouldAbortPlanApproval("allow", nil) {
+		t.Fatal("allow should continue the Claude plan session")
 	}
 }
 

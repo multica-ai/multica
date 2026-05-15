@@ -265,7 +265,7 @@ export function useIssueTimeline(
   // --- Mutation functions ---
 
   const submitComment = useCallback(
-    async (content: string, attachmentIds?: string[]) => {
+    async (content: string, attachmentIds?: string[], type = "comment") => {
       if (!content.trim()) return;
       if (submitting) throw new Error("Comment submission already in progress");
       if (!userId) {
@@ -274,9 +274,9 @@ export function useIssueTimeline(
       }
       setSubmitting(true);
       try {
-        await createComment({ content, attachmentIds });
-      } catch {
-        toast.error(t(($) => $.comment.send_failed));
+        await createComment({ content, type, attachmentIds });
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t(($) => $.comment.send_failed));
       } finally {
         setSubmitting(false);
       }
@@ -298,17 +298,17 @@ export function useIssueTimeline(
           parentId,
           attachmentIds,
         });
-      } catch {
-        toast.error(t(($) => $.comment.send_reply_failed));
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t(($) => $.comment.send_reply_failed));
       }
     },
     [userId, createComment, t],
   );
 
   const editComment = useCallback(
-    async (commentId: string, content: string) => {
+    async (commentId: string, content: string, attachmentIds?: string[]) => {
       try {
-        await updateComment({ commentId, content });
+        await updateComment({ commentId, content, attachmentIds });
       } catch {
         toast.error(t(($) => $.comment.update_failed));
       }

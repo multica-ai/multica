@@ -1,7 +1,7 @@
 "use client";
 
-import { Component, useState, useEffect, useCallback, useMemo, useRef } from "react";
-import type { ReactNode } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
+import { Virtuoso } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
@@ -20,6 +20,8 @@ import {
   Pin,
   PinOff,
   Plus,
+  MessageSquare,
+  MessageSquareReply,
   Users,
 } from "lucide-react";
 import { PageHeader } from "../../layout/page-header";
@@ -37,6 +39,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
@@ -58,28 +61,35 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
-import type { IssueStatus, IssuePriority, TimelineEntry } from "@multica/core/types";
+import type { Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
+import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { useIssueActions } from "../actions";
 import { IssueActionsMenuItems, dropdownPrimitives } from "../actions/issue-actions-menu-items";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
-import { CommentInput } from "./comment-input";
+import { CommentInput, type CommentInputRef } from "./comment-input";
+import type { ReplyInputRef } from "./reply-input";
+import { AgentStreamSidebar } from "./agent-stream-sidebar";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { collectThreadReplies } from "./thread-utils";
 import { AgentLiveCard } from "./agent-live-card";
 import { ExecutionLogSection } from "./execution-log-section";
+import { PullRequestList } from "./pull-request-list";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
-import { toast } from "sonner";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { useClearIssueHistory } from "@multica/core/issues/mutations";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
+import { useCommentCollapseStore } from "@multica/core/issues/stores";
+import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
+import { BatchActionToolbar } from "./batch-action-toolbar";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
 import { useIssueReactions } from "../hooks/use-issue-reactions";
 import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
@@ -90,7 +100,90 @@ import { timeAgo } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
+
+function SubscriberPopoverContent({
+  members,
+  agents,
+  subscribers,
+  toggleSubscriber,
+  t,
+}: {
+  members: { user_id: string; name: string }[];
+  agents: { id: string; name: string; archived_at?: string | null }[];
+  subscribers: { user_type: string; user_id: string }[];
+  toggleSubscriber: (id: string, type: "member" | "agent", subscribed: boolean) => void;
+  t: ActivityT;
+}) {
+  const [search, setSearch] = useState("");
+  const q = search.trim().toLowerCase();
+
+  const uniqueMembers = members.filter((m, i, arr) => arr.findIndex((x) => x.user_id === m.user_id) === i);
+  const activeAgents = agents.filter((a) => !a.archived_at);
+
+  const filteredMembers = q
+    ? uniqueMembers.filter((m) => m.name.toLowerCase().includes(q) || matchesPinyin(m.name, q))
+    : uniqueMembers;
+  const filteredAgents = q
+    ? activeAgents.filter((a) => a.name.toLowerCase().includes(q) || matchesPinyin(a.name, q))
+    : activeAgents;
+
+  return (
+    <PopoverContent align="end" className="w-64 p-0">
+      <Command shouldFilter={false}>
+        <CommandInput
+          placeholder={t(($) => $.detail.change_subscribers_placeholder)}
+          value={search}
+          onValueChange={setSearch}
+        />
+        <CommandList className="max-h-64">
+          {filteredMembers.length === 0 && filteredAgents.length === 0 && (
+            <CommandEmpty>{t(($) => $.detail.no_subscribers_results)}</CommandEmpty>
+          )}
+          {filteredMembers.length > 0 && (
+            <CommandGroup heading={t(($) => $.detail.members_group)}>
+              {filteredMembers.map((m) => {
+                const sub = subscribers.find((s) => s.user_type === "member" && s.user_id === m.user_id);
+                const isSubbed = !!sub;
+                return (
+                  <CommandItem
+                    key={`member-${m.user_id}`}
+                    onSelect={() => toggleSubscriber(m.user_id, "member", isSubbed)}
+                    className="flex items-center gap-2.5"
+                  >
+                    <Checkbox checked={isSubbed} className="pointer-events-none" />
+                    <ActorAvatar actorType="member" actorId={m.user_id} size={22} />
+                    <span className="truncate flex-1">{m.name}</span>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          )}
+          {filteredAgents.length > 0 && (
+            <CommandGroup heading={t(($) => $.detail.agents_group)}>
+              {filteredAgents.map((a) => {
+                const sub = subscribers.find((s) => s.user_type === "agent" && s.user_id === a.id);
+                const isSubbed = !!sub;
+                return (
+                  <CommandItem
+                    key={`agent-${a.id}`}
+                    onSelect={() => toggleSubscriber(a.id, "agent", isSubbed)}
+                    className="flex items-center gap-2.5"
+                  >
+                    <Checkbox checked={isSubbed} className="pointer-events-none" />
+                    <ActorAvatar actorType="agent" actorId={a.id} size={22} showStatusDot />
+                    <span className="truncate flex-1">{a.name}</span>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          )}
+        </CommandList>
+      </Command>
+    </PopoverContent>
+  );
+}
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
@@ -161,6 +254,25 @@ function formatActivity(
       return t(($) => $.activity.task_completed, { count: entry.coalesced_count ?? 1 });
     case "task_failed":
       return t(($) => $.activity.task_failed, { count: entry.coalesced_count ?? 1 });
+    case "squad_leader_evaluated": {
+      const reason = details.reason?.trim();
+      switch (details.outcome) {
+        case "action":
+          return reason
+            ? t(($) => $.activity.squad_leader_action_reason, { reason })
+            : t(($) => $.activity.squad_leader_action);
+        case "no_action":
+          return reason
+            ? t(($) => $.activity.squad_leader_no_action_reason, { reason })
+            : t(($) => $.activity.squad_leader_no_action);
+        case "failed":
+          return reason
+            ? t(($) => $.activity.squad_leader_failed_reason, { reason })
+            : t(($) => $.activity.squad_leader_failed);
+        default:
+          return t(($) => $.activity.squad_leader_evaluated);
+      }
+    }
     default:
       return entry.action ?? "";
   }
@@ -179,7 +291,61 @@ function formatTokenCount(n: number): string {
 
 // Stable reference for threads with no replies. Inline `[]` would create a
 // new array on every render and bust React.memo on CommentCard / ResolvedThreadBar.
+type TimelineItem =
+  | { kind: "comment"; id: string; entry: TimelineEntry }
+  | { kind: "resolved-bar"; id: string; entry: TimelineEntry }
+  | { kind: "activity-group"; id: string; entries: TimelineEntry[] };
+
+type RawTimelineGroup = {
+  type: "comment" | "activities";
+  entries: TimelineEntry[];
+};
+
+function flattenGroups(
+  groups: ReadonlyArray<RawTimelineGroup>,
+  expandedResolved: ReadonlySet<string>,
+): TimelineItem[] {
+  const out: TimelineItem[] = [];
+  for (const group of groups) {
+    if (group.type === "comment") {
+      const entry = group.entries[0]!;
+      const isResolved = !!entry.resolved_at;
+      const isExpanded = expandedResolved.has(entry.id);
+      out.push(
+        isResolved && !isExpanded
+          ? { kind: "resolved-bar", id: entry.id, entry }
+          : { kind: "comment", id: entry.id, entry },
+      );
+    } else {
+      out.push({
+        kind: "activity-group",
+        id: group.entries[0]!.id,
+        entries: group.entries,
+      });
+    }
+  }
+  return out;
+}
+
 const EMPTY_REPLIES: TimelineEntry[] = [];
+const MAX_SELECTED_QUOTE_CHARS = 4000;
+const SELECTION_BLOCKED_SELECTOR = [
+  "input",
+  "textarea",
+  "button",
+  "a",
+  "[contenteditable='true']",
+  ".ProseMirror",
+  "[role='button']",
+  "[data-node-view-wrapper]",
+].join(",");
+
+type QuoteSelectionMenuState = {
+  text: string;
+  x: number;
+  y: number;
+  threadRootId: string | null;
+};
 
 // Shallow array equality by element identity. Used to reuse the previous
 // render's per-thread reply slice when nothing in *this* thread changed,
@@ -211,6 +377,146 @@ function TimelineSkeleton() {
   );
 }
 
+function formatSelectedTextAsQuote(text: string): { markdown: string; truncated: boolean } {
+  const normalized = text.replace(/\r\n?/g, "\n").trim();
+  const truncated = normalized.length > MAX_SELECTED_QUOTE_CHARS;
+  const selected = truncated
+    ? normalized.slice(0, MAX_SELECTED_QUOTE_CHARS).trimEnd()
+    : normalized;
+  const quoted = selected
+    .split("\n")
+    .map((line) => (line.trim().length > 0 ? `> ${line}` : ">"))
+    .join("\n");
+  return { markdown: `${quoted}\n\n`, truncated };
+}
+
+function elementFromSelectionNode(node: Node | null): Element | null {
+  if (!node) return null;
+  return node.nodeType === Node.ELEMENT_NODE
+    ? (node as Element)
+    : node.parentElement;
+}
+
+function isBlockedSelectionTarget(node: Node | null): boolean {
+  return !!elementFromSelectionNode(node)?.closest(SELECTION_BLOCKED_SELECTOR);
+}
+
+function closestThreadRootId(node: Node | null): string | null {
+  const el = elementFromSelectionNode(node);
+  return el?.closest("[data-thread-root-id]")?.getAttribute("data-thread-root-id") ?? null;
+}
+
+function inferThreadRootId(selection: Selection): string | null {
+  const anchorRoot = closestThreadRootId(selection.anchorNode);
+  const focusRoot = closestThreadRootId(selection.focusNode);
+  if (anchorRoot && focusRoot && anchorRoot === focusRoot) return anchorRoot;
+  if (anchorRoot && !focusRoot) return anchorRoot;
+  if (focusRoot && !anchorRoot) return focusRoot;
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// SubIssueRow — sub-issue list item with inline status & assignee editing
+// ---------------------------------------------------------------------------
+
+function SubIssueRow({ child }: { child: Issue }) {
+  const { t } = useT("issues");
+  const paths = useWorkspacePaths();
+  const updateIssue = useUpdateIssue();
+  const selected = useIssueSelectionStore((s) => s.selectedIds.has(child.id));
+  const toggleSelected = useIssueSelectionStore((s) => s.toggle);
+  const isDone = child.status === "done" || child.status === "cancelled";
+
+  const handleUpdate = useCallback(
+    (updates: Partial<UpdateIssueRequest>) => {
+      updateIssue.mutate(
+        { id: child.id, ...updates },
+        { onError: () => toast.error(t(($) => $.detail.update_failed)) },
+      );
+    },
+    [child.id, updateIssue, t],
+  );
+
+  // AppLink wraps only the title/identifier area. Pickers and checkbox are
+  // siblings, so their clicks never navigate — no stopPropagation acrobatics
+  // and no risk of the native checkbox / picker triggers being blocked.
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2.5 px-3 py-2 hover:bg-accent/50 transition-colors group/row",
+        selected && "bg-accent/30",
+      )}
+    >
+      <div
+        className={cn(
+          "flex h-4 w-4 shrink-0 items-center justify-center transition-opacity",
+          selected
+            ? "opacity-100"
+            : "opacity-0 group-hover/row:opacity-100 focus-within:opacity-100",
+        )}
+      >
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={() => toggleSelected(child.id)}
+          aria-label={`Select ${child.identifier}`}
+          className="cursor-pointer accent-primary"
+        />
+      </div>
+      <StatusPicker
+        status={child.status}
+        onUpdate={handleUpdate}
+        align="start"
+        trigger={
+          <StatusIcon
+            status={child.status}
+            className="h-[15px] w-[15px] shrink-0"
+          />
+        }
+      />
+      <AppLink
+        href={paths.issueDetail(child.id)}
+        className="flex min-w-0 flex-1 items-center gap-2.5"
+      >
+        <span className="text-[11px] text-muted-foreground tabular-nums font-medium shrink-0">
+          {child.identifier}
+        </span>
+        <span
+          className={cn(
+            "text-sm truncate flex-1",
+            isDone
+              ? "text-muted-foreground"
+              : "group-hover/row:text-foreground",
+          )}
+        >
+          {child.title}
+        </span>
+      </AppLink>
+      <AssigneePicker
+        assigneeType={child.assignee_type}
+        assigneeId={child.assignee_id}
+        onUpdate={handleUpdate}
+        align="end"
+        trigger={
+          child.assignee_type && child.assignee_id ? (
+            <ActorAvatar
+              actorType={child.assignee_type}
+              actorId={child.assignee_id}
+              size={20}
+              className="shrink-0"
+            />
+          ) : (
+            <span
+              aria-hidden
+              className="h-5 w-5 rounded-full border border-dashed border-muted-foreground/30 shrink-0"
+            />
+          )
+        }
+      />
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -222,51 +528,26 @@ interface IssueDetailProps {
   onDone?: () => void;
   defaultSidebarOpen?: boolean;
   layoutId?: string;
+  /** Pixel cap for the desktop right sidebar when resizing. */
+  sidebarMaxSize?: number;
   /** When set, the issue detail will auto-scroll to this comment and briefly highlight it. */
   highlightCommentId?: string;
-}
-
-// ---------------------------------------------------------------------------
-// TimelineErrorBoundary — catches render crashes in the timeline section
-// ---------------------------------------------------------------------------
-
-type TimelineErrorBoundaryProps = {
-  children: ReactNode;
-  fallback?: ReactNode;
-};
-
-type TimelineErrorBoundaryState = {
-  hasError: boolean;
-};
-
-class TimelineErrorBoundary extends Component<TimelineErrorBoundaryProps, TimelineErrorBoundaryState> {
-  constructor(props: TimelineErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false };
-  }
-
-  static getDerivedStateFromError(): TimelineErrorBoundaryState {
-    return { hasError: true };
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return this.props.fallback ?? (
-        <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-center text-sm text-muted-foreground">
-          Failed to load comments. Please refresh the page.
-        </div>
-      );
-    }
-    return this.props.children;
-  }
 }
 
 // ---------------------------------------------------------------------------
 // IssueDetail
 // ---------------------------------------------------------------------------
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
-  const { t } = useT("issues");
+export function IssueDetail({
+  issueId,
+  onDelete,
+  onDone,
+  defaultSidebarOpen = true,
+  layoutId = "multica_issue_detail_layout",
+  sidebarMaxSize = 560,
+  highlightCommentId,
+}: IssueDetailProps) {
+  const { t, i18n } = useT("issues");
   // `issueId` is the raw route param — may be a UUID *or* a human-readable
   // identifier (e.g. "OPE-460") when the URL has been canonicalized.  We keep
   // it around only for the initial detail query (the API accepts both formats)
@@ -312,16 +593,36 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
+  const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  // Virtuoso's `customScrollParent` wants the HTMLElement, not a ref. A plain
+  // `useRef.current` does not trigger a re-render when it populates, so the
+  // Virtuoso prop would never receive the element. Callback ref + state fixes
+  // that: setState triggers the re-render that hands Virtuoso the element.
+  const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
+  const detailRootRef = useRef<HTMLDivElement>(null);
+  const commentInputRef = useRef<CommentInputRef>(null);
+  const replyControllersRef = useRef<Map<string, ReplyInputRef>>(new Map());
+  const [quoteMenu, setQuoteMenu] = useState<QuoteSelectionMenuState | null>(null);
+  const [quoteChooserOpen, setQuoteChooserOpen] = useState(false);
+  const closeQuoteMenu = useCallback(() => {
+    setQuoteMenu(null);
+    setQuoteChooserOpen(false);
+  }, []);
+  const registerReplyController = useCallback((threadRootId: string, controller: ReplyInputRef | null) => {
+    if (controller) {
+      replyControllersRef.current.set(threadRootId, controller);
+    } else {
+      replyControllersRef.current.delete(threadRootId);
+    }
+  }, []);
   const scrollToTop = useCallback(() => {
-    scrollContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-  }, []);
+    scrollContainerEl?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [scrollContainerEl]);
   const scrollToBottom = useCallback(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
-  }, []);
+    if (!scrollContainerEl) return;
+    scrollContainerEl.scrollTo({ top: scrollContainerEl.scrollHeight, behavior: "smooth" });
+  }, [scrollContainerEl]);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
   // Per-session: which resolved threads the user has temporarily expanded.
@@ -374,9 +675,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
   useEffect(() => {
     if (issue) {
-      recordVisit(issue.id);
+      recordVisit(wsId, issue.id);
     }
-  }, [issue?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [issue?.id, wsId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fire `onDelete` once when the issue transitions from loaded to missing.
   // Delete goes through a shell-level modal, so the caller (e.g. inbox) can't
@@ -481,13 +782,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     // Coalesce consecutive activities from the same actor + action.
     // - task_completed / task_failed: no time limit (these repeat across runs)
     // - all other actions: within a 2-minute window
+    // - squad_leader_evaluated: never coalesce; outcome/reason are audit data
     const COALESCE_MS = 2 * 60 * 1000;
     const NO_TIME_LIMIT_ACTIONS = new Set(["task_completed", "task_failed"]);
+    const NEVER_COALESCE_ACTIONS = new Set(["squad_leader_evaluated"]);
     const coalesced: TimelineEntry[] = [];
     for (const entry of topLevel) {
       if (entry.type === "activity") {
         const prev = coalesced[coalesced.length - 1];
         if (
+          !NEVER_COALESCE_ACTIONS.has(entry.action!) &&
           prev?.type === "activity" &&
           prev.action === entry.action &&
           prev.actor_type === entry.actor_type &&
@@ -520,6 +824,36 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     return { threadReplies, commentById, groups };
   }, [timeline]);
 
+  // Flat array consumed by <Virtuoso>. Recomputed when timelineView.groups
+  // changes (timeline events) or expandedResolved flips (user toggles a
+  // resolved thread).
+  const items = useMemo<TimelineItem[]>(
+    () => flattenGroups(timelineView.groups, expandedResolved),
+    [timelineView.groups, expandedResolved],
+  );
+
+  // Map of reply-comment id → root-comment id, so a deep-link to a reply
+  // can fall back to scrolling the root thread into view.
+  const replyToRoot = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const [rootId, replies] of timelineView.threadReplies) {
+      for (const reply of replies) {
+        map.set(reply.id, rootId);
+      }
+    }
+    return map;
+  }, [timelineView.threadReplies]);
+
+  // Deep-link target index in the flat items array.
+  const targetIdx = useMemo(() => {
+    if (!highlightCommentId) return -1;
+    const direct = items.findIndex((it) => it.id === highlightCommentId);
+    if (direct >= 0) return direct;
+    const rootId = replyToRoot.get(highlightCommentId);
+    if (!rootId) return -1;
+    return items.findIndex((it) => it.id === rootId);
+  }, [items, highlightCommentId, replyToRoot]);
+
   const {
     reactions: issueReactions,
     toggleReaction: handleToggleIssueReaction,
@@ -529,8 +863,25 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     subscribers, isSubscribed, toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
   } = useIssueSubscribers(resolvedId, user?.id);
 
+  const topLevelComments = useMemo(
+    () => timeline.filter((entry) => entry.type === "comment" && !entry.parent_id),
+    [timeline],
+  );
+  const selectionQuoteReplyTargets = useMemo(
+    () => topLevelComments.map((comment) => ({
+      id: comment.id,
+      label: getActorName(comment.actor_type, comment.actor_id),
+      meta: new Date(comment.created_at).toLocaleString(i18n.language),
+    })),
+    [getActorName, i18n.language, topLevelComments],
+  );
+
   // Token usage
   const { data: usage } = useQuery(issueUsageOptions(resolvedId));
+
+  // Attachments uploaded against this issue. Drives the description
+  // editor's click-time fresh-sign download.
+  const { data: issueAttachments } = useQuery(issueAttachmentsOptions(id));
 
   // Sub-issue queries
   const parentIssueId = issue?.parent_issue_id;
@@ -551,26 +902,75 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   });
   const [subIssuesCollapsed, setSubIssuesCollapsed] = useState(false);
 
+  // Selection store is global (workspace-scoped); clear it whenever this
+  // issue detail is mounted or switched.
+  const clearSelection = useIssueSelectionStore((s) => s.clear);
+  const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
+  const selectIds = useIssueSelectionStore((s) => s.select);
+  const deselectIds = useIssueSelectionStore((s) => s.deselect);
+  useEffect(() => {
+    clearSelection();
+    return clearSelection;
+  }, [id, clearSelection]);
+
+  const childIssueIds = useMemo(() => childIssues.map((c) => c.id), [childIssues]);
+  const childSelectedCount = childIssueIds.filter((cid) =>
+    selectedIds.has(cid),
+  ).length;
+  const allChildrenSelected =
+    childIssueIds.length > 0 && childSelectedCount === childIssueIds.length;
+  const someChildrenSelected = childSelectedCount > 0;
+  const handleToggleSelectAllChildren = useCallback(() => {
+    if (allChildrenSelected) deselectIds(childIssueIds);
+    else selectIds(childIssueIds);
+  }, [allChildrenSelected, childIssueIds, deselectIds, selectIds]);
+
   const loading = issueLoading;
 
-  // Scroll to highlighted comment once timeline loads (fire only once per highlightCommentId)
+  // Deep-link landing. Semantically equivalent to navigating to
+  // `#comment-${id}`: find the element with that id, scrollIntoView it.
+  // When `highlightCommentId` is set the timeline below renders flat (no
+  // virtualization), so every comment id is in the DOM by the time this
+  // effect runs after commit.
+  //
+  // For a reply inside a folded resolved thread, the reply is not in items
+  // (only the resolved-bar root is). Auto-expand the thread first; the
+  // effect re-runs once items re-flatten.
+  //
+  // `scrollContainerEl` is in deps because the component early-returns a
+  // loading skeleton while the issue query is pending. The scroll-container
+  // ref populates only on the post-loading render, so it's the signal that
+  // the timeline (and the deep-link target id) has actually rendered.
   useEffect(() => {
-    if (!requestedCommentId || timeline.length === 0) return;
-    if (didHighlightRef.current === requestedCommentId) return;
-    const el = document.getElementById(`comment-${requestedCommentId}`);
-    if (el) {
-      didHighlightRef.current = requestedCommentId;
-      requestAnimationFrame(() => {
-        if (typeof el.scrollIntoView === "function") {
-          el.scrollIntoView({ behavior: "auto", block: "center" });
-        }
-        setHighlightedId(requestedCommentId);
-        const timer = setTimeout(() => setHighlightedId(null), 2000);
-        return () => clearTimeout(timer);
-      });
-    }
-  }, [requestedCommentId, timeline.length]);
+    if (!highlightCommentId || items.length === 0) return;
+    if (didHighlightRef.current === highlightCommentId) return;
 
+    const rootId = replyToRoot.get(highlightCommentId);
+    if (
+      rootId &&
+      rootId !== highlightCommentId &&
+      items[targetIdx]?.kind === "resolved-bar"
+    ) {
+      toggleResolvedExpand(rootId, true);
+      return;
+    }
+
+    const el = document.getElementById(`comment-${highlightCommentId}`);
+    if (!el) return;
+
+    didHighlightRef.current = highlightCommentId;
+    el.scrollIntoView({ block: "center" });
+
+    setHighlightedId(highlightCommentId);
+    const fade = window.setTimeout(() => setHighlightedId(null), 2500);
+    return () => clearTimeout(fade);
+  }, [highlightCommentId, items, targetIdx, scrollContainerEl, replyToRoot, toggleResolvedExpand]);
+
+  // Cmd-F / Ctrl-F on a virtualized timeline only searches what's mounted in
+  // the viewport — off-screen comments are invisible to browser find-in-page.
+  // Intercept once per (session, issue) when the list is long enough that the
+  // user might actually try; let the keystroke pass through on short lists.
+  // Real fix is in-app search (separate PR); this is the toast stopgap.
   useEffect(() => {
     if (!issue) return;
     const match = router.pathname.match(/\/issues\/([^/?#]+)/);
@@ -587,10 +987,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
   });
-  // Description uploads don't pass issueId — the URL lives in the markdown.
-  // This avoids stale attachment records when users delete images from the editor.
+  // Pending uploads in the description editor. We don't pass `issueId` on
+  // upload (to avoid orphaning attachments when the user deletes the file
+  // from the markdown), so they start unattached and we re-bind them via
+  // `attachment_ids` on the next description save. Drives editor previews
+  // so text/code attachments show an Eye before the bind round-trips.
+  const [descPendingAttachments, setDescPendingAttachments] = useState<Attachment[]>([]);
+  const descEditorAttachments = descPendingAttachments.length > 0
+    ? [...(issueAttachments ?? []), ...descPendingAttachments]
+    : issueAttachments;
   const handleDescriptionUpload = useCallback(
-    (file: File) => uploadWithToast(file),
+    async (file: File) => {
+      const result = await uploadWithToast(file);
+      if (result) setDescPendingAttachments((prev) => [...prev, result]);
+      return result;
+    },
     [uploadWithToast],
   );
 
@@ -598,6 +1009,145 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
+
+  const insertQuoteToNewComment = useCallback((markdown: string) => {
+    closeQuoteMenu();
+    scrollToBottom();
+    window.setTimeout(() => {
+      commentInputRef.current?.appendMarkdown(markdown);
+    }, 120);
+  }, [closeQuoteMenu, scrollToBottom]);
+
+  const insertQuoteToReply = useCallback((threadRootId: string, markdown: string) => {
+    closeQuoteMenu();
+    toggleResolvedExpand(threadRootId, true);
+    const collapsed = useCommentCollapseStore.getState().isCollapsed(resolvedId, threadRootId);
+    if (collapsed) {
+      useCommentCollapseStore.getState().toggle(resolvedId, threadRootId);
+    }
+
+    const append = () => {
+      const controller = replyControllersRef.current.get(threadRootId);
+      if (!controller) return false;
+      controller.appendMarkdown(markdown);
+      return true;
+    };
+
+    if (append()) return;
+
+    const target = document.getElementById(`comment-${threadRootId}`);
+    target?.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    window.setTimeout(() => {
+      if (append()) return;
+      window.setTimeout(() => {
+        if (!append()) {
+          toast.error(t(($) => $.quote.reply_input_not_ready));
+        }
+      }, 250);
+    }, 180);
+  }, [closeQuoteMenu, resolvedId, t, toggleResolvedExpand]);
+
+  const buildQuoteFromMenu = useCallback(() => {
+    if (!quoteMenu) return null;
+    const result = formatSelectedTextAsQuote(quoteMenu.text);
+    if (result.truncated) {
+      toast.message(t(($) => $.quote.truncated, { count: MAX_SELECTED_QUOTE_CHARS }));
+    }
+    return result.markdown;
+  }, [quoteMenu, t]);
+
+  const formatMarkdownSelectionAsQuote = useCallback((markdown: string) => {
+    const result = formatSelectedTextAsQuote(markdown);
+    if (result.truncated) {
+      toast.message(t(($) => $.quote.truncated, { count: MAX_SELECTED_QUOTE_CHARS }));
+    }
+    return result.markdown;
+  }, [t]);
+
+  const handleQuoteToNewComment = useCallback(() => {
+    const markdown = buildQuoteFromMenu();
+    if (!markdown) return;
+    insertQuoteToNewComment(markdown);
+  }, [buildQuoteFromMenu, insertQuoteToNewComment]);
+
+  const handleEditorQuoteToNewComment = useCallback((markdown: string) => {
+    insertQuoteToNewComment(formatMarkdownSelectionAsQuote(markdown));
+  }, [formatMarkdownSelectionAsQuote, insertQuoteToNewComment]);
+
+  const handleEditorQuoteToReplyInThread = useCallback((threadRootId: string, markdown: string) => {
+    insertQuoteToReply(threadRootId, formatMarkdownSelectionAsQuote(markdown));
+  }, [formatMarkdownSelectionAsQuote, insertQuoteToReply]);
+
+  const handleEditorQuoteToReplyTarget = useCallback((threadRootId: string, markdown: string) => {
+    insertQuoteToReply(threadRootId, formatMarkdownSelectionAsQuote(markdown));
+  }, [formatMarkdownSelectionAsQuote, insertQuoteToReply]);
+
+  const handleQuoteToReply = useCallback(() => {
+    const markdown = buildQuoteFromMenu();
+    if (!markdown || !quoteMenu) return;
+    if (quoteMenu.threadRootId) {
+      insertQuoteToReply(quoteMenu.threadRootId, markdown);
+      return;
+    }
+    setQuoteChooserOpen(true);
+  }, [buildQuoteFromMenu, insertQuoteToReply, quoteMenu]);
+
+  const handleSelectReplyTarget = useCallback((threadRootId: string) => {
+    const markdown = buildQuoteFromMenu();
+    if (!markdown) return;
+    insertQuoteToReply(threadRootId, markdown);
+  }, [buildQuoteFromMenu, insertQuoteToReply]);
+
+  const updateQuoteMenuFromSelection = useCallback(() => {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !detailRootRef.current) {
+      closeQuoteMenu();
+      return;
+    }
+    if (
+      isBlockedSelectionTarget(selection.anchorNode) ||
+      isBlockedSelectionTarget(selection.focusNode)
+    ) {
+      closeQuoteMenu();
+      return;
+    }
+    const text = selection.toString().trim();
+    if (!text) {
+      closeQuoteMenu();
+      return;
+    }
+    const range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+    if (!range || !detailRootRef.current.contains(range.commonAncestorContainer)) {
+      closeQuoteMenu();
+      return;
+    }
+    const rect = range.getBoundingClientRect();
+    if (!rect.width && !rect.height) {
+      closeQuoteMenu();
+      return;
+    }
+    setQuoteMenu({
+      text,
+      x: Math.min(Math.max(rect.left + rect.width / 2, 16), window.innerWidth - 16),
+      y: Math.max(rect.top - 8, 12),
+      threadRootId: inferThreadRootId(selection),
+    });
+    setQuoteChooserOpen(false);
+  }, [closeQuoteMenu]);
+
+  const handleSelectionGestureEnd = useCallback(() => {
+    window.setTimeout(updateQuoteMenuFromSelection, 0);
+  }, [updateQuoteMenuFromSelection]);
+
+  useEffect(() => {
+    if (!quoteMenu) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeQuoteMenu();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [closeQuoteMenu, quoteMenu]);
 
   const handleToggleSidebar = useCallback(() => {
     if (isMobile) {
@@ -689,7 +1239,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     );
   }
 
-  const sidebarContent = (
+  const propertiesContent = (
     <div className="space-y-5">
       {/* Properties */}
       <div>
@@ -744,6 +1294,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </div>}
         </div>
       )}
+
+      {/* Pull requests */}
+      <div>
+        <button
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${pullRequestsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setPullRequestsOpen(!pullRequestsOpen)}
+        >
+          {t(($) => $.detail.section_pull_requests)}
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${pullRequestsOpen ? "rotate-90" : ""}`} />
+        </button>
+        {pullRequestsOpen && <div className="pl-2"><PullRequestList issueId={id} /></div>}
+      </div>
 
       {/* Details */}
       <div>
@@ -809,8 +1371,128 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     </div>
   );
 
+  // Shared row renderer for both timeline render modes (flat / virtualized).
+  // The wrapper `id="comment-..."` is the deep-link target — equivalent to
+  // a native `<a href="#comment-...">` anchor.
+  const renderItem = (_i: number, item: TimelineItem): React.ReactElement => {
+    if (item.kind === "resolved-bar") {
+      return (
+        <div className="pb-3" id={`comment-${item.id}`}>
+          <ResolvedThreadBar
+            entry={item.entry}
+            replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
+            onExpand={() => toggleResolvedExpand(item.id, true)}
+          />
+        </div>
+      );
+    }
+    if (item.kind === "comment") {
+      const isResolved = !!item.entry.resolved_at;
+      return (
+        <div className="pb-3" id={`comment-${item.id}`}>
+          <CommentCard
+            issueId={id}
+            entry={item.entry}
+            replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
+            commentById={timelineView.commentById}
+            agents={agents}
+            issueOpen={issue.status !== "done" && issue.status !== "cancelled"}
+            currentUserId={user?.id}
+            canModerate={canModerateComments}
+            onReply={submitReply}
+            onEdit={editComment}
+            onDelete={deleteComment}
+            onToggleReaction={handleToggleReaction}
+            onResolveToggle={handleResolveToggle}
+            onCollapseResolved={isResolved ? () => toggleResolvedExpand(item.id, false) : undefined}
+            highlightedCommentId={highlightedId}
+            onRegisterReplyController={registerReplyController}
+            selectionQuoteActions={{
+              onQuoteToNewComment: handleEditorQuoteToNewComment,
+              onQuoteToReplyTarget: handleEditorQuoteToReplyTarget,
+              replyTargets: selectionQuoteReplyTargets,
+            }}
+            onQuoteToReplyInThread={handleEditorQuoteToReplyInThread}
+          />
+        </div>
+      );
+    }
+    // activity-group
+    return (
+      <div className="pb-3 px-4 flex flex-col gap-3">
+        {item.entries.map((entry) => {
+          const details = (entry.details ?? {}) as Record<string, string>;
+          const isStatusChange = entry.action === "status_changed";
+          const isPriorityChange = entry.action === "priority_changed";
+          const isDueDateChange = entry.action === "due_date_changed";
+
+          let leadIcon: React.ReactNode;
+          if (isStatusChange && details.to) {
+            leadIcon = <StatusIcon status={details.to as IssueStatus} className="h-4 w-4 shrink-0" />;
+          } else if (isPriorityChange && details.to) {
+            leadIcon = <PriorityIcon priority={details.to as IssuePriority} className="h-4 w-4 shrink-0" />;
+          } else if (isDueDateChange) {
+            leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
+          } else {
+            leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
+          }
+
+          return (
+            <div key={entry.id} className="flex items-center text-xs text-muted-foreground">
+              <div className="mr-2 flex w-4 shrink-0 justify-center">
+                {leadIcon}
+              </div>
+              <div className="flex min-w-0 flex-1 items-center gap-1">
+                <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
+                <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
+                {(entry.coalesced_count ?? 1) > 1 &&
+                  entry.action !== "task_completed" &&
+                  entry.action !== "task_failed" && (
+                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+                      {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
+                    </span>
+                  )}
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span className="ml-auto shrink-0 cursor-default">
+                        {timeAgo(entry.created_at)}
+                      </span>
+                    }
+                  />
+                  <TooltipContent side="top">
+                    {new Date(entry.created_at).toLocaleString()}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const sidebarContent = (
+    <Tabs defaultValue="stream" className="flex h-full min-h-0 flex-col">
+      <TabsList className="mb-3 grid w-full grid-cols-2">
+        <TabsTrigger value="stream">Stream</TabsTrigger>
+        <TabsTrigger value="properties">Properties</TabsTrigger>
+      </TabsList>
+      <TabsContent value="stream" keepMounted className="mt-0 min-h-0 flex-1">
+        <AgentStreamSidebar issueId={issue.id} />
+      </TabsContent>
+      <TabsContent value="properties" keepMounted className="mt-0 min-h-0 flex-1 overflow-y-auto">
+        {propertiesContent}
+      </TabsContent>
+    </Tabs>
+  );
   const detailContent = (
-    <div className="flex h-full min-w-0 flex-1 flex-col">
+    <div
+      ref={detailRootRef}
+      className="flex h-full min-w-0 flex-1 flex-col"
+      onMouseUp={handleSelectionGestureEnd}
+      onKeyUp={handleSelectionGestureEnd}
+    >
         <PageHeader className="gap-2 bg-background text-sm">
           <div className="flex flex-1 items-center gap-1.5 min-w-0">
             {workspace && (
@@ -907,6 +1589,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   actions={actions}
                   primitives={dropdownPrimitives}
                   onDeletedNavigateTo={onDelete ? undefined : paths.issues()}
+                  onOpenAssignee={() => {}}
                 />
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => setClearHistoryDialogOpen(true)}>
@@ -935,7 +1618,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
         {/* Content — scrollable */}
         <div className="flex flex-1 min-h-0">
-        <div ref={scrollContainerRef} className="relative flex-1 overflow-y-auto">
+        <div
+          ref={setScrollContainerEl}
+          className="relative flex-1 overflow-y-auto"
+        >
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
           <TitleEditor
             key={`title-${id}`}
@@ -979,10 +1665,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               key={id}
               defaultValue={issue.description || ""}
               placeholder={t(($) => $.detail.desc_placeholder)}
-              onUpdate={(md) => handleUpdateField({ description: md })}
+              onUpdate={(md) => {
+                // Bind any pending uploads still referenced in the markdown
+                // so they appear in `issueAttachments` after refresh and the
+                // editor's text/code preview keeps working past reload.
+                const ids = descPendingAttachments
+                  .filter((a) => md.includes(a.url))
+                  .map((a) => a.id);
+                handleUpdateField({ description: md, attachment_ids: ids.length > 0 ? ids : undefined });
+              }}
               onUploadFile={handleDescriptionUpload}
               debounceMs={1500}
               currentIssueId={resolvedId}
+              attachments={descEditorAttachments}
+              selectionQuoteActions={{
+                onQuoteToNewComment: handleEditorQuoteToNewComment,
+                onQuoteToReplyTarget: handleEditorQuoteToReplyTarget,
+                replyTargets: selectionQuoteReplyTargets,
+              }}
             />
 
             <div className="flex items-center gap-1 mt-3">
@@ -1016,7 +1716,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {childIssues.length > 0 && (() => {
             const doneCount = childIssues.filter((c) => c.status === "done").length;
             return (
-              <div className="mt-10">
+              <div className="mt-10 group/sub-issues">
                 {/* Header */}
                 <div className="flex items-center gap-2 mb-2">
                   <button
@@ -1038,6 +1738,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       {doneCount}/{childIssues.length}
                     </span>
                   </div>
+                  <input
+                    type="checkbox"
+                    checked={allChildrenSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = someChildrenSelected && !allChildrenSelected;
+                    }}
+                    onChange={handleToggleSelectAllChildren}
+                    aria-label="Select all sub-issues"
+                    className={cn(
+                      "ml-1 cursor-pointer accent-primary transition-opacity",
+                      someChildrenSelected
+                        ? "opacity-100"
+                        : "opacity-0 group-hover/sub-issues:opacity-100 focus-visible:opacity-100",
+                    )}
+                  />
                   <Tooltip>
                     <TooltipTrigger
                       render={
@@ -1055,52 +1770,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   </Tooltip>
                 </div>
 
+                {/* Inline batch toolbar — appears next to the rows when
+                    selections exist, instead of as a far-away fixed bar. */}
+                <BatchActionToolbar placement="inline" />
+
                 {/* List */}
                 {!subIssuesCollapsed && (
                   <div className="overflow-hidden rounded-lg border bg-card/30 divide-y divide-border/60">
-                    {childIssues.map((child) => {
-                      const isDone =
-                        child.status === "done" || child.status === "cancelled";
-                      return (
-                        <AppLink
-                          key={child.id}
-                          href={paths.issueDetail(child.id)}
-                          className="flex items-center gap-2.5 px-3 py-2 hover:bg-accent/50 transition-colors group/row"
-                        >
-                          <StatusIcon
-                            status={child.status}
-                            className="h-[15px] w-[15px] shrink-0"
-                          />
-                          <span className="text-[11px] text-muted-foreground tabular-nums font-medium shrink-0">
-                            {child.identifier}
-                          </span>
-                          <span
-                            className={cn(
-                              "text-sm truncate flex-1",
-                              isDone
-                                ? "text-muted-foreground"
-                                : "group-hover/row:text-foreground",
-                            )}
-                          >
-                            {child.title}
-                          </span>
-                          {child.assignee_type && child.assignee_id ? (
-                            <ActorAvatar
-                              actorType={child.assignee_type}
-                              actorId={child.assignee_id}
-                              size={20}
-                              className="shrink-0"
-                              enableHoverCard
-                            />
-                          ) : (
-                            <span
-                              aria-hidden
-                              className="h-5 w-5 rounded-full border border-dashed border-muted-foreground/30 shrink-0"
-                            />
-                          )}
-                        </AppLink>
-                      );
-                    })}
+                    {childIssues.map((child) => (
+                      <SubIssueRow key={child.id} child={child} />
+                    ))}
                   </div>
                 )}
               </div>
@@ -1145,54 +1824,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       </span>
                     )}
                   </PopoverTrigger>
-                  <PopoverContent align="end" className="w-64 p-0">
-                    <Command>
-                      <CommandInput placeholder={t(($) => $.detail.change_subscribers_placeholder)} />
-                      <CommandList className="max-h-64">
-                        <CommandEmpty>{t(($) => $.detail.no_subscribers_results)}</CommandEmpty>
-                        {members.length > 0 && (
-                          <CommandGroup heading={t(($) => $.detail.members_group)}>
-                            {members.filter((m, i, arr) => arr.findIndex((x) => x.user_id === m.user_id) === i).map((m) => {
-                              const sub = subscribers.find((s) => s.user_type === "member" && s.user_id === m.user_id);
-                              const isSubbed = !!sub;
-                              return (
-                                <CommandItem
-                                  key={`member-${m.user_id}`}
-                                  onSelect={() => toggleSubscriber(m.user_id, "member", isSubbed)}
-                                  className="flex items-center gap-2.5"
-                                >
-                                  <Checkbox checked={isSubbed} className="pointer-events-none" />
-                                  <ActorAvatar actorType="member" actorId={m.user_id} size={22} />
-                                  <span className="truncate flex-1">{m.name}</span>
-
-                                </CommandItem>
-                              );
-                            })}
-                          </CommandGroup>
-                        )}
-                        {agents.filter((a) => !a.archived_at).length > 0 && (
-                          <CommandGroup heading={t(($) => $.detail.agents_group)}>
-                            {agents.filter((a) => !a.archived_at).map((a) => {
-                              const sub = subscribers.find((s) => s.user_type === "agent" && s.user_id === a.id);
-                              const isSubbed = !!sub;
-                              return (
-                                <CommandItem
-                                  key={`agent-${a.id}`}
-                                  onSelect={() => toggleSubscriber(a.id, "agent", isSubbed)}
-                                  className="flex items-center gap-2.5"
-                                >
-                                  <Checkbox checked={isSubbed} className="pointer-events-none" />
-                                  <ActorAvatar actorType="agent" actorId={a.id} size={22} showStatusDot />
-                                  <span className="truncate flex-1">{a.name}</span>
-
-                                </CommandItem>
-                              );
-                            })}
-                          </CommandGroup>
-                        )}
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
+                  <SubscriberPopoverContent
+                    members={members}
+                    agents={agents}
+                    subscribers={subscribers}
+                    toggleSubscriber={toggleSubscriber}
+                    t={t}
+                  />
                 </Popover>
               </div>
             </div>
@@ -1209,117 +1847,72 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             {timelineLoading && timelineView.groups.length === 0 ? (
               <TimelineSkeleton />
             ) : (
-            <>
-
-            <TimelineErrorBoundary>
-            <div className="mt-4 flex flex-col gap-3">
-              {timelineView.groups.map((group) => {
-                if (group.type === "comment") {
-                  const entry = group.entries[0]!;
-                  const isResolved = !!entry.resolved_at;
-                  const isExpanded = expandedResolved.has(entry.id);
-                  if (isResolved && !isExpanded) {
-                    return (
-                      <div key={entry.id} id={`comment-${entry.id}`}>
-                        <ResolvedThreadBar
-                          entry={entry}
-                          replies={timelineView.threadReplies.get(entry.id) ?? EMPTY_REPLIES}
-                          onExpand={() => toggleResolvedExpand(entry.id, true)}
-                        />
-                      </div>
-                    );
-                  }
-                  return (
-                    <div key={entry.id} id={`comment-${entry.id}`}>
-                      <CommentCard
-                        issueId={resolvedId}
-                        entry={entry}
-                        replies={timelineView.threadReplies.get(entry.id) ?? EMPTY_REPLIES}
-                        commentById={timelineView.commentById}
-                        agents={agents}
-                        issueOpen={issue.status !== "done" && issue.status !== "cancelled"}
-                        currentUserId={user?.id}
-                        canModerate={canModerateComments}
-                        onReply={submitReply}
-                        onEdit={editComment}
-                        onDelete={deleteComment}
-                        onToggleReaction={handleToggleReaction}
-                        onResolveToggle={handleResolveToggle}
-                        onCollapseResolved={isResolved ? () => toggleResolvedExpand(entry.id, false) : undefined}
-                        highlightedCommentId={highlightedId}
-                      />
-                    </div>
-                  );
-                }
-
-                return (
-                  <div key={group.entries[0]!.id} className="px-4 flex flex-col gap-3">
-                    {group.entries.map((entry, _idx) => {
-                      const details = (entry.details ?? {}) as Record<string, string>;
-                      const isStatusChange = entry.action === "status_changed";
-                      const isPriorityChange = entry.action === "priority_changed";
-                      const isDueDateChange = entry.action === "due_date_changed";
-
-                      let leadIcon: React.ReactNode;
-                      if (isStatusChange && details.to) {
-                        leadIcon = <StatusIcon status={details.to as IssueStatus} className="h-4 w-4 shrink-0" />;
-                      } else if (isPriorityChange && details.to) {
-                        leadIcon = <PriorityIcon priority={details.to as IssuePriority} className="h-4 w-4 shrink-0" />;
-                      } else if (isDueDateChange) {
-                        leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
-                      } else {
-                        leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
-                      }
-
-                      return (
-                        <div key={entry.id} className="flex items-center text-xs text-muted-foreground">
-                          <div className="mr-2 flex w-4 shrink-0 justify-center">
-                            {leadIcon}
-                          </div>
-                          <div className="flex min-w-0 flex-1 items-center gap-1">
-                            <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
-                            <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
-                            {/* Coalesce badge for non-task actions: task_completed / task_failed already
-                                bake the count into their translation, so suppress the badge there to
-                                avoid showing "×N" twice. */}
-                            {(entry.coalesced_count ?? 1) > 1 &&
-                              entry.action !== "task_completed" &&
-                              entry.action !== "task_failed" && (
-                                <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
-                                  {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
-                                </span>
-                              )}
-                            <Tooltip>
-                              <TooltipTrigger
-                                render={
-                                  <span className="ml-auto shrink-0 cursor-default">
-                                    {timeAgo(entry.created_at)}
-                                  </span>
-                                }
-                              />
-                              <TooltipContent side="top">
-                                {new Date(entry.created_at).toLocaleString()}
-                              </TooltipContent>
-                            </Tooltip>
-                          </div>
-                        </div>
-                      );
-                    })}
+              // Two render modes:
+              //   - `highlightCommentId` set (came from inbox deep-link) →
+              //     render flat. Every comment mounts, every height is real,
+              //     the target id is in the DOM the instant the useEffect
+              //     above runs `scrollIntoView`. No virtualization estimate
+              //     errors, no spacer reflow drift. Pays cold-mount cost
+              //     proportional to items.length (markdown + lowlight per
+              //     comment), which is acceptable in the deep-link case —
+              //     the user has explicit intent to land on a specific item.
+              //   - otherwise → Virtuoso. Browsing mode, virtualization
+              //     wins on first-paint perf for long timelines.
+              //
+              // The split is deliberate: virtualization and "land precisely
+              // on a target" have fundamentally opposed contracts (estimated
+              // heights vs real heights). Trying to satisfy both in one
+              // path is what produced the bug history this PR closes.
+              !highlightCommentId ? (
+                !scrollContainerEl ? (
+                  // Skeleton while the callback ref populates so the gap
+                  // between IssueDetail mount and Virtuoso mount doesn't
+                  // flash empty.
+                  <TimelineSkeleton />
+                ) : (
+                  <div className="mt-4">
+                    <Virtuoso
+                      key={`${wsId}:${id}`}
+                      customScrollParent={scrollContainerEl}
+                      data={items}
+                      increaseViewportBy={{ top: 800, bottom: 800 }}
+                      computeItemKey={(_i, item) => `${item.kind}:${item.id}`}
+                      skipAnimationFrameInResizeObserver
+                      // followOutput intentionally NOT set. Virtuoso treats
+                      // it as a sticky "is at bottom" flag and resets
+                      // scrollTop to maxScrollTop on every height-change
+                      // tick — issue-detail is document-shaped, not chat.
+                      itemContent={renderItem}
+                    />
                   </div>
-                );
-              })}
-            </div>
-            </TimelineErrorBoundary>
-
-            </>
+                )
+              ) : (
+                <div className="mt-4">
+                  {items.map((item, i) => (
+                    <Fragment key={`${item.kind}:${item.id}`}>
+                      {renderItem(i, item)}
+                    </Fragment>
+                  ))}
+                </div>
+              )
             )}
 
             {/* Bottom comment input — no avatar, full width */}
             <div className="mt-4">
-              <CommentInput issueId={resolvedId} onSubmit={submitComment} />
+              <CommentInput
+                ref={commentInputRef}
+                key={resolvedId}
+                issueId={resolvedId}
+                onSubmit={submitComment}
+                selectionQuoteActions={{
+                  onQuoteToNewComment: handleEditorQuoteToNewComment,
+                  onQuoteToReplyTarget: handleEditorQuoteToReplyTarget,
+                  replyTargets: selectionQuoteReplyTargets,
+                }}
+              />
             </div>
           </div>
-        </div>
+          </div>
         </div>
         {!isMobile && (
           <div className="pointer-events-none hidden w-12 shrink-0 justify-center md:flex">
@@ -1336,6 +1929,56 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </div>
         )}
         </div>
+        {quoteMenu && (
+          <div
+            className="fixed z-50 min-w-44 -translate-x-1/2 -translate-y-full rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+            style={{ left: quoteMenu.x, top: quoteMenu.y }}
+            onMouseDown={(event) => event.preventDefault()}
+            onMouseUp={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+              onClick={handleQuoteToNewComment}
+            >
+              <MessageSquare className="h-3.5 w-3.5" />
+              <span>{t(($) => $.quote.add_to_new_comment)}</span>
+            </button>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+              onClick={handleQuoteToReply}
+            >
+              <MessageSquareReply className="h-3.5 w-3.5" />
+              <span>{t(($) => $.quote.add_to_reply)}</span>
+            </button>
+            {quoteChooserOpen && (
+              <div className="mt-1 max-h-64 min-w-64 overflow-y-auto border-t border-border pt-1">
+                {topLevelComments.length === 0 ? (
+                  <div className="px-2.5 py-2 text-xs text-muted-foreground">
+                    {t(($) => $.quote.no_comments_to_reply)}
+                  </div>
+                ) : (
+                  topLevelComments.map((comment) => (
+                    <button
+                      key={comment.id}
+                      type="button"
+                      className="flex w-full items-center justify-between gap-4 rounded-sm px-2.5 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                      onClick={() => handleSelectReplyTarget(comment.id)}
+                    >
+                      <span className="min-w-0 truncate font-medium">
+                        {getActorName(comment.actor_type, comment.actor_id)}
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {new Date(comment.created_at).toLocaleString(i18n.language)}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
   );
 
@@ -1384,7 +2027,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         id="sidebar"
         defaultSize={defaultSidebarOpen ? 320 : 0}
         minSize={260}
-        maxSize={420}
+        maxSize={sidebarMaxSize}
         collapsible
         groupResizeBehavior="preserve-pixel-size"
         panelRef={sidebarRef}

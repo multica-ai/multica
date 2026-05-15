@@ -42,12 +42,14 @@ import { cn } from "@multica/ui/lib/utils";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { useQueryClient } from "@tanstack/react-query";
+import type { Attachment } from "@multica/core/types";
 import { createEditorExtensions } from "./extensions";
 import { uploadAndInsertFile } from "./extensions/file-upload";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
+import { AttachmentDownloadProvider } from "./attachment-download-context";
 import "katex/dist/katex.min.css";
 import "./content-editor.css";
 
@@ -87,16 +89,43 @@ interface ContentEditorProps {
    */
   currentIssueId?: string;
   /**
-   * When true, the @mention extension is not registered. Use for editors
-   * where mentioning members/agents has no business meaning (e.g. agent
-   * system prompts, where the content is fed to an LLM as plain text).
+   * When true, the `@` suggestion picker is disabled but the mention node
+   * type remains in the schema, so existing mentions pasted in from other
+   * Multica editors still render as the normal pill. Use for editors where
+   * *creating* a new mention has no business meaning (e.g. agent system
+   * prompts) but *preserving* an existing one still matters.
    */
   disableMentions?: boolean;
+  /**
+   * Attachments referenced by this content. The download buttons on file
+   * cards and images inside the editor look up an attachment by `url` and
+   * fetch a fresh CloudFront signature at click time, so a stale URL
+   * persisted in markdown never opens. Pass `issue.attachments` /
+   * `comment.attachments` etc.; omit when no attachment context is
+   * available (NodeView buttons fall back to opening the raw URL).
+   */
+  attachments?: Attachment[];
+  /** Optional actions for quoting the current editor selection into issue comments. */
+  selectionQuoteActions?: SelectionQuoteActions;
+}
+
+interface SelectionQuoteActions {
+  onQuoteToNewComment?: (markdown: string) => void;
+  onQuoteToReply?: (markdown: string) => void;
+  onQuoteToReplyTarget?: (targetId: string, markdown: string) => void;
+  replyTargets?: SelectionQuoteReplyTarget[];
+}
+
+interface SelectionQuoteReplyTarget {
+  id: string;
+  label: string;
+  meta?: string;
 }
 
 interface ContentEditorRef {
   getMarkdown: () => string;
   setMarkdown: (markdown: string) => void;
+  appendMarkdown: (markdown: string) => void;
   clearContent: () => void;
   focus: () => void;
   /** Drop focus from the editor — used by chat after send so the caret
@@ -127,6 +156,8 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       submitOnEnter = false,
       currentIssueId,
       disableMentions = false,
+      attachments,
+      selectionQuoteActions,
     },
     ref,
   ) {
@@ -200,7 +231,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           },
         },
         attributes: {
-          class: cn("rich-text-editor text-sm outline-none", className),
+          class: cn("flex-1 rich-text-editor text-sm outline-none", className),
         },
       },
     });
@@ -219,6 +250,27 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         const processed = markdown ? preprocessMarkdown(markdown) : "";
         if (processed) {
           editor.commands.setContent(processed, { contentType: "markdown" });
+        } else {
+          editor.commands.clearContent();
+        }
+      },
+      appendMarkdown: (markdown: string) => {
+        if (!editor) return;
+        const current = stripBlobUrls(editor.getMarkdown()).trimEnd();
+        const next = current
+          ? `${current}\n\n${markdown.trimEnd()}`
+          : markdown.trimEnd();
+        const processed = next ? preprocessMarkdown(next) : "";
+        if (processed) {
+          editor.commands.setContent(processed, { contentType: "markdown" });
+          const { doc, schema } = editor.state;
+          const paragraphType = schema.nodes.paragraph;
+          if (doc.lastChild?.type.name === "blockquote" && paragraphType) {
+            editor.view.dispatch(
+              editor.state.tr.insert(doc.content.size, paragraphType.create()),
+            );
+          }
+          editor.commands.focus("end");
         } else {
           editor.commands.clearContent();
         }
@@ -267,19 +319,31 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     if (!editor) return null;
 
     return (
-      <div
-        ref={wrapperRef}
-        className="relative flex min-h-full flex-col"
-        onMouseDown={handleContainerMouseDown}
-      >
-        <EditorContent className="flex-1 min-h-full" editor={editor} />
-        {showBubbleMenu && (
-          <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} />
-        )}
-        <LinkHoverCard {...hover} />
-      </div>
+      <AttachmentDownloadProvider attachments={attachments}>
+        <div
+          ref={wrapperRef}
+          className="relative flex flex-1 min-h-full flex-col"
+          onMouseDown={handleContainerMouseDown}
+        >
+          <EditorContent className="flex flex-1 flex-col" editor={editor} />
+          {showBubbleMenu && (
+            <EditorBubbleMenu
+              editor={editor}
+              currentIssueId={currentIssueId}
+              selectionQuoteActions={selectionQuoteActions}
+            />
+          )}
+          <LinkHoverCard {...hover} />
+        </div>
+      </AttachmentDownloadProvider>
     );
   },
 );
 
-export { ContentEditor, type ContentEditorProps, type ContentEditorRef };
+export {
+  ContentEditor,
+  type ContentEditorProps,
+  type ContentEditorRef,
+  type SelectionQuoteActions,
+  type SelectionQuoteReplyTarget,
+};

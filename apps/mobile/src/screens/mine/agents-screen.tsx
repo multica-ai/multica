@@ -23,6 +23,7 @@ import { useCoreQuery, useCoreQueryClient } from "@multica/core/provider";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import type {
   Agent,
+  AgentSkillSummary,
   AgentRuntimeMode,
   AgentStatus,
   AgentTask,
@@ -30,6 +31,7 @@ import type {
   CreateAgentRequest,
   MemberWithUser,
   RuntimeDevice,
+  SkillSummary,
   UpdateAgentRequest,
 } from "@multica/core/types";
 import {
@@ -836,7 +838,7 @@ function SkillRow({
   readOnly,
   onRemove,
 }: {
-  skill: SkillOption;
+  skill: AgentSkillSummary;
   readOnly: boolean;
   onRemove: () => void;
 }) {
@@ -1302,7 +1304,7 @@ function SkillPickerModal({
   onSelect: (skillId: string) => void;
   open: boolean;
   saving: boolean;
-  skills: SkillOption[];
+  skills: SkillSummary[];
 }) {
   const { t } = useTranslation();
   return (
@@ -1323,12 +1325,6 @@ function SkillPickerModal({
       )}
     </SheetModal>
   );
-}
-
-interface SkillOption {
-  id: string;
-  name: string;
-  description?: string | null;
 }
 
 function SheetModal({

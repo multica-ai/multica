@@ -32,9 +32,11 @@ import { useEditorState } from "@tiptap/react";
 import type { Editor } from "@tiptap/core";
 import { posToDOMRect } from "@tiptap/core";
 import { NodeSelection } from "@tiptap/pm/state";
+import type { Slice } from "@tiptap/pm/model";
 import { toast } from "sonner";
 import { useCreateIssue } from "@multica/core/issues/mutations";
 import { useT } from "../i18n";
+import type { SelectionQuoteActions } from "./content-editor";
 import { modKey } from "@multica/core/platform";
 import { Toggle } from "@multica/ui/components/ui/toggle";
 import { Separator } from "@multica/ui/components/ui/separator";
@@ -60,6 +62,10 @@ import {
   List,
   ListOrdered,
   Quote,
+  MessageSquare,
+  MessageSquareQuote,
+  MessageSquareReply,
+  ChevronRight,
   ChevronDown,
   Check,
   X,
@@ -76,6 +82,8 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
+const BLOB_IMAGE_RE = /!\[[^\]]*\]\(blob:[^)]*\)\n?/g;
+
 function shouldShowBubbleMenu(editor: Editor): boolean {
   if (!editor.isEditable) return false;
   const { selection } = editor.state;
@@ -86,6 +94,25 @@ function shouldShowBubbleMenu(editor: Editor): boolean {
   const $from = editor.state.doc.resolve(from);
   if ($from.parent.type.name === "codeBlock") return false;
   return true;
+}
+
+function serializeSelectedMarkdown(editor: Editor): string {
+  const slice = editor.state.selection.content();
+  const fallback = (selectedSlice: Slice) =>
+    selectedSlice.content.textBetween(0, selectedSlice.content.size, "\n\n").trim();
+
+  if (!editor.markdown) return fallback(slice);
+
+  try {
+    const doc = editor.schema.topNodeType.create(null, slice.content);
+    return editor.markdown
+      .serialize(doc.toJSON())
+      .replace(BLOB_IMAGE_RE, "")
+      .replace(/\n+$/, "")
+      .trim();
+  } catch {
+    return fallback(slice);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -440,15 +467,146 @@ function CreateSubIssueButton({
 }
 
 // ---------------------------------------------------------------------------
+// Selection Quote Actions
+// ---------------------------------------------------------------------------
+
+function SelectionQuoteActionsDropdown({
+  editor,
+  actions,
+  onOpenChange,
+}: {
+  editor: Editor;
+  actions: SelectionQuoteActions;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { t } = useT("editor");
+  const [open, setOpen] = useState(false);
+  const [replySubmenuOpen, setReplySubmenuOpen] = useState(false);
+  const replyTargets = actions.replyTargets ?? [];
+  const canChooseReplyTarget = !!actions.onQuoteToReplyTarget && replyTargets.length > 0;
+
+  const handleOpenChange = useCallback((next: boolean) => {
+    setOpen(next);
+    if (!next) setReplySubmenuOpen(false);
+    onOpenChange(next);
+  }, [onOpenChange]);
+
+  const runAction = useCallback((action: ((markdown: string) => void) | undefined) => {
+    const markdown = serializeSelectedMarkdown(editor);
+    if (!markdown) return;
+    action?.(markdown);
+    setOpen(false);
+  }, [editor]);
+
+  if (!actions.onQuoteToNewComment && !actions.onQuoteToReply && !canChooseReplyTarget) return null;
+
+  return (
+    <Popover modal={false} open={open} onOpenChange={handleOpenChange}>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <PopoverTrigger
+              className="inline-flex h-7 items-center justify-center rounded-md px-1.5 text-xs font-medium hover:bg-muted"
+              onMouseDown={(e) => e.preventDefault()}
+            />
+          }
+        >
+          <MessageSquareQuote className="size-3.5" />
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={8}>
+          {t(($) => $.bubble_menu.quote_actions.tooltip)}
+        </TooltipContent>
+      </Tooltip>
+      <PopoverContent
+        side="bottom"
+        sideOffset={8}
+        align="end"
+        className="w-auto min-w-44 p-1"
+        initialFocus={false}
+        finalFocus={false}
+      >
+        {actions.onQuoteToNewComment && (
+          <button
+            type="button"
+            className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              runAction(actions.onQuoteToNewComment);
+            }}
+          >
+            <MessageSquare className="size-3.5" />
+            {t(($) => $.bubble_menu.quote_actions.add_to_new_comment)}
+          </button>
+        )}
+        {actions.onQuoteToReply && !canChooseReplyTarget && (
+          <button
+            type="button"
+            className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              runAction(actions.onQuoteToReply);
+            }}
+          >
+            <MessageSquareReply className="size-3.5" />
+            {t(($) => $.bubble_menu.quote_actions.add_to_reply)}
+          </button>
+        )}
+        {canChooseReplyTarget && (
+          <div
+            className="relative"
+            onMouseEnter={() => setReplySubmenuOpen(true)}
+            onMouseLeave={() => setReplySubmenuOpen(false)}
+          >
+            <button
+              type="button"
+              className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+              onMouseDown={(e) => e.preventDefault()}
+            >
+              <MessageSquareReply className="size-3.5" />
+              <span className="flex-1 text-left">{t(($) => $.bubble_menu.quote_actions.add_to_reply)}</span>
+              <ChevronRight className="size-3" />
+            </button>
+            {replySubmenuOpen && (
+              <div className="absolute left-full top-0 ml-1 max-h-72 min-w-56 overflow-y-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md">
+                {replyTargets.map((target) => (
+                  <button
+                    key={target.id}
+                    type="button"
+                    className="flex h-7 w-full cursor-default items-center justify-between gap-3 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      runAction((markdown) => actions.onQuoteToReplyTarget?.(target.id, markdown));
+                    }}
+                  >
+                    <span className="min-w-0 truncate font-medium">{target.label}</span>
+                    {target.meta && (
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        {target.meta}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Bubble Menu — @floating-ui/dom + portal to body
 // ---------------------------------------------------------------------------
 
 function EditorBubbleMenu({
   editor,
   currentIssueId,
+  selectionQuoteActions,
 }: {
   editor: Editor;
   currentIssueId?: string;
+  selectionQuoteActions?: SelectionQuoteActions;
 }) {
   const { t } = useT("editor");
   const [visible, setVisible] = useState(false);
@@ -608,6 +766,16 @@ function EditorBubbleMenu({
               <>
                 <Separator orientation="vertical" className="mx-0.5 h-5" />
                 <CreateSubIssueButton editor={editor} parentIssueId={currentIssueId} />
+              </>
+            )}
+            {(selectionQuoteActions?.onQuoteToNewComment || selectionQuoteActions?.onQuoteToReply) && (
+              <>
+                <Separator orientation="vertical" className="mx-0.5 h-5" />
+                <SelectionQuoteActionsDropdown
+                  editor={editor}
+                  actions={selectionQuoteActions}
+                  onOpenChange={handleMenuOpenChange}
+                />
               </>
             )}
           </div>

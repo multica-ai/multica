@@ -3,35 +3,22 @@
 import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import type {
-  Issue,
-  MemberWithUser,
-  Agent,
-  UpdateIssueRequest,
-} from "@multica/core/types";
+import type { Issue, UpdateIssueRequest } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
+import { memberListOptions } from "@multica/core/workspace/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
-import {
-  memberListOptions,
-  agentListOptions,
-} from "@multica/core/workspace/queries";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
-import { canAssignAgent } from "../components/pickers";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
 const BACKLOG_HINT_LS_KEY = "multica:backlog-agent-hint-dismissed";
 
 export interface UseIssueActionsResult {
-  // Derived data for rendering menu rows
-  members: MemberWithUser[];
-  agents: Agent[];
   isPinned: boolean;
   canDelete: boolean;
-  // Handlers
   updateField: (updates: Partial<UpdateIssueRequest>) => void;
   togglePin: () => void;
   copyLink: () => Promise<void>;
@@ -54,29 +41,23 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const user = useAuthStore((s) => s.user);
   const userId = user?.id;
 
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: pinnedItems = [] } = useQuery({
     ...pinListOptions(wsId, userId ?? ""),
     enabled: !!userId,
   });
 
-  const currentMemberRole = useMemo(
-    () => members.find((m) => m.user_id === userId)?.role,
-    [members, userId],
-  );
-  const filteredAgents = useMemo(
-    () =>
-      agents.filter(
-        (a) => !a.archived_at && canAssignAgent(a, userId, currentMemberRole),
-      ),
-    [agents, userId, currentMemberRole],
-  );
   const isPinned =
     !!issue &&
     pinnedItems.some(
       (p) => p.item_type === "issue" && p.item_id === issue.id,
     );
+
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+
+  const currentMemberRole = useMemo(
+    () => members.find((m) => m.user_id === userId)?.role,
+    [members, userId],
+  );
 
   const isCreator =
     !!user && !!issue && issue.creator_type === "member" && issue.creator_id === user.id;
@@ -168,8 +149,6 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   );
 
   return {
-    members,
-    agents: filteredAgents,
     isPinned,
     canDelete,
     updateField,

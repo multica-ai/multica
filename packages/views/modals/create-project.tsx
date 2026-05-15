@@ -52,6 +52,7 @@ import { PriorityIcon } from "../issues/components/priority-icon";
 import { ActorAvatar } from "../common/actor-avatar";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
+import { matchesPinyin } from "../editor/extensions/pinyin-match";
 import {
   useProjectStatusLabels,
   useProjectPriorityLabels,
@@ -152,9 +153,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [leadFilter, setLeadFilter] = useState("");
 
   const leadQuery = leadFilter.toLowerCase();
-  const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery));
+  const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery) || matchesPinyin(m.name, leadQuery));
   const filteredAgents = agents.filter(
-    (a) => !a.archived_at && a.name.toLowerCase().includes(leadQuery),
+    (a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)),
   );
 
   const leadLabel =
@@ -464,7 +465,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 {t(($) => $.create_project.repos_heading)}
               </div>
               {workspaceRepos.length > 0 ? (
-                <div className="space-y-1">
+                <div className="space-y-1 max-h-48 overflow-y-auto">
                   {workspaceRepos.map((repo) => {
                     const checked = selectedRepos.includes(repo.url);
                     return (

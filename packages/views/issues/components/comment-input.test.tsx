@@ -18,7 +18,10 @@ function I18nWrapper({ children }: { children: ReactNode }) {
   );
 }
 
-const draftKey = "multica:issue-comment-draft:user-1:issue-1";
+const draftKey = "new:issue-1";
+const draftState = vi.hoisted(() => ({
+  drafts: {} as Record<string, string>,
+}));
 
 const mockUser = vi.hoisted(() => ({
   id: "user-1",
@@ -33,6 +36,27 @@ vi.mock("@multica/core/auth", () => ({
   },
 }));
 
+vi.mock("@multica/core/issues/stores", () => {
+  const store = {
+    getDraft: (key: string) => draftState.drafts[key],
+    setDraft: (key: string, content: string) => {
+      draftState.drafts[key] = content;
+    },
+    clearDraft: (key: string) => {
+      delete draftState.drafts[key];
+    },
+  };
+  const useCommentDraftStore = Object.assign(
+    (selector?: (state: typeof store) => unknown) => (
+      selector ? selector(store) : store
+    ),
+    {
+      getState: () => store,
+    },
+  );
+  return { useCommentDraftStore };
+});
+
 vi.mock("@multica/core/api", () => ({
   api: {},
 }));
@@ -45,6 +69,23 @@ vi.mock("@multica/core/hooks/use-file-upload", () => ({
 
 vi.mock("@multica/ui/components/common/file-upload-button", () => ({
   FileUploadButton: () => <button type="button">Upload</button>,
+}));
+
+vi.mock("@multica/ui/components/common/submit-button", () => ({
+  SubmitButton: ({ disabled, loading, onClick }: {
+    disabled?: boolean;
+    loading?: boolean;
+    onClick: () => void;
+  }) => (
+    <button
+      aria-label="Submit comment"
+      disabled={disabled || loading}
+      type="button"
+      onClick={onClick}
+    >
+      Submit
+    </button>
+  ),
 }));
 
 vi.mock("@multica/ui/components/ui/tooltip", () => ({
@@ -90,11 +131,11 @@ vi.mock("../../editor", () => ({
   useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
   FileDropOverlay: () => null,
   ContentEditor: forwardRef(function MockContentEditor(
-    { onUpdate, placeholder }: any,
+    { defaultValue, onUpdate, placeholder }: any,
     ref: any,
   ) {
-    const valueRef = useRef("");
-    const [value, setValue] = useState("");
+    const valueRef = useRef(defaultValue ?? "");
+    const [value, setValue] = useState(defaultValue ?? "");
 
     const setEditorValue = (next: string) => {
       valueRef.current = next;
@@ -105,6 +146,11 @@ vi.mock("../../editor", () => ({
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
       setMarkdown: setEditorValue,
+      appendMarkdown: (markdown: string) => setEditorValue(
+        valueRef.current.trimEnd()
+          ? `${valueRef.current.trimEnd()}\n\n${markdown.trimEnd()}`
+          : markdown.trimEnd(),
+      ),
       clearContent: () => setEditorValue(""),
       focus: () => {},
       uploadFile: () => {},
@@ -121,58 +167,27 @@ vi.mock("../../editor", () => ({
   }),
 }));
 
-function makeDraft(content: string, overrides: Partial<Record<string, unknown>> = {}) {
-  return JSON.stringify({
-    version: 1,
-    issueId: "issue-1",
-    userId: "user-1",
-    content,
-    uploads: [],
-    updatedAt: 123,
-    tabId: "other-tab",
-    ...overrides,
-  });
-}
-
 describe("CommentInput drafts", () => {
   beforeEach(() => {
     vi.useRealTimers();
-    window.localStorage.clear();
+    draftState.drafts = {};
   });
 
-  it("saves issue and user scoped drafts after a debounce", async () => {
-    vi.useFakeTimers();
+  it("saves issue scoped drafts when content changes", async () => {
     render(<I18nWrapper><CommentInput issueId="issue-1" onSubmit={vi.fn()} /></I18nWrapper>);
 
     fireEvent.change(screen.getByPlaceholderText("Leave a comment..."), {
       target: { value: "draft text" },
     });
 
-    act(() => vi.advanceTimersByTime(499));
-    expect(window.localStorage.getItem(draftKey)).toBeNull();
-
-    act(() => vi.advanceTimersByTime(1));
-
-    const draft = JSON.parse(window.localStorage.getItem(draftKey) ?? "{}");
-    expect(draft).toMatchObject({
-      version: 1,
-      issueId: "issue-1",
-      userId: "user-1",
-      content: "draft text",
-      uploads: [],
-    });
-    expect(typeof draft.updatedAt).toBe("number");
-    expect(typeof draft.tabId).toBe("string");
+    expect(draftState.drafts[draftKey]).toBe("draft text");
   });
 
-  it("prompts to restore an existing draft and clears it after submit", async () => {
+  it("hydrates an existing draft and clears it after submit", async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
-    window.localStorage.setItem(draftKey, makeDraft("restored draft"));
+    draftState.drafts[draftKey] = "restored draft";
 
     render(<I18nWrapper><CommentInput issueId="issue-1" onSubmit={onSubmit} /></I18nWrapper>);
-
-    expect(await screen.findByText("Restore draft?")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Restore"));
 
     expect(screen.getByPlaceholderText("Leave a comment...")).toHaveValue(
       "restored draft",
@@ -181,52 +196,38 @@ describe("CommentInput drafts", () => {
     fireEvent.click(screen.getByLabelText("Submit comment"));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith("restored draft", undefined);
+      expect(onSubmit).toHaveBeenCalledWith("restored draft", undefined, "comment");
     });
-    expect(window.localStorage.getItem(draftKey)).toBeNull();
+    expect(draftState.drafts[draftKey]).toBeUndefined();
   });
 
   it("keeps the saved draft when submit fails", async () => {
-    vi.useFakeTimers();
     const onSubmit = vi.fn().mockRejectedValue(new Error("network failed"));
     render(<I18nWrapper><CommentInput issueId="issue-1" onSubmit={onSubmit} /></I18nWrapper>);
 
     fireEvent.change(screen.getByPlaceholderText("Leave a comment..."), {
       target: { value: "do not lose me" },
     });
-    act(() => vi.advanceTimersByTime(500));
 
     await act(async () => {
       fireEvent.click(screen.getByLabelText("Submit comment"));
     });
 
-    expect(onSubmit).toHaveBeenCalledWith("do not lose me", undefined);
-    expect(JSON.parse(window.localStorage.getItem(draftKey) ?? "{}")).toMatchObject({
-      content: "do not lose me",
-    });
+    expect(onSubmit).toHaveBeenCalledWith("do not lose me", undefined, "comment");
+    expect(draftState.drafts[draftKey]).toBe("do not lose me");
     expect(screen.getByPlaceholderText("Leave a comment...")).toHaveValue(
       "do not lose me",
     );
   });
 
-  it("prompts before applying a draft written from another tab", async () => {
+  it("clears the saved draft when content becomes empty", async () => {
+    draftState.drafts[draftKey] = "old draft";
     render(<I18nWrapper><CommentInput issueId="issue-1" onSubmit={vi.fn()} /></I18nWrapper>);
 
-    act(() => {
-      window.dispatchEvent(
-        new StorageEvent("storage", {
-          key: draftKey,
-          newValue: makeDraft("from another tab", { updatedAt: 456 }),
-          oldValue: null,
-        }),
-      );
+    fireEvent.change(screen.getByPlaceholderText("Leave a comment..."), {
+      target: { value: "" },
     });
 
-    expect(await screen.findByText("Restore draft?")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Restore"));
-
-    expect(screen.getByPlaceholderText("Leave a comment...")).toHaveValue(
-      "from another tab",
-    );
+    expect(draftState.drafts[draftKey]).toBeUndefined();
   });
 });

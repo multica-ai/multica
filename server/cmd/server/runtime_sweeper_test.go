@@ -780,6 +780,68 @@ func TestExpireStaleQueuedTasksRespectsBatchLimit(t *testing.T) {
 	}
 }
 
+func TestDeleteExpiredInviteLinks(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	ctx := context.Background()
+	queries := db.New(testPool)
+
+	var workspaceID, inviterID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT m.workspace_id, m.user_id
+		FROM member m
+		JOIN "user" u ON u.id = m.user_id
+		WHERE u.email = $1
+		LIMIT 1
+	`, integrationTestEmail).Scan(&workspaceID, &inviterID); err != nil {
+		t.Fatalf("failed to resolve workspace/inviter for fixture: %v", err)
+	}
+
+	var expiredID, freshID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace_invitation (
+			workspace_id, inviter_id, invite_type, token_hash, role, status, expires_at, max_uses, used_count
+		)
+		VALUES ($1, $2, 'link', $3, 'member', 'pending', now() - interval '2 hours', 1, 0)
+		RETURNING id
+	`, workspaceID, inviterID, "test-expired-token-hash").Scan(&expiredID); err != nil {
+		t.Fatalf("failed to insert expired invite link: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace_invitation (
+			workspace_id, inviter_id, invite_type, token_hash, role, status, expires_at, max_uses, used_count
+		)
+		VALUES ($1, $2, 'link', $3, 'member', 'pending', now() + interval '2 hours', 1, 0)
+		RETURNING id
+	`, workspaceID, inviterID, "test-fresh-token-hash").Scan(&freshID); err != nil {
+		t.Fatalf("failed to insert fresh invite link: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM workspace_invitation WHERE id IN ($1, $2)`, expiredID, freshID)
+	})
+
+	deleted, err := queries.DeleteExpiredInviteLinks(ctx, 100)
+	if err != nil {
+		t.Fatalf("DeleteExpiredInviteLinks failed: %v", err)
+	}
+	if len(deleted) != 1 {
+		t.Fatalf("expected 1 deleted invite link, got %d", len(deleted))
+	}
+	if deleted[0].ID.Bytes != parseUUIDBytes(expiredID) {
+		t.Fatalf("deleted wrong invite link: got %x", deleted[0].ID.Bytes)
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM workspace_invitation WHERE id = $1`, freshID).Scan(&count); err != nil {
+		t.Fatalf("failed to check fresh invite link: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected fresh invite link to remain, got count=%d", count)
+	}
+}
+
 // parseUUIDBytes converts a UUID string to the 16-byte array used by pgtype.UUID.
 func parseUUIDBytes(s string) [16]byte {
 	s = strings.ReplaceAll(s, "-", "")

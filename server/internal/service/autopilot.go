@@ -47,7 +47,6 @@ func (s *AutopilotService) DispatchAutopilot(
 	triggerID pgtype.UUID,
 	source string,
 	payload []byte,
-	trigger TriggerActor,
 ) (*db.AutopilotRun, error) {
 	if reason, skip := s.shouldSkipDispatch(ctx, autopilot); skip {
 		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, reason)
@@ -73,13 +72,13 @@ func (s *AutopilotService) DispatchAutopilot(
 
 	switch autopilot.ExecutionMode {
 	case "create_issue":
-		if err := s.dispatchCreateIssue(ctx, autopilot, &run, trigger); err != nil {
+		if err := s.dispatchCreateIssue(ctx, autopilot, &run); err != nil {
 			s.failRun(ctx, run.ID, err.Error())
 			s.captureAutopilotRunFailed(autopilot, run, source, err.Error())
 			return &run, fmt.Errorf("dispatch create_issue: %w", err)
 		}
 	case "run_only":
-		if err := s.dispatchRunOnly(ctx, autopilot, &run, trigger); err != nil {
+		if err := s.dispatchRunOnly(ctx, autopilot, &run); err != nil {
 			s.failRun(ctx, run.ID, err.Error())
 			s.captureAutopilotRunFailed(autopilot, run, source, err.Error())
 			return &run, fmt.Errorf("dispatch run_only: %w", err)
@@ -110,7 +109,7 @@ func (s *AutopilotService) DispatchAutopilot(
 }
 
 // dispatchCreateIssue creates an issue and enqueues a task for the agent.
-func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun, trigger TriggerActor) error {
+func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun) error {
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -179,7 +178,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	s.captureIssueCreatedFromAutopilot(ap, run, issue)
 
 	// Enqueue agent task via the existing flow.
-	if _, err := s.TaskSvc.EnqueueTaskForIssue(ctx, issue, trigger); err != nil {
+	if _, err := s.TaskSvc.EnqueueTaskForIssue(ctx, issue); err != nil {
 		return fmt.Errorf("enqueue task for issue: %w", err)
 	}
 
@@ -192,7 +191,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 }
 
 // dispatchRunOnly enqueues a direct agent task without creating an issue.
-func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun, trigger TriggerActor) error {
+func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun) error {
 	agent, err := s.Queries.GetAgent(ctx, ap.AssigneeID)
 	if err != nil {
 		return fmt.Errorf("load agent: %w", err)
@@ -209,9 +208,6 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		RuntimeID:      agent.RuntimeID,
 		Priority:       0,
 		AutopilotRunID: run.ID,
-		TriggerSource:  trigger.sourceText(),
-		TriggerActorType: trigger.actorTypeText(),
-		TriggerActorID: trigger.ActorID,
 		// Snapshot the autopilot title so task rows self-describe later
 		// without joining back to autopilot. Truncated for the same
 		// transmission-cost reason as comment-driven summaries.
@@ -386,6 +382,27 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 	}
 	if rt.Status != "online" {
 		return "agent runtime is " + rt.Status + " at dispatch time", true
+	}
+	// Private-agent gate at the autopilot layer. Caller identity = the
+	// autopilot's creator: if the creator no longer has access to the
+	// (now-private) target agent, the dispatch is recorded as `skipped`.
+	// Agent-created autopilots bypass the gate to preserve A2A
+	// collaboration. Errors loading the workspace member fail closed —
+	// without an authoritative role the gate cannot grant access.
+	if agent.Visibility == "private" && ap.CreatedByType == "member" {
+		creatorID := util.UUIDToString(ap.CreatedByID)
+		if util.UUIDToString(agent.OwnerID) != creatorID {
+			member, err := s.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+				UserID:      ap.CreatedByID,
+				WorkspaceID: ap.WorkspaceID,
+			})
+			if err != nil {
+				return "autopilot creator no longer in workspace", true
+			}
+			if member.Role != "owner" && member.Role != "admin" {
+				return "autopilot creator lacks access to private assignee agent", true
+			}
+		}
 	}
 	return "", false
 }

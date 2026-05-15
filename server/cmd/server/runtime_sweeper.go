@@ -56,6 +56,9 @@ const (
 	// ticks and 500 rows/tick we drain 60k rows/hour worst case — plenty
 	// of headroom for the documented backlog without monopolising DB CPU.
 	queuedExpireBatchSize = 500
+	// inviteLinkCleanupBatchSize caps how many expired invite links are
+	// physically deleted each sweep tick.
+	inviteLinkCleanupBatchSize = 500
 )
 
 // runRuntimeSweeper periodically marks runtimes as offline if their
@@ -82,6 +85,7 @@ func runRuntimeSweeper(ctx context.Context, dbtx db.DBTX, queries *db.Queries, l
 			sweepStaleTasks(ctx, queries, taskSvc, bus)
 			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
 			sweepStaleLocalCLIRuns(ctx, dbtx, bus)
+			sweepExpiredInviteLinks(ctx, queries)
 			gcRuntimes(ctx, queries, bus)
 		}
 	}
@@ -340,6 +344,21 @@ func sweepStaleLocalCLIRuns(ctx context.Context, dbtx db.DBTX, bus *events.Bus) 
 			},
 		})
 	}
+}
+
+// sweepExpiredInviteLinks physically deletes invite-link records that are
+// already expired and still pending, so member settings lists do not retain
+// stale links indefinitely.
+func sweepExpiredInviteLinks(ctx context.Context, queries *db.Queries) {
+	deleted, err := queries.DeleteExpiredInviteLinks(ctx, inviteLinkCleanupBatchSize)
+	if err != nil {
+		slog.Warn("invite-link sweeper: failed to delete expired invite links", "error", err)
+		return
+	}
+	if len(deleted) == 0 {
+		return
+	}
+	slog.Info("invite-link sweeper: deleted expired invite links", "count", len(deleted))
 }
 
 // broadcastFailedTasks is preserved as a thin shim for the integration tests

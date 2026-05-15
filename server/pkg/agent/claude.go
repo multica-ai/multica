@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // claudeBackend implements Backend by spawning the Claude Code CLI
@@ -21,6 +23,10 @@ type claudeBackend struct {
 }
 
 func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
+	if opts.ClaudeUseSDKBridge {
+		return b.executeWithGoSDK(ctx, prompt, opts)
+	}
+
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
 		execPath = "claude"
@@ -89,7 +95,11 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// exits unexpectedly. Without the tail, an exit-code-only failure looks
 	// like "claude exited with error: exit status 3" — which is useless for
 	// root-causing V8 aborts, Bun panics, or any other CLI-side crash.
-	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[claude:stderr] "), agentStderrTailBytes)
+	stderrWriter := io.Writer(newLogWriter(b.cfg.Logger, "[claude:stderr] "))
+	if opts.TraceCallback != nil {
+		stderrWriter = io.MultiWriter(stderrWriter, newTraceWriter("raw_stderr", opts.TraceCallback))
+	}
+	stderrBuf := newStderrTail(stderrWriter, agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
 	if err := cmd.Start(); err != nil {
@@ -109,7 +119,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		_ = cmd.Wait()
 		return nil, errors.New(withAgentStderr(fmt.Sprintf("write claude input: %v", err), "claude", stderrBuf.Tail()))
 	}
-	closeStdin()
+	// In auto mode (no approval callback), close stdin immediately — Claude
+	// won't send control_requests with bypassPermissions. In prompt/deny mode,
+	// keep stdin open so we can write control_response messages back.
+	if opts.OnApproval == nil {
+		closeStdin()
+	}
 
 	b.cfg.Logger.Info("claude started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
@@ -123,6 +138,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
+		defer closeStdin() // ensure stdin is closed when goroutine exits (prompt mode keeps it open)
 		if mcpConfigPath != "" {
 			defer os.Remove(mcpConfigPath)
 		}
@@ -132,6 +148,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		var sessionID string
 		finalStatus := "completed"
 		var finalError string
+		permissionBlocked := false
 		usage := make(map[string]TokenUsage)
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
@@ -144,9 +161,18 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 
 		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
+			rawLine := scanner.Text()
+			if opts.TraceCallback != nil {
+				opts.TraceCallback("raw_stdout", rawLine, "")
+			}
+			line := strings.TrimSpace(rawLine)
 			if line == "" {
 				continue
+			}
+
+			// Trace: capture every valid stream-json line as provider_event.
+			if opts.TraceCallback != nil {
+				opts.TraceCallback("provider_event", "", line)
 			}
 
 			var msg claudeSDKMessage
@@ -156,14 +182,21 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 			switch msg.Type {
 			case "assistant":
-				b.handleAssistant(msg, msgCh, &output, usage)
+				b.handleAssistant(msg, msgCh, &output, usage, opts.TraceCallback)
 			case "user":
-				b.handleUser(msg, msgCh)
+				if b.handleUser(msg, msgCh, opts.TraceCallback) {
+					permissionBlocked = true
+					finalStatus = "blocked"
+					finalError = "Claude reported a permission request in tool output but did not emit a control_request event; stopping this run to avoid repeated permission retries."
+					emitDisplayEvent(opts.TraceCallback, "approval_prompt", "Claude permission request not mappable", finalError, map[string]any{"provider": "claude"})
+					cancel()
+				}
 			case "system":
 				if msg.SessionID != "" {
 					sessionID = msg.SessionID
 				}
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
+				emitDisplayEvent(opts.TraceCallback, "status", "Claude", "running", nil)
 			case "result":
 				closeStdin()
 				sessionID = msg.SessionID
@@ -175,6 +208,15 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					finalStatus = "failed"
 					finalError = msg.ResultText
 				}
+				// Trace: result/error as normalized.
+				if opts.TraceCallback != nil {
+					content := "result: " + finalStatus
+					if finalError != "" {
+						content = "error: " + finalError
+					}
+					opts.TraceCallback("normalized", content, "")
+				}
+				emitDisplayEvent(opts.TraceCallback, "status", "Claude", finalStatus, map[string]any{"error": finalError})
 			case "log":
 				if msg.Log != nil {
 					trySend(msgCh, Message{
@@ -182,7 +224,19 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 						Level:   msg.Log.Level,
 						Content: msg.Log.Message,
 					})
+
 				}
+			case "control_request":
+				// Only received when --permission-mode is not bypassPermissions.
+				if stdin != nil {
+					b.handleControlRequest(runCtx, msg, stdin, opts.OnApproval)
+				}
+				// Trace: control_request as normalized (approval_request/response
+				// are written by WithApprovalTrace separately).
+				if opts.TraceCallback != nil {
+					opts.TraceCallback("normalized", "[control_request]", line)
+				}
+				emitDisplayEvent(opts.TraceCallback, "approval_prompt", "Approval required", "", map[string]any{"provider": "claude"})
 			}
 		}
 
@@ -190,7 +244,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		exitErr := cmd.Wait()
 		duration := time.Since(startTime)
 
-		if runCtx.Err() == context.DeadlineExceeded {
+		if permissionBlocked {
+			// Keep the explicit blocked result set above. Claude can sometimes
+			// report "permission not granted" as tool output instead of a
+			// control_request in print/stream-json mode; cancelling prevents it
+			// from spending more turns retrying an approval we cannot answer.
+		} else if runCtx.Err() == context.DeadlineExceeded {
 			finalStatus = "timeout"
 			finalError = fmt.Sprintf("claude timed out after %s", timeout)
 		} else if runCtx.Err() == context.Canceled {
@@ -233,7 +292,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
-func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, output *strings.Builder, usage map[string]TokenUsage) {
+func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, output *strings.Builder, usage map[string]TokenUsage, trace TraceCallback) {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
 		return
@@ -255,10 +314,15 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 			if block.Text != "" {
 				output.WriteString(block.Text)
 				trySend(ch, Message{Type: MessageText, Content: block.Text})
+				if trace != nil {
+					trace("normalized", block.Text, "")
+				}
+				emitDisplayEvent(trace, "assistant_text", "Claude", block.Text, nil)
 			}
 		case "thinking":
 			if block.Text != "" {
 				trySend(ch, Message{Type: MessageThinking, Content: block.Text})
+				emitDisplayEvent(trace, "thinking", "Thinking", block.Text, nil)
 			}
 		case "tool_use":
 			var input map[string]any
@@ -271,33 +335,52 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 				CallID: block.ID,
 				Input:  input,
 			})
+			if trace != nil {
+				trace("normalized", "[tool_use: "+block.Name+"]", "")
+			}
+			emitDisplayEvent(trace, "tool_call", block.Name, "", map[string]any{"call_id": block.ID, "input": input})
+
 		}
 	}
 }
 
-func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) {
+func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message, trace TraceCallback) bool {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
-		return
+		return false
 	}
 
+	permissionBlocked := false
 	for _, block := range content.Content {
 		if block.Type == "tool_result" {
 			resultStr := ""
 			if block.Content != nil {
 				resultStr = string(block.Content)
 			}
+			if isClaudePermissionNotGranted(resultStr) {
+				permissionBlocked = true
+			}
 			trySend(ch, Message{
 				Type:   MessageToolResult,
 				CallID: block.ToolUseID,
 				Output: resultStr,
 			})
+			if trace != nil {
+				trace("normalized", "[tool_result: "+block.ToolUseID+"]", resultStr)
+			}
+			emitDisplayEvent(trace, "tool_result", "Tool result", resultStr, map[string]any{"call_id": block.ToolUseID})
+
 		}
 	}
+	return permissionBlocked
 }
 
-func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interface{ Write([]byte) (int, error) }) {
-	// Auto-approve all tool uses in autonomous/daemon mode.
+func isClaudePermissionNotGranted(s string) bool {
+	return strings.Contains(s, "Claude requested permissions") &&
+		strings.Contains(s, "you haven't granted it yet")
+}
+
+func (b *claudeBackend) handleControlRequest(ctx context.Context, msg claudeSDKMessage, stdin interface{ Write([]byte) (int, error) }, onApproval ApprovalCallback) {
 	var req claudeControlRequestPayload
 	if err := json.Unmarshal(msg.Request, &req); err != nil {
 		return
@@ -311,13 +394,45 @@ func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interfa
 		inputMap = map[string]any{}
 	}
 
+	// Determine behavior: auto-approve if no callback, otherwise ask.
+	behavior := "allow"
+	if onApproval != nil {
+		if req.ToolName == "Bash" {
+			if command, _ := inputMap["command"].(string); isTrustedPlatformCommand(command) {
+				behavior = "allow"
+				goto respond
+			}
+		}
+		title := "Tool: " + req.ToolName
+		detail := ""
+		if req.Subtype != "" {
+			title = req.Subtype + ": " + req.ToolName
+		}
+		if raw, err := json.Marshal(inputMap); err == nil {
+			detail = string(raw)
+		}
+		_, approved, err := onApproval(ctx, ApprovalRequest{
+			Type:  "permission_request",
+			Title: title, Detail: detail,
+			Options: []protocol.InteractionOption{
+				{ID: "allow", Label: "Approve " + req.ToolName},
+				{ID: "deny", Label: "Reject " + req.ToolName},
+			},
+			DefaultOption: "deny",
+		})
+		if err != nil || !approved {
+			behavior = "deny"
+		}
+	}
+
+respond:
 	response := map[string]any{
 		"type": "control_response",
 		"response": map[string]any{
 			"subtype":    "success",
 			"request_id": msg.RequestID,
 			"response": map[string]any{
-				"behavior":     "allow",
+				"behavior":     behavior,
 				"updatedInput": inputMap,
 			},
 		},
@@ -404,23 +519,42 @@ func trySend(ch chan<- Message, msg Message) {
 
 // claudeBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args. Overriding these would break
-// the daemon↔Claude communication protocol.
+// the daemon↔Claude communication protocol or approval policy enforcement.
+// --permission-mode is blocked in ALL modes because the daemon sets it based
+// on approval_policy (bypassPermissions for auto, default for prompt/deny).
+// Allowing custom_args to override it would silently break the prompt flow.
 var claudeBlockedArgs = map[string]blockedArgMode{
 	"-p":                blockedStandalone, // non-interactive mode
 	"--output-format":   blockedWithValue,  // stream-json protocol
 	"--input-format":    blockedWithValue,  // stream-json protocol
-	"--permission-mode": blockedWithValue,  // bypassPermissions for autonomous operation
+	"--permission-mode": blockedWithValue,  // set by daemon based on approval_policy
 	"--mcp-config":      blockedWithValue,  // set by daemon from agent.mcp_config
 }
 
 func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
+	// Determine permission mode: auto/nil callback → bypassPermissions,
+	// prompt/deny callback → default (so Claude emits control_request events
+	// for every bash command and file edit). A controlled runtime_config
+	// override can select Claude's native plan/acceptEdits modes for explicit
+	// verification, but custom_args cannot override this flag.
+	permMode := "bypassPermissions"
+	if opts.OnApproval != nil {
+		permMode = "default"
+	}
+	switch opts.ClaudePermissionMode {
+	case "default", "plan", "acceptEdits":
+		if opts.OnApproval != nil {
+			permMode = opts.ClaudePermissionMode
+		}
+	}
+
 	args := []string{
 		"-p",
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
 		"--strict-mcp-config",
-		"--permission-mode", "bypassPermissions",
+		"--permission-mode", permMode,
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
@@ -581,7 +715,31 @@ func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("detect version for %s: %w", execPath, err)
 	}
-	return strings.TrimSpace(string(data)), nil
+	return extractVersionLine(string(data)), nil
+}
+
+// extractVersionLine pulls the version line out of a `<cli> --version` capture,
+// discarding leading shell noise. On Windows, npm-installed CLI shims (notably
+// gemini's) emit `chcp` output like `Active code page: 65001` before the real
+// version reaches stdout, and the raw concatenation was being persisted as the
+// runtime version (see #2516).
+//
+// The heuristic: return the first non-empty line that contains a semver-shaped
+// token (matches versionRe). Full version strings like "2.1.5 (Claude Code)"
+// or "codex-cli 0.118.0" survive unchanged because the whole matching line is
+// returned. If no line carries a semver token, fall back to the trimmed raw
+// output so unusual version formats aren't silently dropped to empty.
+func extractVersionLine(raw string) string {
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if versionRe.MatchString(line) {
+			return line
+		}
+	}
+	return strings.TrimSpace(raw)
 }
 
 // logWriter adapts a *slog.Logger to an io.Writer for capturing stderr.
