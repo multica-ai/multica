@@ -10,5 +10,12 @@
     "detail_link": "Detalle →",
     "more_agents_one": "y {{count}} agente más",
     "more_agents_other": "y {{count}} agentes más"
+  },
+  "detail": {
+    "workspace_fallback": "Espacio de trabajo",
+    "members_breadcrumb": "Miembros",
+    "breadcrumb_fallback": "Miembro",
+    "not_found_title": "Miembro no encontrado",
+    "not_found_description": "Es posible que este miembro haya abandonado el espacio de trabajo."
   }
 }

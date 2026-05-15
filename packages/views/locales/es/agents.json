@@ -186,6 +186,7 @@
   },
   "tabs": {
     "activity": "Actividad",
+    "tasks": "Tareas",
     "instructions": "Instrucciones",
     "skills": "Habilidades",
     "environment": "Entorno",
@@ -218,43 +219,7 @@
     "creating": "Creando...",
     "cancel": "Cancelar",
     "create_failed_toast": "Error al crear el agente",
-    "back_aria": "Atrás",
-    "no_runtime_toast": "No hay entorno disponible. Añade un entorno primero e inténtalo de nuevo.",
-    "template_created_toast": "Agente \"{{name}}\" creado",
-    "template_created_with_reuse_toast_one": "Agente \"{{name}}\" creado. Se reutilizó {{count}} habilidad existente.",
-    "template_created_with_reuse_toast_other": "Agente \"{{name}}\" creado. Se reutilizaron {{count}} habilidades existentes.",
     "skill_attach_failed_toast": "Agente creado, pero no se pudieron adjuntar las habilidades: {{error}}",
-    "chooser": {
-      "blank_title": "Empezar desde cero",
-      "blank_desc": "Escribe todo tú mismo.",
-      "template_title": "Desde plantilla",
-      "template_desc": "Agentes preconfigurados con habilidades seleccionadas."
-    },
-    "template_picker": {
-      "title": "Elige una plantilla",
-      "empty": "Aún no hay plantillas disponibles.",
-      "load_failed": "Error al cargar las plantillas",
-      "other_category": "Otros",
-      "filter_all": "Todos"
-    },
-    "template_card": {
-      "skills_one": "{{count}} habilidad",
-      "skills_other": "{{count}} habilidades",
-      "prompt_only": "Solo instrucciones"
-    },
-    "template_detail": {
-      "load_failed": "Error al cargar la plantilla",
-      "skill_count_one": "Incluye {{count}} habilidad",
-      "skill_count_other": "Incluye {{count}} habilidades",
-      "instructions_label": "Instrucciones",
-      "instructions_loading": "Cargando instrucciones…",
-      "use": "Usar esta plantilla",
-      "creating": "Creando…"
-    },
-    "template_failure": {
-      "title": "Algunas habilidades de la plantilla no están disponibles",
-      "body": "No se puede aplicar la plantilla porque una o más URLs devolvieron un error. No se realizaron cambios. Contacta al mantenedor de la plantilla con las URLs indicadas."
-    },
     "instructions": {
       "label": "Instrucciones",
       "placeholder_blank": "Haz clic para escribir instrucciones…",
@@ -402,6 +367,13 @@
     "skills_label": "Habilidades",
     "owner_label": "Propietario",
     "unknown_runtime": "Runtime desconocido"
+  },
+  "live_peek": {
+    "current_issue_label": "Trabajando en",
+    "no_current_issue": "Sin tarea",
+    "last_activity_label": "Última actividad",
+    "no_recent_activity": "Sin actividad reciente",
+    "failed_indicator": "Fallido"
   },
   "transcript": {
     "dialog_title": "Transcripción de ejecución del agente",

@@ -76,6 +76,28 @@
     "board": "Tablero",
     "list": "Lista"
   },
+  "actor_issues": {
+    "scope": {
+      "assigned": {
+        "label": "Asignadas",
+        "description": "Incidencias asignadas a este miembro o agente"
+      },
+      "created": {
+        "label": "Creadas",
+        "description": "Incidencias creadas por este miembro o agente"
+      }
+    },
+    "empty": {
+      "assigned": {
+        "title": "Sin incidencias asignadas",
+        "description": "Las incidencias asignadas aquí aparecerán en esta vista."
+      },
+      "created": {
+        "title": "Sin incidencias creadas",
+        "description": "Las incidencias creadas aquí aparecerán en esta vista."
+      }
+    }
+  },
   "list": {
     "empty_status": "Sin incidencias",
     "add_issue_tooltip": "Añadir incidencia"
@@ -114,6 +136,7 @@
     "prop_due_date": "Fecha límite",
     "prop_project": "Proyecto",
     "prop_labels": "Etiquetas",
+    "add_property_action": "Añadir propiedad",
     "prop_created_by": "Creado por",
     "prop_created": "Creado",
     "prop_updated": "Actualizado",
@@ -169,7 +192,9 @@
     "squad_leader_no_action": "evaluó: no se necesita acción",
     "squad_leader_no_action_reason": "evaluó: no se necesita acción ({{reason}})",
     "squad_leader_failed": "la evaluación falló",
-    "squad_leader_failed_reason": "la evaluación falló: {{reason}}"
+    "squad_leader_failed_reason": "la evaluación falló: {{reason}}",
+    "activity_count_one": "{{count}} actividad",
+    "activity_count_other": "{{count}} actividades"
   },
   "comment": {
     "delete_title": "Eliminar comentario",

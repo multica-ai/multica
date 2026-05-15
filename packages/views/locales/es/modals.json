@@ -146,11 +146,26 @@
     "description_placeholder": "Describe de qué se encarga este equipo...",
     "leader_label": "Agente líder",
     "leader_hint": "El líder recibe todas las tareas asignadas a este equipo y coordina al resto.",
+    "leader_placeholder": "Selecciona un agente líder",
+    "members_label": "Miembros adicionales",
+    "members_optional": "(opcional)",
+    "members_hint": "Miembros a los que el líder puede delegar subtareas. Se pueden añadir más tarde.",
+    "members_placeholder": "Añadir agentes o miembros del espacio de trabajo",
+    "members_selected_count_one": "{{count}} seleccionado",
+    "members_selected_count_other": "{{count}} seleccionados",
+    "members_more_count": "+{{count}}",
+    "members_remove_aria": "Eliminar {{name}}",
+    "picker_search_placeholder": "Buscar agentes y miembros...",
+    "group_my_agents": "Mis agentes",
+    "group_workspace_agents": "Agentes del espacio de trabajo",
+    "group_members": "Miembros",
     "no_agents": "No hay agentes activos disponibles. Crea un agente primero.",
+    "no_results": "Sin resultados",
     "cancel": "Cancelar",
     "submit": "Crear equipo",
     "submitting": "Creando...",
     "toast_created": "Equipo creado",
-    "toast_failed": "Error al crear el equipo"
+    "toast_failed": "Error al crear el equipo",
+    "toast_member_add_failed": "Error al añadir a {{name}}: {{error}}"
   }
 }

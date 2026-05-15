@@ -5,7 +5,7 @@
   "groups": {
     "pages": "Páginas",
     "commands": "Comandos",
-    "switch_workspace": "Cambiar espacio de trabajo",
+    "members": "Miembros",
     "projects": "Proyectos",
     "issues": "Tareas",
     "recent": "Reciente"
