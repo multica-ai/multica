@@ -238,6 +238,15 @@ const DashboardAgentRunTimeSchema = z.object({
 
 export const DashboardAgentRunTimeListSchema = z.array(DashboardAgentRunTimeSchema);
 
+const DashboardRunTimeDailySchema = z.object({
+  date: z.string(),
+  total_seconds: z.number().default(0),
+  task_count: z.number().default(0),
+  failed_count: z.number().default(0),
+}).loose();
+
+export const DashboardRunTimeDailyListSchema = z.array(DashboardRunTimeDailySchema);
+
 // ---------------------------------------------------------------------------
 // Agent template catalog — `/api/agent-templates*` and the
 // create-from-template response. The desktop app's create-agent picker

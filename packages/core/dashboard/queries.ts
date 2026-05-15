@@ -22,6 +22,8 @@ export const dashboardKeys = {
     [...dashboardKeys.all(wsId), "by-agent", days, projectId] as const,
   agentRuntime: (wsId: string, days: number, projectId: string | null) =>
     [...dashboardKeys.all(wsId), "agent-runtime", days, projectId] as const,
+  runTimeDaily: (wsId: string, days: number, projectId: string | null) =>
+    [...dashboardKeys.all(wsId), "runtime-daily", days, projectId] as const,
 };
 
 // 60s staleTime matches the per-runtime usage queries — the data is rollup-
@@ -66,6 +68,20 @@ export function dashboardAgentRunTimeOptions(
     queryKey: dashboardKeys.agentRuntime(wsId, days, projectId),
     queryFn: () =>
       api.getDashboardAgentRunTime({ days, project_id: projectId ?? undefined }),
+    enabled: !!wsId,
+    staleTime: STALE_TIME,
+  });
+}
+
+export function dashboardRunTimeDailyOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+) {
+  return queryOptions({
+    queryKey: dashboardKeys.runTimeDaily(wsId, days, projectId),
+    queryFn: () =>
+      api.getDashboardRunTimeDaily({ days, project_id: projectId ?? undefined }),
     enabled: !!wsId,
     staleTime: STALE_TIME,
   });

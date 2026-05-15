@@ -509,6 +509,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/usage/daily", h.GetDashboardUsageDaily)
 				r.Get("/usage/by-agent", h.GetDashboardUsageByAgent)
 				r.Get("/agent-runtime", h.GetDashboardAgentRunTime)
+				r.Get("/runtime/daily", h.GetDashboardRunTimeDaily)
 			})
 
 			// Runtimes

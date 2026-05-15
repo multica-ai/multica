@@ -271,6 +271,73 @@ func (q *Queries) ListDashboardAgentRunTime(ctx context.Context, arg ListDashboa
 	return items, nil
 }
 
+const listDashboardRunTimeDaily = `-- name: ListDashboardRunTimeDaily :many
+SELECT
+    DATE(atq.completed_at) AS date,
+    COALESCE(
+        SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at)))::bigint,
+        0
+    )::bigint AS total_seconds,
+    COUNT(*)::int AS task_count,
+    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed')
+  AND atq.started_at IS NOT NULL
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= DATE_TRUNC('day', $2::timestamptz)
+  AND ($3::uuid IS NULL OR i.project_id = $3)
+GROUP BY DATE(atq.completed_at)
+ORDER BY DATE(atq.completed_at) DESC
+`
+
+type ListDashboardRunTimeDailyParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+}
+
+type ListDashboardRunTimeDailyRow struct {
+	Date         pgtype.Date `json:"date"`
+	TotalSeconds int64       `json:"total_seconds"`
+	TaskCount    int32       `json:"task_count"`
+	FailedCount  int32       `json:"failed_count"`
+}
+
+// Daily per-date run time + task counts for the workspace, optionally
+// scoped to a single project. Powers the workspace dashboard's "Time"
+// and "Tasks" metrics on the same toggle as Tokens / Cost. Bucketed by
+// completed_at (terminal time) — same anchor as ListDashboardAgentRunTime
+// so the day boundaries line up with the per-agent run-time card. Only
+// terminal tasks (completed or failed) with both started_at and
+// completed_at populated contribute.
+func (q *Queries) ListDashboardRunTimeDaily(ctx context.Context, arg ListDashboardRunTimeDailyParams) ([]ListDashboardRunTimeDailyRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardRunTimeDaily, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardRunTimeDailyRow{}
+	for rows.Next() {
+		var i ListDashboardRunTimeDailyRow
+		if err := rows.Scan(
+			&i.Date,
+			&i.TotalSeconds,
+			&i.TaskCount,
+			&i.FailedCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDashboardUsageByAgent = `-- name: ListDashboardUsageByAgent :many
 SELECT
     atq.agent_id,
