@@ -1442,7 +1442,11 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// want to spam the issue with "task timed out" messages on every
 	// daemon hiccup.
 	if errMsg != "" && task.IssueID.Valid && retried == nil {
-		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID)
+		if failureReason == "timeout" {
+			s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(s.timeoutFailureCommentBody(ctx, task, errMsg)), "comment", task.TriggerCommentID)
+		} else {
+			s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID)
+		}
 	}
 
 	// Mirror the issue fallback for chat tasks: write an assistant
@@ -1658,9 +1662,11 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	retried := 0
 
 	for _, t := range tasks {
+		taskRetried := false
 		// Auto-retry first so the issue stays in_progress rather than
 		// flapping todo → in_progress within a tick.
 		if child, _ := s.MaybeRetryFailedTask(ctx, t); child != nil {
+			taskRetried = true
 			retried++
 			if t.IssueID.Valid {
 				retriedIssues[util.UUIDToString(t.IssueID)] = true
@@ -1702,6 +1708,15 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 				}
 			}
 		}
+
+		issueKey := util.UUIDToString(t.IssueID)
+		if failureReason == "timeout" && t.IssueID.Valid && !taskRetried && !retriedIssues[issueKey] {
+			errMsg := "task timed out"
+			if t.Error.Valid && strings.TrimSpace(t.Error.String) != "" {
+				errMsg = t.Error.String
+			}
+			s.createAgentComment(ctx, t.IssueID, t.AgentID, redact.Text(s.timeoutFailureCommentBody(ctx, t, errMsg)), "comment", t.TriggerCommentID)
+		}
 		if workspaceID == "" {
 			workspaceID = s.ResolveTaskWorkspaceID(ctx, t)
 		}
@@ -1728,6 +1743,60 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 		s.ReconcileAgentStatus(ctx, agentID)
 	}
 	return retried
+}
+
+func (s *TaskService) timeoutFailureCommentBody(ctx context.Context, task db.AgentTaskQueue, errMsg string) string {
+	// CEREBRO-PATCH(task-timeout-issue-comment): surface useful timeout context on the issue.
+	taskID := util.UUIDToString(task.ID)
+	body := "BLOCKED: Agent-run timed out before it could post a final comment.\n\n"
+	body += "Run: `" + taskID + "`\n"
+	body += "Reason: `" + strings.TrimSpace(errMsg) + "`\n"
+	body += "Full run log: `multica issue run-messages " + taskID + " --output json`"
+
+	if s.Queries != nil {
+		if text := s.latestAgentTextForTimeout(ctx, task.ID); text != "" {
+			body += "\n\nLast visible agent output before timeout:\n\n" + quoteMarkdown(limitRunSummary(text, 1200))
+		}
+	}
+	return body
+}
+
+func (s *TaskService) latestAgentTextForTimeout(ctx context.Context, taskID pgtype.UUID) string {
+	messages, err := s.Queries.ListTaskMessages(ctx, taskID)
+	if err != nil {
+		slog.Warn("timeout fallback: failed to load task messages",
+			"task_id", util.UUIDToString(taskID),
+			"error", err,
+		)
+		return ""
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Type != "text" || !msg.Content.Valid {
+			continue
+		}
+		if text := strings.TrimSpace(msg.Content.String); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func limitRunSummary(text string, maxRunes int) string {
+	text = strings.TrimSpace(text)
+	runes := []rune(text)
+	if len(runes) <= maxRunes {
+		return text
+	}
+	return strings.TrimSpace(string(runes[:maxRunes])) + "\n..."
+}
+
+func quoteMarkdown(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = "> " + line
+	}
+	return strings.Join(lines, "\n")
 }
 
 // runInTx executes fn inside a single DB transaction. If TxStarter is nil
