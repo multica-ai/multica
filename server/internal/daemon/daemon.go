@@ -2066,10 +2066,12 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			taskLog.Warn("report task usage failed", "error", err)
 		}
 	}
-	// CEREBRO-PATCH(daemon-task-account-usage): JEH-881 parse the task output
-	// for account-level usage signals (429 / usage-window-%) and persist them
-	// on the cerebro_account row so the UI can show exact quota state.
-	d.maybeReportAccountUsage(ctx, task.RuntimeID, result.Comment, result.Usage, taskLog) // CEREBRO-PATCH(daemon-task-account-token-usage): include exact task tokens in account usage telemetry.
+	// CEREBRO-PATCH(daemon-task-account-usage): JEH-881/JEH-1365 parse the task
+	// output AND verbose run logs for account-level usage signals (429 /
+	// usage-window-%) and persist them on the cerebro_account row so the UI can
+	// show exact quota state. Logs carry Anthropic x-ratelimit headers emitted
+	// by Claude Code's --verbose stream that are absent from the final comment.
+	d.maybeReportAccountUsage(ctx, task.RuntimeID, result.Comment, result.Logs, result.Usage, taskLog) // CEREBRO-PATCH(daemon-task-account-token-usage): include exact task tokens in account usage telemetry.
 
 	d.reportTaskResult(ctx, task.ID, result, taskLog)
 
@@ -2539,6 +2541,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				WorkDir:   env.WorkDir,
 				EnvRoot:   env.RootDir,
 				Usage:     usageEntries,
+				// CEREBRO-PATCH(daemon-task-result-logs): JEH-1365 propagate run logs
+				Logs: result.Logs,
 			}, nil
 		}
 		// Detect "poisoned" terminal output: the agent didn't reach a real
@@ -2560,6 +2564,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				EnvRoot:       env.RootDir,
 				Usage:         usageEntries,
 				FailureReason: reason,
+				Logs:          result.Logs,
 			}, nil
 		}
 		return TaskResult{
@@ -2569,6 +2574,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			WorkDir:   env.WorkDir,
 			EnvRoot:   env.RootDir,
 			Usage:     usageEntries,
+			Logs:      result.Logs,
 		}, nil
 	case "timeout":
 		// Surface session_id/work_dir so the chat resume pointer is kept
@@ -2587,6 +2593,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			EnvRoot:       env.RootDir,
 			FailureReason: "timeout",
 			Usage:         usageEntries,
+			Logs:          result.Logs,
 		}, nil
 	case "cancelled":
 		// Server cancelled the task (e.g. issue reassignment, user cancel).
@@ -2601,6 +2608,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			WorkDir:   env.WorkDir,
 			EnvRoot:   env.RootDir,
 			Usage:     usageEntries,
+			Logs:      result.Logs,
 		}, nil
 	default:
 		errMsg := result.Error
@@ -2633,6 +2641,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			EnvRoot:       env.RootDir,
 			Usage:         usageEntries,
 			FailureReason: failureReason,
+			Logs:          result.Logs,
 		}, nil
 	}
 }

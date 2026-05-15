@@ -145,6 +145,11 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		startTime := time.Now()
 		var output strings.Builder
+		// CEREBRO-PATCH(agent-claude-logs): JEH-1365 — accumulate verbose log messages
+		// so the daemon can parse rate-limit/quota signals from the stream (not just
+		// the final result text). Anthropic headers like x-ratelimit-* are logged here
+		// by Claude Code in --verbose mode and not included in the final output.
+		var logs strings.Builder
 		var sessionID string
 		finalStatus := "completed"
 		var finalError string
@@ -212,6 +217,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 						Level:   msg.Log.Level,
 						Content: msg.Log.Message,
 					})
+					// CEREBRO-PATCH(agent-claude-logs): JEH-1365 — accumulate log
+					// content for quota-signal parsing after the run completes.
+					if msg.Log.Message != "" {
+						logs.WriteString(msg.Log.Message)
+						logs.WriteByte('\n')
+					}
 				}
 			}
 		}
@@ -288,6 +299,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			DurationMs: duration.Milliseconds(),
 			SessionID:  reportedSessionID,
 			Usage:      usage,
+			Logs:       logs.String(), // CEREBRO-PATCH(agent-claude-logs): JEH-1365
 		}
 	}()
 

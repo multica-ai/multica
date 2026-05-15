@@ -23,15 +23,16 @@ import (
 // account load even when the provider emitted no quota warning. Always
 // best-effort: errors are logged but never block the task-completion path.
 //
-// Signal sources:
-//   - 429 retry-after in result.Comment → ThrottledUntil on the account row.
-//   - Usage-window-percent in result.Comment → UsageWindowPct on the account row.
+// Signal sources (JEH-1365: now scans both final output and verbose run logs):
+//   - 429 retry-after in comment or logs → ThrottledUntil on the account row.
+//   - Usage-window-percent in comment or logs → UsageWindowPct on the account row.
+//   - Anthropic x-ratelimit-limit/remaining headers in logs → computed pct.
 //   - Task usage entries → rolling 5h/7d token totals for the account.
 //
 // The account_id is resolved from the identity cache populated on each
 // heartbeat ack. If no account has been registered for this runtime yet the
 // call is a no-op.
-func (d *Daemon) maybeReportAccountUsage(ctx context.Context, runtimeID, comment string, usage []TaskUsageEntry, log *slog.Logger) { // CEREBRO-PATCH(daemon-task-account-token-usage): include task token usage in account telemetry.
+func (d *Daemon) maybeReportAccountUsage(ctx context.Context, runtimeID, comment, logs string, usage []TaskUsageEntry, log *slog.Logger) { // CEREBRO-PATCH(daemon-task-account-token-usage): include task token usage in account telemetry.
 	if d.accountIdentities == nil {
 		return
 	}
@@ -39,7 +40,14 @@ func (d *Daemon) maybeReportAccountUsage(ctx context.Context, runtimeID, comment
 	if accountID == "" {
 		return
 	}
-	ev := cerebroaccount.ParseAdapterOutput(comment, time.Now())
+	// Merge comment + verbose logs so the parser can pick up signals that
+	// appear in Claude Code's debug log stream (e.g. x-ratelimit headers)
+	// rather than only in the agent's final text output.
+	combined := comment
+	if logs != "" {
+		combined = comment + "\n" + logs
+	}
+	ev := cerebroaccount.ParseAdapterOutput(combined, time.Now())
 	tokens := accountUsageTokens(usage)
 	if !ev.HasSignal() && tokens <= 0 {
 		return

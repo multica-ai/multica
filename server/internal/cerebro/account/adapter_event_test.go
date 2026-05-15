@@ -94,3 +94,52 @@ x-ratelimit-input-tokens-pct: 99`
 		t.Fatalf("expected UsageWindowPct=99, got %+v", ev.UsageWindowPct)
 	}
 }
+
+func TestParseAdapterOutput_RateLimitPair(t *testing.T) {
+	now := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name    string
+		input   string
+		wantPct float32
+	}{
+		{
+			name: "input-tokens header pair",
+			// 20000 used out of 100000 = 20%
+			input:   "x-ratelimit-limit-input-tokens: 100000\nx-ratelimit-remaining-input-tokens: 80000",
+			wantPct: 20,
+		},
+		{
+			name: "tokens header pair",
+			// 50000 used out of 200000 = 25%
+			input:   "x-ratelimit-limit-tokens: 200000\nx-ratelimit-remaining-tokens: 150000",
+			wantPct: 25,
+		},
+		{
+			name: "prose takes priority over header pair",
+			// Explicit percentage wins over computed one.
+			input:   "You have used 87% of your usage window\nx-ratelimit-limit-tokens: 200000\nx-ratelimit-remaining-tokens: 150000",
+			wantPct: 87,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ev := ParseAdapterOutput(tc.input, now)
+			if ev.UsageWindowPct == nil {
+				t.Fatalf("expected UsageWindowPct to be set")
+			}
+			got := *ev.UsageWindowPct
+			if got < tc.wantPct-0.5 || got > tc.wantPct+0.5 {
+				t.Fatalf("UsageWindowPct: got %v want %v", got, tc.wantPct)
+			}
+		})
+	}
+}
+
+func TestParseAdapterOutput_RateLimitPairNoSignalWhenMissing(t *testing.T) {
+	now := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
+	// Only limit, no remaining — should not produce a signal.
+	ev := ParseAdapterOutput("x-ratelimit-limit-tokens: 100000", now)
+	if ev.UsageWindowPct != nil {
+		t.Fatalf("expected no UsageWindowPct when remaining is missing, got %v", *ev.UsageWindowPct)
+	}
+}

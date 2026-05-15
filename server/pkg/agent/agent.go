@@ -93,6 +93,11 @@ type Result struct {
 	DurationMs int64
 	SessionID  string
 	Usage      map[string]TokenUsage // keyed by model name
+	// CEREBRO-PATCH(agent-result-logs): JEH-1365 — accumulated verbose log content
+	// from the run stream (level="debug"/"info"/"warn"). Used by maybeReportAccountUsage
+	// to find rate-limit/quota signals that appear in log messages rather than the
+	// final text output (e.g. Anthropic x-ratelimit headers logged with --verbose).
+	Logs string
 }
 
 // Config configures a Backend instance.

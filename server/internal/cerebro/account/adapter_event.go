@@ -7,6 +7,19 @@ import (
 	"time"
 )
 
+// rateLimitPairRe matches x-ratelimit-limit-* and x-ratelimit-remaining-* header
+// values emitted by Claude Code's verbose log stream. We use these to compute a
+// usage percentage when no explicit *-pct header is present.
+//
+// The "tokens" family takes priority over "requests" since it is more granular.
+// Named captures: "kind" (tokens|requests), "val" (integer value).
+var rateLimitLimitRe = regexp.MustCompile(
+	`(?i)x-ratelimit-limit-(input-)?tokens[^\d]*(\d+)`,
+)
+var rateLimitRemainingRe = regexp.MustCompile(
+	`(?i)x-ratelimit-remaining-(input-)?tokens[^\d]*(\d+)`,
+)
+
 // AdapterEvent is what the daemon emits to the server when it observes an
 // account-relevant signal (429 or usage-percent) in adapter output. Both
 // fields are pointer-typed so a single observation can patch either one
@@ -41,9 +54,9 @@ func (e AdapterEvent) HasSignal() bool {
 //
 //  2. Usage percent → UsageWindowPct. Matches:
 //     - Anthropic-style `limits.x_tokens_pct=NN` / `pct: NN` / `NN%`
-//       headers and SDK system messages.
+//     headers and SDK system messages.
 //     - "Used 87% of your weekly usage window" prose lines that some
-//       Claude Code CLI versions print.
+//     Claude Code CLI versions print.
 //     Values are clamped to [0, 100] and returned as float32 to match
 //     the DB column type.
 //
@@ -60,6 +73,12 @@ func ParseAdapterOutput(output string, now time.Time) AdapterEvent {
 		ev.ThrottledUntil = &reset
 	}
 	if pct, ok := parseUsagePct(output); ok {
+		ev.UsageWindowPct = &pct
+	} else if pct, ok := parseRateLimitPairPct(output); ok {
+		// Fallback: compute pct from x-ratelimit-limit-* / x-ratelimit-remaining-*
+		// absolute header values that Claude Code's --verbose stream emits on every
+		// Anthropic API call. This ensures quota data is reported even when the
+		// agent never emits a prose usage-window warning (JEH-1365).
 		ev.UsageWindowPct = &pct
 	}
 	return ev
@@ -112,4 +131,37 @@ func parseUsagePct(output string) (float32, bool) {
 		return float32(v), true
 	}
 	return 0, false
+}
+
+// parseRateLimitPairPct computes a usage percentage from the Anthropic API's
+// absolute x-ratelimit-limit-* and x-ratelimit-remaining-* headers that Claude
+// Code logs in --verbose mode. Returns (pct, true) when both limit and remaining
+// are present and limit > 0; otherwise (0, false).
+//
+// This is a best-effort approximation: the per-minute token rate-limit window is
+// narrower than the 5-hour Claude Pro usage window, but it still gives the server
+// non-null data after every run. The prose usage-warning parser (parseUsagePct)
+// takes priority when a proper window-percentage is available.
+func parseRateLimitPairPct(output string) (float32, bool) {
+	lm := rateLimitLimitRe.FindStringSubmatch(output)
+	rm := rateLimitRemainingRe.FindStringSubmatch(output)
+	if lm == nil || rm == nil {
+		return 0, false
+	}
+	limit, err := strconv.ParseFloat(lm[2], 64)
+	if err != nil || limit <= 0 {
+		return 0, false
+	}
+	remaining, err := strconv.ParseFloat(rm[2], 64)
+	if err != nil || remaining < 0 {
+		return 0, false
+	}
+	pct := float32((1.0 - remaining/limit) * 100.0)
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	return pct, true
 }
