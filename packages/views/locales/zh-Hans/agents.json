@@ -182,6 +182,7 @@
   },
   "tabs": {
     "activity": "动态",
+    "tasks": "task",
     "instructions": "指令",
     "skills": "skill",
     "environment": "环境变量",

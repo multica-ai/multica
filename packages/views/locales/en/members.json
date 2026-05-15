@@ -10,5 +10,12 @@
     "detail_link": "Detail →",
     "more_agents_one": "and {{count}} other agent",
     "more_agents_other": "and {{count}} other agents"
+  },
+  "detail": {
+    "workspace_fallback": "Workspace",
+    "members_breadcrumb": "Members",
+    "breadcrumb_fallback": "Member",
+    "not_found_title": "Member not found",
+    "not_found_description": "This member may have left the workspace."
   }
 }
