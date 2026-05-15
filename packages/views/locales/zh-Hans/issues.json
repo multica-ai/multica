@@ -75,6 +75,28 @@
     "board": "看板",
     "list": "列表"
   },
+  "actor_issues": {
+    "scope": {
+      "assigned": {
+        "label": "已分配",
+        "description": "分配给这个成员或智能体的 issue"
+      },
+      "created": {
+        "label": "已创建",
+        "description": "这个成员或智能体创建的 issue"
+      }
+    },
+    "empty": {
+      "assigned": {
+        "title": "没有已分配的 issue",
+        "description": "分配到这里的 issue 会显示在此视图中。"
+      },
+      "created": {
+        "title": "没有已创建的 issue",
+        "description": "由这里创建的 issue 会显示在此视图中。"
+      }
+    }
+  },
   "list": {
     "empty_status": "无 issue",
     "add_issue_tooltip": "新建 issue"

@@ -493,7 +493,51 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
   const setScope = useIssuesScopeStore((s) => s.setScope);
+  const SCOPE_LABEL_KEY: Record<IssuesScope, "all_label" | "members_label" | "agents_label"> = {
+    all: "all_label",
+    members: "members_label",
+    agents: "agents_label",
+  };
+  const SCOPE_DESC_KEY: Record<IssuesScope, "all_description" | "members_description" | "agents_description"> = {
+    all: "all_description",
+    members: "members_description",
+    agents: "agents_description",
+  };
 
+  return (
+    <div className="flex h-12 shrink-0 items-center justify-between px-4">
+      {/* Left: scope buttons */}
+      <div className="flex items-center gap-1">
+        {SCOPE_VALUES.map((s) => (
+          <Tooltip key={s}>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={
+                    scope === s
+                      ? "bg-accent text-accent-foreground hover:bg-accent/80"
+                      : "text-muted-foreground"
+                  }
+                  onClick={() => setScope(s)}
+                >
+                  {t(($) => $.scope[SCOPE_LABEL_KEY[s]])}
+                </Button>
+              }
+            />
+            <TooltipContent side="bottom">{t(($) => $.scope[SCOPE_DESC_KEY[s]])}</TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
+
+      <IssueDisplayControls scopedIssues={scopedIssues} />
+    </div>
+  );
+}
+
+export function IssueDisplayControls({ scopedIssues }: { scopedIssues: Issue[] }) {
+  const { t } = useT("issues");
   const viewMode = useViewStore((s) => s.viewMode);
   const statusFilters = useViewStore((s) => s.statusFilters);
   const priorityFilters = useViewStore((s) => s.priorityFilters);
@@ -539,46 +583,9 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
     childProgress: "card_child_progress",
   };
   const sortLabel = t(($) => $.display[SORT_LABEL_KEY[sortBy]]);
-  const SCOPE_LABEL_KEY: Record<IssuesScope, "all_label" | "members_label" | "agents_label"> = {
-    all: "all_label",
-    members: "members_label",
-    agents: "agents_label",
-  };
-  const SCOPE_DESC_KEY: Record<IssuesScope, "all_description" | "members_description" | "agents_description"> = {
-    all: "all_description",
-    members: "members_description",
-    agents: "agents_description",
-  };
 
   return (
-    <div className="flex h-12 shrink-0 items-center justify-between px-4">
-      {/* Left: scope buttons */}
-      <div className="flex items-center gap-1">
-        {SCOPE_VALUES.map((s) => (
-          <Tooltip key={s}>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={
-                    scope === s
-                      ? "bg-accent text-accent-foreground hover:bg-accent/80"
-                      : "text-muted-foreground"
-                  }
-                  onClick={() => setScope(s)}
-                >
-                  {t(($) => $.scope[SCOPE_LABEL_KEY[s]])}
-                </Button>
-              }
-            />
-            <TooltipContent side="bottom">{t(($) => $.scope[SCOPE_DESC_KEY[s]])}</TooltipContent>
-          </Tooltip>
-        ))}
-      </div>
-
-      {/* Right: filter + display + view toggle */}
-      <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1">
         {/* Filter */}
         <DropdownMenu>
           <Tooltip>
@@ -893,7 +900,6 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
             </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-      </div>
     </div>
   );
 }

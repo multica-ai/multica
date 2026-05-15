@@ -76,6 +76,28 @@
     "board": "Board",
     "list": "List"
   },
+  "actor_issues": {
+    "scope": {
+      "assigned": {
+        "label": "Assigned",
+        "description": "Issues assigned to this member or agent"
+      },
+      "created": {
+        "label": "Created",
+        "description": "Issues created by this member or agent"
+      }
+    },
+    "empty": {
+      "assigned": {
+        "title": "No assigned issues",
+        "description": "Issues assigned here will appear in this view."
+      },
+      "created": {
+        "title": "No created issues",
+        "description": "Issues created here will appear in this view."
+      }
+    }
+  },
   "list": {
     "empty_status": "No issues",
     "add_issue_tooltip": "Add issue"

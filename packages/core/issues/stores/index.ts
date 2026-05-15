@@ -24,6 +24,11 @@ export {
   type MyIssuesScope,
 } from "./my-issues-view-store";
 export {
+  actorIssuesViewStore,
+  type ActorIssuesViewState,
+  type ActorIssuesScope,
+} from "./actor-issues-view-store";
+export {
   useIssueViewStore,
   createIssueViewStore,
   viewStoreSlice,

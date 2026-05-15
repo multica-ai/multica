@@ -186,6 +186,7 @@
   },
   "tabs": {
     "activity": "Activity",
+    "tasks": "Tasks",
     "instructions": "Instructions",
     "skills": "Skills",
     "environment": "Environment",

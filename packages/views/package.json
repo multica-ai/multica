@@ -25,6 +25,7 @@
     "./my-issues": "./my-issues/index.ts",
     "./skills": "./skills/index.ts",
     "./agents": "./agents/index.ts",
+    "./members": "./members/index.ts",
     "./inbox": "./inbox/index.ts",
     "./runtimes": "./runtimes/index.ts",
     "./dashboard": "./dashboard/index.ts",
