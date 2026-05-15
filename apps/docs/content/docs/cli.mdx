@@ -79,6 +79,20 @@ For the difference between token types, see [Authentication and tokens](/auth-to
 | `multica skill import ...` | Import a skill from GitHub, ClawHub, or the local machine |
 | `multica skill files ...` | Nested: manage a skill's files |
 
+## Squads
+
+| Command | Purpose |
+|---|---|
+| `multica squad list` | List squads in the workspace |
+| `multica squad get <id>` | Show a single squad |
+| `multica squad create --name "..." --leader <agent>` | Create a squad (owner / admin) |
+| `multica squad update <id> ...` | Update name, description, instructions, leader, or avatar |
+| `multica squad delete <id>` | Archive (soft-delete) — transfers assigned issues to the leader |
+| `multica squad member list/add/remove <squad-id>` | Manage squad members |
+| `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | Used by squad leader agents to record an evaluation per turn |
+
+See [Squads](/squads) for the full model.
+
 ## Autopilots
 
 | Command | Purpose |

@@ -285,6 +285,30 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.0",
+        date: "2026-05-14",
+        title: "Squads & Attachment Previews",
+        changes: [],
+        features: [
+          "Squads let teams assign work to a group, with a leader agent coordinating the next step",
+          "Attachments can be previewed in place for PDFs, audio, video, markdown, code, logs, and plain text",
+          "Chinese names can be found by pinyin across mentions, assignees, subscribers, agents, projects, and squads",
+        ],
+        improvements: [
+          "Squad pages now include member management, faster agent creation from a squad, clearer row actions, and a wider detail layout",
+          "Quick-create and picker flows are easier to search and now include squad-aware routing",
+          "Usage charts can switch between cost and token views, with the same timezone controls used by runtimes",
+          "Workspace operators get command-line controls for managing squads and stopping a runaway issue run",
+          "Shared interface labels are translated more consistently in English and Chinese",
+        ],
+        fixes: [
+          "Squad leaders stay quiet when a human already routed the conversation to someone specific",
+          "Mentioning a squad now wakes the right leader while preserving private-agent access rules",
+          "Issue lists stay fresher after deletes and follow-up comments no longer trigger stale Done replies",
+          "Attachment previews keep working for files added while writing or editing issues and comments",
+        ],
+      },
+      {
         version: "0.2.32",
         date: "2026-05-13",
         title: "Usage Insights, Chat Renaming & Smoother Desktop Flows",
