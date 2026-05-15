@@ -53,6 +53,7 @@ export function ActorAvatar({
       initials={getActorInitials(actorType, actorId)}
       avatarUrl={getActorAvatarUrl(actorType, actorId)}
       isAgent={actorType === "agent"}
+      isSystem={actorType === "system"}
       size={size}
       className={className}
     />

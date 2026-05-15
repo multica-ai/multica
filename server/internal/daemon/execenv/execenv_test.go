@@ -202,7 +202,7 @@ func TestPrepareWithProjectResources(t *testing.T) {
 	}
 
 	// CLAUDE.md should mention the project context block.
-	if err := InjectRuntimeConfig(env.WorkDir, "claude", taskCtx); err != nil {
+	if _, err := InjectRuntimeConfig(env.WorkDir, "claude", taskCtx); err != nil {
 		t.Fatalf("InjectRuntimeConfig: %v", err)
 	}
 	content, err := os.ReadFile(filepath.Join(env.WorkDir, "CLAUDE.md"))
@@ -250,7 +250,7 @@ func TestProjectReposReplaceWorkspaceReposInMetaSkill(t *testing.T) {
 			},
 		},
 	}
-	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+	if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig: %v", err)
 	}
 	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
@@ -302,7 +302,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	defer env.Cleanup(true)
 
 	// Inject runtime config (done separately in daemon, replicate here).
-	if err := InjectRuntimeConfig(env.WorkDir, "claude", taskCtx); err != nil {
+	if _, err := InjectRuntimeConfig(env.WorkDir, "claude", taskCtx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -561,7 +561,7 @@ func TestInjectRuntimeConfigClaude(t *testing.T) {
 		},
 	}
 
-	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+	if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -585,6 +585,34 @@ func TestInjectRuntimeConfigClaude(t *testing.T) {
 	}
 }
 
+// Regression test for #2347: the runtime config injected into agent harnesses
+// must advertise both autopilot execution modes on create AND update, so an
+// agent acting as a CLI user is not confined to create_issue.
+func TestInjectRuntimeConfigAutopilotAdvertisesBothModes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	if _, err := InjectRuntimeConfig(dir, "claude", TaskContextForEnv{IssueID: "issue-1"}); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("failed to read CLAUDE.md: %v", err)
+	}
+
+	s := string(content)
+	for _, want := range []string{
+		"multica autopilot create --title \"...\" --agent <name> --mode create_issue|run_only",
+		"multica autopilot update <id>",
+		"[--mode create_issue|run_only]",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("CLAUDE.md missing %q", want)
+		}
+	}
+}
+
 func TestInjectRuntimeConfigGemini(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -594,7 +622,7 @@ func TestInjectRuntimeConfigGemini(t *testing.T) {
 		AgentSkills: []SkillContextForEnv{{Name: "Writing", Content: "Write clearly."}},
 	}
 
-	if err := InjectRuntimeConfig(dir, "gemini", ctx); err != nil {
+	if _, err := InjectRuntimeConfig(dir, "gemini", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -632,7 +660,7 @@ func TestInjectRuntimeConfigCodex(t *testing.T) {
 		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
 	}
 
-	if err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
+	if _, err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -656,7 +684,7 @@ func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 
 	ctx := TaskContextForEnv{IssueID: "test-issue-id"}
 
-	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+	if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -810,7 +838,7 @@ func TestInjectRuntimeConfigOpencode(t *testing.T) {
 		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
 	}
 
-	if err := InjectRuntimeConfig(dir, "opencode", ctx); err != nil {
+	if _, err := InjectRuntimeConfig(dir, "opencode", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -846,7 +874,7 @@ func TestInjectRuntimeConfigKiro(t *testing.T) {
 		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
 	}
 
-	if err := InjectRuntimeConfig(dir, "kiro", ctx); err != nil {
+	if _, err := InjectRuntimeConfig(dir, "kiro", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -890,7 +918,7 @@ func TestPrepareWithRepoContextOpencode(t *testing.T) {
 	}
 	defer env.Cleanup(true)
 
-	if err := InjectRuntimeConfig(env.WorkDir, "opencode", taskCtx); err != nil {
+	if _, err := InjectRuntimeConfig(env.WorkDir, "opencode", taskCtx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -946,7 +974,7 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			if err := InjectRuntimeConfig(dir, "claude", tc.ctx); err != nil {
+			if _, err := InjectRuntimeConfig(dir, "claude", tc.ctx); err != nil {
 				t.Fatalf("InjectRuntimeConfig failed: %v", err)
 			}
 			data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
@@ -982,43 +1010,91 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigDirectsMultiLineWritesToStdin pins the guidance that
-// any multi-line content for `multica issue comment add` must go through
-// `--content-stdin` + a HEREDOC. Agents that reached for the inline
-// `--content "...\n\n..."` form ended up with literal 4-char `\n` sequences
-// in stored comments because bash does not expand backslash escapes inside
-// double quotes; see MUL-1467. This test prevents the multi-line guidance
-// from silently regressing back into a "for special characters" footnote.
-func TestInjectRuntimeConfigDirectsMultiLineWritesToStdin(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	if err := InjectRuntimeConfig(dir, "claude", TaskContextForEnv{IssueID: "issue-1"}); err != nil {
-		t.Fatalf("InjectRuntimeConfig failed: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
-	if err != nil {
-		t.Fatalf("read CLAUDE.md: %v", err)
-	}
-	s := string(data)
+// TestInjectRuntimeConfigAvailableCommandsIsNeutral pins that the global
+// Available Commands section lists the three input modes neutrally for
+// every non-Codex provider on every host OS, with no "MUST pipe via stdin"
+// mandate.
+//
+// Background: #1795 / #1851 introduced "MUST pipe via stdin" /
+// `--description-stdin` directives in the global section to fix Codex's
+// habit of emitting literal `\n` inside `--content "..."` (MUL-1467).
+// That mandate landed in the all-provider section and ended up steering
+// every provider at stdin — which then broke non-ASCII bytes on Windows
+// shells (#2198 / #2236 / #2376). This rollback keeps the strong
+// Codex-specific mandate in the Codex-Specific section (pinned by
+// TestInjectRuntimeConfigCodexLinuxEmphasizesStdin) and leaves the global
+// section neutral.
+//
+// Not parallel: mutates the package-level runtimeGOOS.
+func TestInjectRuntimeConfigAvailableCommandsIsNeutral(t *testing.T) {
+	saved := runtimeGOOS
+	t.Cleanup(func() { runtimeGOOS = saved })
 
-	for _, want := range []string{
-		"multi-line content",
-		"MUST pipe via stdin",
-		"--content-stdin",
-		"<<'COMMENT'",
-		"`--description`",
-		"--description-stdin",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("CLAUDE.md missing multi-line guidance %q\n---\n%s", want, s)
+	for _, host := range []string{"linux", "darwin", "windows"} {
+		for _, provider := range []string{"claude", "opencode", "openclaw", "hermes", "kimi", "kiro", "cursor", "gemini"} {
+			t.Run(provider+"/"+host, func(t *testing.T) {
+				runtimeGOOS = host
+				dir := t.TempDir()
+				if _, err := InjectRuntimeConfig(dir, provider, TaskContextForEnv{IssueID: "issue-1"}); err != nil {
+					t.Fatalf("InjectRuntimeConfig failed: %v", err)
+				}
+
+				configFile := "CLAUDE.md"
+				if provider != "claude" {
+					configFile = "AGENTS.md"
+				}
+				if provider == "gemini" {
+					configFile = "GEMINI.md"
+				}
+				data, err := os.ReadFile(filepath.Join(dir, configFile))
+				if err != nil {
+					t.Fatalf("read %s: %v", configFile, err)
+				}
+				s := string(data)
+
+				// Available Commands lists all three input modes as fact.
+				for _, want := range []string{
+					"`--content \"...\"`",
+					"`--content-stdin`",
+					"`--content-file <path>`",
+					"`--description-stdin`",
+					"`--description-file <path>`",
+				} {
+					if !strings.Contains(s, want) {
+						t.Errorf("%s missing flag mention %q\n---\n%s", configFile, want, s)
+					}
+				}
+
+				// "MUST pipe via stdin" must NOT appear in any non-Codex
+				// provider's runtime config: it was the over-spread of
+				// the Codex-specific fix.
+				for _, banned := range []string{
+					"MUST pipe via stdin",
+					"Agent-authored comments should always pipe content via stdin",
+					"use `--description-stdin` and pipe a HEREDOC",
+				} {
+					if strings.Contains(s, banned) {
+						t.Errorf("%s carries over-spread Codex mandate %q for non-Codex provider %s\n---\n%s", configFile, banned, provider, s)
+					}
+				}
+			})
 		}
 	}
 }
 
-func TestInjectRuntimeConfigCodexEmphasizesStdinForFormattedComments(t *testing.T) {
-	t.Parallel()
+// TestInjectRuntimeConfigCodexLinuxEmphasizesStdin pins the
+// Codex-Specific Comment Formatting section's "MUST stdin" mandate on
+// non-Windows hosts. This is the MUL-1467 / #1795 / #1851 fix scoped
+// back to where it belongs.
+//
+// Not parallel: mutates the package-level runtimeGOOS.
+func TestInjectRuntimeConfigCodexLinuxEmphasizesStdin(t *testing.T) {
+	saved := runtimeGOOS
+	t.Cleanup(func() { runtimeGOOS = saved })
+	runtimeGOOS = "linux"
+
 	dir := t.TempDir()
-	if err := InjectRuntimeConfig(dir, "codex", TaskContextForEnv{
+	if _, err := InjectRuntimeConfig(dir, "codex", TaskContextForEnv{
 		IssueID:          "issue-1",
 		TriggerCommentID: "comment-1",
 	}); err != nil {
@@ -1044,6 +1120,46 @@ func TestInjectRuntimeConfigCodexEmphasizesStdinForFormattedComments(t *testing.
 	}
 }
 
+// TestInjectRuntimeConfigCodexWindowsUsesContentFile pins that on Windows
+// the Codex-Specific section directs the agent at `--content-file` instead
+// of `--content-stdin`. PowerShell 5.1 / cmd.exe re-encode piped HEREDOC
+// bytes through the active console codepage and silently drop non-ASCII
+// as `?` before reaching `multica.exe` (#2198 / #2236 / #2376).
+//
+// Not parallel: mutates the package-level runtimeGOOS.
+func TestInjectRuntimeConfigCodexWindowsUsesContentFile(t *testing.T) {
+	saved := runtimeGOOS
+	t.Cleanup(func() { runtimeGOOS = saved })
+	runtimeGOOS = "windows"
+
+	dir := t.TempDir()
+	if _, err := InjectRuntimeConfig(dir, "codex", TaskContextForEnv{IssueID: "issue-1"}); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	s := string(data)
+	for _, want := range []string{
+		"On Windows, **always write the comment body to a UTF-8 file",
+		"$OutputEncoding",
+		"--content-file",
+		"silently dropping non-ASCII characters as `?`",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("AGENTS.md missing Codex/Windows file-first guidance %q\n---\n%s", want, s)
+		}
+	}
+	for _, banned := range []string{
+		"always use `--content-stdin` with a HEREDOC, even for short single-line replies",
+	} {
+		if strings.Contains(s, banned) {
+			t.Errorf("AGENTS.md still carries Codex stdin mandate %q on Windows\n---\n%s", banned, s)
+		}
+	}
+}
+
 func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -1056,7 +1172,7 @@ func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 		AutopilotSource:      "manual",
 	}
 
-	if err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
+	if _, err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
@@ -1092,7 +1208,7 @@ func TestInjectRuntimeConfigUnknownProvider(t *testing.T) {
 	dir := t.TempDir()
 
 	// Unknown provider should be a no-op.
-	if err := InjectRuntimeConfig(dir, "unknown", TaskContextForEnv{}); err != nil {
+	if _, err := InjectRuntimeConfig(dir, "unknown", TaskContextForEnv{}); err != nil {
 		t.Fatalf("expected no error for unknown provider, got: %v", err)
 	}
 
@@ -1112,7 +1228,7 @@ func TestInjectRuntimeConfigHermes(t *testing.T) {
 		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
 	}
 
-	if err := InjectRuntimeConfig(dir, "hermes", ctx); err != nil {
+	if _, err := InjectRuntimeConfig(dir, "hermes", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -1966,7 +2082,11 @@ func TestWriteReadGCMeta(t *testing.T) {
 	issueID := "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 	wsID := "ws-test-001"
 
-	if err := WriteGCMeta(dir, issueID, wsID, discardLogger()); err != nil {
+	if err := WriteGCMeta(dir, GCMeta{
+		Kind:        GCKindIssue,
+		IssueID:     issueID,
+		WorkspaceID: wsID,
+	}, discardLogger()); err != nil {
 		t.Fatalf("WriteGCMeta: %v", err)
 	}
 
@@ -1975,6 +2095,9 @@ func TestWriteReadGCMeta(t *testing.T) {
 		t.Fatalf("ReadGCMeta: %v", err)
 	}
 
+	if meta.Kind != GCKindIssue {
+		t.Errorf("Kind = %q, want %q", meta.Kind, GCKindIssue)
+	}
 	if meta.IssueID != issueID {
 		t.Errorf("IssueID = %q, want %q", meta.IssueID, issueID)
 	}
@@ -1988,20 +2111,74 @@ func TestWriteReadGCMeta(t *testing.T) {
 
 func TestWriteGCMeta_EmptyRoot(t *testing.T) {
 	t.Parallel()
-	if err := WriteGCMeta("", "issue", "ws", discardLogger()); err != nil {
+	if err := WriteGCMeta("", GCMeta{Kind: GCKindIssue, IssueID: "x", WorkspaceID: "ws"}, discardLogger()); err != nil {
 		t.Fatalf("expected nil for empty root, got %v", err)
 	}
 }
 
-func TestWriteGCMeta_EmptyIssueID(t *testing.T) {
+func TestWriteGCMeta_EmptyKind(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	if err := WriteGCMeta(dir, "", "ws", discardLogger()); err != nil {
-		t.Fatalf("expected nil for empty issue ID, got %v", err)
+	if err := WriteGCMeta(dir, GCMeta{WorkspaceID: "ws"}, discardLogger()); err != nil {
+		t.Fatalf("expected nil for empty kind, got %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, gcMetaFile)); !os.IsNotExist(err) {
 		t.Fatalf("expected gc meta file to be absent, got err=%v", err)
+	}
+}
+
+// Pre-v2 meta files lacked the kind field. ReadGCMeta must default an empty
+// kind to GCKindIssue so the existing on-disk meta files keep flowing
+// through the issue path.
+func TestReadGCMeta_LegacyFileDefaultsToIssueKind(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	legacy := []byte(`{"issue_id":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","workspace_id":"ws","completed_at":"2025-01-01T00:00:00Z"}`)
+	if err := os.WriteFile(filepath.Join(dir, gcMetaFile), legacy, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := ReadGCMeta(dir)
+	if err != nil {
+		t.Fatalf("ReadGCMeta: %v", err)
+	}
+	if meta.Kind != GCKindIssue {
+		t.Fatalf("legacy kind: want %q, got %q", GCKindIssue, meta.Kind)
+	}
+	if meta.IssueID != "a1b2c3d4-e5f6-7890-abcd-ef1234567890" {
+		t.Fatalf("legacy issue_id: got %q", meta.IssueID)
+	}
+}
+
+// New v2 meta files for chat / autopilot / quick-create round-trip without
+// being misclassified as the issue kind.
+func TestWriteReadGCMeta_KindRoundTrip(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		meta GCMeta
+		want GCMetaKind
+	}{
+		{"chat", GCMeta{Kind: GCKindChat, ChatSessionID: "cs-1", WorkspaceID: "ws"}, GCKindChat},
+		{"autopilot_run", GCMeta{Kind: GCKindAutopilotRun, AutopilotRunID: "ar-1", WorkspaceID: "ws"}, GCKindAutopilotRun},
+		{"quick_create", GCMeta{Kind: GCKindQuickCreate, TaskID: "t-1", WorkspaceID: "ws"}, GCKindQuickCreate},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			if err := WriteGCMeta(dir, tc.meta, discardLogger()); err != nil {
+				t.Fatalf("WriteGCMeta: %v", err)
+			}
+			got, err := ReadGCMeta(dir)
+			if err != nil {
+				t.Fatalf("ReadGCMeta: %v", err)
+			}
+			if got.Kind != tc.want {
+				t.Fatalf("Kind: want %q, got %q", tc.want, got.Kind)
+			}
+		})
 	}
 }
 
@@ -2032,7 +2209,7 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 	readClaudeMD := func(t *testing.T, ctx TaskContextForEnv) string {
 		t.Helper()
 		dir := t.TempDir()
-		if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
 			t.Fatalf("InjectRuntimeConfig failed: %v", err)
 		}
 		data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))

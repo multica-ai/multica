@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeftRight, Check, ChevronRight, X as XIcon } from "lucide-react";
+import { ArrowLeftRight, Check, ChevronRight, Maximize2, Minimize2, X as XIcon } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DialogTitle } from "@multica/ui/components/ui/dialog";
@@ -17,6 +17,7 @@ import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { agentListOptions } from "@multica/core/workspace/queries";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
@@ -30,6 +31,8 @@ import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { formatShortcut, modKey, enterKey } from "@multica/core/platform";
 import type { Agent } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
+import { PillButton } from "../common/pill-button";
+import { ProjectPicker } from "../projects/components/project-picker";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
 import { useAuthStore } from "@multica/core/auth";
 import { memberListOptions } from "@multica/core/workspace/queries";
@@ -49,16 +52,26 @@ import { useT } from "../i18n";
 // animation flash — Base UI replays Popup enter/exit when DialogContent is
 // remounted, even inside a still-open Dialog Root.
 //
-// `onSwitchMode` is wired by the shell — the panel calls it (no payload from
-// agent → manual; the shared draft store carries description + agent).
+// `onSwitchMode` is wired by the shell — the panel calls it with an optional
+// carry payload (currently `project_id`). The shared draft store carries the
+// description + agent across the agent→manual flip; project_id rides through
+// the same carry channel manual→agent uses, so the manual panel reads it
+// from `data?.project_id` without a parallel store.
 export function AgentCreatePanel({
   onClose,
   onSwitchMode,
   data,
+  isExpanded,
+  setIsExpanded,
 }: {
   onClose: () => void;
-  onSwitchMode?: () => void;
+  onSwitchMode?: (carry?: Record<string, unknown> | null) => void;
   data?: Record<string, unknown> | null;
+  /** Lifted to the shell so DialogContent's mode-aware className can react —
+   *  same pattern as ManualCreatePanel. Shared across modes so the user's
+   *  expand preference persists when switching between agent and manual. */
+  isExpanded: boolean;
+  setIsExpanded: (v: boolean) => void;
 }) {
   const { t } = useT("modals");
   const workspaceName = useCurrentWorkspace()?.name;
@@ -66,6 +79,12 @@ export function AgentCreatePanel({
   const userId = useAuthStore((s) => s.user?.id);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  // Pull `isSuccess` so the stale-id sweep below can distinguish "still
+  // loading" from "loaded as empty". Reading length alone treats both as
+  // empty and incorrectly clears a valid persisted preference on every open.
+  const { data: projects = [], isSuccess: projectsLoaded } = useQuery(
+    projectListOptions(wsId),
+  );
 
   const memberRole = useMemo(
     () => members.find((m) => m.user_id === userId)?.role,
@@ -83,6 +102,8 @@ export function AgentCreatePanel({
 
   const lastAgentId = useQuickCreateStore((s) => s.lastAgentId);
   const setLastAgentId = useQuickCreateStore((s) => s.setLastAgentId);
+  const lastProjectId = useQuickCreateStore((s) => s.lastProjectId);
+  const setLastProjectId = useQuickCreateStore((s) => s.setLastProjectId);
   const promptDraft = useQuickCreateStore((s) => s.prompt);
   const setPrompt = useQuickCreateStore((s) => s.setPrompt);
   const clearPrompt = useQuickCreateStore((s) => s.clearPrompt);
@@ -112,6 +133,28 @@ export function AgentCreatePanel({
     () => visibleAgents.find((a) => a.id === agentId),
     [visibleAgents, agentId],
   );
+
+  // Project selection — defaults to the last project the user picked in this
+  // workspace. `data?.project_id` lets the modal opener seed a one-shot
+  // override (e.g. a future "+ Issue" button on a project page); it does NOT
+  // replace the persisted default.
+  const [projectId, setProjectId] = useState<string | null>(() => {
+    const seed = (data?.project_id as string | undefined) ?? lastProjectId;
+    return seed ?? null;
+  });
+
+  // Stale-id sweep. Once the project list query has actually resolved
+  // (`isSuccess` — distinct from "data is the empty default during loading"),
+  // a `projectId` that isn't in the list means the project was deleted in
+  // another session. Clear BOTH local state and the persisted preference;
+  // dropping only local state would leave the deleted UUID in `lastProjectId`,
+  // and the next open would re-seed it and submit the same dead value.
+  useEffect(() => {
+    if (!projectsLoaded || projectId === null) return;
+    if (projects.some((p) => p.id === projectId)) return;
+    setProjectId(null);
+    if (lastProjectId === projectId) setLastProjectId(null);
+  }, [projectsLoaded, projects, projectId, lastProjectId, setLastProjectId]);
 
   // Daemon CLI version gate. The agent-create flow needs the runtime's
   // bundled multica CLI to be ≥ MIN_QUICK_CREATE_CLI_VERSION; older
@@ -173,8 +216,13 @@ export function AgentCreatePanel({
     setSubmitting(true);
     setError(null);
     try {
-      await api.quickCreateIssue({ agent_id: agentId, prompt: md });
+      await api.quickCreateIssue({
+        agent_id: agentId,
+        prompt: md,
+        project_id: projectId ?? undefined,
+      });
       setLastAgentId(agentId);
+      setLastProjectId(projectId);
       clearPrompt();
       setLastMode("agent");
       toast.success(t(($) => $.create_issue.agent.toast_sent), {
@@ -246,7 +294,11 @@ export function AgentCreatePanel({
         : {}),
     });
     setLastMode("manual");
-    onSwitchMode?.();
+    // Hand the picked project to the manual panel through the same `data`
+    // channel that already carries agent_id / parent_issue_id. The manual
+    // panel reads `data.project_id` on mount; this preserves the user's
+    // selection across the mode flip without piping a third store through.
+    onSwitchMode?.(projectId ? { project_id: projectId } : null);
   };
 
   return (
@@ -263,16 +315,27 @@ export function AgentCreatePanel({
           {/* Native `title` instead of Base UI Tooltip — Tooltip opens on
               keyboard focus, and the dialog's focus trap briefly lands focus
               on the first focusable element on mount, causing the tooltip to
-              auto-pop every open. */}
-          <button
-            type="button"
-            onClick={onClose}
-            title={t(($) => $.common.close)}
-            aria-label={t(($) => $.common.close)}
-            className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
-          >
-            <XIcon className="size-4" />
-          </button>
+              auto-pop every open. Same workaround applies to expand. */}
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setIsExpanded(!isExpanded)}
+              title={isExpanded ? t(($) => $.common.collapse_tooltip) : t(($) => $.common.expand_tooltip)}
+              aria-label={isExpanded ? t(($) => $.common.collapse_tooltip) : t(($) => $.common.expand_tooltip)}
+              className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+            >
+              {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              title={t(($) => $.common.close)}
+              aria-label={t(($) => $.common.close)}
+              className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+            >
+              <XIcon className="size-4" />
+            </button>
+          </div>
         </div>
 
         {/* Agent picker */}
@@ -352,7 +415,7 @@ export function AgentCreatePanel({
             editor unbounded and pushed the modal past the viewport. */}
         <div
           {...dropZoneProps}
-          className="relative px-5 pb-3 flex-1 min-h-[140px] overflow-y-auto"
+          className="relative px-5 pb-3 flex flex-1 min-h-[140px] overflow-y-auto"
         >
           <ContentEditor
             ref={editorRef}
@@ -372,6 +435,21 @@ export function AgentCreatePanel({
         {error && (
           <div className="px-5 pb-2 text-xs text-destructive">{error}</div>
         )}
+
+        {/* Property toolbar — mirrors the manual panel's pill row so the
+            project pill sits in the same place across both modes. Agent mode
+            owns only the project (status / priority / assignee / due-date are
+            inferred from the prompt), so it's a single pill. The pick is
+            persisted per-workspace via useQuickCreateStore.lastProjectId so
+            users targeting one project skip retyping "in project X". */}
+        <div className="flex items-center gap-1.5 px-4 pb-2 shrink-0 flex-wrap">
+          <ProjectPicker
+            projectId={projectId}
+            onUpdate={(u) => setProjectId(u.project_id ?? null)}
+            triggerRender={<PillButton />}
+            align="start"
+          />
+        </div>
 
         {/* Footer */}
         <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">

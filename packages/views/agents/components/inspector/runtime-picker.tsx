@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Cloud, Monitor } from "lucide-react";
+import { Cloud, Lock, Monitor } from "lucide-react";
 import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import {
@@ -25,7 +25,6 @@ export function RuntimePicker({
   runtimes,
   members,
   currentUserId,
-  isWorkspaceAdmin = false,
   canEdit = true,
   onChange,
 }: {
@@ -33,9 +32,6 @@ export function RuntimePicker({
   runtimes: AgentRuntime[];
   members: MemberWithUser[];
   currentUserId: string | null;
-  /** Workspace owners/admins can pick anyone's runtime. Non-admins are
-   * force-filtered to their own — the server will 403 a mismatch. */
-  isWorkspaceAdmin?: boolean;
   /** When false, render a static read-only display and skip the popover. */
   canEdit?: boolean;
   onChange: (runtimeId: string) => Promise<void> | void;
@@ -47,32 +43,31 @@ export function RuntimePicker({
   const selected = runtimes.find((r) => r.id === value) ?? null;
   const Icon = selected?.runtime_mode === "cloud" ? Cloud : Monitor;
 
-  // Non-admin users are force-pinned to "mine" regardless of the local
-  // filter state — keeps the server check (canBindAgentToRuntime) and the
-  // UI consistent.
-  const effectiveFilter: Filter = isWorkspaceAdmin ? filter : "mine";
-
   // Compute filtered list unconditionally — the early `!canEdit` return
   // below would otherwise re-order this hook across renders.
-  // "all" stays unfiltered (admin only). For "mine", a missing currentUserId
-  // returns [] rather than the full list — a transient null userId during
-  // auth hydration must not briefly expose other users' runtimes to a
-  // non-admin.
+  const isDisabled = (r: AgentRuntime): boolean => {
+    if (!currentUserId) return false;
+    if (r.owner_id === currentUserId) return false;
+    return r.visibility !== "public";
+  };
   const filtered = useMemo(() => {
     const list =
-      effectiveFilter === "all"
-        ? runtimes
-        : currentUserId
-          ? runtimes.filter((r) => r.owner_id === currentUserId)
-          : [];
+      filter === "mine" && currentUserId
+        ? runtimes.filter((r) => r.owner_id === currentUserId)
+        : runtimes;
     return [...list].sort((a, b) => {
-      if (a.owner_id === currentUserId && b.owner_id !== currentUserId)
-        return -1;
-      if (a.owner_id !== currentUserId && b.owner_id === currentUserId)
-        return 1;
+      const aMine = a.owner_id === currentUserId;
+      const bMine = b.owner_id === currentUserId;
+      if (aMine && !bMine) return -1;
+      if (!aMine && bMine) return 1;
+      const aDisabled = isDisabled(a);
+      const bDisabled = isDisabled(b);
+      if (!aDisabled && bDisabled) return -1;
+      if (aDisabled && !bDisabled) return 1;
       return 0;
     });
-  }, [runtimes, effectiveFilter, currentUserId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runtimes, filter, currentUserId]);
 
   if (!canEdit) {
     const isOnline = selected?.status === "online";
@@ -107,7 +102,6 @@ export function RuntimePicker({
     : t(($) => $.pickers.runtime_tooltip_none);
 
   const hasOtherRuntimes = runtimes.some((r) => r.owner_id !== currentUserId);
-  const showFilterTabs = isWorkspaceAdmin && hasOtherRuntimes;
 
   const getOwner = (id: string | null) =>
     id ? members.find((m) => m.user_id === id) ?? null : null;
@@ -145,7 +139,7 @@ export function RuntimePicker({
         </>
       }
       header={
-        showFilterTabs ? (
+        hasOtherRuntimes ? (
           <div className="p-2">
             <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
               <FilterButton
@@ -173,10 +167,12 @@ export function RuntimePicker({
         filtered.map((rt) => {
           const owner = getOwner(rt.owner_id);
           const rtOnline = rt.status === "online";
+          const locked = isDisabled(rt);
           const tooltip = [
             rt.name,
             owner ? t(($) => $.pickers.runtime_owned_by, { name: owner.name }) : null,
             rtOnline ? t(($) => $.pickers.runtime_online) : t(($) => $.pickers.runtime_offline),
+            locked ? t(($) => $.create_dialog.runtime_private_locked_tooltip) : null,
           ]
             .filter(Boolean)
             .join(" · ");
@@ -184,7 +180,11 @@ export function RuntimePicker({
             <PickerItem
               key={rt.id}
               selected={rt.id === value}
-              onClick={() => void select(rt.id)}
+              disabled={locked}
+              onClick={() => {
+                if (locked) return;
+                void select(rt.id);
+              }}
               tooltip={tooltip}
             >
               <ProviderLogo
@@ -199,6 +199,12 @@ export function RuntimePicker({
                   {rt.runtime_mode === "cloud" && (
                     <span className="shrink-0 rounded bg-info/10 px-1 text-[10px] font-medium text-info">
                       {t(($) => $.create_dialog.runtime_cloud_badge)}
+                    </span>
+                  )}
+                  {locked && (
+                    <span className="shrink-0 inline-flex items-center gap-0.5 rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground">
+                      <Lock className="h-2.5 w-2.5" />
+                      {t(($) => $.create_dialog.runtime_private_badge)}
                     </span>
                   )}
                 </div>

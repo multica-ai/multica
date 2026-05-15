@@ -12,6 +12,7 @@ import type {
   MemberWithUser,
   CreateAgentRequest,
 } from "@multica/core/types";
+import { isImeComposing } from "@multica/core/utils";
 import {
   Dialog,
   DialogContent,
@@ -44,7 +45,6 @@ export function CreateAgentDialog({
   runtimesLoading,
   members,
   currentUserId,
-  isWorkspaceAdmin = false,
   template,
   onClose,
   onCreate,
@@ -53,11 +53,6 @@ export function CreateAgentDialog({
   runtimesLoading?: boolean;
   members: MemberWithUser[];
   currentUserId: string | null;
-  // Workspace owners/admins can bind agents to anyone's runtime; regular
-  // members can only bind to their own. When false the "All" tab is
-  // hidden and the runtime list is force-filtered to runtimes the user
-  // owns. Mirrors the server check in canBindAgentToRuntime.
-  isWorkspaceAdmin?: boolean;
   // When provided, the dialog opens in "Duplicate" mode: the visible
   // fields (name / description / runtime / visibility / model) are
   // pre-populated from this agent, and the hidden fields
@@ -89,68 +84,77 @@ export function CreateAgentDialog({
   };
 
   const hasOtherRuntimes = runtimes.some((r) => r.owner_id !== currentUserId);
-  // Non-admins can only bind to their own runtimes (the server enforces this).
-  // Force "mine" so a stale runtimeFilter from a previous admin session, or
-  // an attempt to render the "all" view, can't surface someone else's runtime
-  // and produce a 403 on submit.
-  const effectiveFilter: RuntimeFilter =
-    isWorkspaceAdmin ? runtimeFilter : "mine";
-  const showFilterTabs = isWorkspaceAdmin && hasOtherRuntimes;
+
+  // A runtime is disabled for the caller when it's owned by someone else
+  // AND its visibility is not "public". Older backends that haven't shipped
+  // MUL-2062 leave visibility undefined; we treat anything other than the
+  // literal string "public" as private so the strict default holds (the
+  // backend will reject the create anyway).
+  const isRuntimeDisabledForUser = (r: RuntimeDevice): boolean => {
+    if (!currentUserId) return false;
+    if (r.owner_id === currentUserId) return false;
+    return r.visibility !== "public";
+  };
 
   const filteredRuntimes = useMemo(() => {
-    // "all" stays unfiltered (admin only — non-admins are pinned to "mine"
-    // by effectiveFilter above). For "mine", missing currentUserId means we
-    // cannot identify the caller's runtimes — return empty rather than
-    // falling back to the full list, otherwise a transient null userId
-    // (auth not yet hydrated) would briefly expose other users' runtimes
-    // to a non-admin.
-    const filtered =
-      effectiveFilter === "all"
-        ? runtimes
-        : currentUserId
-          ? runtimes.filter((r) => r.owner_id === currentUserId)
-          : [];
+    const filtered = runtimeFilter === "mine" && currentUserId
+      ? runtimes.filter((r) => r.owner_id === currentUserId)
+      : runtimes;
     return [...filtered].sort((a, b) => {
-      if (a.owner_id === currentUserId && b.owner_id !== currentUserId) return -1;
-      if (a.owner_id !== currentUserId && b.owner_id === currentUserId) return 1;
+      // Caller's own runtimes first; among the rest, usable (public) ones
+      // come before unusable (private) ones so the picker doesn't lead
+      // with greyed-out rows.
+      const aMine = a.owner_id === currentUserId;
+      const bMine = b.owner_id === currentUserId;
+      if (aMine && !bMine) return -1;
+      if (!aMine && bMine) return 1;
+      const aDisabled = isRuntimeDisabledForUser(a);
+      const bDisabled = isRuntimeDisabledForUser(b);
+      if (!aDisabled && bDisabled) return -1;
+      if (aDisabled && !bDisabled) return 1;
       return 0;
     });
-  }, [runtimes, effectiveFilter, currentUserId]);
+    // currentUserId is the only external dep of isRuntimeDisabledForUser;
+    // listing it in the deps array is enough.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runtimes, runtimeFilter, currentUserId]);
 
-  // When duplicating, seed the picker with the template's runtime — but
-  // only if it's actually in `filteredRuntimes` (i.e. the user is allowed
-  // to bind to it). The reconcile effect below corrects stale selections
-  // either way, so the seed is just for the first render to avoid a flash
-  // of "no selection" in the happy path.
-  const [selectedRuntimeId, setSelectedRuntimeId] = useState(() => {
-    const seed = template?.runtime_id ?? filteredRuntimes[0]?.id ?? "";
-    if (seed && filteredRuntimes.some((r) => r.id === seed)) return seed;
-    return filteredRuntimes[0]?.id ?? "";
-  });
+  // When duplicating, default to the template's runtime so the clone
+  // lands on the same machine — caller can still switch in the picker.
+  // But never seed with a runtime the caller can't actually use (locked
+  // by visibility); otherwise the dialog opens with a selected row the
+  // user can't submit, and Create falls through to a backend 403. Falling
+  // back to the first usable runtime is friendlier than the locked
+  // pre-fill.
+  const templateRuntime = template?.runtime_id
+    ? runtimes.find((r) => r.id === template.runtime_id)
+    : undefined;
+  const initialRuntime =
+    templateRuntime && !isRuntimeDisabledForUser(templateRuntime)
+      ? templateRuntime.id
+      : filteredRuntimes.find((r) => !isRuntimeDisabledForUser(r))?.id ?? "";
+  const [selectedRuntimeId, setSelectedRuntimeId] = useState(initialRuntime);
 
-  // Keep selection inside the visible filtered set. Two cases this guards:
-  // 1) duplicating an agent whose runtime is owned by someone else (template
-  //    seeds an unbindable id; we drop it back to the user's first own
-  //    runtime instead of letting the form submit a 403),
-  // 2) admin flipping the Mine/All tab, leaving a previously-selected
-  //    cross-owner runtime no longer in scope.
   useEffect(() => {
-    const stillVisible = filteredRuntimes.some((r) => r.id === selectedRuntimeId);
-    if (!stillVisible) {
-      setSelectedRuntimeId(filteredRuntimes[0]?.id ?? "");
+    if (!selectedRuntimeId) {
+      const firstUsable = filteredRuntimes.find(
+        (r) => !isRuntimeDisabledForUser(r),
+      );
+      if (firstUsable) setSelectedRuntimeId(firstUsable.id);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filteredRuntimes, selectedRuntimeId]);
 
-  // Look up the selected runtime *inside the filtered set* so the trigger
-  // label, model picker, and submit button can never reference a runtime
-  // the user can't bind to. Belt-and-suspenders alongside the reconcile
-  // effect: if React batches/delays the effect, this still keeps the form
-  // in a coherent, submittable state.
-  const selectedRuntime =
-    filteredRuntimes.find((d) => d.id === selectedRuntimeId) ?? null;
+  const selectedRuntime = runtimes.find((d) => d.id === selectedRuntimeId) ?? null;
+  // Defense-in-depth: even if a locked runtime somehow ends up selected
+  // (e.g. duplicate of an agent whose template runtime is now locked, and
+  // the workspace has no usable fallback), gate Create on it so we don't
+  // submit a request the backend will reject with 403.
+  const selectedRuntimeLocked =
+    selectedRuntime != null && isRuntimeDisabledForUser(selectedRuntime);
 
   const handleSubmit = async () => {
-    if (!name.trim() || !selectedRuntime) return;
+    if (!name.trim() || !selectedRuntime || selectedRuntimeLocked) return;
     setCreating(true);
     try {
       // When duplicating, forward the hidden config fields the template
@@ -212,7 +216,10 @@ export function CreateAgentDialog({
               onChange={(e) => setName(e.target.value)}
               placeholder={t(($) => $.create_dialog.name_placeholder)}
               className="mt-1"
-              onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+              onKeyDown={(e) => {
+                if (isImeComposing(e)) return;
+                if (e.key === "Enter") handleSubmit();
+              }}
             />
           </div>
 
@@ -277,7 +284,7 @@ export function CreateAgentDialog({
           <div className="min-w-0">
             <div className="flex items-center justify-between">
               <Label className="text-xs text-muted-foreground">{t(($) => $.create_dialog.runtime_label)}</Label>
-              {showFilterTabs && (
+              {hasOtherRuntimes && (
                 <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
                   <button
                     type="button"
@@ -338,15 +345,33 @@ export function CreateAgentDialog({
               <PopoverContent align="start" className="w-[var(--anchor-width)] p-1 max-h-60 overflow-y-auto">
                 {filteredRuntimes.map((device) => {
                   const ownerMember = getOwnerMember(device.owner_id);
+                  const disabled = isRuntimeDisabledForUser(device);
+                  // Use the native title for the disabled tooltip so we
+                  // don't have to wrap each row in a Tooltip primitive
+                  // inside a Popover (which has its own focus trap and
+                  // close-on-outside-click handling — adding another layer
+                  // makes the Popover dismiss when the tooltip portal
+                  // mounts).
+                  const disabledTitle = disabled
+                    ? t(($) => $.create_dialog.runtime_private_locked_tooltip)
+                    : undefined;
                   return (
                     <button
                       key={device.id}
+                      type="button"
+                      disabled={disabled}
+                      title={disabledTitle}
                       onClick={() => {
+                        if (disabled) return;
                         setSelectedRuntimeId(device.id);
                         setRuntimeOpen(false);
                       }}
                       className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
-                        device.id === selectedRuntimeId ? "bg-accent" : "hover:bg-accent/50"
+                        disabled
+                          ? "cursor-not-allowed opacity-50"
+                          : device.id === selectedRuntimeId
+                            ? "bg-accent"
+                            : "hover:bg-accent/50"
                       }`}
                     >
                       <ProviderLogo provider={device.provider} className="h-4 w-4 shrink-0" />
@@ -356,6 +381,12 @@ export function CreateAgentDialog({
                           {device.runtime_mode === "cloud" && (
                             <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
                               {t(($) => $.create_dialog.runtime_cloud_badge)}
+                            </span>
+                          )}
+                          {disabled && (
+                            <span className="shrink-0 inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                              <Lock className="h-3 w-3" />
+                              {t(($) => $.create_dialog.runtime_private_badge)}
                             </span>
                           )}
                         </div>
@@ -397,7 +428,14 @@ export function CreateAgentDialog({
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={creating || !name.trim() || !selectedRuntime}
+            disabled={
+              creating || !name.trim() || !selectedRuntime || selectedRuntimeLocked
+            }
+            title={
+              selectedRuntimeLocked
+                ? t(($) => $.create_dialog.runtime_private_locked_tooltip)
+                : undefined
+            }
           >
             {creating ? t(($) => $.create_dialog.creating) : t(($) => $.create_dialog.create)}
           </Button>

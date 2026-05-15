@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent as rtlFireEvent, render, screen, waitFor } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { AgentTask } from "@multica/core/types/agent";
 import enCommon from "../../locales/en/common.json";
@@ -83,7 +83,7 @@ vi.mock("sonner", () => ({
 
 import { AgentLiveCard } from "./agent-live-card";
 
-function makeTask(id: string): AgentTask {
+function makeTask(id: string, overrides: Partial<AgentTask> = {}): AgentTask {
   return {
     id,
     agent_id: "agent-1",
@@ -97,6 +97,7 @@ function makeTask(id: string): AgentTask {
     result: null,
     error: null,
     created_at: "2026-01-01T00:00:00Z",
+    ...overrides,
   };
 }
 
@@ -227,5 +228,99 @@ describe("AgentLiveCard reconcile race", () => {
     await waitFor(() => {
       expect(screen.queryByText(/is working/)).toBeNull();
     });
+  });
+});
+
+describe("AgentLiveCard queued rendering", () => {
+  it("renders 'is queued' copy without transcript when status is queued", async () => {
+    const queuedTask = makeTask("task-q", {
+      status: "queued",
+      dispatched_at: null,
+      started_at: null,
+    });
+    mockApi.getActiveTasksForIssue.mockResolvedValueOnce({ tasks: [queuedTask] });
+
+    renderCard();
+
+    await waitFor(() => {
+      expect(screen.getByText(/is queued/)).toBeTruthy();
+    });
+    // No execution transcript while queued — no log to show yet.
+    expect(screen.queryByTestId("transcript-button")).toBeNull();
+    // Cancel button is still available so users can drop a queued task.
+    expect(screen.getByText("Stop")).toBeTruthy();
+  });
+
+  it("Stop button opens a confirm dialog and only calls cancelTask after the user confirms", async () => {
+    const runningTask = makeTask("task-r", { status: "running" });
+    mockApi.getActiveTasksForIssue.mockResolvedValueOnce({ tasks: [runningTask] });
+    mockApi.cancelTask.mockResolvedValue(undefined);
+
+    renderCard();
+
+    await waitFor(() => {
+      expect(screen.getByText("Stop")).toBeTruthy();
+    });
+
+    // First click should not hit the API — it only opens the confirm.
+    await act(async () => {
+      rtlFireEvent.click(screen.getByText("Stop"));
+    });
+    expect(mockApi.cancelTask).not.toHaveBeenCalled();
+    expect(screen.getByText(/Stop this task\?/)).toBeTruthy();
+
+    // Confirm — now the cancel fires.
+    await act(async () => {
+      rtlFireEvent.click(screen.getByRole("button", { name: "Stop task" }));
+    });
+    expect(mockApi.cancelTask).toHaveBeenCalledWith("issue-1", "task-r");
+  });
+
+  it("Stop confirm dialog dismisses without cancelling when the user picks Keep running", async () => {
+    const runningTask = makeTask("task-r", { status: "running" });
+    mockApi.getActiveTasksForIssue.mockResolvedValueOnce({ tasks: [runningTask] });
+    mockApi.cancelTask.mockResolvedValue(undefined);
+
+    renderCard();
+
+    await waitFor(() => {
+      expect(screen.getByText("Stop")).toBeTruthy();
+    });
+
+    await act(async () => {
+      rtlFireEvent.click(screen.getByText("Stop"));
+    });
+    expect(screen.getByText(/Stop this task\?/)).toBeTruthy();
+
+    await act(async () => {
+      rtlFireEvent.click(screen.getByRole("button", { name: "Keep running" }));
+    });
+    expect(mockApi.cancelTask).not.toHaveBeenCalled();
+  });
+
+  it("running tasks sort above queued tasks so the sticky slot stays on the active one", async () => {
+    const runningTask = makeTask("task-r", { status: "running" });
+    const queuedTask = makeTask("task-q", {
+      status: "queued",
+      dispatched_at: null,
+      started_at: null,
+    });
+    // Server returns queued first (created_at DESC), but the client must
+    // re-sort so the running banner takes the sticky position.
+    mockApi.getActiveTasksForIssue.mockResolvedValueOnce({
+      tasks: [queuedTask, runningTask],
+    });
+
+    renderCard();
+
+    await waitFor(() => {
+      expect(screen.getByText(/is working/)).toBeTruthy();
+      expect(screen.getByText(/is queued/)).toBeTruthy();
+    });
+
+    const working = screen.getByText(/is working/);
+    const queued = screen.getByText(/is queued/);
+    // Running banner appears earlier in the document order.
+    expect(working.compareDocumentPosition(queued) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

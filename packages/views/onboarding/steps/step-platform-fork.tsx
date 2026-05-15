@@ -101,8 +101,10 @@ export function StepPlatformFork({
     // `source: "step3"` future-proofs if the event is reused from
     // another surface later.
     captureEvent("onboarding_runtime_path_selected", {
+      workspace_id: wsId,
       path: "download_desktop",
-      source: "step3",
+      source: "onboarding",
+      surface: "step3",
       is_mac: isMac,
     });
     // Cross-surface Desktop intent event — also fires from landing
@@ -115,8 +117,10 @@ export function StepPlatformFork({
   const handleOpenCli = () => {
     setDialog("cli");
     captureEvent("onboarding_runtime_path_selected", {
+      workspace_id: wsId,
       path: "cli",
-      source: "step3",
+      source: "onboarding",
+      surface: "step3",
       is_mac: isMac,
     });
     setPersonProperties({ platform_preference: "web" });
@@ -125,8 +129,10 @@ export function StepPlatformFork({
   const handleOpenCloud = () => {
     setDialog("cloud");
     captureEvent("onboarding_runtime_path_selected", {
+      workspace_id: wsId,
       path: "cloud_waitlist",
-      source: "step3",
+      source: "onboarding",
+      surface: "step3",
       is_mac: isMac,
     });
   };

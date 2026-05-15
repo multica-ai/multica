@@ -43,8 +43,7 @@ import type {
   RuntimeLocalSkillListRequest,
   CreateRuntimeLocalSkillImportRequest,
   RuntimeLocalSkillImportRequest,
-  TimelinePage,
-  TimelinePageParam,
+  TimelineEntry,
   AssigneeFrequencyEntry,
   TaskMessagePayload,
   Attachment,
@@ -84,11 +83,26 @@ import type {
   NotificationPreferences,
   AgentFeishuBotConfig,
   UpdateAgentFeishuBotConfigRequest,
+  GitHubPullRequest,
+  ListGitHubInstallationsResponse,
+  GitHubConnectResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
+import { parseWithFallback } from "./schema";
+import {
+  AttachmentResponseSchema,
+  ChildIssuesResponseSchema,
+  CommentsListSchema,
+  EMPTY_ATTACHMENT,
+  EMPTY_LIST_ISSUES_RESPONSE,
+  EMPTY_TIMELINE_ENTRIES,
+  ListIssuesResponseSchema,
+  SubscribersListSchema,
+  TimelineEntriesSchema,
+} from "./schemas";
 
 /** Identifies the calling client to the server.
  *  Sent on every HTTP request as X-Client-Platform / X-Client-Version /
@@ -333,6 +347,7 @@ export class ApiClient {
 
   async markOnboardingComplete(payload?: {
     completion_path?: OnboardingCompletionPath;
+    workspace_id?: string;
   }): Promise<User> {
     return this.fetch("/api/me/onboarding/complete", {
       method: "POST",
@@ -407,7 +422,11 @@ export class ApiClient {
     if (params?.creator_id) search.set("creator_id", params.creator_id);
     if (params?.project_id) search.set("project_id", params.project_id);
     if (params?.open_only) search.set("open_only", "true");
-    return this.fetch(`/api/issues?${search}`);
+    const path = `/api/issues?${search}`;
+    const raw = await this.fetch<unknown>(path);
+    return parseWithFallback(raw, ListIssuesResponseSchema, EMPTY_LIST_ISSUES_RESPONSE, {
+      endpoint: "GET /api/issues",
+    });
   }
 
   async searchIssues(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; signal?: AbortSignal }): Promise<SearchIssuesResponse> {
@@ -437,7 +456,7 @@ export class ApiClient {
     });
   }
 
-  async quickCreateIssue(data: { agent_id: string; prompt: string }): Promise<{ task_id: string }> {
+  async quickCreateIssue(data: { agent_id: string; prompt: string; project_id?: string | null }): Promise<{ task_id: string }> {
     return this.fetch("/api/issues/quick-create", {
       method: "POST",
       body: JSON.stringify(data),
@@ -463,7 +482,10 @@ export class ApiClient {
   }
 
   async listChildIssues(id: string): Promise<{ issues: Issue[] }> {
-    return this.fetch(`/api/issues/${id}/children`);
+    const raw = await this.fetch<unknown>(`/api/issues/${id}/children`);
+    return parseWithFallback(raw, ChildIssuesResponseSchema, { issues: [] }, {
+      endpoint: "GET /api/issues/:id/children",
+    });
   }
 
   async getChildIssueProgress(): Promise<{ progress: { parent_issue_id: string; total: number; done: number }[] }> {
@@ -490,7 +512,10 @@ export class ApiClient {
 
   // Comments
   async listComments(issueId: string): Promise<Comment[]> {
-    return this.fetch(`/api/issues/${issueId}/comments`);
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/comments`);
+    return parseWithFallback(raw, CommentsListSchema, [], {
+      endpoint: "GET /api/issues/:id/comments",
+    });
   }
 
   async createComment(issueId: string, content: string, type?: string, parentId?: string, attachmentIds?: string[]): Promise<Comment> {
@@ -505,17 +530,13 @@ export class ApiClient {
     });
   }
 
-  async listTimeline(
-    issueId: string,
-    pageParam: TimelinePageParam = { mode: "latest" },
-    limit = 50,
-  ): Promise<TimelinePage> {
-    const params = new URLSearchParams();
-    params.set("limit", String(limit));
-    if (pageParam.mode === "before") params.set("before", pageParam.cursor);
-    else if (pageParam.mode === "after") params.set("after", pageParam.cursor);
-    else if (pageParam.mode === "around") params.set("around", pageParam.id);
-    return this.fetch(`/api/issues/${issueId}/timeline?${params.toString()}`);
+  async listTimeline(issueId: string): Promise<TimelineEntry[]> {
+    const raw = await this.fetch<unknown>(
+      `/api/issues/${issueId}/timeline`,
+    );
+    return parseWithFallback(raw, TimelineEntriesSchema, EMPTY_TIMELINE_ENTRIES, {
+      endpoint: "GET /api/issues/:id/timeline",
+    });
   }
 
   async getAssigneeFrequency(): Promise<AssigneeFrequencyEntry[]> {
@@ -531,6 +552,14 @@ export class ApiClient {
 
   async deleteComment(commentId: string): Promise<void> {
     await this.fetch(`/api/comments/${commentId}`, { method: "DELETE" });
+  }
+
+  async resolveComment(commentId: string): Promise<Comment> {
+    return this.fetch(`/api/comments/${commentId}/resolve`, { method: "POST" });
+  }
+
+  async unresolveComment(commentId: string): Promise<Comment> {
+    return this.fetch(`/api/comments/${commentId}/resolve`, { method: "DELETE" });
   }
 
   async addReaction(commentId: string, emoji: string): Promise<Reaction> {
@@ -563,7 +592,10 @@ export class ApiClient {
 
   // Subscribers
   async listIssueSubscribers(issueId: string): Promise<IssueSubscriber[]> {
-    return this.fetch(`/api/issues/${issueId}/subscribers`);
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/subscribers`);
+    return parseWithFallback(raw, SubscribersListSchema, [], {
+      endpoint: "GET /api/issues/:id/subscribers",
+    });
   }
 
   async subscribeToIssue(issueId: string, userId?: string, userType?: string): Promise<void> {
@@ -655,11 +687,11 @@ export class ApiClient {
 
   async updateRuntime(
     runtimeId: string,
-    data: { visibility?: "workspace" | "private" },
+    patch: { timezone?: string; visibility?: "private" | "public" },
   ): Promise<AgentRuntime> {
     return this.fetch(`/api/runtimes/${runtimeId}`, {
       method: "PATCH",
-      body: JSON.stringify(data),
+      body: JSON.stringify(patch),
     });
   }
 
@@ -799,6 +831,12 @@ export class ApiClient {
     });
   }
 
+  async rerunIssue(issueId: string): Promise<AgentTask> {
+    return this.fetch(`/api/issues/${issueId}/rerun`, {
+      method: "POST",
+    });
+  }
+
   // Inbox
   async listInbox(): Promise<InboxItem[]> {
     return this.fetch("/api/inbox");
@@ -851,6 +889,7 @@ export class ApiClient {
     google_client_id?: string;
     posthog_key?: string;
     posthog_host?: string;
+    analytics_environment?: string;
   }> {
     return this.fetch("/api/config");
   }
@@ -1008,11 +1047,15 @@ export class ApiClient {
   }
 
   // File Upload & Attachments
-  async uploadFile(file: File, opts?: { issueId?: string; commentId?: string }): Promise<Attachment> {
+  async uploadFile(
+    file: File,
+    opts?: { issueId?: string; commentId?: string; chatSessionId?: string },
+  ): Promise<Attachment> {
     const formData = new FormData();
     formData.append("file", file);
     if (opts?.issueId) formData.append("issue_id", opts.issueId);
     if (opts?.commentId) formData.append("comment_id", opts.commentId);
+    if (opts?.chatSessionId) formData.append("chat_session_id", opts.chatSessionId);
 
     const rid = createRequestId();
     const start = Date.now();
@@ -1033,7 +1076,10 @@ export class ApiClient {
     }
 
     this.logger.info(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms` });
-    return res.json() as Promise<Attachment>;
+    const raw = (await res.json()) as unknown;
+    return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
+      endpoint: "POST /api/upload-file",
+    });
   }
 
   // Chat Sessions
@@ -1061,10 +1107,18 @@ export class ApiClient {
     return this.fetch(`/api/chat/sessions/${sessionId}/messages`);
   }
 
-  async sendChatMessage(sessionId: string, content: string): Promise<SendChatMessageResponse> {
+  async sendChatMessage(
+    sessionId: string,
+    content: string,
+    attachmentIds?: string[],
+  ): Promise<SendChatMessageResponse> {
+    const body: { content: string; attachment_ids?: string[] } = { content };
+    if (attachmentIds && attachmentIds.length > 0) {
+      body.attachment_ids = attachmentIds;
+    }
     return this.fetch(`/api/chat/sessions/${sessionId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(body),
     });
   }
 
@@ -1086,6 +1140,17 @@ export class ApiClient {
 
   async listAttachments(issueId: string): Promise<Attachment[]> {
     return this.fetch(`/api/issues/${issueId}/attachments`);
+  }
+
+  // Fetches a fresh attachment metadata record. The server re-signs
+  // `download_url` on every call (30 min expiry), so the click-time
+  // download flow uses this endpoint to avoid handing the user a stale
+  // signed URL cached in TanStack Query.
+  async getAttachment(id: string): Promise<Attachment> {
+    const raw = await this.fetch<unknown>(`/api/attachments/${id}`);
+    return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
+      endpoint: "GET /api/attachments/{id}",
+    });
   }
 
   async deleteAttachment(id: string): Promise<void> {
@@ -1270,5 +1335,24 @@ export class ApiClient {
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
+  }
+
+  // GitHub integration
+  async getGitHubConnectURL(workspaceId: string): Promise<GitHubConnectResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/github/connect`);
+  }
+
+  async listGitHubInstallations(workspaceId: string): Promise<ListGitHubInstallationsResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/github/installations`);
+  }
+
+  async deleteGitHubInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/github/installations/${installationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listIssuePullRequests(issueId: string): Promise<{ pull_requests: GitHubPullRequest[] }> {
+    return this.fetch(`/api/issues/${issueId}/pull-requests`);
   }
 }

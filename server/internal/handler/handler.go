@@ -47,6 +47,16 @@ type Config struct {
 	AllowSignup         bool
 	AllowedEmails       []string
 	AllowedEmailDomains []string
+	// UseDailyRollupForRuntimeUsage routes ListRuntimeUsage to the
+	// task_usage_daily rollup table when true. Default false: the read
+	// path stays on the raw task_usage stream so rollup-related issues
+	// (pg_cron not running, backfill not yet performed, watermark stuck)
+	// can never make the dashboard return empty/stale data. Operators
+	// flip this on per environment AFTER:
+	//   1) migrations 072..076 applied,
+	//   2) backfill_task_usage_daily ran successfully,
+	//   3) cron job scheduled and task_usage_rollup_lag_seconds() < 900.
+	UseDailyRollupForRuntimeUsage bool
 }
 
 type Handler struct {
@@ -64,6 +74,7 @@ type Handler struct {
 	LocalSkillListStore   LocalSkillListStore
 	LocalSkillImportStore LocalSkillImportStore
 	LivenessStore         LivenessStore
+	HeartbeatScheduler    HeartbeatScheduler
 	Storage               storage.Storage
 	CFSigner              *auth.CloudFrontSigner
 	Analytics             analytics.Client
@@ -88,6 +99,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	}
 
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
+	taskSvc.Analytics = analyticsClient
 	return &Handler{
 		Queries:               queries,
 		DB:                    executor,
@@ -103,6 +115,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		LocalSkillListStore:   NewInMemoryLocalSkillListStore(),
 		LocalSkillImportStore: NewInMemoryLocalSkillImportStore(),
 		LivenessStore:         NewNoopLivenessStore(),
+		HeartbeatScheduler:    NewPassthroughHeartbeatScheduler(queries),
 		Storage:               store,
 		CFSigner:              cfSigner,
 		Analytics:             analyticsClient,
@@ -222,13 +235,27 @@ func requestUserID(r *http.Request) string {
 }
 
 // resolveActor determines whether the request is from an agent or a human member.
-// If X-Agent-ID and X-Task-ID headers are both set, validates that the task
-// belongs to the claimed agent (defense-in-depth against manual header spoofing).
-// If only X-Agent-ID is set, validates that the agent belongs to the workspace.
+// To claim "agent" identity the request MUST carry both X-Agent-ID and a valid
+// X-Task-ID, and the task must belong to the claimed agent. Otherwise we fall
+// back to "member" using the user ID from the session.
+//
+// X-Agent-ID alone is not trusted: any workspace member can guess or observe
+// an agent's UUID, and a member-supplied X-Agent-ID would otherwise let that
+// member impersonate the agent and bypass the private-agent gate (#2359
+// review). The daemon always pairs the two headers — X-Agent-ID names the
+// agent claiming the request, X-Task-ID names the in-flight task that
+// authorizes it — so requiring both has no effect on legitimate agent
+// callers but closes the impersonation path.
+//
 // Returns ("agent", agentID) on success, ("member", userID) otherwise.
 func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (actorType, actorID string) {
 	agentID := r.Header.Get("X-Agent-ID")
 	if agentID == "" {
+		return "member", userID
+	}
+	taskID := r.Header.Get("X-Task-ID")
+	if taskID == "" {
+		slog.Debug("resolveActor: X-Agent-ID present but X-Task-ID missing, refusing to trust agent identity", "agent_id", agentID)
 		return "member", userID
 	}
 
@@ -244,18 +271,15 @@ func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (act
 		return "member", userID
 	}
 
-	// When X-Task-ID is provided, cross-check that the task belongs to this agent.
-	if taskID := r.Header.Get("X-Task-ID"); taskID != "" {
-		taskUUID, err := util.ParseUUID(taskID)
-		if err != nil {
-			slog.Debug("resolveActor: X-Task-ID is not a valid UUID, falling back to member", "task_id", taskID)
-			return "member", userID
-		}
-		task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
-		if err != nil || uuidToString(task.AgentID) != agentID {
-			slog.Debug("resolveActor: X-Task-ID rejected, task not found or agent mismatch", "agent_id", agentID, "task_id", taskID)
-			return "member", userID
-		}
+	taskUUID, err := util.ParseUUID(taskID)
+	if err != nil {
+		slog.Debug("resolveActor: X-Task-ID is not a valid UUID, falling back to member", "task_id", taskID)
+		return "member", userID
+	}
+	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
+	if err != nil || uuidToString(task.AgentID) != agentID {
+		slog.Debug("resolveActor: X-Task-ID rejected, task not found or agent mismatch", "agent_id", agentID, "task_id", taskID)
+		return "member", userID
 	}
 
 	return "agent", agentID

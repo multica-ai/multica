@@ -245,7 +245,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import { CreateIssueModal } from "./create-issue";
+import { CreateIssueModal, ManualCreatePanel } from "./create-issue";
 
 function renderModal(element: React.ReactElement) {
   const qc = new QueryClient({
@@ -355,5 +355,37 @@ describe("CreateIssueModal", () => {
       assigneeId: undefined,
       dueDate: null,
     });
+  });
+
+  // Manual → agent must forward the picked project so the new modal pins to
+  // the same target. Without this the agent panel re-seeds from its own
+  // persisted `lastProjectId` and silently routes the issue to a stale one.
+  it("forwards the picked project when switching to agent mode", async () => {
+    const user = userEvent.setup();
+    const onSwitchMode = vi.fn();
+
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={onSwitchMode}
+        data={{ project_id: "proj-1" }}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+        backlogHintIssueId={null}
+        setBacklogHintIssueId={vi.fn()}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Refactor auth");
+
+    await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
+
+    expect(onSwitchMode).toHaveBeenCalledTimes(1);
+    expect(onSwitchMode.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        prompt: "Refactor auth",
+        project_id: "proj-1",
+      }),
+    );
   });
 });

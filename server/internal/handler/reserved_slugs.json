@@ -1,0 +1,145 @@
+{
+  "$comment": "Source of truth for reserved workspace slugs. Edit this file only. The Go side embeds this JSON directly; the TS side (packages/core/paths/reserved-slugs.ts) is regenerated from this file by `pnpm generate:reserved-slugs`. CI re-runs the generator and fails on any diff, so the two sides cannot drift. Convention for new global routes: single word (`/login`, `/inbox`) or `/{noun}/{verb}` (`/workspaces/new`). Never add hyphenated root-level word groups (`/new-workspace`, `/create-team`) — they collide with common user workspace names.",
+  "groups": [
+    {
+      "label": "Auth flow",
+      "description": "`onboarding` is historical, kept reserved post-removal of the route.",
+      "slugs": [
+        "login",
+        "logout",
+        "signin",
+        "signout",
+        "signup",
+        "auth",
+        "oauth",
+        "callback",
+        "invite",
+        "invitations",
+        "verify",
+        "reset",
+        "password",
+        "onboarding"
+      ]
+    },
+    {
+      "label": "Platform / marketing routes (current + likely-future)",
+      "description": "`multica` is reserved as the brand name to block impersonation workspaces. `www`, `new`, `home`, `homepage`, `dashboard` are confusables or likely-future global landing/entry routes; `homepage` matches the existing `/homepage` landing variant in apps/web.",
+      "slugs": [
+        "api",
+        "admin",
+        "multica",
+        "www",
+        "new",
+        "home",
+        "homepage",
+        "dashboard",
+        "help",
+        "about",
+        "pricing",
+        "changelog",
+        "docs",
+        "support",
+        "status",
+        "legal",
+        "privacy",
+        "terms",
+        "security",
+        "contact",
+        "blog",
+        "careers",
+        "press",
+        "download"
+      ]
+    },
+    {
+      "label": "Account / billing (likely-future global routes in the avatar menu)",
+      "slugs": [
+        "profile",
+        "account",
+        "billing",
+        "notifications",
+        "search",
+        "members"
+      ]
+    },
+    {
+      "label": "Dashboard / workspace route segments",
+      "description": "Reserving each segment name prevents `/{slug}/{view}` from being visually ambiguous (e.g. a workspace named `issues` would make `/issues/abc` mean two things). `workspaces` covers the global `/workspaces/new` workspace-creation page; `teams` is reserved for future team management.",
+      "slugs": [
+        "issues",
+        "projects",
+        "autopilots",
+        "agents",
+        "inbox",
+        "my-issues",
+        "runtimes",
+        "skills",
+        "settings",
+        "workspaces",
+        "teams"
+      ]
+    },
+    {
+      "label": "API / integration prefixes",
+      "description": "`api` above already covers `/api/*`; these guard against future top-level API alias routes (e.g. `/v1`, `/graphql`) and against accidental workspace slugs that read like API identifiers.",
+      "slugs": [
+        "v1",
+        "v2",
+        "graphql",
+        "webhooks",
+        "sdk",
+        "tokens",
+        "cli"
+      ]
+    },
+    {
+      "label": "Backend ops / observability",
+      "description": "`/health`, `/readyz`, `/healthz`, and `/ws` exist on the backend host; reserving them on the workspace slug space prevents naming confusion if/when these paths are ever proxied through the web origin.",
+      "slugs": [
+        "health",
+        "readyz",
+        "healthz",
+        "ws",
+        "metrics",
+        "ping"
+      ]
+    },
+    {
+      "label": "RFC 2142 — privileged email mailboxes",
+      "description": "Allowing user workspaces with these slugs would let attackers spoof system messaging.",
+      "slugs": [
+        "postmaster",
+        "abuse",
+        "noreply",
+        "webmaster",
+        "hostmaster"
+      ]
+    },
+    {
+      "label": "Hostname / subdomain confusables",
+      "description": "Even on path-based routing these names attract phishing and subdomain-takeover attempts.",
+      "slugs": [
+        "mail",
+        "ftp",
+        "static",
+        "cdn",
+        "assets",
+        "public",
+        "files",
+        "uploads"
+      ]
+    },
+    {
+      "label": "Next.js / web standards",
+      "description": "These entries contain characters (dots, underscores) that today's slug regex `^[a-z0-9]+(?:-[a-z0-9]+)*$` already rejects at the format-validation step — so `isReservedSlug` never actually matches them. They are kept as defense-in-depth so that if the slug regex is ever relaxed (e.g. to support dotted corporate slugs like `acme.io`), these system paths stay protected.",
+      "slugs": [
+        "_next",
+        "favicon.ico",
+        "robots.txt",
+        "sitemap.xml",
+        "manifest.json",
+        ".well-known"
+      ]
+    }
+  ]
+}

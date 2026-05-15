@@ -158,6 +158,7 @@ type AgentTaskResponse struct {
 	CreatedAt               string                `json:"created_at"`
 	PriorSessionID          string                `json:"prior_session_id,omitempty"`          // session ID from a previous task on same issue
 	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on same issue
+	WorkDir                 string                `json:"work_dir,omitempty"`                  // local working directory pinned for this task; populated once the daemon reports it
 	TriggerCommentID        *string               `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
 	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
 	TriggerSummary          *string               `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
@@ -165,6 +166,7 @@ type AgentTaskResponse struct {
 	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
 	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
 	ChatMessage             string                `json:"chat_message,omitempty"`              // user message for chat tasks
+	ChatMessageAttachments  []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`  // attachments on the user message — agent calls `multica attachment download <id>` per entry
 	AutopilotRunID          string                `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot-spawned tasks
 	AutopilotID             string                `json:"autopilot_id,omitempty"`              // autopilot that spawned this task
 	AutopilotTitle          string                `json:"autopilot_title,omitempty"`           // autopilot title used as task context
@@ -173,6 +175,18 @@ type AgentTaskResponse struct {
 	AutopilotTriggerPayload json.RawMessage       `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
 	QuickCreatePrompt       string                `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
 	Kind                    string                `json:"kind"`                                // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+}
+
+// ChatAttachmentMeta is the structured attachment metadata embedded in
+// claim responses for chat tasks. The agent uses these to run
+// `multica attachment download <id>` rather than guessing from the
+// markdown URL (which is signed and 30-min expiring on private CDN).
+// The mirror struct on the daemon side lives in internal/daemon/types.go
+// and uses the same JSON field names.
+type ChatAttachmentMeta struct {
+	ID          string `json:"id"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type,omitempty"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
@@ -197,6 +211,10 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 	if t.FailureReason.Valid {
 		failureReason = t.FailureReason.String
 	}
+	workDir := ""
+	if t.WorkDir.Valid {
+		workDir = t.WorkDir.String
+	}
 	return AgentTaskResponse{
 		ID:               uuidToString(t.ID),
 		AgentID:          uuidToString(t.AgentID),
@@ -216,6 +234,7 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		CreatedAt:        timestampToString(t.CreatedAt),
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
 		TriggerSummary:   textToPtr(t.TriggerSummary),
+		WorkDir:          workDir,
 		// Surface task source so the UI can distinguish issue-linked tasks
 		// from chat-spawned or autopilot-spawned ones; all three may arrive
 		// with issue_id = "" once a task has no linked issue.
@@ -283,9 +302,17 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// All agents (including private) are visible to workspace members.
+	// Resolve the request actor once. Agents bypass the private-agent gate
+	// to preserve A2A collaboration; members must be in allowed_principals
+	// (agent owner or workspace owner/admin) to see private agents.
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
+		if a.Visibility == "private" && actorType == "member" {
+			if !memberAllowedForPrivateAgent(a, actorID, member.Role) {
+				continue
+			}
+		}
 		resp := agentToResponse(a)
 		if skills, ok := skillMap[resp.ID]; ok {
 			resp.Skills = skills
@@ -305,6 +332,16 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	agent, ok := h.loadAgentForUser(w, r, id)
 	if !ok {
+		return
+	}
+	// Private-agent gate: members must be in allowed_principals to view
+	// (and therefore navigate to) a private agent. The 403 lets the front-end
+	// render an explicit "no access" placeholder instead of a 404 — see
+	// agent-detail-page.tsx.
+	workspaceID := uuidToString(agent.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+		writeError(w, http.StatusForbidden, "you do not have access to this agent")
 		return
 	}
 	resp := agentToResponse(agent)
@@ -434,7 +471,12 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !canBindAgentToRuntime(h, w, r, runtime, ownerID, workspaceID) {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	if !canUseRuntimeForAgent(member, runtime) {
+		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can create agents on it")
 		return
 	}
 
@@ -513,6 +555,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		workspaceID,
 		uuidToString(agent.ID),
 		runtime.Provider,
+		runtime.RuntimeMode,
 		req.Template,
 		isFirstAgent,
 	))
@@ -566,29 +609,6 @@ func redactMcpConfig(resp *AgentResponse) {
 		resp.McpConfig = nil
 		resp.McpConfigRedacted = true
 	}
-}
-
-// canBindAgentToRuntime gates agent create / runtime-rebind on whether the
-// caller may use the chosen runtime. Allowed iff the caller is the runtime
-// owner OR a workspace owner/admin (per the upstream design discussed in
-// multica-ai/multica#1804 and multica-ai/multica#365). Unowned legacy
-// runtimes (NULL owner_id) are admin/owner-only — without an owner there
-// is no claim to delegate.
-//
-// On denial writes a 403 and returns false; callers must return immediately.
-func canBindAgentToRuntime(h *Handler, w http.ResponseWriter, r *http.Request, runtime db.AgentRuntime, callerUserID, workspaceID string) bool {
-	if runtime.OwnerID.Valid && uuidToString(runtime.OwnerID) == callerUserID {
-		return true
-	}
-	member, ok := h.workspaceMember(w, r, workspaceID)
-	if !ok {
-		return false
-	}
-	if roleAllowed(member.Role, "owner", "admin") {
-		return true
-	}
-	writeError(w, http.StatusForbidden, "you can only bind agents to your own runtime; ask a workspace admin if you need to use someone else's runtime")
-	return false
 }
 
 // canManageAgent checks whether the current user can update or archive an agent.
@@ -675,7 +695,15 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid runtime_id")
 			return
 		}
-		if !canBindAgentToRuntime(h, w, r, runtime, requestUserID(r), uuidToString(agent.WorkspaceID)) {
+		// Same gate as CreateAgent — prevents UpdateAgent from being used to
+		// re-bind an agent onto someone else's private runtime, which would
+		// otherwise be a quiet end-run around the CreateAgent check.
+		member, ok := h.workspaceMember(w, r, uuidToString(agent.WorkspaceID))
+		if !ok {
+			return
+		}
+		if !canUseRuntimeForAgent(member, runtime) {
+			writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can move agents onto it")
 			return
 		}
 		params.RuntimeID = runtime.ID
@@ -749,8 +777,10 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 	// rows here — the agent:archived event below already triggers a full
 	// active-tasks invalidation on every connected client, so per-task
 	// task:cancelled events would be redundant noise.
-	if _, err := h.Queries.CancelAgentTasksByAgent(r.Context(), agent.ID); err != nil {
+	if cancelled, err := h.Queries.CancelAgentTasksByAgent(r.Context(), agent.ID); err != nil {
 		slog.Warn("cancel agent tasks on archive failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+	} else {
+		h.TaskService.CaptureCancelledTasks(r.Context(), cancelled)
 	}
 
 	wsID := uuidToString(archived.WorkspaceID)
@@ -835,6 +865,14 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Run history is part of the private-agent gate ("查看历史会话"). Same
+	// 403 semantics as GetAgent.
+	workspaceID := uuidToString(agent.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+		writeError(w, http.StatusForbidden, "you do not have access to this agent")
+		return
+	}
 
 	tasks, err := h.Queries.ListAgentTasks(r.Context(), agent.ID)
 	if err != nil {
@@ -871,7 +909,8 @@ type AgentRunCount struct {
 // activity to keep the Agents list cheap regardless of agent count.
 func (h *Handler) GetWorkspaceAgentRunCounts(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
-	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
 		return
 	}
 
@@ -881,12 +920,23 @@ func (h *Handler) GetWorkspaceAgentRunCounts(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	resp := make([]AgentRunCount, len(rows))
-	for i, row := range rows {
-		resp[i] = AgentRunCount{
-			AgentID:  uuidToString(row.AgentID),
-			RunCount: row.RunCount,
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
+		return
+	}
+
+	resp := make([]AgentRunCount, 0, len(rows))
+	for _, row := range rows {
+		agentID := uuidToString(row.AgentID)
+		if _, ok := allowed[agentID]; !ok {
+			continue
 		}
+		resp = append(resp, AgentRunCount{
+			AgentID:  agentID,
+			RunCount: row.RunCount,
+		})
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -900,7 +950,8 @@ func (h *Handler) GetWorkspaceAgentRunCounts(w http.ResponseWriter, r *http.Requ
 // empty buckets to keep the response small.
 func (h *Handler) GetWorkspaceAgentActivity30d(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
-	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
 		return
 	}
 
@@ -910,14 +961,25 @@ func (h *Handler) GetWorkspaceAgentActivity30d(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	resp := make([]AgentActivityBucket, len(rows))
-	for i, row := range rows {
-		resp[i] = AgentActivityBucket{
-			AgentID:     uuidToString(row.AgentID),
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
+		return
+	}
+
+	resp := make([]AgentActivityBucket, 0, len(rows))
+	for _, row := range rows {
+		agentID := uuidToString(row.AgentID)
+		if _, ok := allowed[agentID]; !ok {
+			continue
+		}
+		resp = append(resp, AgentActivityBucket{
+			AgentID:     agentID,
 			BucketAt:    timestampToString(row.Bucket),
 			TaskCount:   row.TaskCount,
 			FailedCount: row.FailedCount,
-		}
+		})
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -934,7 +996,8 @@ func (h *Handler) GetWorkspaceAgentActivity30d(w http.ResponseWriter, r *http.Re
 // snapshot.
 func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
-	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
 		return
 	}
 
@@ -944,9 +1007,19 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 		return
 	}
 
-	resp := make([]AgentTaskResponse, len(tasks))
-	for i, t := range tasks {
-		resp[i] = taskToResponse(t)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
+		return
+	}
+
+	resp := make([]AgentTaskResponse, 0, len(tasks))
+	for _, t := range tasks {
+		if _, ok := allowed[uuidToString(t.AgentID)]; !ok {
+			continue
+		}
+		resp = append(resp, taskToResponse(t))
 	}
 
 	writeJSON(w, http.StatusOK, resp)

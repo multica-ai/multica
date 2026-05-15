@@ -120,12 +120,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
 
   const copyLink = useCallback(async () => {
     if (!issueId) return;
-    const path = paths.issueDetail(issueId);
-    const url = navigation.getShareableUrl
-      ? navigation.getShareableUrl(path)
-      : typeof window !== "undefined"
-        ? window.location.origin + path
-        : path;
+    const url = navigation.getShareableUrl(paths.issueDetail(issueId));
     try {
       await navigator.clipboard.writeText(url);
       toast.success(t(($) => $.detail.link_copied));

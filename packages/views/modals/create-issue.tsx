@@ -262,6 +262,9 @@ export function ManualCreatePanel({
   // panel reads `data.prompt` on mount. Concatenate title + description so
   // nothing the user typed is lost — the agent derives a fresh title from
   // the combined text. Persist the mode flip so the next `c` lands in agent.
+  // Also forward the picked project so the agent panel pins the new issue
+  // to it; without this the agent panel would fall back to its persisted
+  // `lastProjectId`, silently routing the issue to the wrong project.
   const switchToAgent = () => {
     const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
     const prompt = [title.trim(), desc].filter(Boolean).join("\n\n");
@@ -271,6 +274,7 @@ export function ManualCreatePanel({
       ...(assigneeType === "agent" && assigneeId
         ? { agent_id: assigneeId }
         : {}),
+      ...(projectId ? { project_id: projectId } : {}),
     });
   };
 
@@ -353,7 +357,7 @@ export function ManualCreatePanel({
             </div>
 
             {/* Description — takes remaining space */}
-            <div {...descDropZoneProps} className="relative flex-1 min-h-0 overflow-y-auto px-5">
+            <div {...descDropZoneProps} className="relative flex flex-1 min-h-0 overflow-y-auto px-5">
               <ContentEditor
                 ref={descEditorRef}
                 defaultValue={draft.description}

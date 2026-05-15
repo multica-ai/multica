@@ -19,7 +19,7 @@ import {
 } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { timeAgo } from "@multica/core/utils";
+import { isImeComposing, timeAgo } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Input } from "@multica/ui/components/ui/input";
@@ -56,10 +56,6 @@ interface InspectorProps {
   runtimes: AgentRuntime[];
   members: MemberWithUser[];
   currentUserId: string | null;
-  /** Workspace owners/admins can rebind to anyone's runtime; regular
-   * members are pinned to their own. Mirrors the server check in
-   * canBindAgentToRuntime. */
-  isWorkspaceAdmin?: boolean;
   /**
    * Computed by the parent via `useAgentPermissions(agent).canEdit.allowed`.
    * When false the inspector renders all editable surfaces as static
@@ -91,7 +87,6 @@ export function AgentDetailInspector({
   runtimes,
   members,
   currentUserId,
-  isWorkspaceAdmin = false,
   canEdit,
   onUpdate,
 }: InspectorProps) {
@@ -122,7 +117,6 @@ export function AgentDetailInspector({
             runtimes={runtimes}
             members={members}
             currentUserId={currentUserId}
-            isWorkspaceAdmin={isWorkspaceAdmin}
             canEdit={canEdit}
             onChange={(id) => update({ runtime_id: id })}
           />
@@ -461,7 +455,11 @@ function DescriptionEditorBody({
           placeholder={t(($) => $.inspector.description_placeholder)}
           rows={6}
           onKeyDown={(e) => {
-            if (e.key === "Escape") onClose();
+            if (e.key === "Escape") {
+              onClose();
+              return;
+            }
+            if (isImeComposing(e)) return;
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
               void commit();
@@ -567,11 +565,14 @@ function InlineEditPopover({
               }}
               placeholder={placeholder}
               onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setOpen(false);
+                  return;
+                }
+                if (isImeComposing(e)) return;
                 if (e.key === "Enter") {
                   e.preventDefault();
                   void commit();
-                } else if (e.key === "Escape") {
-                  setOpen(false);
                 }
               }}
               className="h-8"
@@ -586,7 +587,11 @@ function InlineEditPopover({
               }}
               placeholder={placeholder}
               onKeyDown={(e) => {
-                if (e.key === "Escape") setOpen(false);
+                if (e.key === "Escape") {
+                  setOpen(false);
+                  return;
+                }
+                if (isImeComposing(e)) return;
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
                   void commit();

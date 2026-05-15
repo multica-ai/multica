@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import {
-  useInfiniteQuery,
+  useQuery,
   useQueryClient,
   useMutationState,
 } from "@tanstack/react-query";
@@ -15,24 +15,21 @@ import type {
   CommentCreatedPayload,
   CommentUpdatedPayload,
   CommentDeletedPayload,
+  CommentResolvedPayload,
+  CommentUnresolvedPayload,
   ActivityCreatedPayload,
   ReactionAddedPayload,
   ReactionRemovedPayload,
 } from "@multica/core/types";
 import {
-  issueTimelineInfiniteOptions,
+  issueTimelineOptions,
   issueKeys,
 } from "@multica/core/issues/queries";
-import {
-  mapAllEntries,
-  filterAllEntries,
-  prependToLatestPage,
-  type TimelineCacheData,
-} from "@multica/core/issues/timeline-cache";
 import {
   useCreateComment,
   useUpdateComment,
   useDeleteComment,
+  useResolveComment,
   useToggleCommentReaction,
   type ToggleCommentReactionVars,
 } from "@multica/core/issues/mutations";
@@ -40,7 +37,7 @@ import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
 
-type TLData = TimelineCacheData;
+type TLCache = TimelineEntry[];
 
 function commentToTimelineEntry(c: Comment): TimelineEntry {
   return {
@@ -55,62 +52,22 @@ function commentToTimelineEntry(c: Comment): TimelineEntry {
     comment_type: c.type,
     reactions: c.reactions ?? [],
     attachments: c.attachments ?? [],
+    resolved_at: c.resolved_at,
+    resolved_by_type: c.resolved_by_type,
+    resolved_by_id: c.resolved_by_id,
   };
 }
 
-export interface UseIssueTimelineOptions {
-  /** Anchor the initial fetch on this entry id (Inbox jump path). When set,
-   *  the first page is centered on the target instead of the latest 50. */
-  around?: string | null;
-}
-
-export function useIssueTimeline(
-  issueId: string,
-  userId?: string,
-  options: UseIssueTimelineOptions = {},
-) {
+export function useIssueTimeline(issueId: string, userId?: string) {
   const { t } = useT("issues");
   const qc = useQueryClient();
 
-  // Internal anchor state. Starts as the caller's around prop; jumpToLatest
-  // clears it. A new around prop (e.g. user clicks a different inbox item)
-  // resets it via the effect below.
-  const [around, setAround] = useState<string | null>(options.around ?? null);
-  useEffect(() => {
-    if (options.around) setAround(options.around);
-  }, [options.around]);
+  const query = useQuery(issueTimelineOptions(issueId));
+  const { data, isLoading: loading } = query;
 
-  const query = useInfiniteQuery(issueTimelineInfiniteOptions(issueId, around));
-  const {
-    data,
-    isLoading: loading,
-    fetchNextPage,
-    fetchPreviousPage,
-    hasNextPage,
-    hasPreviousPage,
-    isFetchingNextPage,
-    isFetchingPreviousPage,
-  } = query;
-
-  // isAtLatest is the cache-invariant we use to decide where WS-delivered
-  // entries belong. It's true when the FIRST loaded page reports no newer
-  // entries on the server — i.e. the user is looking at the live tail.
-  const isAtLatest = data?.pages[0]?.has_more_after === false;
+  const timeline = useMemo<TimelineEntry[]>(() => data ?? [], [data]);
 
   const [submitting, setSubmitting] = useState(false);
-  const [newEntriesBelowCount, setNewEntriesBelowCount] = useState(0);
-
-  // Flatten pages → ASC array for the legacy UI consumer. pages are DESC
-  // newest-first; the consumer (issue-detail.tsx) renders chronologically
-  // (oldest at top). Concat → DESC; reverse once at the end → ASC.
-  const timeline = useMemo<TimelineEntry[]>(() => {
-    if (!data) return [];
-    const flat: TimelineEntry[] = [];
-    for (const page of data.pages) {
-      for (const entry of page.entries) flat.push(entry);
-    }
-    return flat.reverse();
-  }, [data]);
 
   // Stable mutation handles. TanStack v5 returns a fresh result wrapper from
   // useMutation per render, but the inner mutateAsync / mutate functions are
@@ -120,15 +77,15 @@ export function useIssueTimeline(
   const { mutateAsync: createComment } = useCreateComment(issueId);
   const { mutateAsync: updateComment } = useUpdateComment(issueId);
   const { mutateAsync: deleteCommentAsync } = useDeleteComment(issueId);
+  const { mutateAsync: resolveCommentAsync } = useResolveComment(issueId);
   const { mutate: toggleCommentReaction } = useToggleCommentReaction(issueId);
 
-  // Reconnect recovery: drop the cache so the next render refetches the
-  // latest page from scratch. We don't try to reconcile diffs over a
-  // possibly-long disconnect — easier to start fresh.
+  // Reconnect recovery: invalidate so the next render refetches the full
+  // timeline. Cheaper than diffing across a possibly-long disconnect.
   useWSReconnect(
     useCallback(() => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId, around) });
-    }, [qc, issueId, around]),
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+    }, [qc, issueId]),
   );
 
   // --- WS event handlers ---
@@ -139,17 +96,14 @@ export function useIssueTimeline(
       (payload: unknown) => {
         const { comment } = payload as CommentCreatedPayload;
         if (comment.issue_id !== issueId) return;
-        if (isAtLatest) {
-          qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) =>
-            prependToLatestPage(old, commentToTimelineEntry(comment)),
-          );
-        } else {
-          // Reading older history — don't yank scroll position. Surface a
-          // counter so the UI can offer "jump to latest (N new)".
-          setNewEntriesBelowCount((c) => c + 1);
-        }
+        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) => {
+          const entry = commentToTimelineEntry(comment);
+          if (!old) return [entry];
+          if (old.some((e) => e.id === comment.id)) return old;
+          return [...old, entry];
+        });
       },
-      [qc, issueId, around, isAtLatest],
+      [qc, issueId],
     ),
   );
 
@@ -159,13 +113,51 @@ export function useIssueTimeline(
       (payload: unknown) => {
         const { comment } = payload as CommentUpdatedPayload;
         if (comment.issue_id !== issueId) return;
-        qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) =>
-          mapAllEntries(old, (e) =>
+        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
+          old?.map((e) =>
             e.id === comment.id ? commentToTimelineEntry(comment) : e,
           ),
         );
       },
-      [qc, issueId, around],
+      [qc, issueId],
+    ),
+  );
+
+  // Granular handlers for comment:resolved / comment:unresolved. The payload
+  // carries the full Comment with the new resolved_at/resolved_by_* fields,
+  // which `commentToTimelineEntry` already preserves, so the existing
+  // entry can simply be replaced in place. Without these handlers the only
+  // path that updated the cache was `useRealtimeSync`'s global invalidate,
+  // which forces a full timeline refetch and busts every CommentCard memo.
+  useWSEvent(
+    "comment:resolved",
+    useCallback(
+      (payload: unknown) => {
+        const { comment } = payload as CommentResolvedPayload;
+        if (comment.issue_id !== issueId) return;
+        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
+          old?.map((e) =>
+            e.id === comment.id ? commentToTimelineEntry(comment) : e,
+          ),
+        );
+      },
+      [qc, issueId],
+    ),
+  );
+
+  useWSEvent(
+    "comment:unresolved",
+    useCallback(
+      (payload: unknown) => {
+        const { comment } = payload as CommentUnresolvedPayload;
+        if (comment.issue_id !== issueId) return;
+        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
+          old?.map((e) =>
+            e.id === comment.id ? commentToTimelineEntry(comment) : e,
+          ),
+        );
+      },
+      [qc, issueId],
     ),
   );
 
@@ -175,31 +167,29 @@ export function useIssueTimeline(
       (payload: unknown) => {
         const { comment_id, issue_id } = payload as CommentDeletedPayload;
         if (issue_id !== issueId) return;
-        // Cascade through replies. Walk pages collectively; a reply may live
-        // on a different page than its parent.
-        qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) => {
+        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) => {
           if (!old) return old;
+          // Cascade through replies (full timeline now lives in this single
+          // cache, so a flat sweep is sufficient).
           const idsToRemove = new Set<string>([comment_id]);
           let changed = true;
           while (changed) {
             changed = false;
-            for (const page of old.pages) {
-              for (const e of page.entries) {
-                if (
-                  e.parent_id &&
-                  idsToRemove.has(e.parent_id) &&
-                  !idsToRemove.has(e.id)
-                ) {
-                  idsToRemove.add(e.id);
-                  changed = true;
-                }
+            for (const e of old) {
+              if (
+                e.parent_id &&
+                idsToRemove.has(e.parent_id) &&
+                !idsToRemove.has(e.id)
+              ) {
+                idsToRemove.add(e.id);
+                changed = true;
               }
             }
           }
-          return filterAllEntries(old, (e) => idsToRemove.has(e.id));
+          return old.filter((e) => !idsToRemove.has(e.id));
         });
       },
-      [qc, issueId, around],
+      [qc, issueId],
     ),
   );
 
@@ -211,15 +201,13 @@ export function useIssueTimeline(
         if (p.issue_id !== issueId) return;
         const entry = p.entry;
         if (!entry || !entry.id) return;
-        if (isAtLatest) {
-          qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) =>
-            prependToLatestPage(old, entry),
-          );
-        } else {
-          setNewEntriesBelowCount((c) => c + 1);
-        }
+        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) => {
+          if (!old) return [entry];
+          if (old.some((e) => e.id === entry.id)) return old;
+          return [...old, entry];
+        });
       },
-      [qc, issueId, around, isAtLatest],
+      [qc, issueId],
     ),
   );
 
@@ -229,8 +217,8 @@ export function useIssueTimeline(
       (payload: unknown) => {
         const { reaction, issue_id } = payload as ReactionAddedPayload;
         if (issue_id !== issueId) return;
-        qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) =>
-          mapAllEntries(old, (e) => {
+        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
+          old?.map((e) => {
             if (e.id !== reaction.comment_id) return e;
             const existing = e.reactions ?? [];
             if (existing.some((r) => r.id === reaction.id)) return e;
@@ -238,7 +226,7 @@ export function useIssueTimeline(
           }),
         );
       },
-      [qc, issueId, around],
+      [qc, issueId],
     ),
   );
 
@@ -248,8 +236,8 @@ export function useIssueTimeline(
       (payload: unknown) => {
         const p = payload as ReactionRemovedPayload;
         if (p.issue_id !== issueId) return;
-        qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) =>
-          mapAllEntries(old, (e) => {
+        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
+          old?.map((e) => {
             if (e.id !== p.comment_id) return e;
             return {
               ...e,
@@ -265,27 +253,9 @@ export function useIssueTimeline(
           }),
         );
       },
-      [qc, issueId, around],
+      [qc, issueId],
     ),
   );
-
-  // --- Page navigation ---
-
-  const fetchOlder = useCallback(() => {
-    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
-
-  const fetchNewer = useCallback(() => {
-    if (hasPreviousPage && !isFetchingPreviousPage) fetchPreviousPage();
-  }, [hasPreviousPage, isFetchingPreviousPage, fetchPreviousPage]);
-
-  const jumpToLatest = useCallback(() => {
-    // Drop any anchor + prefetched windows. The latest cache (around=null)
-    // may be cold; an invalidate forces a fresh fetch on next render.
-    setAround(null);
-    setNewEntriesBelowCount(0);
-    qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId, null) });
-  }, [qc, issueId]);
 
   // --- Mutation functions ---
 
@@ -341,6 +311,21 @@ export function useIssueTimeline(
       }
     },
     [deleteCommentAsync, t],
+  );
+
+  const toggleResolveComment = useCallback(
+    async (commentId: string, resolved: boolean) => {
+      try {
+        await resolveCommentAsync({ commentId, resolved });
+      } catch {
+        toast.error(
+          resolved
+            ? t(($) => $.comment.resolve.resolve_failed)
+            : t(($) => $.comment.resolve.unresolve_failed),
+        );
+      }
+    },
+    [resolveCommentAsync, t],
   );
 
   // --- Optimistic UI for comment reactions ---
@@ -420,19 +405,6 @@ export function useIssueTimeline(
     [userId, toggleCommentReaction],
   );
 
-  // Around-mode anchor index (target_index from server, applied within the
-  // first page). Translated to a flat-array index: the array is reversed
-  // (DESC pages → ASC flat), so the offset within page[0] becomes
-  // (totalEntries - 1) - target_index.
-  const targetFlatIndex = useMemo(() => {
-    if (!data || data.pages.length === 0) return null;
-    const first = data.pages[0];
-    if (!first || first.target_index == null) return null;
-    let total = 0;
-    for (const p of data.pages) total += p.entries.length;
-    return total - 1 - first.target_index;
-  }, [data]);
-
   return {
     timeline: optimisticTimeline,
     loading,
@@ -441,17 +413,7 @@ export function useIssueTimeline(
     submitReply,
     editComment,
     deleteComment,
+    toggleResolveComment,
     toggleReaction,
-    // Pagination controls (new)
-    hasMoreOlder: hasNextPage,
-    hasMoreNewer: hasPreviousPage,
-    isFetchingOlder: isFetchingNextPage,
-    isFetchingNewer: isFetchingPreviousPage,
-    fetchOlder,
-    fetchNewer,
-    jumpToLatest,
-    isAtLatest: isAtLatest === true,
-    newEntriesBelowCount,
-    targetFlatIndex,
   };
 }

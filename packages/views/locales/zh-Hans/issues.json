@@ -97,8 +97,15 @@
     "add_sub_issue_aria": "添加子 issue",
     "section_properties": "属性",
     "section_parent_issue": "父 issue",
+    "section_pull_requests": "Pull Request",
     "section_details": "详情",
     "section_token_usage": "Token 用量",
+    "pull_requests_loading": "加载中…",
+    "pull_requests_empty": "还没有关联的 PR。在 PR 的分支名、标题或正文里引用本 issue 的 identifier 即可自动关联。",
+    "pull_request_state_open": "Open",
+    "pull_request_state_draft": "Draft",
+    "pull_request_state_merged": "Merged",
+    "pull_request_state_closed": "Closed",
     "prop_status": "状态",
     "prop_priority": "优先级",
     "prop_assignee": "负责人",
@@ -125,16 +132,17 @@
     "pin_tooltip": "固定到侧边栏",
     "unpin_tooltip": "从侧边栏取消固定",
     "sidebar_tooltip": "切换侧边栏",
+    "cmdf_toast_title": "页面内查找仅覆盖可见区",
+    "cmdf_toast_description": "评论列表已虚拟滚动,⌘F 找不到视口外的评论。完整应用内搜索即将推出。",
     "update_failed": "更新 issue 失败",
     "link_copied": "已复制链接",
-    "link_copy_failed": "复制链接失败"
+    "link_copy_failed": "复制链接失败",
+    "workdir_path_copied": "已复制本地 workdir 路径",
+    "workdir_path_copy_failed": "复制本地 workdir 路径失败",
+    "workdir_path_unavailable": "暂无本地 workdir — 这个 issue 还没被本地 agent 运行过"
   },
   "timeline": {
-    "show_older": "显示更早",
-    "show_newer": "显示更晚",
-    "loading": "加载中…",
-    "jump_to_latest": "跳到最新",
-    "jump_to_latest_with_count": "跳到最新 · {{count}} 条新动态"
+    "loading": "加载中…"
   },
   "activity": {
     "created": "创建了这个 issue",
@@ -151,7 +159,8 @@
     "task_completed_one": "完成了 task",
     "task_completed_other": "完成了 task（{{count}} 次）",
     "task_failed_one": "task 失败",
-    "task_failed_other": "task 失败（{{count}} 次）"
+    "task_failed_other": "task 失败（{{count}} 次）",
+    "coalesced_badge": "×{{count}}"
   },
   "comment": {
     "delete_title": "删除评论",
@@ -171,8 +180,18 @@
     "delete_failed": "删除评论失败",
     "reply_count_other": "{{count}} 条回复",
     "leave_comment_placeholder": "留下评论...",
+    "send_tooltip": "发送",
     "expand_tooltip": "展开",
-    "collapse_tooltip": "收起"
+    "collapse_tooltip": "收起",
+    "resolve": {
+      "resolve_action": "标记为已解决",
+      "unresolve_action": "重新打开",
+      "collapse": "收起",
+      "bar_other": "来自 {{authors}} 的 {{count}} 条已解决评论",
+      "bar_authors_more_other": "{{names}} 等 {{count}} 人",
+      "resolve_failed": "标记已解决失败",
+      "unresolve_failed": "重新打开失败"
+    }
   },
   "reply": {
     "placeholder": "回复...",
@@ -181,6 +200,8 @@
   },
   "agent_live": {
     "is_working": "{{name}} 正在处理",
+    "is_queued": "{{name}} 排队中",
+    "queued_elapsed_prefix": "已排队 {{elapsed}}",
     "fallback_name": "智能体",
     "tool_count_other": "{{count}} 次工具调用",
     "transcript_button": "查看记录",
@@ -194,6 +215,9 @@
     "hide_past": "隐藏历史运行（{{count}}）",
     "cancel_task_tooltip": "取消 task",
     "cancel_task_aria": "取消 task",
+    "retry_task_tooltip": "重试 task",
+    "retry_task_aria": "重试 task",
+    "retry_failed": "重试 task 失败",
     "transcript_tooltip": "查看记录",
     "cancel_failed": "取消 task 失败",
     "trigger_retry": "重试",
@@ -209,6 +233,13 @@
     "status_completed": "已完成",
     "status_failed": "失败",
     "status_cancelled": "已取消"
+  },
+  "terminate_dialog": {
+    "title": "确定停止该 task？",
+    "body": "Task 会被取消且无法恢复。",
+    "running_note": " 进行中的 task 可能需要几秒才能完全停止。",
+    "keep": "保留运行",
+    "confirm": "停止 task"
   },
   "batch": {
     "selected": "已选择 {{count}} 个",
@@ -241,6 +272,7 @@
     "pin_to_sidebar": "固定到侧边栏",
     "unpin_from_sidebar": "从侧边栏取消固定",
     "copy_link": "复制链接",
+    "copy_workdir_path": "复制本地 workdir 路径",
     "more": "更多",
     "create_sub_issue": "创建子 issue",
     "set_parent_issue": "设置父 issue...",

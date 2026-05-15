@@ -545,7 +545,9 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	// "member row exists ↔ onboarded_at != null" cannot be violated.
 	// COALESCE in MarkUserOnboarded keeps this idempotent for users joining
 	// additional workspaces after their first.
-	if _, err := qtx.MarkUserOnboarded(r.Context(), user.ID); err != nil {
+	firstOnboardingCompletion := !user.OnboardedAt.Valid
+	onboardedUser, err := qtx.MarkUserOnboarded(r.Context(), user.ID)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to mark user onboarded")
 		return
 	}
@@ -585,6 +587,19 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		wsID,
 		daysSinceInvite,
 	))
+	if firstOnboardingCompletion {
+		onboardedAt := ""
+		if onboardedUser.OnboardedAt.Valid {
+			onboardedAt = onboardedUser.OnboardedAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00")
+		}
+		h.Analytics.Capture(analytics.OnboardingCompleted(
+			userID,
+			wsID,
+			analytics.OnboardingPathInviteAccept,
+			onboardedAt,
+			onboardedUser.CloudWaitlistEmail.Valid,
+		))
+	}
 
 	writeJSON(w, http.StatusOK, memberResp)
 }

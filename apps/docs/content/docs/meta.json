@@ -27,6 +27,8 @@
     "autopilots",
     "---Inbox---",
     "inbox",
+    "---Integrations---",
+    "github-integration",
     "---Self-hosting & ops---",
     "environment-variables",
     "auth-setup",

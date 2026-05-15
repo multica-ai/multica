@@ -48,3 +48,28 @@ export function createSafeId(): string {
 export function createRequestId(length = 8): string {
   return createSafeId().replace(/-/g, "").slice(0, length);
 }
+
+/**
+ * True when the keyboard event fires while an IME is composing a multi-key
+ * input (e.g. Chinese pinyin, Japanese kana). The Enter that commits the
+ * composition must NOT trigger submit/send/create handlers.
+ *
+ * Accepts both React synthetic events and native DOM `KeyboardEvent`s.
+ *
+ * Why both `isComposing` and `keyCode === 229`:
+ * - `isComposing` is the standard signal but Safari clears it on the keydown
+ *   that ends composition, so a bare check misses the very Enter that submits.
+ * - During composition the browser reports `keyCode === 229` regardless of
+ *   the actual key, which keeps working in Safari's edge case.
+ *
+ * Always read from `nativeEvent` when present — React's synthetic event is
+ * normalized but the native event reflects the browser's real state.
+ */
+export function isImeComposing(event: {
+  isComposing?: boolean;
+  keyCode?: number;
+  nativeEvent?: { isComposing?: boolean; keyCode?: number };
+}): boolean {
+  const e = event.nativeEvent ?? event;
+  return Boolean(e.isComposing) || e.keyCode === 229;
+}

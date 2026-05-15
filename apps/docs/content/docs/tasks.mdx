@@ -69,7 +69,7 @@ Automatic retry also has two extra conditions:
 
 ## Manual rerun vs. automatic retry
 
-A **manual rerun** is one you trigger from the UI or CLI:
+A **manual rerun** is one you trigger from the CLI or the API (`POST /api/issues/{id}/rerun`):
 
 ```bash
 multica issue rerun <issue-id>
@@ -77,9 +77,10 @@ multica issue rerun <issue-id>
 
 Behavior:
 
-- **Cancels** the currently running task (if any)
-- Creates a **brand-new** task — attempt count resets to 1, even if the original task hit the attempt ceiling
-- Inherits the previous session ID; if the corresponding AI coding tool supports session resumption, the new task continues from the previous context
+- Targets the issue's **current agent assignee** — not whoever ran the most recent task. If the assignee changed since the last run, rerun follows the current assignment. To rerun a specific agent that is no longer the assignee, reassign the issue first, then rerun.
+- **Cancels** the assignee's queued or running task on this issue (if any). Tasks owned by other agents on the same issue (e.g. parallel @-mention runs) are left alone.
+- Creates a **brand-new** task — attempt count resets to 1, even if the original task hit the attempt ceiling.
+- Starts a **fresh agent session** — the prior session ID is **not** inherited. A manual rerun means you've judged the previous output bad, so resuming the same conversation would replay the same poisoned state. (Automatic retry, by contrast, does inherit the session — that path is for infrastructure failures, not bad output.)
 
 Comparison:
 
@@ -87,8 +88,9 @@ Comparison:
 |---|---|---|
 | Trigger | System, based on failure reason | You, manually |
 | Ceiling | 2 attempts | No limit |
-| Applicable sources | Issues, chat | All sources |
-| Session inheritance | Yes | Yes |
+| Applicable sources | Issues, chat | Issues with an agent assignee |
+| Agent picked | Same agent as the failed task | Issue's current assignee |
+| Session inheritance | Yes (resumes prior session) | No (fresh session) |
 
 ## How a failed task affects issue status
 
@@ -98,7 +100,7 @@ If an issue-triggered task fails (and no automatic retry succeeds) because the i
 
 Yes — as long as the AI coding tool supports session resumption.
 
-Multica pins the session ID **twice** during a task: once at the start (when the AI tool returns its first system message), and once at the end (on completion or failure). The first lets the daemon recover if it crashes mid-run; the second is reserved for future reruns. On the next rerun or automatic retry, that ID is passed back so the agent can pick up the previous conversation and file state.
+Multica pins the session ID **twice** during a task: once at the start (when the AI tool returns its first system message), and once at the end (on completion or failure). The first lets the daemon recover if it crashes mid-run; the second is reserved for the next **automatic retry**, where that ID is passed back so the agent can pick up the previous conversation and file state. **Manual rerun deliberately skips this** and starts a fresh session — see [Manual rerun vs. automatic retry](#manual-rerun-vs-automatic-retry).
 
 But **which AI coding tools actually support this** varies a lot:
 

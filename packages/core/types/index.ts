@@ -4,7 +4,6 @@ export type {
   AgentStatus,
   AgentRuntimeMode,
   AgentVisibility,
-  RuntimeVisibility,
   AgentTask,
   AgentActivityBucket,
   AgentRunCount,
@@ -48,8 +47,6 @@ export type { Comment, CommentType, CommentAuthorType, Reaction } from "./commen
 export type { Label, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse } from "./label";
 export type {
   TimelineEntry,
-  TimelinePage,
-  TimelinePageParam,
   AssigneeFrequencyEntry,
 } from "./activity";
 export type { IssueSubscriber } from "./subscriber";
@@ -72,6 +69,13 @@ export type {
   ListProjectResourcesResponse,
 } from "./project";
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
+export type {
+  GitHubInstallation,
+  GitHubPullRequest,
+  GitHubPullRequestState,
+  ListGitHubInstallationsResponse,
+  GitHubConnectResponse,
+} from "./github";
 export type {
   Autopilot,
   AutopilotStatus,

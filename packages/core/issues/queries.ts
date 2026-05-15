@@ -1,11 +1,9 @@
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
+import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 import type {
   IssueStatus,
   ListIssuesParams,
   ListIssuesCache,
-  TimelinePage,
-  TimelinePageParam,
 } from "../types";
 import { BOARD_STATUSES } from "./config";
 
@@ -23,19 +21,17 @@ export const issueKeys = {
     [...issueKeys.all(wsId), "children", id] as const,
   childProgress: (wsId: string) =>
     [...issueKeys.all(wsId), "child-progress"] as const,
-  /**
-   * Cursor-paginated timeline cache. Around-mode lookups use a separate cache
-   * (keyed by the anchor id) so an Inbox-jump fetch does not pollute the
-   * default latest-page cache that the regular issue list path consumes.
-   */
-  timeline: (issueId: string, around?: string | null) =>
-    around
-      ? (["issues", "timeline", issueId, "around", around] as const)
-      : (["issues", "timeline", issueId] as const),
+  /** Full-issue timeline (single TanStack Query, no cursor). */
+  timeline: (issueId: string) =>
+    ["issues", "timeline", issueId] as const,
   reactions: (issueId: string) => ["issues", "reactions", issueId] as const,
   subscribers: (issueId: string) =>
     ["issues", "subscribers", issueId] as const,
   usage: (issueId: string) => ["issues", "usage", issueId] as const,
+  /** Issue-level attachments — used by the description editor so its
+   *  inline file-card / image NodeViews can re-sign download URLs at
+   *  click time. */
+  attachments: (issueId: string) => ["issues", "attachments", issueId] as const,
   /** Per-issue task list (issue-detail Execution log section). */
   tasks: (issueId: string) => ["issues", "tasks", issueId] as const,
   /** Prefix-match key for invalidating tasks across all issues — used by
@@ -141,39 +137,16 @@ export function childIssuesOptions(wsId: string, id: string) {
 }
 
 /**
- * Infinite-query options for the cursor-paginated timeline. The first page is
- * either the latest 50 entries (no `around`) or a 50-wide window centered on
- * the given comment/activity id (Inbox jump path). `getNextPageParam` walks
- * older; `getPreviousPageParam` walks newer.
+ * Single-fetch timeline options. The endpoint returns the full ordered set of
+ * comments + activities for an issue (server caps at 2000 as a safety net).
+ * Cursor pagination was removed in #1929 — at observed data sizes (p99 ~30
+ * entries per issue) it added complexity without a UX win and broke reply
+ * threads at page boundaries.
  */
-export function issueTimelineInfiniteOptions(
-  issueId: string,
-  around?: string | null,
-) {
-  return infiniteQueryOptions<
-    TimelinePage,
-    Error,
-    { pages: TimelinePage[]; pageParams: TimelinePageParam[] },
-    readonly unknown[],
-    TimelinePageParam
-  >({
-    queryKey: issueKeys.timeline(issueId, around ?? null),
-    initialPageParam: around
-      ? ({ mode: "around", id: around } as TimelinePageParam)
-      : ({ mode: "latest" } as TimelinePageParam),
-    queryFn: ({ pageParam }) => api.listTimeline(issueId, pageParam),
-    // Walk older: append a page below the current oldest (last entry of the
-    // last loaded page). undefined = no more older entries.
-    getNextPageParam: (lastPage) =>
-      lastPage.has_more_before && lastPage.next_cursor
-        ? ({ mode: "before", cursor: lastPage.next_cursor } as TimelinePageParam)
-        : undefined,
-    // Walk newer: prepend a page above the current newest (first entry of the
-    // first loaded page). undefined = at the latest, no newer to fetch.
-    getPreviousPageParam: (firstPage) =>
-      firstPage.has_more_after && firstPage.prev_cursor
-        ? ({ mode: "after", cursor: firstPage.prev_cursor } as TimelinePageParam)
-        : undefined,
+export function issueTimelineOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.timeline(issueId),
+    queryFn: () => api.listTimeline(issueId),
   });
 }
 
@@ -198,5 +171,16 @@ export function issueUsageOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.usage(issueId),
     queryFn: () => api.getIssueUsage(issueId),
+  });
+}
+
+// Backs the description editor's fresh-sign download flow: NodeViews resolve
+// an attachment id by matching the markdown URL against this list. The list
+// is workspace-private metadata and lives on the same cache lifetime as the
+// rest of the issue detail surface.
+export function issueAttachmentsOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.attachments(issueId),
+    queryFn: () => api.listAttachments(issueId),
   });
 }

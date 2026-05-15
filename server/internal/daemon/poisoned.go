@@ -2,15 +2,24 @@ package daemon
 
 import "strings"
 
-// FailureReason values for tasks that "completed" with output but the
-// output is actually a known agent fallback marker — i.e. the agent gave
-// up and emitted a meta message instead of a real result. Listed here so
-// the server-side query GetLastTaskSession can filter them out and a
-// rerun starts from a fresh agent session instead of resuming the same
-// poisoned conversation.
+// FailureReason values for tasks whose session is "poisoned" — i.e.
+// resuming the same conversation on a follow-up task would deterministically
+// reproduce the same failure. Listed here so the server-side query
+// GetLastTaskSession can filter them out and the next task starts from
+// a fresh agent session instead of inheriting the bad state.
+//
+// Two flavors:
+//   - Output-side: agent "completed" with output that is actually a known
+//     fallback marker (gave up mid-thought, emitted a meta message). Detected
+//     via classifyPoisonedOutput.
+//   - Error-side: the LLM API itself rejected the request with a 400
+//     invalid_request_error (oversized payload, malformed image, etc.).
+//     The bad message is already baked into the conversation history, so
+//     every resume hits the same 400. Detected via classifyPoisonedError.
 const (
-	FailureReasonIterationLimit   = "iteration_limit"
-	FailureReasonAgentFallbackMsg = "agent_fallback_message"
+	FailureReasonIterationLimit    = "iteration_limit"
+	FailureReasonAgentFallbackMsg  = "agent_fallback_message"
+	FailureReasonAPIInvalidRequest = "api_invalid_request"
 )
 
 // poisonedOutputMaxLen caps how long an output can be and still be
@@ -52,6 +61,40 @@ func classifyPoisonedOutput(output string) (string, bool) {
 		if strings.Contains(lowered, m.Substring) {
 			return m.Reason, true
 		}
+	}
+	return "", false
+}
+
+// classifyPoisonedError reports whether an agent error message indicates
+// the LLM API itself rejected the request body — i.e. the conversation
+// history contains content the API will not accept (oversized image,
+// malformed base64, prompt-too-long, etc.). The conversation cannot be
+// resumed: every retry replays the same body and reproduces the same 400.
+// The classifier returns FailureReasonAPIInvalidRequest so GetLastTaskSession
+// excludes the task from the (agent_id, issue_id) resume lookup, and the
+// next task on the issue starts a fresh session instead of permanently
+// inheriting the bad state.
+//
+// Match shape: the Claude Code SDK and similar backends surface upstream
+// API failures verbatim, e.g.
+//
+//	API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"Could not process image"},"request_id":"..."}
+//
+// Matching on both "400" and "invalid_request_error" keeps the classifier
+// narrow: 429 rate-limits, 5xx overloads, and tool-shaped errors are
+// transient and SHOULD resume on retry.
+func classifyPoisonedError(errMsg string) (string, bool) {
+	if errMsg == "" {
+		return "", false
+	}
+	lowered := strings.ToLower(errMsg)
+	// Both markers must be present: "400" alone is too generic (a tool
+	// could surface a 400 from anywhere) and "invalid_request_error"
+	// alone could in theory appear in non-poisoning contexts. The
+	// combination is the canonical Anthropic error shape and indicates
+	// the request body — i.e. the conversation history — is the problem.
+	if strings.Contains(lowered, "invalid_request_error") && strings.Contains(lowered, "400") {
+		return FailureReasonAPIInvalidRequest, true
 	}
 	return "", false
 }

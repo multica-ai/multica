@@ -11,19 +11,11 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
-import type {
-  AgentRuntime,
-  Agent,
-  MemberWithUser,
-  RuntimeVisibility,
-} from "@multica/core/types";
+import type { AgentRuntime, Agent, MemberWithUser } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import {
-  useDeleteRuntime,
-  useUpdateRuntimeVisibility,
-} from "@multica/core/runtimes/mutations";
+import { useDeleteRuntime, useUpdateRuntime } from "@multica/core/runtimes/mutations";
 import { deriveRuntimeHealth } from "@multica/core/runtimes";
 import {
   type AgentPresenceDetail,
@@ -46,6 +38,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
@@ -214,14 +213,13 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
             <UsageSection runtimeId={runtime.id} />
           </div>
 
-          {/* Right rail: serving agents + visibility + diagnostics */}
+          {/* Right rail: serving agents + diagnostics */}
           <div className="space-y-4">
             <ServingAgentsCard
               agents={servingAgents}
               presenceMap={presenceMap}
               agentHref={(id) => paths.agentDetail(id)}
             />
-            <VisibilityCard runtime={runtime} isRuntimeOwner={!!isRuntimeOwner} />
             <DiagnosticsCard
               runtime={runtime}
               cliVersion={cliVersion}
@@ -494,101 +492,6 @@ function ServingAgentsCard({
   );
 }
 
-// VisibilityCard — runtime owner controls workspace/private visibility.
-// Non-owners (including admins) see a read-only label so they understand
-// the row's semantics, but can't change it. List-level filtering means
-// non-owners don't see "private" runtimes at all, so they only ever land
-// here on workspace-visibility runtimes — but the label still fires for
-// completeness if e.g. they navigate via a stale link.
-function VisibilityCard({
-  runtime,
-  isRuntimeOwner,
-}: {
-  runtime: AgentRuntime;
-  isRuntimeOwner: boolean;
-}) {
-  const { t } = useT("runtimes");
-  const wsId = useWorkspaceId();
-  const mutation = useUpdateRuntimeVisibility(wsId);
-
-  const flip = (visibility: RuntimeVisibility) => {
-    if (visibility === runtime.visibility || mutation.isPending) return;
-    mutation.mutate(
-      { runtimeId: runtime.id, visibility },
-      {
-        onSuccess: () => toast.success(t(($) => $.detail.visibility_toast_updated)),
-        onError: (e) =>
-          toast.error(e instanceof Error ? e.message : t(($) => $.detail.visibility_toast_failed)),
-      },
-    );
-  };
-
-  if (!isRuntimeOwner) {
-    const Icon = runtime.visibility === "private" ? Lock : Globe;
-    const label =
-      runtime.visibility === "private"
-        ? t(($) => $.detail.visibility_static_private)
-        : t(($) => $.detail.visibility_static_workspace);
-    return (
-      <div className="rounded-lg border">
-        <div className="border-b px-4 py-2.5">
-          <span className="text-xs font-semibold">{t(($) => $.detail.visibility_title)}</span>
-        </div>
-        <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
-          <Icon className="h-4 w-4 shrink-0" />
-          {label}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-lg border">
-      <div className="border-b px-4 py-2.5">
-        <span className="text-xs font-semibold">{t(($) => $.detail.visibility_title)}</span>
-      </div>
-      <div className="flex flex-col gap-2 p-4">
-        <button
-          type="button"
-          onClick={() => flip("workspace")}
-          disabled={mutation.isPending}
-          className={`flex items-center gap-2 rounded-md border px-3 py-2.5 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-            runtime.visibility === "workspace"
-              ? "border-primary bg-primary/5"
-              : "border-border hover:bg-muted"
-          }`}
-        >
-          <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <div>
-            <div className="font-medium">{t(($) => $.detail.visibility_workspace)}</div>
-            <div className="text-xs text-muted-foreground">
-              {t(($) => $.detail.visibility_workspace_hint)}
-            </div>
-          </div>
-        </button>
-        <button
-          type="button"
-          onClick={() => flip("private")}
-          disabled={mutation.isPending}
-          className={`flex items-center gap-2 rounded-md border px-3 py-2.5 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-            runtime.visibility === "private"
-              ? "border-primary bg-primary/5"
-              : "border-border hover:bg-muted"
-          }`}
-        >
-          <Lock className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <div>
-            <div className="font-medium">{t(($) => $.detail.visibility_private)}</div>
-            <div className="text-xs text-muted-foreground">
-              {t(($) => $.detail.visibility_private_hint)}
-            </div>
-          </div>
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function DiagnosticsCard({
   runtime,
   cliVersion,
@@ -604,14 +507,37 @@ function DiagnosticsCard({
 }) {
   const { t } = useT("runtimes");
   const isLocal = runtime.runtime_mode === "local";
+  // canDelete here doubles as the "can edit runtime" predicate — it already
+  // means "workspace owner/admin OR runtime owner", which is the same gate
+  // the server enforces for the visibility PATCH.
   return (
     <div className="rounded-lg border">
       <div className="border-b px-4 py-2.5">
         <span className="text-xs font-semibold">{t(($) => $.detail.diagnostics_title)}</span>
       </div>
       <div className="space-y-3 p-4">
+        <div>
+          <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+            {t(($) => $.detail.diagnostics_visibility)}
+          </div>
+          {canDelete ? (
+            <VisibilityEditor runtime={runtime} />
+          ) : (
+            <VisibilityReadout runtime={runtime} />
+          )}
+        </div>
+        <div className="border-t pt-3">
+          <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+            {t(($) => $.detail.diagnostics_timezone)}
+          </div>
+          {canDelete ? (
+            <TimezoneEditor runtime={runtime} />
+          ) : (
+            <TimezoneReadout runtime={runtime} />
+          )}
+        </div>
         {isLocal && (
-          <div>
+          <div className="border-t pt-3">
             <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
               {t(($) => $.detail.diagnostics_cli)}
             </div>
@@ -624,7 +550,7 @@ function DiagnosticsCard({
           </div>
         )}
         {canDelete && (
-          <div className={isLocal ? "border-t pt-3" : ""}>
+          <div className="border-t pt-3">
             <Button
               variant="ghost"
               size="sm"
@@ -637,6 +563,242 @@ function DiagnosticsCard({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Common IANA zones offered as quick picks when Intl.supportedValuesOf is not
+// available, and promoted near the top otherwise.
+const COMMON_TIMEZONES = [
+  "UTC",
+  "America/Los_Angeles",
+  "America/Denver",
+  "America/Chicago",
+  "America/New_York",
+  "America/Sao_Paulo",
+  "Europe/London",
+  "Europe/Berlin",
+  "Europe/Paris",
+  "Europe/Moscow",
+  "Africa/Cairo",
+  "Asia/Dubai",
+  "Asia/Kolkata",
+  "Asia/Bangkok",
+  "Asia/Shanghai",
+  "Asia/Singapore",
+  "Asia/Tokyo",
+  "Australia/Sydney",
+  "Pacific/Auckland",
+];
+
+function browserTimezone(): string {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return tz || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+type IntlWithSupportedValues = typeof Intl & {
+  supportedValuesOf?: (key: "timeZone") => string[];
+};
+
+function supportedTimezones(): string[] {
+  try {
+    const supported = (Intl as IntlWithSupportedValues).supportedValuesOf?.(
+      "timeZone",
+    );
+    return supported && supported.length > 0 ? supported : COMMON_TIMEZONES;
+  } catch {
+    return COMMON_TIMEZONES;
+  }
+}
+
+// VisibilityReadout renders a static "Private" / "Public" pill for users
+// who can't edit the runtime. The description used to sit under the chip;
+// it now lives in the hover tooltip so the Diagnostics column stays compact
+// and matches the surrounding sections. Older backends that omit the field
+// render as "Private" to match the strict default.
+function VisibilityReadout({ runtime }: { runtime: AgentRuntime }) {
+  const { t } = useT("runtimes");
+  const visibility = runtime.visibility === "public" ? "public" : "private";
+  const Icon = visibility === "public" ? Globe : Lock;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span className="inline-flex items-center gap-1.5 rounded-md border bg-muted/30 px-2 py-1.5 text-xs">
+            <Icon className="h-3 w-3 text-muted-foreground" />
+            <span className="font-medium">
+              {t(($) => $.detail.visibility_label[visibility])}
+            </span>
+          </span>
+        }
+      />
+      <TooltipContent>
+        {t(($) => $.detail.visibility_hint[visibility])}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+// VisibilityEditor lets the runtime owner (or workspace admin) flip
+// public↔private. The PATCH endpoint also re-checks; this is a UI gate, not
+// a security boundary. Per-choice description text lives in the hover
+// tooltip so the two buttons stay a tight icon+label pair instead of the
+// previous two-line block that competed with the surrounding cards.
+function VisibilityEditor({ runtime }: { runtime: AgentRuntime }) {
+  const { t } = useT("runtimes");
+  const wsId = useWorkspaceId();
+  const updateRuntime = useUpdateRuntime(wsId);
+  const current = runtime.visibility === "public" ? "public" : "private";
+
+  const flip = (next: "private" | "public") => {
+    if (next === current) return;
+    updateRuntime.mutate(
+      { runtimeId: runtime.id, patch: { visibility: next } },
+      {
+        onSuccess: () =>
+          toast.success(
+            t(($) => $.detail.visibility_toast_updated, {
+              visibility: t(($) => $.detail.visibility_label[next]),
+            }),
+          ),
+        onError: () =>
+          toast.error(t(($) => $.detail.visibility_toast_failed)),
+      },
+    );
+  };
+
+  return (
+    <div className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5">
+      <VisibilityChoice
+        active={current === "private"}
+        icon={<Lock className="h-3 w-3" />}
+        label={t(($) => $.detail.visibility_label.private)}
+        tooltip={t(($) => $.detail.visibility_hint.private)}
+        disabled={updateRuntime.isPending}
+        onClick={() => flip("private")}
+      />
+      <VisibilityChoice
+        active={current === "public"}
+        icon={<Globe className="h-3 w-3" />}
+        label={t(($) => $.detail.visibility_label.public)}
+        tooltip={t(($) => $.detail.visibility_hint.public)}
+        disabled={updateRuntime.isPending}
+        onClick={() => flip("public")}
+      />
+    </div>
+  );
+}
+
+function VisibilityChoice({
+  active,
+  icon,
+  label,
+  tooltip,
+  disabled,
+  onClick,
+}: {
+  active: boolean;
+  icon: React.ReactNode;
+  label: string;
+  tooltip: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            onClick={onClick}
+            disabled={disabled}
+            className={`inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition-colors ${
+              active
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+          >
+            <span className="shrink-0">{icon}</span>
+            <span>{label}</span>
+          </button>
+        }
+      />
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function TimezoneReadout({ runtime }: { runtime: AgentRuntime }) {
+  const { t } = useT("runtimes");
+  return (
+    <div className="space-y-1.5">
+      <div className="rounded-md border bg-muted/30 px-2 py-1.5 font-mono text-xs">
+        {runtime.timezone || "UTC"}
+      </div>
+      <p className="text-[11px] leading-snug text-muted-foreground">
+        {t(($) => $.detail.timezone_hint)}
+      </p>
+    </div>
+  );
+}
+
+// TimezoneEditor renders the current runtime tz, a dropdown of supported IANA
+// zones (plus the runtime's current value if it is unusual), and commits the
+// change via PATCH /api/runtimes/:id. We deliberately don't gate this behind a
+// separate "edit" mode because the change is reversible.
+function TimezoneEditor({ runtime }: { runtime: AgentRuntime }) {
+  const { t } = useT("runtimes");
+  const wsId = useWorkspaceId();
+  const updateRuntime = useUpdateRuntime(wsId);
+  const current = runtime.timezone || "UTC";
+  const browser = browserTimezone();
+  const browserSuffix = t(($) => $.detail.timezone_browser_suffix);
+
+  const options = Array.from(
+    new Set([current, browser, ...COMMON_TIMEZONES, ...supportedTimezones()]),
+  ).filter(Boolean);
+  const handleTimezoneChange = (next: string) => {
+    if (next === current) return;
+    updateRuntime.mutate(
+      { runtimeId: runtime.id, patch: { timezone: next } },
+      {
+        onSuccess: () =>
+          toast.success(t(($) => $.detail.timezone_toast_updated, { tz: next })),
+        onError: () =>
+          toast.error(t(($) => $.detail.timezone_toast_failed)),
+      },
+    );
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <Select
+        value={current}
+        disabled={updateRuntime.isPending}
+        onValueChange={(next) => {
+          if (next) handleTimezoneChange(next);
+        }}
+      >
+        <SelectTrigger size="sm" className="w-full rounded-md font-mono text-xs">
+          <SelectValue>
+            {current === browser ? `${current}${browserSuffix}` : current}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent align="start" className="max-h-72">
+          {options.map((tz) => (
+            <SelectItem key={tz} value={tz} className="font-mono text-xs">
+              {tz === browser ? `${tz}${browserSuffix}` : tz}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-[11px] leading-snug text-muted-foreground">
+        {t(($) => $.detail.timezone_hint)}
+      </p>
     </div>
   );
 }
