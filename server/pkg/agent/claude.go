@@ -419,9 +419,11 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
-		"--strict-mcp-config",
-		"--permission-mode", "bypassPermissions",
 	}
+	if len(opts.McpConfig) > 0 {
+		args = append(args, "--strict-mcp-config")
+	}
+	args = append(args, "--permission-mode", "bypassPermissions")
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
