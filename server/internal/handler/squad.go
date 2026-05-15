@@ -122,9 +122,10 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		LeaderID    string `json:"leader_id"`
+		Name        string  `json:"name"`
+		Description string  `json:"description"`
+		LeaderID    string  `json:"leader_id"`
+		AvatarURL   *string `json:"avatar_url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -158,12 +159,18 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	avatarURL := pgtype.Text{}
+	if req.AvatarURL != nil {
+		avatarURL = pgtype.Text{String: *req.AvatarURL, Valid: true}
+	}
+
 	squad, err := h.Queries.CreateSquad(r.Context(), db.CreateSquadParams{
 		WorkspaceID: wsUUID,
 		Name:        req.Name,
 		Description: req.Description,
 		LeaderID:    leaderUUID,
 		CreatorID:   member.UserID,
+		AvatarUrl:   avatarURL,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create squad")
