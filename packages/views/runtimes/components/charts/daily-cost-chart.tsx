@@ -58,6 +58,22 @@ export function DailyCostChart({ data }: { data: DailyCostStackData[] }) {
                   ? `$${value.toFixed(2)} ${name}`
                   : `${value} ${name}`
               }
+              footer={(payload) => {
+                const total = payload.reduce(
+                  (sum, item) =>
+                    sum +
+                    (typeof item.value === "number" ? item.value : 0),
+                  0,
+                );
+                return (
+                  <div className="flex items-center justify-between gap-2 font-medium">
+                    <span>Total</span>
+                    <span className="font-mono tabular-nums">
+                      ${total.toFixed(2)}
+                    </span>
+                  </div>
+                );
+              }}
             />
           }
         />

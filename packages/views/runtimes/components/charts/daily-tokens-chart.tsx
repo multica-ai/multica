@@ -60,6 +60,22 @@ export function DailyTokensChart({ data }: { data: DailyTokenData[] }) {
                   ? `${formatTokens(value)} ${name}`
                   : `${value} ${name}`
               }
+              footer={(payload) => {
+                const total = payload.reduce(
+                  (sum, item) =>
+                    sum +
+                    (typeof item.value === "number" ? item.value : 0),
+                  0,
+                );
+                return (
+                  <div className="flex items-center justify-between gap-2 font-medium">
+                    <span>Total</span>
+                    <span className="font-mono tabular-nums">
+                      {total.toLocaleString()}
+                    </span>
+                  </div>
+                );
+              }}
             />
           }
         />
