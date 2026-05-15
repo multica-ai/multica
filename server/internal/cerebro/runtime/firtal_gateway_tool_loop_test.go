@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/mcp"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -296,6 +297,79 @@ func TestRunToolLoopSendsToolResultsAsRoleToolMessages(t *testing.T) {
 	}
 	if !strings.Contains(last[len(last)-1].Content, "echoed:hej") {
 		t.Fatalf("tool result content = %q", last[len(last)-1].Content)
+	}
+}
+
+type fallbackTestTool struct{}
+
+func (fallbackTestTool) Name() string { return "echo" }
+func (fallbackTestTool) Description() string {
+	return "Echo input text."
+}
+func (fallbackTestTool) InputSchema() map[string]any {
+	return map[string]any{
+		"type":     "object",
+		"required": []string{"text"},
+		"properties": map[string]any{
+			"text": map[string]any{"type": "string"},
+		},
+	}
+}
+func (fallbackTestTool) Call(ctx context.Context, args map[string]any) (string, error) {
+	return "echoed:" + args["text"].(string), nil
+}
+
+func TestGatewayCompatRegistryToolLoopDispatchesTools(t *testing.T) { // CEREBRO-PATCH(firtal-gateway-tool-loop-fallback): malformed Anthropic-native tool requests must still run via chat-completions fallback.
+	var captured []map[string]any
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/ai/proxy/v1/chat/completions" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		var body map[string]any
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		captured = append(captured, body)
+		w.Header().Set("Content-Type", "application/json")
+		if len(captured) == 1 {
+			w.Write([]byte(`{"choices":[{"message":{"content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"echo","arguments":"{\"text\":\"hej\"}"}}]}}],"firtal":{"input_tokens":3,"output_tokens":2}}`))
+			return
+		}
+		w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"firtal":{"input_tokens":5,"output_tokens":7}}`))
+	}))
+	defer srv.Close()
+
+	reg := NewRegistry(nil)
+	reg.Register(fallbackTestTool{})
+	e := &FirtalGatewayExecutor{gateway: NewGatewayClient(FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096}, srv.Client()), logger: testLogger()}
+	completion, err := e.runGatewayCompatRegistryToolLoop(context.Background(),
+		FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096},
+		db.Agent{},
+		[]GatewayMessage{{Role: "system", Content: "system"}, {Role: "user", Content: "go"}},
+		GatewayRequestMeta{TaskID: "t1"},
+		pgtype.UUID{},
+		pgtype.UUID{},
+		reg,
+		[]Tool{fallbackTestTool{}},
+	)
+	if err != nil {
+		t.Fatalf("runGatewayCompatRegistryToolLoop error = %v", err)
+	}
+	if completion.Output != "done" {
+		t.Fatalf("Output = %q, want done", completion.Output)
+	}
+	if len(captured) != 2 {
+		t.Fatalf("captured %d requests, want 2", len(captured))
+	}
+	if _, ok := captured[0]["tools"]; !ok {
+		t.Fatal("first fallback request omitted tools")
+	}
+	messages, ok := captured[1]["messages"].([]any)
+	if !ok || len(messages) == 0 {
+		t.Fatalf("second fallback request missing messages: %+v", captured[1])
+	}
+	last, _ := messages[len(messages)-1].(map[string]any)
+	if last["role"] != "tool" || !strings.Contains(last["content"].(string), "echoed:hej") {
+		t.Fatalf("second fallback request missing tool result: %+v", last)
 	}
 }
 

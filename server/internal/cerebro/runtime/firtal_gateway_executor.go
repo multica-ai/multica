@@ -431,6 +431,7 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 	// hardcoded MCP server (POC compatibility).
 	var (
 		anthropicTools []AnthropicTool
+		enabledTools   []Tool
 		toolSrv        *mcp.Server
 		activeRegistry *Registry
 		useRegistry    bool
@@ -438,7 +439,7 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 	if e.registry != nil {
 		taskRegistry := NewDefaultRegistry(nil, e.queries, tctx, e.cerebro) // CEREBRO-PATCH(firtal-gateway-cerebro-tools): wire concrete Cerebro-family handlers into per-task registries.
 		taskRegistry.db = e.registry.db
-		enabledTools := taskRegistry.GetEnabledToolsForAgent(ctx, agentID)
+		enabledTools = taskRegistry.GetEnabledToolsForAgent(ctx, agentID)
 		if len(enabledTools) > 0 {
 			// Also register the MCP-backed tools (get_issue, list_comments,
 			// add_comment) that the Registry wraps via its Call method.
@@ -464,7 +465,64 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		}
 	}
 
-	return e.runAnthropicToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, anthropicTools, tctx, toolSrv, activeRegistry, useRegistry)
+	completion, err := e.runAnthropicToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, anthropicTools, tctx, toolSrv, activeRegistry, useRegistry)
+	if err == nil || !isAnthropicMalformedToolRequest(err) || len(anthropicTools) == 0 {
+		return completion, err
+	}
+
+	e.logger.Warn("firtal gateway anthropic tool request malformed; retrying via chat completions tool loop",
+		"task_id", meta.TaskID,
+		"agent_id", meta.AgentID,
+		"workspace_id", meta.WorkspaceID,
+		"tool_count", len(anthropicTools),
+		"error", err,
+	)
+	if useRegistry && activeRegistry != nil {
+		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, activeRegistry, enabledTools)
+	}
+	if toolSrv != nil {
+		return e.runToolLoopWithServer(ctx, cfg, agent, initialMessages, meta, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools))
+	}
+	return completion, err
+}
+
+func isAnthropicMalformedToolRequest(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "anthropic gateway returned HTTP 400") &&
+		(strings.Contains(msg, "upstream_rejected_request") || strings.Contains(msg, "request malformed"))
+}
+
+func toolsToGatewayToolDefs(tools []Tool) []GatewayToolDef {
+	out := make([]GatewayToolDef, 0, len(tools))
+	for _, tool := range tools {
+		out = append(out, GatewayToolDef{
+			Type: "function",
+			Function: GatewayToolFunction{
+				Name:        tool.Name(),
+				Description: tool.Description(),
+				Parameters:  normalizeAnthropicToolSchema(tool.InputSchema()), // CEREBRO-PATCH(firtal-gateway-tool-loop-fallback): use provider-safe schemas on chat-completions fallback too.
+			},
+		})
+	}
+	return out
+}
+
+func anthropicToolsToGatewayToolDefs(tools []AnthropicTool) []GatewayToolDef {
+	out := make([]GatewayToolDef, 0, len(tools))
+	for _, tool := range tools {
+		out = append(out, GatewayToolDef{
+			Type: "function",
+			Function: GatewayToolFunction{
+				Name:        tool.Name,
+				Description: tool.Description,
+				Parameters:  normalizeAnthropicToolSchema(tool.InputSchema),
+			},
+		})
+	}
+	return out
 }
 
 // runToolLoopWithServer is the testable inner form of the legacy OpenAI-compat
@@ -528,6 +586,116 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 	// Tool-round budget exhausted. Make one final gateway call WITHOUT tools
 	// so the model has to produce a text answer.
 	e.logger.Info("firtal gateway tool loop forcing final no-tool call",
+		"task_id", meta.TaskID,
+		"agent_id", meta.AgentID,
+		"workspace_id", meta.WorkspaceID,
+		"max_tool_rounds", maxRounds,
+	)
+	final, err := e.completeGateway(ctx, cfg, agent.Model.String, history, meta)
+	if err != nil {
+		return GatewayCompletion{}, err
+	}
+	accumulate(final)
+	acc.Output = final.Output
+	return acc, nil
+}
+
+func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
+	ctx context.Context,
+	cfg FirtalGatewayRuntimeConfig,
+	agent db.Agent,
+	initialMessages []GatewayMessage,
+	meta GatewayRequestMeta,
+	agentID, workspaceID pgtype.UUID,
+	registry *Registry,
+	tools []Tool,
+) (GatewayCompletion, error) {
+	history := withRegistryToolUsageHint(initialMessages, tools)
+	toolDefs := toolsToGatewayToolDefs(tools)
+
+	var acc GatewayCompletion
+	accumulate := func(c GatewayCompletion) {
+		acc.Model = c.Model
+		acc.Usage.InputTokens += c.Usage.InputTokens
+		acc.Usage.OutputTokens += c.Usage.OutputTokens
+		acc.Usage.CacheReadTokens += c.Usage.CacheReadTokens
+		acc.Usage.CacheWriteTokens += c.Usage.CacheWriteTokens
+		acc.Usage.CostCents += c.Usage.CostCents
+	}
+
+	maxRounds := firtalGatewayMaxToolRounds
+	if cfg.MaxToolRounds > 0 {
+		maxRounds = cfg.MaxToolRounds
+	}
+
+	for round := 0; round < maxRounds; round++ {
+		completion, err := e.completeGatewayWithTools(ctx, cfg, agent.Model.String, history, toolDefs, meta)
+		if err != nil {
+			return GatewayCompletion{}, err
+		}
+		accumulate(completion)
+
+		if len(completion.ToolCalls) == 0 {
+			acc.Output = completion.Output
+			return acc, nil
+		}
+
+		history = append(history, GatewayMessage{
+			Role:      "assistant",
+			Content:   completion.Output,
+			ToolCalls: completion.ToolCalls,
+		})
+
+		if e.budgetSvc != nil {
+			decision := e.budgetSvc.CheckPreClaim(ctx, workspaceID, agentID)
+			if !decision.Allowed {
+				e.logger.Info("firtal gateway chat-completions fallback budget blocked",
+					"task_id", meta.TaskID,
+					"agent_id", meta.AgentID,
+					"reason", decision.Reason,
+				)
+				break
+			}
+		}
+
+		for _, call := range completion.ToolCalls {
+			start := time.Now()
+			args := map[string]any{}
+			resultText := ""
+			isError := false
+			if raw := strings.TrimSpace(call.Function.Arguments); raw != "" {
+				if err := json.Unmarshal([]byte(raw), &args); err != nil {
+					resultText = fmt.Sprintf("invalid tool arguments JSON: %v", err)
+					isError = true
+				}
+			}
+			if !isError {
+				var err error
+				resultText, err = registry.Call(ctx, call.Function.Name, args)
+				if err != nil {
+					resultText = fmt.Sprintf("tool error: %v", err)
+					isError = true
+				}
+			}
+			e.logger.Info("firtal gateway chat-completions fallback tool call",
+				"task_id", meta.TaskID,
+				"agent_id", meta.AgentID,
+				"workspace_id", meta.WorkspaceID,
+				"round", round+1,
+				"tool_name", call.Function.Name,
+				"tool_call_id", call.ID,
+				"duration_ms", time.Since(start).Milliseconds(),
+				"is_error", isError,
+			)
+			history = append(history, GatewayMessage{
+				Role:       "tool",
+				ToolCallID: call.ID,
+				Content:    resultText,
+			})
+		}
+	}
+
+	e.logger.Info("firtal gateway chat-completions fallback forcing final no-tool call",
 		"task_id", meta.TaskID,
 		"agent_id", meta.AgentID,
 		"workspace_id", meta.WorkspaceID,
@@ -776,6 +944,21 @@ func withToolUsageHint(messages []GatewayMessage) []GatewayMessage {
 		return messages
 	}
 	hint := "\n\nYou have these tools available: get_issue(issue_id), list_comments(issue_id), add_comment(issue_id, content). Use them to read the issue and post your reply as a comment when asked."
+	out := append([]GatewayMessage(nil), messages...)
+	out[0].Content = strings.TrimRight(out[0].Content, "\n") + hint
+	return out
+}
+
+func withRegistryToolUsageHint(messages []GatewayMessage, tools []Tool) []GatewayMessage {
+	if len(messages) == 0 || messages[0].Role != "system" || len(tools) == 0 {
+		return messages
+	}
+	names := make([]string, len(tools))
+	for i, tool := range tools {
+		names[i] = tool.Name()
+	}
+	hint := "\n\nYou have the following tools available: " + strings.Join(names, ", ") + "." +
+		" Use them to accomplish the task. Post your final answer as a comment when asked."
 	out := append([]GatewayMessage(nil), messages...)
 	out[0].Content = strings.TrimRight(out[0].Content, "\n") + hint
 	return out
