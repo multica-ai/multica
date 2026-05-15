@@ -3,6 +3,7 @@ import type {
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
 } from "@multica/core/types";
+import { getCustomPricing } from "@multica/core/runtimes/custom-pricing-store";
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -182,16 +183,26 @@ const MODEL_PRICING: Record<
 // tolerance: providers ship dated snapshots (`claude-sonnet-4-5-20250929`,
 // `gpt-5-2025-08-07`) where the family is what we price and the date is
 // volatile, so we strip a trailing date / "latest" tag and try again.
-// Anything still unmapped after that is genuinely unknown; return
-// undefined so callers can distinguish "$0 spend" from "spent but model
-// not priced". No startsWith fallback: variants like `gpt-5.5-mini` must
-// have their own row to be priced (otherwise they'd inherit `gpt-5.5`).
+// Anything still unmapped in the maintained catalog falls back to the
+// user-supplied custom pricing store before giving up. No startsWith
+// fallback: variants like `gpt-5.5-mini` must have their own row to be
+// priced (otherwise they'd inherit `gpt-5.5`).
 function resolvePricing(model: string) {
   if (!model) return undefined;
   if (MODEL_PRICING[model]) return MODEL_PRICING[model];
 
   const stripped = model.replace(/-(20\d{2}-\d{2}-\d{2}|20\d{6}|latest)$/, "");
   if (stripped !== model && MODEL_PRICING[stripped]) return MODEL_PRICING[stripped];
+
+  // User-supplied override for models we don't ship a maintained rate for.
+  // Checked exact-then-stripped to mirror the catalog lookup above, so a
+  // user can either pin a dated snapshot specifically or price the family.
+  const custom = getCustomPricing(model);
+  if (custom) return custom;
+  if (stripped !== model) {
+    const customStripped = getCustomPricing(stripped);
+    if (customStripped) return customStripped;
+  }
 
   return undefined;
 }

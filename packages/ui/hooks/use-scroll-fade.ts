@@ -43,11 +43,19 @@ export function useScrollFade(
     el.addEventListener("scroll", update, { passive: true });
     const ro = new ResizeObserver(update);
     ro.observe(el);
+    // ResizeObserver only fires on the container's own box. When children
+    // grow inside a flex/auto-height parent (e.g. async-loaded list items,
+    // collapsibles), scrollHeight changes but clientHeight does not — the
+    // mask would stay "none" until the user scrolls. MutationObserver on
+    // childList catches those content insertions.
+    const mo = new MutationObserver(update);
+    mo.observe(el, { childList: true, subtree: true });
 
     return () => {
       cancelAnimationFrame(frame);
       el.removeEventListener("scroll", update);
       ro.disconnect();
+      mo.disconnect();
     };
   }, [ref, update]);
 

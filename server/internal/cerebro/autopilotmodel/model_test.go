@@ -45,10 +45,10 @@ func TestResolve(t *testing.T) {
 	textNull := pgtype.Text{}
 
 	cases := []struct {
-		name           string
-		taskOverride   pgtype.Text
-		agentModel     pgtype.Text
-		want           string
+		name         string
+		taskOverride pgtype.Text
+		agentModel   pgtype.Text
+		want         string
 	}{
 		{"task override wins over agent default", textValid(ModelHaiku), textValid(ModelSonnet), ModelHaiku},
 		{"falls back to agent when no override", textNull, textValid(ModelSonnet), ModelSonnet},

@@ -34,7 +34,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 			WorkspaceID: parseUUID(issue.WorkspaceID),
 			IssueID:     parseUUID(issue.ID),
 			ActorType:   util.StrToText(e.ActorType),
-			ActorID:     parseUUID(e.ActorID),
+			ActorID:     optionalUUID(e.ActorID),
 			Action:      "created",
 			Details:     []byte("{}"),
 		})
@@ -73,7 +73,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 				WorkspaceID: parseUUID(issue.WorkspaceID),
 				IssueID:     parseUUID(issue.ID),
 				ActorType:   util.StrToText(e.ActorType),
-				ActorID:     parseUUID(e.ActorID),
+				ActorID:     optionalUUID(e.ActorID),
 				Action:      "status_changed",
 				Details:     details,
 			})
@@ -95,7 +95,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 				WorkspaceID: parseUUID(issue.WorkspaceID),
 				IssueID:     parseUUID(issue.ID),
 				ActorType:   util.StrToText(e.ActorType),
-				ActorID:     parseUUID(e.ActorID),
+				ActorID:     optionalUUID(e.ActorID),
 				Action:      "priority_changed",
 				Details:     details,
 			})
@@ -130,7 +130,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 				WorkspaceID: parseUUID(issue.WorkspaceID),
 				IssueID:     parseUUID(issue.ID),
 				ActorType:   util.StrToText(e.ActorType),
-				ActorID:     parseUUID(e.ActorID),
+				ActorID:     optionalUUID(e.ActorID),
 				Action:      "assignee_changed",
 				Details:     details,
 			})
@@ -159,7 +159,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 				WorkspaceID: parseUUID(issue.WorkspaceID),
 				IssueID:     parseUUID(issue.ID),
 				ActorType:   util.StrToText(e.ActorType),
-				ActorID:     parseUUID(e.ActorID),
+				ActorID:     optionalUUID(e.ActorID),
 				Action:      "due_date_changed",
 				Details:     details,
 			})
@@ -181,7 +181,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 				WorkspaceID: parseUUID(issue.WorkspaceID),
 				IssueID:     parseUUID(issue.ID),
 				ActorType:   util.StrToText(e.ActorType),
-				ActorID:     parseUUID(e.ActorID),
+				ActorID:     optionalUUID(e.ActorID),
 				Action:      "title_changed",
 				Details:     details,
 			})
@@ -198,7 +198,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 				WorkspaceID: parseUUID(issue.WorkspaceID),
 				IssueID:     parseUUID(issue.ID),
 				ActorType:   util.StrToText(e.ActorType),
-				ActorID:     parseUUID(e.ActorID),
+				ActorID:     optionalUUID(e.ActorID),
 				Action:      "description_updated",
 				Details:     []byte("{}"),
 			})

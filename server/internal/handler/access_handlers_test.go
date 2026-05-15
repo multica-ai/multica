@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -51,8 +52,9 @@ func setupFilterFixture(t *testing.T) filterFixture {
 		}
 	}
 
-	memberID := mkUser("Filter Member", "filter-member@multica.test")
-	outsideID := mkUser("Filter Outside", "filter-outside@multica.test")
+	suffix := uuid.NewString()
+	memberID := mkUser("Filter Member", "filter-member-"+suffix+"@multica.test")
+	outsideID := mkUser("Filter Outside", "filter-outside-"+suffix+"@multica.test")
 	mkMember(memberID, "member")
 	mkMember(outsideID, "member")
 

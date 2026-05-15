@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(channel-test-fixture-email): make repeated local test runs collision-free.
+
 import (
 	"context"
 	"encoding/json"
@@ -8,6 +10,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -17,7 +20,7 @@ import (
 func createSecondTestUser(t *testing.T, suffix string) (string, func()) {
 	t.Helper()
 	ctx := context.Background()
-	email := fmt.Sprintf("handler-test-%s@multica.ai", suffix)
+	email := fmt.Sprintf("handler-test-%s-%s@multica.ai", suffix, uuid.NewString())
 	var userID string
 	if err := testPool.QueryRow(ctx,
 		`INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`,

@@ -23,11 +23,13 @@ import {
   DocumentEditPage,
 } from "@multica/cerebro-artifacts/views/pages";
 import { AttachmentViewPage } from "@multica/cerebro-attachments/views/pages";
+import { DashboardPage } from "@multica/views/dashboard";
 import { AutopilotsPage } from "@multica/views/autopilots/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
 import { SkillsPage } from "@multica/views/skills";
 import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { AgentsPage } from "@multica/views/agents";
+import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/views/squads/components";
 import { InboxPage } from "@multica/views/inbox";
 import { NotificationsPage } from "@multica/cerebro-notifications/views";
 import { SettingsPage } from "@multica/views/settings";
@@ -224,6 +226,12 @@ export const appRoutes: RouteObject[] = [
             element: <MemberDetailRoute />,
             handle: { title: "Member" },
           },
+          { path: "squads", element: <SquadsPage />, handle: { title: "Squads" } },
+          {
+            path: "squads/:id",
+            element: <SquadDetailPageView />,
+            handle: { title: "Squad" },
+          },
           {
             path: "groups/:id",
             element: <GroupDetailRoute />,
@@ -241,6 +249,11 @@ export const appRoutes: RouteObject[] = [
             path: "notifications",
             element: <NotificationsPage />,
             handle: { title: "Notifications" },
+          },
+          {
+            path: "usage",
+            element: <DashboardPage />,
+            handle: { title: "Usage" },
           },
           {
             path: "settings",

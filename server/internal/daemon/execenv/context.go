@@ -16,6 +16,7 @@ import (
 // Codex:    skills → handled separately in Prepare via codex-home
 // Copilot:  skills → {workDir}/.github/skills/{name}/SKILL.md  (native project-level discovery)
 // OpenCode: skills → {workDir}/.opencode/skills/{name}/SKILL.md  (native discovery)
+// OpenClaw: skills → {workDir}/skills/{name}/SKILL.md  (native discovery — paired with a per-task synthesized openclaw-config.json that pins agents.defaults.workspace to workDir; see openclaw_config.go)
 // Pi:       skills → {workDir}/.pi/skills/{name}/SKILL.md  (native discovery)
 // Cursor:   skills → {workDir}/.cursor/skills/{name}/SKILL.md  (native discovery)
 // Kimi:     skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
@@ -133,6 +134,14 @@ func resolveSkillsDir(workDir, provider string) (string, error) {
 	case "opencode":
 		// OpenCode natively discovers skills from .opencode/skills/ in the workdir.
 		skillsDir = filepath.Join(workDir, ".opencode", "skills")
+	case "openclaw":
+		// OpenClaw's native skill scanner reads <workspaceDir>/skills/. The
+		// daemon pairs this with a per-task synthesized openclaw-config.json
+		// (see openclaw_config.go) that pins agents.defaults.workspace to
+		// workDir, so writing here is what the CLI actually scans. Before
+		// MUL-2219 this used to fall back to .agent_context/skills/, which
+		// no openclaw scan path ever inspected.
+		skillsDir = filepath.Join(workDir, "skills")
 	case "pi":
 		// Pi natively discovers skills from .pi/skills/ in the workdir.
 		skillsDir = filepath.Join(workDir, ".pi", "skills")

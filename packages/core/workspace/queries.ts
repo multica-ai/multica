@@ -1,7 +1,7 @@
 // CEREBRO-PATCH(core-workspace-queries): cerebro modification of upstream file
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
-import type { Agent, Workspace } from "../types";
+import type { Agent, Squad, Workspace } from "../types";
 
 export const workspaceKeys = {
   all: (wsId: string) => ["workspaces", wsId] as const,
@@ -12,6 +12,7 @@ export const workspaceKeys = {
   invitations: (wsId: string) => ["workspaces", wsId, "invitations"] as const,
   myInvitations: () => ["invitations", "mine"] as const,
   agents: (wsId: string) => ["workspaces", wsId, "agents"] as const,
+  squads: (wsId: string) => ["workspaces", wsId, "squads"] as const,
   skills: (wsId: string) => ["workspaces", wsId, "skills"] as const,
   assigneeFrequency: (wsId: string) => ["workspaces", wsId, "assignee-frequency"] as const,
 };
@@ -51,6 +52,14 @@ export function agentListOptions(wsId: string) {
     queryKey: workspaceKeys.agents(wsId),
     queryFn: () =>
       api.listAgents({ workspace_id: wsId, include_archived: true }),
+  });
+}
+
+export function squadListOptions(wsId: string) {
+  return queryOptions<Squad[]>({
+    queryKey: workspaceKeys.squads(wsId),
+    queryFn: () => api.listSquads(),
+    enabled: !!wsId,
   });
 }
 

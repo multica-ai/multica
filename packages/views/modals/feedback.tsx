@@ -5,11 +5,11 @@ import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
+import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   ContentEditor,
   type ContentEditorRef,
@@ -93,9 +93,17 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
       <DialogContent className="sm:max-w-2xl !h-[28rem] p-0 gap-0 flex flex-col overflow-hidden">
         <DialogHeader className="px-5 pt-4 pb-2 shrink-0">
           <DialogTitle>{t(($) => $.feedback.title)}</DialogTitle>
-          <DialogDescription>
-            {t(($) => $.feedback.description)}
-          </DialogDescription>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t(($) => $.feedback.github_hint_prefix)}
+            <a
+              href="https://github.com/multica-ai/multica/issues"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-brand underline decoration-brand/40 underline-offset-2 hover:decoration-brand"
+            >
+              {t(($) => $.feedback.github_hint_link)}
+            </a>
+          </p>
         </DialogHeader>
 
         <div className="flex-1 min-h-0 px-5 pb-3">
@@ -118,7 +126,11 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        <div className="flex items-center justify-end px-4 py-3 border-t shrink-0">
+        <div className="flex items-center justify-between px-4 py-3 border-t shrink-0">
+          <FileUploadButton
+            size="sm"
+            onSelect={(file) => editorRef.current?.uploadFile(file)}
+          />
           <Button size="sm" onClick={handleSubmit} disabled={!canSubmit}>
             {mutation.isPending ? t(($) => $.feedback.sending) : t(($) => $.feedback.send)}
             <kbd className="ml-1 inline-flex h-4 items-center gap-0.5 rounded border border-border/50 bg-background/30 px-1 font-mono text-[10px] leading-none">

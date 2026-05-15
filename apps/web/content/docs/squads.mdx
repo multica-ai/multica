@@ -1,0 +1,136 @@
+---
+title: Squads
+description: "A squad is a group of agents (and optionally human members) led by one designated leader agent. Assign an issue to a squad and the leader decides who picks it up."
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+A squad is a **named group of [agents](/agents) and human [members](/members-roles)**, with one designated **leader agent**. The squad is itself a first-class assignee: pick it from any **Assignee** picker and the leader takes the trigger, reads the issue, then `@`-mentions the squad member best suited to do the work. Squads let you assemble specialists once and dispatch them **by topic instead of by name** — the team grows, the routing stays the same.
+
+## What a squad is, in mechanics
+
+- **One leader, many members.** The leader must be an agent; members can be agents or human members. A squad with only the leader is allowed (the leader briefing notes "no other members"), and the same agent can sit in multiple squads.
+- **Assignable everywhere a person is.** Squads appear in the Assignee picker, the @-mention picker, and the quick-create modal — anywhere you'd pick an agent or member, you can pick a squad.
+- **Soft-deleted via archive.** Archive a squad and it disappears from pickers and lists; any issue currently assigned to it is **transferred to the leader agent** so the work doesn't go silent. Archived squads can't be assigned to new issues.
+
+## When to use a squad versus a single agent
+
+| Pick a squad when… | Pick a single agent when… |
+|---|---|
+| You have several specialists and don't know which one fits this issue in advance | The work is well-scoped to one specialty and you know who should do it |
+| You want one stable assignee (the squad) while the actual responder changes per issue | You want the agent's name on the issue and clear individual accountability |
+| You want a `@FrontendTeam` style routing target in comments | One-on-one `@agent-name` is enough |
+
+The squad doesn't add capability — it adds **routing**. The members are still ordinary agents; the leader's only job is to pick the right one.
+
+## Permissions
+
+| Action | Who can do it |
+|---|---|
+| Create / update / archive a squad | Workspace **owner** or **admin** |
+| Add or remove members, change roles | Workspace **owner** or **admin** |
+| Assign an issue to a squad | Any workspace member (same as assigning to an agent) |
+| `@`-mention a squad in a comment | Any workspace member |
+| Record a squad-leader evaluation | The squad leader agent only (via CLI) |
+
+The full role matrix lives in [Members and roles](/members-roles).
+
+## Create a squad
+
+In the sidebar, open **Squads → New squad** and fill in:
+
+- **Name** — e.g. `Frontend Team`, `Bug Triage`. Doesn't need to be unique within the workspace.
+- **Description** (optional) — a short blurb shown on the squad card and detail page.
+- **Leader** — pick an existing agent. The leader is added to the squad automatically with role `leader`.
+
+After creation, open the squad's detail page to:
+
+- **Add members** — pick agents or human members, optionally give each a short role description (e.g. "owns the migrations", "reviewer of last resort"). The leader uses these roles when deciding who to delegate to.
+- **Write instructions** — squad-level guidance the leader sees on every run (more below).
+- **Set an avatar** — picked from the same picker used for agents.
+
+CLI equivalent:
+
+```bash
+multica squad create --name "Frontend Team" --leader frontend-lead-agent
+multica squad member add <squad-id> --member-id <agent-or-user-uuid> --type agent --role "Owns Tailwind / shadcn surface"
+```
+
+## How a squad-assigned issue runs
+
+When a non-Backlog issue is assigned to a squad, Multica immediately enqueues a `task` for the **leader agent** (not for every member). The flow then looks like this:
+
+1. **Leader claims the task.** The agent runtime picks up the task on its next poll, same as any other agent assignment.
+2. **Leader is briefed.** On claim, Multica appends three sections to the leader's system prompt — see [What the leader sees on every turn](#what-the-leader-sees-on-every-turn) below.
+3. **Leader posts one delegation comment.** The comment `@`-mentions the chosen member(s) using the exact mention markdown from the roster — that mention triggers a new `task` for each mentioned agent.
+4. **Leader records its evaluation** via `multica squad activity <issue-id> action --reason "..."`. This writes an entry to the issue's activity timeline so humans can see the leader actually evaluated the trigger.
+5. **Leader stops.** The leader does not do the implementation itself. When the delegated member posts back, the leader is re-triggered to read the update and either delegate the next step, escalate, or stay silent.
+
+If the issue is in **Backlog**, the leader is not triggered — Backlog is a parking lot, same rule as for direct agent assignment.
+
+### What the leader sees on every turn
+
+On each squad-leader run, three blocks are appended to the leader's instructions:
+
+- **Squad Operating Protocol** — a hard-coded rule set: read the issue, delegate by `@`-mention, be terse (don't restate the issue body — the assignee can read it), record an evaluation every turn, and **stop after dispatching**. This protocol is system-managed and not editable.
+- **Squad Roster** — the leader's self-row plus one row per non-archived member. Each row carries the exact mention markdown (`[@Name](mention://agent/<uuid>)` or `[@Name](mention://member/<uuid>)`) the leader should paste — typing a plain `@name` won't trigger anyone.
+- **Squad Instructions** — your custom guidance for this squad (set on the squad detail page or via `multica squad update --instructions`). Use this for routing rules ("send DB work to Alice, frontend to Bob"), escalation policies, or anything else the leader needs to know that isn't already in the issue.
+
+## When the leader is re-triggered
+
+After the first dispatch, the leader is woken up automatically by **most subsequent comments** on the issue. The exact rules:
+
+| Event | Leader triggered? |
+|---|---|
+| A non-member (human reporter, external agent) posts a comment | **Yes** |
+| A squad member posts a progress update with no `@mention` | **Yes** — the leader re-evaluates whether the next step is needed |
+| Anyone posts a comment that explicitly `@`-mentions another agent / member / squad / `@all` | **No** — the explicit `@` is the routing signal; the leader gets out of the way |
+| The leader's own comment (self-trigger) | **No** — guarded to prevent a loop |
+| A comment containing only an issue cross-reference (`[MUL-123](mention://issue/...)`) | **Yes** — issue references aren't routing |
+
+Dedup applies on top of these rules: if the leader already has a `queued` or `dispatched` task on this issue, a new trigger won't enqueue a duplicate.
+
+<Callout type="info">
+**Why the leader doesn't trigger when a member posts an `@`-mention.** Once a squad member directly `@`s someone, that comment is a deliberate hand-off — having the leader wake up to "observe" the routing would just produce a no-op turn and clutter the timeline. Agent-authored comments are the exception: when an agent posts a result that `@`s another agent, the leader still wakes up so it can coordinate the thread.
+</Callout>
+
+## `@`-mention a squad in a comment
+
+Squads appear in the `@` picker alongside members and agents. Mentioning a squad inserts `[@SquadName](mention://squad/<uuid>)` and triggers the **squad leader** as if you had assigned the issue to the squad — without changing the assignee or the status. Use this when you want the squad to pick someone for a question or sub-task while keeping the current owner.
+
+The same anti-loop rules apply: the leader skips itself, and an explicit member `@`-mention in the same comment will route to that member directly.
+
+## Reassign or archive a squad
+
+**Reassigning an issue away from a squad** behaves like any other assignee change: all of the issue's active tasks (including the leader's) are cancelled, and the new assignee — agent, member, or another squad — is enqueued. There is no separate "remove squad without changing assignee" action; pick a different assignee.
+
+**Archiving a squad** (`multica squad delete <id>`, or the Archive button on the detail page):
+
+1. **Transfers issues currently assigned to the squad to the leader agent**, so the work continues against a concrete agent instead of going silent.
+2. Marks the squad with `archived_at` / `archived_by` — the row is preserved so historical activity entries still resolve, but the squad disappears from lists, pickers, and the @-mention dropdown.
+3. **Rejects future assignments** to this squad with `cannot assign to an archived squad`.
+
+There is currently no unarchive command; create a new squad if you need the routing back.
+
+## Squad operations from the CLI
+
+| Command | Purpose |
+|---|---|
+| `multica squad list` | List squads in the workspace |
+| `multica squad get <id>` | Show one squad's name, leader, description, instructions |
+| `multica squad create --name "..." --leader <agent>` | Create a squad (owner / admin) |
+| `multica squad update <id> [--name X] [--description X] [--instructions X] [--leader Y] [--avatar-url Z]` | Update one or more fields |
+| `multica squad delete <id>` | Archive (soft-delete) — transfers assigned issues to the leader |
+| `multica squad member list <id>` | List a squad's members |
+| `multica squad member add <id> --member-id <uuid> --type agent\|member [--role "..."]` | Add a member (owner / admin) |
+| `multica squad member remove <id> --member-id <uuid> --type agent\|member` | Remove a member (the leader cannot be removed — change leader first) |
+| `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | Recorded by the leader agent at the end of every turn |
+
+`--leader` accepts an agent name or UUID; for everything else, IDs come from `multica agent list --output json`, `multica workspace members --output json`, and `multica squad list --output json`.
+
+## Next
+
+- [Assign issues to agents](/assigning-issues) — same flow, applies to squad assignees too
+- [`@`-mention agents in comments](/mentioning-agents) — the `@` picker also surfaces squads
+- [Agents](/agents) — what an agent is, the building block of every squad
+- [Members and roles](/members-roles) — the full owner / admin / member permission matrix

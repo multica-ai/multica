@@ -1,10 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { FileText, Search } from "lucide-react";
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import type { Agent } from "@multica/core/types";
+import type { Agent, SkillSummary } from "@multica/core/types";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -20,18 +19,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
-import { Input } from "@multica/ui/components/ui/input";
 import { useT } from "../../i18n";
+import { SkillPickerList } from "./skill-picker-list";
 
 /**
- * Single source of truth for "attach a workspace skill to this agent".
- * Used by both:
- *   - SkillsTab — full surface, "Add skill" button
- *   - Inspector → SkillAttach — inline dashed `+ Attach` chip
+ * "Attach workspace skills to this agent." Multi-select with explicit
+ * Confirm — earlier iterations attached on a single row click, which
+ * meant the user couldn't tick several skills at once and the dialog
+ * closed before they could review their choice.
  *
- * Owns the workspace-skill list query, the "what's still attachable" filter,
- * the API call, and the optimistic invalidation. Callers only manage the
- * open/close state — they don't repeat the attach logic.
+ * Already-attached skills are filtered out of the list entirely (vs.
+ * showing them disabled). When there are no remaining workspace skills
+ * to attach, the empty-state copy explains why, and the Confirm button
+ * is naturally disabled because nothing can be selected.
  */
 export function SkillAddDialog({
   agent,
@@ -45,34 +45,44 @@ export function SkillAddDialog({
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
-  const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
+  const { data: workspaceSkills = [], isLoading } = useQuery(skillListOptions(wsId));
   const [saving, setSaving] = useState(false);
-  const [query, setQuery] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  const agentSkillIds = new Set(agent.skills.map((s) => s.id));
-  const availableSkills = workspaceSkills.filter(
-    (s) => !agentSkillIds.has(s.id),
+  const attachedIds = useMemo(
+    () => new Set(agent.skills.map((s) => s.id)),
+    [agent.skills],
   );
-  const trimmedQuery = query.trim().toLowerCase();
-  const filteredSkills = trimmedQuery
-    ? availableSkills.filter((s) => {
-        const name = s.name.toLowerCase();
-        const description = s.description?.toLowerCase() ?? "";
-        return (
-          name.includes(trimmedQuery) || description.includes(trimmedQuery)
-        );
-      })
-    : availableSkills;
+  // Hide attached skills outright — the dialog is for adding new ones.
+  // If a user wants to see what's already on the agent, the SkillsTab
+  // list above shows it.
+  const availableSkills = useMemo(
+    () => workspaceSkills.filter((s) => !attachedIds.has(s.id)),
+    [workspaceSkills, attachedIds],
+  );
 
   const handleOpenChange = (v: boolean) => {
-    if (!v) setQuery("");
+    if (!v) setSelectedIds(new Set());
     onOpenChange(v);
   };
 
-  const handleAdd = async (skillId: string) => {
+  const handleToggle = (skill: SkillSummary) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(skill.id)) next.delete(skill.id);
+      else next.add(skill.id);
+      return next;
+    });
+  };
+
+  const handleConfirm = async () => {
+    if (selectedIds.size === 0) return;
     setSaving(true);
     try {
-      const newIds = [...agent.skills.map((s) => s.id), skillId];
+      const newIds = [
+        ...agent.skills.map((s) => s.id),
+        ...selectedIds,
+      ];
       await api.setAgentSkills(agent.id, { skill_ids: newIds });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
       handleOpenChange(false);
@@ -83,64 +93,45 @@ export function SkillAddDialog({
     }
   };
 
-  const showSearch = availableSkills.length > 0;
-  const noMatch = showSearch && filteredSkills.length === 0;
+  const count = selectedIds.size;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-sm">{t(($) => $.tab_body.skills.add_dialog_title)}</DialogTitle>
+          <DialogTitle className="text-sm">
+            {t(($) => $.tab_body.skills.add_dialog_title)}
+          </DialogTitle>
           <DialogDescription className="text-xs">
             {t(($) => $.tab_body.skills.add_dialog_description)}
           </DialogDescription>
         </DialogHeader>
-        {showSearch && (
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={t(($) => $.tab_body.skills.add_dialog_search_placeholder)}
-              aria-label={t(($) => $.tab_body.skills.add_dialog_search_placeholder)}
-              className="pl-7"
-            />
-          </div>
-        )}
-        <div className="max-h-64 space-y-1 overflow-y-auto">
-          {filteredSkills.map((skill) => (
-            <button
-              key={skill.id}
-              onClick={() => handleAdd(skill.id)}
-              disabled={saving}
-              className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-accent/50"
-            >
-              <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-medium">{skill.name}</div>
-                {skill.description && (
-                  <div className="truncate text-xs text-muted-foreground">
-                    {skill.description}
-                  </div>
-                )}
-              </div>
-            </button>
-          ))}
-          {availableSkills.length === 0 && (
-            <p className="py-6 text-center text-xs text-muted-foreground">
-              {t(($) => $.tab_body.skills.add_dialog_empty)}
-            </p>
-          )}
-          {noMatch && (
-            <p className="py-6 text-center text-xs text-muted-foreground">
-              {t(($) => $.tab_body.skills.add_dialog_no_match)}
-            </p>
-          )}
-        </div>
+
+        <SkillPickerList
+          skills={availableSkills}
+          selectedIds={selectedIds}
+          onToggle={handleToggle}
+          loading={isLoading}
+          emptyMessage={
+            workspaceSkills.length === 0
+              ? t(($) => $.tab_body.skills.add_dialog_empty)
+              : t(($) => $.tab_body.skills.add_dialog_empty_partial)
+          }
+        />
+
         <DialogFooter>
           <Button variant="ghost" onClick={() => handleOpenChange(false)}>
             {t(($) => $.tab_body.skills.add_dialog_cancel)}
+          </Button>
+          <Button
+            onClick={handleConfirm}
+            disabled={count === 0 || saving}
+          >
+            {saving
+              ? t(($) => $.tab_body.skills.add_dialog_saving)
+              : count > 0
+                ? t(($) => $.tab_body.skills.add_dialog_confirm, { count })
+                : t(($) => $.tab_body.skills.add_dialog_confirm_default)}
           </Button>
         </DialogFooter>
       </DialogContent>

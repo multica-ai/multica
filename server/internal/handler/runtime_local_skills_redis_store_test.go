@@ -25,6 +25,8 @@ func newRedisTestClient(t *testing.T) *redis.Client {
 	if err != nil {
 		t.Fatalf("parse REDIS_TEST_URL: %v", err)
 	}
+	// CEREBRO-PATCH(jeh-1363): isolate handler Redis tests from parallel packages that FlushDB.
+	opts.DB = 11
 	rdb := redis.NewClient(opts)
 	ctx := context.Background()
 	if err := rdb.Ping(ctx).Err(); err != nil {

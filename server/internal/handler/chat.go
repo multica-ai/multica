@@ -69,7 +69,7 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 	// (e.g. one configured with privileged tools or sensitive instructions) and
 	// trigger it — chat is a direct exfiltration channel because only the
 	// session creator sees the responses. Mirrors canAssignAgent / @mention gates.
-	if !h.canAccessPrivateAgent(r.Context(), agent, userID, workspaceID) {
+	if !h.canAccessPrivateAgent(r.Context(), agent, "member", userID, workspaceID) {
 		writeError(w, http.StatusForbidden, "cannot start chat with private agent")
 		return
 	}
@@ -185,6 +185,18 @@ func (h *Handler) loadChatSessionForUser(w http.ResponseWriter, r *http.Request,
 	}
 	if uuidToString(session.CreatorID) != userID {
 		writeError(w, http.StatusForbidden, "not your chat session")
+		return db.ChatSession{}, false
+	}
+	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		ID:          session.AgentID,
+		WorkspaceID: workspaceUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return db.ChatSession{}, false
+	}
+	if !h.canAccessPrivateAgent(r.Context(), agent, "member", userID, workspaceID) {
+		writeError(w, http.StatusForbidden, "cannot access private agent chat")
 		return db.ChatSession{}, false
 	}
 	return session, true
@@ -333,7 +345,8 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 type SendChatMessageRequest struct {
-	Content string `json:"content"`
+	Content       string   `json:"content"`
+	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 }
 
 type SendChatMessageResponse struct {
@@ -364,6 +377,10 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "content is required")
 		return
 	}
+	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
+	if !ok {
+		return
+	}
 
 	// Load chat session.
 	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
@@ -388,6 +405,16 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create chat message")
 		return
+	}
+	if len(attachmentIDs) > 0 {
+		if err := h.Queries.LinkAttachmentsToChatMessage(r.Context(), db.LinkAttachmentsToChatMessageParams{
+			ChatMessageID: msg.ID,
+			ChatSessionID: session.ID,
+			Column3:       attachmentIDs,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to link attachments")
+			return
+		}
 	}
 
 	// Enqueue a chat task after the message exists.
@@ -651,12 +678,12 @@ type ChatSessionResponse struct {
 }
 
 type ChatMessageResponse struct {
-	ID            string               `json:"id"`
-	ChatSessionID string               `json:"chat_session_id"`
-	Role          string               `json:"role"`
-	Content       string               `json:"content"`
-	TaskID        *string              `json:"task_id"`
-	CreatedAt     string               `json:"created_at"`
+	ID            string  `json:"id"`
+	ChatSessionID string  `json:"chat_session_id"`
+	Role          string  `json:"role"`
+	Content       string  `json:"content"`
+	TaskID        *string `json:"task_id"`
+	CreatedAt     string  `json:"created_at"`
 	// CEREBRO-PATCH(chat-attachments): cerebro chat-message attachments.
 	Attachments []AttachmentResponse `json:"attachments"`
 	// FailureReason flags an assistant row synthesized by FailTask's chat

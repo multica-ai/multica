@@ -17,6 +17,8 @@ function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
     device_info: "",
     metadata: {},
     owner_id: null,
+    visibility: "private",
+    timezone: "UTC",
     last_seen_at: new Date(FIXED_NOW - 10_000).toISOString(),
     sandbox_enabled: null,
     persona_sandbox: "",

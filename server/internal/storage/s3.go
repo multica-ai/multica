@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -150,6 +151,25 @@ func (s *S3Storage) KeyFromURL(rawURL string) string {
 		return rawURL[i+1:]
 	}
 	return rawURL
+}
+
+// GetReader streams the object body back to the caller. The returned
+// ReadCloser must be closed; closing it terminates the underlying HTTP
+// connection to S3. A missing key surfaces as an *types.NoSuchKey error
+// wrapped in the SDK's smithy wrapper — callers can use errors.As to
+// distinguish "not found" from a transport failure.
+func (s *S3Storage) GetReader(ctx context.Context, key string) (io.ReadCloser, error) {
+	if key == "" {
+		return nil, fmt.Errorf("s3 GetReader: empty key")
+	}
+	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("s3 GetObject: %w", err)
+	}
+	return out.Body, nil
 }
 
 // Delete removes an object from S3. Errors are logged but not fatal.

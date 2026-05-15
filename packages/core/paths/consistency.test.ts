@@ -17,18 +17,21 @@ describe("paths.workspace() shape", () => {
     expect(new Set(parameterlessRoutes)).toEqual(
       new Set([
         "root",
+        "usage",
         "issues",
         "channels",
         "projects",
         "documents",
         "autopilots",
         "agents",
+        "squads",
         "inbox",
         "search",
         "notifications",
         "myIssues",
         "runtimes",
         "skills",
+        "squads",
         "settings",
         // CEREBRO-PATCH(cerebro-paths-permissions): JEH-1180
         "permissions",
@@ -41,18 +44,21 @@ describe("paths.workspace() shape", () => {
     // Check that none of the parameterless paths embed a leaked literal
     // and that their second URL segment matches the method name's kebab-case.
     const expectedSegments: Array<[string, string]> = [
+      ["usage", "usage"],
       ["issues", "issues"],
       ["channels", "channels"],
       ["projects", "projects"],
       ["documents", "documents"],
       ["autopilots", "autopilots"],
       ["agents", "agents"],
+      ["squads", "squads"],
       ["inbox", "inbox"],
       ["search", "search"],
       ["notifications", "notifications"],
       ["myIssues", "my-issues"],
       ["runtimes", "runtimes"],
       ["skills", "skills"],
+      ["squads", "squads"],
       ["settings", "settings"],
       // CEREBRO-PATCH(cerebro-paths-permissions): JEH-1180
       ["permissions", "permissions"],

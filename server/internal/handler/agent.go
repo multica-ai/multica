@@ -155,41 +155,41 @@ type ChatHistoryMessage struct {
 }
 
 type AgentTaskResponse struct {
-	ID                      string                `json:"id"`
-	AgentID                 string                `json:"agent_id"`
-	RuntimeID               string                `json:"runtime_id"`
-	IssueID                 string                `json:"issue_id"`
-	WorkspaceID             string                `json:"workspace_id"`
-	Status                  string                `json:"status"`
-	Priority                int32                 `json:"priority"`
-	DispatchedAt            *string               `json:"dispatched_at"`
-	StartedAt               *string               `json:"started_at"`
-	CompletedAt             *string               `json:"completed_at"`
-	Result                  any                   `json:"result"`
-	Error                   *string               `json:"error"`
-	FailureReason           string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
-	Attempt                 int32                 `json:"attempt"`
-	MaxAttempts             int32                 `json:"max_attempts"`
-	ParentTaskID            *string               `json:"parent_task_id,omitempty"`
-	Agent                   *TaskAgentData        `json:"agent,omitempty"`
-	Repos                   []RepoData            `json:"repos,omitempty"`
-	ProjectID               string                `json:"project_id,omitempty"`        // issue's project, when present
-	ProjectTitle            string                `json:"project_title,omitempty"`     // for surfacing in agent context
-	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"` // resources attached to the project
-	CreatedAt               string                `json:"created_at"`
-	PriorSessionID          string                `json:"prior_session_id,omitempty"`          // session ID from a previous task on same issue
-	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on same issue
-	WorkDir                 string                `json:"work_dir,omitempty"`                  // local working directory pinned for this task; populated once the daemon reports it
-	TriggerCommentID        *string               `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
-	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
-	TriggerSummary          *string               `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
-	Title                   *string               `json:"title,omitempty"`                     // CEREBRO-PATCH(task-title-builder): short generated headline.
-	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
-	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
-	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
+	ID                    string                `json:"id"`
+	AgentID               string                `json:"agent_id"`
+	RuntimeID             string                `json:"runtime_id"`
+	IssueID               string                `json:"issue_id"`
+	WorkspaceID           string                `json:"workspace_id"`
+	Status                string                `json:"status"`
+	Priority              int32                 `json:"priority"`
+	DispatchedAt          *string               `json:"dispatched_at"`
+	StartedAt             *string               `json:"started_at"`
+	CompletedAt           *string               `json:"completed_at"`
+	Result                any                   `json:"result"`
+	Error                 *string               `json:"error"`
+	FailureReason         string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	Attempt               int32                 `json:"attempt"`
+	MaxAttempts           int32                 `json:"max_attempts"`
+	ParentTaskID          *string               `json:"parent_task_id,omitempty"`
+	Agent                 *TaskAgentData        `json:"agent,omitempty"`
+	Repos                 []RepoData            `json:"repos,omitempty"`
+	ProjectID             string                `json:"project_id,omitempty"`        // issue's project, when present
+	ProjectTitle          string                `json:"project_title,omitempty"`     // for surfacing in agent context
+	ProjectResources      []ProjectResourceData `json:"project_resources,omitempty"` // resources attached to the project
+	CreatedAt             string                `json:"created_at"`
+	PriorSessionID        string                `json:"prior_session_id,omitempty"`        // session ID from a previous task on same issue
+	PriorWorkDir          string                `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on same issue
+	WorkDir               string                `json:"work_dir,omitempty"`                // local working directory pinned for this task; populated once the daemon reports it
+	TriggerCommentID      *string               `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
+	TriggerCommentContent string                `json:"trigger_comment_content,omitempty"` // content of the triggering comment
+	TriggerSummary        *string               `json:"trigger_summary,omitempty"`         // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
+	Title                 *string               `json:"title,omitempty"`                   // CEREBRO-PATCH(task-title-builder): short generated headline.
+	TriggerAuthorType     string                `json:"trigger_author_type,omitempty"`     // "agent" or "member" — author kind of the triggering comment
+	TriggerAuthorName     string                `json:"trigger_author_name,omitempty"`     // display name of the triggering comment author
+	ChatSessionID         string                `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
 	// CEREBRO-PATCH(chat-message-id-claim): JEH-1083 — pre-created assistant chat_message row exposed to the agent as MULTICA_CHAT_MESSAGE_ID so it can attach files mid-turn.
-	ChatMessageID           string                `json:"chat_message_id,omitempty"`           // pre-created assistant chat_message for this chat task
-	ChatMessage             string                `json:"chat_message,omitempty"`              // user message for chat tasks (also: legacy single-message field for daemons pre-JEH-330)
+	ChatMessageID string `json:"chat_message_id,omitempty"` // pre-created assistant chat_message for this chat task
+	ChatMessage   string `json:"chat_message,omitempty"`    // user message for chat tasks (also: legacy single-message field for daemons pre-JEH-330)
 	// CEREBRO-PATCH(agent-task-cerebro-fields): cerebro-only daemon fields.
 	ChatHistory       []ChatHistoryMessage `json:"chat_history,omitempty"`        // capped chat transcript for stateless managed HTTP runtimes
 	ChatMessages      []string             `json:"chat_messages,omitempty"`       // user messages newer than the last assistant reply (oldest first)
@@ -217,26 +217,41 @@ type AgentTaskResponse struct {
 	// CEREBRO-PATCH(agent-task-model-override): per-task model override that wins over agent.model (JEH-1310).
 	ModelOverride string `json:"model_override,omitempty"`
 	// RuntimePersonaSandbox is the runtime-level persona sandbox upper
-// CEREBRO-PATCH(agent): persona integration additions.
+	// CEREBRO-PATCH(agent): persona integration additions.
 	// bound (E1). Empty = no upper bound, the agent's persona_sandbox
 	// decides alone. Non-empty (e.g. "claude-readonly") = the daemon must
 	// use this sandbox at spawn time and ignore the agent-level value, so
 	// an admin's runtime-wide cap can't be bypassed by an agent owner who
 	// picked a more permissive sandbox on their agent.
-	RuntimePersonaSandbox string `json:"runtime_persona_sandbox,omitempty"`
+	RuntimePersonaSandbox  string               `json:"runtime_persona_sandbox,omitempty"`
+	ChatMessageAttachments []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"` // attachments on the user message - agent calls `multica attachment download <id>` per entry
+	SquadID                string               `json:"squad_id,omitempty"`                 // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
+	SquadName              string               `json:"squad_name,omitempty"`               // display name for the picker squad
+}
+
+// ChatAttachmentMeta is the structured attachment metadata embedded in
+// claim responses for chat tasks. The agent uses these to run
+// `multica attachment download <id>` rather than guessing from the
+// markdown URL (which is signed and 30-min expiring on private CDN).
+// The mirror struct on the daemon side lives in internal/daemon/types.go
+// and uses the same JSON field names.
+type ChatAttachmentMeta struct {
+	ID          string `json:"id"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type,omitempty"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
 // can set up the execution environment (branch naming, skill files, instructions).
 type TaskAgentData struct {
-	ID             string                   `json:"id"`
-	Name           string                   `json:"name"`
-	Instructions   string                   `json:"instructions"`
-	Skills         []service.AgentSkillData `json:"skills,omitempty"`
-	CustomEnv      map[string]string        `json:"custom_env,omitempty"`
-	CustomArgs     []string                 `json:"custom_args,omitempty"`
-	McpConfig      json.RawMessage          `json:"mcp_config,omitempty"`
-	Model          string                   `json:"model,omitempty"`
+	ID           string                   `json:"id"`
+	Name         string                   `json:"name"`
+	Instructions string                   `json:"instructions"`
+	Skills       []service.AgentSkillData `json:"skills,omitempty"`
+	CustomEnv    map[string]string        `json:"custom_env,omitempty"`
+	CustomArgs   []string                 `json:"custom_args,omitempty"`
+	McpConfig    json.RawMessage          `json:"mcp_config,omitempty"`
+	Model        string                   `json:"model,omitempty"`
 	// PersonaSandbox is the agent's persona sandbox name (e.g. "claude-developer")
 	// passed to the daemon at task spawn time. Empty = no persona gating.
 	PersonaSandbox string `json:"persona_sandbox,omitempty"`
@@ -275,8 +290,8 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
 		TriggerSummary:   textToPtr(t.TriggerSummary),
 		// CEREBRO-PATCH(task-title-builder): surface generated title to clients.
-		Title:            textToPtr(t.Title),
-		WorkDir:          workDir,
+		Title:   textToPtr(t.Title),
+		WorkDir: workDir,
 		// Surface task source so the UI can distinguish issue-linked tasks
 		// from chat-spawned or autopilot-spawned ones; all three may arrive
 		// with issue_id = "" once a task has no linked issue.
@@ -355,8 +370,17 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	// they can't reason about (replaces the older
 	// list-agents-group-filter / list-agents-owner-exempt skip logic).
 	visibleAgents, hasFilter, ownerExempt, _ := h.cerebroVisibleAgentIDSet(r.Context(), r, workspaceID)
+	// Resolve the request actor once. Agents bypass the private-agent gate
+	// to preserve A2A collaboration; members must be in allowed_principals
+	// (agent owner or workspace owner/admin) to see private agents.
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
+		if a.Visibility == "private" && actorType == "member" {
+			if !memberAllowedForPrivateAgent(a, actorID, member.Role) {
+				continue
+			}
+		}
 		resp := agentToResponse(a)
 		if skills, ok := skillMap[resp.ID]; ok {
 			resp.Skills = skills
@@ -385,6 +409,16 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	agent, ok := h.loadAgentForUser(w, r, id)
 	if !ok {
+		return
+	}
+	// Private-agent gate: members must be in allowed_principals to view
+	// (and therefore navigate to) a private agent. The 403 lets the front-end
+	// render an explicit "no access" placeholder instead of a 404 — see
+	// agent-detail-page.tsx.
+	workspaceID := uuidToString(agent.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+		writeError(w, http.StatusForbidden, "you do not have access to this agent")
 		return
 	}
 	resp := agentToResponse(agent)
@@ -527,6 +561,15 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid runtime_id")
+		return
+	}
+
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	if !canUseRuntimeForAgent(member, runtime) {
+		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can create agents on it")
 		return
 	}
 
@@ -777,6 +820,17 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid runtime_id")
 			return
 		}
+		// Same gate as CreateAgent — prevents UpdateAgent from being used to
+		// re-bind an agent onto someone else's private runtime, which would
+		// otherwise be a quiet end-run around the CreateAgent check.
+		member, ok := h.workspaceMember(w, r, uuidToString(agent.WorkspaceID))
+		if !ok {
+			return
+		}
+		if !canUseRuntimeForAgent(member, runtime) {
+			writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can move agents onto it")
+			return
+		}
 		params.RuntimeID = runtime.ID
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 	}
@@ -984,6 +1038,14 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Run history is part of the private-agent gate ("查看历史会话"). Same
+	// 403 semantics as GetAgent.
+	workspaceID := uuidToString(agent.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+		writeError(w, http.StatusForbidden, "you do not have access to this agent")
+		return
+	}
 
 	tasks, err := h.Queries.ListAgentTasks(r.Context(), agent.ID)
 	if err != nil {
@@ -1020,7 +1082,8 @@ type AgentRunCount struct {
 // activity to keep the Agents list cheap regardless of agent count.
 func (h *Handler) GetWorkspaceAgentRunCounts(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
-	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
 		return
 	}
 
@@ -1030,12 +1093,23 @@ func (h *Handler) GetWorkspaceAgentRunCounts(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	resp := make([]AgentRunCount, len(rows))
-	for i, row := range rows {
-		resp[i] = AgentRunCount{
-			AgentID:  uuidToString(row.AgentID),
-			RunCount: row.RunCount,
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
+		return
+	}
+
+	resp := make([]AgentRunCount, 0, len(rows))
+	for _, row := range rows {
+		agentID := uuidToString(row.AgentID)
+		if _, ok := allowed[agentID]; !ok {
+			continue
 		}
+		resp = append(resp, AgentRunCount{
+			AgentID:  agentID,
+			RunCount: row.RunCount,
+		})
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -1049,7 +1123,8 @@ func (h *Handler) GetWorkspaceAgentRunCounts(w http.ResponseWriter, r *http.Requ
 // empty buckets to keep the response small.
 func (h *Handler) GetWorkspaceAgentActivity30d(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
-	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
 		return
 	}
 
@@ -1059,14 +1134,25 @@ func (h *Handler) GetWorkspaceAgentActivity30d(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	resp := make([]AgentActivityBucket, len(rows))
-	for i, row := range rows {
-		resp[i] = AgentActivityBucket{
-			AgentID:     uuidToString(row.AgentID),
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
+		return
+	}
+
+	resp := make([]AgentActivityBucket, 0, len(rows))
+	for _, row := range rows {
+		agentID := uuidToString(row.AgentID)
+		if _, ok := allowed[agentID]; !ok {
+			continue
+		}
+		resp = append(resp, AgentActivityBucket{
+			AgentID:     agentID,
 			BucketAt:    timestampToString(row.Bucket),
 			TaskCount:   row.TaskCount,
 			FailedCount: row.FailedCount,
-		}
+		})
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -1083,7 +1169,8 @@ func (h *Handler) GetWorkspaceAgentActivity30d(w http.ResponseWriter, r *http.Re
 // snapshot.
 func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
-	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
 		return
 	}
 
@@ -1093,9 +1180,19 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 		return
 	}
 
-	resp := make([]AgentTaskResponse, len(tasks))
-	for i, t := range tasks {
-		resp[i] = taskToResponse(t)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
+		return
+	}
+
+	resp := make([]AgentTaskResponse, 0, len(tasks))
+	for _, t := range tasks {
+		if _, ok := allowed[uuidToString(t.AgentID)]; !ok {
+			continue
+		}
+		resp = append(resp, taskToResponse(t))
 	}
 
 	writeJSON(w, http.StatusOK, resp)

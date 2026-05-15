@@ -66,6 +66,7 @@ type Task struct {
 	ChatHistory             []ChatHistoryMessage `json:"chat_history,omitempty"`              // capped chat transcript for stateless managed HTTP runtimes
 	ChatMessages            []string             `json:"chat_messages,omitempty"`             // user messages newer than the last assistant reply (oldest first)
 	ChatMessage             string               `json:"chat_message,omitempty"`              // user message content for chat tasks
+	ChatMessageAttachments  []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"`  // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
 	AutopilotRunID          string               `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot run_only tasks
 	AutopilotID             string               `json:"autopilot_id,omitempty"`              // autopilot that spawned this run
 	AutopilotTitle          string               `json:"autopilot_title,omitempty"`           // autopilot title used as task context
@@ -73,6 +74,8 @@ type Task struct {
 	AutopilotSource         string               `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
 	AutopilotTriggerPayload json.RawMessage      `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
 	QuickCreatePrompt       string               `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
+	SquadID                 string               `json:"squad_id,omitempty"`                  // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
+	SquadName               string               `json:"squad_name,omitempty"`                // display name for the picker squad, used in prompt text
 	// CEREBRO-PATCH(daemon-task-user-profile-prompt): compiled per-user
 	// communication prompt (JEH-304).
 	UserProfilePrompt string `json:"user_profile_prompt,omitempty"`
@@ -93,7 +96,7 @@ type Task struct {
 	PersonaSpawnUserID   string   `json:"persona_spawn_user_id,omitempty"`
 	PersonaSpawnGroupIDs []string `json:"persona_spawn_group_ids,omitempty"`
 	// RuntimePersonaSandbox is the runtime-level persona sandbox upper
-// CEREBRO-PATCH(types): persona integration additions.
+	// CEREBRO-PATCH(types): persona integration additions.
 	// bound (E1). Empty = no upper bound; the agent's PersonaSandbox
 	// decides alone. Non-empty = preparePersonaSpawn must use this name
 	// and ignore the agent-level value so an operator's runtime-wide cap
@@ -103,6 +106,17 @@ type Task struct {
 	// from agent_task_queue.model_override (JEH-1310). Empty = fall back to
 	// Agent.Model, then env, then CLI default — see daemon.go model-resolution.
 	ModelOverride string `json:"model_override,omitempty"`
+}
+
+// ChatAttachmentMeta is the structured attachment metadata the daemon
+// hands to the agent for chat tasks. We pass id + filename + content_type
+// so the chat prompt can list them explicitly and instruct the agent to
+// run `multica attachment download <id>` instead of guessing from a
+// signed CDN URL (which expires).
+type ChatAttachmentMeta struct {
+	ID          string `json:"id"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type,omitempty"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.

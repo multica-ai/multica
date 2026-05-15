@@ -129,6 +129,14 @@
       "gate": "skill_ownership"
     },
     {
+      "id": "DELETE /api/squads/{id}/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "DELETE /api/squads/{id}/members",
+      "gate": "workspace_member"
+    },
+    {
       "id": "DELETE /api/tokens/{id}",
       "gate": "self_only"
     },
@@ -150,6 +158,10 @@
     },
     {
       "id": "DELETE /api/workspaces/{id}/grants/{grantId}",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "DELETE /api/workspaces/{id}/github/installations/{installationId}",
       "gate": "workspace_admin"
     },
     {
@@ -201,8 +213,16 @@
       "gate": "cerebro_runtime_access"
     },
     {
+      "id": "PATCH /api/runtimes/{runtimeId}/",
+      "gate": "cerebro_runtime_access"
+    },
+    {
       "id": "PATCH /api/runtimes/{runtimeId}/sandbox",
       "gate": "cerebro_runtime_access"
+    },
+    {
+      "id": "PATCH /api/squads/{id}/members/role",
+      "gate": "workspace_member"
     },
     {
       "id": "PATCH /api/workspaces/{id}/",
@@ -230,6 +250,10 @@
     },
     {
       "id": "POST /api/agents/",
+      "gate": "cerebro_capability:create_agent"
+    },
+    {
+      "id": "POST /api/agents/from-template",
       "gate": "cerebro_capability:create_agent"
     },
     {
@@ -521,6 +545,10 @@
       "gate": "issue_scope"
     },
     {
+      "id": "POST /api/issues/{id}/squad-evaluated",
+      "gate": "issue_scope"
+    },
+    {
       "id": "POST /api/issues/{id}/subscribe",
       "gate": "issue_scope"
     },
@@ -645,6 +673,14 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/squads/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/squads/{id}/members",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/tokens/",
       "gate": "self_only"
     },
@@ -711,6 +747,10 @@
     {
       "id": "POST /api/workspaces/{id}/pause-tasks",
       "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/webhooks/github",
+      "exempt": "pre-auth signed webhook — GitHub HMAC signature authorises delivery before any user JWT exists"
     },
     {
       "id": "POST /auth/google",
@@ -811,6 +851,10 @@
     {
       "id": "PUT /api/skills/{id}/ownership",
       "gate": "skill_ownership"
+    },
+    {
+      "id": "PUT /api/squads/{id}/",
+      "gate": "workspace_member"
     },
     {
       "id": "PUT /api/work-sessions/{id}/complete",
@@ -1357,6 +1401,10 @@
       "gate": "via:PUT /api/issues/{id}"
     },
     {
+      "id": "issue cancel-task",
+      "gate": "via:POST /api/tasks/{taskId}/cancel"
+    },
+    {
       "id": "issue comment add",
       "gate": "via:POST /api/issues/{id}/comments"
     },
@@ -1559,6 +1607,42 @@
     {
       "id": "skill update",
       "gate": "via:PUT /api/skills/{id}/"
+    },
+    {
+      "id": "squad activity",
+      "gate": "via:POST /api/issues/{id}/squad-evaluated"
+    },
+    {
+      "id": "squad create",
+      "gate": "via:POST /api/squads/"
+    },
+    {
+      "id": "squad delete",
+      "gate": "via:DELETE /api/squads/{id}/"
+    },
+    {
+      "id": "squad get",
+      "exempt": "read-only \u2014 wraps GET /api/squads/{id}"
+    },
+    {
+      "id": "squad list",
+      "exempt": "read-only \u2014 wraps GET /api/squads"
+    },
+    {
+      "id": "squad member add",
+      "gate": "via:POST /api/squads/{id}/members"
+    },
+    {
+      "id": "squad member list",
+      "exempt": "read-only \u2014 wraps GET /api/squads/{id}/members"
+    },
+    {
+      "id": "squad member remove",
+      "gate": "via:DELETE /api/squads/{id}/members"
+    },
+    {
+      "id": "squad update",
+      "gate": "via:PUT /api/squads/{id}/"
     },
     {
       "id": "update",

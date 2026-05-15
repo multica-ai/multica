@@ -10,10 +10,11 @@ export default [
       globals: { ...globals.node },
     },
   },
-  // Security: every renderer-controlled URL that reaches the OS shell must
-  // flow through openExternalSafely in src/main/external-url.ts (scheme
-  // allowlist). Enforce it statically so a direct shell.openExternal call
-  // cannot silently regress the protection.
+  // Security: every renderer-controlled URL that reaches the OS shell or the
+  // native download system must flow through the safe wrappers in
+  // src/main/external-url.ts (scheme allowlist). Enforce it statically so
+  // direct shell.openExternal / webContents.downloadURL calls cannot silently
+  // regress the protection.
   {
     files: ["src/main/**/*.ts"],
     rules: {
@@ -24,6 +25,12 @@ export default [
             "CallExpression[callee.object.name='shell'][callee.property.name='openExternal']",
           message:
             "Do not call shell.openExternal directly. Use openExternalSafely from './external-url' so the http/https allowlist stays enforced.",
+        },
+        {
+          selector:
+            "CallExpression[callee.object.property.name='webContents'][callee.property.name='downloadURL']",
+          message:
+            "Do not call webContents.downloadURL directly. Use downloadURLSafely from './external-url' so the http/https allowlist stays enforced.",
         },
       ],
     },

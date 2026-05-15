@@ -27,6 +27,7 @@ import { redactSecrets } from "../../common/task-transcript/redact";
 // CEREBRO-PATCH(agent-live-card-cerebro): import getToolSummary from cerebro-chat after Phase 6 relocation
 import { getToolSummary } from "@multica/cerebro-chat/views";
 import { useT } from "../../i18n";
+import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 
 // Local helper — formats a start/end timestamp pair as "Ns" / "Nm Ns".
 function formatDuration(start: string, end: string): string {
@@ -296,6 +297,7 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
   const { t } = useT("issues");
   const [elapsed, setElapsed] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const isQueued = task.status === "queued";
 
@@ -320,6 +322,11 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
       setCancelling(false);
     }
   }, [task.id, issueId, cancelling, t]);
+
+  const requestCancel = useCallback(() => {
+    if (cancelling) return;
+    setConfirmOpen(true);
+  }, [cancelling]);
 
   const toolCount = items.filter((i) => i.type === "tool_use").length;
 
@@ -373,7 +380,7 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
             />
           )}
           <button
-            onClick={handleCancel}
+            onClick={requestCancel}
             disabled={cancelling}
             className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
             title={t(($) => $.agent_live.stop_tooltip)}
@@ -383,6 +390,12 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
           </button>
         </div>
       </div>
+      <TerminateTaskConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        onConfirm={() => void handleCancel()}
+        showRunningNote={!isQueued}
+      />
     </div>
   );
 }

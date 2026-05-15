@@ -22,14 +22,15 @@
   },
   "feedback": {
     "title": "反馈",
-    "description": "告诉我们哪些好用、哪些不好用、希望接下来做什么。",
     "placeholder": "聊聊你的体验、遇到的 bug，或想看到的功能...",
     "toast_uploading": "请等待上传完成...",
     "toast_too_long": "内容过长",
     "toast_sent": "感谢反馈！",
     "toast_failed": "发送反馈失败",
     "send": "发送反馈",
-    "sending": "发送中..."
+    "sending": "发送中...",
+    "github_hint_prefix": "想被更快处理、参与讨论？请去 ",
+    "github_hint_link": "GitHub"
   },
   "issue_picker": {
     "search_placeholder": "搜索 issue...",
@@ -51,6 +52,22 @@
   },
   "backlog_hint": {
     "toast_status_failed": "更新状态失败"
+  },
+  "create_squad": {
+    "title": "创建 Squad",
+    "description": "创建一个由 Leader Agent 协调团队的协作小队。",
+    "name_label": "名称",
+    "name_placeholder": "例如 前端团队",
+    "description_label": "描述",
+    "description_placeholder": "描述这个 Squad 负责什么...",
+    "leader_label": "Leader Agent",
+    "leader_hint": "Leader 接收分配给此 Squad 的所有任务并协调团队。",
+    "no_agents": "没有可用的 Agent。请先创建一个 Agent。",
+    "cancel": "取消",
+    "submit": "创建 Squad",
+    "submitting": "创建中...",
+    "toast_created": "Squad 已创建",
+    "toast_failed": "创建 Squad 失败"
   },
   "create_project": {
     "title": "新建项目",
@@ -117,7 +134,10 @@
       "created_by": "创建者",
       "select_agent_aria": "选择智能体",
       "pick_an_agent": "选一个智能体...",
-      "no_agents": "暂无可用智能体。",
+      "no_agents": "暂无可用智能体或小队。",
+      "search_placeholder": "搜索智能体或小队...",
+      "agents_group": "智能体",
+      "squads_group": "小队",
       "version_missing": "该智能体的守护进程没有报告 CLI 版本。通过智能体创建需要 multica CLI ≥ {{min}}。请升级守护进程并重连，或切换到手动创建。",
       "version_below": "该智能体的守护进程 CLI 是 {{current}}——通过智能体创建需要 ≥ {{min}}。请升级守护进程，或切换到手动创建。",
       "prompt_placeholder": "告诉智能体要做什么，例如：\"让 Bohan 修一下 Web 项目里收件箱加载慢的问题\"",

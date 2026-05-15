@@ -209,7 +209,7 @@ type DaemonRegisterRequest struct {
 		Version string `json:"version"` // agent CLI version (claude/codex)
 		Status  string `json:"status"`
 		// Capabilities is a daemon-reported snapshot of what this runtime
-// CEREBRO-PATCH(daemon): persona integration additions.
+		// CEREBRO-PATCH(daemon): persona integration additions.
 		// can actually do — tools the provider exposes, configured MCP
 		// servers, supported providers. Loose JSON so different providers
 		// report what fits without a schema migration. Persona's UI uses
@@ -1002,6 +1002,13 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	}
 	rt, err := h.Queries.GetAgentRuntime(ctx, runtimeUUID)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return &protocol.DaemonHeartbeatAckPayload{
+				RuntimeID:   payload.RuntimeID,
+				Status:      protocol.HeartbeatStatusRuntimeGone,
+				RuntimeGone: true,
+			}, nil
+		}
 		return nil, fmt.Errorf("runtime not found: %w", err)
 	}
 	if identity.WorkspaceID != "" && identity.WorkspaceID != uuidToString(rt.WorkspaceID) {
@@ -1490,6 +1497,18 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
+
+			if resp.Agent != nil && issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid {
+				if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+					ID:          issue.AssigneeID,
+					WorkspaceID: issue.WorkspaceID,
+				}); err == nil && squad.LeaderID == task.AgentID {
+					briefing := strings.TrimSpace(buildSquadLeaderBriefing(r.Context(), h.Queries, squad))
+					if briefing != "" {
+						resp.Agent.Instructions = strings.TrimSpace(resp.Agent.Instructions + "\n\n" + briefing)
+					}
+				}
+			}
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it
@@ -1539,7 +1558,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
 			}); err == nil && prior.SessionID.Valid {
-				if prior.RuntimeID == task.RuntimeID {
+				if !task.TriggerCommentID.Valid && prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
 				}
 				if prior.WorkDir.Valid {
