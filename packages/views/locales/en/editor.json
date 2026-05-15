@@ -23,6 +23,11 @@
       "tooltip": "Create sub-issue from selection",
       "created": "Created {{identifier}}",
       "create_failed": "Failed to create sub-issue"
+    },
+    "quote_actions": {
+      "tooltip": "Quote selection",
+      "add_to_new_comment": "Add to new comment",
+      "add_to_reply": "Add to reply"
     }
   },
   "image": {

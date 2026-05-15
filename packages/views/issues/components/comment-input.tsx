@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useCallback, useEffect, useMemo } from "react";
+import { forwardRef, useRef, useState, useCallback, useEffect, useMemo, useImperativeHandle } from "react";
 import { ArrowUp, ClipboardList, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -15,7 +15,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
-import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
+import { ContentEditor, type ContentEditorRef, type SelectionQuoteActions, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -26,6 +26,12 @@ import { toast } from "sonner";
 interface CommentInputProps {
   issueId: string;
   onSubmit: (content: string, attachmentIds?: string[], type?: string) => Promise<void>;
+  selectionQuoteActions?: SelectionQuoteActions;
+}
+
+interface CommentInputRef {
+  appendMarkdown: (markdown: string) => void;
+  focus: () => void;
 }
 
 const COMMENT_DRAFT_STORAGE_PREFIX = "multica:issue-comment-draft";
@@ -119,7 +125,10 @@ function removeDraft(key: string, expectedUpdatedAt?: number) {
   }
 }
 
-function CommentInput({ issueId, onSubmit }: CommentInputProps) {
+const CommentInput = forwardRef<CommentInputRef, CommentInputProps>(function CommentInput(
+  { issueId, onSubmit, selectionQuoteActions },
+  ref,
+) {
   const { t } = useT("issues");
   const editorRef = useRef<ContentEditorRef>(null);
   const [isEmpty, setIsEmpty] = useState(true);
@@ -269,6 +278,22 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
     scheduleDraftSave(md);
   }, [scheduleDraftSave]);
 
+  useImperativeHandle(ref, () => ({
+    appendMarkdown: (markdown: string) => {
+      editorRef.current?.appendMarkdown(markdown);
+      const next = editorRef.current?.getMarkdown() ?? "";
+      currentContentRef.current = next;
+      hasUserEditedRef.current = true;
+      setIsEmpty(!next.trim());
+      clearPendingSave();
+      persistDraft(next, true);
+      editorRef.current?.focus();
+    },
+    focus: () => {
+      editorRef.current?.focus();
+    },
+  }), [clearPendingSave, persistDraft]);
+
   const handleRestoreDraft = useCallback(() => {
     if (!pendingDraft) return;
     clearPendingSave();
@@ -309,6 +334,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
             onUploadFile={handleUpload}
             debounceMs={100}
             currentIssueId={issueId}
+            selectionQuoteActions={selectionQuoteActions}
           />
         </div>
         <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
@@ -382,6 +408,6 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
       </AlertDialog>
     </>
   );
-}
+});
 
-export { CommentInput };
+export { CommentInput, type CommentInputProps, type CommentInputRef };

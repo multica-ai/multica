@@ -13,8 +13,14 @@ const mockNavigationSearchParams = vi.hoisted(() => ({
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
+import zhHansCommon from "../../locales/zh-Hans/common.json";
+import zhHansIssues from "../../locales/zh-Hans/issues.json";
+import type { SupportedLocale } from "@multica/core/i18n";
 
-const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
+const TEST_RESOURCES = {
+  en: { common: enCommon, issues: enIssues },
+  "zh-Hans": { common: zhHansCommon, issues: zhHansIssues },
+};
 
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
 
@@ -372,7 +378,7 @@ vi.mock("@multica/core/realtime", () => ({
 
 // Mock sonner
 vi.mock("sonner", () => ({
-  toast: { error: vi.fn(), success: vi.fn() },
+  toast: { error: vi.fn(), message: vi.fn(), success: vi.fn() },
 }));
 
 // Mock react-resizable-panels (used by @multica/ui/components/ui/resizable)
@@ -489,10 +495,11 @@ function createTestQueryClient() {
 function renderIssueDetail(
   issueId = "issue-1",
   props: Partial<ComponentProps<typeof IssueDetail>> = {},
+  options: { locale?: SupportedLocale } = {},
 ) {
   const queryClient = createTestQueryClient();
   return render(
-    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+    <I18nProvider locale={options.locale ?? "en"} resources={TEST_RESOURCES}>
       <QueryClientProvider client={queryClient}>
         <IssueDetail issueId={issueId} {...props} />
       </QueryClientProvider>
@@ -524,6 +531,30 @@ function renderIssueDetailWithHighlight(
   return { ...result, queryClient };
 }
 
+function selectTextNodeContent(element: HTMLElement) {
+  const textNode = element.firstChild;
+  if (!textNode) throw new Error("Expected element to have a text node");
+  const range = document.createRange();
+  range.selectNodeContents(textNode);
+  Object.defineProperty(range, "getBoundingClientRect", {
+    configurable: true,
+    value: () => ({
+      x: 100,
+      y: 100,
+      width: 120,
+      height: 20,
+      top: 100,
+      right: 220,
+      bottom: 120,
+      left: 100,
+      toJSON: () => {},
+    }),
+  });
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -547,6 +578,7 @@ describe("IssueDetail (shared)", () => {
       { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
     ]);
     mockApiObj.listAgents.mockResolvedValue([]);
+    window.getSelection()?.removeAllRanges();
   });
 
   it("shows loading skeleton while data is loading", () => {
@@ -696,6 +728,22 @@ describe("IssueDetail (shared)", () => {
     });
 
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
+  });
+
+  it("localizes the quote selection menu from the active locale", async () => {
+    renderIssueDetail("issue-1", {}, { locale: "zh-Hans" });
+
+    const comment = await screen.findByText("Started working on this");
+    selectTextNodeContent(comment);
+    fireEvent.mouseUp(comment);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /放到新评论/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /放到回复/ })).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("Add to new comment")).not.toBeInTheDocument();
+    expect(screen.queryByText("Add to reply")).not.toBeInTheDocument();
   });
 
   describe("highlightCommentId scroll-to-comment", () => {

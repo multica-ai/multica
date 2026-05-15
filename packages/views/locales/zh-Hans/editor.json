@@ -23,6 +23,11 @@
       "tooltip": "用选中内容创建子 issue",
       "created": "已创建 {{identifier}}",
       "create_failed": "创建子 issue 失败"
+    },
+    "quote_actions": {
+      "tooltip": "引用选区",
+      "add_to_new_comment": "放到新评论",
+      "add_to_reply": "放到回复"
     }
   },
   "image": {

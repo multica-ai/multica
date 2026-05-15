@@ -2,6 +2,8 @@ export {
   ContentEditor,
   type ContentEditorProps,
   type ContentEditorRef,
+  type SelectionQuoteActions,
+  type SelectionQuoteReplyTarget,
 } from "./content-editor";
 export {
   TitleEditor,
