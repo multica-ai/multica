@@ -430,7 +430,10 @@ func TestWebhookHandler_ArchivedAutopilotReturnsIgnored(t *testing.T) {
 func TestWebhookHandler_IPRateLimitReturns429BeforeDBLookup(t *testing.T) {
 	// Spray random (likely-unknown) tokens from one IP and prove the IP
 	// limiter trips before we exhaust the budget — without this gate an
-	// attacker can probe the trigger-lookup index unboundedly.
+	// attacker can probe the trigger-lookup index unboundedly. Rate-limit
+	// keying is by the real source IP (r.RemoteAddr) since TrustedProxies
+	// is empty here, so the bucket is per-connection — exactly the
+	// property the per-IP limiter is meant to provide.
 	prev := testHandler.WebhookIPRateLimiter
 	testHandler.WebhookIPRateLimiter = NewMemoryWebhookIPRateLimiter(WebhookRateLimit{Limit: 2, Window: 60_000_000_000})
 	t.Cleanup(func() { testHandler.WebhookIPRateLimiter = prev })
@@ -439,7 +442,7 @@ func TestWebhookHandler_IPRateLimitReturns429BeforeDBLookup(t *testing.T) {
 		req := httptest.NewRequest("POST", "/api/webhooks/autopilots/"+token,
 			bytes.NewBufferString(`{"x":1}`))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Forwarded-For", "203.0.113.7")
+		req.RemoteAddr = "192.0.2.7:1234" // stable source, three calls = same bucket
 		req = withURLParam(req, "token", token)
 		w := httptest.NewRecorder()
 		testHandler.HandleAutopilotWebhook(w, req)
@@ -454,6 +457,41 @@ func TestWebhookHandler_IPRateLimitReturns429BeforeDBLookup(t *testing.T) {
 	}
 	if got := post("awt_unknown_c"); got != http.StatusTooManyRequests {
 		t.Fatalf("third probe: expected 429 (IP bucket), got %d", got)
+	}
+}
+
+func TestWebhookHandler_IPRateLimitNotBypassedByXFFSpoof(t *testing.T) {
+	// Round-2 fix: with the default empty TrustedProxies, an attacker who
+	// rotates X-Forwarded-For per request must still get bucketed by the
+	// real connection IP — otherwise the per-IP limiter is trivially
+	// bypassable and we're back to one DB index probe per request.
+	prev := testHandler.WebhookIPRateLimiter
+	testHandler.WebhookIPRateLimiter = NewMemoryWebhookIPRateLimiter(WebhookRateLimit{Limit: 2, Window: 60_000_000_000})
+	t.Cleanup(func() { testHandler.WebhookIPRateLimiter = prev })
+
+	post := func(token, xff string) int {
+		req := httptest.NewRequest("POST", "/api/webhooks/autopilots/"+token,
+			bytes.NewBufferString(`{"x":1}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Forwarded-For", xff) // <-- attacker-controlled
+		req.RemoteAddr = "198.51.100.42:5555"  // real (untrusted) source
+		req = withURLParam(req, "token", token)
+		w := httptest.NewRecorder()
+		testHandler.HandleAutopilotWebhook(w, req)
+		return w.Code
+	}
+
+	if got := post("awt_unknown_x", "1.1.1.1"); got != http.StatusNotFound {
+		t.Fatalf("first probe: expected 404, got %d", got)
+	}
+	if got := post("awt_unknown_y", "2.2.2.2"); got != http.StatusNotFound {
+		t.Fatalf("second probe: expected 404, got %d", got)
+	}
+	// Third request with yet another spoofed XFF — would have bypassed
+	// the limiter under the old (header-trusting) behavior, but with the
+	// CIDR-gated trust the bucket is still the real source IP.
+	if got := post("awt_unknown_z", "3.3.3.3"); got != http.StatusTooManyRequests {
+		t.Fatalf("third probe: expected 429 (bucket keyed by real IP), got %d", got)
 	}
 }
 
@@ -508,6 +546,66 @@ func TestCreateAutopilotTrigger_RejectsWebhookWithTimezone(t *testing.T) {
 	testHandler.CreateAutopilotTrigger(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 on webhook+timezone, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateAutopilotTrigger_RejectsCronExpressionOnWebhookKind(t *testing.T) {
+	// Round-2 should-fix: UpdateAutopilotTrigger must mirror create-path
+	// strictness — cron_expression on a non-schedule trigger is rejected
+	// with 400 rather than silently persisted.
+	agentID := createWebhookTestAgent(t, "WebhookUpdCron Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/autopilots/"+apID+"/triggers/"+trig.ID, map[string]any{
+		"cron_expression": "0 0 * * *",
+	})
+	req = withURLParams(req, "id", apID, "triggerId", trig.ID)
+	testHandler.UpdateAutopilotTrigger(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 on cron_expression for webhook trigger, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "cron_expression") {
+		t.Fatalf("error message should mention cron_expression, got %s", w.Body.String())
+	}
+}
+
+func TestUpdateAutopilotTrigger_RejectsTimezoneOnWebhookKind(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "WebhookUpdTZ Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/autopilots/"+apID+"/triggers/"+trig.ID, map[string]any{
+		"timezone": "Europe/Berlin",
+	})
+	req = withURLParams(req, "id", apID, "triggerId", trig.ID)
+	testHandler.UpdateAutopilotTrigger(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 on timezone for webhook trigger, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "timezone") {
+		t.Fatalf("error message should mention timezone, got %s", w.Body.String())
+	}
+}
+
+func TestUpdateAutopilotTrigger_AcceptsEnabledAndLabelOnWebhookKind(t *testing.T) {
+	// Counter-test: enabled and label remain valid on every kind. Without
+	// this, the kind-aware guard could regress to a blanket reject.
+	agentID := createWebhookTestAgent(t, "WebhookUpdAllowed Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/autopilots/"+apID+"/triggers/"+trig.ID, map[string]any{
+		"enabled": false,
+		"label":   "renamed",
+	})
+	req = withURLParams(req, "id", apID, "triggerId", trig.ID)
+	testHandler.UpdateAutopilotTrigger(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 on enabled+label PATCH, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 
