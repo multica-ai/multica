@@ -146,6 +146,15 @@ SET status = 'skipped', completed_at = now(), failure_reason = $2
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateAutopilotRunSkippedWithResult :one
+UPDATE autopilot_run
+SET status = 'skipped',
+    completed_at = now(),
+    failure_reason = $2,
+    result = sqlc.narg('result')
+WHERE id = $1
+RETURNING *;
+
 -- =====================
 -- Scheduler Queries
 -- =====================

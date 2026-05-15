@@ -1033,6 +1033,43 @@ func (q *Queries) UpdateAutopilotRunSkipped(ctx context.Context, arg UpdateAutop
 	return i, err
 }
 
+const updateAutopilotRunSkippedWithResult = `-- name: UpdateAutopilotRunSkippedWithResult :one
+UPDATE autopilot_run
+SET status = 'skipped',
+    completed_at = now(),
+    failure_reason = $2,
+    result = $3
+WHERE id = $1
+RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at
+`
+
+type UpdateAutopilotRunSkippedWithResultParams struct {
+	ID            pgtype.UUID `json:"id"`
+	FailureReason pgtype.Text `json:"failure_reason"`
+	Result        []byte      `json:"result"`
+}
+
+func (q *Queries) UpdateAutopilotRunSkippedWithResult(ctx context.Context, arg UpdateAutopilotRunSkippedWithResultParams) (AutopilotRun, error) {
+	row := q.db.QueryRow(ctx, updateAutopilotRunSkippedWithResult, arg.ID, arg.FailureReason, arg.Result)
+	var i AutopilotRun
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.TriggerID,
+		&i.Source,
+		&i.Status,
+		&i.IssueID,
+		&i.TaskID,
+		&i.TriggeredAt,
+		&i.CompletedAt,
+		&i.FailureReason,
+		&i.TriggerPayload,
+		&i.Result,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const updateAutopilotTrigger = `-- name: UpdateAutopilotTrigger :one
 UPDATE autopilot_trigger SET
     enabled = COALESCE($2::boolean, enabled),
