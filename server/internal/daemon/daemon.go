@@ -65,12 +65,13 @@ type repoCacheBackend interface {
 
 // Daemon is the local agent runtime that polls for and executes tasks.
 type Daemon struct {
-	cfg       Config
-	client    *Client
-	notifier  notifier.Notifier
-	repoCache repoCacheBackend
+	cfg        Config
+	client     *Client
+	notifier   notifier.Notifier
+	repoCache  repoCacheBackend
 	traceStore trace.TraceStore
-	logger    *slog.Logger
+	previews   *PreviewManager
+	logger     *slog.Logger
 
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
@@ -125,6 +126,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		notifier:       notifier.New(),
 		repoCache:      repocache.New(cacheRoot, logger),
 		traceStore:     traceStore,
+		previews:       NewPreviewManager(filepath.Join(cfg.WorkspacesRoot, ".previews"), cfg.DaemonID, logger),
 		logger:         logger,
 		workspaces:     make(map[string]*workspaceState),
 		runtimeIndex:   make(map[string]Runtime),
@@ -283,6 +285,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Deregister runtimes on shutdown (uses a fresh context since ctx will be cancelled).
 	defer d.deregisterRuntimes()
+	if d.previews != nil {
+		defer d.stopPreviewsOnShutdown()
+	}
 	if d.traceStore != nil {
 		defer func() {
 			if err := d.traceStore.Close(); err != nil && !errors.Is(err, trace.ErrStoreClosed) {
@@ -298,6 +303,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.taskWakeupLoop(ctx, taskWakeups)
 	go d.heartbeatLoop(ctx)
 	go d.gcLoop(ctx)
+	if d.previews != nil {
+		go d.previews.RunGC(ctx)
+	}
 	go d.serveHealth(ctx, healthLn, time.Now())
 	return d.pollLoop(ctx, taskWakeups)
 }
@@ -306,6 +314,17 @@ func (d *Daemon) Run(ctx context.Context) error {
 // after a successful update, or empty string if no restart is needed.
 func (d *Daemon) RestartBinary() string {
 	return d.restartBinary
+}
+
+func (d *Daemon) stopPreviewsOnShutdown() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := d.previews.StopAll(ctx); err != nil {
+		d.logger.Warn("failed to stop previews on shutdown", "error", err)
+		return
+	}
+	d.logger.Info("stopped previews on shutdown")
 }
 
 // deregisterRuntimes notifies the server that all runtimes are going offline.

@@ -45,6 +45,7 @@ func init() {
 	autopilotCmd.GroupID = groupCore
 	workspaceCmd.GroupID = groupCore
 	repoCmd.GroupID = groupCore
+	previewCmd.GroupID = groupRuntime
 	skillCmd.GroupID = groupCore
 
 	// Runtime commands
@@ -67,6 +68,7 @@ func init() {
 	rootCmd.AddCommand(autopilotCmd)
 	rootCmd.AddCommand(workspaceCmd)
 	rootCmd.AddCommand(repoCmd)
+	rootCmd.AddCommand(previewCmd)
 	rootCmd.AddCommand(skillCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(runtimeCmd)
