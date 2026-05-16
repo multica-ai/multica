@@ -59,8 +59,17 @@ function InboxListItemShell({
   onUnarchive, // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166
 }: InboxListItemBaseProps) {
   return (
-    <button
+    // CEREBRO-PATCH(inbox-row-action-click-target): avoid nested native buttons so row actions receive clicks.
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       className={`group relative flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${
         isSelected ? "bg-accent" : "hover:bg-accent/50"
       }`}
@@ -85,7 +94,7 @@ function InboxListItemShell({
       ) : (
         <CerebroSwipeArchive onArchive={onArchive} />
       )}
-    </button>
+    </div>
   );
 }
 

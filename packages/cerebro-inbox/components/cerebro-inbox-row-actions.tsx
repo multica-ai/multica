@@ -36,11 +36,13 @@ import { useMuteInbox, useUnmuteInbox, useMarkInboxUnread } from "../mutations";
 import { isMuted, nextLocalEightAm } from "../mute-time";
 import { useCerebroInboxStrings } from "../strings";
 import {
+  ARCHIVE_COMMIT_DELAY_MS,
   DIRECTION_DECIDE_PX,
   LEFT_PANEL_REVEAL_PX,
   LONG_PRESS_MS,
   POST_SWIPE_CLICK_SUPPRESS_MS,
   SWIPE_INTENT_PX,
+  SWIPE_ROW_TRANSITION_MS,
   commitThresholdPx,
 } from "../swipe-thresholds";
 
@@ -294,6 +296,7 @@ function MobileRowActions({
   }, []);
   const [revealed, setRevealed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const archiveCommitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Tracks whether the gesture is still in flight so the transform effect
   // can decide whether to apply a snap-back transition on release.
   const gestureActiveRef = useRef(false);
@@ -307,6 +310,11 @@ function MobileRowActions({
   // so a boolean flag never gets reset by the swallow path — it stays
   // stuck-true and eats the user's NEXT tap on the reveal panel.
   const swipeEndedAtRef = useRef(0);
+  // Ref to the revealed left-panel div so the capture-phase click suppressor
+  // can exempt taps that land inside it — the panel's own onClick handlers
+  // already call stopPropagation, but the capture handler runs first and was
+  // eating the first legitimate tap after a swipe-left.
+  const leftPanelRef = useRef<HTMLDivElement>(null);
 
   // Stable refs for callbacks so the touch-event effect doesn't have to
   // re-attach listeners on every render — listener re-attachment in the
@@ -317,6 +325,15 @@ function MobileRowActions({
     onArchiveRef.current = onArchive;
     onDrawerOpenRef.current = setDrawerOpen;
   });
+
+  useEffect(
+    () => () => {
+      if (archiveCommitTimeoutRef.current !== null) {
+        clearTimeout(archiveCommitTimeoutRef.current);
+      }
+    },
+    [],
+  );
 
   // Apply the offset transform to the parent row so the user sees the row
   // visually follow the finger. Snap-back animates only when the gesture
@@ -330,7 +347,7 @@ function MobileRowActions({
       const x = revealed && offsetX === 0 ? -LEFT_PANEL_REVEAL_PX : offsetX;
       row.style.transform = `translateX(${x}px)`;
     }
-    row.style.transition = gestureActiveRef.current ? "" : "transform 200ms";
+    row.style.transition = gestureActiveRef.current ? "" : `transform ${SWIPE_ROW_TRANSITION_MS}ms`;
   }, [offsetX, revealed]);
 
   // Native TouchEvent listeners with `passive: false` so we can call
@@ -421,9 +438,12 @@ function MobileRowActions({
       }
 
       if (live >= commitPx) {
-        setOffsetX(0);
         setRevealed(false);
-        onArchiveRef.current();
+        archiveCommitTimeoutRef.current = setTimeout(() => {
+          setOffsetX(0);
+          onArchiveRef.current();
+          archiveCommitTimeoutRef.current = null;
+        }, ARCHIVE_COMMIT_DELAY_MS);
       } else if (live <= -commitPx) {
         setOffsetX(0);
         setRevealed(true);
@@ -445,7 +465,7 @@ function MobileRowActions({
     };
   }, [setOffsetX]);
 
-  // Capture-phase click listener on the parent shell <button>: when a
+  // Capture-phase click listener on the parent row shell: when a
   // meaningful swipe just happened, the synthetic click iOS Safari
   // sometimes fires after touchend is intercepted here so the row's
   // onClick (navigation) doesn't run on a swipe attempt. The timestamp
@@ -456,6 +476,10 @@ function MobileRowActions({
     if (!node) return;
     const handler = (e: MouseEvent) => {
       if (Date.now() - swipeEndedAtRef.current < POST_SWIPE_CLICK_SUPPRESS_MS) {
+        // Taps inside the revealed action panel are intentional — the panel's
+        // own onClick handlers call stopPropagation, but capture runs first.
+        // Exempt them so the first tap after swipe-left isn't eaten.
+        if (leftPanelRef.current?.contains(e.target as Node)) return;
         swipeEndedAtRef.current = 0;
         e.stopPropagation();
         e.preventDefault();
@@ -489,18 +513,19 @@ function MobileRowActions({
   // Swipe-right reveal background (archive cue).
   const archiveBg = offsetX > 0 && (
     <div
-      className="absolute inset-y-0 left-0 flex items-center justify-start gap-2 bg-destructive px-4 text-destructive-foreground"
+      className="absolute inset-y-0 left-0 flex items-center justify-start gap-2 bg-destructive px-4 text-white"
       style={{ width: Math.max(offsetX, 0) }}
       aria-hidden
     >
       <Archive className="size-4" />
-      <span className="text-xs font-medium">{strings.swipe_archive}</span>
+      <span className="text-xs font-medium text-white">{strings.swipe_archive}</span>
     </div>
   );
 
   // Swipe-left action panel.
   const leftPanel = (offsetX < 0 || revealed) && (
     <div
+      ref={leftPanelRef}
       className="absolute inset-y-0 right-0 flex items-stretch"
       style={{ width: revealed ? LEFT_PANEL_REVEAL_PX : Math.max(-offsetX, 0) }}
       aria-hidden={!revealed}
@@ -509,11 +534,12 @@ function MobileRowActions({
         role="button"
         tabIndex={-1}
         onClick={(e) => {
+          e.preventDefault();
           e.stopPropagation();
           closePanel();
           onToggleRead();
         }}
-        className="flex flex-1 flex-col items-center justify-center gap-1 bg-brand text-xs font-medium text-brand-foreground"
+        className="flex flex-1 flex-col items-center justify-center gap-1 bg-brand px-1 text-center text-xs font-medium leading-tight text-brand-foreground"
       >
         {unread ? (
           <MailOpen className="size-4" />
@@ -526,11 +552,12 @@ function MobileRowActions({
         role="button"
         tabIndex={-1}
         onClick={(e) => {
+          e.preventDefault();
           e.stopPropagation();
           closePanel();
           onToggleMute();
         }}
-        className="flex flex-1 flex-col items-center justify-center gap-1 bg-amber-500 text-xs font-medium text-white"
+        className="flex flex-1 flex-col items-center justify-center gap-1 bg-amber-500 px-1 text-center text-xs font-medium leading-tight text-white"
       >
         {muted ? <BellRing className="size-4" /> : <BellOff className="size-4" />}
         <span>{muted ? strings.unmute : strings.mute}</span>
@@ -679,14 +706,17 @@ function IconButton({
   onClick,
   ...props
 }: React.HTMLAttributes<HTMLSpanElement>) {
-  // role=button span (not <button>) — the inbox row shell wraps the whole
-  // row in a <button>, and a real <button> nested inside another <button>
-  // is invalid HTML and produces unstable click delivery on mobile Safari.
+  // role=button span (not <button>) keeps this safe inside row-level click
+  // surfaces across desktop and mobile renderers.
   return (
     <span
       role="button"
       tabIndex={-1}
-      onClick={onClick}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onClick?.(e);
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.stopPropagation();
@@ -759,6 +789,7 @@ function SwipeArchiveOnly({
   // Timestamp of the most recent meaningful swipe; see MobileRowActions
   // for the full rationale on why this is a timestamp, not a boolean.
   const swipeEndedAtRef = useRef(0);
+  const archiveCommitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Stable ref for the archive callback so the touch effect doesn't re-
   // attach listeners every render.
@@ -766,6 +797,15 @@ function SwipeArchiveOnly({
   useEffect(() => {
     onArchiveRef.current = onArchive;
   });
+
+  useEffect(
+    () => () => {
+      if (archiveCommitTimeoutRef.current !== null) {
+        clearTimeout(archiveCommitTimeoutRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     const row = containerRef.current?.parentElement;
@@ -775,7 +815,7 @@ function SwipeArchiveOnly({
     } else {
       row.style.transform = `translateX(${offsetX}px)`;
     }
-    row.style.transition = gestureActiveRef.current ? "" : "transform 200ms";
+    row.style.transition = gestureActiveRef.current ? "" : `transform ${SWIPE_ROW_TRANSITION_MS}ms`;
   }, [offsetX]);
 
   useEffect(() => {
@@ -854,8 +894,11 @@ function SwipeArchiveOnly({
         swipeEndedAtRef.current = Date.now();
       }
       if (live >= commitThresholdPx(rowWidth)) {
-        setOffsetX(0);
-        onArchiveRef.current();
+        archiveCommitTimeoutRef.current = setTimeout(() => {
+          setOffsetX(0);
+          onArchiveRef.current();
+          archiveCommitTimeoutRef.current = null;
+        }, ARCHIVE_COMMIT_DELAY_MS);
       } else {
         setOffsetX(0);
       }
@@ -882,12 +925,12 @@ function SwipeArchiveOnly({
       />
       {offsetX > 0 && (
         <div
-          className="absolute inset-y-0 left-0 flex items-center justify-start gap-2 bg-destructive px-4 text-destructive-foreground"
+          className="absolute inset-y-0 left-0 flex items-center justify-start gap-2 bg-destructive px-4 text-white"
           style={{ width: Math.max(offsetX, 0) }}
           aria-hidden
         >
           <Archive className="size-4" />
-          <span className="text-xs font-medium">{strings.swipe_archive}</span>
+          <span className="text-xs font-medium text-white">{strings.swipe_archive}</span>
         </div>
       )}
     </>
@@ -895,8 +938,7 @@ function SwipeArchiveOnly({
   // No SimpleArchiveButton here — `CerebroSwipeArchive` already takes the
   // desktop fallback path (`!isMobile`) before reaching this component.
   // Rendering it again from the mobile path was redundant and added a
-  // nested clickable that could confuse iOS Safari's tap-target heuristic
-  // on rows whose parent shell is a <button>.
+  // nested clickable that could confuse iOS Safari's tap-target heuristic.
 }
 
 function SimpleArchiveButton({ onArchive }: { onArchive: () => void }) {
@@ -907,6 +949,7 @@ function SimpleArchiveButton({ onArchive }: { onArchive: () => void }) {
       tabIndex={-1}
       title={strings.archive_label}
       onClick={(e) => {
+        e.preventDefault();
         e.stopPropagation();
         onArchive();
       }}
@@ -963,6 +1006,7 @@ function SimpleUnarchiveButton({ onUnarchive }: { onUnarchive: () => void }) {
       title={strings.unarchive_label}
       aria-label={strings.unarchive_label}
       onClick={(e) => {
+        e.preventDefault();
         e.stopPropagation();
         onUnarchive();
       }}

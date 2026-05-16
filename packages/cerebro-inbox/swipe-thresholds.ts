@@ -55,6 +55,14 @@ export const SWIPE_INTENT_PX = 16;
  * age out on its own, making tap-after-swipe reliable. */
 export const POST_SWIPE_CLICK_SUPPRESS_MS = 350;
 
+/** Keep the archive reveal visible briefly after a committed swipe, so the
+ * user sees the destructive action before the row disappears. */
+export const ARCHIVE_COMMIT_DELAY_MS = 1000;
+
+/** Snap-back / reveal transition duration. Slightly slower than the previous
+ * 200ms so swipe-to-archive feels less abrupt. */
+export const SWIPE_ROW_TRANSITION_MS = 320;
+
 /** Total movement before we decide which axis dominates. Below this, we
  * wait — the very first sample of a touch is noisy. */
 export const DIRECTION_DECIDE_PX = 8;
