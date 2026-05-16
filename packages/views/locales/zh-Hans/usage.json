@@ -16,7 +16,10 @@
     "tasks_hint": "失败 {{failed}} 个"
   },
   "daily": {
-    "title": "每日费用",
+    "title_cost": "每日费用",
+    "title_tokens": "每日 Token",
+    "metric_cost": "费用",
+    "metric_tokens": "Token",
     "no_data": "所选时间范围内暂无消耗。"
   },
   "leaderboard": {

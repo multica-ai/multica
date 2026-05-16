@@ -3,7 +3,7 @@ import type {
   DashboardUsageByAgent,
   DashboardAgentRunTime,
 } from "@multica/core/types";
-import { estimateCost, estimateCostBreakdown } from "../runtimes/utils";
+import { estimateCost, estimateCostBreakdown, type DailyTokenData } from "../runtimes/utils";
 
 // ---------------------------------------------------------------------------
 // Dashboard data aggregations
@@ -64,6 +64,42 @@ export function aggregateDailyCost(usage: DashboardUsageDaily[]): DailyCostStack
         total: round(input + output + cacheWrite),
       };
     });
+}
+
+// Per-(date, model) rows → 1 row per date with raw token counts split
+// across the four chart segments. Independent of pricing — unmapped
+// models still contribute here, even if they're excluded from cost.
+// Mirrors `aggregateByDate(...).dailyTokens` from the runtimes utils so
+// the Tokens chart on the Usage page consumes the same shape as the one
+// on the runtime-detail page.
+export function aggregateDailyTokens(usage: DashboardUsageDaily[]): DailyTokenData[] {
+  const map = new Map<
+    string,
+    { input: number; output: number; cacheRead: number; cacheWrite: number }
+  >();
+  for (const u of usage) {
+    const entry = map.get(u.date) ?? {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    };
+    entry.input += u.input_tokens;
+    entry.output += u.output_tokens;
+    entry.cacheRead += u.cache_read_tokens;
+    entry.cacheWrite += u.cache_write_tokens;
+    map.set(u.date, entry);
+  }
+  return [...map.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, t]) => ({
+      date,
+      label: formatDateLabel(date),
+      input: t.input,
+      output: t.output,
+      cacheRead: t.cacheRead,
+      cacheWrite: t.cacheWrite,
+    }));
 }
 
 export interface DashboardTokenTotals {
