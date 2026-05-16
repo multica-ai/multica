@@ -2301,7 +2301,7 @@ func TestDispatchStep_IssueTimeline_SavesReplyContext(t *testing.T) {
 	cfg.ReplyContext = store
 	cfg.IssueDigestFacade = facade.NewIssueDigestFacade(&fakeIssueDigestService{
 		timeline: facade.IssueTimelinePage{
-			Issue: facade.IssueDigestIssue{Identifier: "STA-4", Title: "timeline test", Status: "in_progress"},
+			Issue: facade.IssueDigestIssue{ID: uuid(0x54), Identifier: "STA-4", Title: "timeline test", Status: "in_progress"},
 			Page:  1, PageSize: 5, HasMore: false,
 		},
 	})
@@ -2334,7 +2334,7 @@ func TestDispatchStep_IssueLogs_SavesReplyContext(t *testing.T) {
 	cfg.ReplyContext = store
 	cfg.IssueDigestFacade = facade.NewIssueDigestFacade(&fakeIssueDigestService{
 		logs: facade.IssueLogPage{
-			Issue: facade.IssueDigestIssue{Identifier: "STA-5", Title: "logs test", Status: "in_progress"},
+			Issue: facade.IssueDigestIssue{ID: uuid(0x55), Identifier: "STA-5", Title: "logs test", Status: "in_progress"},
 			Page:  1, PageSize: 8, HasMore: false,
 		},
 	})
