@@ -23,6 +23,7 @@ const mockApi = vi.hoisted(() => ({
   createProject: vi.fn(),
   listIssues: vi.fn(),
   createIssue: vi.fn(),
+  getCRMEmailEngineStatus: vi.fn(),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -60,6 +61,10 @@ function renderEmailsPage() {
       </QueryClientProvider>
     </I18nProvider>,
   );
+}
+
+async function switchToCRMUI() {
+  await userEvent.click(await screen.findByRole("button", { name: "CRM UI" }));
 }
 
 const linkedThread = {
@@ -145,12 +150,23 @@ beforeEach(() => {
   mockApi.createProject.mockResolvedValue(project);
   mockApi.listIssues.mockResolvedValue({ issues: [issue], total: 1 });
   mockApi.createIssue.mockResolvedValue({ ...issue, id: "issue-2", identifier: "ACME-2", title: "Follow up: New quotation request" });
+  mockApi.getCRMEmailEngineStatus.mockResolvedValue({ enabled: true, configured: true, base_url: "http://emailengine:3000", account: "sales", state: "connected", syncing: false, folders: [], fallback_provider: "imap_smtp" });
 
 });
 
 describe("CRMEmailsPage", () => {
+  it("renders the EmailEngine embed POC first with a CRM UI fallback", async () => {
+    renderEmailsPage();
+
+    expect(await screen.findByText("EmailEngine webmail embed POC")).toBeInTheDocument();
+    expect(await screen.findByTitle("EmailEngine webmail embed POC")).toHaveAttribute("src", "/emailengine/");
+    expect(screen.getByRole("button", { name: "CRM UI" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open EmailEngine" })).toHaveAttribute("href", "/emailengine/");
+  });
+
   it("renders a CRM-style email workspace with folders, wide detail pane, and message body", async () => {
     renderEmailsPage();
+    await switchToCRMUI();
 
     expect(await screen.findByText("Email workspace")).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Email folders" })).toBeInTheDocument();
@@ -173,6 +189,7 @@ describe("CRMEmailsPage", () => {
   it("filters folders and opens the IMAP mailbox binding dialog", async () => {
     mockApi.listCRMEmailThreads.mockResolvedValue({ threads: [linkedThread, sentThread, unlinkedThread], total: 3 });
     renderEmailsPage();
+    await switchToCRMUI();
 
     expect((await screen.findAllByText("New quotation request")).length).toBeGreaterThan(0);
     expect(screen.queryByText("Sent quotation")).not.toBeInTheDocument();
@@ -183,14 +200,15 @@ describe("CRMEmailsPage", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /Mailbox settings/ }));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByText("Bind an IMAP mailbox for CRM email import. Automatic sync stays off until the connection and security model are confirmed.")).toBeInTheDocument();
-    expect(within(dialog).getByLabelText("IMAP host")).toBeInTheDocument();
-    expect(within(dialog).getByLabelText("Secret reference")).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Test connection" })).toBeInTheDocument();
+    expect(within(dialog).getByText("EmailEngine mailbox backend")).toBeInTheDocument();
+    expect(within(dialog).getByText(/Multica now uses EmailEngine/)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Mailbox display name")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Check provider" })).toBeInTheDocument();
   });
 
   it("opens CRM detail dialogs from linked customer and contact names", async () => {
     renderEmailsPage();
+    await switchToCRMUI();
 
     await screen.findByText("Please quote 500 units.");
     await userEvent.click(screen.getByRole("button", { name: /Linked customer\s*Acme Buyer/ }));
@@ -216,6 +234,7 @@ describe("CRMEmailsPage", () => {
     mockApi.updateCRMEmailThreadAssociation.mockResolvedValue({ ...unlinkedThread, account_id: "account-1", contact_id: "contact-2" });
 
     renderEmailsPage();
+    await switchToCRMUI();
 
     await screen.findByText("Can you send the catalog?");
     await userEvent.click(screen.getByRole("button", { name: "Link customer" }));
@@ -240,6 +259,7 @@ describe("CRMEmailsPage", () => {
   it("links project and issue as email thread links and can create default project and follow-up issue", async () => {
     mockApi.listProjects.mockResolvedValueOnce({ projects: [], total: 0 }).mockResolvedValue({ projects: [project], total: 1 });
     renderEmailsPage();
+    await switchToCRMUI();
 
     await screen.findByText("Please quote 500 units.");
     await userEvent.click(screen.getByRole("button", { name: /Link project \/ issue/ }));

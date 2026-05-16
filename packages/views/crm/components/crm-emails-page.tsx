@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArrowRight, Building2, Inbox, Link2, Mail, MailOpen, Search, Send, Settings, Star, UserRound } from "lucide-react";
+import { Archive, ArrowRight, Building2, ExternalLink, Inbox, Link2, Mail, MailOpen, Search, Send, Settings, Star, UserRound } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueKeys, useIssueDraftStore } from "@multica/core/issues";
@@ -102,6 +102,7 @@ export function CRMEmailsPage() {
   const [associationDraft, setAssociationDraft] = useState<AssociationDraft | null>(null);
   const [emailLinkDraft, setEmailLinkDraft] = useState<EmailLinkDraft | null>(null);
   const [composeDraft, setComposeDraft] = useState<ComposeDraft | null>(null);
+  const [viewMode, setViewMode] = useState<"embed" | "native">("embed");
   const openModal = useModalStore((state) => state.open);
   const setIssueDraft = useIssueDraftStore((state) => state.setDraft);
   const clearIssueDraft = useIssueDraftStore((state) => state.clearDraft);
@@ -119,6 +120,8 @@ export function CRMEmailsPage() {
   const selectedMailboxId = mailboxDraft.id ?? mailboxes[0]?.id ?? "";
   const { data: emailEngineStatus } = useQuery(crmEmailEngineStatusOptions(wsId, selectedMailboxId));
   const emailDrafts = draftsData?.drafts ?? [];
+  const emailEngineEmbedUrl = "/emailengine/";
+  const canTryEmailEngineEmbed = Boolean(emailEngineStatus?.enabled && emailEngineStatus?.configured);
 
   const folderThreads = useMemo(() => {
     return threads.filter((thread) => {
@@ -402,12 +405,58 @@ export function CRMEmailsPage() {
           <h1 className="text-sm font-medium">{t(($) => $.emails.workspace_title)}</h1>
           {!isLoading && <Badge variant="secondary" className="tabular-nums">{threads.length}</Badge>}
         </div>
-        <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)}>
-          <Settings className="mr-1 size-3" />
-          {t(($) => $.emails.mailbox_settings)}
-        </Button>
+        <div className="flex items-center gap-2">
+          <div className="rounded-md border bg-muted p-1">
+            <Button variant={viewMode === "embed" ? "secondary" : "ghost"} size="sm" onClick={() => setViewMode("embed")}>Embed POC</Button>
+            <Button variant={viewMode === "native" ? "secondary" : "ghost"} size="sm" onClick={() => setViewMode("native")}>CRM UI</Button>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)}>
+            <Settings className="mr-1 size-3" />
+            {t(($) => $.emails.mailbox_settings)}
+          </Button>
+        </div>
       </PageHeader>
 
+      {viewMode === "embed" ? (
+        <div className="min-h-0 flex-1 bg-muted/30 p-4">
+          <section className="flex h-full min-h-[620px] flex-col overflow-hidden rounded-xl border bg-background shadow-sm">
+            <div className="border-b bg-card/80 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">EmailEngine webmail embed POC</div>
+                  <h2 className="mt-1 text-lg font-semibold">Same-origin iframe trial for `/emailengine/`</h2>
+                  <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+                    This mode intentionally tries the EmailEngine UI without exposing tokens in the browser. If proxy, auth, or frame headers block it, switch back to the CRM UI while we keep the native fallback intact.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant={canTryEmailEngineEmbed ? "default" : "outline"}>{canTryEmailEngineEmbed ? "EmailEngine configured" : "Embed not ready"}</Badge>
+                  {emailEngineStatus?.state ? <Badge variant="secondary">{emailEngineStatus.state}</Badge> : null}
+                  <Button variant="outline" size="sm" onClick={() => setViewMode("native")}>Use CRM UI</Button>
+                  <a className="inline-flex h-8 items-center rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted" href={emailEngineEmbedUrl} target="_blank" rel="noreferrer">
+                    <ExternalLink className="mr-1 size-3" />Open EmailEngine
+                  </a>
+                </div>
+              </div>
+              <div className="mt-3 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                {canTryEmailEngineEmbed
+                  ? "Attempting to render EmailEngine through the same origin path. A blank/login/refused frame means the POC needs reverse-proxy or EmailEngine frame/auth settings before continuing."
+                  : emailEngineStatus?.last_error || "EmailEngine is not enabled/configured for this workspace yet, so this POC keeps the native CRM mailbox available as the safe fallback."}
+              </div>
+            </div>
+            {canTryEmailEngineEmbed ? (
+              <iframe title="EmailEngine webmail embed POC" src={emailEngineEmbedUrl} className="min-h-0 flex-1 border-0 bg-white" />
+            ) : (
+              <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground">
+                <div className="max-w-md rounded-lg border border-dashed bg-card p-6">
+                  <Mail className="mx-auto mb-3 size-8" />
+                  <p>EmailEngine embed is blocked until the backend reports an enabled and configured account. Use the CRM UI fallback for current mailbox work.</p>
+                </div>
+              </div>
+            )}
+          </section>
+        </div>
+      ) : (
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 lg:grid-cols-[220px_360px_minmax(0,1fr)]">
         <aside className="flex min-h-0 flex-col border-r bg-card/80 p-3">
           <div className="mb-3 rounded-lg border bg-background p-3">
@@ -583,6 +632,7 @@ export function CRMEmailsPage() {
           )}
         </section>
       </div>
+      )}
 
       <Dialog open={detailDialog !== null} onOpenChange={(open) => !open && setDetailDialog(null)}>
         <DialogContent className="sm:max-w-lg">
