@@ -34,6 +34,7 @@ The following variables are expected by the template:
 - `DINGTALK_CLIENT_SECRET`
 - `DINGTALK_ROBOT_CODE`
 - `DINGTALK_TOKEN_ENCRYPTION_KEY`
+- `GITEE_TOKEN` (optional — required for importing skills from private Gitee repos)
 
 `DINGTALK_TOKEN_ENCRYPTION_KEY` is optional in application code, but it should be set in production so linked DingTalk tokens are not encrypted with the JWT signing secret.
 
