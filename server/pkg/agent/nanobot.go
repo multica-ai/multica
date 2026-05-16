@@ -6,11 +6,15 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+const nanobotSessionFile = ".nanobot_session"
 
 const defaultNanobotGatewayURL = "ws://127.0.0.1:8765/ws"
 
@@ -88,12 +92,23 @@ func (b *nanobotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		}
 		chatID = ready.ChatID
 
+		// Resolve the session to resume: server-provided ID takes priority,
+		// then fall back to the chat_id cached in the workdir.
+		resumeID := opts.ResumeSessionID
+		if resumeID == "" && opts.Cwd != "" {
+			if data, err := os.ReadFile(filepath.Join(opts.Cwd, nanobotSessionFile)); err == nil {
+				if id := strings.TrimSpace(string(data)); id != "" {
+					resumeID = id
+				}
+			}
+		}
+
 		// If resuming a previous session, attach to the existing chat_id
 		// so the agent retains conversation context.
-		if opts.ResumeSessionID != "" {
+		if resumeID != "" {
 			attachEnvelope := map[string]any{
 				"type":    "attach",
-				"chat_id": opts.ResumeSessionID,
+				"chat_id": resumeID,
 			}
 			if err := conn.WriteJSON(attachEnvelope); err != nil {
 				finalStatus = "failed"
@@ -109,10 +124,10 @@ func (b *nanobotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
-			chatID = opts.ResumeSessionID
+			chatID = resumeID
 		}
 
-		b.cfg.Logger.Info("nanobot gateway connected", "chat_id", chatID, "resume", opts.ResumeSessionID != "")
+		b.cfg.Logger.Info("nanobot gateway connected", "chat_id", chatID, "resume", resumeID != "")
 
 		_ = conn.SetReadDeadline(time.Time{})
 
@@ -205,6 +220,12 @@ func (b *nanobotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 
 		duration := time.Since(startTime)
 		b.cfg.Logger.Info("nanobot finished", "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+
+		// Persist chat_id to workdir so the next task on the same issue
+		// can resume this session even after a daemon restart.
+		if opts.Cwd != "" && chatID != "" && finalStatus != "failed" {
+			_ = os.WriteFile(filepath.Join(opts.Cwd, nanobotSessionFile), []byte(chatID+"\n"), 0o644)
+		}
 
 		resCh <- Result{
 			Status:     finalStatus,
