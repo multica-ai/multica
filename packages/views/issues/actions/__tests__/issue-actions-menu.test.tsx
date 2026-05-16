@@ -48,6 +48,18 @@ vi.mock("@multica/core/workspace/queries", () => ({
     queryKey: ["workspaces", "ws-1", "agents"],
     queryFn: () => Promise.resolve([]),
   }),
+  squadListOptions: () => ({
+    queryKey: ["workspaces", "ws-1", "squads"],
+    queryFn: () => Promise.resolve([]),
+  }),
+  assigneeFrequencyOptions: () => ({
+    queryKey: ["workspaces", "ws-1", "assignee-frequency"],
+    queryFn: () => Promise.resolve([]),
+  }),
+}));
+
+vi.mock("@multica/core/workspace/hooks", () => ({
+  useActorName: () => ({ getActorName: (_t: string, _id: string) => "" }),
 }));
 
 vi.mock("@multica/core/pins", () => ({
@@ -156,6 +168,29 @@ describe("IssueActionsDropdown", () => {
     expect(screen.queryByText("Create sub-issue")).not.toBeInTheDocument();
     expect(screen.queryByText("Set parent issue...")).not.toBeInTheDocument();
     expect(screen.queryByText("Add sub-issue...")).not.toBeInTheDocument();
+  });
+
+  it("clicking the Assignee item opens the shared AssigneePicker popover", async () => {
+    render(
+      wrap(
+        <IssueActionsDropdown
+          issue={mockIssue}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId("trigger"));
+    fireEvent.click(await screen.findByText("Assignee"));
+
+    // The shared picker exposes a search input and renders the workspace
+    // member under a "Members" group — both come from `AssigneePicker`, not
+    // the legacy submenu (which had neither).
+    expect(
+      await screen.findByPlaceholderText("Assign to..."),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("Members")).toBeInTheDocument();
+    expect(await screen.findByText("Test User")).toBeInTheDocument();
   });
 
   it("clicking Delete issue opens the delete-confirm modal", async () => {

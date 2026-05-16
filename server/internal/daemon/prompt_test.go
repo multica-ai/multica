@@ -156,6 +156,24 @@ func TestBuildThreadIssuePrompt_ParentIssueAndProject(t *testing.T) {
 	}
 }
 
+// TestBuildQuickCreatePromptAssigneeIncludesSquads locks in the MUL-2165
+// fix: the assignee-resolution rules must tell the agent to consult the
+// squad list alongside members and agents. Before this, a quick-create
+// input like "assign to <SquadName>" silently fell through to
+// "Unrecognized assignee" because squads were never queried.
+func TestBuildQuickCreatePromptAssigneeIncludesSquads(t *testing.T) {
+	out := buildQuickCreatePrompt(Task{QuickCreatePrompt: "fix the login button color"})
+	mustContain := []string{
+		"multica squad list",
+		"Squads are first-class assignees",
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(out, s) {
+			t.Errorf("buildQuickCreatePrompt assignee block missing %q\n--- output ---\n%s", s, out)
+		}
+	}
+}
+
 // TestBuildQuickCreatePromptProjectPinning verifies that when the user
 // pins a project in the quick-create modal, the prompt instructs the agent
 // to pass `--project <uuid>` exactly. Without this, the agent would re-read

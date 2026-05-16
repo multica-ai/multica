@@ -852,18 +852,25 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 }
 
 // QuickCreateIssueRequest is the body for POST /api/issues/quick-create. The
-// user picks an agent in the modal and types one line of natural language;
-// the server validates the agent's reachability up front, queues a quick-
-// create task, and returns 202 immediately. The agent translates the prompt
-// into a `multica issue create` invocation in the background; success and
-// failure both surface as inbox notifications to the requester.
+// user picks an actor (agent or squad) in the modal and types one line of
+// natural language; the server validates the actor's reachability up front,
+// queues a quick-create task, and returns 202 immediately. The agent
+// translates the prompt into a `multica issue create` invocation in the
+// background; success and failure both surface as inbox notifications to
+// the requester.
+//
+// Exactly one of AgentID / SquadID is required. When SquadID is set, the
+// task is enqueued against the squad's leader agent and the leader receives
+// the same Operating Protocol briefing it would for an issue assigned to
+// the squad, so it can choose to delegate to a squad member as usual.
 //
 // ProjectID is optional and lets the modal target a specific project so
 // the agent's `multica issue create` invocation passes `--project <uuid>`
 // instead of letting it default. The frontend remembers the user's last
 // pick per workspace, so frequent users skip retyping "in project X".
 type QuickCreateIssueRequest struct {
-	AgentID   string `json:"agent_id"`
+	AgentID   string `json:"agent_id,omitempty"`
+	SquadID   string `json:"squad_id,omitempty"`
 	Prompt    string `json:"prompt"`
 	ProjectID string `json:"project_id,omitempty"`
 }
@@ -885,8 +892,11 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "prompt is required")
 		return
 	}
-	agentUUID, ok := parseUUIDOrBadRequest(w, req.AgentID, "agent_id")
-	if !ok {
+
+	hasAgent := strings.TrimSpace(req.AgentID) != ""
+	hasSquad := strings.TrimSpace(req.SquadID) != ""
+	if hasAgent == hasSquad {
+		writeError(w, http.StatusBadRequest, "exactly one of agent_id or squad_id is required")
 		return
 	}
 
@@ -905,10 +915,48 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve the actor to the agent that will actually run the task. For
+	// agent picks that's the agent itself; for squad picks it's the squad's
+	// leader agent. The leader receives a squad-leader briefing on dispatch
+	// (see daemon.go), matching the behavior of an issue assigned to the
+	// squad — picking a squad here is functionally "ask the squad leader to
+	// create this issue, on behalf of the squad".
+	var agentUUID pgtype.UUID
+	var squadUUID pgtype.UUID
+	if hasSquad {
+		var ok bool
+		squadUUID, ok = parseUUIDOrBadRequest(w, req.SquadID, "squad_id")
+		if !ok {
+			return
+		}
+		squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+			ID:          squadUUID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "squad not found")
+			return
+		}
+		if squad.ArchivedAt.Valid {
+			writeError(w, http.StatusBadRequest, "squad is archived")
+			return
+		}
+		agentUUID = squad.LeaderID
+	} else {
+		var ok bool
+		agentUUID, ok = parseUUIDOrBadRequest(w, req.AgentID, "agent_id")
+		if !ok {
+			return
+		}
+	}
+
 	// Reuse the same workspace-membership / archived / private-agent
 	// ownership rules as `validateAssigneePair` so a user can't POST a
 	// private agent_id they shouldn't be able to dispatch (the frontend
-	// filters them out, but the handler is the trust boundary).
+	// filters them out, but the handler is the trust boundary). Squad
+	// picks reach this with the resolved leader agent; the same rules
+	// apply — a private leader behind a squad the user can't reach
+	// should still be rejected.
 	if status, msg := h.validateAssigneePair(
 		r.Context(), r, workspaceID,
 		pgtype.Text{String: "agent", Valid: true},
@@ -971,7 +1019,7 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		projectUUID = pid
 	}
 
-	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, prompt, projectUUID)
+	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID)
 	if err != nil {
 		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue quick-create task")

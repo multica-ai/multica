@@ -505,12 +505,20 @@ func (s *TaskService) EnqueueOrchestratorTask(ctx context.Context, issue db.Issu
 // non-empty the daemon claim handler resolves the project's title +
 // resources, and the prompt template instructs the agent to pass
 // `--project <uuid>` so the new issue lands in that project.
+//
+// SquadID is non-empty when the user picked a squad (rather than an agent)
+// in the modal. The task is still enqueued against the squad's leader
+// agent (Queries.CreateQuickCreateTask is agent-scoped); SquadID is the
+// hint the daemon claim handler uses to layer the squad-leader briefing
+// onto the agent's Instructions, matching the behavior of issue-bound
+// tasks assigned to the squad.
 type QuickCreateContext struct {
 	Type        string `json:"type"`
 	Prompt      string `json:"prompt"`
 	RequesterID string `json:"requester_id"`
 	WorkspaceID string `json:"workspace_id"`
 	ProjectID   string `json:"project_id,omitempty"`
+	SquadID     string `json:"squad_id,omitempty"`
 }
 
 // QuickCreateContextType marks a task as a quick-create job.
@@ -789,7 +797,12 @@ func (s *TaskService) EnqueueTaskForThreadIssue(ctx context.Context, p EnqueueTa
 // projectID is optional (zero-valued pgtype.UUID when the user didn't pick
 // one). The handler is responsible for validating it belongs to the same
 // workspace before passing it in.
-func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID pgtype.UUID, prompt string, projectID pgtype.UUID) (db.AgentTaskQueue, error) {
+//
+// squadID is non-empty (Valid) when the user picked a squad as the actor.
+// The handler has already resolved it to the squad's leader agent for
+// agentID; the squadID hint is stamped into the task context so the daemon
+// claim handler can inject the squad-leader briefing on dispatch.
+func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt string, projectID pgtype.UUID) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
@@ -810,6 +823,9 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	if projectID.Valid {
 		payload.ProjectID = util.UUIDToString(projectID)
 	}
+	if squadID.Valid {
+		payload.SquadID = util.UUIDToString(squadID)
+	}
 	contextJSON, err := json.Marshal(payload)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("marshal quick-create context: %w", err)
@@ -828,6 +844,7 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	slog.Info("quick-create task enqueued",
 		"task_id", util.UUIDToString(task.ID),
 		"agent_id", util.UUIDToString(agentID),
+		"squad_id", payload.SquadID,
 		"requester_id", util.UUIDToString(requesterID),
 		"workspace_id", util.UUIDToString(workspaceID),
 		"project_id", payload.ProjectID,
