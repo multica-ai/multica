@@ -147,7 +147,7 @@ func normaliseMessageReceive(channelName, botUserID string, raw RawEvent) (port.
 
 	// Thread / reply metadata is present on all message types.
 	base.ThreadID = ev.Event.Message.RootID
-	if ev.Event.Message.ParentID != "" && ev.Event.Message.ParentID != ev.Event.Message.MessageID && ev.Event.Message.ParentID != ev.Event.Message.RootID {
+	if isExplicitReply(ev.Event.Message.ParentID, ev.Event.Message.MessageID, ev.Event.Message.RootID) {
 		base.ReplyToMessageID = ev.Event.Message.ParentID
 	}
 
@@ -224,9 +224,16 @@ func stripBotMentions(text string, mentions []feishuMention, botUserID string) s
 	return strings.TrimSpace(out)
 }
 
-// collapseSpaces is a tiny helper kept inline rather than pulling in
-// regexp — the adapter is on the hot path of every inbound event and a
-// 6-line manual loop is dramatically faster than a regexp compile.
+// isExplicitReply returns true when parentID is a genuine reply to a
+// different message (not a thread root where parent_id == message_id or
+// parent_id == root_id).
+func isExplicitReply(parentID, messageID, rootID string) bool {
+	if parentID == "" {
+		return false
+	}
+	return parentID != messageID && parentID != rootID
+}
+
 // truncateQuotedText limits quoted text to 200 runes; anything longer keeps
 // the first 200 runes. The 201-rune boundary preserves an ellipsis so the
 // caller can distinguish "exactly 200" from "truncated"; longer inputs are
@@ -242,6 +249,9 @@ func truncateQuotedText(s string) string {
 	return string(r[:200])
 }
 
+// collapseSpaces is a tiny helper kept inline rather than pulling in
+// regexp — the adapter is on the hot path of every inbound event and a
+// 6-line manual loop is dramatically faster than a regexp compile.
 func collapseSpaces(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))

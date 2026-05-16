@@ -412,8 +412,3 @@ func TestExtractEntityKeys(t *testing.T) {
 		}
 	}
 }
-
-// Placeholder so tests compile; real implementation will be provided in Green.
-func extractEntityKeys(text string) []EntityRef {
-	return nil
-}

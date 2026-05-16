@@ -39,25 +39,20 @@ func (f *FakeStore) AppendEntities(ctx context.Context, scope Scope, entities []
 	defer f.mu.Unlock()
 	cc, ok := f.data[scope]
 	if !ok {
-		cc = ConversationContext{Scope: scope, Entities: []EntityRef{}}
+		cc = ConversationContext{Scope: scope}
 	}
 	now := time.Now()
-	seen := make(map[string]struct{}, len(cc.Entities))
-	for _, e := range cc.Entities {
-		seen[e.Key] = struct{}{}
+	// index tracks existing entity positions for O(1) timestamp updates.
+	index := make(map[string]int, len(cc.Entities))
+	for i, e := range cc.Entities {
+		index[e.Key] = i
 	}
 	for _, e := range entities {
-		if _, exists := seen[e.Key]; exists {
-			// update timestamp for existing
-			for i := range cc.Entities {
-				if cc.Entities[i].Key == e.Key {
-					cc.Entities[i].MentionedAt = e.MentionedAt
-					break
-				}
-			}
+		if i, exists := index[e.Key]; exists {
+			cc.Entities[i].MentionedAt = e.MentionedAt
 			continue
 		}
-		seen[e.Key] = struct{}{}
+		index[e.Key] = len(cc.Entities)
 		cc.Entities = append(cc.Entities, e)
 	}
 	// sort by MentionedAt DESC
