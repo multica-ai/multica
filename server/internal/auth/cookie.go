@@ -10,18 +10,45 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	AuthCookieName   = "multica_auth"
-	CSRFCookieName   = "multica_csrf"
-	authCookieMaxAge = 30 * 24 * 60 * 60 // 30 days in seconds
+	AuthCookieName        = "multica_auth"
+	CSRFCookieName        = "multica_csrf"
+	defaultAuthTokenTTL   = 30 * 24 * time.Hour // 30 days
 )
 
-var ipCookieDomainWarnOnce sync.Once
+var (
+	ipCookieDomainWarnOnce sync.Once
+	authTokenTTLOnce       sync.Once
+	authTokenTTLCached     time.Duration
+)
+
+// AuthTokenTTL returns the configured auth token lifetime. It reads the
+// AUTH_TOKEN_TTL environment variable (in seconds) once and caches the result.
+// When the variable is unset or invalid the default of 30 days is used.
+func AuthTokenTTL() time.Duration {
+	authTokenTTLOnce.Do(func() {
+		authTokenTTLCached = defaultAuthTokenTTL
+		raw := strings.TrimSpace(os.Getenv("AUTH_TOKEN_TTL"))
+		if raw == "" {
+			return
+		}
+		secs, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || secs <= 0 {
+			slog.Warn("AUTH_TOKEN_TTL is not a valid positive integer; using default",
+				"value", raw, "default_seconds", int(defaultAuthTokenTTL.Seconds()))
+			return
+		}
+		authTokenTTLCached = time.Duration(secs) * time.Second
+		slog.Info("auth token TTL configured", "seconds", secs)
+	})
+	return authTokenTTLCached
+}
 
 // cookieDomain returns the trimmed COOKIE_DOMAIN env value, or "" if it looks
 // like an IP address. RFC 6265 §4.1.2.3 forbids IP literals in the cookie
@@ -90,8 +117,8 @@ func SetAuthCookies(w http.ResponseWriter, token string) error {
 		Value:    token,
 		Path:     "/",
 		Domain:   domain,
-		MaxAge:   authCookieMaxAge,
-		Expires:  time.Now().Add(30 * 24 * time.Hour),
+		MaxAge:   int(AuthTokenTTL().Seconds()),
+		Expires:  time.Now().Add(AuthTokenTTL()),
 		HttpOnly: true,
 		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
@@ -107,8 +134,8 @@ func SetAuthCookies(w http.ResponseWriter, token string) error {
 		Value:    csrfToken,
 		Path:     "/",
 		Domain:   domain,
-		MaxAge:   authCookieMaxAge,
-		Expires:  time.Now().Add(30 * 24 * time.Hour),
+		MaxAge:   int(AuthTokenTTL().Seconds()),
+		Expires:  time.Now().Add(AuthTokenTTL()),
 		HttpOnly: false,
 		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
