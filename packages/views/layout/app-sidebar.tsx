@@ -428,6 +428,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const handleNavClick = useCallback(() => {
     if (isMobile) setOpenMobile(false);
   }, [isMobile, setOpenMobile]);
+  const handleNewMessageClick = useCallback(() => {
+    if (isMobile) setOpenMobile(false); // CEREBRO-PATCH(sidebar-new-message-mobile-close): JEH-1443 close mobile sidebar before the agent chat navigation.
+    useModalStore.getState().open("new-message");
+  }, [isMobile, setOpenMobile]);
   const user = useAuthStore((s) => s.user);
   const userId = useAuthStore((s) => s.user?.id);
   const logout = useLogout();
@@ -732,7 +736,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
               <SidebarMenuItem>
                 <SidebarMenuButton
                   className="text-muted-foreground"
-                  onClick={() => useModalStore.getState().open("new-message")}
+                  onClick={handleNewMessageClick}
                 >
                   <MessageSquarePlus />
                   <span>{t(($) => $.sidebar.new_message)}</span>

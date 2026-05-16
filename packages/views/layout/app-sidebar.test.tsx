@@ -3,9 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { AppSidebar } from "./app-sidebar";
 
-const { detail, deletePin, pins } = vi.hoisted(() => ({
+const { detail, deletePin, featureFlags, modalOpen, pins, sidebarState } = vi.hoisted(() => ({
   detail: { current: { isPending: false, isError: false, data: null as unknown, error: null as unknown } },
   deletePin: vi.fn(),
+  featureFlags: { current: false },
+  modalOpen: vi.fn(),
   pins: {
     current: [
       {
@@ -19,6 +21,7 @@ const { detail, deletePin, pins } = vi.hoisted(() => ({
       },
     ],
   },
+  sidebarState: { isMobile: false, setOpenMobile: vi.fn() },
 }));
 
 vi.mock("@dnd-kit/core", () => ({
@@ -43,10 +46,16 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
   SidebarGroupLabel: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarHeader: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SidebarMenuButton: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
+  SidebarMenuButton: ({
+    children,
+    onClick,
+  }: {
+    children: React.ReactNode;
+    onClick?: React.MouseEventHandler<HTMLButtonElement>;
+  }) => <button type="button" onClick={onClick}>{children}</button>,
   SidebarMenuItem: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarRail: () => null,
-  useSidebar: () => ({ isMobile: false, setOpenMobile: vi.fn() }),
+  useSidebar: () => sidebarState,
 }));
 vi.mock("@multica/ui/components/ui/popover", () => ({
   Popover: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -55,7 +64,7 @@ vi.mock("@multica/ui/components/ui/popover", () => ({
 }));
 // CEREBRO-PATCH(channels-flag-gate) — sidebar imports cerebro feature flags
 vi.mock("@multica/cerebro-feature-flags", () => ({
-  useFeatureFlag: () => false,
+  useFeatureFlag: () => featureFlags.current,
 }));
 vi.mock("@multica/cerebro-notifications/core/queries", () => ({
   notificationsListOptions: () => ({ queryKey: ["notifications"] }),
@@ -128,7 +137,7 @@ vi.mock("@multica/core/inbox/queries", () => ({ deduplicateInboxItems: (items: u
 vi.mock("@multica/core/issues/queries", () => ({ issueDetailOptions: () => ({ queryKey: ["issue"] }) }));
 vi.mock("@multica/core/issues/stores/create-mode-store", () => ({ useCreateModeStore: { getState: () => ({ lastMode: "agent" }) } }));
 vi.mock("@multica/core/issues/stores/draft-store", () => ({ useIssueDraftStore: () => false }));
-vi.mock("@multica/core/modals", () => ({ useModalStore: { getState: () => ({ modal: null, open: vi.fn() }) } }));
+vi.mock("@multica/core/modals", () => ({ useModalStore: { getState: () => ({ modal: null, open: modalOpen }) } }));
 vi.mock("@multica/core/pins/mutations", () => ({ useDeletePin: () => ({ mutate: deletePin }), useReorderPins: () => ({ mutate: vi.fn() }) }));
 vi.mock("@multica/core/pins/queries", () => ({ pinListOptions: () => ({ queryKey: ["pins"] }) }));
 vi.mock("@multica/core/projects/queries", () => ({
@@ -159,6 +168,10 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
 describe("PinRow", () => {
   beforeEach(() => {
     deletePin.mockReset();
+    featureFlags.current = false;
+    modalOpen.mockReset();
+    sidebarState.isMobile = false;
+    sidebarState.setOpenMobile.mockReset();
     detail.current = { isPending: false, isError: false, data: null, error: null };
   });
 
@@ -178,5 +191,18 @@ describe("PinRow", () => {
     detail.current = { isPending: false, isError: false, data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" }, error: null };
     render(<AppSidebar />);
     expect(await screen.findByText("MUL-123 Keep this pin")).toBeInTheDocument();
+  });
+
+  it("closes the mobile sidebar when opening new message", async () => {
+    featureFlags.current = true;
+    sidebarState.isMobile = true;
+    render(<AppSidebar />);
+
+    const newMessageButton = screen.getByText("New").closest("button");
+    expect(newMessageButton).not.toBeNull();
+    newMessageButton?.click();
+
+    expect(sidebarState.setOpenMobile).toHaveBeenCalledWith(false);
+    expect(modalOpen).toHaveBeenCalledWith("new-message");
   });
 });
