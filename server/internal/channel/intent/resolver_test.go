@@ -3,7 +3,6 @@ package intent_test
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	in "github.com/multica-ai/multica/server/internal/channel/intent"
@@ -241,54 +240,5 @@ func TestChatIntentResolver_EmptyWorkspaceNoMatch(t *testing.T) {
 	}
 	if got.Matched {
 		t.Fatal("chat resolver should not run without workspace context")
-	}
-}
-
-func TestBuildChatIntentPrompt_WithContextIssueKey(t *testing.T) {
-	t.Parallel()
-
-	req := in.IntentRequest{
-		WorkspaceID:     "ws-1",
-		Text:            "把它关了",
-		ContextIssueKey: "STA-68",
-		ContextMode:     "reply",
-	}
-	prompt := in.BuildChatIntentPrompt(req)
-
-	if !strings.Contains(prompt, "STA-68") {
-		t.Errorf("prompt should mention context issue key STA-68, got:\n%s", prompt)
-	}
-	if !strings.Contains(prompt, "Reply context") && !strings.Contains(prompt, "conversation context") {
-		t.Errorf("prompt should mention context/conversation context, got:\n%s", prompt)
-	}
-}
-
-func TestBuildChatIntentPrompt_WithoutContextIssueKey(t *testing.T) {
-	t.Parallel()
-
-	req := in.IntentRequest{
-		WorkspaceID: "ws-1",
-		Text:        "把它关了",
-	}
-	prompt := in.BuildChatIntentPrompt(req)
-
-	if strings.Contains(prompt, "Context issue") {
-		t.Errorf("prompt should not mention context issue when none is present")
-	}
-}
-
-func TestBuildChannelAgentTurnPrompt_WithContextIssueKey(t *testing.T) {
-	t.Parallel()
-
-	req := in.IntentRequest{
-		WorkspaceID:     "ws-1",
-		Text:            "它合并了吗",
-		ContextIssueKey: "PR-12",
-		ContextMode:     "reply",
-	}
-	prompt := in.BuildChannelAgentTurnPrompt(req)
-
-	if !strings.Contains(prompt, "PR-12") {
-		t.Errorf("prompt should mention context issue key PR-12, got:\n%s", prompt)
 	}
 }

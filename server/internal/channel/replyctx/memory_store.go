@@ -17,23 +17,23 @@ func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{items: make(map[string]Context)}
 }
 
-func (s *InMemoryStore) key(connectionID, externalUserID, chatID string) string {
-	return connectionID + "\x00" + externalUserID + "\x00" + chatID
+func (s *InMemoryStore) key(connectionID, externalUserID string) string {
+	return connectionID + "\x00" + externalUserID
 }
 
-// Upsert saves or replaces the reply context for the given connection + user + chat.
+// Upsert saves or replaces the reply context for the given connection + user.
 func (s *InMemoryStore) Upsert(_ context.Context, item Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.items[s.key(item.ConnectionID, item.ExternalUserID, item.ChatID)] = item
+	s.items[s.key(item.ConnectionID, item.ExternalUserID)] = item
 	return nil
 }
 
-// Lookup retrieves the active reply context for the given connection + user + chat.
-func (s *InMemoryStore) Lookup(_ context.Context, connectionID, externalUserID, chatID string, now time.Time) (Context, bool, error) {
+// Lookup retrieves the active reply context for the given connection + user.
+func (s *InMemoryStore) Lookup(_ context.Context, connectionID, externalUserID string, now time.Time) (Context, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	item, ok := s.items[s.key(connectionID, externalUserID, chatID)]
+	item, ok := s.items[s.key(connectionID, externalUserID)]
 	if !ok {
 		return Context{}, false, nil
 	}
@@ -46,26 +46,12 @@ func (s *InMemoryStore) Lookup(_ context.Context, connectionID, externalUserID, 
 	return item, true, nil
 }
 
-// Clear removes the reply context for the given connection + user + chat.
-func (s *InMemoryStore) Clear(_ context.Context, connectionID, externalUserID, chatID string) error {
+// Clear removes the reply context for the given connection + user.
+func (s *InMemoryStore) Clear(_ context.Context, connectionID, externalUserID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.items, s.key(connectionID, externalUserID, chatID))
+	delete(s.items, s.key(connectionID, externalUserID))
 	return nil
-}
-
-// DeleteExpired removes all reply contexts whose expires_at is before the given time.
-func (s *InMemoryStore) DeleteExpired(_ context.Context, before time.Time) (int64, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var deleted int64
-	for k, item := range s.items {
-		if before.After(item.ExpiresAt) {
-			delete(s.items, k)
-			deleted++
-		}
-	}
-	return deleted, nil
 }
 
 var _ Store = (*InMemoryStore)(nil)

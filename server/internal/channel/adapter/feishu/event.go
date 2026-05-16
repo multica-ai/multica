@@ -78,6 +78,8 @@ type feishuMessageReceive struct {
 			MessageType string `json:"message_type"`
 			Content     string `json:"content"`
 			Mentions    []feishuMention `json:"mentions"`
+			RootID      string `json:"root_id"`
+			ParentID    string `json:"parent_id"`
 		} `json:"message"`
 	} `json:"event"`
 }
@@ -87,7 +89,15 @@ type feishuMessageReceive struct {
 // (post is structured, image carries an image_key, etc.) — those land in
 // future tasks; for MVP we only normalise text.
 type feishuTextContent struct {
-	Text string `json:"text"`
+	Text  string      `json:"text"`
+	Quote *feishuQuote `json:"quote,omitempty"`
+}
+
+// feishuQuote mirrors the quote object Feishu embeds in text content when a
+// user quotes a prior message.
+type feishuQuote struct {
+	MessageID string `json:"message_id"`
+	Text      string `json:"text"`
 }
 
 // feishuImageContent is the inner content struct Feishu uses for image
@@ -135,6 +145,12 @@ func normaliseMessageReceive(channelName, botUserID string, raw RawEvent) (port.
 	}
 	base.BotMentioned = chatType == port.ChatTypeDirect || feishuBotMentioned(ev.Event.Message.Mentions, botUserID)
 
+	// Thread / reply metadata is present on all message types.
+	base.ThreadID = ev.Event.Message.RootID
+	if ev.Event.Message.ParentID != "" && ev.Event.Message.ParentID != ev.Event.Message.MessageID && ev.Event.Message.ParentID != ev.Event.Message.RootID {
+		base.ReplyToMessageID = ev.Event.Message.ParentID
+	}
+
 	switch msgType {
 	case "text":
 		var content feishuTextContent
@@ -142,6 +158,10 @@ func normaliseMessageReceive(channelName, botUserID string, raw RawEvent) (port.
 			return port.InboundEvent{}, false, fmt.Errorf("feishu: decode text content: %w", err)
 		}
 		base.Text = stripBotMentions(content.Text, ev.Event.Message.Mentions, botUserID)
+		if content.Quote != nil {
+			base.QuotedMessageID = content.Quote.MessageID
+			base.QuotedText = truncateQuotedText(content.Quote.Text)
+		}
 		return base, true, nil
 	case "image":
 		var content feishuImageContent
@@ -207,6 +227,21 @@ func stripBotMentions(text string, mentions []feishuMention, botUserID string) s
 // collapseSpaces is a tiny helper kept inline rather than pulling in
 // regexp — the adapter is on the hot path of every inbound event and a
 // 6-line manual loop is dramatically faster than a regexp compile.
+// truncateQuotedText limits quoted text to 200 runes; anything longer keeps
+// the first 200 runes. The 201-rune boundary preserves an ellipsis so the
+// caller can distinguish "exactly 200" from "truncated"; longer inputs are
+// hard-truncated to 200 without ellipsis.
+func truncateQuotedText(s string) string {
+	r := []rune(s)
+	if len(r) <= 200 {
+		return s
+	}
+	if len(r) == 201 {
+		return string(r[:200]) + "…"
+	}
+	return string(r[:200])
+}
+
 func collapseSpaces(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))

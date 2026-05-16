@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/channel/conversationctx"
 	"github.com/multica-ai/multica/server/internal/channel/facade"
 	"github.com/multica-ai/multica/server/internal/channel/port"
 	"github.com/multica-ai/multica/server/internal/channel/replyctx"
@@ -73,6 +74,14 @@ type DispatchConfig struct {
 	DispatchStore     DispatchCompletionStore
 	ProposalStore     ActionProposalStore
 	ReplyContext      replyctx.Store
+
+	// ConversationCtx is the context_entries store for sliding-window context.
+	// TODO: wire up after store implementation is complete.
+	ConversationCtx conversationctx.Store
+	// ContextMaxEntities limits how many recent entities are kept per scope.
+	ContextMaxEntities int
+	// ContextTTL is the expiration duration for context entries.
+	ContextTTL time.Duration
 }
 
 type dispatchStep struct {
@@ -177,12 +186,13 @@ func (d *dispatchStep) Run(ctx context.Context, evt port.InboundEvent) (port.Inb
 		if sendErr := d.sendRichReply(ctx, evt, *rich); sendErr != nil {
 			return evt, DecisionContinue, fmt.Errorf("send dispatch reply: %w", sendErr)
 		}
+		d.appendReplyContextEntities(ctx, evt, reply)
 		return evt, DecisionContinue, nil
 	}
 	if sendErr := d.sendReply(ctx, evt, reply); sendErr != nil {
 		return evt, DecisionContinue, fmt.Errorf("send dispatch reply: %w", sendErr)
 	}
-
+	d.appendReplyContextEntities(ctx, evt, reply)
 	return evt, DecisionContinue, nil
 }
 
@@ -238,7 +248,7 @@ func (d *dispatchStep) replyContextForEvent(ctx context.Context, evt port.Inboun
 	if evt.ChatType != port.ChatTypeDirect || d.cfg.ReplyContext == nil {
 		return replyctx.Context{}, false, nil
 	}
-	return d.cfg.ReplyContext.Lookup(ctx, evt.ConnectionID(), evt.SenderID, evt.ChatID, time.Now())
+	return d.cfg.ReplyContext.Lookup(ctx, evt.ConnectionID(), evt.SenderID, time.Now())
 }
 
 func (d *dispatchStep) saveReplyContext(ctx context.Context, evt port.InboundEvent, wsID pgtype.UUID, issueID pgtype.UUID, issueIdentifier, issueTitle string) {
@@ -248,7 +258,6 @@ func (d *dispatchStep) saveReplyContext(ctx context.Context, evt port.InboundEve
 	if err := d.cfg.ReplyContext.Upsert(ctx, replyctx.Context{
 		ConnectionID:    evt.ConnectionID(),
 		ExternalUserID:  evt.SenderID,
-		ChatID:          evt.ChatID,
 		WorkspaceID:     wsID,
 		IssueID:         issueID,
 		IssueIdentifier: issueIdentifier,
@@ -1261,8 +1270,56 @@ func parseRuntimeEventID(id string) pgtype.UUID {
 // Format: 2-5 uppercase letters, hyphen, positive integer (no leading zeros).
 var identifierRe = regexp.MustCompile(`^[A-Z]{2,5}-[1-9][0-9]*$`)
 
+// issueKeyInTextRe is a word-bounded version for scanning inside sentences.
+var issueKeyInTextRe = regexp.MustCompile(`[A-Z]{2,5}-[1-9][0-9]*`)
+
 // ValidIdentifierFormat checks if an issue identifier matches the expected
 // format (e.g. STA-39, MUL-123). Exported for testing.
 func ValidIdentifierFormat(key string) bool {
 	return identifierRe.MatchString(key)
+}
+
+func (d *dispatchStep) appendReplyContextEntities(ctx context.Context, evt port.InboundEvent, reply string) {
+	if d.cfg.ConversationCtx == nil {
+		return
+	}
+	keys := extractIssueKeysFromText(reply)
+	if len(keys) == 0 {
+		return
+	}
+	scope := conversationctx.Scope{
+		ConnectionID: evt.ConnectionID(),
+		ChatID:       evt.ChatID,
+		SenderID:     evt.SenderID,
+		ThreadID:     evt.ThreadID,
+	}
+	entities := make([]conversationctx.EntityRef, 0, len(keys))
+	now := time.Now()
+	for _, key := range keys {
+		entities = append(entities, conversationctx.EntityRef{
+			Key:         key,
+			Type:        conversationctx.EntityTypeIssue,
+			MentionedAt: now,
+		})
+	}
+	if err := d.cfg.ConversationCtx.AppendEntities(ctx, scope, entities, d.cfg.ContextMaxEntities, d.cfg.ContextTTL); err != nil {
+		slog.ErrorContext(ctx, "dispatch: append conversation context entities failed", "error", err)
+	}
+}
+
+func extractIssueKeysFromText(text string) []string {
+	matches := issueKeyInTextRe.FindAllString(text, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(matches))
+	out := make([]string, 0, len(matches))
+	for _, match := range matches {
+		if _, ok := seen[match]; ok {
+			continue
+		}
+		seen[match] = struct{}{}
+		out = append(out, match)
+	}
+	return out
 }
