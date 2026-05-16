@@ -1,0 +1,185 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build and deploy"
+        required: false
+        default: "main"
+      image_tag:
+        description: "Container image tag. Defaults to prod-<short-sha>."
+        required: false
+        default: ""
+      health_url:
+        description: "Public URL to verify after deployment"
+        required: false
+        default: "https://dashboard.nexai.co.kr"
+  workflow_run:
+    workflows: ["CI"]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/multica-backend
+  WEB_IMAGE: ghcr.io/${{ github.repository_owner }}/multica-web
+
+jobs:
+  build-and-deploy:
+    name: Build images and deploy
+    runs-on: ubuntu-latest
+    environment:
+      name: Production
+      url: ${{ steps.deploy.outputs.health_url }}
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
+    steps:
+      - name: Resolve deployment ref
+        id: deploy
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            ref="${{ inputs.ref }}"
+            health_url="${{ inputs.health_url }}"
+          else
+            ref="${{ github.event.workflow_run.head_sha }}"
+            health_url="https://dashboard.nexai.co.kr"
+          fi
+
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "health_url=$health_url" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.deploy.outputs.ref }}
+
+      - name: Compute image tag
+        id: image
+        shell: bash
+        env:
+          IMAGE_TAG_INPUT: ${{ github.event.inputs.image_tag }}
+        run: |
+          short_sha="$(git rev-parse --short=12 HEAD)"
+          commit_sha="$(git rev-parse HEAD)"
+          if [[ -n "$IMAGE_TAG_INPUT" ]]; then
+            tag="$IMAGE_TAG_INPUT"
+          else
+            tag="prod-${short_sha}"
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=$commit_sha" >> "$GITHUB_OUTPUT"
+          echo "backend=${BACKEND_IMAGE}:${tag}" >> "$GITHUB_OUTPUT"
+          echo "web=${WEB_IMAGE}:${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          pull: true
+          push: true
+          tags: |
+            ${{ steps.image.outputs.backend }}
+            ${{ env.BACKEND_IMAGE }}:production-latest
+          build-args: |
+            VERSION=${{ steps.image.outputs.tag }}
+            COMMIT=${{ steps.image.outputs.commit_sha }}
+          cache-from: type=gha,scope=production-backend
+          cache-to: type=gha,mode=max,scope=production-backend
+
+      - name: Build and push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.web
+          pull: true
+          push: true
+          tags: |
+            ${{ steps.image.outputs.web }}
+            ${{ env.WEB_IMAGE }}:production-latest
+          build-args: |
+            REMOTE_API_URL=http://backend:8080
+            NEXT_PUBLIC_APP_VERSION=${{ steps.image.outputs.tag }}
+          cache-from: type=gha,scope=production-web
+          cache-to: type=gha,mode=max,scope=production-web
+
+      - name: Configure SSH
+        shell: bash
+        env:
+          PROD_DEPLOY_SSH_KEY: ${{ secrets.PROD_DEPLOY_SSH_KEY }}
+          PROD_DEPLOY_HOST: ${{ secrets.PROD_DEPLOY_HOST }}
+          PROD_DEPLOY_PORT: ${{ secrets.PROD_DEPLOY_PORT }}
+          PROD_DEPLOY_KNOWN_HOSTS: ${{ secrets.PROD_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          test -n "$PROD_DEPLOY_SSH_KEY"
+          test -n "$PROD_DEPLOY_HOST"
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$PROD_DEPLOY_SSH_KEY" > ~/.ssh/prod_deploy_key
+          chmod 600 ~/.ssh/prod_deploy_key
+
+          if [[ -n "$PROD_DEPLOY_KNOWN_HOSTS" ]]; then
+            printf '%s\n' "$PROD_DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "${PROD_DEPLOY_PORT:-22}" "$PROD_DEPLOY_HOST" > ~/.ssh/known_hosts
+          fi
+
+      - name: Deploy on production host
+        id: remote
+        shell: bash
+        env:
+          PROD_DEPLOY_HOST: ${{ secrets.PROD_DEPLOY_HOST }}
+          PROD_DEPLOY_PORT: ${{ secrets.PROD_DEPLOY_PORT }}
+          PROD_DEPLOY_USER: ${{ secrets.PROD_DEPLOY_USER }}
+          PROD_DEPLOY_PATH: ${{ secrets.PROD_DEPLOY_PATH }}
+          PROD_GHCR_USERNAME: ${{ secrets.PROD_GHCR_USERNAME }}
+          PROD_GHCR_TOKEN: ${{ secrets.PROD_GHCR_TOKEN }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          test -n "$PROD_DEPLOY_USER"
+          test -n "$PROD_DEPLOY_PATH"
+
+          ssh_target="${PROD_DEPLOY_USER}@${PROD_DEPLOY_HOST}"
+          ssh_opts=(-i ~/.ssh/prod_deploy_key -p "${PROD_DEPLOY_PORT:-22}" -o BatchMode=yes -o StrictHostKeyChecking=yes)
+
+          if [[ -n "$PROD_GHCR_USERNAME" && -n "$PROD_GHCR_TOKEN" ]]; then
+            printf '%s' "$PROD_GHCR_TOKEN" | ssh "${ssh_opts[@]}" "$ssh_target" \
+              "docker login ghcr.io -u '$PROD_GHCR_USERNAME' --password-stdin"
+          fi
+
+          ssh "${ssh_opts[@]}" "$ssh_target" \
+            "cd '$PROD_DEPLOY_PATH' && \
+             MULTICA_IMAGE_TAG='$IMAGE_TAG' docker compose -f docker-compose.selfhost.yml pull backend frontend && \
+             MULTICA_IMAGE_TAG='$IMAGE_TAG' docker compose -f docker-compose.selfhost.yml up -d --remove-orphans backend frontend && \
+             docker compose -f docker-compose.selfhost.yml ps"
+
+      - name: Verify production health
+        shell: bash
+        run: |
+          curl --fail --silent --show-error --location --max-time 20 \
+            "${{ steps.deploy.outputs.health_url }}" > /dev/null
