@@ -113,7 +113,7 @@ multica setup          # Connect to Multica Cloud, log in, start daemon
 multica setup           # Configure, authenticate, and start the daemon
 ```
 
-The daemon runs in the background and auto-detects agent CLIs (`claude`, `codex`, `copilot`, `openclaw`, `opencode`, `hermes`, `gemini`, `pi`, `cursor-agent`, `kimi`, `kiro-cli`, `nanobot`) on your PATH. For Nanobot, the daemon connects to a running nanobot gateway via WebSocket instead of spawning a CLI.
+The daemon runs in the background and auto-detects agent CLIs (`claude`, `codex`, `copilot`, `openclaw`, `opencode`, `hermes`, `gemini`, `pi`, `cursor-agent`, `kimi`, `kiro-cli`, `nanobot`) on your PATH. For Nanobot, the daemon connects to a running nanobot gateway via WebSocket instead of spawning a CLI. If your gateway requires authentication, set the `NANOBOT_GATEWAY_AUTH_SECRET` environment variable in **workspace → Agents → Nanobot → Environment Variables**.
 
 ### 2. Verify your runtime
 

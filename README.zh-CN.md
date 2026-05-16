@@ -114,7 +114,7 @@ multica setup          # 连接 Multica Cloud，登录，启动 daemon
 multica setup           # 配置、认证、启动 daemon（一条命令搞定）
 ```
 
-daemon 在后台运行，保持你的机器与 Multica 的连接。它会自动检测 PATH 中可用的 Agent CLI（`claude`、`codex`、`copilot`、`openclaw`、`opencode`、`hermes`、`gemini`、`pi`、`cursor-agent`、`kimi`、`kiro-cli`、`nanobot`）。对于 Nanobot，daemon 会通过 WebSocket 连接到已运行的 nanobot 网关，而非启动 CLI。
+daemon 在后台运行，保持你的机器与 Multica 的连接。它会自动检测 PATH 中可用的 Agent CLI（`claude`、`codex`、`copilot`、`openclaw`、`opencode`、`hermes`、`gemini`、`pi`、`cursor-agent`、`kimi`、`kiro-cli`、`nanobot`）。对于 Nanobot，daemon 会通过 WebSocket 连接到已运行的 nanobot 网关，而非启动 CLI。如果网关需要认证，在 **workspace → Agents → Nanobot → 环境变量** 中设置 `NANOBOT_GATEWAY_AUTH_SECRET`。
 
 ### 2. 确认运行时已连接
 
