@@ -46,6 +46,7 @@ func newChannelInboundRuntimeComponents(pool *pgxpool.Pool, opts ...channelPipel
 	bindings := inbound.NewDBChatBindingLookup(pool)
 	userResolver := inbound.NewDBUserInfoResolver(pool)
 	issuer := binding.NewTokenIssuer(queries)
+	replyCtxStore := replyctx.NewDBStore(pool)
 
 	var opt channelPipelineOptions
 	if len(opts) > 0 {
@@ -109,6 +110,7 @@ func newChannelInboundRuntimeComponents(pool *pgxpool.Pool, opts ...channelPipel
 			ProjectValidator:  inbound.NewDBProjectWorkspaceValidator(pool),
 			DispatchStore:     inbound.NewDBDispatchCompletionStore(pool),
 			ProposalStore:     inbound.NewDBActionProposalStore(pool),
+			ReplyContext:      replyCtxStore,
 		}),
 	)
 	post := inbound.NewPipeline(postSteps...)
@@ -122,6 +124,7 @@ func newChannelInboundRuntimeComponents(pool *pgxpool.Pool, opts ...channelPipel
 		TurnPlanner:   turnPlannerFromAsync(asyncChatIntent),
 		ChannelTurn:   channelTurnFromAsync(asyncChatIntent),
 		DispatchStore: inbound.NewDBDispatchCompletionStore(pool),
+		ReplyContext:  replyCtxStore,
 	}
 }
 
