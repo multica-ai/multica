@@ -36,7 +36,7 @@ import { useMuteInbox, useUnmuteInbox, useMarkInboxUnread } from "../mutations";
 import { isMuted, nextLocalEightAm } from "../mute-time";
 import { useCerebroInboxStrings } from "../strings";
 import {
-  ARCHIVE_COMMIT_DELAY_MS,
+  ARCHIVE_HOLD_COMMIT_MS,
   DIRECTION_DECIDE_PX,
   LEFT_PANEL_REVEAL_PX,
   LONG_PRESS_MS,
@@ -44,6 +44,7 @@ import {
   SWIPE_INTENT_PX,
   SWIPE_ROW_TRANSITION_MS,
   commitThresholdPx,
+  shouldCommitHeldSwipe,
 } from "../swipe-thresholds";
 
 interface Props {
@@ -61,7 +62,7 @@ interface Props {
  *
  * - Desktop hover: archive + "..." icons (positioned absolute right)
  * - Desktop right-click: same menu as "..."
- * - Mobile swipe right (≥80px): triggers archive on release
+ * - Mobile swipe right: hold past threshold, then release to archive
  * - Mobile swipe left (≥144px): reveals a two-button strip (læst/ulæst, mute)
  *   that stays open until tap-outside or action selected
  * - Mobile long-press (≥500ms): opens a bottom drawer with all actions
@@ -296,7 +297,8 @@ function MobileRowActions({
   }, []);
   const [revealed, setRevealed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const archiveCommitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const archiveHoldTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const archiveHoldReadyRef = useRef(false);
   // Tracks whether the gesture is still in flight so the transform effect
   // can decide whether to apply a snap-back transition on release.
   const gestureActiveRef = useRef(false);
@@ -328,12 +330,28 @@ function MobileRowActions({
 
   useEffect(
     () => () => {
-      if (archiveCommitTimeoutRef.current !== null) {
-        clearTimeout(archiveCommitTimeoutRef.current);
+      if (archiveHoldTimeoutRef.current !== null) {
+        clearTimeout(archiveHoldTimeoutRef.current);
       }
     },
     [],
   );
+
+  const resetArchiveHold = useCallback(() => {
+    archiveHoldReadyRef.current = false;
+    if (archiveHoldTimeoutRef.current !== null) {
+      clearTimeout(archiveHoldTimeoutRef.current);
+      archiveHoldTimeoutRef.current = null;
+    }
+  }, []);
+
+  const armArchiveHold = useCallback(() => {
+    if (archiveHoldReadyRef.current || archiveHoldTimeoutRef.current !== null) return;
+    archiveHoldTimeoutRef.current = setTimeout(() => {
+      archiveHoldReadyRef.current = true;
+      archiveHoldTimeoutRef.current = null;
+    }, ARCHIVE_HOLD_COMMIT_MS);
+  }, []);
 
   // Apply the offset transform to the parent row so the user sees the row
   // visually follow the finger. Snap-back animates only when the gesture
@@ -379,10 +397,12 @@ function MobileRowActions({
       direction = null;
       active = true;
       gestureActiveRef.current = true;
+      resetArchiveHold();
       longPressId = setTimeout(() => {
         onDrawerOpenRef.current(true);
         active = false;
         gestureActiveRef.current = false;
+        resetArchiveHold();
       }, LONG_PRESS_MS);
     };
 
@@ -415,6 +435,12 @@ function MobileRowActions({
       e.preventDefault();
       offsetXRef.current = dx;
       setOffsetX(dx);
+      const rowWidth = overlay.parentElement?.clientWidth ?? 360;
+      if (dx >= commitThresholdPx(rowWidth)) {
+        armArchiveHold();
+      } else {
+        resetArchiveHold();
+      }
     };
 
     const onTouchEnd = () => {
@@ -437,19 +463,17 @@ function MobileRowActions({
         swipeEndedAtRef.current = Date.now();
       }
 
-      if (live >= commitPx) {
+      if (shouldCommitHeldSwipe(live, rowWidth, archiveHoldReadyRef.current)) {
         setRevealed(false);
-        archiveCommitTimeoutRef.current = setTimeout(() => {
-          setOffsetX(0);
-          onArchiveRef.current();
-          archiveCommitTimeoutRef.current = null;
-        }, ARCHIVE_COMMIT_DELAY_MS);
+        setOffsetX(0);
+        onArchiveRef.current();
       } else if (live <= -commitPx) {
         setOffsetX(0);
         setRevealed(true);
       } else {
         setOffsetX(0);
       }
+      resetArchiveHold();
     };
 
     overlay.addEventListener("touchstart", onTouchStart, { passive: false });
@@ -463,7 +487,7 @@ function MobileRowActions({
       overlay.removeEventListener("touchend", onTouchEnd);
       overlay.removeEventListener("touchcancel", onTouchEnd);
     };
-  }, [setOffsetX]);
+  }, [armArchiveHold, resetArchiveHold, setOffsetX]);
 
   // Capture-phase click listener on the parent row shell: when a
   // meaningful swipe just happened, the synthetic click iOS Safari
@@ -789,7 +813,8 @@ function SwipeArchiveOnly({
   // Timestamp of the most recent meaningful swipe; see MobileRowActions
   // for the full rationale on why this is a timestamp, not a boolean.
   const swipeEndedAtRef = useRef(0);
-  const archiveCommitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const archiveHoldTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const archiveHoldReadyRef = useRef(false);
 
   // Stable ref for the archive callback so the touch effect doesn't re-
   // attach listeners every render.
@@ -800,12 +825,28 @@ function SwipeArchiveOnly({
 
   useEffect(
     () => () => {
-      if (archiveCommitTimeoutRef.current !== null) {
-        clearTimeout(archiveCommitTimeoutRef.current);
+      if (archiveHoldTimeoutRef.current !== null) {
+        clearTimeout(archiveHoldTimeoutRef.current);
       }
     },
     [],
   );
+
+  const resetArchiveHold = useCallback(() => {
+    archiveHoldReadyRef.current = false;
+    if (archiveHoldTimeoutRef.current !== null) {
+      clearTimeout(archiveHoldTimeoutRef.current);
+      archiveHoldTimeoutRef.current = null;
+    }
+  }, []);
+
+  const armArchiveHold = useCallback(() => {
+    if (archiveHoldReadyRef.current || archiveHoldTimeoutRef.current !== null) return;
+    archiveHoldTimeoutRef.current = setTimeout(() => {
+      archiveHoldReadyRef.current = true;
+      archiveHoldTimeoutRef.current = null;
+    }, ARCHIVE_HOLD_COMMIT_MS);
+  }, []);
 
   useEffect(() => {
     const row = containerRef.current?.parentElement;
@@ -852,6 +893,7 @@ function SwipeArchiveOnly({
       direction = null;
       active = true;
       gestureActiveRef.current = true;
+      resetArchiveHold();
     };
 
     const onTouchMove = (e: TouchEvent) => {
@@ -879,6 +921,12 @@ function SwipeArchiveOnly({
       const live = Math.max(0, dx);
       offsetXRef.current = live;
       setOffsetX(live);
+      const rowWidth = overlay.parentElement?.clientWidth ?? 360;
+      if (live >= commitThresholdPx(rowWidth)) {
+        armArchiveHold();
+      } else {
+        resetArchiveHold();
+      }
     };
 
     const onTouchEnd = () => {
@@ -893,15 +941,13 @@ function SwipeArchiveOnly({
       if (live > SWIPE_INTENT_PX) {
         swipeEndedAtRef.current = Date.now();
       }
-      if (live >= commitThresholdPx(rowWidth)) {
-        archiveCommitTimeoutRef.current = setTimeout(() => {
-          setOffsetX(0);
-          onArchiveRef.current();
-          archiveCommitTimeoutRef.current = null;
-        }, ARCHIVE_COMMIT_DELAY_MS);
+      if (shouldCommitHeldSwipe(live, rowWidth, archiveHoldReadyRef.current)) {
+        setOffsetX(0);
+        onArchiveRef.current();
       } else {
         setOffsetX(0);
       }
+      resetArchiveHold();
     };
 
     overlay.addEventListener("touchstart", onTouchStart, { passive: false });
@@ -914,7 +960,7 @@ function SwipeArchiveOnly({
       overlay.removeEventListener("touchend", onTouchEnd);
       overlay.removeEventListener("touchcancel", onTouchEnd);
     };
-  }, [setOffsetX]);
+  }, [armArchiveHold, resetArchiveHold, setOffsetX]);
 
   return (
     <>

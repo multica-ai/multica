@@ -44,6 +44,33 @@ func (q *Queries) ClearInboxMute(ctx context.Context, id pgtype.UUID) (InboxItem
 	return i, err
 }
 
+const clearInboxMuteByIssue = `-- name: ClearInboxMuteByIssue :execrows
+UPDATE inbox_item
+SET muted_until = NULL
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = false
+`
+
+type ClearInboxMuteByIssueParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+}
+
+// Unmute every sibling inbox item for the same recipient + issue.
+func (q *Queries) ClearInboxMuteByIssue(ctx context.Context, arg ClearInboxMuteByIssueParams) (int64, error) {
+	result, err := q.db.Exec(ctx, clearInboxMuteByIssue,
+		arg.WorkspaceID,
+		arg.RecipientType,
+		arg.RecipientID,
+		arg.IssueID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setInboxMutedUntil = `-- name: SetInboxMutedUntil :one
 
 UPDATE inbox_item
@@ -88,6 +115,37 @@ func (q *Queries) SetInboxMutedUntil(ctx context.Context, arg SetInboxMutedUntil
 		&i.MutedUntil,
 	)
 	return i, err
+}
+
+const setInboxMutedUntilByIssue = `-- name: SetInboxMutedUntilByIssue :execrows
+UPDATE inbox_item
+SET muted_until = $5
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = false
+`
+
+type SetInboxMutedUntilByIssueParams struct {
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	RecipientType string             `json:"recipient_type"`
+	RecipientID   pgtype.UUID        `json:"recipient_id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	MutedUntil    pgtype.Timestamptz `json:"muted_until"`
+}
+
+// Mute every sibling inbox item for the same recipient + issue. The inbox UI
+// deduplicates rows by issue_id, so muting only the clicked notification can
+// make an unmuted sibling resurface after refetch.
+func (q *Queries) SetInboxMutedUntilByIssue(ctx context.Context, arg SetInboxMutedUntilByIssueParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setInboxMutedUntilByIssue,
+		arg.WorkspaceID,
+		arg.RecipientType,
+		arg.RecipientID,
+		arg.IssueID,
+		arg.MutedUntil,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setInboxUnread = `-- name: SetInboxUnread :one

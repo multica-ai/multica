@@ -19,13 +19,17 @@
  *        match Gmail's actual feel; click is also suppressed on any
  *        meaningful swipe attempt (>16 px), not just on commit, so a tiny
  *        swipe that springs back doesn't navigate the user into the issue.
- *  - v5 (current): timestamp-based click suppression. v4 used a boolean
+ *  - v5: timestamp-based click suppression. v4 used a boolean
  *        "swipeJustCompleted" flag reset by the synthetic click — but iOS
  *        Safari doesn't fire a click after a real drag, so the flag stayed
  *        stuck and swallowed the user's NEXT tap on the reveal panel
  *        (mute / mark-unread "did nothing"). Replaced with a timestamp
  *        window so the flag self-clears after `POST_SWIPE_CLICK_SUPPRESS_MS`
  *        regardless of whether the synthetic click ever fires.
+ *  - v6 (current): archive is hold-to-commit while the finger is still down.
+ *        Release no longer leaves a 1s "stuck" destructive state. The user
+ *        must hold beyond the threshold briefly, and moving back under the
+ *        threshold cancels before release.
  *
  * Sources:
  *  - "Pointer events vs touch events for swipe" — react-swipeable's README
@@ -55,9 +59,9 @@ export const SWIPE_INTENT_PX = 16;
  * age out on its own, making tap-after-swipe reliable. */
 export const POST_SWIPE_CLICK_SUPPRESS_MS = 350;
 
-/** Keep the archive reveal visible briefly after a committed swipe, so the
- * user sees the destructive action before the row disappears. */
-export const ARCHIVE_COMMIT_DELAY_MS = 1000;
+/** Time the swipe-right gesture must stay past the archive threshold before
+ * release can commit it. Moving back under the threshold cancels the hold. */
+export const ARCHIVE_HOLD_COMMIT_MS = 450;
 
 /** Snap-back / reveal transition duration. Slightly slower than the previous
  * 200ms so swipe-to-archive feels less abrupt. */
@@ -85,4 +89,12 @@ export const LEFT_PANEL_REVEAL_PX = 144;
 export function commitThresholdPx(rowWidth: number): number {
   const target = rowWidth * SWIPE_COMMIT_FRACTION;
   return Math.max(SWIPE_COMMIT_MIN_PX, Math.min(target, SWIPE_COMMIT_MAX_PX));
+}
+
+export function shouldCommitHeldSwipe(
+  offsetX: number,
+  rowWidth: number,
+  holdReady: boolean,
+): boolean {
+  return holdReady && offsetX >= commitThresholdPx(rowWidth);
 }

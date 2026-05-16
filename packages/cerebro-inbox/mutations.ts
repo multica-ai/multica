@@ -6,6 +6,20 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { inboxKeys } from "@multica/core/inbox/queries";
 import type { InboxItem } from "@multica/core/types";
 
+function updateInboxIssueSiblings(
+  items: InboxItem[] | undefined,
+  id: string,
+  update: (item: InboxItem) => InboxItem,
+): InboxItem[] | undefined {
+  const target = items?.find((item) => item.id === id);
+  const issueId = target?.issue_id;
+  return items?.map((item) =>
+    item.id === id || (issueId && item.issue_id === issueId)
+      ? update(item)
+      : item,
+  );
+}
+
 /**
  * Mute an inbox item until the supplied timestamp. Optimistic — sets
  * `muted_until` locally before the server round-trip and rolls back on
@@ -21,10 +35,8 @@ export function useMuteInbox() {
       await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
       const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
       qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
-        old?.map((item) =>
-          item.id === id
-            ? { ...item, muted_until: mutedUntil.toISOString() }
-            : item,
+        updateInboxIssueSiblings(old, id, (item) =>
+          ({ ...item, muted_until: mutedUntil.toISOString() }),
         ),
       );
       return { prev };
@@ -47,9 +59,7 @@ export function useUnmuteInbox() {
       await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
       const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
       qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
-        old?.map((item) =>
-          item.id === id ? { ...item, muted_until: null } : item,
-        ),
+        updateInboxIssueSiblings(old, id, (item) => ({ ...item, muted_until: null })),
       );
       return { prev };
     },

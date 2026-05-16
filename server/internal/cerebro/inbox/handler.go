@@ -79,6 +79,15 @@ func (h *Handler) MuteInboxItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to mute inbox item")
 		return
 	}
+	if item.IssueID.Valid {
+		_, _ = h.Cerebro.SetInboxMutedUntilByIssue(r.Context(), cerebrodb.SetInboxMutedUntilByIssueParams{
+			WorkspaceID:   item.WorkspaceID,
+			RecipientType: item.RecipientType,
+			RecipientID:   item.RecipientID,
+			IssueID:       item.IssueID,
+			MutedUntil:    pgtype.Timestamptz{Time: parsed, Valid: true},
+		})
+	}
 	writeJSON(w, http.StatusOK, toResponse(item))
 }
 
@@ -92,6 +101,14 @@ func (h *Handler) UnmuteInboxItem(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to unmute inbox item")
 		return
+	}
+	if item.IssueID.Valid {
+		_, _ = h.Cerebro.ClearInboxMuteByIssue(r.Context(), cerebrodb.ClearInboxMuteByIssueParams{
+			WorkspaceID:   item.WorkspaceID,
+			RecipientType: item.RecipientType,
+			RecipientID:   item.RecipientID,
+			IssueID:       item.IssueID,
+		})
 	}
 	writeJSON(w, http.StatusOK, toResponse(item))
 }

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  ARCHIVE_HOLD_COMMIT_MS,
   POST_SWIPE_CLICK_SUPPRESS_MS,
   SWIPE_COMMIT_MAX_PX,
   SWIPE_COMMIT_MIN_PX,
   commitThresholdPx,
+  shouldCommitHeldSwipe,
 } from "./swipe-thresholds";
 
 describe("POST_SWIPE_CLICK_SUPPRESS_MS", () => {
@@ -38,5 +40,26 @@ describe("commitThresholdPx", () => {
 
   it("never falls below the minimum even at zero", () => {
     expect(commitThresholdPx(0)).toBe(SWIPE_COMMIT_MIN_PX);
+  });
+});
+
+describe("ARCHIVE_HOLD_COMMIT_MS", () => {
+  it("requires a deliberate hold without making the gesture feel stuck", () => {
+    expect(ARCHIVE_HOLD_COMMIT_MS).toBeGreaterThanOrEqual(350);
+    expect(ARCHIVE_HOLD_COMMIT_MS).toBeLessThan(700);
+  });
+});
+
+describe("shouldCommitHeldSwipe", () => {
+  it("does not commit before the hold timer has completed", () => {
+    expect(shouldCommitHeldSwipe(160, 414, false)).toBe(false);
+  });
+
+  it("commits after hold when still beyond threshold", () => {
+    expect(shouldCommitHeldSwipe(160, 414, true)).toBe(true);
+  });
+
+  it("cancels when the user moves back under threshold before release", () => {
+    expect(shouldCommitHeldSwipe(80, 414, true)).toBe(false);
   });
 });

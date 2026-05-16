@@ -13,12 +13,26 @@ SET muted_until = $2
 WHERE id = $1
 RETURNING *;
 
+-- name: SetInboxMutedUntilByIssue :execrows
+-- Mute every sibling inbox item for the same recipient + issue. The inbox UI
+-- deduplicates rows by issue_id, so muting only the clicked notification can
+-- make an unmuted sibling resurface after refetch.
+UPDATE inbox_item
+SET muted_until = $5
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = false;
+
 -- name: ClearInboxMute :one
 -- Un-mute an inbox item by clearing the muted_until column.
 UPDATE inbox_item
 SET muted_until = NULL
 WHERE id = $1
 RETURNING *;
+
+-- name: ClearInboxMuteByIssue :execrows
+-- Unmute every sibling inbox item for the same recipient + issue.
+UPDATE inbox_item
+SET muted_until = NULL
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = false;
 
 -- name: SetInboxUnread :one
 -- Force an inbox item back to unread state. Used by the "Marker ulæst" action;
