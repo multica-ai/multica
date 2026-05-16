@@ -58,6 +58,10 @@ services:
       APP_ENV: ${APP_ENV:-production}
       MULTICA_DEV_VERIFICATION_CODE: ${MULTICA_DEV_VERIFICATION_CODE:-}
       MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:3000}
+      CRM_EMAIL_PROVIDER: ${CRM_EMAIL_PROVIDER:-imap}
+      EMAILENGINE_BASE_URL: ${EMAILENGINE_BASE_URL:-}
+      EMAILENGINE_ACCESS_TOKEN: ${EMAILENGINE_ACCESS_TOKEN:-}
+      EMAILENGINE_ACCOUNT: ${EMAILENGINE_ACCOUNT:-}
       ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}                                     
       ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}                                     
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-} 
@@ -73,6 +77,27 @@ services:
       HOSTNAME: "0.0.0.0"
     restart: unless-stopped
 
+  emailengine-redis:
+    image: redis:7-alpine
+    profiles: ["emailengine"]
+    volumes:
+      - emailengine_redis:/data
+    restart: unless-stopped
+
+  emailengine:
+    image: ${EMAILENGINE_IMAGE:-postalsys/emailengine:latest}
+    profiles: ["emailengine"]
+    depends_on:
+      - emailengine-redis
+    ports:
+      - "${EMAILENGINE_PORT:-3005}:3000"
+    environment:
+      EENGINE_REDIS: redis://emailengine-redis:6379/2
+      EENGINE_SECRET: ${EMAILENGINE_SECRET:-change-me-in-production}
+      EENGINE_SETTINGS: ${EMAILENGINE_SETTINGS:-}
+    restart: unless-stopped
+
 volumes:
   pgdata:
   backend_uploads:
+  emailengine_redis:

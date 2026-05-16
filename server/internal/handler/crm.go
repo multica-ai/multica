@@ -1687,7 +1687,7 @@ func (h *Handler) TestCRMIMAPSetting(w http.ResponseWriter, r *http.Request) {
 
 	status := "ok"
 	msg := "IMAP connection successful"
-	if _, err := fetchCRMIMAPMessages(cfg, "INBOX", 1, 0, nil); err != nil {
+	if _, err := fetchCRMEmailProviderMessages(cfg, "INBOX", 1, 0, nil); err != nil {
 		status = "failed"
 		msg = "IMAP connection failed: " + err.Error()
 	}
@@ -1710,7 +1710,7 @@ func (h *Handler) PreviewCRMIMAP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	messages, err := fetchCRMIMAPMessages(cfg, cleanCRMIMAPFolder(req.Folder), limit, req.RangeDays, nil)
+	messages, err := fetchCRMEmailProviderMessages(cfg, cleanCRMIMAPFolder(req.Folder), limit, req.RangeDays, nil)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "failed to fetch IMAP messages: "+err.Error())
 		return
@@ -1736,7 +1736,7 @@ func (h *Handler) ImportCRMIMAP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	messages, err := fetchCRMIMAPMessages(cfg, cleanCRMIMAPFolder(req.Folder), len(req.UIDs), 0, req.UIDs)
+	messages, err := fetchCRMEmailProviderMessages(cfg, cleanCRMIMAPFolder(req.Folder), len(req.UIDs), 0, req.UIDs)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "failed to fetch IMAP messages: "+err.Error())
 		return
@@ -1767,7 +1767,7 @@ func (h *Handler) SyncCRMIMAP(w http.ResponseWriter, r *http.Request) {
 	folder := cleanCRMIMAPFolder(req.Folder)
 	var runID pgtype.UUID
 	_ = h.DB.QueryRow(r.Context(), `INSERT INTO crm_imap_sync_run (workspace_id, mailbox_id, folder, requested_limit) VALUES ($1,$2,$3,$4) RETURNING id`, workspaceID, cfg.UUID, folder, limit).Scan(&runID)
-	messages, err := fetchCRMIMAPMessages(cfg, folder, limit, req.RangeDays, nil)
+	messages, err := fetchCRMEmailProviderMessages(cfg, folder, limit, req.RangeDays, nil)
 	if err != nil {
 		_, _ = h.DB.Exec(r.Context(), `UPDATE crm_imap_sync_run SET status='failed', error_message=$2, finished_at=now(), updated_at=now() WHERE id=$1`, runID, err.Error())
 		writeError(w, http.StatusBadGateway, "failed to fetch IMAP messages: "+err.Error())
@@ -1965,7 +1965,7 @@ func (h *Handler) SendCRMEmailDraft(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := sendCRMSMTP(cfg, toEmails, ccEmails, bccEmails, subject, body); err != nil {
+	if err := sendCRMEmailProvider(cfg, toEmails, ccEmails, bccEmails, subject, body); err != nil {
 		_, _ = h.DB.Exec(r.Context(), `UPDATE crm_email_draft SET status='failed', error_message=$3, updated_at=now() WHERE id=$1 AND workspace_id=$2`, draftID, workspaceID, err.Error())
 		writeError(w, http.StatusBadGateway, "failed to send CRM email draft: "+err.Error())
 		return
