@@ -59,7 +59,7 @@ func fetchCRMEmailEngineMessages(cfg crmIMAPMailboxConfig, folder string, limit 
 		limit = 100
 	}
 	values := url.Values{}
-	values.Set("path", cleanCRMIMAPFolder(folder))
+	values.Set("path", cleanCRMIMAPFolder(&folder))
 	values.Set("pageSize", strconv.Itoa(limit))
 	if len(requestedUIDs) > 0 {
 		values.Set("uid", strings.Join(requestedUIDs, ","))
