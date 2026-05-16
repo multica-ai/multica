@@ -967,6 +967,20 @@ export function InboxPage() {
   );
 
   const selectedChannel = selectedKey ? channelMap.get(selectedKey) ?? null : null;
+  // CEREBRO-PATCH(inbox-mobile-detail-title): Mobile detail header shows the selected message/chat/channel title next to Back (JEH-1515).
+  const selectedDetailTitle = selectedChannel
+    ? selectedChannel.kind === "channel"
+      ? `# ${selectedChannel.title}`
+      : selectedChannel.title
+    : selectedChatSession || selectedKey === "new-chat"
+      ? selectedChatSession?.title ||
+        (urlAgent
+          ? agents.find((agent) => agent.id === urlAgent)?.name
+          : null) ||
+        "Chat"
+      : selected
+        ? getInboxDisplayTitle(selected)
+        : "";
 
   // Key by issue_id (not inbox-item id): a new comment/reaction generates a
   // new inbox notification for the same issue, and the dedup helper picks the
@@ -1108,11 +1122,16 @@ export function InboxPage() {
               variant="ghost"
               size="sm"
               onClick={() => setSelectedKey(null, "")}
-              className="gap-1.5 text-muted-foreground"
+              className="shrink-0 gap-1.5 text-muted-foreground"
             >
               <ArrowLeft className="h-4 w-4" />
               {t(($) => $.page.back)}
             </Button>
+            {selectedDetailTitle && (
+              <h1 className="min-w-0 flex-1 truncate pr-2 text-sm font-medium text-foreground">
+                {selectedDetailTitle}
+              </h1>
+            )}
           </div>
           {/* CEREBRO-PATCH(inbox-mobile-detail-flex-height): IssueDetail/ChannelDetail/InboxChatPanel rely on h-full + flex-1 for their internal scroll regions, so the wrapper must be a flex column (not an overflow-y-auto block) or the body collapses to zero height (JEH-697). */}
           <div className="flex flex-1 flex-col min-h-0">
