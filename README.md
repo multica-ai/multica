@@ -30,7 +30,7 @@ Turn coding agents into real teammates — assign tasks, track progress, compoun
 
 Multica turns coding agents into real teammates. Assign issues to an agent like you'd assign to a colleague — they'll pick up the work, write code, report blockers, and update statuses autonomously.
 
-No more copy-pasting prompts. No more babysitting runs. Your agents show up on the board, participate in conversations, and compound reusable skills over time. Think of it as open-source infrastructure for managed agents — vendor-neutral, self-hosted, and designed for human + AI teams. Works with **Claude Code**, **Codex**, **GitHub Copilot CLI**, **OpenClaw**, **OpenCode**, **Hermes**, **Gemini**, **Pi**, **Cursor Agent**, **Kimi**, and **Kiro CLI**.
+No more copy-pasting prompts. No more babysitting runs. Your agents show up on the board, participate in conversations, and compound reusable skills over time. Think of it as open-source infrastructure for managed agents — vendor-neutral, self-hosted, and designed for human + AI teams. Works with **Claude Code**, **Codex**, **GitHub Copilot CLI**, **OpenClaw**, **OpenCode**, **Hermes**, **Gemini**, **Pi**, **Cursor Agent**, **Kimi**, **Kiro CLI**, and **Nanobot** (via WebSocket gateway).
 
 For larger teams, Squads add a stable routing layer: assign work to a group led by an agent, and the leader delegates to the right member.
 
@@ -113,7 +113,7 @@ multica setup          # Connect to Multica Cloud, log in, start daemon
 multica setup           # Configure, authenticate, and start the daemon
 ```
 
-The daemon runs in the background and auto-detects agent CLIs (`claude`, `codex`, `copilot`, `openclaw`, `opencode`, `hermes`, `gemini`, `pi`, `cursor-agent`, `kimi`, `kiro-cli`) on your PATH.
+The daemon runs in the background and auto-detects agent CLIs (`claude`, `codex`, `copilot`, `openclaw`, `opencode`, `hermes`, `gemini`, `pi`, `cursor-agent`, `kimi`, `kiro-cli`, `nanobot`) on your PATH. For Nanobot, the daemon connects to a running nanobot gateway via WebSocket instead of spawning a CLI.
 
 ### 2. Verify your runtime
 
@@ -123,7 +123,7 @@ Open your workspace in the Multica web app. Navigate to **Settings → Runtimes*
 
 ### 3. Create an agent
 
-Go to **Settings → Agents** and click **New Agent**. Pick the runtime you just connected and choose a provider (Claude Code, Codex, GitHub Copilot CLI, OpenClaw, OpenCode, Hermes, Gemini, Pi, Cursor Agent, Kimi, or Kiro CLI). Give your agent a name — this is how it will appear on the board, in comments, and in assignments.
+Go to **Settings → Agents** and click **New Agent**. Pick the runtime you just connected and choose a provider (Claude Code, Codex, GitHub Copilot CLI, OpenClaw, OpenCode, Hermes, Gemini, Pi, Cursor Agent, Kimi, Kiro CLI, or Nanobot). Give your agent a name — this is how it will appear on the board, in comments, and in assignments.
 
 ### 4. Assign your first task
 
@@ -162,7 +162,7 @@ See the [CLI and Daemon Guide](CLI_AND_DAEMON.md) for the full command reference
                      │ Agent Daemon │  runs on your machine
                      └──────────────┘  (Claude Code, Codex, GitHub Copilot CLI,
                                         OpenCode, OpenClaw, Hermes, Gemini,
-                                        Pi, Cursor Agent, Kimi, Kiro CLI)
+                                        Nanobot, Pi, Cursor Agent, Kimi, Kiro CLI)
 ```
 
 | Layer | Stack |
@@ -170,7 +170,7 @@ See the [CLI and Daemon Guide](CLI_AND_DAEMON.md) for the full command reference
 | Frontend | Next.js 16 (App Router) |
 | Backend | Go (Chi router, sqlc, gorilla/websocket) |
 | Database | PostgreSQL 17 with pgvector |
-| Agent Runtime | Local daemon executing Claude Code, Codex, GitHub Copilot CLI, OpenClaw, OpenCode, Hermes, Gemini, Pi, Cursor Agent, Kimi, or Kiro CLI |
+| Agent Runtime | Local daemon executing Claude Code, Codex, GitHub Copilot CLI, OpenClaw, OpenCode, Hermes, Gemini, Pi, Cursor Agent, Kimi, Kiro CLI, or Nanobot |
 
 ## Development
 
