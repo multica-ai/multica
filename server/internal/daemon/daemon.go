@@ -525,6 +525,19 @@ func (d *Daemon) Run(ctx context.Context) error {
 		logFields = append(logFields, "profile", d.cfg.Profile)
 	}
 	d.logger.Info("starting daemon", logFields...)
+	d.logger.Debug("daemon config resolved",
+		"daemon_id", d.cfg.DaemonID,
+		"device_name", d.cfg.DeviceName,
+		"workspaces_root", d.cfg.WorkspacesRoot,
+		"health_port", d.cfg.HealthPort,
+		"poll_interval", d.cfg.PollInterval,
+		"heartbeat_interval", d.cfg.HeartbeatInterval,
+		"agent_timeout", d.cfg.AgentTimeout,
+		"idle_watchdog", d.cfg.AgentIdleWatchdog,
+		"max_concurrent_tasks", d.cfg.MaxConcurrentTasks,
+		"gc_enabled", d.cfg.GCEnabled,
+		"launched_by", d.cfg.LaunchedBy,
+	)
 
 	// Load auth token from CLI config.
 	if err := d.resolveAuth(); err != nil {
@@ -553,7 +566,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.watchdogLoop(ctx)
 	go d.gcLoop(ctx)
 	go d.serveHealth(ctx, healthLn, time.Now())
-	return d.pollLoop(ctx, taskWakeups)
+	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, health)")
+	err = d.pollLoop(ctx, taskWakeups)
+	d.logger.Debug("daemon main loop returning", "error", err)
+	return err
 }
 
 // RestartBinary returns the path to the new binary if the daemon needs to restart
@@ -566,9 +582,11 @@ func (d *Daemon) RestartBinary() string {
 func (d *Daemon) deregisterRuntimes() {
 	runtimeIDs := d.allRuntimeIDs()
 	if len(runtimeIDs) == 0 {
+		d.logger.Debug("deregister: no runtimes to deregister")
 		return
 	}
 
+	d.logger.Debug("deregistering runtimes on shutdown", "count", len(runtimeIDs), "runtime_ids", runtimeIDs)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -595,6 +613,7 @@ func (d *Daemon) resolveAuth() error {
 	}
 	d.client.SetToken(cfg.Token)
 	d.logger.Info("authenticated")
+	d.logger.Debug("auth token loaded", "profile", d.cfg.Profile, "token_len", len(cfg.Token))
 	return nil
 }
 
@@ -620,6 +639,7 @@ func (d *Daemon) findRuntime(id string) *Runtime {
 }
 
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, error) {
+	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
 	var runtimes []map[string]string
 	for name, entry := range d.cfg.Agents {
 		version, err := detectAgentVersion(ctx, entry.Path)
@@ -632,6 +652,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 			continue
 		}
 		d.setAgentVersion(name, version)
+		d.logger.Debug("agent version detected", "name", name, "version", version, "path", entry.Path)
 		displayName := strings.ToUpper(name[:1]) + name[1:]
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
@@ -665,6 +686,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	if len(resp.Runtimes) == 0 {
 		return nil, fmt.Errorf("register runtimes: empty response")
 	}
+	d.logger.Debug("register response", "workspace_id", workspaceID, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos), "repos_version", resp.ReposVersion)
 	return resp, nil
 }
 
@@ -962,6 +984,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list workspaces: %w", err)
 	}
+	d.logger.Debug("workspace sync: fetched workspaces", "count", len(workspaces))
 
 	apiIDs := make(map[string]string, len(workspaces)) // id -> name
 	for _, ws := range workspaces {
@@ -1051,6 +1074,9 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 
 	if len(d.allRuntimeIDs()) == 0 && registered == 0 && len(workspaces) > 0 {
 		return fmt.Errorf("failed to register runtimes for any of the %d workspace(s)", len(workspaces))
+	}
+	if registered > 0 || removed > 0 {
+		d.logger.Debug("workspace sync done", "registered", registered, "removed", removed, "tracked", len(apiIDs))
 	}
 	return nil
 }
@@ -1143,8 +1169,10 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 	// automatically on the next tick — that is the fallback the WS path
 	// relies on.
 	if d.wsHeartbeatRecentlyAcked(rid) {
+		d.logger.Debug("heartbeat: skipping HTTP tick, WS recently acked", "runtime_id", rid)
 		return
 	}
+	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
 	resp, err := d.client.SendHeartbeat(ctx, rid)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -1179,6 +1207,15 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, resp *HeartbeatResponse) {
 	if resp == nil {
 		return
+	}
+	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
+		d.logger.Debug("heartbeat: pending actions",
+			"runtime_id", runtimeID,
+			"update", resp.PendingUpdate != nil,
+			"model_list", resp.PendingModelList != nil,
+			"local_skills", resp.PendingLocalSkills != nil,
+			"local_skill_import", resp.PendingLocalSkillImport != nil,
+		)
 	}
 	if resp.PendingUpdate != nil {
 		go d.handleUpdate(ctx, runtimeID, resp.PendingUpdate)
@@ -1634,6 +1671,7 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan struct{}) erro
 			// Fan out to every runtime poller. Any of them might have a queued
 			// task; the per-poller wakeup channel coalesces (cap 1) so a burst
 			// of wake-ups doesn't pile up.
+			d.logger.Debug("task wakeup: fanning out to pollers", "pollers", len(pollers))
 			for _, h := range pollers {
 				select {
 				case h.wakeup <- struct{}{}:
@@ -1822,6 +1860,17 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	} else {
 		taskLog.Info("picked task", "issue", task.IssueID, "agent", agentName, "provider", provider)
 	}
+	taskLog.Debug("task context",
+		"workspace_id", task.WorkspaceID,
+		"runtime_id", task.RuntimeID,
+		"agent_id", task.AgentID,
+		"repos", len(task.Repos),
+		"project_id", task.ProjectID,
+		"autopilot_run_id", task.AutopilotRunID,
+		"trigger_comment_id", task.TriggerCommentID,
+		"resume_session", task.PriorSessionID != "",
+		"reuse_workdir", task.PriorWorkDir != "",
+	)
 
 	if err := d.client.StartTask(ctx, task.ID); err != nil {
 		taskLog.Error("start task failed", "error", err)
@@ -2278,6 +2327,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		execOpts.SystemPrompt = runtimeBrief
 	}
 
+	taskLog.Debug("invoking backend",
+		"provider", provider,
+		"model", model,
+		"prompt_bytes", len(prompt),
+		"custom_args", len(customArgs),
+		"extra_args", len(extraArgs),
+		"mcp_config", len(mcpConfig) > 0,
+		"inline_system_prompt", execOpts.SystemPrompt != "",
+		"resume_session", execOpts.ResumeSessionID != "",
+		"timeout", execOpts.Timeout,
+	)
+
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
 	if err != nil {
 		return TaskResult{}, err
@@ -2305,6 +2366,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"status", result.Status,
 		"duration", elapsed.String(),
 		"tools", tools,
+	)
+	taskLog.Debug("agent result detail",
+		"status", result.Status,
+		"output_bytes", len(result.Output),
+		"session_id", result.SessionID,
+		"models_with_usage", len(result.Usage),
+		"agent_error", result.Error,
 	)
 
 	// Convert agent usage map to task usage entries.
@@ -2468,8 +2536,10 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 
 	session, err := backend.Execute(agentCtx, prompt, opts)
 	if err != nil {
+		taskLog.Debug("backend execute returned error", "error", err)
 		return agent.Result{}, 0, err
 	}
+	taskLog.Debug("backend started, draining messages")
 
 	// Create an independent drain deadline so we don't block forever if the
 	// backend's internal timeout fails to produce a Result (e.g. scanner
