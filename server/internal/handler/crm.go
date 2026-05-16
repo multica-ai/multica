@@ -2022,8 +2022,6 @@ func (h *Handler) importCRMIMAPMessages(ctx context.Context, workspaceID pgtype.
 	return imported, nil
 }
 
-func imapQuote(s string) string { return `"` + strings.ReplaceAll(s, `"`, `\\"`) + `"` }
-
 func imapSearchIDs(lines []string) []string {
 	ids := []string{}
 	for _, line := range lines {
