@@ -1112,7 +1112,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const detailContent = (
     <div className="flex h-full min-w-0 flex-1 flex-col">
         <PageHeader className="gap-2 bg-background text-sm">
-          <div className="flex flex-1 items-center gap-1.5 min-w-0 overflow-x-auto">
+          {/* CEREBRO-PATCH(issue-detail-mobile-topbar-title): Mobile shows issue id+title first; desktop keeps full workspace breadcrumb (JEH-1482). */}
+          <div className="flex flex-1 items-center gap-1.5 min-w-0 md:hidden">
+            <span className="shrink-0 text-muted-foreground">{issue.identifier}</span>
+            <span className="truncate font-medium text-foreground">{displayTitle}</span>
+          </div>
+          <div className="hidden md:flex flex-1 items-center gap-1.5 min-w-0 overflow-x-auto">
             {workspace && (
               <>
                 <AppLink

@@ -602,3 +602,4 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `autopilot-model-update-submit` | packages/views/autopilots/components/autopilot-dialog.tsx | 2 | JEH-1310 — include `model` on update submission; explicit `null` clears the override. |
 | `autopilot-model-section-render` | packages/views/autopilots/components/autopilot-dialog.tsx | 2 | JEH-1310 — render the section between OutputMode and Schedule. |
 | `autopilot-model-edit-seed` | packages/views/autopilots/components/autopilot-detail-page.tsx | 2 | JEH-1310 — pass the persisted `model` through to the edit dialog so the picker shows the current value. |
+| `issue-detail-mobile-topbar-title` | packages/views/issues/components/issue-detail.tsx | 5 | JEH-1482 — mobile topbar shows issue identifier + title first (`md:hidden`); desktop retains full workspace/project/parent breadcrumb (`hidden md:flex`). |
