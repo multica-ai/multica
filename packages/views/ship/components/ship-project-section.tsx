@@ -7,6 +7,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import {
   useCollapsedProjects,
+  useDeployEnvironments,
   useProjectPullRequests,
   useSyncProject,
 } from "@multica/core/ship";
@@ -18,8 +19,8 @@ import { projectListOptions } from "@multica/core/projects/queries";
 import { AppLink } from "../../navigation";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
-import { ShipKanban } from "./ship-kanban";
 import { ShipDeploySwimlanes } from "./ship-deploy-swimlanes";
+import { ShipRepoSection } from "./ship-repo-section";
 
 interface ShipProjectSectionProps {
   project: ShipProjectSummary;
@@ -59,6 +60,27 @@ export function ShipProjectSection({ project }: ShipProjectSectionProps) {
     () => data?.pull_requests ?? [],
     [data],
   );
+  // Staging env — needed so PR card chips can surface smoke-test actions.
+  // TQ deduplicates this with the same call in ShipDeploySwimlanes.
+  const { data: envData } = useDeployEnvironments(project.id);
+  const stagingEnv = useMemo(() => {
+    const envs = envData?.environments ?? [];
+    return envs.find((e) => e.kind === "staging") ?? null;
+  }, [envData]);
+
+  // Group PRs by repo URL. Sort repos alphabetically by name.
+  const repoGroups = useMemo(() => {
+    const map = new Map<string, PullRequest[]>();
+    for (const pr of prs) {
+      if (!map.has(pr.repo_url)) map.set(pr.repo_url, []);
+      map.get(pr.repo_url)!.push(pr);
+    }
+    return Array.from(map.entries()).sort(([a], [b]) => {
+      const nameA = a.split("/").at(-1) ?? a;
+      const nameB = b.split("/").at(-1) ?? b;
+      return nameA.localeCompare(nameB);
+    });
+  }, [prs]);
 
   const [errorBanner, setErrorBanner] = useState<{
     title: string;
@@ -275,11 +297,17 @@ export function ShipProjectSection({ project }: ShipProjectSectionProps) {
         <div id={sectionId} className="space-y-3">
           <ShipDeploySwimlanes projectId={project.id} />
 
-          <ShipKanban
-            pullRequests={prs}
-            isLoading={isLoading}
-            projectId={project.id}
-          />
+          <div className="space-y-3">
+            {repoGroups.map(([repoUrl, repoPrs]) => (
+              <ShipRepoSection
+                key={repoUrl}
+                repoUrl={repoUrl}
+                prs={repoPrs}
+                isLoading={isLoading}
+                stagingEnv={stagingEnv}
+              />
+            ))}
+          </div>
         </div>
       )}
     </section>
