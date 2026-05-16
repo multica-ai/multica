@@ -41,6 +41,7 @@ export interface CreateSquadRequest {
   name: string;
   description?: string;
   leader_id: string;
+  avatar_url?: string;
 }
 
 export interface UpdateSquadRequest {

@@ -1,6 +1,6 @@
 -- name: CreateSquad :one
-INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO squad (workspace_id, name, description, leader_id, creator_id, avatar_url)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: GetSquad :one

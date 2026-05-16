@@ -58,7 +58,9 @@ make selfhost
 
 如果不配邮件，用户无法通过邮件收到验证码；server 会把生成的验证码打印到 stdout。
 
-要真的发验证码邮件：
+支持两种发送通道，按部署环境二选一：
+
+**Option A — Resend（公网/云端部署）：**
 
 1. 在 [Resend](https://resend.com/) 注册并拿一个 API key
 2. 验证一个你控制的发件域名
@@ -69,16 +71,28 @@ make selfhost
     RESEND_FROM_EMAIL=noreply@yourdomain.com
     ```
 
-4. 重启：`docker compose -f docker-compose.selfhost.yml restart backend`
+**Option B — SMTP relay（内网/自部署）：**
 
-更多 auth 配置（OAuth、注册白名单）见 [登录与注册配置](/auth-setup)。
+适合内网无法访问 `api.resend.com`，或已经有内部邮件中继（Exchange、Postfix、自部署 SendGrid 等）的场景。同时设置时 `SMTP_HOST` 优先级高于 Resend。
+
+```bash
+SMTP_HOST=smtp.internal.example.com
+SMTP_PORT=587                  # 默认 25；STARTTLS 提交端口用 587
+SMTP_USERNAME=multica          # 留空则使用未认证 relay
+SMTP_PASSWORD=...
+RESEND_FROM_EMAIL=noreply@yourdomain.com  # 同时作为 SMTP From: 头
+```
+
+之后重启：`docker compose -f docker-compose.selfhost.yml restart backend`。
+
+更多 auth 配置（OAuth、注册白名单）以及完整的 SMTP 变量说明见 [登录与注册配置](/auth-setup) 和 [环境变量](/environment-variables)。
 
 ## 4. 首次登录 + 创建工作区
 
 打开 [http://localhost:3000](http://localhost:3000)：
 
 - 输入你的邮箱
-- 从 Resend 邮件里拿验证码（或者前面没配 Resend 的话从 server 容器的 stdout 里抄 `[DEV] Verification code` 这行）
+- 从你配置的邮件后端（Resend 或 SMTP relay）收到的邮件里拿验证码；两者都没配的话，从 server 容器的 stdout 里抄 `[DEV] Verification code` 这行
 - 不要直接使用 `888888`；只有在非 production 私有实例上显式设置 `MULTICA_DEV_VERIFICATION_CODE=888888` 后它才会生效
 - 登录后创建第一个工作区
 
@@ -107,7 +121,7 @@ multica setup self-host
 ## 常见问题
 
 - **后端起不来**：看容器日志 `docker compose -f docker-compose.selfhost.yml logs backend`；常见是 `.env` 里 `DATABASE_URL` 或 `JWT_SECRET` 有问题
-- **验证码收不到**：没配 Resend → 从 `docker compose logs backend` 里找 `[DEV] Verification code`
+- **验证码收不到**：没配任何邮件后端（Resend 和 SMTP 都没设） → 从 `docker compose logs backend` 里找 `[DEV] Verification code`
 - **WebSocket 连不上**：公网部署必须设 `FRONTEND_ORIGIN` 成你真实的前端域名；见 [故障排查 → WebSocket 连不上](/troubleshooting#websocket-连不上)
 
 ## 下一步
