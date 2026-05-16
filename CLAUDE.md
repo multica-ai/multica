@@ -308,6 +308,23 @@ All test deps are in the pnpm catalog for unified versioning.
 
 Standard `go test`. Tests should create their own fixture data in a test database.
 
+### Go backend quality gate
+
+When changing Go backend code under `server/`, database migrations, sqlc queries,
+background workers, webhooks, external integrations, task queues, or state
+synchronization flows, follow the repository skill at
+`docs/agent-skills/go-backend-quality/SKILL.md` before implementation.
+
+The practical bar is:
+
+- Write the failing test first unless the change is mechanical or docs-only.
+- Keep handlers thin; put business workflows in services or focused helpers.
+- Enforce invariants in the database with constraints, transactions, locks, or leases.
+- Design for multiple `multica-server` replicas; no process-local shared truth.
+- Make webhook, sync, worker, and queue processing idempotent under retries.
+- Use fake clients for external integration tests; do not depend on live services.
+- Run `make sqlc` after query changes and include generated files.
+
 ### E2E tests
 
 E2E tests should be self-contained. Use the `TestApiClient` fixture for data setup/teardown:

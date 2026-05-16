@@ -24,6 +24,7 @@ import type { ChildProgress } from "./list-row";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { useT } from "../../i18n";
+import { mutationErrorMessage } from "../utils/errors";
 
 function formatDate(date: string): string {
   return new Date(date).toLocaleDateString("en-US", {
@@ -70,7 +71,7 @@ export const BoardCardContent = memo(function BoardCardContent({
     (updates: Partial<UpdateIssueRequest>) => {
       updateIssueMutation.mutate(
         { id: issue.id, ...updates },
-        { onError: () => toast.error(t(($) => $.card.update_failed)) },
+        { onError: (err) => toast.error(mutationErrorMessage(err, t(($) => $.card.update_failed))) },
       );
     },
     [issue.id, updateIssueMutation, t],

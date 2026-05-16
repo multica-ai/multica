@@ -277,6 +277,58 @@ type FeishuIssueThread struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
+type FeishuProjectIntegration struct {
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	ProjectKey           string             `json:"project_key"`
+	PluginID             string             `json:"plugin_id"`
+	PluginSecret         string             `json:"plugin_secret"`
+	ActorUserKey         pgtype.Text        `json:"actor_user_key"`
+	Enabled              bool               `json:"enabled"`
+	SyncStory            bool               `json:"sync_story"`
+	SyncIssue            bool               `json:"sync_issue"`
+	MqlFilter            string             `json:"mql_filter"`
+	StatusMapping        []byte             `json:"status_mapping"`
+	ReverseStatusMapping []byte             `json:"reverse_status_mapping"`
+	CreatedByID          pgtype.UUID        `json:"created_by_id"`
+	LastSyncedAt         pgtype.Timestamptz `json:"last_synced_at"`
+	LastError            pgtype.Text        `json:"last_error"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
+type FeishuProjectIssueBinding struct {
+	ID                    pgtype.UUID        `json:"id"`
+	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
+	IntegrationID         pgtype.UUID        `json:"integration_id"`
+	IssueID               pgtype.UUID        `json:"issue_id"`
+	ProjectKey            string             `json:"project_key"`
+	WorkItemType          string             `json:"work_item_type"`
+	WorkItemID            string             `json:"work_item_id"`
+	ExternalIdentifier    string             `json:"external_identifier"`
+	ExternalUrl           pgtype.Text        `json:"external_url"`
+	ExternalStatusLabel   pgtype.Text        `json:"external_status_label"`
+	LastExternalUpdatedAt pgtype.Timestamptz `json:"last_external_updated_at"`
+	LastSyncedAt          pgtype.Timestamptz `json:"last_synced_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+}
+
+type FeishuProjectSyncRun struct {
+	ID            pgtype.UUID        `json:"id"`
+	IntegrationID pgtype.UUID        `json:"integration_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Status        string             `json:"status"`
+	Trigger       string             `json:"trigger"`
+	CreatedCount  int32              `json:"created_count"`
+	UpdatedCount  int32              `json:"updated_count"`
+	SkippedCount  int32              `json:"skipped_count"`
+	ErrorCount    int32              `json:"error_count"`
+	Error         pgtype.Text        `json:"error"`
+	StartedAt     pgtype.Timestamptz `json:"started_at"`
+	FinishedAt    pgtype.Timestamptz `json:"finished_at"`
+}
+
 type GithubInstallation struct {
 	ID               pgtype.UUID        `json:"id"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`

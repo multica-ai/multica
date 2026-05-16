@@ -1,5 +1,12 @@
 import { z } from "zod";
-import type { Attachment, ListIssuesResponse, TimelineEntry } from "../types";
+import type {
+  Attachment,
+  FeishuProjectIntegration,
+  FeishuProjectStatusOptionsResponse,
+  FeishuProjectSyncResponse,
+  ListIssuesResponse,
+  TimelineEntry,
+} from "../types";
 
 // ---------------------------------------------------------------------------
 // Schemas for the highest-risk API endpoints — those whose responses drive
@@ -169,3 +176,74 @@ export const SubscribersListSchema = z.array(SubscriberSchema);
 export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
 }).loose();
+
+export const FeishuProjectIntegrationSchema = z.object({
+  id: z.string().optional(),
+  workspace_id: z.string().optional(),
+  project_key: z.string().default(""),
+  plugin_id: z.string().default(""),
+  has_plugin_secret: z.boolean().default(false),
+  actor_user_key: z.string().nullable().default(null),
+  enabled: z.boolean().default(false),
+  sync_story: z.boolean().default(false),
+  sync_issue: z.boolean().default(true),
+  mql_filter: z.string().default(""),
+  status_mapping: z.record(z.string(), z.string()).default({}),
+  reverse_status_mapping: z.record(z.string(), z.string()).default({}),
+  last_synced_at: z.string().nullable().default(null),
+  last_error: z.string().nullable().default(null),
+  created_at: z.string().optional(),
+  updated_at: z.string().optional(),
+}).loose();
+
+export const EMPTY_FEISHU_PROJECT_INTEGRATION: FeishuProjectIntegration = {
+  project_key: "",
+  plugin_id: "",
+  has_plugin_secret: false,
+  actor_user_key: null,
+  enabled: false,
+  sync_story: false,
+  sync_issue: true,
+  mql_filter: "",
+  status_mapping: {},
+  reverse_status_mapping: {},
+  last_synced_at: null,
+  last_error: null,
+};
+
+export const FeishuProjectSyncResponseSchema = z.object({
+  status: z.string().default("failed"),
+  summary: z.object({
+    created: z.number().default(0),
+    updated: z.number().default(0),
+    skipped: z.number().default(0),
+    errors: z.number().default(0),
+  }).default({
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    errors: 0,
+  }),
+  error: z.string().optional(),
+}).loose();
+
+export const EMPTY_FEISHU_PROJECT_SYNC_RESPONSE: FeishuProjectSyncResponse = {
+  status: "failed",
+  summary: {
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    errors: 0,
+  },
+};
+
+export const FeishuProjectStatusOptionsResponseSchema = z.object({
+  statuses: z.array(z.object({
+    key: z.string(),
+    name: z.string(),
+  }).loose()).default([]),
+}).loose();
+
+export const EMPTY_FEISHU_PROJECT_STATUS_OPTIONS_RESPONSE: FeishuProjectStatusOptionsResponse = {
+  statuses: [],
+};

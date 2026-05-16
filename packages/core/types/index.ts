@@ -77,6 +77,13 @@ export type {
   GitHubConnectResponse,
 } from "./github";
 export type {
+  FeishuProjectIntegration,
+  FeishuProjectStatusOption,
+  FeishuProjectStatusOptionsResponse,
+  UpdateFeishuProjectIntegrationRequest,
+  FeishuProjectSyncResponse,
+} from "./feishu-project";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,

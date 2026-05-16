@@ -73,6 +73,7 @@ import { cn } from "@multica/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
 import { useT } from "../../i18n";
+import { mutationErrorMessage } from "../utils/errors";
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
@@ -250,7 +251,7 @@ function SubIssueRow({ child }: { child: Issue }) {
     (updates: Partial<UpdateIssueRequest>) => {
       updateIssue.mutate(
         { id: child.id, ...updates },
-        { onError: () => toast.error(t(($) => $.detail.update_failed)) },
+        { onError: (err) => toast.error(mutationErrorMessage(err, t(($) => $.detail.update_failed))) },
       );
     },
     [child.id, updateIssue, t],

@@ -26,6 +26,7 @@ import { myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-st
 import { PageHeader } from "../../layout/page-header";
 import { useT } from "../../i18n";
 import { MyIssuesHeader } from "./my-issues-header";
+import { mutationErrorMessage } from "../../issues/utils/errors";
 
 export function MyIssuesPage() {
   const { t } = useT("my-issues");
@@ -111,7 +112,7 @@ export function MyIssuesPage() {
 
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
-        { onError: () => toast.error(t(($) => $.errors.move_failed)) },
+        { onError: (err) => toast.error(mutationErrorMessage(err, t(($) => $.errors.move_failed))) },
       );
     },
     [updateIssueMutation, t],
