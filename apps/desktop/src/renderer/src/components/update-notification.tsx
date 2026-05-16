@@ -50,15 +50,6 @@ export function UpdateNotification() {
               Later
             </button>
             <button
-              onClick={() =>
-                window.desktopAPI.openExternal("https://multica.furtherref.com/changelog")
-              }
-              disabled={installing}
-              className="inline-flex items-center rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent transition-colors disabled:opacity-60"
-            >
-              See changes
-            </button>
-            <button
               onClick={() => {
                 if (installing) return;
                 setInstalling(true);

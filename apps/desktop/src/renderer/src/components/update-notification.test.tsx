@@ -84,6 +84,6 @@ describe("UpdateNotification", () => {
     expect(
       screen.getByRole("button", { name: /restarting/i }),
     ).toBeDisabled();
-    expect(screen.getByRole("button", { name: "See changes" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "See changes" })).not.toBeInTheDocument();
   });
 });
