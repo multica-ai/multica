@@ -117,8 +117,8 @@ func TestNanobotLaunchHeader(t *testing.T) {
 func TestNanobotGatewayURL(t *testing.T) {
 	// Default URL
 	b := &nanobotBackend{cfg: Config{}}
-	if got := b.gatewayURL(); got != "ws://127.0.0.1:8765/" {
-		t.Errorf("default gatewayURL = %q, want ws://127.0.0.1:8765/", got)
+	if got := b.gatewayURL(); got != "ws://127.0.0.1:8765/ws" {
+		t.Errorf("default gatewayURL = %q, want ws://127.0.0.1:8765/ws", got)
 	}
 
 	// Custom URL via env

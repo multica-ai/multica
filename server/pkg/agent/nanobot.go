@@ -48,8 +48,15 @@ func (b *nanobotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		var finalError string
 		var chatID string
 
-		// 1. Connect to nanobot gateway WebSocket.
-		gatewayURL := b.gatewayURL()
+		// 1. Resolve the gateway WebSocket URL, fetching a short-lived
+		// token via /auth/token if an auth secret is configured.
+		gatewayURL, err := b.resolveGatewayURL(runCtx)
+		if err != nil {
+			finalStatus = "failed"
+			finalError = fmt.Sprintf("nanobot gateway URL resolve failed: %v", err)
+			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+			return
+		}
 		b.cfg.Logger.Info("connecting to nanobot gateway", "url", gatewayURL)
 
 		dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
@@ -205,12 +212,61 @@ func (b *nanobotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
-// gatewayURL returns the WebSocket URL for the nanobot gateway.
+// gatewayURL returns the raw base URL (for tests).
 func (b *nanobotBackend) gatewayURL() string {
 	if u := b.cfg.Env["NANOBOT_GATEWAY_URL"]; u != "" {
 		return u
 	}
-	return "ws://127.0.0.1:8765/"
+	return "ws://127.0.0.1:8765/ws"
+}
+
+// resolveGatewayURL returns the full WebSocket URL, fetching a short-lived
+// token via /auth/token if NANOBOT_GATEWAY_AUTH_SECRET is configured.
+func (b *nanobotBackend) resolveGatewayURL(ctx context.Context) (string, error) {
+	base := b.cfg.Env["NANOBOT_GATEWAY_URL"]
+	if base == "" {
+		base = "ws://127.0.0.1:8765/ws"
+	}
+
+	secret := b.cfg.Env["NANOBOT_GATEWAY_AUTH_SECRET"]
+	if secret == "" {
+		return base, nil
+	}
+
+	u, err := url.Parse(base)
+	if err != nil {
+		return base, nil
+	}
+
+	// Build the HTTP token endpoint URL from the WS URL.
+	tokenURL := url.URL{Scheme: "http", Host: u.Host, Path: "/auth/token"}
+	if u.Scheme == "wss" {
+		tokenURL.Scheme = "https"
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tokenURL.String(), nil)
+	if err != nil {
+		return "", fmt.Errorf("build token request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+secret)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetch gateway token from %s: %w", tokenURL.String(), err)
+	}
+	defer resp.Body.Close()
+
+	var tokenResp struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil || tokenResp.Token == "" {
+		return "", fmt.Errorf("gateway token response missing token (status %d)", resp.StatusCode)
+	}
+
+	q := u.Query()
+	q.Set("token", tokenResp.Token)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }
 
 // processNanobotEvent parses a single WebSocket frame from the nanobot
