@@ -7,17 +7,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-// nanobotBlockedArgs are flags hardcoded by the daemon that must not be
-// overridden by user-configured custom_args. nanobot uses a WebSocket
-// transport so custom CLI args are not applicable, but we keep the map
-// for consistency with other backends.
-var nanobotBlockedArgs = map[string]blockedArgMode{}
+const defaultNanobotGatewayURL = "ws://127.0.0.1:8765/ws"
 
 // nanobotBackend implements Backend by connecting to a running nanobot
 // gateway via its WebSocket channel protocol. Unlike CLI-based backends
@@ -48,8 +43,6 @@ func (b *nanobotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		var finalError string
 		var chatID string
 
-		// 1. Resolve the gateway WebSocket URL, fetching a short-lived
-		// token via /auth/token if an auth secret is configured.
 		gatewayURL, err := b.resolveGatewayURL(runCtx)
 		if err != nil {
 			finalStatus = "failed"
@@ -69,7 +62,7 @@ func (b *nanobotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		}
 		defer conn.Close()
 
-		// 2. Read the "ready" event to get the default chat_id.
+		// Read the "ready" event to get the default chat_id.
 		if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("nanobot set deadline failed: %v", err)
@@ -96,10 +89,8 @@ func (b *nanobotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		chatID = ready.ChatID
 		b.cfg.Logger.Info("nanobot gateway connected", "chat_id", chatID)
 
-		// Clear read deadline for streaming.
 		_ = conn.SetReadDeadline(time.Time{})
 
-		// 3. Build and send the message envelope.
 		userText := prompt
 		if opts.SystemPrompt != "" {
 			userText = opts.SystemPrompt + "\n\n---\n\n" + prompt
@@ -120,13 +111,10 @@ func (b *nanobotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 
 		b.cfg.Logger.Info("nanobot prompt sent", "chat_id", chatID)
 
-		// 4. Read streaming events until turn_end or context cancellation.
 		var output strings.Builder
-		var outputMu sync.Mutex
 
 	eventLoop:
 		for {
-			// Use a goroutine + channel to make ReadMessage cancellable.
 			type readResult struct {
 				msgType int
 				data    []byte
@@ -151,7 +139,6 @@ func (b *nanobotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 
 			case result := <-readCh:
 				if result.err != nil {
-					// Check if the connection closed normally after turn_end.
 					if finalStatus == "completed" && output.Len() > 0 {
 						break eventLoop
 					}
@@ -174,9 +161,7 @@ func (b *nanobotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 				msgType, content, status := processNanobotEvent(result.data)
 				switch msgType {
 				case MessageText:
-					outputMu.Lock()
 					output.WriteString(content)
-					outputMu.Unlock()
 					trySend(msgCh, Message{Type: MessageText, Content: content})
 				case MessageThinking:
 					trySend(msgCh, Message{Type: MessageThinking, Content: content})
@@ -196,13 +181,9 @@ func (b *nanobotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		duration := time.Since(startTime)
 		b.cfg.Logger.Info("nanobot finished", "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
-		outputMu.Lock()
-		finalOutput := output.String()
-		outputMu.Unlock()
-
 		resCh <- Result{
 			Status:     finalStatus,
-			Output:     finalOutput,
+			Output:     output.String(),
 			Error:      finalError,
 			DurationMs: duration.Milliseconds(),
 			SessionID:  chatID,
@@ -217,7 +198,7 @@ func (b *nanobotBackend) gatewayURL() string {
 	if u := b.cfg.Env["NANOBOT_GATEWAY_URL"]; u != "" {
 		return u
 	}
-	return "ws://127.0.0.1:8765/ws"
+	return defaultNanobotGatewayURL
 }
 
 // resolveGatewayURL returns the full WebSocket URL, fetching a short-lived
@@ -225,7 +206,7 @@ func (b *nanobotBackend) gatewayURL() string {
 func (b *nanobotBackend) resolveGatewayURL(ctx context.Context) (string, error) {
 	base := b.cfg.Env["NANOBOT_GATEWAY_URL"]
 	if base == "" {
-		base = "ws://127.0.0.1:8765/ws"
+		base = defaultNanobotGatewayURL
 	}
 
 	secret := b.cfg.Env["NANOBOT_GATEWAY_AUTH_SECRET"]
@@ -238,7 +219,6 @@ func (b *nanobotBackend) resolveGatewayURL(ctx context.Context) (string, error) 
 		return base, nil
 	}
 
-	// Build the HTTP token endpoint URL from the WS URL.
 	tokenURL := url.URL{Scheme: "http", Host: u.Host, Path: "/auth/token"}
 	if u.Scheme == "wss" {
 		tokenURL.Scheme = "https"
@@ -306,35 +286,4 @@ func processNanobotEvent(raw []byte) (MessageType, string, string) {
 		return MessageError, event.Text, ""
 	}
 	return "", "", ""
-}
-
-// checkNanobotGateway performs a lightweight HTTP GET to the nanobot
-// gateway's /api/bootstrap endpoint to verify it is running and reachable.
-func checkNanobotGateway(ctx context.Context, gatewayURL string) error {
-	u, err := url.Parse(gatewayURL)
-	if err != nil {
-		return fmt.Errorf("nanobot gateway URL parse: %w", err)
-	}
-	switch u.Scheme {
-	case "ws":
-		u.Scheme = "http"
-	case "wss":
-		u.Scheme = "https"
-	}
-	u.Path = strings.TrimRight(u.Path, "/") + "/api/bootstrap"
-	u.RawQuery = ""
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return fmt.Errorf("nanobot gateway check: %w", err)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("nanobot gateway not reachable at %s: %w", u.String(), err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("nanobot gateway returned status %d", resp.StatusCode)
-	}
-	return nil
 }
