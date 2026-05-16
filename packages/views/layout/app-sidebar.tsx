@@ -35,6 +35,7 @@ import {
   FolderKanban,
   Hash,
   FileText,
+  Users,
   // CEREBRO-PATCH(sidebar-new-message-header): JEH-1296 new-message + notification badge icons
   MessageSquarePlus,
   Bell,
@@ -137,6 +138,7 @@ type NavKey =
   | "documents"
   | "autopilots"
   | "agents"
+  | "squads"
   | "runtimes"
   | "skills"
   | "settings";
@@ -150,6 +152,7 @@ type NavLabelKey =
   | "documents"
   | "autopilots"
   | "agents"
+  | "squads"
   | "runtimes"
   | "skills"
   | "settings";
@@ -167,6 +170,8 @@ const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[]
 
 const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "agents", labelKey: "agents", icon: Bot },
+  // CEREBRO-PATCH(sidebar-squads-nav): expose upstream Squads page in the main workspace navigation.
+  { key: "squads", labelKey: "squads", icon: Users },
   { key: "runtimes", labelKey: "runtimes", icon: Monitor },
   { key: "autopilots", labelKey: "autopilots", icon: Zap },
   { key: "skills", labelKey: "skills", icon: BookOpenText },
