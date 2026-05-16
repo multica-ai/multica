@@ -2382,3 +2382,24 @@ func TestDispatchStep_UnknownIntent_DoesNotSaveReplyContext(t *testing.T) {
 		t.Error("expected no reply context for unknown intent")
 	}
 }
+
+func TestDispatchStep_CreateIssue_NilReplyContext_DoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	cfg, issueSvc, _, _ := buildDispatchConfig()
+	cfg.ReplyContext = nil
+	issueSvc.createReturn = facade.Issue{
+		ID:         uuid(0xAA),
+		Identifier: "STA-39",
+		Title:      "登录页加载慢",
+		Status:     "todo",
+	}
+	step := inbound.NewDispatchStep(cfg)
+
+	evt := makeEvt(port.IntentCreateIssue, map[string]string{"title": "登录页加载慢"})
+	evt.ChatType = port.ChatTypeDirect
+	_, _, err := step.Run(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}

@@ -11,6 +11,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// DefaultTTL is the default expiration duration for reply contexts.
+const DefaultTTL = 24 * time.Hour
+
 type Context struct {
 	ConnectionID    string
 	ExternalUserID  string

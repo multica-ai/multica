@@ -123,6 +123,47 @@ func TestInMemoryStore_Clear(t *testing.T) {
 	}
 }
 
+func TestInMemoryStore_ClearNotFound(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := replyctx.NewInMemoryStore()
+
+	if err := store.Clear(ctx, "feishu", "ou_unknown"); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+}
+
+func TestInMemoryStore_LookupZeroNowUsesCurrentTime(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := replyctx.NewInMemoryStore()
+
+	wsID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	issueID := pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
+
+	if err := store.Upsert(ctx, replyctx.Context{
+		ConnectionID:    "feishu",
+		ExternalUserID:  "ou_user1",
+		WorkspaceID:     wsID,
+		IssueID:         issueID,
+		IssueIdentifier: "STA-1",
+		ExpiresAt:       time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	got, ok, err := store.Lookup(ctx, "feishu", "ou_user1", time.Time{})
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected context to be found with zero now")
+	}
+	if got.IssueIdentifier != "STA-1" {
+		t.Errorf("IssueIdentifier = %q, want STA-1", got.IssueIdentifier)
+	}
+}
+
 func TestInMemoryStore_Overwrite(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
