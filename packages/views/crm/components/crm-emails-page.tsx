@@ -35,6 +35,8 @@ type AssociationDraft = {
 
 type EmailLinkDraft = { projectId: string; issueIds: string[] };
 
+type ComposeDraft = { mailboxId: string; to: string; cc: string; bcc: string; subject: string; body: string };
+
 type MailboxDraft = { id?: string | null; label: string; email: string; host: string; port: string; tls_mode: "ssl" | "starttls" | "none"; username: string; secret_ref: string; secret: string; sync_enabled: boolean; owner_type: string; owner_id: string; smtp_host: string; smtp_port: string; smtp_tls_mode: string; smtp_username: string; smtp_secret_ref: string; smtp_secret: string };
 
 const emptyMailboxDraft: MailboxDraft = { label: "", email: "", host: "", port: "993", tls_mode: "ssl", username: "", secret_ref: "", secret: "", sync_enabled: false, owner_type: "", owner_id: "", smtp_host: "", smtp_port: "465", smtp_tls_mode: "ssl", smtp_username: "", smtp_secret_ref: "", smtp_secret: "" };
@@ -99,6 +101,7 @@ export function CRMEmailsPage() {
   const [detailDialog, setDetailDialog] = useState<{ type: "account"; account: CRMAccount } | { type: "contact"; contact: CRMContact } | null>(null);
   const [associationDraft, setAssociationDraft] = useState<AssociationDraft | null>(null);
   const [emailLinkDraft, setEmailLinkDraft] = useState<EmailLinkDraft | null>(null);
+  const [composeDraft, setComposeDraft] = useState<ComposeDraft | null>(null);
   const openModal = useModalStore((state) => state.open);
   const setIssueDraft = useIssueDraftStore((state) => state.setDraft);
   const clearIssueDraft = useIssueDraftStore((state) => state.clearDraft);
@@ -225,6 +228,28 @@ export function CRMEmailsPage() {
     },
   });
 
+  const saveEmailDraft = useMutation({
+    mutationFn: async () => {
+      if (!composeDraft) throw new Error("No draft is being composed");
+      const mailboxId = composeDraft.mailboxId || mailboxes[0]?.id;
+      if (!mailboxId) throw new Error("Create a mailbox before saving a draft");
+      return api.createCRMEmailDraft({
+        mailbox_id: mailboxId,
+        thread_id: selectedThread?.id ?? null,
+        to_emails: composeDraft.to.split(/[;,\n]/).map((value) => value.trim()).filter(Boolean),
+        cc_emails: composeDraft.cc.split(/[;,\n]/).map((value) => value.trim()).filter(Boolean),
+        bcc_emails: composeDraft.bcc.split(/[;,\n]/).map((value) => value.trim()).filter(Boolean),
+        subject: composeDraft.subject.trim(),
+        body_text: composeDraft.body,
+      });
+    },
+    onSuccess: () => {
+      setComposeDraft(null);
+      setMailboxStatus("Draft saved.");
+      queryClient.invalidateQueries({ queryKey: ["crm", wsId, "email-drafts"] });
+    },
+  });
+
   const selectedThread = useMemo<CRMEmailThread | null>(() => {
     const found = threads.find((thread) => thread.id === selectedThreadId) ?? filteredThreads[0] ?? null;
     return found;
@@ -270,6 +295,12 @@ export function CRMEmailsPage() {
       contactName: selectedContact?.name ?? inferred.contactName,
       contactEmail: selectedContact?.email ?? inferred.contactEmail,
     });
+  };
+
+  const openComposeDraft = () => {
+    const replyTo = messages.find((message) => message.direction === "inbound" && message.from_email)?.from_email ?? "";
+    const subject = selectedThread?.subject ? (selectedThread.subject.toLowerCase().startsWith("re:") ? selectedThread.subject : `Re: ${selectedThread.subject}`) : "";
+    setComposeDraft({ mailboxId: mailboxes[0]?.id ?? "", to: replyTo, cc: "", bcc: "", subject, body: "" });
   };
 
   const updateAssociation = useMutation({
@@ -485,6 +516,7 @@ export function CRMEmailsPage() {
                   <Button variant="outline" size="sm"><MailOpen className="mr-1 size-3" />{t(($) => $.emails.mark_read)}</Button>
                   <Button variant="outline" size="sm"><Archive className="mr-1 size-3" />{t(($) => $.emails.archive)}</Button>
                   <Button variant="outline" size="sm"><Star className="mr-1 size-3" />{t(($) => $.emails.star)}</Button>
+                  <Button variant="outline" size="sm" disabled={!mailboxes.length} onClick={openComposeDraft}><Send className="mr-1 size-3" />Compose draft</Button>
                   <Button variant="outline" size="sm" disabled={!selectedAccount} onClick={openEmailLinkDialog}><Link2 className="mr-1 size-3" />{t(($) => $.emails.link_project_issue)}</Button>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -648,6 +680,44 @@ export function CRMEmailsPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setEmailLinkDraft(null)}>{t(($) => $.actions.cancel)}</Button>
             <Button disabled={!emailLinkDraft?.projectId || updateEmailLinks.isPending} onClick={() => updateEmailLinks.mutate()}>{t(($) => $.emails.save_email_link)}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+
+      <Dialog open={composeDraft !== null} onOpenChange={(open) => !open && setComposeDraft(null)}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Compose CRM email draft</DialogTitle>
+            <DialogDescription>Save the reply as a draft first, then send it from Drafts after review.</DialogDescription>
+          </DialogHeader>
+          {composeDraft && (
+            <div className="space-y-3">
+              <label className="space-y-1 text-sm">
+                <span className="text-xs font-medium text-muted-foreground">Mailbox</span>
+                <select className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={composeDraft.mailboxId} onChange={(event) => setComposeDraft({ ...composeDraft, mailboxId: event.target.value })}>
+                  {mailboxes.map((mailbox) => <option key={mailbox.id} value={mailbox.id}>{mailbox.label} · {mailbox.email}</option>)}
+                </select>
+              </label>
+              <Input aria-label="To" placeholder="To" value={composeDraft.to} onChange={(event) => setComposeDraft({ ...composeDraft, to: event.target.value })} />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input aria-label="Cc" placeholder="Cc" value={composeDraft.cc} onChange={(event) => setComposeDraft({ ...composeDraft, cc: event.target.value })} />
+                <Input aria-label="Bcc" placeholder="Bcc" value={composeDraft.bcc} onChange={(event) => setComposeDraft({ ...composeDraft, bcc: event.target.value })} />
+              </div>
+              <Input aria-label="Subject" placeholder="Subject" value={composeDraft.subject} onChange={(event) => setComposeDraft({ ...composeDraft, subject: event.target.value })} />
+              <textarea
+                aria-label="Email body"
+                className="min-h-48 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                placeholder="Write the email body..."
+                value={composeDraft.body}
+                onChange={(event) => setComposeDraft({ ...composeDraft, body: event.target.value })}
+              />
+            </div>
+          )}
+          {saveEmailDraft.isError && <p className="text-xs text-destructive">Failed to save draft. Check mailbox and recipient fields.</p>}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setComposeDraft(null)}>Cancel</Button>
+            <Button disabled={!composeDraft?.to.trim() || !composeDraft?.subject.trim() || !composeDraft?.body.trim() || saveEmailDraft.isPending} onClick={() => saveEmailDraft.mutate()}>Save draft</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

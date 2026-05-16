@@ -1953,10 +1953,10 @@ func (h *Handler) SendCRMEmailDraft(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var mailboxID pgtype.UUID
+	var mailboxID, threadID pgtype.UUID
 	var toEmails, ccEmails, bccEmails []string
 	var subject, body string
-	if err := h.DB.QueryRow(r.Context(), `SELECT mailbox_id, to_emails, cc_emails, bcc_emails, subject, body_text FROM crm_email_draft WHERE id=$1 AND workspace_id=$2`, draftID, workspaceID).Scan(&mailboxID, &toEmails, &ccEmails, &bccEmails, &subject, &body); err != nil {
+	if err := h.DB.QueryRow(r.Context(), `SELECT mailbox_id, thread_id, to_emails, cc_emails, bcc_emails, subject, body_text FROM crm_email_draft WHERE id=$1 AND workspace_id=$2`, draftID, workspaceID).Scan(&mailboxID, &threadID, &toEmails, &ccEmails, &bccEmails, &subject, &body); err != nil {
 		writeError(w, http.StatusNotFound, "CRM email draft not found")
 		return
 	}
@@ -1969,6 +1969,9 @@ func (h *Handler) SendCRMEmailDraft(w http.ResponseWriter, r *http.Request) {
 		_, _ = h.DB.Exec(r.Context(), `UPDATE crm_email_draft SET status='failed', error_message=$3, updated_at=now() WHERE id=$1 AND workspace_id=$2`, draftID, workspaceID, err.Error())
 		writeError(w, http.StatusBadGateway, "failed to send CRM email draft: "+err.Error())
 		return
+	}
+	if threadID.Valid {
+		_, _ = h.DB.Exec(r.Context(), `INSERT INTO crm_email_message (workspace_id, thread_id, direction, from_email, to_emails, cc_emails, bcc_emails, subject, body_text, sent_at) VALUES ($1,$2,'outbound',$3,$4,$5,$6,$7,$8,now()); UPDATE crm_email_thread SET direction='outbound', status='open', last_message_at=now(), message_count=message_count+1, updated_at=now() WHERE id=$2 AND workspace_id=$1`, workspaceID, threadID, cfg.Email, toEmails, ccEmails, bccEmails, subject, body)
 	}
 	_, _ = h.DB.Exec(r.Context(), `UPDATE crm_email_draft SET status='sent', sent_at=now(), updated_at=now() WHERE id=$1 AND workspace_id=$2`, draftID, workspaceID)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "sent"})
