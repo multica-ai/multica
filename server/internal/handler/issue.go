@@ -15,9 +15,11 @@ import (
 	"unicode"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -26,33 +28,33 @@ import (
 
 // IssueResponse is the JSON response for an issue.
 type IssueResponse struct {
-	ID                 string                  `json:"id"`
-	WorkspaceID        string                  `json:"workspace_id"`
-	Number             int32                   `json:"number"`
-	Identifier         string                  `json:"identifier"`
-	Title              string                  `json:"title"`
-	Description        *string                 `json:"description"`
-	Status             string                  `json:"status"`
-	Priority           string                  `json:"priority"`
-	AssigneeType       *string                 `json:"assignee_type"`
-	AssigneeID         *string                 `json:"assignee_id"`
-	CreatorType        string                  `json:"creator_type"`
-	CreatorID          string                  `json:"creator_id"`
-	ParentIssueID      *string                 `json:"parent_issue_id"`
-	ProjectID          *string                 `json:"project_id"`
-	Position           float64                 `json:"position"`
-	DueDate            *string                 `json:"due_date"`
-	CreatedAt          string                  `json:"created_at"`
-	UpdatedAt          string                  `json:"updated_at"`
-	Reactions          []IssueReactionResponse `json:"reactions,omitempty"`
-	Attachments        []AttachmentResponse    `json:"attachments,omitempty"`
+	ID            string                  `json:"id"`
+	WorkspaceID   string                  `json:"workspace_id"`
+	Number        int32                   `json:"number"`
+	Identifier    string                  `json:"identifier"`
+	Title         string                  `json:"title"`
+	Description   *string                 `json:"description"`
+	Status        string                  `json:"status"`
+	Priority      string                  `json:"priority"`
+	AssigneeType  *string                 `json:"assignee_type"`
+	AssigneeID    *string                 `json:"assignee_id"`
+	CreatorType   string                  `json:"creator_type"`
+	CreatorID     string                  `json:"creator_id"`
+	ParentIssueID *string                 `json:"parent_issue_id"`
+	ProjectID     *string                 `json:"project_id"`
+	Position      float64                 `json:"position"`
+	DueDate       *string                 `json:"due_date"`
+	CreatedAt     string                  `json:"created_at"`
+	UpdatedAt     string                  `json:"updated_at"`
+	Reactions     []IssueReactionResponse `json:"reactions,omitempty"`
+	Attachments   []AttachmentResponse    `json:"attachments,omitempty"`
 	// Labels are bulk-attached by list/detail endpoints so the client can render
 	// chips without an N+1 round-trip per row. Pointer + omitempty so paths that
 	// don't load labels (e.g. UpdateIssue, batch UpdateIssues, the issue:updated
 	// WS broadcast) emit no `labels` field at all — the client merge then
 	// preserves whatever labels are already in cache. nil pointer = "field
 	// absent, do not touch"; non-nil (incl. empty slice) = authoritative list.
-	Labels             *[]LabelResponse        `json:"labels,omitempty"`
+	Labels *[]LabelResponse `json:"labels,omitempty"`
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -286,7 +288,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	}
 
 	escapedPhrase := escapeLike(phrase)
-	phraseParam := nextArg(escapedPhrase)               // $1
+	phraseParam := nextArg(escapedPhrase) // $1
 	phraseContains := "'%' || " + phraseParam + " || '%'"
 	phraseStartsWith := phraseParam + " || '%'"
 
@@ -1070,16 +1072,16 @@ func readRuntimeCLIVersion(metadata []byte) string {
 }
 
 type CreateIssueRequest struct {
-	Title              string   `json:"title"`
-	Description        *string  `json:"description"`
-	Status             string   `json:"status"`
-	Priority           string   `json:"priority"`
-	AssigneeType       *string  `json:"assignee_type"`
-	AssigneeID         *string  `json:"assignee_id"`
-	ParentIssueID      *string  `json:"parent_issue_id"`
-	ProjectID          *string  `json:"project_id"`
-	DueDate            *string  `json:"due_date"`
-	AttachmentIDs      []string `json:"attachment_ids,omitempty"`
+	Title         string   `json:"title"`
+	Description   *string  `json:"description"`
+	Status        string   `json:"status"`
+	Priority      string   `json:"priority"`
+	AssigneeType  *string  `json:"assignee_type"`
+	AssigneeID    *string  `json:"assignee_id"`
+	ParentIssueID *string  `json:"parent_issue_id"`
+	ProjectID     *string  `json:"project_id"`
+	DueDate       *string  `json:"due_date"`
+	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 	// OriginType / OriginID stamp the new issue with its provenance so
 	// platform-internal flows can deterministically locate it later. Only
 	// trusted callers should set these — currently the daemon CLI passes
@@ -1353,16 +1355,16 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
-	Title              *string  `json:"title"`
-	Description        *string  `json:"description"`
-	Status             *string  `json:"status"`
-	Priority           *string  `json:"priority"`
-	AssigneeType       *string  `json:"assignee_type"`
-	AssigneeID         *string  `json:"assignee_id"`
-	Position           *float64 `json:"position"`
-	DueDate            *string  `json:"due_date"`
-	ParentIssueID      *string  `json:"parent_issue_id"`
-	ProjectID          *string  `json:"project_id"`
+	Title         *string  `json:"title"`
+	Description   *string  `json:"description"`
+	Status        *string  `json:"status"`
+	Priority      *string  `json:"priority"`
+	AssigneeType  *string  `json:"assignee_type"`
+	AssigneeID    *string  `json:"assignee_id"`
+	Position      *float64 `json:"position"`
+	DueDate       *string  `json:"due_date"`
+	ParentIssueID *string  `json:"parent_issue_id"`
+	ProjectID     *string  `json:"project_id"`
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -1511,6 +1513,16 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	feishuProjectTransitioned := false
+	if req.Status != nil && prevIssue.Status != *req.Status {
+		transitioned, err := h.transitionFeishuProjectStatusBeforeLocalUpdate(r.Context(), prevIssue, *req.Status)
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		feishuProjectTransitioned = transitioned
+	}
+
 	issue, err := h.Queries.UpdateIssue(r.Context(), params)
 	if err != nil {
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
@@ -1552,6 +1564,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"prev_description":    textToPtr(prevIssue.Description),
 		"creator_type":        prevIssue.CreatorType,
 		"creator_id":          uuidToString(prevIssue.CreatorID),
+		"source":              issueUpdateSource(feishuProjectTransitioned),
 	})
 
 	// Reconcile task queue when assignee changes.
@@ -1916,6 +1929,20 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		feishuProjectTransitioned := false
+		if req.Updates.Status != nil && prevIssue.Status != *req.Updates.Status {
+			transitioned, err := h.transitionFeishuProjectStatusBeforeLocalUpdate(r.Context(), prevIssue, *req.Updates.Status)
+			if err != nil {
+				slog.Warn("batch update issue skipped: Feishu Project status transition failed",
+					"issue_id", issueID,
+					"target_status", *req.Updates.Status,
+					"error", err,
+				)
+				continue
+			}
+			feishuProjectTransitioned = transitioned
+		}
+
 		issue, err := h.Queries.UpdateIssue(r.Context(), params)
 		if err != nil {
 			slog.Warn("batch update issue failed", "issue_id", issueID, "error", err)
@@ -1936,6 +1963,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			"assignee_changed": assigneeChanged,
 			"status_changed":   statusChanged,
 			"priority_changed": priorityChanged,
+			"source":           issueUpdateSource(feishuProjectTransitioned),
 		})
 
 		if assigneeChanged {
@@ -1963,6 +1991,46 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("batch update issues", append(logger.RequestAttrs(r), "count", updated)...)
 	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})
+}
+
+const FeishuProjectLocalStatusUpdateSource = "feishu_project_local_status_transition"
+
+func issueUpdateSource(feishuProjectTransitioned bool) any {
+	if feishuProjectTransitioned {
+		return FeishuProjectLocalStatusUpdateSource
+	}
+	return nil
+}
+
+func (h *Handler) transitionFeishuProjectStatusBeforeLocalUpdate(ctx context.Context, issue db.Issue, targetStatus string) (bool, error) {
+	binding, err := h.Queries.GetFeishuProjectIssueBindingByIssue(ctx, db.GetFeishuProjectIssueBindingByIssueParams{
+		WorkspaceID: issue.WorkspaceID,
+		IssueID:     issue.ID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to check Feishu Project binding: %w", err)
+	}
+
+	cfg, err := h.Queries.GetFeishuProjectIntegrationByID(ctx, binding.IntegrationID)
+	if errors.Is(err, pgx.ErrNoRows) || !cfg.Enabled {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to load Feishu Project integration: %w", err)
+	}
+
+	targetFeishuStatus := service.MapMulticaStatusToFeishu(cfg.ReverseStatusMapping, binding.WorkItemType, targetStatus)
+	if targetFeishuStatus == "" {
+		return false, fmt.Errorf("飞书项目状态映射缺失：请在集成设置里配置 Multica 状态 %q 对应的飞书状态", targetStatus)
+	}
+
+	if err := service.NewFeishuProjectClient().TransitionStatus(ctx, cfg, binding.WorkItemID, binding.WorkItemType, targetFeishuStatus); err != nil {
+		return false, fmt.Errorf("飞书项目状态流转失败：目标状态 %q，原因：%w", targetFeishuStatus, err)
+	}
+	return true, nil
 }
 
 type BatchDeleteIssuesRequest struct {

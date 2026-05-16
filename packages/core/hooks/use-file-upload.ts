@@ -36,7 +36,7 @@ export function useFileUpload(
           commentId: ctx?.commentId,
           chatSessionId: ctx?.chatSessionId,
         });
-        return { id: att.id, filename: att.filename, link: att.url };
+        return { id: att.id, filename: att.filename, link: att.content_url || att.url };
       } finally {
         setUploading(false);
       }

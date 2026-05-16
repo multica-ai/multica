@@ -34,11 +34,11 @@ export function AttachmentDownloadProvider({ attachments, children }: ProviderPr
     () => ({
       resolveAttachmentId: (url) => {
         if (!url || !attachments?.length) return undefined;
-        return attachments.find((a) => a.url === url)?.id;
+        return attachments.find((a) => a.url === url || a.content_url === url)?.id;
       },
       openByUrl: (url) => {
         const id = url && attachments?.length
-          ? attachments.find((a) => a.url === url)?.id
+          ? attachments.find((a) => a.url === url || a.content_url === url)?.id
           : undefined;
         if (id) {
           download(id);

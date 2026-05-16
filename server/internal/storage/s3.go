@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -12,7 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 type S3Storage struct {
@@ -20,7 +21,8 @@ type S3Storage struct {
 	bucket      string
 	region      string // used to construct virtual-hosted-style public URLs when no CDN/endpoint is set
 	cdnDomain   string // if set, returned URLs use this instead of bucket name
-	endpointURL string // if set, use path-style URLs (e.g. MinIO)
+	endpointURL string // custom S3-compatible endpoint (e.g. MinIO, Aliyun OSS)
+	pathStyle   bool   // custom endpoints such as MinIO usually need path-style; Aliyun OSS rejects it
 }
 
 // NewS3StorageFromEnv creates an S3Storage from environment variables.
@@ -29,6 +31,8 @@ type S3Storage struct {
 // Environment variables:
 //   - S3_BUCKET (required)
 //   - S3_REGION (default: us-west-2)
+//   - AWS_ENDPOINT_URL (optional; custom S3-compatible endpoint)
+//   - AWS_S3_FORCE_PATH_STYLE (optional; true/false, defaults true for most custom endpoints and false for Aliyun OSS)
 //   - AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (optional; falls back to default credential chain)
 func NewS3StorageFromEnv() *S3Storage {
 	bucket := os.Getenv("S3_BUCKET")
@@ -52,6 +56,14 @@ func NewS3StorageFromEnv() *S3Storage {
 		config.WithRegion(region),
 	}
 
+	endpointURL := os.Getenv("AWS_ENDPOINT_URL")
+	if isAliyunOSSEndpoint(endpointURL) {
+		opts = append(opts,
+			config.WithRequestChecksumCalculation(aws.RequestChecksumCalculationWhenRequired),
+			config.WithResponseChecksumValidation(aws.ResponseChecksumValidationWhenRequired),
+		)
+	}
+
 	accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
 	secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
 	if accessKey != "" && secretKey != "" {
@@ -68,22 +80,23 @@ func NewS3StorageFromEnv() *S3Storage {
 
 	cdnDomain := os.Getenv("CLOUDFRONT_DOMAIN")
 
-	endpointURL := os.Getenv("AWS_ENDPOINT_URL")
+	pathStyle := endpointPathStyleFromEnv(endpointURL)
 	s3Opts := []func(*s3.Options){}
 	if endpointURL != "" {
 		s3Opts = append(s3Opts, func(o *s3.Options) {
 			o.BaseEndpoint = aws.String(endpointURL)
-			o.UsePathStyle = true
+			o.UsePathStyle = pathStyle
 		})
 	}
 
-	slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "cdn_domain", cdnDomain, "endpoint_url", endpointURL)
+	slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "cdn_domain", cdnDomain, "endpoint_url", endpointURL, "path_style", pathStyle)
 	return &S3Storage{
 		client:      s3.NewFromConfig(cfg, s3Opts...),
 		bucket:      bucket,
 		region:      region,
 		cdnDomain:   cdnDomain,
 		endpointURL: endpointURL,
+		pathStyle:   pathStyle,
 	}
 }
 
@@ -100,13 +113,31 @@ func looksLikeS3Hostname(bucket string) bool {
 	return strings.Contains(bucket, "amazonaws.com")
 }
 
+func endpointPathStyleFromEnv(endpointURL string) bool {
+	if endpointURL == "" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("AWS_S3_FORCE_PATH_STYLE"))) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	}
+	return !isAliyunOSSEndpoint(endpointURL)
+}
+
+func isAliyunOSSEndpoint(endpointURL string) bool {
+	endpoint := strings.ToLower(endpointURL)
+	return strings.Contains(endpoint, ".aliyuncs.com") && strings.Contains(endpoint, "oss-")
+}
+
 // storageClass returns the appropriate S3 storage class.
 // Custom endpoints (e.g. MinIO) only support STANDARD; real AWS defaults to INTELLIGENT_TIERING.
-func (s *S3Storage) storageClass() types.StorageClass {
+func (s *S3Storage) storageClass() s3types.StorageClass {
 	if s.endpointURL != "" {
-		return types.StorageClassStandard
+		return s3types.StorageClassStandard
 	}
-	return types.StorageClassIntelligentTiering
+	return s3types.StorageClassIntelligentTiering
 }
 
 // KeyFromURL extracts the S3 object key from a CDN or bucket URL.
@@ -115,9 +146,14 @@ func (s *S3Storage) storageClass() types.StorageClass {
 //	"https://my-bucket.s3.us-east-1.amazonaws.com/uploads/x/y.png" → "uploads/x/y.png"
 func (s *S3Storage) KeyFromURL(rawURL string) string {
 	if s.endpointURL != "" {
-		prefix := strings.TrimRight(s.endpointURL, "/") + "/" + s.bucket + "/"
-		if strings.HasPrefix(rawURL, prefix) {
-			return strings.TrimPrefix(rawURL, prefix)
+		endpoint := strings.TrimRight(s.endpointURL, "/")
+		pathPrefix := endpoint + "/" + s.bucket + "/"
+		if strings.HasPrefix(rawURL, pathPrefix) {
+			return strings.TrimPrefix(rawURL, pathPrefix)
+		}
+		virtualHostedPrefix := strings.Replace(endpoint, "://", "://"+s.bucket+".", 1) + "/"
+		if strings.HasPrefix(rawURL, virtualHostedPrefix) {
+			return strings.TrimPrefix(rawURL, virtualHostedPrefix)
 		}
 	}
 
@@ -173,13 +209,27 @@ func (s *S3Storage) DeleteKeys(ctx context.Context, keys []string) {
 	}
 }
 
+func (s *S3Storage) Open(ctx context.Context, key string) (io.ReadCloser, error) {
+	if key == "" {
+		return nil, fmt.Errorf("s3 GetObject: empty key")
+	}
+	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("s3 GetObject: %w", err)
+	}
+	return out.Body, nil
+}
+
 func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error) {
 	safe := sanitizeFilename(filename)
 	disposition := "attachment"
 	if isInlineContentType(contentType) {
 		disposition = "inline"
 	}
-	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
+	input := &s3.PutObjectInput{
 		Bucket:             aws.String(s.bucket),
 		Key:                aws.String(key),
 		Body:               bytes.NewReader(data),
@@ -187,7 +237,8 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 		ContentDisposition: aws.String(fmt.Sprintf(`%s; filename="%s"`, disposition, safe)),
 		CacheControl:       aws.String("max-age=432000,public"),
 		StorageClass:       s.storageClass(),
-	})
+	}
+	_, err := s.client.PutObject(ctx, input)
 	if err != nil {
 		return "", fmt.Errorf("s3 PutObject: %w", err)
 	}
@@ -210,8 +261,12 @@ func (s *S3Storage) uploadedURL(key string) string {
 	if s.cdnDomain != "" {
 		return fmt.Sprintf("https://%s/%s", s.cdnDomain, key)
 	}
-	if s.endpointURL != "" {
+	if s.endpointURL != "" && s.pathStyle {
 		return fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpointURL, "/"), s.bucket, key)
+	}
+	if s.endpointURL != "" {
+		endpoint := strings.TrimRight(s.endpointURL, "/")
+		return fmt.Sprintf("%s/%s", strings.Replace(endpoint, "://", "://"+s.bucket+".", 1), key)
 	}
 	if strings.Contains(s.bucket, ".") {
 		return fmt.Sprintf("https://s3.%s.amazonaws.com/%s/%s", s.region, s.bucket, key)

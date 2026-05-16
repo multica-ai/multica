@@ -28,6 +28,19 @@ func TestS3StorageKeyFromURL_CustomEndpointWithTrailingSlash(t *testing.T) {
 	}
 }
 
+func TestS3StorageKeyFromURL_CustomEndpointVirtualHostedStylePreservesNestedKey(t *testing.T) {
+	s := &S3Storage{
+		bucket:      "test-bucket",
+		endpointURL: "https://s3.oss-cn-shanghai-internal.aliyuncs.com",
+	}
+
+	rawURL := "https://test-bucket.s3.oss-cn-shanghai-internal.aliyuncs.com/uploads/abc/file.png"
+
+	if got := s.KeyFromURL(rawURL); got != "uploads/abc/file.png" {
+		t.Fatalf("KeyFromURL(%q) = %q, want %q", rawURL, got, "uploads/abc/file.png")
+	}
+}
+
 func TestS3StorageKeyFromURL_VirtualHostedStylePreservesNestedKey(t *testing.T) {
 	s := &S3Storage{
 		bucket: "test-bucket",
@@ -100,6 +113,7 @@ func TestS3StorageUploadedURL(t *testing.T) {
 		region      string
 		cdnDomain   string
 		endpointURL string
+		pathStyle   bool
 		want        string
 	}{
 		{
@@ -126,6 +140,7 @@ func TestS3StorageUploadedURL(t *testing.T) {
 			bucket:      "test-bucket",
 			region:      "us-east-1",
 			endpointURL: "http://localhost:9000",
+			pathStyle:   true,
 			want:        "http://localhost:9000/test-bucket/uploads/abc/file.png",
 		},
 		{
@@ -133,7 +148,16 @@ func TestS3StorageUploadedURL(t *testing.T) {
 			bucket:      "test-bucket",
 			region:      "us-east-1",
 			endpointURL: "http://localhost:9000/",
+			pathStyle:   true,
 			want:        "http://localhost:9000/test-bucket/uploads/abc/file.png",
+		},
+		{
+			name:        "endpoint virtual hosted style",
+			bucket:      "test-bucket",
+			region:      "cn-shanghai",
+			endpointURL: "https://s3.oss-cn-shanghai-internal.aliyuncs.com",
+			pathStyle:   false,
+			want:        "https://test-bucket.s3.oss-cn-shanghai-internal.aliyuncs.com/uploads/abc/file.png",
 		},
 		{
 			name:        "endpoint and cdn both set prefers cdn",
@@ -152,10 +176,31 @@ func TestS3StorageUploadedURL(t *testing.T) {
 				region:      tc.region,
 				cdnDomain:   tc.cdnDomain,
 				endpointURL: tc.endpointURL,
+				pathStyle:   tc.pathStyle,
 			}
 			if got := s.uploadedURL(key); got != tc.want {
 				t.Fatalf("uploadedURL() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestEndpointPathStyleFromEnv(t *testing.T) {
+	t.Setenv("AWS_S3_FORCE_PATH_STYLE", "")
+	if got := endpointPathStyleFromEnv("http://localhost:9000"); !got {
+		t.Fatalf("MinIO-like endpoint path style = %v, want true", got)
+	}
+	if got := endpointPathStyleFromEnv("https://s3.oss-cn-shanghai-internal.aliyuncs.com"); got {
+		t.Fatalf("Aliyun OSS endpoint path style = %v, want false", got)
+	}
+
+	t.Setenv("AWS_S3_FORCE_PATH_STYLE", "false")
+	if got := endpointPathStyleFromEnv("http://localhost:9000"); got {
+		t.Fatalf("explicit false path style = %v, want false", got)
+	}
+
+	t.Setenv("AWS_S3_FORCE_PATH_STYLE", "true")
+	if got := endpointPathStyleFromEnv("https://s3.oss-cn-shanghai-internal.aliyuncs.com"); !got {
+		t.Fatalf("explicit true path style = %v, want true", got)
 	}
 }

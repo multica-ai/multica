@@ -130,6 +130,17 @@ func (s *LocalStorage) Upload(ctx context.Context, key string, data []byte, cont
 	return fmt.Sprintf("/uploads/%s", key), nil
 }
 
+func (s *LocalStorage) Open(ctx context.Context, key string) (io.ReadCloser, error) {
+	if key == "" || strings.HasSuffix(key, metaSuffix) {
+		return nil, os.ErrNotExist
+	}
+	filePath := filepath.Join(s.uploadDir, key)
+	if !isUnder(s.uploadDir, filePath) {
+		return nil, os.ErrNotExist
+	}
+	return os.Open(filePath)
+}
+
 func (s *LocalStorage) GetFilePath(key string) string {
 	return filepath.Join(s.uploadDir, key)
 }

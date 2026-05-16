@@ -16,7 +16,7 @@
 const IMAGE_EXTS = /\.(png|jpe?g|gif|webp|svg|ico|bmp|tiff?)$/i
 
 /** New syntax: !file[name](url) — unambiguous, no hostname matching needed. */
-const NEW_FILE_CARD_RE = /^!file\[([^\]]*)\]\((https?:\/\/[^)]+)\)$/
+const NEW_FILE_CARD_RE = /^!file\[([^\]]*)\]\(((?:https?:\/\/|\/api\/attachments\/)[^)]+)\)$/
 
 /** Legacy syntax: [name](cdnUrl) on its own line — matched by CDN hostname. */
 const FILE_LINK_LINE = /^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/

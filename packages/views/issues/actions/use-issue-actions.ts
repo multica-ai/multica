@@ -22,6 +22,7 @@ import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import { canAssignAgent } from "../components/pickers";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { mutationErrorMessage } from "../utils/errors";
 
 const BACKLOG_HINT_LS_KEY = "multica:backlog-agent-hint-dismissed";
 
@@ -92,7 +93,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
       if (!issueId) return;
       updateIssue.mutate(
         { id: issueId, ...updates },
-        { onError: () => toast.error(t(($) => $.detail.update_failed)) },
+        { onError: (err) => toast.error(mutationErrorMessage(err, t(($) => $.detail.update_failed))) },
       );
       // Hint: assigning an agent to a backlog issue won't trigger execution
       // until the issue is moved to an active status.

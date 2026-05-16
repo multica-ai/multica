@@ -10,6 +10,7 @@ export interface Attachment {
   filename: string;
   url: string;
   download_url: string;
+  content_url: string;
   content_type: string;
   size_bytes: number;
   created_at: string;

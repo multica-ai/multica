@@ -45,12 +45,14 @@ type AttachmentResponse struct {
 	Filename      string  `json:"filename"`
 	URL           string  `json:"url"`
 	DownloadURL   string  `json:"download_url"`
+	ContentURL    string  `json:"content_url"`
 	ContentType   string  `json:"content_type"`
 	SizeBytes     int64   `json:"size_bytes"`
 	CreatedAt     string  `json:"created_at"`
 }
 
 func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
+	contentURL := attachmentContentURL(a)
 	resp := AttachmentResponse{
 		ID:           uuidToString(a.ID),
 		WorkspaceID:  uuidToString(a.WorkspaceID),
@@ -58,7 +60,8 @@ func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 		UploaderID:   uuidToString(a.UploaderID),
 		Filename:     a.Filename,
 		URL:          a.Url,
-		DownloadURL:  a.Url,
+		DownloadURL:  contentURL,
+		ContentURL:   contentURL,
 		ContentType:  a.ContentType,
 		SizeBytes:    a.SizeBytes,
 		CreatedAt:    a.CreatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
@@ -83,6 +86,10 @@ func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 		resp.ChatMessageID = &s
 	}
 	return resp
+}
+
+func attachmentContentURL(a db.Attachment) string {
+	return fmt.Sprintf("/api/attachments/%s/content?workspace_id=%s", uuidToString(a.ID), uuidToString(a.WorkspaceID))
 }
 
 // groupAttachments loads attachments for multiple comments and groups them by comment ID.
@@ -358,6 +365,89 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, h.attachmentToResponse(att))
+}
+
+// ---------------------------------------------------------------------------
+// ServeAttachmentContent — GET /api/attachments/{id}/content
+// ---------------------------------------------------------------------------
+
+func (h *Handler) ServeAttachmentContent(w http.ResponseWriter, r *http.Request) {
+	if h.Storage == nil {
+		writeError(w, http.StatusServiceUnavailable, "file storage not configured")
+		return
+	}
+
+	attachmentID := chi.URLParam(r, "id")
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	if _, ok := h.requireWorkspaceMember(w, r, workspaceID, "attachment not found"); !ok {
+		return
+	}
+
+	attUUID, ok := parseUUIDOrBadRequest(w, attachmentID, "attachment id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+
+	att, err := h.Queries.GetAttachment(r.Context(), db.GetAttachmentParams{
+		ID:          attUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "attachment not found")
+		return
+	}
+
+	key := h.Storage.KeyFromURL(att.Url)
+	body, err := h.Storage.Open(r.Context(), key)
+	if err != nil {
+		slog.Error("failed to open attachment content", "attachment_id", attachmentID, "key", key, "error", err)
+		writeError(w, http.StatusNotFound, "attachment not found")
+		return
+	}
+	defer body.Close()
+
+	contentType := att.ContentType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	disposition := "attachment"
+	if isInlineAttachmentContentType(contentType) {
+		disposition = "inline"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`%s; filename="%s"`, disposition, sanitizeAttachmentFilename(att.Filename)))
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	if _, err := io.Copy(w, body); err != nil {
+		slog.Error("failed to stream attachment content", "attachment_id", attachmentID, "error", err)
+	}
+}
+
+func sanitizeAttachmentFilename(name string) string {
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f || r == '"' || r == ';' || r == '\\' || r == '\x00' {
+			b.WriteRune('_')
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func isInlineAttachmentContentType(ct string) bool {
+	return strings.HasPrefix(ct, "image/") ||
+		strings.HasPrefix(ct, "video/") ||
+		strings.HasPrefix(ct, "audio/") ||
+		ct == "application/pdf"
 }
 
 // ---------------------------------------------------------------------------

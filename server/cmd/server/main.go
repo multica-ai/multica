@@ -258,6 +258,7 @@ func main() {
 		registerExternalNotificationListeners(bus, queries, feishuNotifier)
 	}
 	registerFeishuAgentBotListeners(bus, queries)
+	registerFeishuProjectListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
@@ -303,6 +304,7 @@ func main() {
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
 	feishuBotCtx, feishuBotCancel := context.WithCancel(context.Background())
+	feishuProjectCtx, feishuProjectCancel := context.WithCancel(context.Background())
 	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
 	taskSvc.Analytics = analyticsClient
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
@@ -322,6 +324,7 @@ func main() {
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
+	go runFeishuProjectSyncWorker(feishuProjectCtx, queries, pool)
 	go runDBStatsLogger(sweepCtx, pool)
 	feishuBotHandler := handler.New(queries, pool, hub, bus, service.NewEmailService(), nil, nil, analyticsClient, handler.Config{}, daemonHub)
 	feishuBotHandler.TaskService.Wakeup = daemonWakeup
@@ -352,6 +355,7 @@ func main() {
 	slog.Info("shutting down server")
 	autopilotCancel()
 	feishuBotCancel()
+	feishuProjectCancel()
 
 	// Order matters: drain in-flight HTTP first so any heartbeat handlers
 	// finish calling Schedule() before we stop the scheduler. Otherwise a

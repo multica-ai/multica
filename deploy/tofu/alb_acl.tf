@@ -36,7 +36,7 @@
 # Both spots must match; tools don't enforce that today.
 
 resource "alicloud_alb_acl" "multica" {
-  acl_name      = "multica-prod-whitelist"
+  acl_name          = "multica-prod-whitelist"
   resource_group_id = null
   lifecycle {
     # The ACL is referenced by the live ALB listener via ingress annotation.

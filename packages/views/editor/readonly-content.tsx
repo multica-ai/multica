@@ -297,8 +297,11 @@ function buildComponents(
       const dataType = node?.properties?.dataType as string | undefined;
       if (dataType === "fileCard") {
         const rawHref = (node?.properties?.dataHref as string) || "";
-        // Only allow http(s) URLs to prevent javascript: and other dangerous schemes.
-        const href = /^https?:\/\//i.test(rawHref) ? rawHref : "";
+        // Only allow http(s) or our same-origin attachment proxy to prevent
+        // javascript: and other dangerous schemes.
+        const href = /^https?:\/\//i.test(rawHref) || rawHref.startsWith("/api/attachments/")
+          ? rawHref
+          : "";
         const filename = (node?.properties?.dataFilename as string) || "";
         return (
           <ReadonlyFileCard
@@ -405,7 +408,7 @@ export const ReadonlyContent = memo(function ReadonlyContent({
   const resolveAttachmentId = useCallback(
     (url: string): string | undefined => {
       if (!url || !attachments?.length) return undefined;
-      return attachments.find((a) => a.url === url)?.id;
+      return attachments.find((a) => a.url === url || a.content_url === url)?.id;
     },
     [attachments],
   );

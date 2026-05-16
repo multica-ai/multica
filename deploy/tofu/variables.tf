@@ -25,8 +25,8 @@ Explicit vSwitch ids to use for RDS placement and ALB zone mappings. Leave
 empty to auto-discover every vSwitch in var.vpc_id; set explicitly if you
 need to pin a subset (e.g. to control AZ choice for ALB).
 EOT
-  type    = list(string)
-  default = []
+  type        = list(string)
+  default     = []
 }
 
 # ---------------------------------------------------------------------------
@@ -110,4 +110,20 @@ variable "rds_auto_renew" {
   description = "Whether to auto-renew the prepaid instance when its period elapses."
   type        = bool
   default     = true
+}
+
+# ---------------------------------------------------------------------------
+# OSS uploads
+# ---------------------------------------------------------------------------
+
+variable "oss_bucket_name" {
+  description = "Existing OSS bucket used by Multica for shared uploads."
+  type        = string
+  default     = "lilith-multica"
+}
+
+variable "oss_public_domain" {
+  description = "Public domain used by browsers to read uploaded objects. Leave empty to store endpoint URLs."
+  type        = string
+  default     = "multica-bucket.lilithgames.com"
 }

@@ -30,6 +30,7 @@ import { AppLink, useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
+import { mutationErrorMessage } from "../../issues/utils/errors";
 import { IssuesHeader } from "../../issues/components/issues-header";
 import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
@@ -144,7 +145,7 @@ function ProjectIssuesContent({
       if (newPosition !== undefined) updates.position = newPosition;
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
-        { onError: () => toast.error(t(($) => $.detail.toast_move_issue_failed)) },
+        { onError: (err) => toast.error(mutationErrorMessage(err, t(($) => $.detail.toast_move_issue_failed))) },
       );
     },
     [updateIssueMutation, t],
