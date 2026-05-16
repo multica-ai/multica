@@ -25,11 +25,13 @@ const (
 	// message queue is empty. Backends like Claude Code can hang indefinitely
 	// on a stuck child process (e.g. `docker ps` against a frozen dockerd),
 	// in which case `cmd.Wait()` never returns and the task sits at "running"
-	// for its full DefaultAgentTimeout (2 h). 5 min is conservative enough to
-	// avoid false positives during long tool calls but tight enough to keep
-	// stuck runs out of the operator's hair. Set MULTICA_AGENT_IDLE_WATCHDOG=0
-	// to disable.
-	DefaultAgentIdleWatchdog = 5 * time.Minute
+	// for its full DefaultAgentTimeout (2 h). The previous 5 min default
+	// killed legitimate long assistant outputs (e.g. RFC-length writeups)
+	// where the model streams a single message for many minutes without any
+	// daemon-visible activity — see MUL-2300. 30 min keeps the safety net for
+	// truly stuck runs (dockerd hang) while leaving headroom for long writes.
+	// Set MULTICA_AGENT_IDLE_WATCHDOG=0 to disable.
+	DefaultAgentIdleWatchdog = 30 * time.Minute
 	DefaultRuntimeName                    = "Local Agent"
 	DefaultWorkspaceSyncInterval          = 30 * time.Second
 	DefaultHealthPort                     = 19514
@@ -245,7 +247,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 
 	// MULTICA_AGENT_IDLE_WATCHDOG=0 disables the per-task idle watchdog. We
 	// route 0 through durationFromEnv so the operator can opt out without
-	// patching the binary; any positive duration overrides the 5-minute default.
+	// patching the binary; any positive duration overrides DefaultAgentIdleWatchdog.
 	agentIdleWatchdog, err := durationFromEnv("MULTICA_AGENT_IDLE_WATCHDOG", DefaultAgentIdleWatchdog)
 	if err != nil {
 		return Config{}, err
