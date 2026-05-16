@@ -88,6 +88,55 @@ func (q *Queries) CreateCerebroAgentPass(ctx context.Context, arg CreateCerebroA
 	return i, err
 }
 
+const getExhaustedAgentPassForAgentIssue = `-- name: GetExhaustedAgentPassForAgentIssue :one
+SELECT
+    id, workspace_id,
+    issuer_type, issuer_id,
+    agent_id, issue_id, parent_pass_id,
+    scope,
+    spend_ceiling_micros,
+    status,
+    issued_at, expires_at,
+    revoked_by_type, revoked_by_id, revoked_at, revoke_reason,
+    created_at, updated_at
+FROM cerebro_agent_pass
+WHERE agent_id = $1
+  AND issue_id = $2
+  AND status   = 'exhausted'
+ORDER BY updated_at DESC
+LIMIT 1
+`
+
+// Returns the most recently exhausted pass for (agent, issue), if any.
+// Used by the pre-run gate as a fallback when the active-pass lookup returns
+// nothing: a pass flipped to 'exhausted' on a prior enqueue must still block
+// subsequent enqueues until the ceiling is raised or a new pass is issued.
+func (q *Queries) GetExhaustedAgentPassForAgentIssue(ctx context.Context, arg GetActiveAgentPassForAgentIssueParams) (CerebroAgentPass, error) {
+	row := q.db.QueryRow(ctx, getExhaustedAgentPassForAgentIssue, arg.AgentID, arg.IssueID)
+	var i CerebroAgentPass
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssuerType,
+		&i.IssuerID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.ParentPassID,
+		&i.Scope,
+		&i.SpendCeilingMicros,
+		&i.Status,
+		&i.IssuedAt,
+		&i.ExpiresAt,
+		&i.RevokedByType,
+		&i.RevokedByID,
+		&i.RevokedAt,
+		&i.RevokeReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getActiveAgentPassForAgentIssue = `-- name: GetActiveAgentPassForAgentIssue :one
 SELECT
     id, workspace_id,
@@ -347,4 +396,66 @@ func (q *Queries) RevokeAgentPass(ctx context.Context, arg RevokeAgentPassParams
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const sumIssueTreeUsageByModel = `-- name: SumIssueTreeUsageByModel :many
+WITH RECURSIVE issue_tree AS (
+    SELECT issue.id AS issue_id FROM issue WHERE issue.id = $1
+    UNION ALL
+    SELECT i.id AS issue_id
+    FROM issue i
+    JOIN issue_tree t ON i.parent_issue_id = t.issue_id
+)
+SELECT
+    tu.provider,
+    tu.model,
+    SUM(tu.input_tokens)::bigint        AS input_tokens,
+    SUM(tu.output_tokens)::bigint       AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint  AS cache_write_tokens
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.issue_id IN (SELECT t2.issue_id FROM issue_tree t2)
+GROUP BY tu.provider, tu.model
+`
+
+type SumIssueTreeUsageByModelRow struct {
+	Provider         string `json:"provider"`
+	Model            string `json:"model"`
+	InputTokens      int64  `json:"input_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+}
+
+// Returns per-(provider, model) token sums for all tasks whose issue is in
+// the subtree rooted at $1 (inclusive). Used by the spend-ceiling gate
+// (JEH-1327 milestone 3) to compute accumulated cost against the pass ceiling.
+// The recursive CTE traverses child issues via parent_issue_id so the sum
+// covers the entire issue tree, not just the root issue.
+func (q *Queries) SumIssueTreeUsageByModel(ctx context.Context, id pgtype.UUID) ([]SumIssueTreeUsageByModelRow, error) {
+	rows, err := q.db.Query(ctx, sumIssueTreeUsageByModel, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SumIssueTreeUsageByModelRow{}
+	for rows.Next() {
+		var i SumIssueTreeUsageByModelRow
+		if err := rows.Scan(
+			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
