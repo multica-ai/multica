@@ -76,6 +76,68 @@ func TestCRMAccountLifecycle(t *testing.T) {
 		t.Fatalf("UpsertCRMAccountProfile: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
+	// Save IMAP settings and preview existing CRM email messages.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/crm/imap-settings", map[string]any{
+		"host":     "imap.example.com",
+		"username": "sales@example.com",
+		"enabled":  true,
+	})
+	testHandler.UpsertCRMIMAPSettings(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpsertCRMIMAPSettings: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var imapSettings CRMIMAPSettingsResponse
+	if err := json.NewDecoder(w.Body).Decode(&imapSettings); err != nil {
+		t.Fatalf("decode imap settings: %v", err)
+	}
+	if imapSettings.Port != 993 || imapSettings.Mailbox != "INBOX" || !imapSettings.UseTLS || !imapSettings.Enabled {
+		t.Fatalf("unexpected imap defaults: %+v", imapSettings)
+	}
+
+	if _, err := testPool.Exec(req.Context(), `
+		INSERT INTO crm_email_thread (workspace_id, account_id, subject)
+		VALUES ($1, $2, 'RFQ')
+	`, parseUUID(testWorkspaceID), parseUUID(account.ID)); err != nil {
+		t.Fatalf("insert email thread: %v", err)
+	}
+	if _, err := testPool.Exec(req.Context(), `
+		INSERT INTO crm_email_message (workspace_id, thread_id, account_id, from_email, subject, snippet, direction)
+		SELECT $1, id, $2, 'buyer@example.com', 'RFQ', 'Need quote', 'inbound'
+		FROM crm_email_thread WHERE workspace_id = $1 AND account_id = $2 LIMIT 1
+	`, parseUUID(testWorkspaceID), parseUUID(account.ID)); err != nil {
+		t.Fatalf("insert email message: %v", err)
+	}
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/crm/imap/preview", map[string]any{"limit": 1})
+	testHandler.PreviewCRMIMAP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PreviewCRMIMAP: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if _, err := testPool.Exec(req.Context(), `
+		INSERT INTO crm_profile_suggestion (workspace_id, account_id, field_path, suggested_value, confidence)
+		VALUES ($1, $2, 'product_interests', '["LED lights"]', 0.9)
+	`, parseUUID(testWorkspaceID), parseUUID(account.ID)); err != nil {
+		t.Fatalf("insert profile suggestion: %v", err)
+	}
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/crm/accounts/"+account.ID+"/profile/suggestions", nil)
+	req = withURLParam(req, "accountId", account.ID)
+	testHandler.ListCRMProfileSuggestions(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListCRMProfileSuggestions: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var suggestionList struct {
+		Suggestions []CRMProfileSuggestionResponse `json:"suggestions"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&suggestionList); err != nil {
+		t.Fatalf("decode suggestions: %v", err)
+	}
+	if len(suggestionList.Suggestions) == 0 || suggestionList.Suggestions[0].FieldPath != "product_interests" {
+		t.Fatalf("unexpected suggestions: %+v", suggestionList.Suggestions)
+	}
+
 	// List should include account with contact count.
 	w = httptest.NewRecorder()
 	req = newRequest("GET", "/api/crm/accounts", nil)

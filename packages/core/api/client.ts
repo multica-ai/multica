@@ -82,6 +82,10 @@ import type {
   CreateCRMCommunicationNoteRequest,
   UpsertCRMAccountProfileRequest,
   UpdateCRMEmailThreadAssociationRequest,
+  SaveAndImportCRMIMAPSettingsRequest,
+  CRMEmailDraftRequest,
+  CRMEmailSendResponse,
+  CRMIMAPSettings,
   ListCRMAccountsResponse,
   ListCRMContactsResponse,
   ListCRMEmailThreadsResponse,
@@ -1317,6 +1321,17 @@ export class ApiClient {
     });
   }
 
+  async getCRMIMAPSettings(): Promise<CRMIMAPSettings | null> {
+    return this.fetch("/api/crm/imap-settings");
+  }
+
+  async saveAndImportCRMIMAPSettings(data: SaveAndImportCRMIMAPSettingsRequest): Promise<{ saved: boolean; import_started: boolean; imported?: number; import_error?: string | null }> {
+    return this.fetch("/api/crm/imap-settings/save-and-import", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
   async refreshCRMAccountProfile(accountId: string): Promise<CRMAccountProfile> {
     return this.fetch(`/api/crm/accounts/${accountId}/profile/suggestions`, { method: "POST" });
   }
@@ -1333,12 +1348,22 @@ export class ApiClient {
     return this.fetch("/api/crm/email-drafts");
   }
 
-  async createCRMEmailDraft(data: Record<string, unknown>): Promise<{ ok: boolean; id: string }> {
-    return this.fetch("/api/crm/email-drafts", { method: "POST", body: JSON.stringify(data) });
+  async createCRMEmailDraft(data: Record<string, unknown>): Promise<{ ok: boolean; id: string }>;
+  async createCRMEmailDraft(threadId: string, data: CRMEmailDraftRequest): Promise<CRMEmailMessage>;
+  async createCRMEmailDraft(arg1: string | Record<string, unknown>, arg2?: CRMEmailDraftRequest): Promise<{ ok: boolean; id: string } | CRMEmailMessage> {
+    if (typeof arg1 === "string") {
+      return this.fetch(`/api/crm/email-threads/${arg1}/drafts`, { method: "POST", body: JSON.stringify(arg2) });
+    }
+    return this.fetch("/api/crm/email-drafts", { method: "POST", body: JSON.stringify(arg1) });
   }
 
-  async sendCRMEmailDraft(draftId: string): Promise<{ ok: boolean; status: string }> {
-    return this.fetch(`/api/crm/email-drafts/${draftId}/send`, { method: "POST" });
+  async sendCRMEmailDraft(draftId: string): Promise<{ ok: boolean; status: string }>;
+  async sendCRMEmailDraft(threadId: string, data: CRMEmailDraftRequest): Promise<CRMEmailSendResponse>;
+  async sendCRMEmailDraft(arg1: string, arg2?: CRMEmailDraftRequest): Promise<{ ok: boolean; status: string } | CRMEmailSendResponse> {
+    if (arg2) {
+      return this.fetch(`/api/crm/email-threads/${arg1}/send`, { method: "POST", body: JSON.stringify(arg2) });
+    }
+    return this.fetch(`/api/crm/email-drafts/${arg1}/send`, { method: "POST" });
   }
 
   async listCRMEmailThreads(params?: { account_id?: string }): Promise<ListCRMEmailThreadsResponse> {
