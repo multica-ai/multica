@@ -32,17 +32,14 @@ DO_NOT_RELEASE_LABEL = "do-not-release"
 
 # Conventional commit type → display label, in render order.
 TYPE_GROUPS: "OrderedDict[str, str]" = OrderedDict([
-    ("feat", "Features"),
-    ("fix", "Bug fixes"),
-    ("perf", "Performance"),
-    ("refactor", "Refactoring"),
-    ("docs", "Documentation"),
-    ("test", "Tests"),
-    ("build", "Build"),
-    ("ci", "CI"),
-    ("chore", "Chores"),
+    ("feat", "New"),
+    ("fix", "Fixed"),
+    ("perf", "Improved"),
+    ("refactor", "Improved"),
+    ("docs", "Improved"),
 ])
-OTHER_GROUP = "Other"
+OTHER_GROUP = "Other changes"
+INTERNAL_NOTE_TYPES = {"test", "build", "ci", "chore"}
 
 ID_PATTERN = re.compile(rf"\b({re.escape(ID_PREFIX)}-\d+)\b")
 PR_PATTERN = re.compile(r"\(#(\d+)\)\s*$")
@@ -131,11 +128,19 @@ def emit(key: str, value: str) -> None:
 
 
 def render_line(c: dict) -> str:
-    subject = PR_PATTERN.sub("", c["subject"]).rstrip()
+    subject = product_subject(c["subject"])
     subject = link_ids(subject)
     pr = c.get("pr")
     pr_md = f" [#{pr['number']}]({pr['url']})" if pr else ""
     return f"- {subject}{pr_md}"
+
+
+def product_subject(subject: str) -> str:
+    subject = PR_PATTERN.sub("", subject).rstrip()
+    m = HEADER_PATTERN.match(subject)
+    if m:
+        subject = m.group("subject").strip()
+    return subject[:1].upper() + subject[1:] if subject else subject
 
 
 def main() -> int:
@@ -202,9 +207,13 @@ def main() -> int:
     new_tag = f"v{major}.{minor}.{patch}"
 
     breaking_section = [c for c in included if c["breaking"]]
-    groups: dict[str, list[dict]] = OrderedDict((label, []) for label in TYPE_GROUPS.values())
+    groups: dict[str, list[dict]] = OrderedDict()
+    for label in TYPE_GROUPS.values():
+        groups.setdefault(label, [])
     groups[OTHER_GROUP] = []
     for c in included:
+        if c["type"] in INTERNAL_NOTE_TYPES and not c["breaking"]:
+            continue
         label = TYPE_GROUPS.get(c["type"], OTHER_GROUP)
         groups[label].append(c)
 
