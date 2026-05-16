@@ -30,13 +30,17 @@ func (q *Queries) BumpCerebroWorkflowRunAttempt(ctx context.Context, arg BumpCer
 }
 
 const countNonDoneChildrenLocked = `-- name: CountNonDoneChildrenLocked :one
+WITH locked_children AS (
+    SELECT status, updated_at
+    FROM issue
+    WHERE parent_issue_id = $1
+      AND workspace_id = $2
+    FOR UPDATE
+)
 SELECT
     COUNT(*) FILTER (WHERE status NOT IN ('done', 'cancelled'))::bigint AS open_count,
     (MAX(updated_at) FILTER (WHERE status IN ('done', 'cancelled')))::timestamptz AS last_done_at
-FROM issue
-WHERE parent_issue_id = $1
-  AND workspace_id = $2
-FOR UPDATE
+FROM locked_children
 `
 
 type CountNonDoneChildrenLockedParams struct {

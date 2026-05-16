@@ -195,13 +195,17 @@ DELETE FROM cerebro_issue_due_time WHERE issue_id = $1;
 -- The MAX(updated_at) over the parent's *done* children is what the EventID
 -- hashes against — deterministic per all-done state, so re-opening a child
 -- and re-closing it produces a new event_id and the trigger fires again.
+WITH locked_children AS (
+    SELECT status, updated_at
+    FROM issue
+    WHERE parent_issue_id = $1
+      AND workspace_id = $2
+    FOR UPDATE
+)
 SELECT
     COUNT(*) FILTER (WHERE status NOT IN ('done', 'cancelled'))::bigint AS open_count,
     (MAX(updated_at) FILTER (WHERE status IN ('done', 'cancelled')))::timestamptz AS last_done_at
-FROM issue
-WHERE parent_issue_id = $1
-  AND workspace_id = $2
-FOR UPDATE;
+FROM locked_children;
 
 -- name: GetCerebroWorkflowByInboundToken :one
 -- Phase-3 (JEH-1108, PR 2). Webhook ingress lookup. The partial-unique index
