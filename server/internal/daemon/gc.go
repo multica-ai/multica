@@ -219,7 +219,7 @@ func isAccessNotFound(err error) bool {
 }
 
 func (d *Daemon) gcDecisionIssue(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
-	status, err := d.client.GetIssueGCCheck(ctx, meta.IssueID)
+	status, err := d.client.GetIssueGCCheck(d.ctxForWorkspace(ctx, meta.WorkspaceID), meta.IssueID)
 	if err != nil {
 		if isAccessNotFound(err) {
 			// 404 is ambiguous: server returns it for both "issue deleted"
@@ -259,7 +259,7 @@ func (d *Daemon) gcDecisionIssue(ctx context.Context, taskDir string, meta *exec
 }
 
 func (d *Daemon) gcDecisionChat(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
-	status, err := d.client.GetChatSessionGCCheck(ctx, meta.ChatSessionID)
+	status, err := d.client.GetChatSessionGCCheck(d.ctxForWorkspace(ctx, meta.WorkspaceID), meta.ChatSessionID)
 	if err != nil {
 		if isAccessNotFound(err) {
 			// 404 means the chat_session row is gone — DeleteChatSession is
@@ -305,7 +305,7 @@ func (d *Daemon) gcDecisionChat(ctx context.Context, taskDir string, meta *exece
 }
 
 func (d *Daemon) gcDecisionAutopilotRun(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
-	status, err := d.client.GetAutopilotRunGCCheck(ctx, meta.AutopilotRunID)
+	status, err := d.client.GetAutopilotRunGCCheck(d.ctxForWorkspace(ctx, meta.WorkspaceID), meta.AutopilotRunID)
 	if err != nil {
 		if isAccessNotFound(err) {
 			return d.orphanByMTime(taskDir, "autopilot run not accessible")
@@ -356,7 +356,7 @@ func isAutopilotRunTerminal(status string) bool {
 }
 
 func (d *Daemon) gcDecisionQuickCreate(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
-	status, err := d.client.GetTaskGCCheck(ctx, meta.TaskID)
+	status, err := d.client.GetTaskGCCheck(d.ctxForWorkspace(ctx, meta.WorkspaceID), meta.TaskID)
 	if err != nil {
 		if isAccessNotFound(err) {
 			// Task row was hard-deleted, or token can't see it. Either way,

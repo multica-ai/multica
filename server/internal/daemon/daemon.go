@@ -84,11 +84,24 @@ type Daemon struct {
 	repoCache repoCacheBackend
 	logger    *slog.Logger
 
-	mu           sync.Mutex
-	workspaces   map[string]*workspaceState
-	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
-	reloading    sync.Mutex         // prevents concurrent workspace syncs
-	runtimeSet   *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
+	mu               sync.Mutex
+	workspaces       map[string]*workspaceState
+	runtimeIndex     map[string]Runtime // runtimeID -> Runtime for provider lookups
+	runtimeWorkspace map[string]string  // runtimeID -> workspaceID for per-call token lookup
+	reloading        sync.Mutex         // prevents concurrent workspace syncs
+	runtimeSet       *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
+
+	// authMode records how resolveAuth picked the credential. "daemon_token"
+	// means we loaded one or more mdt_ entries from the credentials store and
+	// must register each (workspace_id, daemon_id) pair directly — the
+	// ListWorkspaces endpoint requires mul_/JWT and 401s on mdt_. "pat" keeps
+	// the legacy mul_ flow that walks ListWorkspaces and registers each
+	// workspace it returns. Empty means resolveAuth has not run yet.
+	authMode string
+	// workspaceTokens is the per-workspace mdt_ keyring (only populated in
+	// authMode=="daemon_token"). The client's TokenResolver reads this when
+	// the request ctx is tagged via WithCallWorkspaceID.
+	workspaceTokens map[string]string
 
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
@@ -160,6 +173,8 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		logger:                    logger,
 		workspaces:                make(map[string]*workspaceState),
 		runtimeIndex:              make(map[string]Runtime),
+		runtimeWorkspace:          make(map[string]string),
+		workspaceTokens:           make(map[string]string),
 		runtimeSet:                newRuntimeSetWatcher(),
 		agentVersions:             make(map[string]string),
 		wsHBLastAck:               make(map[string]time.Time),
@@ -384,6 +399,7 @@ func (d *Daemon) removeStaleRuntime(runtimeID string) (string, bool) {
 		return "", false
 	}
 	delete(d.runtimeIndex, runtimeID)
+	delete(d.runtimeWorkspace, runtimeID)
 	d.mu.Unlock()
 
 	d.wsHBMu.Lock()
@@ -444,10 +460,12 @@ func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, worksp
 	for _, oldID := range ws.runtimeIDs {
 		if _, kept := newIDSet[oldID]; !kept {
 			delete(d.runtimeIndex, oldID)
+			delete(d.runtimeWorkspace, oldID)
 		}
 	}
 	for _, rt := range resp.Runtimes {
 		d.runtimeIndex[rt.ID] = rt
+		d.runtimeWorkspace[rt.ID] = workspaceID
 	}
 	// Response is authoritative — replace, do not append. Replacing also
 	// catches the rare case where UpsertAgentRuntime returns a different ID
@@ -472,7 +490,7 @@ func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, worksp
 	// Tell the server about any tasks the previous (now-deleted) runtime
 	// was working on, mirroring the registration path's recover-orphans call.
 	for _, rid := range newIDs {
-		if err := d.client.RecoverOrphans(ctx, rid); err != nil {
+		if err := d.client.RecoverOrphans(d.ctxForWorkspace(ctx, workspaceID), rid); err != nil {
 			d.logger.Warn("recover-orphans after re-register failed",
 				"runtime_id", rid, "error", err)
 		}
@@ -646,21 +664,65 @@ func (d *Daemon) RestartBinary() string {
 }
 
 // deregisterRuntimes notifies the server that all runtimes are going offline.
+// In daemon_token mode the runtimes may live across several workspaces, each
+// with its own mdt_; deregister has to be issued per-workspace so the right
+// credential authenticates each batch.
 func (d *Daemon) deregisterRuntimes() {
-	runtimeIDs := d.allRuntimeIDs()
-	if len(runtimeIDs) == 0 {
+	d.mu.Lock()
+	perWorkspace := make(map[string][]string)
+	var unscoped []string
+	for _, ws := range d.workspaces {
+		for _, rid := range ws.runtimeIDs {
+			perWorkspace[ws.workspaceID] = append(perWorkspace[ws.workspaceID], rid)
+		}
+	}
+	// Capture any runtimes that somehow aren't owned by a workspace state —
+	// best-effort: send under the static token so this doesn't silently drop.
+	for rid := range d.runtimeIndex {
+		owned := false
+		for _, ids := range perWorkspace {
+			for _, id := range ids {
+				if id == rid {
+					owned = true
+					break
+				}
+			}
+			if owned {
+				break
+			}
+		}
+		if !owned {
+			unscoped = append(unscoped, rid)
+		}
+	}
+	d.mu.Unlock()
+
+	if len(perWorkspace) == 0 && len(unscoped) == 0 {
 		d.logger.Debug("deregister: no runtimes to deregister")
 		return
 	}
 
-	d.logger.Debug("deregistering runtimes on shutdown", "count", len(runtimeIDs), "runtime_ids", runtimeIDs)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := d.client.Deregister(ctx, runtimeIDs); err != nil {
-		d.logger.Warn("failed to deregister runtimes on shutdown", "error", err)
-	} else {
-		d.logger.Info("deregistered runtimes", "count", len(runtimeIDs))
+	total := 0
+	for wsID, ids := range perWorkspace {
+		d.logger.Debug("deregistering runtimes on shutdown", "workspace_id", wsID, "count", len(ids), "runtime_ids", ids)
+		if err := d.client.Deregister(d.ctxForWorkspace(ctx, wsID), ids); err != nil {
+			d.logger.Warn("failed to deregister runtimes on shutdown", "workspace_id", wsID, "error", err)
+			continue
+		}
+		total += len(ids)
+	}
+	if len(unscoped) > 0 {
+		if err := d.client.Deregister(ctx, unscoped); err != nil {
+			d.logger.Warn("failed to deregister unscoped runtimes on shutdown", "error", err)
+		} else {
+			total += len(unscoped)
+		}
+	}
+	if total > 0 {
+		d.logger.Info("deregistered runtimes", "count", total)
 	}
 }
 
@@ -668,7 +730,12 @@ func (d *Daemon) deregisterRuntimes() {
 // register and heartbeat calls. Resolution order (RFC v6.1 §6.4 / R1):
 //
 //  1. mdt_ from the daemon credential store (created via `multica daemon
-//     start --install-token`). Cross-platform, file-backed, 0600.
+//     start --install-token`). Cross-platform, file-backed, 0600. When at
+//     least one entry matches (server, daemon_id), the daemon enters
+//     daemon_token mode: every credential becomes a (workspace, token)
+//     binding the daemon will register against directly, and the
+//     ListWorkspaces detour is skipped (it requires mul_/JWT and would
+//     401 on mdt_).
 //  2. mul_ PAT from the CLI config (legacy path; populated by
 //     `multica login --token`). DaemonAuth on the server falls back to PAT
 //     when the prefix matches, so this keeps the pre-RFC flow working
@@ -678,13 +745,41 @@ func (d *Daemon) deregisterRuntimes() {
 // user is most likely to be on.
 func (d *Daemon) resolveAuth() error {
 	if store, err := cli.LoadDaemonCredentials(d.cfg.Profile); err == nil {
-		if cred, ok := cli.FindDaemonCredential(store, d.cfg.ServerBaseURL, d.cfg.DaemonID, ""); ok && cred.DaemonToken != "" {
-			d.client.SetToken(cred.DaemonToken)
-			d.logger.Info("authenticated", "via", "daemon_token")
-			d.logger.Debug("daemon token loaded",
+		var matched []cli.DaemonCredential
+		for _, c := range store.Credentials {
+			if !sameServer(c.ServerURL, d.cfg.ServerBaseURL) {
+				continue
+			}
+			if c.DaemonID != d.cfg.DaemonID || c.DaemonToken == "" {
+				continue
+			}
+			matched = append(matched, c)
+		}
+		if len(matched) > 0 {
+			d.authMode = "daemon_token"
+			d.mu.Lock()
+			for _, c := range matched {
+				d.workspaceTokens[c.WorkspaceID] = c.DaemonToken
+			}
+			d.mu.Unlock()
+			// Resolver picks the per-workspace mdt_ tagged on the request
+			// context. Untagged ctx returns an empty string, which signals
+			// the client to send no Authorization header — that's safe
+			// because every authenticated call below this point is tagged
+			// via WithCallWorkspaceID.
+			d.client.SetTokenResolver(d.tokenForCtx)
+			// The task-wakeup WebSocket dials once with a static header (its
+			// runtime list cannot mix workspaces because the server scopes
+			// the connection to the auth'd workspace). Seed the static token
+			// to one credential so the single-workspace install-token install
+			// gets WS fast-path wakeups; the multi-workspace daemon falls
+			// back to polling for any workspace whose mdt_ isn't the seeded
+			// one, which still drains tasks just at the poll cadence.
+			d.client.SetToken(matched[0].DaemonToken)
+			d.logger.Info("authenticated", "via", "daemon_token", "workspaces", len(matched))
+			d.logger.Debug("daemon token store loaded",
 				"profile", d.cfg.Profile,
-				"workspace_id", cred.WorkspaceID,
-				"token_len", len(cred.DaemonToken))
+				"workspace_count", len(matched))
 			return nil
 		}
 	} else {
@@ -705,10 +800,66 @@ func (d *Daemon) resolveAuth() error {
 		d.logger.Warn("not authenticated — run " + loginHint + " to authenticate, then restart the daemon")
 		return fmt.Errorf("not authenticated: run %s first", loginHint)
 	}
+	d.authMode = "pat"
 	d.client.SetToken(cfg.Token)
 	d.logger.Info("authenticated", "via", "pat")
 	d.logger.Debug("auth token loaded", "profile", d.cfg.Profile, "token_len", len(cfg.Token))
 	return nil
+}
+
+// tokenForCtx resolves a per-request token. Called by the Client for every
+// outbound call when in daemon_token mode. The request must be tagged via
+// WithCallWorkspaceID; an untagged ctx returns "" so the call goes out with
+// no Authorization header (caller will surface a clean 401 instead of a
+// cross-workspace token leak).
+func (d *Daemon) tokenForCtx(ctx context.Context) string {
+	wsID := CallWorkspaceIDFromContext(ctx)
+	if wsID == "" {
+		return ""
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.workspaceTokens[wsID]
+}
+
+// sameServer compares two server base URLs after trimming trailing slashes
+// and lowercasing the scheme/host. Mirrors cli.normalizeServerURL without
+// reaching into the cli package's unexported helper.
+func sameServer(a, b string) bool {
+	return normalizeServerURLForCompare(a) == normalizeServerURLForCompare(b)
+}
+
+func normalizeServerURLForCompare(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimRight(s, "/")
+	return strings.ToLower(s)
+}
+
+// workspaceIDForRuntime returns the workspace a runtime is registered under,
+// or "" if the daemon has never seen this runtime ID. Heartbeat / claim /
+// task call sites use this to tag their ctx in daemon_token mode.
+func (d *Daemon) workspaceIDForRuntime(rid string) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.runtimeWorkspace[rid]
+}
+
+// ctxForRuntime returns a context tagged with the runtime's workspace ID so
+// the daemon-token resolver can pick the right mdt_ credential. Cheap no-op
+// in pat mode (resolver is not installed).
+func (d *Daemon) ctxForRuntime(ctx context.Context, rid string) context.Context {
+	if d.authMode != "daemon_token" {
+		return ctx
+	}
+	return WithCallWorkspaceID(ctx, d.workspaceIDForRuntime(rid))
+}
+
+// ctxForWorkspace is the workspace-id variant of ctxForRuntime.
+func (d *Daemon) ctxForWorkspace(ctx context.Context, wsID string) context.Context {
+	if d.authMode != "daemon_token" {
+		return ctx
+	}
+	return WithCallWorkspaceID(ctx, wsID)
 }
 
 // allRuntimeIDs returns all runtime IDs across all watched workspaces.
@@ -773,7 +924,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		"runtimes":          runtimes,
 	}
 
-	resp, err := d.client.Register(ctx, req)
+	resp, err := d.client.Register(d.ctxForWorkspace(ctx, workspaceID), req)
 	if err != nil {
 		return nil, fmt.Errorf("register runtimes: %w", err)
 	}
@@ -984,7 +1135,7 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 	refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	resp, err := d.client.GetWorkspaceRepos(refreshCtx, workspaceID)
+	resp, err := d.client.GetWorkspaceRepos(d.ctxForWorkspace(refreshCtx, workspaceID), workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -1074,15 +1225,28 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	apiCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	workspaces, err := d.client.ListWorkspaces(apiCtx)
-	if err != nil {
-		return fmt.Errorf("list workspaces: %w", err)
-	}
-	d.logger.Debug("workspace sync: fetched workspaces", "count", len(workspaces))
-
-	apiIDs := make(map[string]string, len(workspaces)) // id -> name
-	for _, ws := range workspaces {
-		apiIDs[ws.ID] = ws.Name
+	apiIDs := make(map[string]string)
+	if d.authMode == "daemon_token" {
+		// mdt_ mode: skip ListWorkspaces (requires mul_/JWT) and treat each
+		// stored (workspace_id, daemon_token) binding as a workspace to
+		// register against directly. RFC v6.1 §6.4 / R1: the install/exchange
+		// flow embeds the workspace context in the mit_ → mdt_ trade, so the
+		// daemon already knows every workspace it should touch.
+		d.mu.Lock()
+		for wsID := range d.workspaceTokens {
+			apiIDs[wsID] = ""
+		}
+		d.mu.Unlock()
+		d.logger.Debug("workspace sync: skipping ListWorkspaces (daemon_token mode)", "count", len(apiIDs))
+	} else {
+		workspaces, err := d.client.ListWorkspaces(apiCtx)
+		if err != nil {
+			return fmt.Errorf("list workspaces: %w", err)
+		}
+		d.logger.Debug("workspace sync: fetched workspaces", "count", len(workspaces))
+		for _, ws := range workspaces {
+			apiIDs[ws.ID] = ws.Name
+		}
 	}
 
 	d.mu.Lock()
@@ -1126,6 +1290,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 		d.workspaces[id] = newWorkspaceState(id, runtimeIDs, resp.ReposVersion, resp.Repos, resp.Settings)
 		for _, rt := range resp.Runtimes {
 			d.runtimeIndex[rt.ID] = rt
+			d.runtimeWorkspace[rt.ID] = id
 		}
 		d.mu.Unlock()
 
@@ -1138,7 +1303,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 		// at in_progress until the slow heartbeat sweeper or the in-flight
 		// task timeout (2.5h) kicks in.
 		for _, rid := range runtimeIDs {
-			if err := d.client.RecoverOrphans(ctx, rid); err != nil {
+			if err := d.client.RecoverOrphans(d.ctxForWorkspace(ctx, id), rid); err != nil {
 				d.logger.Warn("recover-orphans failed", "runtime_id", rid, "error", err)
 			}
 		}
@@ -1154,6 +1319,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 			if ws, exists := d.workspaces[id]; exists {
 				for _, rid := range ws.runtimeIDs {
 					delete(d.runtimeIndex, rid)
+					delete(d.runtimeWorkspace, rid)
 				}
 			}
 			delete(d.workspaces, id)
@@ -1166,8 +1332,8 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 		d.notifyRuntimeSetChanged()
 	}
 
-	if len(d.allRuntimeIDs()) == 0 && registered == 0 && len(workspaces) > 0 {
-		return fmt.Errorf("failed to register runtimes for any of the %d workspace(s)", len(workspaces))
+	if len(d.allRuntimeIDs()) == 0 && registered == 0 && len(apiIDs) > 0 {
+		return fmt.Errorf("failed to register runtimes for any of the %d workspace(s)", len(apiIDs))
 	}
 	if registered > 0 || removed > 0 {
 		d.logger.Debug("workspace sync done", "registered", registered, "removed", removed, "tracked", len(apiIDs))
@@ -1267,7 +1433,7 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 		return
 	}
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
-	resp, err := d.client.SendHeartbeat(ctx, rid)
+	resp, err := d.client.SendHeartbeat(d.ctxForRuntime(ctx, rid), rid)
 	if err != nil {
 		if ctx.Err() == nil {
 			if isRuntimeNotFoundError(err) {
@@ -1439,7 +1605,7 @@ var runtimeReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.
 // on transient failures. See reportRuntimeResultWithRetry for semantics.
 func (d *Daemon) reportLocalSkillListResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
 	d.reportRuntimeResultWithRetry(ctx, "local_skill_list", rt.ID, requestID, func(ctx context.Context) error {
-		return d.client.ReportLocalSkillListResult(ctx, rt.ID, requestID, payload)
+		return d.client.ReportLocalSkillListResult(d.ctxForRuntime(ctx, rt.ID), rt.ID, requestID, payload)
 	})
 }
 
@@ -1447,7 +1613,7 @@ func (d *Daemon) reportLocalSkillListResult(ctx context.Context, rt Runtime, req
 // retry on transient failures.
 func (d *Daemon) reportLocalSkillImportResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
 	d.reportRuntimeResultWithRetry(ctx, "local_skill_import", rt.ID, requestID, func(ctx context.Context) error {
-		return d.client.ReportLocalSkillImportResult(ctx, rt.ID, requestID, payload)
+		return d.client.ReportLocalSkillImportResult(d.ctxForRuntime(ctx, rt.ID), rt.ID, requestID, payload)
 	})
 }
 
@@ -1457,7 +1623,7 @@ func (d *Daemon) reportLocalSkillImportResult(ctx context.Context, rt Runtime, r
 // until its 60s timeout — defeating the multi-node store fix.
 func (d *Daemon) reportModelListResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
 	d.reportRuntimeResultWithRetry(ctx, "model_list", rt.ID, requestID, func(ctx context.Context) error {
-		return d.client.ReportModelListResult(ctx, rt.ID, requestID, payload)
+		return d.client.ReportModelListResult(d.ctxForRuntime(ctx, rt.ID), rt.ID, requestID, payload)
 	})
 }
 
@@ -1597,7 +1763,7 @@ var updateReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.S
 
 func (d *Daemon) reportUpdateResult(ctx context.Context, runtimeID, updateID string, payload map[string]any) {
 	d.reportUpdateResultWithRetry(ctx, runtimeID, updateID, func(ctx context.Context) error {
-		return d.client.ReportUpdateResult(ctx, runtimeID, updateID, payload)
+		return d.client.ReportUpdateResult(d.ctxForRuntime(ctx, runtimeID), runtimeID, updateID, payload)
 	})
 }
 
@@ -1879,7 +2045,7 @@ func (d *Daemon) runRuntimePoller(
 			continue
 		}
 
-		task, err := d.client.ClaimTask(pollerCtx, rid)
+		task, err := d.client.ClaimTask(d.ctxForRuntime(pollerCtx, rid), rid)
 		if err != nil {
 			d.exitClaim()
 			sem <- slot
@@ -1993,6 +2159,10 @@ func (d *Daemon) watchTaskCancellation(ctx context.Context, taskID string, pollI
 }
 
 func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
+	// Every daemon-API call below runs against the task's workspace; tag the
+	// root ctx once so per-workspace mdt_ resolution (daemon_token mode) picks
+	// the right credential without each call having to remember.
+	ctx = d.ctxForWorkspace(ctx, task.WorkspaceID)
 	d.mu.Lock()
 	rt := d.runtimeIndex[task.RuntimeID]
 	d.mu.Unlock()

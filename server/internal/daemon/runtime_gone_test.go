@@ -23,6 +23,8 @@ func freshDaemon(serverURL string) *Daemon {
 		logger:                    slog.New(slog.NewTextHandler(testNopWriter{}, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		workspaces:                make(map[string]*workspaceState),
 		runtimeIndex:              make(map[string]Runtime),
+		runtimeWorkspace:          make(map[string]string),
+		workspaceTokens:           make(map[string]string),
 		runtimeSet:                newRuntimeSetWatcher(),
 		agentVersions:             make(map[string]string),
 		wsHBLastAck:               make(map[string]time.Time),

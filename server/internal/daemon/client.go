@@ -75,11 +75,44 @@ func isRuntimeNotFoundError(err error) bool {
 	return strings.Contains(strings.ToLower(reqErr.Body), "runtime not found")
 }
 
+// callCtxKey is a private key type for context values attached to daemon
+// client calls. The workspace ID lets the Daemon's token resolver pick the
+// right mdt_ credential for each call when multiple workspaces share one
+// daemon process.
+type callCtxKey int
+
+const ctxKeyCallWorkspaceID callCtxKey = iota
+
+// WithCallWorkspaceID returns a derived context tagged with workspaceID so
+// the Client's token resolver can look up the matching mdt_ credential.
+// Empty workspaceID is a no-op (falls back to the resolver's default).
+func WithCallWorkspaceID(ctx context.Context, workspaceID string) context.Context {
+	if workspaceID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, ctxKeyCallWorkspaceID, workspaceID)
+}
+
+// CallWorkspaceIDFromContext returns the workspace ID a daemon client call
+// was tagged with, or empty if untagged.
+func CallWorkspaceIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(ctxKeyCallWorkspaceID).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// TokenResolver returns the Authorization token a daemon client should send
+// for a given request context. It is consulted on every request; an empty
+// return falls back to the Client's default token.
+type TokenResolver func(ctx context.Context) string
+
 // Client handles HTTP communication with the Multica server daemon API.
 type Client struct {
-	baseURL string
-	token   string
-	client  *http.Client
+	baseURL  string
+	token    string
+	resolver TokenResolver
+	client   *http.Client
 
 	// Identity headers sent on every request as X-Client-*. Populated by
 	// SetIdentity(); empty values are simply omitted.
@@ -132,13 +165,35 @@ func (c *Client) setIdentityHeaders(req *http.Request) {
 	}
 }
 
-// SetToken sets the auth token for authenticated requests.
+// SetToken sets the auth token for authenticated requests. Used in PAT mode
+// where one token serves every workspace the daemon talks to.
 func (c *Client) SetToken(token string) {
 	c.token = token
 }
 
+// SetTokenResolver installs a per-request token resolver. When set, every
+// request consults the resolver first (passing the request's context); an
+// empty return falls back to the static token from SetToken. The daemon
+// uses this in mdt_ mode to pick the right per-workspace credential.
+func (c *Client) SetTokenResolver(r TokenResolver) {
+	c.resolver = r
+}
+
 // Token returns the current auth token.
 func (c *Client) Token() string {
+	return c.token
+}
+
+// tokenForRequest picks the token for an outgoing request: resolver first
+// (when configured), then the static token. An empty result means "send no
+// Authorization header" — the server will 401 and the caller decides how
+// to react.
+func (c *Client) tokenForRequest(ctx context.Context) string {
+	if c.resolver != nil {
+		if tok := c.resolver(ctx); tok != "" {
+			return tok
+		}
+	}
 	return c.token
 }
 
@@ -427,8 +482,8 @@ func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBod
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
+	if tok := c.tokenForRequest(ctx); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	c.setIdentityHeaders(req)
 
@@ -454,8 +509,8 @@ func (c *Client) getJSON(ctx context.Context, path string, respBody any) error {
 	if err != nil {
 		return err
 	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
+	if tok := c.tokenForRequest(ctx); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	c.setIdentityHeaders(req)
 
