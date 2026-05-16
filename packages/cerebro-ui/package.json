@@ -11,7 +11,8 @@
     ".": "./index.ts",
     "./components/jump-to-latest-button": "./components/jump-to-latest-button.tsx",
     "./hooks/use-sticky-bottom": "./hooks/use-sticky-bottom.ts",
-    "./hooks/use-highlight-comment-scroll": "./hooks/use-highlight-comment-scroll.ts"
+    "./hooks/use-highlight-comment-scroll": "./hooks/use-highlight-comment-scroll.ts",
+    "./hooks/use-nav-scroll-state": "./hooks/use-nav-scroll-state.ts"
   },
   "dependencies": {
     "@multica/ui": "workspace:*",

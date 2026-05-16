@@ -31,9 +31,11 @@ import { toast } from "sonner";
 import { PageHeader } from "../../layout/page-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
-// CEREBRO-PATCH(issue-detail-cerebro-extras): sticky-bottom + jump-to-latest from cerebro-ui
+// CEREBRO-PATCH(issue-detail-cerebro-extras): sticky-bottom + jump-to-latest + nav-scroll-state from cerebro-ui
 import { useStickyBottom } from "@multica/cerebro-ui/hooks/use-sticky-bottom";
 import { JumpToLatestButton } from "@multica/cerebro-ui/components/jump-to-latest-button";
+// CEREBRO-PATCH(issue-detail-nav-overlay-import): JEH-1518 — multi-function nav overlay scroll state
+import { useNavScrollState } from "@multica/cerebro-ui/hooks/use-nav-scroll-state";
 // CEREBRO-PATCH(issue-detail-highlight-scroll-hook): JEH-1002 retry-based inbox→comment scroll lives in cerebro-ui (replaces the prior single-shot inline effect).
 import { useHighlightCommentScroll } from "@multica/cerebro-ui/hooks/use-highlight-comment-scroll";
 import {
@@ -475,6 +477,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { isAtBottom, scrollToBottom } = useStickyBottom(scrollContainerRef, {
     initialScroll: false,
   });
+  // CEREBRO-PATCH(issue-detail-nav-overlay-state): JEH-1518 — tabs ref + nav scroll state for multi-function overlay button
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const { scrollPercent, isInTabsArea, scrollToTop, scrollToTabs } = useNavScrollState(scrollContainerRef, tabsRef);
   // CEREBRO-PATCH(issue-detail-highlight-scroll-hook): see import above (JEH-1002).
   const highlightedId = useHighlightCommentScroll(highlightCommentId);
 
@@ -1743,6 +1748,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 Chat threads run conversationally — there is no agent-run history to surface here. */}
             {!isChat && <AgentLiveCard key={id} issueId={id} />}
 
+            {/* CEREBRO-PATCH(issue-detail-tabs-anchor): JEH-1518 — scroll anchor for NavOverlayButton tab-section scroll */}
+            <div ref={tabsRef} />
             <Tabs defaultValue="comments" className="mt-3">
               {!isChat && (
                 <TabsList variant="line">
@@ -1886,16 +1893,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </div>
         </div>
         </div>
+        {/* CEREBRO-PATCH(issue-detail-nav-overlay-button): JEH-1518 — multi-function NavOverlayButton replaces single Latest pill */}
         <JumpToLatestButton
           visible={!highlightedId && !isAtBottom && timeline.length > 0}
-          onClick={() => scrollToBottom()}
-          label="Latest"
-          // CEREBRO-PATCH(issue-detail-latest-pill-top-right): JEH-1143 — pin
-          // pill to top-right (under PageHeader) so it stops fighting the
-          // comment/reply composer for the bottom-right corner on mobile.
-          // CEREBRO-PATCH(issue-detail-latest-hide-on-highlight): JEH-1143 —
-          // hide while inbox→comment highlight is active; that highlight is
-          // the blue top element, not a persistent panel with a stable height.
+          scrollPercent={scrollPercent}
+          isInTabsArea={isInTabsArea}
+          onScrollToLatest={() => scrollToBottom()}
+          onScrollToTabs={scrollToTabs}
+          onScrollToTop={scrollToTop}
+          // CEREBRO-PATCH(issue-detail-latest-pill-top-right): JEH-1143 — pin to top-right under PageHeader
+          // CEREBRO-PATCH(issue-detail-latest-hide-on-highlight): JEH-1143 — hide during inbox highlight
           className="top-3 bottom-auto"
         />
         </div>

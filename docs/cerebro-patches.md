@@ -603,3 +603,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `autopilot-model-section-render` | packages/views/autopilots/components/autopilot-dialog.tsx | 2 | JEH-1310 — render the section between OutputMode and Schedule. |
 | `autopilot-model-edit-seed` | packages/views/autopilots/components/autopilot-detail-page.tsx | 2 | JEH-1310 — pass the persisted `model` through to the edit dialog so the picker shows the current value. |
 | `issue-detail-mobile-topbar-title` | packages/views/issues/components/issue-detail.tsx | 5 | JEH-1482 — mobile topbar shows issue identifier + title first (`md:hidden`); desktop retains full workspace/project/parent breadcrumb (`hidden md:flex`). |
+| `issue-detail-nav-overlay-import` | packages/views/issues/components/issue-detail.tsx | 2 | JEH-1518 — import `useNavScrollState` from cerebro-ui for the multi-function NavOverlayButton. |
+| `issue-detail-nav-overlay-state` | packages/views/issues/components/issue-detail.tsx | 2 | JEH-1518 — `tabsRef` anchor + `useNavScrollState` hook call to track scroll position and tabs visibility. |
+| `issue-detail-tabs-anchor` | packages/views/issues/components/issue-detail.tsx | 2 | JEH-1518 — zero-height `<div ref={tabsRef} />` anchor before Tabs so NavOverlayButton can scroll to comments section. |
+| `issue-detail-nav-overlay-button` | packages/views/issues/components/issue-detail.tsx | 5 | JEH-1518 — pass `scrollPercent`, `isInTabsArea`, `onScrollToLatest`, `onScrollToTabs`, `onScrollToTop` to JumpToLatestButton, replacing single `onClick/label` props. |
