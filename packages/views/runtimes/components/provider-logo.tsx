@@ -169,12 +169,12 @@ function KiroLogo({ className }: { className: string }) {
 function NanobotLogo({ className }: { className: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <rect x="2" y="2" width="20" height="20" rx="4" fill="#6366f1" />
-      <circle cx="9" cy="11" r="2" fill="white" />
-      <circle cx="15" cy="11" r="2" fill="white" />
-      <path d="M8 16c0 0 2 2 4 2s4-2 4-2" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
-      <line x1="12" y1="2" x2="12" y2="0" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" />
-      <circle cx="12" cy="0" r="1.5" fill="#6366f1" />
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M12 2 4 2 6.5 8 3 10 3 17.5 6.5 22 17.5 22 21 17.5 21 10 17.5 8 20 2Z M8.5 13H10V15.5H8.5z M14 13H15.5V15.5H14z M12 16.5 10.5 19.5 13.5 19.5z"
+        fill="currentColor"
+      />
     </svg>
   );
 }
