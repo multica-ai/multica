@@ -87,7 +87,32 @@ func (b *nanobotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 			return
 		}
 		chatID = ready.ChatID
-		b.cfg.Logger.Info("nanobot gateway connected", "chat_id", chatID)
+
+		// If resuming a previous session, attach to the existing chat_id
+		// so the agent retains conversation context.
+		if opts.ResumeSessionID != "" {
+			attachEnvelope := map[string]any{
+				"type":    "attach",
+				"chat_id": opts.ResumeSessionID,
+			}
+			if err := conn.WriteJSON(attachEnvelope); err != nil {
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("nanobot gateway attach failed: %v", err)
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				return
+			}
+			// Read the "attached" confirmation event.
+			_, raw, err = conn.ReadMessage()
+			if err != nil {
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("nanobot gateway attach confirm read failed: %v", err)
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				return
+			}
+			chatID = opts.ResumeSessionID
+		}
+
+		b.cfg.Logger.Info("nanobot gateway connected", "chat_id", chatID, "resume", opts.ResumeSessionID != "")
 
 		_ = conn.SetReadDeadline(time.Time{})
 
