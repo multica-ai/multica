@@ -262,6 +262,10 @@ export function useRealtimeSync(
         // every list-of-tasks query stale" so cache stays fresh even
         // when the relevant component isn't currently mounted.
         qc.invalidateQueries({ queryKey: ["issues", "tasks"] });
+        // Per-issue token usage card (issue-detail right rail). Same
+        // shape as the tasks invalidation above — any task lifecycle
+        // event shifts the aggregated usage numbers.
+        qc.invalidateQueries({ queryKey: ["issues", "usage"] });
       },
     };
 
