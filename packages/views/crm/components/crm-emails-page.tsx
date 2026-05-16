@@ -202,14 +202,6 @@ export function CRMEmailsPage() {
     },
   });
 
-  const syncMailbox = useMutation({
-    mutationFn: () => api.syncCRMIMAP({ mailbox_id: mailboxDraft.id, folder: "INBOX", limit: 500, range_days: importRangeDays }),
-    onSuccess: (result) => {
-      setMailboxStatus(`Sync complete. Fetched ${result.fetched}; imported ${result.imported}; skipped ${result.skipped}.`);
-      queryClient.invalidateQueries({ queryKey: crmKeys.emailThreads(wsId) });
-    },
-  });
-
   const saveAndImportMailbox = async () => {
     setMailboxStatus("Saving mailbox and importing selected range…");
     const setting = await saveMailbox.mutateAsync();
