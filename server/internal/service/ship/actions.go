@@ -3,7 +3,7 @@
 // This file is the dispatcher for the nine action endpoints registered
 // in handler/ship_actions.go. Each public method corresponds to one
 // chip the user can press on a PR card. Synchronous actions (merge,
-// comment, dismiss_review, close_as_stale, run_smoke_tests, rebase,
+// comment, dismiss_review, close_as_stale, close_pr, run_smoke_tests, rebase,
 // nudge_author) finish in the same request. Asynchronous actions
 // (diagnose_ci_failure, summarize_review_feedback) spawn an agent task
 // via the supplied TaskEnqueuer and return the task id so the chip can
@@ -45,6 +45,7 @@ const (
 	// ActionSubmitReview — Phase 6.5. Posts a GitHub PR review
 	// (APPROVE / REQUEST_CHANGES / COMMENT) without leaving Multica.
 	ActionSubmitReview = "submit_review"
+	ActionClosePR      = "close_pr"
 )
 
 // ActionStatus values mirror what's recorded in result_status.
@@ -178,6 +179,8 @@ func (s *Service) ExecuteAction(
 		return s.actionRunSmokeTests(ctx, row, pr, owner, repo, smokeWorkflow, payload, result)
 	case ActionSubmitReview:
 		return s.actionSubmitReview(ctx, row, pr, owner, repo, actorUserID, payload, result)
+	case ActionClosePR:
+		return s.actionClosePR(ctx, row, pr, owner, repo, result)
 	case ActionDiagnoseCIFailure, ActionSummarizeReviewFeedback:
 		return s.actionSpawnAgentTask(ctx, row, pr, owner, repo, action, task, orchestratorAgentID, actorUserID, result)
 	default:
@@ -516,6 +519,29 @@ func (s *Service) actionCloseAsStale(
 	s.finishAction(ctx, row.ID, StatusSucceeded, map[string]any{
 		"reason": req.Reason,
 	})
+	return result, nil
+}
+
+func (s *Service) actionClosePR(
+	ctx context.Context,
+	row db.ShipCardAction,
+	pr db.PullRequest,
+	owner, repo string,
+	result *ActionResult,
+) (*ActionResult, error) {
+	if err := s.Github.ClosePullRequest(ctx, owner, repo, int(pr.PrNumber)); err != nil {
+		s.finishAction(ctx, row.ID, StatusFailed, map[string]any{"error": err.Error()})
+		result.Error = err.Error()
+		return result, err
+	}
+	if _, err := s.Q.MarkPullRequestClosed(ctx, db.MarkPullRequestClosedParams{
+		ID:       pr.ID,
+		ClosedAt: pgtype.Timestamptz{Time: s.now(), Valid: true},
+	}); err != nil {
+		_ = err
+	}
+	result.Status = StatusSucceeded
+	s.finishAction(ctx, row.ID, StatusSucceeded, map[string]any{"closed": true})
 	return result, nil
 }
 

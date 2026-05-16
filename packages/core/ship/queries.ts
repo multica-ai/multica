@@ -237,15 +237,15 @@ export function useLogDeploy(environmentId: string) {
 //     active workspace's ship surface.
 //
 // Optimistic updates only happen for actions whose effect is deterministic
-// from the request alone — `merge` flips state to merged, `close_as_stale`
-// flips state to closed. Everything else (comment, rebase, nudge, smoke
+// from the request alone — `merge` flips state to merged, close actions
+// flip state to closed. Everything else (comment, rebase, nudge, smoke
 // tests) leaves the cache untouched and lets the WS event drive the refetch.
 // Optimism elsewhere would create a "fake green" frame on a chip whose
 // outcome the user can't verify locally.
 // ---------------------------------------------------------------------------
 
 // Helper: walk every cached pull_requests list under this workspace and
-// patch the matching PR row in place. Used by the merge / close-as-stale
+// patch the matching PR row in place. Used by merge / close mutations
 // mutations to give the user instant feedback while the server roundtrip
 // completes. We rely on TanStack's queryClient.setQueriesData with a
 // prefix matcher — every state-filter slice (open/closed/merged/all) is
@@ -421,6 +421,31 @@ export function useClosePullRequestAsStale(prId: string) {
       patchPullRequestInCache(qc, wsId, prId, {
         state: "closed",
         pr_closed_at: nowIso,
+      });
+      return { snapshot };
+    },
+    onError: (_err, _vars, ctx) => {
+      ctx?.snapshot?.forEach(([key, data]) => {
+        qc.setQueryData(key, data);
+      });
+    },
+    onSettled: () => invalidatePullRequestSurface(qc, wsId, prId),
+  });
+}
+
+export function useClosePullRequest(prId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: () => api.closePullRequest(prId),
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: shipKeys.allPullRequests(wsId) });
+      const snapshot = qc.getQueriesData<ListPullRequestsResponse>({
+        queryKey: shipKeys.allPullRequests(wsId),
+      });
+      patchPullRequestInCache(qc, wsId, prId, {
+        state: "closed",
+        pr_closed_at: new Date().toISOString(),
       });
       return { snapshot };
     },

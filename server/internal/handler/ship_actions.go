@@ -7,7 +7,7 @@
 //
 // Authorization model:
 //
-//   - Destructive actions (merge, dismiss_review, close_as_stale,
+//   - Destructive actions (merge, dismiss_review, close_as_stale, close_pr,
 //     run_smoke_tests) require workspace owner/admin role.
 //   - Non-destructive actions (comment, rebase_on_main, nudge_author,
 //     diagnose_ci_failure, summarize_review_feedback) require any
@@ -126,6 +126,7 @@ var destructiveActions = map[string]bool{
 	ship.ActionMerge:         true,
 	ship.ActionDismissReview: true,
 	ship.ActionCloseAsStale:  true,
+	ship.ActionClosePR:       true,
 	ship.ActionRunSmokeTests: true,
 }
 
@@ -290,6 +291,11 @@ func (h *Handler) RunSmokeTests(w http.ResponseWriter, r *http.Request) {
 // ClosePullRequestAsStale — POST /api/pull_requests/{id}/close_as_stale
 func (h *Handler) ClosePullRequestAsStale(w http.ResponseWriter, r *http.Request) {
 	h.dispatchAction(w, r, ship.ActionCloseAsStale)
+}
+
+// ClosePullRequest — POST /api/pull_requests/{id}/close_pr
+func (h *Handler) ClosePullRequest(w http.ResponseWriter, r *http.Request) {
+	h.dispatchAction(w, r, ship.ActionClosePR)
 }
 
 // SubmitPullRequestReview — POST /api/pull_requests/{id}/review (Phase 6.5).
