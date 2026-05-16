@@ -171,6 +171,12 @@ The [GitHub PR ↔ issue integration](/github-integration) needs two variables. 
 
 **Note:** `GITHUB_WEBHOOK_SECRET` is reused as the signing key for the install-flow state token, so operators only need to manage one secret. It is **not** the GitHub App's *Client* secret — Client secrets are OAuth-related and not used by this integration. See [GitHub integration → Self-host setup](/github-integration#self-host-setup) for the full walkthrough.
 
+## Gitee Skill Import
+
+| Variable | Default | Description |
+|---|---|---|
+| `GITEE_TOKEN` | empty | Personal access token for the Gitee API. Used by Skill Import to fetch `skill.yaml` / `skill.json` from Gitee repositories. Required for private repos; public repos work without it but are subject to stricter rate-limits |
+
 ## Usage analytics
 
 By default, the server reports to Multica's official PostHog instance. To opt out, set `ANALYTICS_DISABLED=true`.
