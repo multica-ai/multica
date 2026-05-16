@@ -455,6 +455,7 @@
   },
   "releases": {
     "page_title": "Active releases",
+    "history_title": "Release history",
     "empty": "No active releases. Select PRs and click Create release.",
     "view_release": "View",
     "create_dialog": {

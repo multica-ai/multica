@@ -20,6 +20,10 @@ vi.mock("@multica/core/ship", () => ({
     data: activeReleasesFixture,
     isLoading: false,
   }),
+  useShipProjects: () => ({
+    data: { projects: [{ id: "p-1", title: "My Project" }] },
+    isLoading: false,
+  }),
   useCollapsedProjects: <T,>(
     selector: (state: {
       activeReleasesCollapsed: boolean;
@@ -115,6 +119,16 @@ describe("ShipActiveReleasesRail", () => {
     expect(screen.getByText(/3 PRs/)).toBeInTheDocument();
     const link = screen.getByTestId("ship-active-release-view");
     expect(link).toHaveAttribute("href", "/acme/ship/release/rel-1");
+  });
+
+  it("shows the project name on each release card", () => {
+    activeReleasesFixture = {
+      releases: [
+        makeRelease({ id: "rel-1", title: "May rollout", project_id: "p-1" }),
+      ],
+    };
+    render(<ShipActiveReleasesRail />, { wrapper: Wrapper });
+    expect(screen.getByText("My Project")).toBeInTheDocument();
   });
 
   it("applies a stage color class to the stage badge", () => {

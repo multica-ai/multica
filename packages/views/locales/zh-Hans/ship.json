@@ -450,6 +450,7 @@
   },
   "releases": {
     "page_title": "进行中的发布",
+    "history_title": "发布历史",
     "empty": "暂无进行中的发布。先选择 PR，再点击创建发布。",
     "view_release": "查看",
     "create_dialog": {

@@ -21,11 +21,13 @@ import { defaultStorage } from "../platform/storage";
  *  view-mode toggle on the project list. */
 interface CollapsedProjectsState {
   activeReleasesCollapsed: boolean;
+  releaseHistoryCollapsed: boolean;
   /** projectIds collapsed in the current workspace. Set so toggle is
    *  O(1); JSON-serialised as an array via the persist middleware
    *  rehydration step below. */
   collapsed: Set<string>;
   toggleActiveReleases: () => void;
+  toggleReleaseHistory: () => void;
   isCollapsed: (projectId: string) => boolean;
   toggle: (projectId: string) => void;
   setCollapsed: (projectId: string, value: boolean) => void;
@@ -36,10 +38,15 @@ export const useCollapsedProjects = create<CollapsedProjectsState>()(
   persist(
     (set, get) => ({
       activeReleasesCollapsed: false,
+      releaseHistoryCollapsed: true,
       collapsed: new Set<string>(),
       toggleActiveReleases: () =>
         set((s) => ({
           activeReleasesCollapsed: !s.activeReleasesCollapsed,
+        })),
+      toggleReleaseHistory: () =>
+        set((s) => ({
+          releaseHistoryCollapsed: !s.releaseHistoryCollapsed,
         })),
       isCollapsed: (projectId) => get().collapsed.has(projectId),
       toggle: (projectId) =>

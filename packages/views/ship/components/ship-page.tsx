@@ -14,6 +14,7 @@ import { ShipEmptyState } from "./ship-empty-state";
 import { ShipNoTokenState } from "./ship-no-token-state";
 import { ShipProjectSection } from "./ship-project-section";
 import { ShipActiveReleasesRail } from "./ship-active-releases-rail";
+import { ShipReleaseHistory } from "./ship-release-history";
 import { ShipSelectionBar } from "./ship-selection-bar";
 import { ShipPrDetailDrawer } from "./ship-pr-detail-drawer";
 import { ShipConciergePanel } from "./ship-concierge-panel";
@@ -119,6 +120,7 @@ export function ShipPage() {
             {/* Phase 7a — active releases rail above the per-project
                 Kanban sections. Hidden when no active releases exist. */}
             <ShipActiveReleasesRail />
+            <ShipReleaseHistory />
             <div className="space-y-8">
               {projects.map((project) => (
                 <ShipProjectSection key={project.id} project={project} />

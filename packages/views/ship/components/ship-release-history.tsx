@@ -1,79 +1,86 @@
 "use client";
 
-// Phase 7a — Active releases rail.
-//
-// Renders at the top of the Ship Hub landing page above the
-// per-project Kanban sections. Lists every active release in the
-// workspace as a small card with title + project + stage + PR count.
-// Clicking anywhere on the card navigates to the release detail page.
-
 import { useMemo } from "react";
-import { ChevronRight, Train } from "lucide-react";
+import { ChevronRight, History } from "lucide-react";
+import { useQueries } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import {
-  useActiveReleases,
+  projectReleasesOptions,
   useCollapsedProjects,
   useShipProjects,
 } from "@multica/core/ship";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { useT } from "../../i18n";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { AppLink } from "../../navigation";
-import {
-  formatDeployedAt,
-  releaseDeployedAt,
-  releaseStageColorClass,
-} from "./release-utils";
+import { useT } from "../../i18n";
+import type { Release } from "@multica/core/types";
+import { formatDeployedAt, releaseStageColorClass } from "./release-utils";
 
-export function ShipActiveReleasesRail() {
+const TERMINAL_STAGES = new Set(["done", "cancelled", "rolled_back"]);
+const HISTORY_LIMIT = 10;
+
+function releaseTerminalAt(r: Release): string {
+  return r.done_at ?? r.promoted_at ?? r.updated_at;
+}
+
+export function ShipReleaseHistory() {
   const { t } = useT("ship");
   const workspace = useCurrentWorkspace();
-  const { data, isLoading } = useActiveReleases(true);
+  const wsId = useWorkspaceId();
+  const slug = workspace?.slug ?? "";
+
   const { data: projectsData } = useShipProjects(true);
-  const rawReleases = data?.releases ?? [];
+  const projects = useMemo(() => projectsData?.projects ?? [], [projectsData]);
+
   const projectTitleById = useMemo(() => {
     const m = new Map<string, string>();
-    for (const p of projectsData?.projects ?? []) m.set(p.id, p.title);
+    for (const p of projects) m.set(p.id, p.title);
     return m;
-  }, [projectsData]);
-  // Sort newest-deployed first so the most recently promoted/staged release
-  // appears at the top. Mirrors the backend ORDER BY but guards against any
-  // cache entries delivered in an older order.
-  const releases = [...rawReleases].sort(
-    (a, b) =>
-      new Date(releaseDeployedAt(b)).getTime() -
-      new Date(releaseDeployedAt(a)).getTime(),
-  );
-  const collapsed = useCollapsedProjects((s) => s.activeReleasesCollapsed);
-  const toggleActiveReleases = useCollapsedProjects(
-    (s) => s.toggleActiveReleases,
-  );
+  }, [projects]);
 
-  // Don't render the rail at all when nothing is loading and the
-  // list is empty — the page-level empty state covers that case.
-  // (We DO render an empty rail during initial load so the page
-  // doesn't jump as the data arrives.)
-  if (!isLoading && releases.length === 0) {
-    return null;
-  }
+  const queries = useQueries({
+    queries: projects.map((p) => projectReleasesOptions(wsId, p.id, "all")),
+  });
 
-  const slug = workspace?.slug ?? "";
+  const isLoading = queries.some((q) => q.isLoading);
+
+  const historyReleases = useMemo(() => {
+    const result: Release[] = [];
+    for (const q of queries) {
+      for (const r of q.data?.releases ?? []) {
+        if (TERMINAL_STAGES.has(r.stage)) result.push(r);
+      }
+    }
+    return result
+      .sort(
+        (a, b) =>
+          new Date(releaseTerminalAt(b)).getTime() -
+          new Date(releaseTerminalAt(a)).getTime(),
+      )
+      .slice(0, HISTORY_LIMIT);
+  }, [queries]);
+
+  const collapsed = useCollapsedProjects((s) => s.releaseHistoryCollapsed);
+  const toggle = useCollapsedProjects((s) => s.toggleReleaseHistory);
+
+  if (!isLoading && historyReleases.length === 0) return null;
 
   return (
     <section
       className="rounded-md border bg-card p-3"
-      data-testid="ship-active-releases-rail"
+      data-testid="ship-release-history"
     >
       <header className="mb-2 flex items-center gap-2 text-sm font-medium">
         <button
           type="button"
-          onClick={toggleActiveReleases}
+          onClick={toggle}
           className="flex size-6 shrink-0 items-center justify-center rounded hover:bg-muted"
           aria-expanded={!collapsed}
-          aria-controls="ship-active-releases-content"
+          aria-controls="ship-release-history-content"
           aria-label={
-            collapsed ? "Expand active releases" : "Collapse active releases"
+            collapsed ? "Expand release history" : "Collapse release history"
           }
-          data-testid="ship-active-releases-toggle"
+          data-testid="ship-release-history-toggle"
         >
           <ChevronRight
             className={cn(
@@ -82,23 +89,23 @@ export function ShipActiveReleasesRail() {
             )}
           />
         </button>
-        <Train className="size-4 text-primary" aria-hidden />
-        {t(($) => $.releases.page_title)}
+        <History className="size-4 text-muted-foreground" aria-hidden />
+        {t(($) => $.releases.history_title)}
       </header>
 
       {!collapsed && (
-        <div id="ship-active-releases-content">
-          {isLoading && releases.length === 0 ? (
+        <div id="ship-release-history-content">
+          {isLoading && historyReleases.length === 0 ? (
             <p className="text-xs text-muted-foreground">…</p>
           ) : (
             <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {releases.map((release) => (
-                <li key={release.id} data-testid="ship-active-release-card">
+              {historyReleases.map((release) => (
+                <li key={release.id} data-testid="ship-history-release-card">
                   {slug ? (
                     <AppLink
                       href={`/${slug}/ship/release/${release.id}`}
                       className="block rounded border bg-background p-2.5 text-sm transition-colors hover:bg-muted/50"
-                      data-testid="ship-active-release-view"
+                      data-testid="ship-history-release-view"
                     >
                       <div className="flex items-center gap-2">
                         <span
@@ -131,14 +138,12 @@ export function ShipActiveReleasesRail() {
                           {release.pr_count} PR
                           {release.pr_count === 1 ? "" : "s"}
                         </span>
-                        <span aria-hidden>·</span>
-                        <span className="capitalize">{release.risk_level}</span>
                       </div>
                       <time
-                        dateTime={releaseDeployedAt(release)}
+                        dateTime={releaseTerminalAt(release)}
                         className="mt-0.5 block text-xs text-muted-foreground"
                       >
-                        {formatDeployedAt(releaseDeployedAt(release))}
+                        {formatDeployedAt(releaseTerminalAt(release))}
                       </time>
                     </AppLink>
                   ) : (
@@ -174,14 +179,12 @@ export function ShipActiveReleasesRail() {
                           {release.pr_count} PR
                           {release.pr_count === 1 ? "" : "s"}
                         </span>
-                        <span aria-hidden>·</span>
-                        <span className="capitalize">{release.risk_level}</span>
                       </div>
                       <time
-                        dateTime={releaseDeployedAt(release)}
+                        dateTime={releaseTerminalAt(release)}
                         className="mt-0.5 block text-xs text-muted-foreground"
                       >
-                        {formatDeployedAt(releaseDeployedAt(release))}
+                        {formatDeployedAt(releaseTerminalAt(release))}
                       </time>
                     </div>
                   )}
