@@ -122,9 +122,10 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		LeaderID    string `json:"leader_id"`
+		Name        string  `json:"name"`
+		Description string  `json:"description"`
+		LeaderID    string  `json:"leader_id"`
+		AvatarURL   *string `json:"avatar_url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -158,12 +159,18 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	avatarURL := pgtype.Text{}
+	if req.AvatarURL != nil {
+		avatarURL = pgtype.Text{String: *req.AvatarURL, Valid: true}
+	}
+
 	squad, err := h.Queries.CreateSquad(r.Context(), db.CreateSquadParams{
 		WorkspaceID: wsUUID,
 		Name:        req.Name,
 		Description: req.Description,
 		LeaderID:    leaderUUID,
 		CreatorID:   member.UserID,
+		AvatarUrl:   avatarURL,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create squad")
@@ -622,10 +629,14 @@ func (h *Handler) shouldEnqueueSquadLeaderOnComment(ctx context.Context, issue d
 		return false
 	}
 
-	// Skip if the comment author is the squad leader itself (prevent self-trigger).
-	// Other squad members ARE allowed to trigger the leader — the leader uses
-	// silent/no-op turns when no action is needed.
-	if authorType == "agent" && authorID == uuidToString(squad.LeaderID) {
+	// Skip if the comment author is the squad leader itself AND the agent's
+	// last activity on this issue was in the leader role (prevent self-trigger
+	// loop). An agent that is simultaneously the squad's leader and one of its
+	// workers must still wake the leader role after posting a comment from
+	// its worker task — role is inferred from the agent's most recent task
+	// on the issue, not from author ID alone.
+	if authorType == "agent" && authorID == uuidToString(squad.LeaderID) &&
+		h.lastTaskWasLeader(ctx, issue.ID, squad.LeaderID) {
 		return false
 	}
 
@@ -645,6 +656,24 @@ func (h *Handler) shouldEnqueueSquadLeaderOnComment(ctx context.Context, issue d
 	}
 
 	return true
+}
+
+// lastTaskWasLeader returns true when the agent's most recent task on the
+// issue was enqueued in the squad-leader role. Used by the self-trigger
+// guards to tell apart a comment posted while the agent was acting as
+// leader (skip) from one posted while it was acting as a worker (do not
+// skip). When the agent has no prior task on this issue the role is
+// undetermined and we treat it as non-leader so a brand-new external
+// trigger can still reach the leader.
+func (h *Handler) lastTaskWasLeader(ctx context.Context, issueID, agentID pgtype.UUID) bool {
+	flag, err := h.Queries.GetLatestTaskIsLeaderForIssueAndAgent(ctx, db.GetLatestTaskIsLeaderForIssueAndAgentParams{
+		IssueID: issueID,
+		AgentID: agentID,
+	})
+	if err != nil {
+		return false
+	}
+	return flag
 }
 
 // commentMentionsAnyone returns true when the comment body contains at least
@@ -713,7 +742,7 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 		return
 	}
 
-	if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, squad.LeaderID, triggerCommentID); err != nil {
+	if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, squad.LeaderID, triggerCommentID); err != nil {
 		slog.Warn("enqueue squad leader task failed",
 			"issue_id", uuidToString(issue.ID),
 			"squad_id", uuidToString(squad.ID),

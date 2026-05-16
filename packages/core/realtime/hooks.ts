@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import type { WSEventType } from "../types";
 import { useWS } from "./provider";
 
-type EventHandler = (payload: unknown, actorId?: string) => void;
+type EventHandler = (payload: unknown, actorId?: string, actorType?: string) => void;
 
 /**
  * Hook that subscribes to a WebSocket event and calls the handler.

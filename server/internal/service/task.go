@@ -519,6 +519,20 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 }
 
 func (s *TaskService) EnqueueTaskForMentionWithContext(ctx context.Context, issue db.Issue, agentID pgtype.UUID, trigger TriggerActor, triggerCommentID pgtype.UUID, taskContext []byte) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, agentID, trigger, triggerCommentID, taskContext, false)
+}
+
+// EnqueueTaskForSquadLeader is the leader-role variant of EnqueueTaskForMention.
+// The resulting task carries is_leader_task=true so that downstream
+// self-trigger guards can distinguish a comment posted while the agent was
+// acting as the squad's leader (skip) from one posted while it was acting
+// as a worker (do not skip). This matters for agents that are simultaneously
+// the leader and a worker of the same squad — see migration 090.
+func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, leaderID, TriggerActor{}, triggerCommentID, nil, true)
+}
+
+func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, trigger TriggerActor, triggerCommentID pgtype.UUID, taskContext []byte, isLeader bool) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -544,13 +558,14 @@ func (s *TaskService) EnqueueTaskForMentionWithContext(ctx context.Context, issu
 		TriggerActorType: trigger.actorTypeText(),
 		TriggerActorID:   trigger.ActorID,
 		TriggerSummary:   s.buildCommentTriggerSummary(ctx, triggerCommentID),
+		IsLeaderTask:     pgtype.Bool{Bool: isLeader, Valid: isLeader},
 	})
 	if err != nil {
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
 	}
 
-	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "is_leader_task", isLeader)
 	// See EnqueueTaskForIssue for ordering rationale.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
@@ -1464,12 +1479,13 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, trigg
 
 // enqueueRerunTask enqueues a fresh task for the given agent on the issue.
 // For agent-assigned issues it uses enqueueIssueTask (which reads AssigneeID);
-// for squad-assigned issues it uses EnqueueTaskForMention with the leader ID.
+// for squad-assigned issues the rerun targets the squad leader and is flagged
+// as a leader task so the self-trigger guard treats it correctly.
 func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
 	if issue.AssigneeType.String == "agent" {
 		return s.enqueueIssueTask(ctx, issue, TriggerActor{}, triggerCommentID, nil, true)
 	}
-	return s.EnqueueTaskForMention(ctx, issue, agentID, triggerCommentID)
+	return s.EnqueueTaskForSquadLeader(ctx, issue, agentID, triggerCommentID)
 }
 
 // HandleFailedTasks runs the post-failure side effects for a batch of

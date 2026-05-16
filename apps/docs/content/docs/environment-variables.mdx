@@ -35,14 +35,28 @@ These are the core variables you must think about before deploying — some have
 
 ## Email configuration
 
-Multica uses [Resend](https://resend.com/) to send verification codes and invite emails.
+Multica supports two delivery backends — [Resend](https://resend.com/) for cloud deployments, or an SMTP relay for internal / on-premise networks. `SMTP_HOST` takes priority over `RESEND_API_KEY` when both are set.
+
+### Resend
 
 | Variable | Default | Description |
 |---|---|---|
 | `RESEND_API_KEY` | empty | Resend API key |
-| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | Sender address (must be a domain verified in your Resend account) |
+| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | Sender address (must be a domain verified in your Resend account; also reused as the `From:` header when SMTP is in use) |
 
-**Behavior when `RESEND_API_KEY` is unset**: the server does not error, but every email that should have been sent (verification codes, invite links) **is written to the server's stdout only**. Convenient for local development — copy the code out of the server logs; **in production, forgetting to set this creates a silent black hole**, with users never receiving email and no error surfaced.
+### SMTP relay
+
+| Variable | Default | Description |
+|---|---|---|
+| `SMTP_HOST` | empty | SMTP relay hostname. Setting this activates SMTP mode and overrides Resend |
+| `SMTP_PORT` | `25` | SMTP port. Use `587` for STARTTLS submission; **port 465 (SMTPS / implicit TLS) is not supported** |
+| `SMTP_USERNAME` | empty | SMTP username. Leave empty for unauthenticated relay |
+| `SMTP_PASSWORD` | empty | SMTP password |
+| `SMTP_TLS_INSECURE` | `false` | Set `true` to skip TLS certificate verification (private CA / self-signed only) |
+
+STARTTLS is upgraded automatically when the server advertises it. The dial timeout is 10s and the whole SMTP session has a 30s deadline, so a black-holed relay can't hang the auth handler.
+
+**Behavior when neither is set**: the server does not error, but every email that should have been sent (verification codes, invite links) **is written to the server's stdout only**. Convenient for local development — copy the code out of the server logs; **in production, forgetting to set this creates a silent black hole**, with users never receiving email and no error surfaced.
 
 ## Google OAuth configuration
 

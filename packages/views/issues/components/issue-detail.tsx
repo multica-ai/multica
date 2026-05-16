@@ -415,6 +415,101 @@ function inferThreadRootId(selection: Selection): string | null {
   return null;
 }
 
+// Collapsible wrapper for an activity block. Older blocks default to a single
+// "N activities" summary line so the timeline isn't dominated by status /
+// priority / assignee churn; the trailing block stays expanded because it
+// usually answers "what just happened?". Expansion state is owned by the
+// parent so it survives Virtuoso's mount/unmount on scroll.
+function ActivityBlock({
+  entries,
+  expanded,
+  onToggle,
+  getActorName,
+  t,
+}: {
+  entries: TimelineEntry[];
+  expanded: boolean;
+  onToggle: () => void;
+  getActorName: (type: string, id: string) => string;
+  t: ActivityT;
+}) {
+  if (!expanded) {
+    const count = entries.length;
+    return (
+      <div className="pb-3 px-4">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronRight className="h-3 w-3 shrink-0" />
+          <span>{t(($) => $.activity.activity_count, { count })}</span>
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="pb-3 px-4 flex flex-col gap-3">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ChevronDown className="h-3 w-3 shrink-0" />
+        <span>{t(($) => $.activity.activity_count, { count: entries.length })}</span>
+      </button>
+      {entries.map((entry) => {
+        const details = (entry.details ?? {}) as Record<string, string>;
+        const isStatusChange = entry.action === "status_changed";
+        const isPriorityChange = entry.action === "priority_changed";
+        const isDueDateChange = entry.action === "due_date_changed";
+
+        let leadIcon: React.ReactNode;
+        if (isStatusChange && details.to) {
+          leadIcon = <StatusIcon status={details.to as IssueStatus} className="h-4 w-4 shrink-0" />;
+        } else if (isPriorityChange && details.to) {
+          leadIcon = <PriorityIcon priority={details.to as IssuePriority} className="h-4 w-4 shrink-0" />;
+        } else if (isDueDateChange) {
+          leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
+        } else {
+          leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
+        }
+
+        return (
+          <div key={entry.id} className="flex items-center text-xs text-muted-foreground">
+            <div className="mr-2 flex w-4 shrink-0 justify-center">
+              {leadIcon}
+            </div>
+            <div className="flex min-w-0 flex-1 items-center gap-1">
+              <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
+              <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
+              {(entry.coalesced_count ?? 1) > 1 &&
+                entry.action !== "task_completed" &&
+                entry.action !== "task_failed" && (
+                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+                    {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
+                  </span>
+                )}
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span className="ml-auto shrink-0 cursor-default">
+                      {timeAgo(entry.created_at)}
+                    </span>
+                  }
+                />
+                <TooltipContent side="top">
+                  {new Date(entry.created_at).toLocaleString()}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // SubIssueRow — sub-issue list item with inline status & assignee editing
 // ---------------------------------------------------------------------------
@@ -644,6 +739,43 @@ export function IssueDetail({
       return next;
     });
   }, []);
+
+  // Per-session activity-block expansion overrides. The default rule is
+  // "only the trailing block is expanded" (computed from timelineView.groups
+  // below); these two sets capture user clicks that diverge from the default.
+  // Two sets are needed because "default" can flip when a new activity block
+  // appends — without an explicit collapse override, a manually-collapsed
+  // older block would re-expand when it stops being the trailing one (or vice
+  // versa). Not persisted, matches the resolved-thread behaviour above.
+  const [expandedActivityIds, setExpandedActivityIds] = useState<Set<string>>(() => new Set());
+  const [collapsedActivityIds, setCollapsedActivityIds] = useState<Set<string>>(() => new Set());
+  const toggleActivityBlock = useCallback((id: string, currentlyExpanded: boolean) => {
+    if (currentlyExpanded) {
+      setCollapsedActivityIds((prev) => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+      setExpandedActivityIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    } else {
+      setExpandedActivityIds((prev) => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+      setCollapsedActivityIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  }, []);
   const didHighlightRef = useRef<string | null>(null);
 
   // Scroll to and briefly highlight a comment — used by ExecutionLogSection
@@ -831,6 +963,15 @@ export function IssueDetail({
     () => flattenGroups(timelineView.groups, expandedResolved),
     [timelineView.groups, expandedResolved],
   );
+
+  // ID of the trailing activity block — the only one expanded by default.
+  const lastActivityGroupId = useMemo(() => {
+    for (let i = timelineView.groups.length - 1; i >= 0; i--) {
+      const g = timelineView.groups[i]!;
+      if (g.type === "activities") return g.entries[0]!.id;
+    }
+    return null;
+  }, [timelineView.groups]);
 
   // Map of reply-comment id → root-comment id, so a deep-link to a reply
   // can fall back to scrolling the root thread into view.
@@ -1418,57 +1559,19 @@ export function IssueDetail({
       );
     }
     // activity-group
+    const expanded = expandedActivityIds.has(item.id)
+      ? true
+      : collapsedActivityIds.has(item.id)
+        ? false
+        : item.id === lastActivityGroupId;
     return (
-      <div className="pb-3 px-4 flex flex-col gap-3">
-        {item.entries.map((entry) => {
-          const details = (entry.details ?? {}) as Record<string, string>;
-          const isStatusChange = entry.action === "status_changed";
-          const isPriorityChange = entry.action === "priority_changed";
-          const isDueDateChange = entry.action === "due_date_changed";
-
-          let leadIcon: React.ReactNode;
-          if (isStatusChange && details.to) {
-            leadIcon = <StatusIcon status={details.to as IssueStatus} className="h-4 w-4 shrink-0" />;
-          } else if (isPriorityChange && details.to) {
-            leadIcon = <PriorityIcon priority={details.to as IssuePriority} className="h-4 w-4 shrink-0" />;
-          } else if (isDueDateChange) {
-            leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
-          } else {
-            leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
-          }
-
-          return (
-            <div key={entry.id} className="flex items-center text-xs text-muted-foreground">
-              <div className="mr-2 flex w-4 shrink-0 justify-center">
-                {leadIcon}
-              </div>
-              <div className="flex min-w-0 flex-1 items-center gap-1">
-                <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
-                <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
-                {(entry.coalesced_count ?? 1) > 1 &&
-                  entry.action !== "task_completed" &&
-                  entry.action !== "task_failed" && (
-                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
-                      {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
-                    </span>
-                  )}
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <span className="ml-auto shrink-0 cursor-default">
-                        {timeAgo(entry.created_at)}
-                      </span>
-                    }
-                  />
-                  <TooltipContent side="top">
-                    {new Date(entry.created_at).toLocaleString()}
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      <ActivityBlock
+        entries={item.entries}
+        expanded={expanded}
+        onToggle={() => toggleActivityBlock(item.id, expanded)}
+        getActorName={getActorName}
+        t={t}
+      />
     );
   };
 

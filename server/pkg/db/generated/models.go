@@ -99,6 +99,7 @@ type AgentTaskQueue struct {
 	TriggerActorID    pgtype.UUID        `json:"trigger_actor_id"`
 	TriggerSummary    pgtype.Text        `json:"trigger_summary"`
 	ForceFreshSession bool               `json:"force_fresh_session"`
+	IsLeaderTask      bool               `json:"is_leader_task"`
 }
 
 type Attachment struct {
