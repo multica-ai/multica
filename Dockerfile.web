@@ -60,12 +60,21 @@ ENV NODE_ENV=production
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-# Copy standalone output (includes traced node_modules)
-COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
+# Copy build output. Deliberately NO --chown: the standalone bundle is
+# tens of thousands of traced node_modules files, and `COPY --chown`
+# forces BuildKit to stat+chown every file individually as it
+# materializes the layer. Through the Mac virtualization storage layer
+# on the constrained self-hosted runner, that syscall amplification
+# stalls the build for 30+ min with zero log output until the job
+# timeout kills it (root-caused 2026-05-15). The runtime user only
+# READS these files (Next.js standalone server never writes them), and
+# `next build` output is world-readable (644/755), so plain root-owned
+# copies are fully sufficient for `USER nextjs`.
+COPY --from=builder /app/apps/web/.next/standalone ./
 # Copy static files (not included in standalone)
-COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
 # Copy public assets
-COPY --from=builder --chown=nextjs:nodejs /app/apps/web/public ./apps/web/public
+COPY --from=builder /app/apps/web/public ./apps/web/public
 
 USER nextjs
 

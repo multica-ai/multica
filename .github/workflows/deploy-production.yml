@@ -266,6 +266,68 @@ jobs:
             exit 1
           fi
 
+      - name: Pre-flight — cloudflared ingress matches operator port overrides
+        # The FOURTH port source of truth: /etc/cloudflared/config.yml
+        # routes multica.wisco.wine -> localhost:<FRONTEND_PORT> and
+        # multica-api.wisco.wine -> localhost:<PORT>. Nothing else in
+        # this pipeline checks it, so bumping FRONTEND_PORT in
+        # ~/multica-deploy.env produces a GREEN deploy that 502s in
+        # prod because the tunnel still points at the old port. This is
+        # the real "port change gets forgotten" failure mode (lives
+        # between the operator .env and cloudflared, a seam nothing
+        # else watches). Assert the coupling here, fail-fast before the
+        # 5-minute build.
+        #
+        # Soft-skip when the cloudflared config is absent or unreadable
+        # (non-mini hosts, future topology changes) — we ONLY hard-fail
+        # on a *detected divergence*, never on "couldn't find the file".
+        run: |
+          CF=/etc/cloudflared/config.yml
+          if [ ! -r "$CF" ]; then
+            echo "No readable ${CF}; skipping cloudflared/port coupling check."
+            exit 0
+          fi
+          if [ -f .env ]; then
+            set -o allexport
+            # shellcheck disable=SC1091
+            . ./.env
+            set +o allexport
+          fi
+          FE="${FRONTEND_PORT:-3000}"
+          BE="${PORT:-8080}"
+          # Extract the localhost port cloudflared routes each hostname
+          # to. index() (not regex) for the host so a literal dot can't
+          # act as a wildcard; "multica.wisco.wine" is NOT a substring
+          # of "multica-api.wisco.wine" so the match stays unambiguous.
+          cf_port_for() {
+            awk -v host="$1" '
+              index($0, "hostname:") && index($0, host) { armed=1; next }
+              armed && index($0, "service:") {
+                if (match($0, /localhost:[0-9]+/))
+                  print substr($0, RSTART+10, RLENGTH-10)
+                armed=0
+              }
+            ' "$CF"
+          }
+          CF_FE="$(cf_port_for 'multica.wisco.wine')"
+          CF_BE="$(cf_port_for 'multica-api.wisco.wine')"
+          echo "operator .env:  FRONTEND_PORT=${FE}  PORT=${BE}"
+          echo "cloudflared:    multica.wisco.wine->${CF_FE:-<none>}  multica-api.wisco.wine->${CF_BE:-<none>}"
+          fail=0
+          if [ -n "$CF_FE" ] && [ "$CF_FE" != "$FE" ]; then
+            echo "::error::cloudflared routes multica.wisco.wine to localhost:${CF_FE} but FRONTEND_PORT=${FE}. Edit ${CF} + restart cloudflared, or fix ~/multica-deploy.env."
+            fail=1
+          fi
+          if [ -n "$CF_BE" ] && [ "$CF_BE" != "$BE" ]; then
+            echo "::error::cloudflared routes multica-api.wisco.wine to localhost:${CF_BE} but PORT=${BE}. Edit ${CF} + restart cloudflared, or fix ~/multica-deploy.env."
+            fail=1
+          fi
+          if [ $fail -eq 0 ]; then
+            echo "cloudflared ingress matches operator port overrides."
+          else
+            exit 1
+          fi
+
       - name: Build + restart containers
         # `up -d --build` is idempotent: rebuilds images that changed,
         # recreates only containers whose image hash moved, leaves
