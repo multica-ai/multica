@@ -162,13 +162,6 @@ export interface UpsertCRMAccountProfileRequest {
   profile_json?: Record<string, unknown>;
 }
 
-export interface CRMAccountProfileSuggestion {
-  summary?: string | null;
-  profile_json: Record<string, unknown>;
-  source_thread_ids: string[];
-  source_message_ids: string[];
-}
-
 export type CRMCommunicationChannel = "manual" | "email" | "whatsapp" | "phone" | "meeting" | "other";
 export type CRMCommunicationDirection = "inbound" | "outbound" | "note";
 
@@ -292,77 +285,6 @@ export interface CreateCRMEmailMessageRequest {
   body_html?: string | null;
   snippet?: string | null;
   direction: CRMEmailMessageDirection;
-}
-
-export interface CRMIMAPSettings {
-  id?: string;
-  workspace_id?: string;
-  host: string;
-  port: number;
-  username: string;
-  mailbox?: string | null;
-  use_tls: boolean;
-  enabled: boolean;
-  last_synced_at?: string | null;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export interface UpsertCRMIMAPSettingsRequest {
-  host: string;
-  port: number;
-  username: string;
-  password?: string;
-  mailbox?: string | null;
-  use_tls?: boolean;
-  enabled?: boolean;
-}
-
-export interface CRMEmailPreviewRequest {
-  host?: string;
-  port?: number;
-  username?: string;
-  password?: string;
-  mailbox?: string | null;
-  use_tls?: boolean;
-  limit?: number;
-}
-
-export interface CRMEmailPreviewMessage {
-  from_email?: string | null;
-  from_name?: string | null;
-  to_emails: string[];
-  subject?: string | null;
-  sent_at?: string | null;
-  received_at?: string | null;
-  snippet?: string | null;
-}
-
-export interface CRMEmailPreviewResponse {
-  messages: CRMEmailPreviewMessage[];
-  total: number;
-}
-
-export interface SaveAndImportCRMIMAPSettingsRequest extends UpsertCRMIMAPSettingsRequest {
-  password?: string;
-  import_days?: number | null;
-  bind_member_id?: string | null;
-  bind_agent_id?: string | null;
-}
-
-export interface CRMEmailDraftRequest {
-  to_emails: string[];
-  cc_emails?: string[];
-  bcc_emails?: string[];
-  subject: string;
-  body_text: string;
-}
-
-export interface CRMEmailSendResponse {
-  message: CRMEmailMessage;
-  sent: boolean;
-  provider: string;
-  error?: string | null;
 }
 
 export interface LinkCRMAccountProjectRequest {
