@@ -152,10 +152,10 @@ export function CRMEmailsPage() {
       id: mailboxDraft.id,
       label: mailboxDraft.label,
       email: mailboxDraft.email,
-      host: mailboxDraft.host,
+      host: mailboxDraft.host || "emailengine",
       port: Number(mailboxDraft.port) || 993,
       tls_mode: mailboxDraft.tls_mode,
-      username: mailboxDraft.username,
+      username: mailboxDraft.username || mailboxDraft.email,
       secret_ref: mailboxDraft.secret_ref || null,
       secret: mailboxDraft.secret || null,
       sync_enabled: false,
@@ -726,30 +726,46 @@ export function CRMEmailsPage() {
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{t(($) => $.emails.mailbox_settings)}</DialogTitle>
-            <DialogDescription>{t(($) => $.emails.mailbox_settings_help)}</DialogDescription>
+            <DialogTitle>EmailEngine mailbox backend</DialogTitle>
+            <DialogDescription>
+              Multica now uses EmailEngine for mailbox sync and sending while keeping this CRM email workspace as the user interface.
+            </DialogDescription>
           </DialogHeader>
+          <div className="rounded-lg border bg-muted/30 p-4 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="font-medium">Provider: EmailEngine</div>
+                <p className="mt-1 text-xs text-muted-foreground">Connect or verify accounts in EmailEngine, then keep the Multica mailbox record below for CRM ownership, import range, and rollback metadata.</p>
+              </div>
+              <Badge variant="outline">Active backend</Badge>
+            </div>
+            <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+              <div className="rounded-md border bg-background px-3 py-2">1. Add account in EmailEngine</div>
+              <div className="rounded-md border bg-background px-3 py-2">2. Set account id on the server</div>
+              <div className="rounded-md border bg-background px-3 py-2">3. Preview, import, and send from Multica CRM</div>
+            </div>
+          </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <select
-              aria-label={t(($) => $.emails.mailbox_settings)}
+              aria-label="EmailEngine CRM mailbox record"
               className="h-9 rounded-md border bg-background px-3 text-sm sm:col-span-2"
               value={mailboxDraft.id ?? "new"}
               onChange={(event) => setMailboxDraft(event.target.value === "new" ? emptyMailboxDraft : mailboxToDraft(mailboxes.find((mailbox) => mailbox.id === event.target.value)))}
             >
-              <option value="new">{t(($) => $.emails.new_mailbox)}</option>
+              <option value="new">New CRM mailbox record</option>
               {mailboxes.map((mailbox) => <option key={mailbox.id} value={mailbox.id}>{mailbox.label} · {mailbox.email}</option>)}
             </select>
-            <Input aria-label={t(($) => $.emails.mailbox_name)} placeholder={t(($) => $.emails.mailbox_name)} value={mailboxDraft.label} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, label: event.target.value }))} />
+            <Input aria-label="Mailbox display name" placeholder="Mailbox display name" value={mailboxDraft.label} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, label: event.target.value }))} />
             <Input aria-label={t(($) => $.emails.email_address)} placeholder="sales@example.com" value={mailboxDraft.email} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, email: event.target.value }))} />
-            <Input aria-label={t(($) => $.emails.imap_host)} placeholder="imap.example.com" value={mailboxDraft.host} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, host: event.target.value }))} />
-            <Input aria-label={t(($) => $.emails.imap_port)} placeholder="993" value={mailboxDraft.port} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, port: event.target.value }))} />
+            <Input aria-label="Fallback IMAP host" placeholder="Fallback IMAP host" value={mailboxDraft.host} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, host: event.target.value }))} />
+            <Input aria-label="Fallback IMAP port" placeholder="993" value={mailboxDraft.port} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, port: event.target.value }))} />
             <select aria-label={t(($) => $.emails.tls_mode)} className="h-9 rounded-md border bg-background px-3 text-sm" value={mailboxDraft.tls_mode} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, tls_mode: event.target.value as MailboxDraft["tls_mode"] }))}>
               <option value="ssl">{t(($) => $.emails.tls_ssl)}</option>
               <option value="starttls">{t(($) => $.emails.tls_starttls)}</option>
               <option value="none">{t(($) => $.emails.tls_none)}</option>
             </select>
             <Input aria-label={t(($) => $.emails.username)} placeholder={t(($) => $.emails.username)} value={mailboxDraft.username} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, username: event.target.value }))} />
-            <Input className="sm:col-span-2" aria-label={t(($) => $.emails.secret_reference)} placeholder={t(($) => $.emails.secret_reference_placeholder)} value={mailboxDraft.secret_ref} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, secret_ref: event.target.value }))} />
+            <Input className="sm:col-span-2" aria-label="Fallback secret reference" placeholder="Fallback secret reference; EmailEngine credentials are stored outside Multica" value={mailboxDraft.secret_ref} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, secret_ref: event.target.value }))} />
             <label className="space-y-1 text-sm sm:col-span-2">
               <span className="text-xs font-medium text-muted-foreground">Bind mailbox to member or AI agent</span>
               <select className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={`${mailboxDraft.owner_type}:${mailboxDraft.owner_id}`} onChange={(event) => { const [owner_type, owner_id] = event.target.value.split(":"); setMailboxDraft((draft) => ({ ...draft, owner_type: owner_type || "", owner_id: owner_id || "" })); }}>
@@ -767,16 +783,16 @@ export function CRMEmailsPage() {
                 <option value={365}>Recent 1 year</option>
               </select>
             </label>
-            <Input aria-label="SMTP host" placeholder="smtp.gmail.com" value={mailboxDraft.smtp_host} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_host: event.target.value }))} />
-            <Input aria-label="SMTP port" placeholder="465" value={mailboxDraft.smtp_port} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_port: event.target.value }))} />
-            <select aria-label="SMTP TLS mode" className="h-9 rounded-md border bg-background px-3 text-sm" value={mailboxDraft.smtp_tls_mode} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_tls_mode: event.target.value }))}>
-              <option value="ssl">SMTP SSL</option>
-              <option value="starttls">SMTP STARTTLS</option>
+            <Input aria-label="Fallback SMTP host" placeholder="Fallback SMTP host" value={mailboxDraft.smtp_host} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_host: event.target.value }))} />
+            <Input aria-label="Fallback SMTP port" placeholder="465" value={mailboxDraft.smtp_port} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_port: event.target.value }))} />
+            <select aria-label="Fallback SMTP TLS mode" className="h-9 rounded-md border bg-background px-3 text-sm" value={mailboxDraft.smtp_tls_mode} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_tls_mode: event.target.value }))}>
+              <option value="ssl">Fallback SMTP SSL</option>
+              <option value="starttls">Fallback SMTP STARTTLS</option>
             </select>
-            <Input aria-label="SMTP username" placeholder="SMTP username" value={mailboxDraft.smtp_username} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_username: event.target.value }))} />
-            <Input className="sm:col-span-2" aria-label="SMTP password" placeholder="SMTP app password (optional; defaults to IMAP password)" value={mailboxDraft.smtp_secret} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_secret: event.target.value }))} />
+            <Input aria-label="Fallback SMTP username" placeholder="Fallback SMTP username" value={mailboxDraft.smtp_username} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_username: event.target.value }))} />
+            <Input className="sm:col-span-2" aria-label="Fallback SMTP password" placeholder="Fallback SMTP app password; EmailEngine is primary" value={mailboxDraft.smtp_secret} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_secret: event.target.value }))} />
           </div>
-          <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">{t(($) => $.emails.imap_security_note)}</p>
+          <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">Primary mail transport is EmailEngine. These IMAP/SMTP fields are kept only as CRM mailbox metadata and rollback fallback while account credentials live in EmailEngine.</p>
           {mailboxStatus ? <p className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">{mailboxStatus}</p> : null}
           {previewMessages.length > 0 ? (
             <div className="max-h-80 space-y-2 overflow-y-auto rounded-md border bg-muted/20 p-3">
@@ -804,8 +820,8 @@ export function CRMEmailsPage() {
           ) : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => { setSettingsOpen(false); setMailboxStatus(null); }}>{t(($) => $.actions.cancel)}</Button>
-            <Button variant="outline" disabled={testMailbox.isPending || saveMailbox.isPending || !mailboxDraft.host} onClick={() => testMailbox.mutate()}>{t(($) => $.emails.test_connection)}</Button>
-            <Button disabled={saveMailbox.isPending || previewMailbox.isPending || importPreviewMessages.isPending || !mailboxDraft.label || !mailboxDraft.email || !mailboxDraft.host || !mailboxDraft.username} onClick={() => void saveAndImportMailbox()}>Save and import</Button>
+            <Button variant="outline" disabled={testMailbox.isPending || saveMailbox.isPending || !mailboxDraft.id} onClick={() => testMailbox.mutate()}>Check provider</Button>
+            <Button disabled={saveMailbox.isPending || previewMailbox.isPending || importPreviewMessages.isPending || !mailboxDraft.label || !mailboxDraft.email} onClick={() => void saveAndImportMailbox()}>Save CRM record and import</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
