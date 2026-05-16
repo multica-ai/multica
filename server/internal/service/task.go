@@ -1207,6 +1207,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	var task db.AgentTaskQueue
 	var blockedIssue *db.Issue
 	var prevIssueStatus string
+	var quickCreateProducedIssue bool
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		t, err := qtx.FailAgentTask(ctx, db.FailAgentTaskParams{
 			ID:            taskID,
@@ -1243,6 +1244,8 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		} else if changed {
 			blockedIssue = &issue
 			prevIssueStatus = prevStatus
+		} else if issue.ID.Valid && isQuickCreateProducedIssue(issue, t) {
+			quickCreateProducedIssue = true
 		}
 		return nil
 	}); err != nil {
@@ -1288,7 +1291,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// the new task will surface its own status to the user, and we don't
 	// want to spam the issue with "task timed out" messages on every
 	// daemon hiccup.
-	if errMsg != "" && task.IssueID.Valid && retried == nil {
+	if errMsg != "" && task.IssueID.Valid && retried == nil && !quickCreateProducedIssue {
 		parentID := pgtype.UUID{}
 		if task.TriggerCommentID.Valid {
 			parentID = task.TriggerCommentID
@@ -1590,6 +1593,10 @@ func (s *TaskService) blockIssueForFailedTask(ctx context.Context, qtx *db.Queri
 		return db.Issue{}, "", false, fmt.Errorf("load issue for failed task: %w", err)
 	}
 
+	if isQuickCreateProducedIssue(issue, task) {
+		return issue, issue.Status, false, nil
+	}
+
 	switch issue.Status {
 	case "blocked", "done", "cancelled":
 		return issue, issue.Status, false, nil
@@ -1604,6 +1611,13 @@ func (s *TaskService) blockIssueForFailedTask(ctx context.Context, qtx *db.Queri
 		return db.Issue{}, "", false, fmt.Errorf("block issue for failed task: %w", err)
 	}
 	return blockedIssue, prevStatus, true, nil
+}
+
+func isQuickCreateProducedIssue(issue db.Issue, task db.AgentTaskQueue) bool {
+	return issue.OriginType.Valid &&
+		issue.OriginType.String == "quick_create" &&
+		issue.OriginID.Valid &&
+		issue.OriginID == task.ID
 }
 
 // runInTx executes fn inside a single DB transaction. If TxStarter is nil
