@@ -7,6 +7,7 @@ import {
   Eye,
   EyeOff,
   FileText,
+  History,
   KeyRound,
   Loader2,
   Lock,
@@ -43,6 +44,10 @@ import type { AgentDefaultsWithUser } from "@multica/core/types";
 import { ContentEditor } from "../../editor/content-editor";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
+import {
+  InstructionsHistorySheet,
+  instructionsHistoryKey,
+} from "./instructions-history-sheet";
 
 // ─── Types & helpers ────────────────────────────────────────────────────────
 
@@ -131,12 +136,16 @@ function DefaultsInstructionsTab({
   value: initialValue,
   readOnly,
   saving,
+  showHistory,
+  onOpenHistory,
   onSave,
   onDirtyChange,
 }: {
   value: string;
   readOnly: boolean;
   saving: boolean;
+  showHistory: boolean;
+  onOpenHistory: () => void;
   onSave: (instructions: string) => void;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
@@ -168,7 +177,7 @@ function DefaultsInstructionsTab({
         <>
           <div className="flex-1 min-h-0 overflow-y-auto rounded-md border bg-background px-4 py-3 transition-colors focus-within:border-input">
             <ContentEditor
-              key="defaults-instructions"
+              key={`defaults-instructions-${initialValue}`}
               defaultValue={value}
               onUpdate={setValue}
               placeholder={t(($) => $.tab_body.instructions.placeholder)}
@@ -181,6 +190,18 @@ function DefaultsInstructionsTab({
           <div className="flex items-center justify-end gap-3">
             {isDirty && (
               <span className="text-xs text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
+            )}
+            {showHistory && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onOpenHistory}
+                className="gap-1"
+              >
+                <History className="h-3.5 w-3.5" />
+                {t(($) => $.history.action)}
+              </Button>
             )}
             <Button
               size="sm"
@@ -615,17 +636,23 @@ function DefaultsForm({
   config,
   readOnly,
   saving,
+  historyScope,
+  onRestoreInstructions,
   onSaveField,
 }: {
   config: AgentDefaultsConfig;
   readOnly: boolean;
   saving: boolean;
+  historyScope?: "personal" | "system";
+  onRestoreInstructions?: (instructions: string) => Promise<void>;
   onSaveField: (field: keyof AgentDefaultsConfig, value: unknown) => void;
 }) {
   const { t } = useT("agents");
+  const wsId = useWorkspaceId();
   const [activeTab, setActiveTab] = useState<DefaultsTab>("instructions");
   const [activeDirty, setActiveDirty] = useState(false);
   const [pendingTab, setPendingTab] = useState<DefaultsTab | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const requestTabChange = (next: DefaultsTab) => {
     if (next === activeTab) return;
@@ -673,6 +700,8 @@ function DefaultsForm({
               value={config.instructions ?? ""}
               readOnly={readOnly}
               saving={saving}
+              showHistory={!readOnly && historyScope !== undefined}
+              onOpenHistory={() => setHistoryOpen(true)}
               onSave={(v) => onSaveField("instructions", v)}
               onDirtyChange={setActiveDirty}
             />
@@ -740,6 +769,17 @@ function DefaultsForm({
           </AlertDialogContent>
         </AlertDialog>
       )}
+
+      {historyScope && onRestoreInstructions && (
+        <InstructionsHistorySheet
+          workspaceId={wsId}
+          scope={historyScope}
+          open={historyOpen}
+          currentContent={config.instructions ?? ""}
+          onOpenChange={setHistoryOpen}
+          onRestore={onRestoreInstructions}
+        />
+      )}
     </>
   );
 }
@@ -762,22 +802,34 @@ export function PersonalDefaultsDetail() {
     [personalDefaults?.config],
   );
 
-  const handleSaveField = useCallback(async (field: keyof AgentDefaultsConfig, value: unknown) => {
+  const saveConfig = useCallback(async (newConfig: AgentDefaultsConfig) => {
     setSaving(true);
     try {
-      const newConfig = { ...config, [field]: value };
       await api.updatePersonalAgentDefaults(wsId, newConfig as Record<string, unknown>);
-      qc.invalidateQueries({ queryKey: personalDefaultsKey(wsId) });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: personalDefaultsKey(wsId) }),
+        qc.invalidateQueries({ queryKey: instructionsHistoryKey(wsId, "personal") }),
+      ]);
       toast.success(t(($) => $.tab_body.env.saved_toast));
     } catch (e) {
       const msg = e instanceof ApiError ? e.message
         : e instanceof Error ? e.message
         : t(($) => $.tab_body.env.save_failed_toast);
       toast.error(msg);
+      throw e;
     } finally {
       setSaving(false);
     }
-  }, [config, wsId, qc, t]);
+  }, [wsId, qc, t]);
+
+  const handleSaveField = useCallback(async (field: keyof AgentDefaultsConfig, value: unknown) => {
+    const newConfig = { ...config, [field]: value };
+    await saveConfig(newConfig);
+  }, [config, saveConfig]);
+
+  const handleRestoreInstructions = useCallback(async (instructions: string) => {
+    await saveConfig({ ...config, instructions });
+  }, [config, saveConfig]);
 
   if (isLoading) {
     return (
@@ -798,7 +850,14 @@ export function PersonalDefaultsDetail() {
           <h2 className="text-sm font-semibold">{t(($) => $.defaults.personal_title)}</h2>
         </div>
       </div>
-      <DefaultsForm config={config} readOnly={false} saving={saving} onSaveField={handleSaveField} />
+      <DefaultsForm
+        config={config}
+        readOnly={false}
+        saving={saving}
+        historyScope="personal"
+        onRestoreInstructions={handleRestoreInstructions}
+        onSaveField={handleSaveField}
+      />
     </div>
   );
 }
@@ -816,24 +875,35 @@ export function SystemDefaultsDetail({ readOnly = false }: { readOnly?: boolean 
     [workspace?.settings?.agent_defaults],
   );
 
-  const handleSaveField = useCallback(async (field: keyof AgentDefaultsConfig, value: unknown) => {
+  const saveDefaults = useCallback(async (newDefaults: AgentDefaultsConfig) => {
     if (!workspace) return;
     setSaving(true);
     try {
-      const newDefaults = { ...agentDefaults, [field]: value };
       const newSettings = { ...workspace.settings, agent_defaults: newDefaults };
       await api.updateWorkspace(workspace.id, { settings: newSettings });
-      qc.invalidateQueries({ queryKey: workspaceKeys.list() });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: workspaceKeys.list() }),
+        qc.invalidateQueries({ queryKey: instructionsHistoryKey(workspace.id, "system") }),
+      ]);
       toast.success(t(($) => $.tab_body.env.saved_toast));
     } catch (e) {
       const msg = e instanceof ApiError ? e.message
         : e instanceof Error ? e.message
         : t(($) => $.tab_body.env.save_failed_toast);
       toast.error(msg);
+      throw e;
     } finally {
       setSaving(false);
     }
-  }, [workspace, agentDefaults, qc, t]);
+  }, [workspace, qc, t]);
+
+  const handleSaveField = useCallback(async (field: keyof AgentDefaultsConfig, value: unknown) => {
+    await saveDefaults({ ...agentDefaults, [field]: value });
+  }, [agentDefaults, saveDefaults]);
+
+  const handleRestoreInstructions = useCallback(async (instructions: string) => {
+    await saveDefaults({ ...agentDefaults, instructions });
+  }, [agentDefaults, saveDefaults]);
 
   return (
     <div className="flex h-full flex-col">
@@ -846,7 +916,14 @@ export function SystemDefaultsDetail({ readOnly = false }: { readOnly?: boolean 
           <h2 className="text-sm font-semibold">{t(($) => $.defaults.system_title)}</h2>
         </div>
       </div>
-      <DefaultsForm config={agentDefaults} readOnly={readOnly} saving={saving} onSaveField={handleSaveField} />
+      <DefaultsForm
+        config={agentDefaults}
+        readOnly={readOnly}
+        saving={saving}
+        historyScope={readOnly ? undefined : "system"}
+        onRestoreInstructions={readOnly ? undefined : handleRestoreInstructions}
+        onSaveField={handleSaveField}
+      />
     </div>
   );
 }

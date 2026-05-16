@@ -430,5 +430,33 @@
     "duplicate_action": "复制为我的",
     "badge_label": "默认",
     "other_user_desc": "该用户的默认Agent配置"
+  },
+  "history": {
+    "action": "历史版本",
+    "title": "Instructions 历史版本",
+    "personal_description": "个人默认 instructions 的历史版本。",
+    "system_description": "工作区默认 instructions 的历史版本。",
+    "load_failed": "无法加载 instructions 历史。",
+    "empty": "暂无历史版本。",
+    "current_version": "当前版本",
+    "version_label": "版本 {{count}}",
+    "unknown_actor": "未知修改人",
+    "empty_content": "空 instructions",
+    "view": "查看",
+    "restore": "恢复",
+    "version_content": "版本全文",
+    "select_version": "选择版本",
+    "loading_content": "正在加载全文...",
+    "select_hint": "选择一个版本查看完整 instructions。",
+    "restore_dialog_title": "恢复到这个版本？",
+    "restore_dialog_description": "当前 instructions 会被替换为 {{actor}} 于 {{time}} 保存的版本。恢复操作会生成一条新的历史版本。",
+    "cancel": "取消",
+    "restore_confirm": "恢复",
+    "restored_toast": "已恢复 instructions",
+    "restore_failed_toast": "恢复 instructions 失败",
+    "relative_now": "刚刚",
+    "relative_minutes": "{{count}} 分钟前",
+    "relative_hours": "{{count}} 小时前",
+    "relative_days": "{{count}} 天前"
   }
 }

@@ -440,5 +440,33 @@
     "duplicate_action": "Duplicate to Mine",
     "badge_label": "Default",
     "other_user_desc": "This user's default agent config"
+  },
+  "history": {
+    "action": "History",
+    "title": "Instructions history",
+    "personal_description": "Previous personal default instructions.",
+    "system_description": "Previous workspace default instructions.",
+    "load_failed": "Couldn't load instructions history.",
+    "empty": "No history yet.",
+    "current_version": "Current version",
+    "version_label": "Version {{count}}",
+    "unknown_actor": "Unknown actor",
+    "empty_content": "Empty instructions",
+    "view": "View",
+    "restore": "Restore",
+    "version_content": "Version content",
+    "select_version": "Select a version",
+    "loading_content": "Loading content...",
+    "select_hint": "Select a version to view the full instructions.",
+    "restore_dialog_title": "Restore to this version?",
+    "restore_dialog_description": "Current instructions will be replaced with the version saved by {{actor}} {{time}}. Restoring creates a new history version.",
+    "cancel": "Cancel",
+    "restore_confirm": "Restore",
+    "restored_toast": "Instructions restored",
+    "restore_failed_toast": "Failed to restore instructions",
+    "relative_now": "just now",
+    "relative_minutes": "{{count}}m ago",
+    "relative_hours": "{{count}}h ago",
+    "relative_days": "{{count}}d ago"
   }
 }

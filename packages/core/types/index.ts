@@ -133,7 +133,14 @@ export type {
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
 } from "./autopilot";
-export type { AgentDefaults, AgentDefaultsWithUser } from "./agent-defaults";
+export type {
+  AgentDefaults,
+  AgentDefaultsWithUser,
+  InstructionsHistoryScope,
+  InstructionsHistoryItem,
+  InstructionsHistoryDetail,
+  ListInstructionsHistoryResponse,
+} from "./agent-defaults";
 export type {
   WikiPage,
   WikiPageSummary,

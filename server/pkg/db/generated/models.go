@@ -319,6 +319,17 @@ type InboxItem struct {
 	Details       []byte             `json:"details"`
 }
 
+type InstructionsHistory struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Scope        string             `json:"scope"`
+	MemberID     pgtype.UUID        `json:"member_id"`
+	Content      string             `json:"content"`
+	ActorID      pgtype.UUID        `json:"actor_id"`
+	RestoredFrom pgtype.UUID        `json:"restored_from"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
 type Issue struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
