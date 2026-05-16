@@ -399,9 +399,31 @@ func TestExtractEntityKeys(t *testing.T) {
 		{"好的，已经处理完毕", nil},
 	}
 	for _, c := range cases {
-		// This tests the helper that will be used by dispatcher/runtime.
-		// We will import it from the intent package or define it nearby.
-		got := extractEntityKeys(c.input)
+		got := ExtractEntityKeys(c.input)
+		if len(got) != len(c.want) {
+			t.Fatalf("input=%q expected %d keys, got %d", c.input, len(c.want), len(got))
+		}
+		for i := range c.want {
+			if got[i].Key != c.want[i] {
+				t.Fatalf("input=%q key[%d] expected %s, got %s", c.input, i, c.want[i], got[i].Key)
+			}
+		}
+	}
+}
+
+func TestExtractEntityKeys_WordBoundary(t *testing.T) {
+	cases := []struct {
+		input string
+		want  []string
+	}{
+		{"MYPROJECT-123 的状态", nil},          // long word should not produce partial match like JECT-123
+		{"查看 STA-78 的进度", []string{"STA-78"}}, // normal standalone key
+		{"STA-78,ABC-1 and DEF-99", []string{"STA-78", "ABC-1", "DEF-99"}},
+		{"前缀STA-78后缀", []string{"STA-78"}},     // Chinese prefix/suffix are word boundaries
+	}
+
+	for _, c := range cases {
+		got := ExtractEntityKeys(c.input)
 		if len(got) != len(c.want) {
 			t.Fatalf("input=%q expected %d keys, got %d", c.input, len(c.want), len(got))
 		}

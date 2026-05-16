@@ -8,12 +8,12 @@ import (
 
 // issueKeyRe matches issue identifiers embedded in natural-language text.
 // Format: 2-5 uppercase letters, hyphen, positive integer (no leading zeros).
-var issueKeyRe = regexp.MustCompile(`[A-Z]{2,5}-[1-9][0-9]*`)
+var issueKeyRe = regexp.MustCompile(`\b[A-Z]{2,5}-[1-9][0-9]*\b`)
 
-// extractEntityKeys scans text for issue identifiers and returns them as
+// ExtractEntityKeys scans text for issue identifiers and returns them as
 // EntityRef values. Duplicates are deduplicated while preserving first-seen
 // order.
-func extractEntityKeys(text string) []EntityRef {
+func ExtractEntityKeys(text string) []EntityRef {
 	matches := issueKeyRe.FindAllString(text, -1)
 	if len(matches) == 0 {
 		return nil

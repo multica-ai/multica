@@ -296,8 +296,11 @@ func TestAdapter_NormalisesQuoteMessage_Truncation(t *testing.T) {
 			t.Fatalf("QuotedMessageID = %q, want om_quoted_002", ev.QuotedMessageID)
 		}
 		runes := []rune(ev.QuotedText)
-		if len(runes) > 200 {
-			t.Fatalf("QuotedText rune count = %d, want <= 200", len(runes))
+		if len(runes) > 201 {
+			t.Fatalf("QuotedText rune count = %d, want <= 201", len(runes))
+		}
+		if !strings.HasSuffix(ev.QuotedText, "…") {
+			t.Fatal("QuotedText should end with ellipsis when truncated")
 		}
 		if !strings.HasPrefix(ev.QuotedText, strings.Repeat("a", 50)) {
 			t.Fatal("QuotedText should preserve prefix")

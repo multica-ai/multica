@@ -52,7 +52,7 @@ func TestDispatchStep_AppendEntities_AfterReply(t *testing.T) {
 		t.Fatal("expected reply to be sent")
 	}
 
-	scope := conversationctx.Scope{ConnectionID: "conn-1", WorkspaceID: "", ChatID: "chat-1", SenderID: "user-a", ThreadID: ""}
+	scope := conversationctx.Scope{ConnectionID: "conn-1", WorkspaceID: "00000000-0000-0000-0000-000000000000", ChatID: "chat-1", SenderID: "user-a", ThreadID: ""}
 	cc, ok, err := store.Get(ctx, scope)
 	if err != nil {
 		t.Fatalf("Get: %v", err)

@@ -1270,9 +1270,6 @@ func parseRuntimeEventID(id string) pgtype.UUID {
 // Format: 2-5 uppercase letters, hyphen, positive integer (no leading zeros).
 var identifierRe = regexp.MustCompile(`^[A-Z]{2,5}-[1-9][0-9]*$`)
 
-// issueKeyInTextRe is a word-bounded version for scanning inside sentences.
-var issueKeyInTextRe = regexp.MustCompile(`[A-Z]{2,5}-[1-9][0-9]*`)
-
 // ValidIdentifierFormat checks if an issue identifier matches the expected
 // format (e.g. STA-39, MUL-123). Exported for testing.
 func ValidIdentifierFormat(key string) bool {
@@ -1283,43 +1280,23 @@ func (d *dispatchStep) appendReplyContextEntities(ctx context.Context, evt port.
 	if d.cfg.ConversationCtx == nil {
 		return
 	}
-	keys := extractIssueKeysFromText(reply)
-	if len(keys) == 0 {
+	entities := conversationctx.ExtractEntityKeys(reply)
+	if len(entities) == 0 {
+		return
+	}
+	wsID, err := d.lookupWorkspaceID(ctx, evt)
+	if err != nil {
+		slog.ErrorContext(ctx, "dispatch: lookup workspace for context entities failed", "error", err)
 		return
 	}
 	scope := conversationctx.Scope{
 		ConnectionID: evt.ConnectionID(),
+		WorkspaceID:  wsIDToString(wsID),
 		ChatID:       evt.ChatID,
 		SenderID:     evt.SenderID,
 		ThreadID:     evt.ThreadID,
 	}
-	entities := make([]conversationctx.EntityRef, 0, len(keys))
-	now := time.Now()
-	for _, key := range keys {
-		entities = append(entities, conversationctx.EntityRef{
-			Key:         key,
-			Type:        conversationctx.EntityTypeIssue,
-			MentionedAt: now,
-		})
-	}
 	if err := d.cfg.ConversationCtx.AppendEntities(ctx, scope, entities, d.cfg.ContextMaxEntities, d.cfg.ContextTTL); err != nil {
 		slog.ErrorContext(ctx, "dispatch: append conversation context entities failed", "error", err)
 	}
-}
-
-func extractIssueKeysFromText(text string) []string {
-	matches := issueKeyInTextRe.FindAllString(text, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(matches))
-	out := make([]string, 0, len(matches))
-	for _, match := range matches {
-		if _, ok := seen[match]; ok {
-			continue
-		}
-		seen[match] = struct{}{}
-		out = append(out, match)
-	}
-	return out
 }

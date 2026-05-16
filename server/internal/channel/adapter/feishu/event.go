@@ -234,19 +234,14 @@ func isExplicitReply(parentID, messageID, rootID string) bool {
 	return parentID != messageID && parentID != rootID
 }
 
-// truncateQuotedText limits quoted text to 200 runes; anything longer keeps
-// the first 200 runes. The 201-rune boundary preserves an ellipsis so the
-// caller can distinguish "exactly 200" from "truncated"; longer inputs are
-// hard-truncated to 200 without ellipsis.
+// truncateQuotedText limits quoted text to 200 runes; anything longer is
+// truncated to 200 runes followed by an ellipsis.
 func truncateQuotedText(s string) string {
 	r := []rune(s)
 	if len(r) <= 200 {
 		return s
 	}
-	if len(r) == 201 {
-		return string(r[:200]) + "…"
-	}
-	return string(r[:200])
+	return string(r[:200]) + "…"
 }
 
 // collapseSpaces is a tiny helper kept inline rather than pulling in
