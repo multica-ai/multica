@@ -28,6 +28,10 @@ import (
 // price for the test ergonomics.
 type GithubClient interface {
 	ListPullRequests(ctx context.Context, owner, repo string, opts gh.ListOptions) ([]gh.PullRequest, error)
+	// GetPullRequest fetches a single PR's detail, including
+	// merge_commit_sha — the merge-train reconciler needs the true
+	// merged SHA (not the head SHA) after a missed webhook.
+	GetPullRequest(ctx context.Context, owner, repo string, prNumber int) (*gh.PullRequest, error)
 	MergePullRequest(ctx context.Context, owner, repo string, prNumber int, method, sha string) (*gh.MergeResult, error)
 	UpdatePullRequestBranch(ctx context.Context, owner, repo string, prNumber int, expectedSHA string) error
 	CreatePullRequestComment(ctx context.Context, owner, repo string, prNumber int, body string) (*gh.Comment, error)

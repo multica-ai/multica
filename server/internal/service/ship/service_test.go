@@ -31,6 +31,10 @@ type fakeGithub struct {
 	// the supplied event echoed back so tests can assert on the
 	// passthrough without wiring a custom hook.
 	submitReviewFn func(ctx context.Context, owner, repo string, prNumber int, event gh.ReviewEvent, body string) (*gh.Review, error)
+	// Merge-train reconcile — single-PR detail fetch. Default returns an
+	// empty PR so the reconciler leaves MergedSha unset; tests that care
+	// wire a canned PR (typically with a distinct MergeCommitSHA).
+	getPRFn func(ctx context.Context, owner, repo string, prNumber int) (*gh.PullRequest, error)
 }
 
 type ghResponse struct {
@@ -108,6 +112,13 @@ func (f *fakeGithub) SubmitReview(ctx context.Context, owner, repo string, prNum
 		return f.submitReviewFn(ctx, owner, repo, prNumber, event, body)
 	}
 	return &gh.Review{ID: 1, HTMLURL: "https://example.com/r/1", State: string(event), Body: body}, nil
+}
+
+func (f *fakeGithub) GetPullRequest(ctx context.Context, owner, repo string, prNumber int) (*gh.PullRequest, error) {
+	if f.getPRFn != nil {
+		return f.getPRFn(ctx, owner, repo, prNumber)
+	}
+	return &gh.PullRequest{}, nil
 }
 
 func TestMapPRState(t *testing.T) {

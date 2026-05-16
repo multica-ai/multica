@@ -27,6 +27,7 @@ type fakeShipGithub struct {
 	closePRFn       func(ctx context.Context, owner, repo string, prNumber int) error
 	dispatchFn      func(ctx context.Context, owner, repo, workflowFile, ref string, inputs map[string]string) error
 	submitReviewFn  func(ctx context.Context, owner, repo string, prNumber int, event gh.ReviewEvent, body string) (*gh.Review, error)
+	getPRFn         func(ctx context.Context, owner, repo string, prNumber int) (*gh.PullRequest, error)
 }
 
 func (f *fakeShipGithub) ListPullRequests(ctx context.Context, owner, repo string, opts gh.ListOptions) ([]gh.PullRequest, error) {
@@ -81,6 +82,12 @@ func (f *fakeShipGithub) SubmitReview(ctx context.Context, owner, repo string, p
 		return f.submitReviewFn(ctx, owner, repo, prNumber, event, body)
 	}
 	return &gh.Review{ID: 700, HTMLURL: "https://example.com/r/700", State: string(event), Body: body}, nil
+}
+func (f *fakeShipGithub) GetPullRequest(ctx context.Context, owner, repo string, prNumber int) (*gh.PullRequest, error) {
+	if f.getPRFn != nil {
+		return f.getPRFn(ctx, owner, repo, prNumber)
+	}
+	return &gh.PullRequest{}, nil
 }
 
 // fakeShipTaskEnqueuer captures spawn calls so tests can assert on the
