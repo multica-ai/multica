@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CRMIMAPImportResponse, CRMIMAPPreviewResponse, ListIssuesResponse, TimelinePage } from "../types";
+import type { CRMEmailEngineStatus, CRMIMAPImportResponse, CRMIMAPPreviewResponse, ListIssuesResponse, TimelinePage } from "../types";
 
 // ---------------------------------------------------------------------------
 // Schemas for the highest-risk API endpoints — those whose responses drive
@@ -188,4 +188,32 @@ export const EMPTY_CRM_IMAP_IMPORT_RESPONSE: CRMIMAPImportResponse = {
   fetched: 0,
   imported: 0,
   skipped: 0,
+};
+
+const CRMEmailEngineFolderSchema = z.object({
+  path: z.string().default(""),
+  name: z.string().default(""),
+  special_use: z.string().nullable().optional(),
+  total: z.number().default(0),
+  unread: z.number().default(0),
+}).loose();
+
+export const CRMEmailEngineStatusSchema = z.object({
+  enabled: z.boolean().default(false),
+  configured: z.boolean().default(false),
+  base_url: z.string().nullable().optional(),
+  account: z.string().nullable().optional(),
+  state: z.string().nullable().optional(),
+  syncing: z.boolean().default(false),
+  last_error: z.string().nullable().optional(),
+  folders: z.array(CRMEmailEngineFolderSchema).default([]),
+  fallback_provider: z.string().default("imap_smtp"),
+}).loose();
+
+export const EMPTY_CRM_EMAILENGINE_STATUS: CRMEmailEngineStatus = {
+  enabled: false,
+  configured: false,
+  syncing: false,
+  folders: [],
+  fallback_provider: "imap_smtp",
 };

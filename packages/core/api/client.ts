@@ -73,6 +73,7 @@ import type {
   CRMIMAPTestResponse,
   CRMIMAPPreviewResponse,
   CRMIMAPImportResponse,
+  CRMEmailEngineStatus,
   UpsertCRMIMAPSettingRequest,
   ListCRMIMAPSettingsResponse,
   CreateCRMAccountRequest,
@@ -118,8 +119,10 @@ import { parseWithFallback } from "./schema";
 import {
   ChildIssuesResponseSchema,
   CommentsListSchema,
+  CRMEmailEngineStatusSchema,
   CRMIMAPImportResponseSchema,
   CRMIMAPPreviewResponseSchema,
+  EMPTY_CRM_EMAILENGINE_STATUS,
   EMPTY_CRM_IMAP_IMPORT_RESPONSE,
   EMPTY_CRM_IMAP_PREVIEW_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
@@ -1314,6 +1317,16 @@ export class ApiClient {
     });
     return parseWithFallback(raw, CRMIMAPImportResponseSchema, EMPTY_CRM_IMAP_IMPORT_RESPONSE, {
       endpoint: "POST /api/crm/imap/sync",
+    });
+  }
+
+  async getCRMEmailEngineStatus(mailboxId?: string | null): Promise<CRMEmailEngineStatus> {
+    const search = new URLSearchParams();
+    if (mailboxId) search.set("mailbox_id", mailboxId);
+    const qs = search.toString();
+    const raw = await this.fetch<unknown>(`/api/crm/emailengine/status${qs ? `?${qs}` : ""}`);
+    return parseWithFallback(raw, CRMEmailEngineStatusSchema, EMPTY_CRM_EMAILENGINE_STATUS, {
+      endpoint: "GET /api/crm/emailengine/status",
     });
   }
 

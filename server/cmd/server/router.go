@@ -404,6 +404,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/", h.UpsertCRMIMAPSetting)
 					r.Post("/{mailboxId}/test", h.TestCRMIMAPSetting)
 				})
+				r.Get("/emailengine/status", h.GetCRMEmailEngineStatus)
 				r.Post("/imap/preview", h.PreviewCRMIMAP)
 				r.Post("/imap/import", h.ImportCRMIMAP)
 				r.Post("/imap/sync", h.SyncCRMIMAP)

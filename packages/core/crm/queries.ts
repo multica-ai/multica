@@ -21,6 +21,8 @@ export const crmKeys = {
     [...crmKeys.all(wsId), "email-threads", threadId] as const,
   emailMessages: (wsId: string, threadId: string) =>
     [...crmKeys.emailThread(wsId, threadId), "messages"] as const,
+  emailEngineStatus: (wsId: string, mailboxId = "") =>
+    [...crmKeys.all(wsId), "emailengine", "status", mailboxId] as const,
   aiSettings: (wsId: string) => [...crmKeys.all(wsId), "ai-settings"] as const,
 };
 
@@ -83,5 +85,13 @@ export function crmEmailMessageListOptions(wsId: string, threadId: string) {
     queryKey: crmKeys.emailMessages(wsId, threadId),
     queryFn: () => api.listCRMEmailMessages(threadId),
     select: (data) => data.messages,
+  });
+}
+
+export function crmEmailEngineStatusOptions(wsId: string, mailboxId = "") {
+  return queryOptions({
+    queryKey: crmKeys.emailEngineStatus(wsId, mailboxId),
+    queryFn: () => api.getCRMEmailEngineStatus(mailboxId || undefined),
+    enabled: Boolean(wsId),
   });
 }

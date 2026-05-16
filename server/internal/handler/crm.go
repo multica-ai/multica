@@ -1695,6 +1695,28 @@ func (h *Handler) TestCRMIMAPSetting(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": status == "ok", "status": status, "message": msg})
 }
 
+func (h *Handler) GetCRMEmailEngineStatus(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.crmWorkspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	mailboxID := r.URL.Query().Get("mailbox_id")
+	var mailboxIDPtr *string
+	if mailboxID != "" {
+		mailboxIDPtr = &mailboxID
+	}
+	cfg, ok := h.loadCRMIMAPConfig(w, r, workspaceID, mailboxIDPtr)
+	if !ok {
+		return
+	}
+	status, err := fetchCRMEmailEngineStatus(cfg)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to fetch EmailEngine status: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
 func (h *Handler) PreviewCRMIMAP(w http.ResponseWriter, r *http.Request) {
 	workspaceID, ok := h.crmWorkspaceUUID(w, r)
 	if !ok {

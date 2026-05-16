@@ -7,7 +7,7 @@ import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueKeys, useIssueDraftStore } from "@multica/core/issues";
 import { useModalStore } from "@multica/core/modals";
-import { crmAccountListOptions, crmContactListOptions, crmEmailMessageListOptions, crmEmailThreadListOptions, crmKeys } from "@multica/core/crm/queries";
+import { crmAccountListOptions, crmContactListOptions, crmEmailEngineStatusOptions, crmEmailMessageListOptions, crmEmailThreadListOptions, crmKeys } from "@multica/core/crm/queries";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { CRMAccount, CRMContact, CRMEmailThread, CRMIMAPPreviewMessage, CRMIMAPSetting, CreateCRMContactRequest, Issue, Project } from "@multica/core/types";
 import { Badge } from "@multica/ui/components/ui/badge";
@@ -116,6 +116,8 @@ export function CRMEmailsPage() {
     enabled: Boolean(wsId),
   });
   const mailboxes = mailboxData?.settings ?? [];
+  const selectedMailboxId = mailboxDraft.id ?? mailboxes[0]?.id ?? "";
+  const { data: emailEngineStatus } = useQuery(crmEmailEngineStatusOptions(wsId, selectedMailboxId));
   const emailDrafts = draftsData?.drafts ?? [];
 
   const folderThreads = useMemo(() => {
@@ -410,9 +412,29 @@ export function CRMEmailsPage() {
         <aside className="flex min-h-0 flex-col border-r bg-card/80 p-3">
           <div className="mb-3 rounded-lg border bg-background p-3">
             <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t(($) => $.emails.mailboxes)}</div>
-            <div className="mt-2 truncate text-sm font-medium">{mailboxes[0]?.email ?? "sales@example.com"}</div>
-            <div className="mt-1 text-xs text-muted-foreground">{mailboxes[0]?.last_test_message ?? t(($) => $.emails.imap_not_connected)}</div>
+            <div className="mt-2 truncate text-sm font-medium">{mailboxes[0]?.email ?? emailEngineStatus?.account ?? "sales@example.com"}</div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Badge variant={emailEngineStatus?.enabled && emailEngineStatus?.configured ? "default" : "outline"}>
+                {emailEngineStatus?.enabled ? (emailEngineStatus.configured ? "EmailEngine" : "Not configured") : "IMAP fallback"}
+              </Badge>
+              {emailEngineStatus?.state ? <Badge variant="secondary">{emailEngineStatus.state}</Badge> : null}
+              {emailEngineStatus?.syncing ? <Badge variant="secondary">Syncing</Badge> : null}
+            </div>
+            <div className="mt-2 text-xs text-muted-foreground">{emailEngineStatus?.last_error || mailboxes[0]?.last_test_message || t(($) => $.emails.imap_not_connected)}</div>
           </div>
+          {emailEngineStatus?.folders?.length ? (
+            <div className="mb-3 rounded-lg border bg-background p-2">
+              <div className="px-1 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">EmailEngine folders</div>
+              <div className="max-h-44 space-y-1 overflow-y-auto">
+                {emailEngineStatus.folders.map((folder) => (
+                  <div key={folder.path} className="flex items-center justify-between rounded-md px-2 py-1.5 text-xs text-muted-foreground">
+                    <span className="truncate">{folder.name || folder.path}</span>
+                    <span className="shrink-0 tabular-nums">{folder.unread ? `${folder.unread}/` : ""}{folder.total}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <nav className="space-y-1" aria-label={t(($) => $.emails.folder_nav)}>
             {([
               ["inbox", Inbox, t(($) => $.emails.folder_inbox)],
@@ -744,6 +766,12 @@ export function CRMEmailsPage() {
               <div className="rounded-md border bg-background px-3 py-2">2. Set account id on the server</div>
               <div className="rounded-md border bg-background px-3 py-2">3. Preview, import, and send from Multica CRM</div>
             </div>
+          </div>
+          <div className="grid gap-3 rounded-lg border bg-background p-3 text-xs sm:grid-cols-4">
+            <DetailRow label="Account" value={emailEngineStatus?.account} />
+            <DetailRow label="State" value={emailEngineStatus?.state ?? (emailEngineStatus?.configured ? "unknown" : "not configured")} />
+            <DetailRow label="Folders" value={String(emailEngineStatus?.folders?.length ?? 0)} />
+            <DetailRow label="Fallback" value={emailEngineStatus?.fallback_provider ?? "imap_smtp"} />
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <select

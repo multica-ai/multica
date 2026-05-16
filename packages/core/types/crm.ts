@@ -250,6 +250,26 @@ export interface ListCRMEmailMessagesResponse {
   total: number;
 }
 
+export interface CRMEmailEngineFolder {
+  path: string;
+  name: string;
+  special_use?: string | null;
+  total: number;
+  unread: number;
+}
+
+export interface CRMEmailEngineStatus {
+  enabled: boolean;
+  configured: boolean;
+  base_url?: string | null;
+  account?: string | null;
+  state?: string | null;
+  syncing: boolean;
+  last_error?: string | null;
+  folders: CRMEmailEngineFolder[];
+  fallback_provider: string;
+}
+
 export interface UpdateCRMEmailThreadAssociationRequest {
   account_id?: string | null;
   contact_id?: string | null;
