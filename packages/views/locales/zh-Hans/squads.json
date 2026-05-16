@@ -1,0 +1,47 @@
+{
+  "page": {
+    "title": "小队",
+    "new_button": "新建小队",
+    "empty_no_squads": "还没有小队，创建一个开始吧。",
+    "empty_no_match": "没有匹配筛选条件的小队。"
+  },
+  "inspector": {
+    "details_section": "详情",
+    "archive_button": "归档"
+  },
+  "name_editor": {
+    "cancel": "取消"
+  },
+  "add_member_dialog": {
+    "title": "添加成员",
+    "description": "添加工作区成员或智能体到这个小队。",
+    "label_member": "成员",
+    "label_role": "角色",
+    "label_optional": "（可选）",
+    "placeholder_role_inline": "添加角色…",
+    "cancel": "取消"
+  },
+  "description_dialog": {
+    "title": "编辑描述",
+    "placeholder_empty": "添加描述",
+    "cancel": "取消"
+  },
+  "discard_changes_dialog": {
+    "title": "放弃未保存的修改？",
+    "description": "当前标签页有未保存的修改，切换标签会丢弃这些修改。",
+    "keep_editing": "继续编辑",
+    "discard_button": "放弃"
+  },
+  "members_tab": {
+    "section_title": "成员",
+    "section_count_one": "该小队有 {{count}} 名成员",
+    "section_count_other": "该小队有 {{count}} 名成员",
+    "add_member_button": "添加成员",
+    "leader_chip": "负责人"
+  },
+  "instructions_tab": {
+    "description": "小队指引会在 Leader 智能体处理分配给该小队的 issue 时注入到它的 prompt 中。可用来给 Leader 提供贯穿全队的指导、协作规范，或每次任务都应遵循的上下文。",
+    "unsaved_changes": "有未保存的修改",
+    "save_button": "保存"
+  }
+}

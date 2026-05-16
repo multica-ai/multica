@@ -24,6 +24,7 @@ import { ShipPage, ShipReleasePage } from "@multica/views/ship";
 import { SkillsPage } from "@multica/views/skills";
 import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { AgentsPage } from "@multica/views/agents";
+import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/views/squads/components";
 import { InboxPage } from "@multica/views/inbox";
 import { SettingsPage } from "@multica/views/settings";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
@@ -181,6 +182,12 @@ export const appRoutes: RouteObject[] = [
             path: "agents/:id",
             element: <AgentDetailPage />,
             handle: { title: "Agent" },
+          },
+          { path: "squads", element: <SquadsPage />, handle: { title: "Squads" } },
+          {
+            path: "squads/:id",
+            element: <SquadDetailPageView />,
+            handle: { title: "Squad" },
           },
           { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
           {

@@ -169,6 +169,8 @@ import type {
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
+  Squad,
+  SquadMember,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -625,7 +627,12 @@ export class ApiClient {
     });
   }
 
-  async quickCreateIssue(data: { agent_id: string; prompt: string; project_id?: string | null }): Promise<{ task_id: string }> {
+  async quickCreateIssue(data: {
+    agent_id?: string;
+    squad_id?: string;
+    prompt: string;
+    project_id?: string | null;
+  }): Promise<{ task_id: string }> {
     return this.fetch("/api/issues/quick-create", {
       method: "POST",
       body: JSON.stringify(data),
@@ -1844,6 +1851,43 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify(data),
     });
+  }
+
+  // Squads
+  async listSquads(): Promise<Squad[]> {
+    return this.fetch(`/api/squads`);
+  }
+
+  async getSquad(id: string): Promise<Squad> {
+    return this.fetch(`/api/squads/${id}`);
+  }
+
+  async createSquad(data: { name: string; description?: string; leader_id: string }): Promise<Squad> {
+    return this.fetch("/api/squads", { method: "POST", body: JSON.stringify(data) });
+  }
+
+  async updateSquad(id: string, data: { name?: string; description?: string; instructions?: string; leader_id?: string; avatar_url?: string }): Promise<Squad> {
+    return this.fetch(`/api/squads/${id}`, { method: "PUT", body: JSON.stringify(data) });
+  }
+
+  async deleteSquad(id: string): Promise<void> {
+    await this.fetch(`/api/squads/${id}`, { method: "DELETE" });
+  }
+
+  async listSquadMembers(squadId: string): Promise<SquadMember[]> {
+    return this.fetch(`/api/squads/${squadId}/members`);
+  }
+
+  async addSquadMember(squadId: string, data: { member_type: string; member_id: string; role?: string }): Promise<SquadMember> {
+    return this.fetch(`/api/squads/${squadId}/members`, { method: "POST", body: JSON.stringify(data) });
+  }
+
+  async removeSquadMember(squadId: string, data: { member_type: string; member_id: string }): Promise<void> {
+    await this.fetch(`/api/squads/${squadId}/members`, { method: "DELETE", body: JSON.stringify(data) });
+  }
+
+  async updateSquadMemberRole(squadId: string, data: { member_type: string; member_id: string; role: string }): Promise<SquadMember> {
+    return this.fetch(`/api/squads/${squadId}/members/role`, { method: "PATCH", body: JSON.stringify(data) });
   }
 
   // Autopilots

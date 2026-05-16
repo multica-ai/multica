@@ -54,6 +54,7 @@ export function ActorAvatar({
       avatarUrl={getActorAvatarUrl(actorType, actorId)}
       isAgent={actorType === "agent"}
       isSystem={actorType === "system"}
+      isSquad={actorType === "squad"}
       size={size}
       className={className}
     />

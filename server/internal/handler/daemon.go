@@ -1306,6 +1306,32 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 
+			// Squad-leader briefing injection: when the issue is assigned
+			// to a squad and the claiming agent is that squad's current
+			// leader, append a full briefing (Operating Protocol + Roster
+			// + user Instructions) to the agent's own Instructions. We
+			// append (not replace) so per-agent instructions remain
+			// authoritative for general behavior; the squad briefing
+			// stacks on top as task-specific squad context.
+			if resp.Agent != nil && issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid {
+				if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+					ID:          issue.AssigneeID,
+					WorkspaceID: issue.WorkspaceID,
+				}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
+					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
+					if strings.TrimSpace(resp.Agent.Instructions) == "" {
+						resp.Agent.Instructions = briefing
+					} else {
+						resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
+					}
+					slog.Debug("injected squad leader briefing",
+						"squad_id", uuidToString(squad.ID),
+						"squad_name", squad.Name,
+						"leader_agent_id", resp.Agent.ID,
+					)
+				}
+			}
+
 			var projectRepos []RepoData
 			if issue.ProjectID.Valid {
 				resp.ProjectID = uuidToString(issue.ProjectID)
@@ -1602,6 +1628,35 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					var repos []RepoData
 					if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
 						resp.Repos = repos
+					}
+				}
+
+				// Squad-leader briefing injection for quick-create tasks. When
+				// the user picked a squad in the modal, the task runs on the
+				// squad's leader agent (resolved by the handler). Surface the
+				// same Operating Protocol + Roster + user Instructions that
+				// issue-bound squad tasks see, so the leader can decide to
+				// delegate before opening the issue.
+				if resp.Agent != nil && qc.SquadID != "" {
+					wsUUID, wsErr := util.ParseUUID(qc.WorkspaceID)
+					squadUUID, sqErr := util.ParseUUID(qc.SquadID)
+					if wsErr == nil && sqErr == nil {
+						if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+							ID:          squadUUID,
+							WorkspaceID: wsUUID,
+						}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
+							briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
+							if strings.TrimSpace(resp.Agent.Instructions) == "" {
+								resp.Agent.Instructions = briefing
+							} else {
+								resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
+							}
+							slog.Debug("injected squad leader briefing for quick-create",
+								"squad_id", uuidToString(squad.ID),
+								"squad_name", squad.Name,
+								"leader_agent_id", resp.Agent.ID,
+							)
+						}
 					}
 				}
 			}

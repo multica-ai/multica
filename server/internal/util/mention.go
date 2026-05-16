@@ -14,7 +14,7 @@ type Mention struct {
 // (e.g. "David[TF]") are matched correctly — the ](mention:// anchor is specific
 // enough to prevent over-matching.
 // The broadcast type uses a tag name (lowercase alphanumeric/hyphen/underscore) or "all" as the ID.
-var MentionRe = regexp.MustCompile(`\[@?(.+?)\]\(mention://(member|agent|issue|all|broadcast)/([0-9a-fA-F-]+|all|[a-z][a-z0-9_-]*)\)`)
+var MentionRe = regexp.MustCompile(`\[@?(.+?)\]\(mention://(member|agent|squad|issue|all|broadcast)/([0-9a-fA-F-]+|all|[a-z][a-z0-9_-]*)\)`)
 
 // IsMentionAll returns true if the mention is an @all mention.
 func (m Mention) IsMentionAll() bool {

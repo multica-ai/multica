@@ -5,6 +5,7 @@ import { CreateWorkspaceModal } from "./create-workspace";
 import { CreateIssueDialog } from "./create-issue-dialog";
 import { CreateProjectModal } from "./create-project";
 import { CreateMemoryArtifactModal } from "./create-memory-artifact";
+import { CreateSquadModal } from "./create-squad";
 import { FeedbackModal } from "./feedback";
 import { SetParentIssueModal } from "./set-parent-issue";
 import { AddChildIssueModal } from "./add-child-issue";
@@ -29,6 +30,8 @@ export function ModalRegistry() {
       return <CreateProjectModal onClose={close} />;
     case "create-memory-artifact":
       return <CreateMemoryArtifactModal onClose={close} />;
+    case "create-squad":
+      return <CreateSquadModal onClose={close} />;
     case "feedback":
       return <FeedbackModal onClose={close} />;
     case "issue-set-parent":
