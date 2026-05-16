@@ -25,6 +25,12 @@ describe("createSubmitExtension", () => {
     isActive: () => false,
   } as Partial<Editor>;
 
+  it("registers ahead of the default Enter keymaps", () => {
+    const ext = createSubmitExtension(vi.fn(() => true), { submitOnEnter: true });
+
+    expect(ext.config.priority).toBe(1000);
+  });
+
   it("Mod-Enter always submits", () => {
     const onSubmit = vi.fn(() => true);
     const shortcuts = getShortcuts(

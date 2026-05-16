@@ -14,6 +14,7 @@ export function createSubmitExtension(
 ) {
   return Extension.create({
     name: "submitShortcut",
+    priority: 1000,
     addKeyboardShortcuts() {
       const shortcuts: Record<string, () => boolean> = {
         "Mod-Enter": () => onSubmit(),
