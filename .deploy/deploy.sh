@@ -132,32 +132,141 @@ if [ ! -f "$NEXT_NEW/BUILD_ID" ]; then
   exit 1
 fi
 
-echo "Atomic swap: killing next-server, renaming .next, restarting…"
-# Kill the running next-server so it can't observe the .next/ rename
-# midway. We do NOT bootout/bootstrap the launchd job — that race
-# (bootout still settling when bootstrap runs) made earlier deploys
-# exit 37 from a follow-up kickstart against a not-yet-loaded service.
-# launchctl kickstart -k below is enough: it kills any current
-# next-server and starts a fresh one on the just-swapped .next/.
-pkill -f next-server 2>/dev/null || true
-sleep 1
+# Sanity-check the build before swapping: BUILD_ID alone is not enough.
+# JEH symptom (May 2026) was a "successful" build where every chunk
+# under .next/static/ returned 500 from next-server — the manifest
+# listed chunks that weren't on disk. Verify the static dir is populated
+# and that a sample of manifest-referenced chunks actually exist.
+echo "Verifying build output…"
+if [ ! -d "$NEXT_NEW/static/chunks" ] || [ -z "$(ls -A "$NEXT_NEW/static/chunks" 2>/dev/null)" ]; then
+  echo "ERROR: $NEXT_NEW/static/chunks missing or empty. Aborting swap." >&2
+  rm -rf "$NEXT_NEW"
+  exit 1
+fi
+BUILD_MANIFEST="$NEXT_NEW/build-manifest.json"
+if [ ! -f "$BUILD_MANIFEST" ]; then
+  echo "ERROR: $BUILD_MANIFEST missing — build incomplete. Aborting swap." >&2
+  rm -rf "$NEXT_NEW"
+  exit 1
+fi
+# Sample 5 chunk paths from the manifest and confirm each exists on disk.
+# If the manifest references files that aren't present, next-server will
+# happily serve HTML pointing at them and return 500 on every asset.
+MISSING_CHUNKS=$(grep -oE '"static/chunks/[^"]+"' "$BUILD_MANIFEST" 2>/dev/null \
+  | tr -d '"' | sort -u | head -50 \
+  | while read -r p; do [ -f "$NEXT_NEW/$p" ] || echo "$p"; done)
+if [ -n "$MISSING_CHUNKS" ]; then
+  echo "ERROR: build-manifest.json references chunks missing from disk:" >&2
+  echo "$MISSING_CHUNKS" | head -10 >&2
+  echo "Aborting swap." >&2
+  rm -rf "$NEXT_NEW"
+  exit 1
+fi
 
+echo "Atomic swap: renaming .next, restarting launchd jobs…"
+# We do NOT pkill next-server before the rename. Unix file handles
+# survive rename — the running process keeps serving from the same
+# inode (now reachable via .next.old/) until kickstart -k replaces it.
+# Pkill-then-mv used to race with launchd's KeepAlive=true respawn:
+# launchd would restart next-server in the gap between pkill and
+# kickstart, the respawn would mmap .next/ mid-swap, and end up with
+# a manifest pointing at chunk paths that no longer existed on disk.
+# JEH symptom: all /_next/static/* return 500 while HTML still 200s.
 rm -rf "$NEXT_OLD"
 if [ -e "$NEXT_LIVE" ]; then
   mv "$NEXT_LIVE" "$NEXT_OLD"
 fi
 mv "$NEXT_NEW" "$NEXT_LIVE"
 
-echo "Restarting launchd jobs…"
-# || true on every launchctl call: launchctl returns non-zero on
-# benign races (job in transition, kickstart between KeepAlive
-# respawns) and we don't want set -e to abort the deploy after
-# the swap has already happened. Real failures surface as a 4200
-# downtime — KeepAlive=true on the plist will keep retrying.
+# || true on launchctl: it returns non-zero on benign races (job in
+# transition, kickstart between KeepAlive respawns). Hard failures
+# surface as the smoke test below failing.
+#
+# JEH-438: restart com.multica.daemon too — `make build` rewrote the
+# binary but the running launchd job keeps executing the old one until
+# kickstart. Forgetting daemon was the root cause of JEH-418 looking
+# broken after deploy.
 launchctl kickstart -k gui/$(id -u)/com.multica.backend || true
 launchctl kickstart -k gui/$(id -u)/com.multica.frontend || true
+launchctl kickstart -k gui/$(id -u)/com.multica.daemon || true
 
-# Async cleanup — frontend is already up, this is just disk hygiene.
+# ---------------------------------------------------------------------
+# Post-deploy smoke test + rollback.
+# ---------------------------------------------------------------------
+# Without this, a build that produces 500-on-every-asset (like the May
+# 2026 incident) sails through unnoticed because next-server is "up"
+# (the launchd job is running) and the HTML route returns 200. The
+# user only finds out by hitting the app — and by then .next.old has
+# been async-deleted and there is no fast path back.
+#
+# Smoke test polls / for up to 60s after kickstart, then verifies one
+# JS chunk from the rendered HTML returns 200. If either fails, swap
+# .next.old back into place, restart, and exit non-zero so the
+# DEPLOY FAILED trap fires.
+# Read FRONTEND_PORT from .env if set there (deploy.sh doesn't source .env
+# itself, but run-frontend.sh does — keep them in sync). Falls back to
+# 4200 to match run-frontend.sh's default.
+if [ -f .env ]; then
+  PORT_FROM_ENV=$(grep -E '^FRONTEND_PORT=' .env | tail -1 | cut -d= -f2- | tr -d '"' || true)
+else
+  PORT_FROM_ENV=""
+fi
+PORT_FOR_SMOKE="${FRONTEND_PORT:-${PORT_FROM_ENV:-4200}}"
+SMOKE_URL="http://127.0.0.1:$PORT_FOR_SMOKE/"
+
+smoke_test() {
+  local html chunk code deadline
+  deadline=$(( $(date +%s) + 60 ))
+  echo "Smoke test: polling $SMOKE_URL until 200 (60s budget)…"
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    html=$(curl -fsS --max-time 5 "$SMOKE_URL" 2>/dev/null || true)
+    if [ -n "$html" ]; then break; fi
+    sleep 2
+  done
+  if [ -z "$html" ]; then
+    echo "Smoke FAIL: $SMOKE_URL did not return 200 within 60s." >&2
+    return 1
+  fi
+  echo "Smoke test: / served. Verifying a static chunk loads…"
+  chunk=$(printf '%s' "$html" \
+    | grep -oE '/_next/static/chunks/[A-Za-z0-9._-]+\.js' \
+    | head -1 || true)
+  if [ -z "$chunk" ]; then
+    echo "Smoke WARN: could not find a chunk URL in HTML — accepting / only." >&2
+    return 0
+  fi
+  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
+    "http://127.0.0.1:$PORT_FOR_SMOKE$chunk")
+  if [ "$code" != "200" ]; then
+    echo "Smoke FAIL: chunk $chunk returned $code (expected 200)." >&2
+    return 1
+  fi
+  echo "Smoke OK: / and $chunk both 200."
+  return 0
+}
+
+rollback_to_old() {
+  echo "ROLLBACK: swapping .next.old back into .next and restarting." >&2
+  if [ -d "$NEXT_OLD" ]; then
+    local broken_name="apps/web/.next.broken-$(date +%Y%m%d-%H%M%S)"
+    if [ -e "$NEXT_LIVE" ]; then
+      mv "$NEXT_LIVE" "$broken_name"
+      echo "Broken build preserved at $broken_name for inspection." >&2
+    fi
+    mv "$NEXT_OLD" "$NEXT_LIVE"
+    launchctl kickstart -k gui/$(id -u)/com.multica.frontend || true
+  else
+    echo "ROLLBACK FAILED: no .next.old to restore — frontend may be down." >&2
+  fi
+}
+
+if ! smoke_test; then
+  rollback_to_old
+  echo "=== DEPLOY FAILED (smoke test): rolled back to previous .next ===" >&2
+  exit 1
+fi
+
+# Smoke test passed. Now safe to remove the previous build asynchronously.
 rm -rf "$NEXT_OLD" &
 
 echo "=== deploy finished: $(date -Iseconds) ==="
