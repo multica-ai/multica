@@ -874,11 +874,28 @@ func (s *Service) ReconcileStalledMergeTrain(
 			row.MembershipMergeState == db.PrMergeStateSkipped {
 			continue
 		}
+		// Resolve the TRUE merge commit SHA. Using row.HeadSha (the PR branch
+		// tip) here was the root cause of releases stranded in `promoting`:
+		// completeMergeTrain stamps the last merged PR's MergedSha as the
+		// release's merged_main_sha, and a branch-tip SHA defeats the
+		// strict-SHA deploy linker. Never fall back to HeadSha — a
+		// wrong-but-valid SHA is worse than an empty one (the deploy-poller
+		// time/ancestry fallback can recover an empty merged_main_sha but not
+		// a poisoned one).
+		mergeSha := ""
+		if owner, repo, perr := gh.ParseRepoURL(row.RepoUrl); perr == nil && s.Github != nil {
+			if prDetail, gerr := s.Github.GetPullRequest(ctx, owner, repo, int(row.PrNumber)); gerr == nil && prDetail != nil {
+				mergeSha = prDetail.MergeCommitSHA
+			} else if gerr != nil {
+				slog.Warn("ship: reconcile could not fetch merge_commit_sha; leaving MergedSha unset",
+					"pr_id", uuidString(row.ID), "pr_number", row.PrNumber, "error", gerr)
+			}
+		}
 		if _, err := s.Q.SetReleasePRMergeState(ctx, db.SetReleasePRMergeStateParams{
 			ReleaseID:     releaseID,
 			PullRequestID: row.ID,
 			MergeState:    db.PrMergeStateMerged,
-			MergedSha:     pgtype.Text{String: row.HeadSha, Valid: row.HeadSha != ""},
+			MergedSha:     pgtype.Text{String: mergeSha, Valid: mergeSha != ""},
 			MergedAt:      pgtype.Timestamptz{Time: now, Valid: true},
 		}); err != nil {
 			slog.Warn("ship: stalled train reconcile sync failed",

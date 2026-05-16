@@ -122,15 +122,20 @@ type PullRequest struct {
 		Ref string `json:"ref"`
 		SHA string `json:"sha"`
 	} `json:"head"`
-	Additions    int        `json:"additions"`
-	Deletions    int        `json:"deletions"`
-	ChangedFiles int        `json:"changed_files"`
-	Mergeable    *bool      `json:"mergeable,omitempty"`
-	Labels       []Label    `json:"labels"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-	MergedAt     *time.Time `json:"merged_at,omitempty"`
-	ClosedAt     *time.Time `json:"closed_at,omitempty"`
+	// MergeCommitSHA is the commit GitHub created on the base branch when
+	// the PR merged — NOT the PR's head SHA. Empty until the PR is merged.
+	// The merge-train reconciler reads this to record the true merged SHA
+	// after a missed webhook.
+	MergeCommitSHA string     `json:"merge_commit_sha"`
+	Additions      int        `json:"additions"`
+	Deletions      int        `json:"deletions"`
+	ChangedFiles   int        `json:"changed_files"`
+	Mergeable      *bool      `json:"mergeable,omitempty"`
+	Labels         []Label    `json:"labels"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	MergedAt       *time.Time `json:"merged_at,omitempty"`
+	ClosedAt       *time.Time `json:"closed_at,omitempty"`
 }
 
 // Label is the minimal label payload we keep — name and color cover the
@@ -242,6 +247,20 @@ func (c *Client) GetCombinedStatus(ctx context.Context, owner, repo, sha string)
 		return "", err
 	}
 	return out.State, nil
+}
+
+// GetPullRequest fetches a single PR, including merge_commit_sha (the
+// commit GitHub created on the base branch when the PR merged — NOT the
+// PR's head SHA). Used by the merge-train reconciler to record the true
+// merged SHA after a missed webhook.
+func (c *Client) GetPullRequest(ctx context.Context, owner, repo string, prNumber int) (*PullRequest, error) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d",
+		url.PathEscape(owner), url.PathEscape(repo), prNumber)
+	var out PullRequest
+	if err := c.do(ctx, "GET", path, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // do is the GET/no-body shorthand that delegates to doWithBody. Kept as a

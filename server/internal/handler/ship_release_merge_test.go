@@ -532,6 +532,149 @@ func TestStartMerge_Endpoint_HappyPath(t *testing.T) {
 	}
 }
 
+// seedStalledTrain inserts a release in `merging` stage with a single
+// PR whose pull_request.state is already 'merged' on GitHub's side but
+// whose membership row is still 'queued' — the exact shape a missed
+// webhook / server restart leaves behind. headSHA is the PR branch tip
+// (the value the buggy code wrongly recorded). Returns release id +
+// the PR id.
+func seedStalledTrain(t *testing.T, projectID, repoURL string, prNumber int, headSHA string) (string, string) {
+	t.Helper()
+	var prID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO pull_request (
+			workspace_id, project_id, repo_url, pr_number, title, state,
+			is_draft, author_login, base_ref, head_ref, head_sha, html_url,
+			ci_status, review_decision, mergeable,
+			pr_created_at, pr_updated_at, pr_merged_at, risk_level
+		) VALUES (
+			$1, $2, $3, $4, 'stalled train pr', 'merged',
+			FALSE, 'alice', 'main', 'feat/x', $5, $6,
+			'success', 'APPROVED', 'MERGEABLE',
+			NOW(), NOW(), NOW(), 'low'
+		)
+		RETURNING id
+	`, testWorkspaceID, projectID, repoURL, prNumber, headSHA,
+		fmt.Sprintf("https://example.com/%d", prNumber)).Scan(&prID); err != nil {
+		t.Fatalf("seed stalled pr: %v", err)
+	}
+	var releaseID string
+	if err := testPool.QueryRow(context.Background(),
+		`INSERT INTO ship_release (workspace_id, project_id, title, risk_level, stage)
+		 VALUES ($1, $2, $3, 'low', 'merging')
+		 RETURNING id`,
+		testWorkspaceID, projectID, "Stalled release "+repoURL).Scan(&releaseID); err != nil {
+		t.Fatalf("seed stalled release: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(),
+		`INSERT INTO ship_release_pull_request (release_id, pull_request_id, position, is_active, merge_state)
+		 VALUES ($1, $2, 0, TRUE, 'queued')`,
+		releaseID, prID); err != nil {
+		t.Fatalf("seed stalled membership: %v", err)
+	}
+	return releaseID, prID
+}
+
+func readReleaseMergedMainSHA(t *testing.T, releaseID string) string {
+	t.Helper()
+	var s pgtype.Text
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT merged_main_sha FROM ship_release WHERE id = $1`, releaseID).Scan(&s); err != nil {
+		t.Fatalf("read merged_main_sha: %v", err)
+	}
+	return s.String
+}
+
+func readMembershipMergedSHA(t *testing.T, releaseID, prID string) string {
+	t.Helper()
+	var s pgtype.Text
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT merged_sha FROM ship_release_pull_request WHERE release_id = $1 AND pull_request_id = $2`,
+		releaseID, prID).Scan(&s); err != nil {
+		t.Fatalf("read membership merged_sha: %v", err)
+	}
+	return s.String
+}
+
+// TestReconcileStalledMergeTrain_RecordsMergeCommitSHA_NotHeadSHA — the
+// regression for the stranded-release bug. After a missed webhook the
+// reconciler must record GitHub's merge_commit_sha (the commit created
+// on main), NOT the PR's branch-tip head_sha. A head-sha leak here
+// poisons merged_main_sha and strands the release in `promoting`.
+func TestReconcileStalledMergeTrain_RecordsMergeCommitSHA_NotHeadSHA(t *testing.T) {
+	enableMergeTest(t)
+	repoURL := "https://github.com/multica-ai/merge-reconcile-sha"
+	projectID := createShipProject(t, repoURL)
+	const headSHA = "headtip0000000000000000000000000000beef"
+	const mergeCommitSHA = "mergecommit1111111111111111111111111face"
+	releaseID, prID := seedStalledTrain(t, projectID, repoURL, 4242, headSHA)
+
+	ghClient := &fakeShipGithub{
+		getPRFn: func(_ context.Context, _, _ string, prNumber int) (*gh.PullRequest, error) {
+			if prNumber != 4242 {
+				return nil, fmt.Errorf("unexpected pr number %d", prNumber)
+			}
+			return &gh.PullRequest{
+				Number:         prNumber,
+				MergeCommitSHA: mergeCommitSHA,
+			}, nil
+		},
+	}
+	svc := &ship.Service{Q: testHandler.Queries, Github: ghClient}
+	deps := &ship.MergeTrainDeps{Publisher: &recordingPublisher{}, ParentCtx: context.Background()}
+
+	if err := svc.ReconcileStalledMergeTrain(context.Background(),
+		parseUUID(releaseID), parseUUID(testUserID), deps); err != nil {
+		t.Fatalf("ReconcileStalledMergeTrain: %v", err)
+	}
+
+	if got := readMembershipMergedSHA(t, releaseID, prID); got != mergeCommitSHA {
+		t.Fatalf("membership merged_sha: want merge commit %q, got %q (head_sha=%q)",
+			mergeCommitSHA, got, headSHA)
+	}
+	if got := readReleaseMergedMainSHA(t, releaseID); got != mergeCommitSHA {
+		t.Fatalf("release merged_main_sha: want merge commit %q, got %q (head_sha=%q)",
+			mergeCommitSHA, got, headSHA)
+	}
+	if readReleaseMergedMainSHA(t, releaseID) == headSHA {
+		t.Fatalf("merged_main_sha was poisoned with the PR head_sha")
+	}
+}
+
+// TestReconcileStalledMergeTrain_GetPRError_LeavesShaEmpty — negative
+// case: when the detail fetch fails we must NOT fall back to head_sha.
+// An empty merged_main_sha is recoverable by the deploy-poller's
+// time/ancestry fallback; a poisoned one is not.
+func TestReconcileStalledMergeTrain_GetPRError_LeavesShaEmpty(t *testing.T) {
+	enableMergeTest(t)
+	repoURL := "https://github.com/multica-ai/merge-reconcile-err"
+	projectID := createShipProject(t, repoURL)
+	const headSHA = "headtip2222222222222222222222222222cafe"
+	releaseID, prID := seedStalledTrain(t, projectID, repoURL, 7777, headSHA)
+
+	ghClient := &fakeShipGithub{
+		getPRFn: func(_ context.Context, _, _ string, _ int) (*gh.PullRequest, error) {
+			return nil, gh.ErrNotFound
+		},
+	}
+	svc := &ship.Service{Q: testHandler.Queries, Github: ghClient}
+	deps := &ship.MergeTrainDeps{Publisher: &recordingPublisher{}, ParentCtx: context.Background()}
+
+	if err := svc.ReconcileStalledMergeTrain(context.Background(),
+		parseUUID(releaseID), parseUUID(testUserID), deps); err != nil {
+		t.Fatalf("ReconcileStalledMergeTrain: %v", err)
+	}
+
+	if got := readMembershipMergedSHA(t, releaseID, prID); got != "" {
+		t.Fatalf("membership merged_sha: want empty (no poison), got %q (head_sha=%q)",
+			got, headSHA)
+	}
+	if got := readReleaseMergedMainSHA(t, releaseID); got != "" {
+		t.Fatalf("release merged_main_sha: want empty (no poison), got %q (head_sha=%q)",
+			got, headSHA)
+	}
+}
+
 // TestGetReleaseMergeState_Endpoint — the lightweight poll endpoint
 // returns the right shape pre-merge.
 func TestGetReleaseMergeState_Endpoint(t *testing.T) {
