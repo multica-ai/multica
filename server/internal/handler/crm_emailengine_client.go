@@ -111,11 +111,12 @@ func fetchCRMEmailProviderMessages(cfg crmIMAPMailboxConfig, folder string, limi
 	return fetchCRMEmailEngineMessages(cfg, folder, limit, rangeDays, requestedUIDs)
 }
 
-func sendCRMEmailProvider(cfg crmIMAPMailboxConfig, to, cc, bcc []string, subject, body string) error {
+func sendCRMEmailProvider(cfg crmIMAPMailboxConfig, payload crmEmailSendPayload) (string, []byte, error) {
 	if !useCRMEmailEngine() {
-		return sendCRMSMTP(cfg, to, cc, bcc, subject, body)
+		return sendCRMSMTP(cfg, payload)
 	}
-	return sendCRMEmailEngine(cfg, to, cc, bcc, subject, body)
+	messageID, err := sendCRMEmailEngine(cfg, payload)
+	return messageID, nil, err
 }
 
 func fetchCRMEmailEngineMessages(cfg crmIMAPMailboxConfig, folder string, limit int, rangeDays int, requestedUIDs []string) ([]crmIMAPFetchedMessage, error) {
@@ -136,11 +137,13 @@ func fetchCRMEmailEngineMessages(cfg crmIMAPMailboxConfig, folder string, limit 
 	endpoint := fmt.Sprintf("%s/v1/account/%s/messages?%s", baseURL, url.PathEscape(account), values.Encode())
 	var payload struct {
 		Messages []struct {
-			ID        string `json:"id"`
-			UID       any    `json:"uid"`
-			MessageID string `json:"messageId"`
-			Subject   string `json:"subject"`
-			Text      struct {
+			ID         string   `json:"id"`
+			UID        any      `json:"uid"`
+			MessageID  string   `json:"messageId"`
+			InReplyTo  string   `json:"inReplyTo"`
+			References []string `json:"references"`
+			Subject    string   `json:"subject"`
+			Text       struct {
 				ID string `json:"id"`
 			} `json:"text"`
 			Date    string                         `json:"date"`
@@ -173,7 +176,7 @@ func fetchCRMEmailEngineMessages(cfg crmIMAPMailboxConfig, folder string, limit 
 			}
 		}
 		out = append(out, crmIMAPFetchedMessage{
-			UID: item.ID, MessageID: item.MessageID, Subject: item.Subject,
+			UID: item.ID, MessageID: normalizeCRMMessageID(item.MessageID), InReplyTo: normalizeCRMMessageID(item.InReplyTo), References: normalizeCRMMessageIDSlice(item.References), Subject: item.Subject,
 			FromEmail: item.From.Address, FromName: item.From.Name, ToEmails: emailEngineAddressList(item.To),
 			CcEmails: emailEngineAddressList(item.Cc), Date: messageDate, BodyText: bodyText, BodyHTML: bodyHTML, Snippet: item.Preview, RawSize: item.Size,
 		})
@@ -193,20 +196,39 @@ func fetchCRMEmailEngineText(baseURL, account, textID string) (string, string, e
 	return payload.Plain, payload.HTML, nil
 }
 
-func sendCRMEmailEngine(cfg crmIMAPMailboxConfig, to, cc, bcc []string, subject, body string) error {
+func sendCRMEmailEngine(cfg crmIMAPMailboxConfig, email crmEmailSendPayload) (string, error) {
 	baseURL := crmEmailEngineBaseURL()
 	account := crmEmailEngineAccount(cfg)
 	if baseURL == "" || account == "" {
-		return fmt.Errorf("EmailEngine base URL and account are required")
+		return "", fmt.Errorf("EmailEngine base URL and account are required")
 	}
 	payload := map[string]any{
 		"from": map[string]string{"name": cfg.Label, "address": cfg.Email},
-		"to":   emailEngineRecipients(to), "cc": emailEngineRecipients(cc), "bcc": emailEngineRecipients(bcc),
-		"subject": subject,
-		"text":    body,
+		"to":   emailEngineRecipients(email.ToEmails), "cc": emailEngineRecipients(email.CcEmails), "bcc": emailEngineRecipients(email.BccEmails),
+		"subject": email.Subject,
+		"text":    email.BodyText,
+	}
+	if strings.TrimSpace(email.BodyHTML) != "" {
+		payload["html"] = email.BodyHTML
+	}
+	if strings.TrimSpace(email.InReplyTo) != "" {
+		payload["inReplyTo"] = strings.TrimSpace(email.InReplyTo)
+	}
+	if len(email.ReferenceIDs) > 0 {
+		payload["references"] = email.ReferenceIDs
+	}
+	if len(email.Attachments) > 0 {
+		attachments := make([]map[string]string, 0, len(email.Attachments))
+		for _, item := range email.Attachments {
+			attachments = append(attachments, map[string]string{"filename": item.FileName, "contentType": item.ContentType, "content": item.Content})
+		}
+		payload["attachments"] = attachments
 	}
 	endpoint := fmt.Sprintf("%s/v1/account/%s/submit", baseURL, url.PathEscape(account))
-	return crmEmailEngineRequest(http.MethodPost, endpoint, payload, nil)
+	if err := crmEmailEngineRequest(http.MethodPost, endpoint, payload, nil); err != nil {
+		return "", sanitizeCRMSendError(err)
+	}
+	return newCRMMessageID("emailengine.local"), nil
 }
 
 func crmEmailEngineRequest(method, endpoint string, body any, out any) error {

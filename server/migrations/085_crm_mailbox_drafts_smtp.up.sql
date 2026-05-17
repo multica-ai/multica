@@ -7,6 +7,12 @@ ALTER TABLE crm_imap_setting
     ADD COLUMN IF NOT EXISTS smtp_username TEXT,
     ADD COLUMN IF NOT EXISTS smtp_secret_ref TEXT;
 
+ALTER TABLE crm_email_message
+    ADD COLUMN IF NOT EXISTS in_reply_to TEXT,
+    ADD COLUMN IF NOT EXISTS reference_ids TEXT[] NOT NULL DEFAULT '{}',
+    ADD COLUMN IF NOT EXISTS attachments JSONB NOT NULL DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS sent_append_warning TEXT;
+
 CREATE TABLE IF NOT EXISTS crm_email_draft (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
@@ -20,6 +26,11 @@ CREATE TABLE IF NOT EXISTS crm_email_draft (
     subject TEXT NOT NULL DEFAULT '',
     body_text TEXT NOT NULL DEFAULT '',
     body_html TEXT,
+    in_reply_to TEXT,
+    reference_ids TEXT[] NOT NULL DEFAULT '{}',
+    attachments JSONB NOT NULL DEFAULT '[]'::jsonb,
+    sent_append_enabled BOOLEAN NOT NULL DEFAULT true,
+    sent_append_warning TEXT,
     status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','pending_approval','sent','discarded','failed')),
     ai_generated BOOLEAN NOT NULL DEFAULT false,
     created_by_type TEXT,

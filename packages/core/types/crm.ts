@@ -226,6 +226,12 @@ export interface CRMEmailThread {
   updated_at: string;
 }
 
+export interface CRMEmailAttachment {
+  file_name: string;
+  content_type?: string | null;
+  content: string;
+}
+
 export interface CRMEmailMessage {
   id: string;
   workspace_id: string;
@@ -233,6 +239,10 @@ export interface CRMEmailMessage {
   account_id?: string | null;
   contact_id?: string | null;
   external_message_id?: string | null;
+  in_reply_to?: string | null;
+  reference_ids?: string[];
+  attachments?: CRMEmailAttachment[];
+  sent_append_warning?: string | null;
   from_email?: string | null;
   from_name?: string | null;
   to_emails: string[];
@@ -322,6 +332,9 @@ export interface CreateCRMEmailMessageRequest {
   account_id?: string | null;
   contact_id?: string | null;
   external_message_id?: string | null;
+  in_reply_to?: string | null;
+  reference_ids?: string[];
+  attachments?: CRMEmailAttachment[];
   from_email?: string | null;
   from_name?: string | null;
   to_emails?: string[];
@@ -426,6 +439,8 @@ export interface CRMIMAPTestResponse {
 export interface CRMIMAPPreviewMessage {
   uid: string;
   external_message_id: string;
+  in_reply_to?: string | null;
+  reference_ids?: string[];
   subject: string;
   from_email: string;
   from_name: string;

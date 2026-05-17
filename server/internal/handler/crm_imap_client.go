@@ -3,17 +3,11 @@ package handler
 import (
 	"bufio"
 	"bytes"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"html"
 	"io"
-	"log/slog"
 	"mime"
 	"mime/multipart"
 	"mime/quotedprintable"
@@ -50,31 +44,20 @@ type crmIMAPMailboxConfig struct {
 }
 
 type crmIMAPFetchedMessage struct {
-	UID          string
-	MessageID    string
-	InReplyTo    string
-	ReferenceIDs []string
-	RawHeaders   map[string][]string
-	Attachments  []crmEmailAttachmentMetadata
-	Subject      string
-	FromEmail    string
-	FromName     string
-	ToEmails     []string
-	CcEmails     []string
-	Date         time.Time
-	BodyText     string
-	BodyHTML     string
-	Snippet      string
-	RawSize      int
-}
-
-type crmEmailAttachmentMetadata struct {
-	Filename    string `json:"filename"`
-	ContentType string `json:"content_type"`
-	SizeBytes   int    `json:"size_bytes"`
-	Inline      bool   `json:"inline"`
-	ContentID   string `json:"content_id,omitempty"`
-	Disposition string `json:"disposition,omitempty"`
+	UID        string
+	MessageID  string
+	InReplyTo  string
+	References []string
+	Subject    string
+	FromEmail  string
+	FromName   string
+	ToEmails   []string
+	CcEmails   []string
+	Date       time.Time
+	BodyText   string
+	BodyHTML   string
+	Snippet    string
+	RawSize    int
 }
 
 type crmIMAPClient struct {
@@ -82,50 +65,10 @@ type crmIMAPClient struct {
 	tag  int
 }
 
-func crmMailboxSecretKey() []byte {
-	if raw := strings.TrimSpace(os.Getenv("CRM_MAILBOX_SECRET_KEY")); raw != "" {
-		if decoded, err := base64.StdEncoding.DecodeString(raw); err == nil && len(decoded) == 32 {
-			return decoded
-		}
-		if len(raw) == 32 {
-			return []byte(raw)
-		}
-	}
-	fallback := os.Getenv("JWT_SECRET")
-	if fallback == "" {
-		fallback = "multica-dev-secret-change-in-production"
-	}
-	sum := sha256.Sum256([]byte("crm-mailbox-secret:" + fallback))
-	return sum[:]
-}
-
 func resolveCRMIMAPSecret(ref string) (string, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return "", fmt.Errorf("IMAP password is missing")
-	}
-	if strings.HasPrefix(ref, "enc:v1:") {
-		payload, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(ref, "enc:v1:"))
-		if err != nil {
-			return "", fmt.Errorf("invalid encrypted IMAP secret")
-		}
-		block, err := aes.NewCipher(crmMailboxSecretKey())
-		if err != nil {
-			return "", fmt.Errorf("invalid CRM mailbox secret key")
-		}
-		gcm, err := cipher.NewGCM(block)
-		if err != nil {
-			return "", fmt.Errorf("invalid CRM mailbox cipher")
-		}
-		if len(payload) < gcm.NonceSize() {
-			return "", fmt.Errorf("invalid encrypted IMAP secret")
-		}
-		nonce, ciphertext := payload[:gcm.NonceSize()], payload[gcm.NonceSize():]
-		plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
-		if err != nil {
-			return "", fmt.Errorf("invalid encrypted IMAP secret")
-		}
-		return string(plaintext), nil
 	}
 	if strings.HasPrefix(ref, "inline:") {
 		decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(ref, "inline:"))
@@ -150,24 +93,7 @@ func resolveCRMIMAPSecret(ref string) (string, error) {
 }
 
 func encodeCRMIMAPInlineSecret(secret string) string {
-	block, err := aes.NewCipher(crmMailboxSecretKey())
-	if err != nil {
-		slog.Warn("failed to initialize CRM mailbox secret encryption", "error", err)
-		return "inline:" + base64.StdEncoding.EncodeToString([]byte(secret))
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		slog.Warn("failed to initialize CRM mailbox secret cipher", "error", err)
-		return "inline:" + base64.StdEncoding.EncodeToString([]byte(secret))
-	}
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		slog.Warn("failed to generate CRM mailbox secret nonce", "error", err)
-		return "inline:" + base64.StdEncoding.EncodeToString([]byte(secret))
-	}
-	ciphertext := gcm.Seal(nil, nonce, []byte(secret), nil)
-	payload := append(nonce, ciphertext...)
-	return "enc:v1:" + base64.StdEncoding.EncodeToString(payload)
+	return "inline:" + base64.StdEncoding.EncodeToString([]byte(secret))
 }
 
 func dialCRMIMAP(cfg crmIMAPMailboxConfig) (*crmIMAPClient, error) {
@@ -343,13 +269,12 @@ func parseCRMIMAPMessage(uid, raw string) crmIMAPFetchedMessage {
 		return msg
 	}
 	decode := new(mime.WordDecoder).DecodeHeader
-	msg.RawHeaders = map[string][]string(parsed.Header)
-	msg.MessageID = cleanMessageID(parsed.Header.Get("Message-Id"))
-	msg.InReplyTo = cleanMessageID(parsed.Header.Get("In-Reply-To"))
-	msg.ReferenceIDs = cleanMessageIDList(parsed.Header.Get("References"))
+	msg.MessageID = normalizeCRMMessageID(parsed.Header.Get("Message-Id"))
 	if msg.MessageID == "" {
 		msg.MessageID = uid
 	}
+	msg.InReplyTo = normalizeCRMMessageID(parsed.Header.Get("In-Reply-To"))
+	msg.References = parseCRMMessageIDList(parsed.Header.Get("References"))
 	msg.Subject, _ = decode(parsed.Header.Get("Subject"))
 	if froms, err := parsed.Header.AddressList("From"); err == nil && len(froms) > 0 {
 		msg.FromEmail = froms[0].Address
@@ -362,7 +287,7 @@ func parseCRMIMAPMessage(uid, raw string) crmIMAPFetchedMessage {
 	}
 	body, _ := io.ReadAll(parsed.Body)
 	contentType := parsed.Header.Get("Content-Type")
-	msg.BodyText, msg.BodyHTML, msg.Attachments = extractReadableEmailParts(contentType, body)
+	msg.BodyText, msg.BodyHTML = extractReadableEmailBodies(contentType, body)
 	if strings.TrimSpace(msg.BodyText) == "" && strings.TrimSpace(msg.BodyHTML) != "" {
 		msg.BodyText = htmlToPlainText(msg.BodyHTML)
 	}
@@ -373,20 +298,41 @@ func parseCRMIMAPMessage(uid, raw string) crmIMAPFetchedMessage {
 	return msg
 }
 
-func extractReadableEmailBodies(contentType string, body []byte) (string, string) {
-	textBody, htmlBody, _ := extractReadableEmailParts(contentType, body)
-	return textBody, htmlBody
+func normalizeCRMMessageID(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.Trim(value, "<>")
+	return strings.TrimSpace(value)
 }
 
-func extractReadableEmailParts(contentType string, body []byte) (string, string, []crmEmailAttachmentMetadata) {
+func parseCRMMessageIDList(value string) []string {
+	return normalizeCRMMessageIDSlice(strings.Fields(value))
+}
+
+func normalizeCRMMessageIDSlice(values []string) []string {
+	ids := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		id := normalizeCRMMessageID(value)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func extractReadableEmailBodies(contentType string, body []byte) (string, string) {
 	mediaType, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
-		return decodeTransferBody(body, ""), "", nil
+		return decodeTransferBody(body, ""), ""
 	}
 	if strings.HasPrefix(mediaType, "multipart/") {
 		mr := multipart.NewReader(bytes.NewReader(body), params["boundary"])
 		var textBody, htmlBody string
-		var attachments []crmEmailAttachmentMetadata
 		for {
 			part, err := mr.NextPart()
 			if err == io.EOF {
@@ -397,23 +343,10 @@ func extractReadableEmailParts(contentType string, body []byte) (string, string,
 			}
 			partType := part.Header.Get("Content-Type")
 			partBody, _ := io.ReadAll(part)
-			pt, partParams, _ := mime.ParseMediaType(partType)
-			disposition, dispositionParams, _ := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
-			decodedBytes := decodeTransferBytes(partBody, part.Header.Get("Content-Transfer-Encoding"))
-			decoded := string(decodedBytes)
-			filename := dispositionParams["filename"]
-			if filename == "" {
-				filename = partParams["name"]
-			}
-			contentID := strings.Trim(part.Header.Get("Content-ID"), " <>")
-			isInline := strings.EqualFold(disposition, "inline") || contentID != ""
-			if filename != "" || strings.EqualFold(disposition, "attachment") || (isInline && strings.HasPrefix(strings.ToLower(pt), "image/")) {
-				attachments = append(attachments, crmEmailAttachmentMetadata{Filename: filename, ContentType: pt, SizeBytes: len(decodedBytes), Inline: isInline, ContentID: contentID, Disposition: disposition})
-				continue
-			}
+			pt, _, _ := mime.ParseMediaType(partType)
+			decoded := decodeTransferBody(partBody, part.Header.Get("Content-Transfer-Encoding"))
 			if strings.HasPrefix(pt, "multipart/") {
-				nestedText, nestedHTML, nestedAttachments := extractReadableEmailParts(partType, partBody)
-				attachments = append(attachments, nestedAttachments...)
+				nestedText, nestedHTML := extractReadableEmailBodies(partType, partBody)
 				if textBody == "" {
 					textBody = nestedText
 				}
@@ -426,56 +359,29 @@ func extractReadableEmailParts(contentType string, body []byte) (string, string,
 				htmlBody = decoded
 			}
 		}
-		return textBody, htmlBody, attachments
+		return textBody, htmlBody
 	}
 	decoded := decodeTransferBody(body, "")
 	if strings.EqualFold(mediaType, "text/html") {
-		return htmlToPlainText(decoded), decoded, nil
+		return htmlToPlainText(decoded), decoded
 	}
-	return decoded, "", nil
+	return decoded, ""
 }
 
 func decodeTransferBody(body []byte, encoding string) string {
-	return string(decodeTransferBytes(body, encoding))
-}
-
-func decodeTransferBytes(body []byte, encoding string) []byte {
 	switch strings.ToLower(strings.TrimSpace(encoding)) {
 	case "base64":
 		decoded, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(string(body)), ""))
 		if err == nil {
-			return decoded
+			return string(decoded)
 		}
 	case "quoted-printable":
 		decoded, err := io.ReadAll(quotedprintable.NewReader(bufio.NewReader(bytes.NewReader(body))))
 		if err == nil {
-			return decoded
+			return string(decoded)
 		}
 	}
-	return body
-}
-
-func cleanMessageID(value string) string {
-	return strings.Trim(strings.TrimSpace(value), " <>")
-}
-
-func cleanMessageIDList(value string) []string {
-	fields := strings.Fields(value)
-	out := make([]string, 0, len(fields))
-	for _, field := range fields {
-		if id := cleanMessageID(field); id != "" {
-			out = append(out, id)
-		}
-	}
-	return out
-}
-
-func crmEmailJSON(value any, fallback string) any {
-	b, err := json.Marshal(value)
-	if err != nil || len(b) == 0 || string(b) == "null" {
-		return json.RawMessage(fallback)
-	}
-	return json.RawMessage(b)
+	return string(body)
 }
 
 func htmlToPlainText(value string) string {
