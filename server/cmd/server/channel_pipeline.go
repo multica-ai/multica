@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/channel/binding"
+	channelconversation "github.com/multica-ai/multica/server/internal/channel/conversation"
 	"github.com/multica-ai/multica/server/internal/channel/conversationctx"
 	"github.com/multica-ai/multica/server/internal/channel/facade"
 	"github.com/multica-ai/multica/server/internal/channel/facadeimpl"
@@ -38,6 +39,7 @@ type channelInboundRuntimeComponents struct {
 	ChannelTurn        chintent.ChannelAgentTurnClient
 	DispatchStore      inbound.DispatchCompletionStore
 	ReplyContext       replyctx.Store
+	ConversationStore  channelconversation.Store
 	ConversationCtx    conversationctx.Store
 	ContextMaxEntities int
 	ContextTTL         time.Duration
@@ -53,12 +55,13 @@ func newChannelInboundRuntimeComponents(pool *pgxpool.Pool, opts ...channelPipel
 	issuer := binding.NewTokenIssuer(queries)
 	replyCtxStore := replyctx.NewDBStore(pool)
 	conversationCtxStore := conversationctx.NewDBStore(pool)
+	conversationStore := channelconversation.NewDBStore(pool)
 
 	var opt channelPipelineOptions
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
-	replySink := inbound.NewGatewayReplySink(opt.Gateway)
+	replySink := inbound.NewGatewayReplySink(opt.Gateway, inbound.WithGatewayReplyConversationStore(conversationStore))
 
 	ruleResolvers := []chintent.IntentResolver{
 		chintent.NewRuleResolver(chintent.NewRuleMatcher()),
@@ -124,15 +127,16 @@ func newChannelInboundRuntimeComponents(pool *pgxpool.Pool, opts ...channelPipel
 	post.SetObserver(opt.Observer)
 
 	return channelInboundRuntimeComponents{
-		PrePipeline:     pre,
-		PostPipeline:    post,
-		RuleResolvers:   ruleResolvers,
-		ChatIntent:      asyncChatIntent,
-		TurnPlanner:     turnPlannerFromAsync(asyncChatIntent),
-		ChannelTurn:     channelTurnFromAsync(asyncChatIntent),
-		DispatchStore:   inbound.NewDBDispatchCompletionStore(pool),
-		ReplyContext:    replyCtxStore,
-		ConversationCtx: conversationCtxStore,
+		PrePipeline:       pre,
+		PostPipeline:      post,
+		RuleResolvers:     ruleResolvers,
+		ChatIntent:        asyncChatIntent,
+		TurnPlanner:       turnPlannerFromAsync(asyncChatIntent),
+		ChannelTurn:       channelTurnFromAsync(asyncChatIntent),
+		DispatchStore:     inbound.NewDBDispatchCompletionStore(pool),
+		ReplyContext:      replyCtxStore,
+		ConversationStore: conversationStore,
+		ConversationCtx:   conversationCtxStore,
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/channel"
+	channelconversation "github.com/multica-ai/multica/server/internal/channel/conversation"
 	"github.com/multica-ai/multica/server/internal/channel/conversationctx"
 	"github.com/multica-ai/multica/server/internal/channel/gateway"
 	"github.com/multica-ai/multica/server/internal/channel/inbound"
@@ -40,6 +41,7 @@ type RuntimeComponents struct {
 	ChannelTurn        chintent.ChannelAgentTurnClient
 	DispatchStore      inbound.DispatchCompletionStore
 	ReplyContext       replyctx.Store
+	ConversationStore  channelconversation.Store
 	ConversationCtx    conversationctx.Store
 	ContextMaxEntities int
 	ContextTTL         time.Duration
@@ -336,10 +338,11 @@ func (m *Manager) startInboundRuntimeLocked(ctx context.Context) {
 		ChannelTurn:          components.ChannelTurn,
 		DispatchStore:        components.DispatchStore,
 		ReplyContext:         components.ReplyContext,
+		ConversationStore:    components.ConversationStore,
 		ConversationCtx:      components.ConversationCtx,
 		ContextMaxEntities:   components.ContextMaxEntities,
 		ContextTTL:           components.ContextTTL,
-		ReplySink:            inbound.NewGatewayReplySink(m.cfg.Gateway),
+		ReplySink:            inbound.NewGatewayReplySink(m.cfg.Gateway, inbound.WithGatewayReplyConversationStore(channelconversation.NewDBStore(m.cfg.Pool))),
 		Workers:              m.cfg.Workers,
 		ClaimBatch:           m.cfg.ClaimBatch,
 		IntentTaskTimeout:    m.cfg.IntentTaskTimeout,
@@ -662,6 +665,7 @@ func (m *Manager) startOutbox(ctx context.Context) {
 	outboxCtx, cancel := context.WithCancel(ctx)
 	m.cancels = append(m.cancels, cancel)
 	worker := outbound.NewOutboxWorker(outbound.NewDBNotificationStore(m.cfg.Pool), newRegistryRetrySender(m.cfg.Registry))
+	worker.SetMessageRecorder(outbound.NewConversationMessageRecorder(channelconversation.NewDBStore(m.cfg.Pool)))
 	worker.SetReadyConnectionsFunc(m.readyConnectionIDs)
 	go worker.Run(outboxCtx)
 	if m.cfg.OutboundCleanupEnabled {
@@ -803,10 +807,10 @@ func newRegistryRetrySender(registry *channel.Registry) *registryRetrySender {
 	return &registryRetrySender{registry: registry}
 }
 
-func (s *registryRetrySender) SendCard(ctx context.Context, connectionID string, target port.OutboundTarget, payload outbound.RetryPayload) error {
+func (s *registryRetrySender) SendCard(ctx context.Context, connectionID string, target port.OutboundTarget, payload outbound.RetryPayload) (port.SendResult, error) {
 	ch, err := s.registry.Get(connectionID)
 	if err != nil {
-		return outbound.WrapRetryable(fmt.Errorf("retry sender: get %s: %w", connectionID, err))
+		return port.SendResult{Retryable: true}, outbound.WrapRetryable(fmt.Errorf("retry sender: get %s: %w", connectionID, err))
 	}
 	result, err := ch.SendCard(ctx, port.OutboundCardMessage{
 		Target:   target,
@@ -816,9 +820,9 @@ func (s *registryRetrySender) SendCard(ctx context.Context, connectionID string,
 		Mentions: payload.Mentions,
 	})
 	if err != nil && result.Retryable {
-		return outbound.WrapRetryable(err)
+		return result, outbound.WrapRetryable(err)
 	}
-	return err
+	return result, err
 }
 
 var (

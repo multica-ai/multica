@@ -37,6 +37,9 @@ type NotificationEnqueueRequest struct {
 	IssueIdentifier       string
 	IssueTitle            string
 	InboxItemID           pgtype.UUID
+	ActorType             string
+	ActorID               pgtype.UUID
+	SourceCommentID       pgtype.UUID
 	Replyable             bool
 }
 
@@ -61,6 +64,9 @@ type OutboxNotification struct {
 	IssueIdentifier       string
 	IssueTitle            string
 	InboxItemID           pgtype.UUID
+	ActorType             string
+	ActorID               pgtype.UUID
+	SourceCommentID       pgtype.UUID
 	Replyable             bool
 	Attempts              int32
 	MaxAttempts           int32
@@ -106,8 +112,9 @@ INSERT INTO channel_outbound_notification (
     provider, connection_id, event_kind, target_user_id, target_external_user_id,
     target_type, target_chat_id, mention_external_user_id,
     title, body, workspace_id, issue_id, issue_identifier, issue_title, inbox_item_id,
-    replyable, aggregation_due_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now() + $17::interval)
+    actor_type, actor_id, source_comment_id, replyable, aggregation_due_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+          $16, $17, $18, $19, now() + $20::interval)
 `
 	_, err := s.db.Exec(ctx, q,
 		req.Provider,
@@ -125,6 +132,9 @@ INSERT INTO channel_outbound_notification (
 		strings.TrimSpace(req.IssueIdentifier),
 		strings.TrimSpace(req.IssueTitle),
 		nullableUUID(req.InboxItemID),
+		normalizeActorType(req.ActorType),
+		nullableUUID(req.ActorID),
+		nullableUUID(req.SourceCommentID),
 		req.Replyable,
 		pgInterval(window),
 	)
@@ -155,7 +165,7 @@ RETURNING id, provider, connection_id, event_kind, target_user_id,
           COALESCE(target_external_user_id, '') AS target_external_user_id,
           target_type, target_chat_id, mention_external_user_id,
           title, body, workspace_id, issue_id, issue_identifier, issue_title, inbox_item_id,
-          replyable, attempts, max_attempts
+          actor_type, actor_id, source_comment_id, replyable, attempts, max_attempts
 `
 		return s.queryNotifications(ctx, q, limit, readyConnectionIDs)
 	}
@@ -177,7 +187,7 @@ RETURNING id, provider, connection_id, event_kind, target_user_id,
           COALESCE(target_external_user_id, '') AS target_external_user_id,
           target_type, target_chat_id, mention_external_user_id,
           title, body, workspace_id, issue_id, issue_identifier, issue_title, inbox_item_id,
-          replyable, attempts, max_attempts
+          actor_type, actor_id, source_comment_id, replyable, attempts, max_attempts
 `
 	return s.queryNotifications(ctx, q, limit)
 }
@@ -205,7 +215,7 @@ RETURNING id, provider, connection_id, event_kind, target_user_id,
           COALESCE(target_external_user_id, '') AS target_external_user_id,
           target_type, target_chat_id, mention_external_user_id,
           title, body, workspace_id, issue_id, issue_identifier, issue_title, inbox_item_id,
-          replyable, attempts, max_attempts
+          actor_type, actor_id, source_comment_id, replyable, attempts, max_attempts
 `
 		return s.queryNotifications(ctx, q, limit, pgInterval(staleAfter), readyConnectionIDs)
 	}
@@ -226,7 +236,7 @@ RETURNING id, provider, connection_id, event_kind, target_user_id,
           COALESCE(target_external_user_id, '') AS target_external_user_id,
           target_type, target_chat_id, mention_external_user_id,
           title, body, workspace_id, issue_id, issue_identifier, issue_title, inbox_item_id,
-          replyable, attempts, max_attempts
+          actor_type, actor_id, source_comment_id, replyable, attempts, max_attempts
 `
 	return s.queryNotifications(ctx, q, limit, pgInterval(staleAfter))
 }
@@ -258,6 +268,9 @@ func (s *DBNotificationStore) queryNotifications(ctx context.Context, q string, 
 			&n.IssueIdentifier,
 			&n.IssueTitle,
 			&n.InboxItemID,
+			&n.ActorType,
+			&n.ActorID,
+			&n.SourceCommentID,
 			&n.Replyable,
 			&n.Attempts,
 			&n.MaxAttempts,
@@ -332,6 +345,7 @@ WHERE status IN ('sent', 'dead')
 type OutboxWorker struct {
 	store            NotificationStore
 	sender           RetrySender
+	recorder         SentNotificationRecorder
 	active           func() bool
 	readyConnections func() []string
 }
@@ -347,6 +361,14 @@ type NotificationStore interface {
 
 func NewOutboxWorker(store NotificationStore, sender RetrySender) *OutboxWorker {
 	return &OutboxWorker{store: store, sender: sender}
+}
+
+type SentNotificationRecorder interface {
+	RecordSentNotification(ctx context.Context, group notificationGroup, payload RetryPayload, result port.SendResult) error
+}
+
+func (w *OutboxWorker) SetMessageRecorder(recorder SentNotificationRecorder) {
+	w.recorder = recorder
 }
 
 func (w *OutboxWorker) SetActiveFunc(active func() bool) {
@@ -495,8 +517,13 @@ func (w *OutboxWorker) processGroup(ctx context.Context, g notificationGroup) {
 		payload.Title = g.items[0].Title
 		payload.Body = g.items[0].Body
 	}
-	err := w.sender.SendCard(ctx, g.connectionID, g.target, payload)
+	result, err := w.sender.SendCard(ctx, g.connectionID, g.target, payload)
 	if err == nil {
+		if w.recorder != nil {
+			if recordErr := w.recorder.RecordSentNotification(ctx, g, payload, result); recordErr != nil {
+				slog.Error("outbox worker: record sent notification failed", "error", recordErr)
+			}
+		}
 		channelmetrics.M.RecordOutboundOutbox(g.provider, "sent", len(g.items))
 		if markErr := w.store.MarkSent(ctx, ids); markErr != nil {
 			slog.Error("outbox worker: mark sent failed", "error", markErr)
@@ -574,4 +601,13 @@ func nullableString(s string) any {
 		return nil
 	}
 	return s
+}
+
+func normalizeActorType(s string) string {
+	switch strings.TrimSpace(s) {
+	case "member", "agent", "system":
+		return strings.TrimSpace(s)
+	default:
+		return ""
+	}
 }

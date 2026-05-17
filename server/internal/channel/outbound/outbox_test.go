@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	channelconversation "github.com/multica-ai/multica/server/internal/channel/conversation"
 	"github.com/multica-ai/multica/server/internal/channel/port"
 )
 
@@ -67,9 +68,9 @@ type mockRetrySendCall struct {
 	Payload      RetryPayload
 }
 
-func (m *mockRetrySender) SendCard(_ context.Context, connectionID string, target port.OutboundTarget, card RetryPayload) error {
+func (m *mockRetrySender) SendCard(_ context.Context, connectionID string, target port.OutboundTarget, card RetryPayload) (port.SendResult, error) {
 	m.calls = append(m.calls, mockRetrySendCall{ConnectionID: connectionID, Target: target, Payload: card})
-	return m.err
+	return port.SendResult{PlatformMessageID: "msg-outbox"}, m.err
 }
 
 func TestOutboxWorker_MergesDueNotificationsAndMarksSent(t *testing.T) {
@@ -97,6 +98,41 @@ func TestOutboxWorker_MergesDueNotificationsAndMarksSent(t *testing.T) {
 	}
 	if len(store.sent) != 2 {
 		t.Fatalf("sent ids = %d, want 2", len(store.sent))
+	}
+}
+
+func TestNotificationEntityRefs_ExplicitAgentMentionIsHandoffTarget(t *testing.T) {
+	t.Parallel()
+
+	actorID := pgtype.UUID{Bytes: [16]byte{0x11}, Valid: true}
+	mentionedAgentID := "22222222-2222-2222-2222-222222222222"
+	refs := notificationEntityRefs([]OutboxNotification{{
+		ActorType:       "agent",
+		ActorID:         actorID,
+		IssueIdentifier: "STA-9",
+		Body:            "Review PASS, reply OK [@Orion](mention://agent/" + mentionedAgentID + ")",
+	}})
+
+	var sourceAgent, targetAgent bool
+	for _, ref := range refs {
+		if ref.EntityType != channelconversation.EntityTypeAgent {
+			continue
+		}
+		if ref.EntityID == uuidStr(actorID) && ref.Role == channelconversation.EntityRoleSource {
+			sourceAgent = true
+		}
+		if ref.EntityID == mentionedAgentID && ref.Role == channelconversation.EntityRoleHandoffTarget {
+			targetAgent = true
+		}
+		if ref.EntityID == uuidStr(actorID) && ref.Role == channelconversation.EntityRoleHandoffTarget {
+			t.Fatal("actor agent must not be treated as the handoff target")
+		}
+	}
+	if !sourceAgent {
+		t.Fatal("actor agent source ref was not recorded")
+	}
+	if !targetAgent {
+		t.Fatal("explicit mentioned agent handoff target ref was not recorded")
 	}
 }
 

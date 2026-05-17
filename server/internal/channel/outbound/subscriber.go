@@ -257,6 +257,9 @@ func (s *Subscriber) handleCommentCreated(e events.Event) {
 		commentContent = "有一条新评论（无正文）。"
 	}
 	issueID, _ := commentObj["issue_id"].(string)
+	commentID, _ := commentObj["id"].(string)
+	actorType := firstNonEmpty(e.ActorType, stringFromAny(commentObj["author_type"]))
+	actorID := firstNonEmpty(e.ActorID, stringFromAny(commentObj["author_id"]))
 
 	for _, userID := range subscriberIDs {
 		if userID == e.ActorID {
@@ -267,6 +270,9 @@ func (s *Subscriber) handleCommentCreated(e events.Event) {
 			IssueID:         issueID,
 			IssueIdentifier: issueIdentifier,
 			IssueTitle:      issueTitle,
+			ActorType:       actorType,
+			ActorID:         actorID,
+			SourceCommentID: commentID,
 			Replyable:       issueID != "",
 		})
 	}
@@ -316,6 +322,8 @@ func (s *Subscriber) handleInboxNew(e events.Event) {
 	eventKind := mapInboxTypeToEventKind(inboxType)
 
 	ctxMeta := notificationContextFromInboxItem(e.WorkspaceID, issueTitle, item)
+	ctxMeta.ActorType = e.ActorType
+	ctxMeta.ActorID = e.ActorID
 	ctxMeta.Replyable = ctxMeta.IssueID != "" && replyableEventKind(eventKind)
 	s.sendToUser(e.WorkspaceID, userID, eventKind, issueTitle, body, ctxMeta)
 }
@@ -348,6 +356,8 @@ func (s *Subscriber) handleSubscriberAdded(e events.Event) {
 		IssueID:         issueID,
 		IssueIdentifier: issueIdentifier,
 		IssueTitle:      issueTitle,
+		ActorType:       e.ActorType,
+		ActorID:         e.ActorID,
 		Replyable:       issueID != "",
 	})
 }
@@ -398,6 +408,8 @@ func (s *Subscriber) handleIssueUpdated(e events.Event) {
 			IssueID:         issueID,
 			IssueIdentifier: issueIdentifier,
 			IssueTitle:      issueTitle,
+			ActorType:       e.ActorType,
+			ActorID:         e.ActorID,
 			Replyable:       issueID != "",
 		})
 	}
@@ -440,6 +452,9 @@ type notificationContext struct {
 	IssueIdentifier string
 	IssueTitle      string
 	InboxItemID     string
+	ActorType       string
+	ActorID         string
+	SourceCommentID string
 	Replyable       bool
 }
 
@@ -529,6 +544,9 @@ func (s *Subscriber) sendToUser(workspaceID, userID, eventKind, title, body stri
 		IssueIdentifier:       ctxMeta.IssueIdentifier,
 		IssueTitle:            firstNonEmpty(ctxMeta.IssueTitle, title),
 		InboxItemID:           parseOptionalUUID(ctxMeta.InboxItemID),
+		ActorType:             ctxMeta.ActorType,
+		ActorID:               parseOptionalUUID(ctxMeta.ActorID),
+		SourceCommentID:       parseOptionalUUID(ctxMeta.SourceCommentID),
 		Replyable:             ctxMeta.Replyable,
 	}); err != nil {
 		channelmetrics.M.RecordOutboundFailure(providerName, eventKind, "outbox_enqueue", true)

@@ -291,6 +291,7 @@ func main() {
 				ChannelTurn:        components.ChannelTurn,
 				DispatchStore:      components.DispatchStore,
 				ReplyContext:       components.ReplyContext,
+				ConversationStore:  components.ConversationStore,
 				ConversationCtx:    components.ConversationCtx,
 				ContextMaxEntities: components.ContextMaxEntities,
 				ContextTTL:         components.ContextTTL,

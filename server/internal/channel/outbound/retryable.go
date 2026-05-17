@@ -47,7 +47,7 @@ type RetryPayload struct {
 }
 
 type RetrySender interface {
-	SendCard(ctx context.Context, connectionID string, target port.OutboundTarget, card RetryPayload) error
+	SendCard(ctx context.Context, connectionID string, target port.OutboundTarget, card RetryPayload) (port.SendResult, error)
 }
 
 func backoffForAttempt(attempt int) time.Duration {

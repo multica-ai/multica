@@ -11,11 +11,14 @@ import (
 	"github.com/multica-ai/multica/server/internal/channel/port"
 )
 
-func TestConversationKey_GroupIncludesSender(t *testing.T) {
+func TestConversationKey_GroupIgnoresSender(t *testing.T) {
 	a := port.InboundEvent{ChannelName: "feishu", ChatType: port.ChatTypeGroup, ChatID: "oc_1", SenderID: "ou_a"}
 	b := port.InboundEvent{ChannelName: "feishu", ChatType: port.ChatTypeGroup, ChatID: "oc_1", SenderID: "ou_b"}
-	if ConversationKey(a) == ConversationKey(b) {
-		t.Fatalf("group conversation key must include sender: %q", ConversationKey(a))
+	if ConversationKey(a) != ConversationKey(b) {
+		t.Fatalf("group conversation key should be chat-scoped: %q != %q", ConversationKey(a), ConversationKey(b))
+	}
+	if ProcessingKey(a) == ProcessingKey(b) {
+		t.Fatalf("group processing key must include sender: %q", ProcessingKey(a))
 	}
 }
 
@@ -24,6 +27,14 @@ func TestConversationKey_DirectIgnoresChatID(t *testing.T) {
 	b := port.InboundEvent{ChannelName: "feishu", ChatType: port.ChatTypeDirect, ChatID: "oc_2", SenderID: "ou_a"}
 	if ConversationKey(a) != ConversationKey(b) {
 		t.Fatalf("direct conversation key should be user-scoped: %q != %q", ConversationKey(a), ConversationKey(b))
+	}
+}
+
+func TestConversationKey_ThreadUsesThreadID(t *testing.T) {
+	a := port.InboundEvent{ChannelName: "feishu", ChatType: port.ChatTypeGroup, ChatID: "oc_1", SenderID: "ou_a", ThreadID: "thread_1"}
+	b := port.InboundEvent{ChannelName: "feishu", ChatType: port.ChatTypeGroup, ChatID: "oc_1", SenderID: "ou_a", ThreadID: "thread_2"}
+	if ConversationKey(a) == ConversationKey(b) {
+		t.Fatalf("thread conversation key must include thread id: %q", ConversationKey(a))
 	}
 }
 

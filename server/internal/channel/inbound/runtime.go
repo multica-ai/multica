@@ -2,6 +2,7 @@ package inbound
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	channelconversation "github.com/multica-ai/multica/server/internal/channel/conversation"
 	"github.com/multica-ai/multica/server/internal/channel/conversationctx"
 	chintent "github.com/multica-ai/multica/server/internal/channel/intent"
 	"github.com/multica-ai/multica/server/internal/channel/port"
@@ -84,6 +86,7 @@ type RuntimeConfig struct {
 	DispatchStore         DispatchCompletionStore
 	FailureLimiter        FailureNoticeLimiter
 	ReplyContext          replyctx.Store
+	ConversationStore     channelconversation.Store
 	ConversationCtx       conversationctx.Store
 	ContextMaxEntities    int
 	ContextTTL            time.Duration
@@ -265,7 +268,10 @@ func (r *Runtime) workerLoop(ctx context.Context, workerID string) {
 			if markErr != nil {
 				slog.Error("channel inbound runtime: mark retry failed", "event_row_id", rec.ID, "error", markErr)
 			} else if result.Dead {
+				r.completeTurnAfterFailure(ctx, rec, channelconversation.TurnStatusDead, err)
 				r.sendFailureOnce(ctx, rec, failureCodeInboundDead, "处理失败了，这条消息我先停止处理，请稍后重试。", false)
+			} else {
+				r.completeTurnAfterFailure(ctx, rec, channelconversation.TurnStatusFailed, err)
 			}
 		}
 	}
@@ -333,6 +339,12 @@ func (r *Runtime) resolveIntent(ctx context.Context, rec *InboundEventRecord) (b
 	}
 
 	req := r.buildIntentRequest(ctx, rec, evt, &chatCtx)
+	if result, ok, err := r.resolveMessageContextReply(ctx, rec, evt); err != nil || ok {
+		if err != nil {
+			return false, err
+		}
+		return r.applyIntentResult(ctx, rec, result, chatCtx, false)
+	}
 
 	if isDeterministicChannelInput(evt, req) {
 		result, ok, err := r.resolveByRules(ctx, req)
@@ -367,6 +379,7 @@ func (r *Runtime) resolveIntent(ctx context.Context, rec *InboundEventRecord) (b
 	if err := r.cfg.Store.MarkWaitingAgent(ctx, rec.ID, evt, taskID, chatCtx, WaitKindChannelTurn); err != nil {
 		return false, err
 	}
+	r.recordIntentTurn(ctx, rec, evt, chintent.Intent{}, chatCtx, channelconversation.TurnStatusWaitingAgent, WaitKindChannelTurn, taskID)
 	return true, nil
 }
 
@@ -435,7 +448,221 @@ func (r *Runtime) applyIntentResult(ctx context.Context, rec *InboundEventRecord
 	}
 	rec.Event = evt
 	rec.Phase = InboundPhasePost
+	r.recordIntentTurn(ctx, rec, evt, result.Intent, chatCtx, channelconversation.TurnStatusProcessing, "", "")
 	return false, nil
+}
+
+func (r *Runtime) recordIntentTurn(ctx context.Context, rec *InboundEventRecord, evt port.InboundEvent, intent chintent.Intent, chatCtx ChatBindingContext, status, waitKind, waitTaskID string) {
+	if r == nil || r.cfg.ConversationStore == nil || rec == nil || strings.TrimSpace(rec.ID) == "" {
+		return
+	}
+	inboundMsg, ok, err := r.cfg.ConversationStore.FindMessageByInboundEventID(ctx, rec.ID)
+	if err != nil || !ok {
+		if err != nil {
+			slog.Error("channel inbound runtime: lookup inbound message for turn failed", "event_row_id", rec.ID, "error", err)
+		}
+		return
+	}
+	payload, err := json.Marshal(intent)
+	if err != nil {
+		slog.Error("channel inbound runtime: marshal turn intent failed", "event_row_id", rec.ID, "error", err)
+		return
+	}
+	if status == "" {
+		status = channelconversation.TurnStatusProcessing
+	}
+	workspaceID := firstNonEmpty(chatCtx.WorkspaceID, rec.WorkspaceID, inboundMsg.WorkspaceID)
+	if _, err := r.cfg.ConversationStore.UpsertTurn(ctx, channelconversation.Turn{
+		Provider:         evt.ChannelName,
+		ConnectionID:     evt.ConnectionID(),
+		ConversationID:   inboundMsg.ConversationID,
+		WorkspaceID:      workspaceID,
+		InboundEventID:   rec.ID,
+		InboundMessageID: inboundMsg.ID,
+		SenderExternalID: evt.SenderID,
+		IntentKind:       string(intent.Kind),
+		IntentSource:     string(intent.Source),
+		IntentPayload:    payload,
+		Status:           status,
+		WaitKind:         waitKind,
+		WaitTaskID:       waitTaskID,
+		StartedAt:        time.Now().UTC(),
+	}); err != nil {
+		slog.Error("channel inbound runtime: upsert channel turn failed", "event_row_id", rec.ID, "error", err)
+	}
+}
+
+func (r *Runtime) resolveMessageContextReply(ctx context.Context, rec *InboundEventRecord, evt port.InboundEvent) (chintent.IntentResult, bool, error) {
+	if r == nil || r.cfg.ConversationStore == nil || rec == nil || evt.Type != port.EventTypeMessageReceived {
+		return chintent.IntentResult{}, false, nil
+	}
+	action, ok := classifyShortContextReply(evt.Text)
+	if !ok {
+		return chintent.IntentResult{}, false, nil
+	}
+	target, ok, err := r.contextTargetMessage(ctx, rec, evt)
+	if err != nil || !ok {
+		return chintent.IntentResult{}, ok, err
+	}
+	if !isContextReplyTarget(target) {
+		return chintent.IntentResult{}, false, nil
+	}
+	refs, err := r.cfg.ConversationStore.ListEntityRefsByMessageID(ctx, target.ID)
+	if err != nil {
+		return chintent.IntentResult{}, true, err
+	}
+	issueKey := contextIssueKey(target, refs)
+	if issueKey == "" {
+		return chintent.IntentResult{}, false, nil
+	}
+	comment := composeContextReplyComment(action, evt.Text, contextAgentMention(refs))
+	return chintent.IntentResult{
+		Matched: true,
+		Intent: chintent.Intent{
+			Kind:       chintent.IntentAddComment,
+			Confidence: 1,
+			Source:     chintent.SourceRule,
+			Params: map[string]string{
+				"issue_key":                   issueKey,
+				"comment":                     comment,
+				"_channel_context_message_id": target.ID,
+			},
+		},
+	}, true, nil
+}
+
+func (r *Runtime) contextTargetMessage(ctx context.Context, rec *InboundEventRecord, evt port.InboundEvent) (channelconversation.Message, bool, error) {
+	hasExplicitContext := false
+	for _, platformMessageID := range []string{evt.QuotedMessageID, evt.ReplyToMessageID} {
+		if strings.TrimSpace(platformMessageID) != "" {
+			hasExplicitContext = true
+		}
+		msg, ok, err := r.cfg.ConversationStore.FindMessageByPlatformID(ctx, evt.ConnectionID(), platformMessageID)
+		if err != nil || ok {
+			return msg, ok, err
+		}
+	}
+	if hasExplicitContext {
+		return channelconversation.Message{}, false, nil
+	}
+	inboundMsg, ok, err := r.cfg.ConversationStore.FindMessageByInboundEventID(ctx, rec.ID)
+	if err != nil || !ok {
+		return channelconversation.Message{}, false, err
+	}
+	recent, err := r.cfg.ConversationStore.ListRecentHandoffMessages(ctx, evt.ConnectionID(), inboundMsg.ConversationID, evt.ThreadID, time.Now().Add(-30*time.Minute), 2)
+	if err != nil || len(recent) != 1 {
+		return channelconversation.Message{}, false, err
+	}
+	return recent[0], true, nil
+}
+
+func isContextReplyTarget(msg channelconversation.Message) bool {
+	if msg.HandoffKind == "" || msg.HandoffKind == channelconversation.HandoffKindNone {
+		return false
+	}
+	if msg.Direction != "" && msg.Direction != channelconversation.DirectionOutbound {
+		return false
+	}
+	switch msg.MessageType {
+	case channelconversation.MessageTypeAgent, channelconversation.MessageTypeBot, channelconversation.MessageTypeNotification:
+		return true
+	default:
+		return false
+	}
+}
+
+type contextReplyAction string
+
+const (
+	contextReplyApprove  contextReplyAction = "approve"
+	contextReplyContinue contextReplyAction = "continue"
+	contextReplyRetry    contextReplyAction = "retry"
+)
+
+func classifyShortContextReply(text string) (contextReplyAction, bool) {
+	clean := strings.Trim(strings.ToLower(strings.TrimSpace(text)), " \t\r\n.,，。!！?？")
+	if clean == "" || len([]rune(clean)) > 32 {
+		return "", false
+	}
+	switch {
+	case clean == "重试" || clean == "retry" || clean == "再试一次" || clean == "再跑一次" || clean == "重跑" || strings.HasPrefix(clean, "重试 "):
+		return contextReplyRetry, true
+	case clean == "继续" || clean == "继续推进" || clean == "推进" || clean == "go" || clean == "go ahead":
+		return contextReplyContinue, true
+	case clean == "同意" || clean == "可以" || clean == "批准" || clean == "通过" || clean == "ok" || clean == "okay" || clean == "yes" || clean == "y" ||
+		strings.HasPrefix(clean, "ok ") || strings.HasPrefix(clean, "同意 "):
+		return contextReplyApprove, true
+	default:
+		return "", false
+	}
+}
+
+func contextIssueKey(msg channelconversation.Message, refs []channelconversation.EntityRef) string {
+	for _, ref := range refs {
+		if ref.EntityType == channelconversation.EntityTypeIssue && strings.TrimSpace(ref.EntityKey) != "" {
+			return strings.ToUpper(strings.TrimSpace(ref.EntityKey))
+		}
+	}
+	if key := singleExtractedIssueKey(msg.Text); key != "" {
+		return key
+	}
+	if key := singleExtractedIssueKey(string(msg.Body)); key != "" {
+		return key
+	}
+	return ""
+}
+
+func contextAgentMention(refs []channelconversation.EntityRef) string {
+	for _, ref := range refs {
+		if ref.EntityType != channelconversation.EntityTypeAgent ||
+			ref.Role != channelconversation.EntityRoleHandoffTarget ||
+			strings.TrimSpace(ref.EntityID) == "" {
+			continue
+		}
+		label := strings.TrimSpace(ref.Display)
+		if label == "" {
+			label = "Agent"
+		}
+		label = strings.TrimPrefix(label, "@")
+		return fmt.Sprintf("[@%s](mention://agent/%s)", label, strings.TrimSpace(ref.EntityID))
+	}
+	return ""
+}
+
+func composeContextReplyComment(action contextReplyAction, rawText, agentMention string) string {
+	text := strings.TrimSpace(rawText)
+	if text == "" {
+		switch action {
+		case contextReplyRetry:
+			text = "重试一次"
+		case contextReplyContinue:
+			text = "继续推进"
+		default:
+			text = "同意"
+		}
+	}
+	if action == contextReplyRetry && (text == "重试" || strings.EqualFold(text, "retry")) {
+		text = "重试一次"
+	}
+	if action == contextReplyContinue && text == "继续" {
+		text = "继续推进"
+	}
+	if agentMention != "" && !strings.Contains(text, "mention://agent/") {
+		text = strings.TrimSpace(text + " " + agentMention)
+	}
+	return text
+}
+
+func (r *Runtime) completeTurnAfterFailure(ctx context.Context, rec *InboundEventRecord, status string, runErr error) {
+	if r == nil || r.cfg.ConversationStore == nil || rec == nil || strings.TrimSpace(rec.ID) == "" {
+		return
+	}
+	payload, _ := json.Marshal(struct {
+		Error string `json:"error,omitempty"`
+	}{Error: truncateErr(runErr)})
+	if err := r.cfg.ConversationStore.CompleteTurnForInboundEvent(ctx, rec.ID, "", status, payload, truncateErr(runErr)); err != nil {
+		slog.Error("channel inbound runtime: complete failed turn failed", "event_row_id", rec.ID, "status", status, "error", err)
+	}
 }
 
 func (r *Runtime) resumeLoop(ctx context.Context) {
@@ -459,7 +686,9 @@ func (r *Runtime) resumeWaitingAgents(ctx context.Context) {
 	}
 	for _, item := range items {
 		if item.WaitTaskID == "" {
-			_ = r.cfg.Store.MarkDead(ctx, item.ID, errors.New("waiting agent event has no task id"))
+			err := errors.New("waiting agent event has no task id")
+			_ = r.cfg.Store.MarkDead(ctx, item.ID, err)
+			r.completeTurnAfterFailure(ctx, &InboundEventRecord{ID: item.ID}, channelconversation.TurnStatusDead, err)
 			continue
 		}
 		timeout := r.cfg.IntentTaskTimeout
@@ -474,6 +703,7 @@ func (r *Runtime) resumeWaitingAgents(ctx context.Context) {
 			if markErr := r.cfg.Store.MarkDead(ctx, item.ID, err); markErr != nil {
 				slog.Error("channel inbound runtime: mark timed-out event dead failed", "event_row_id", item.ID, "error", markErr)
 			}
+			r.completeTurnAfterFailure(ctx, &InboundEventRecord{ID: item.ID}, channelconversation.TurnStatusDead, err)
 			if rec != nil {
 				r.sendFailureOnce(ctx, rec, failureCodeChannelTurnTimeout, "处理超时了，这条消息我先停止处理，请稍后重试。", false)
 			}
@@ -550,10 +780,12 @@ func (r *Runtime) resumeChannelTurn(ctx context.Context, item WaitingAgentEvent)
 		if strings.TrimSpace(err.Error()) != "" {
 			slog.Warn("channel inbound runtime: channel turn failed", "event_row_id", item.ID, "task_id", item.WaitTaskID, "error", err)
 		}
+		r.completeTurnAfterFailure(ctx, rec, channelconversation.TurnStatusDead, err)
 		r.sendFailureOnce(ctx, rec, failureCodeChannelTurnFailed, msg, true)
 		return
 	}
 	if strings.TrimSpace(reply) == "" {
+		r.completeTurnAfterFailure(ctx, rec, channelconversation.TurnStatusDead, errors.New("channel turn returned empty reply"))
 		r.sendFailureOnce(ctx, rec, failureCodeChannelTurnEmpty, "我这边没有拿到有效回复，请再发一次。", true)
 		return
 	}
