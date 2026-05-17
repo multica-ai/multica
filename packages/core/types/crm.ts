@@ -198,6 +198,15 @@ export type CRMEmailThreadDirection = "inbound" | "outbound" | "mixed";
 export type CRMEmailThreadStatus = "open" | "archived";
 export type CRMEmailMessageDirection = "inbound" | "outbound";
 
+export interface CRMEmailAttachment {
+  filename?: string;
+  content_type?: string;
+  size_bytes: number;
+  inline: boolean;
+  content_id?: string;
+  disposition?: string;
+}
+
 export interface CRMEmailThread {
   id: string;
   workspace_id: string;
@@ -235,6 +244,11 @@ export interface CRMEmailMessage {
   body_text?: string | null;
   body_html?: string | null;
   snippet?: string | null;
+  raw_size_bytes?: number | null;
+  in_reply_to?: string | null;
+  reference_ids: string[];
+  raw_headers?: Record<string, string[]> | null;
+  attachments: CRMEmailAttachment[];
   direction: CRMEmailMessageDirection;
   created_at: string;
   updated_at: string;
@@ -319,6 +333,11 @@ export interface CreateCRMEmailMessageRequest {
   body_text?: string | null;
   body_html?: string | null;
   snippet?: string | null;
+  raw_size_bytes?: number | null;
+  in_reply_to?: string | null;
+  reference_ids?: string[];
+  raw_headers?: Record<string, string[]> | null;
+  attachments?: CRMEmailAttachment[];
   direction: CRMEmailMessageDirection;
 }
 
