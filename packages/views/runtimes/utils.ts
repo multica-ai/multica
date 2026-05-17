@@ -179,32 +179,71 @@ const MODEL_PRICING: Record<
   "gpt-4o":             { input: 2.50, output: 10,   cacheRead: 1.25,  cacheWrite: 2.50 },
 };
 
-// Resolve a model string to its pricing tier. Exact match, with one
-// tolerance: providers ship dated snapshots (`claude-sonnet-4-5-20250929`,
-// `gpt-5-2025-08-07`) where the family is what we price and the date is
-// volatile, so we strip a trailing date / "latest" tag and try again.
-// Anything still unmapped in the maintained catalog falls back to the
-// user-supplied custom pricing store before giving up. No startsWith
-// fallback: variants like `gpt-5.5-mini` must have their own row to be
-// priced (otherwise they'd inherit `gpt-5.5`).
+// Resolve a model string to its pricing tier. Exact match, with three
+// tolerances applied in order:
+//
+//  1. Provider-prefixed IDs (`anthropic/claude-opus-4.7` from openclaw /
+//     opencode) — the `<provider>/` segment is routing metadata, not part
+//     of the SKU, so we strip it before lookup.
+//  2. Anthropic dot↔dash normalization — Claude Code reports
+//     `claude-opus-4-7`, GitHub Copilot reports `claude-opus-4.7`. Same
+//     SKU, two transports. We canonicalize `claude-*` IDs to the dashed
+//     form Anthropic itself publishes. Scoped to `claude-*` because for
+//     OpenAI the separator IS semantic (`gpt-5.4` ≠ `gpt-5-4`).
+//  3. Trailing dated snapshots (`claude-sonnet-4-5-20250929`,
+//     `gpt-5-2025-08-07`) — the family is what we price, the date is
+//     volatile, so we strip a trailing date / "latest" tag.
+//
+// Anything still unmapped falls back to the user-supplied custom pricing
+// store. No startsWith fallback: variants like `gpt-5.5-mini` must have
+// their own row to be priced (otherwise they'd inherit `gpt-5.5`).
 function resolvePricing(model: string) {
   if (!model) return undefined;
-  if (MODEL_PRICING[model]) return MODEL_PRICING[model];
 
-  const stripped = model.replace(/-(20\d{2}-\d{2}-\d{2}|20\d{6}|latest)$/, "");
-  if (stripped !== model && MODEL_PRICING[stripped]) return MODEL_PRICING[stripped];
-
-  // User-supplied override for models we don't ship a maintained rate for.
-  // Checked exact-then-stripped to mirror the catalog lookup above, so a
-  // user can either pin a dated snapshot specifically or price the family.
-  const custom = getCustomPricing(model);
-  if (custom) return custom;
-  if (stripped !== model) {
-    const customStripped = getCustomPricing(stripped);
-    if (customStripped) return customStripped;
+  for (const candidate of canonicalCandidates(model)) {
+    const hit = MODEL_PRICING[candidate];
+    if (hit) return hit;
   }
-
+  for (const candidate of canonicalCandidates(model)) {
+    const hit = getCustomPricing(candidate);
+    if (hit) return hit;
+  }
   return undefined;
+}
+
+// Generate the lookup candidates for a model string, in priority order:
+// the raw string first (preserves explicit user / catalog spellings),
+// then the canonicalized forms. Deduped so we don't repeat lookups.
+function canonicalCandidates(model: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (s: string) => {
+    if (!s || seen.has(s)) return;
+    seen.add(s);
+    out.push(s);
+  };
+  const stripDate = (s: string) =>
+    s.replace(/-(20\d{2}-\d{2}-\d{2}|20\d{6}|latest)$/, "");
+  const stripProvider = (s: string) => {
+    const i = s.indexOf("/");
+    return i > 0 && /^[a-z][a-z0-9_-]*$/i.test(s.slice(0, i)) ? s.slice(i + 1) : s;
+  };
+  // Only Anthropic IDs are dot↔dash equivalent. OpenAI separators are
+  // semantic, so we leave `gpt-5.4` etc. alone.
+  const canonAnthropic = (s: string) =>
+    s.startsWith("claude-") ? s.replace(/\./g, "-") : s;
+
+  const raw = model;
+  const noProvider = stripProvider(raw);
+  const dashed = canonAnthropic(noProvider);
+
+  push(raw);
+  push(noProvider);
+  push(dashed);
+  push(stripDate(raw));
+  push(stripDate(noProvider));
+  push(stripDate(dashed));
+  return out;
 }
 
 // Cheap predicate for the empty-state diagnostic: which model strings in a

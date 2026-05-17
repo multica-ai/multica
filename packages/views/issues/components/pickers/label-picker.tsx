@@ -28,6 +28,9 @@ interface LabelPickerProps {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   align?: "start" | "center" | "end";
+  /** Open the picker on first mount. Used by progressive-disclosure
+   *  sidebars so a newly-added field immediately enters edit state. */
+  defaultOpen?: boolean;
 }
 
 /**
@@ -67,9 +70,10 @@ export function LabelPicker({
   open: controlledOpen,
   onOpenChange,
   align = "start",
+  defaultOpen = false,
 }: LabelPickerProps) {
   const { t } = useT("issues");
-  const [internalOpen, setInternalOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(defaultOpen);
   const open = controlledOpen ?? internalOpen;
   const setOpen = onOpenChange ?? setInternalOpen;
   const [filter, setFilter] = useState("");

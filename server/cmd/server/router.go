@@ -442,6 +442,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// task token still gets 403, not 200.
 			r.With(middleware.RequireUserScope).Get("/api/issues/search", h.SearchIssues)
 			r.With(middleware.RequireUserScope).Get("/api/issues/child-progress", h.ChildIssueProgress)
+			r.With(middleware.RequireUserScope).Get("/api/issues/grouped", h.ListGroupedIssues)
 			issueScope := middleware.AllowTaskScopeForIssue("id")
 			r.With(issueScope).Get("/api/issues/{id}", h.GetIssue)
 			r.With(issueScope).Put("/api/issues/{id}", h.UpdateIssue)
@@ -634,7 +635,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
-				// /search and /child-progress are registered flat in the
+				// /search, /child-progress and /grouped are registered flat in the
 				// task-allowlist group above (with RequireUserScope) so
 				// they share chi's routing tree with /{id} — see the
 				// comment there.
@@ -864,6 +865,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/usage/daily", h.GetDashboardUsageDaily)
 				r.Get("/usage/by-agent", h.GetDashboardUsageByAgent)
 				r.Get("/agent-runtime", h.GetDashboardAgentRunTime)
+				r.Get("/runtime/daily", h.GetDashboardRunTimeDaily)
 			})
 
 			// Runtimes

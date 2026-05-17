@@ -5,6 +5,7 @@ import type {
   AgentTemplateSummary,
   Attachment,
   CreateAgentFromTemplateResponse,
+  GroupedIssuesResponse,
   ListIssuesResponse,
   TimelineEntry,
 } from "../types";
@@ -147,6 +148,7 @@ const IssueSchema = z.object({
   parent_issue_id: z.string().nullable(),
   project_id: z.string().nullable(),
   position: z.number(),
+  start_date: z.string().nullable().default(null),
   due_date: z.string().nullable(),
   reactions: z.array(z.unknown()).optional(),
   labels: z.array(z.unknown()).optional(),
@@ -162,6 +164,22 @@ export const ListIssuesResponseSchema = z.object({
 export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
   issues: [],
   total: 0,
+};
+
+const IssueAssigneeGroupSchema = z.object({
+  id: z.string(),
+  assignee_type: z.string().nullable(),
+  assignee_id: z.string().nullable(),
+  issues: z.array(IssueSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const GroupedIssuesResponseSchema = z.object({
+  groups: z.array(IssueAssigneeGroupSchema).default([]),
+}).loose();
+
+export const EMPTY_GROUPED_ISSUES_RESPONSE: GroupedIssuesResponse = {
+  groups: [],
 };
 
 const SubscriberSchema = z.object({
@@ -241,6 +259,15 @@ const DashboardAgentRunTimeSchema = z.object({
 }).loose();
 
 export const DashboardAgentRunTimeListSchema = z.array(DashboardAgentRunTimeSchema);
+
+const DashboardRunTimeDailySchema = z.object({
+  date: z.string(),
+  total_seconds: z.number().default(0),
+  task_count: z.number().default(0),
+  failed_count: z.number().default(0),
+}).loose();
+
+export const DashboardRunTimeDailyListSchema = z.array(DashboardRunTimeDailySchema);
 
 // ---------------------------------------------------------------------------
 // Agent template catalog — `/api/agent-templates*` and the

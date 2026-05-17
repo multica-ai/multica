@@ -33,7 +33,7 @@ import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/vie
 import { InboxPage } from "@multica/views/inbox";
 import { NotificationsPage } from "@multica/cerebro-notifications/views";
 import { SettingsPage } from "@multica/views/settings";
-import { MemberDetailPage } from "@multica/cerebro-users/views";
+import { MemberDetailPage as CerebroMemberDetailPage } from "@multica/cerebro-users/views";
 import { GroupDetailView } from "@multica/cerebro-groups/views";
 import { useMembersTabCerebroExtras } from "@multica/cerebro-members/views";
 import { useNavigation } from "@multica/views/navigation";
@@ -222,7 +222,7 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Agent" },
           },
           {
-            path: "members/:memberId",
+            path: "members/:id",
             element: <MemberDetailRoute />,
             handle: { title: "Member" },
           },
@@ -301,8 +301,8 @@ function AttachmentViewRoute() {
 }
 
 function MemberDetailRoute() {
-  const params = useParams<{ memberId: string }>();
-  return <MemberDetailPage memberId={params.memberId ?? ""} />;
+  const params = useParams<{ id: string }>();
+  return <CerebroMemberDetailPage memberId={params.id ?? ""} />;
 }
 
 // JEH-1067 — Cerebro Groups detail (Bundle B). The shared view lives in

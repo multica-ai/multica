@@ -114,6 +114,20 @@
   animation: chat-text-shimmer 2.5s linear infinite;
 }
 
+/* Navigation progress bar: 2px brand-colored indeterminate sweep with a
+ * right-edge glow that shows across the top of the dashboard while a
+ * transition-wrapped push/replace is committing. Driven by useIsNavigating();
+ * independent of the actual network, so it disappears the moment React commits
+ * the new route. */
+@keyframes nav-progress-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.animate-nav-progress-sweep {
+  animation: nav-progress-sweep 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
 /* Border beam: a brand-tinted highlight sweeps continuously around the
  * element's rounded border, drawing the eye to a CTA that would otherwise
  * blend into the chrome (e.g. the "switch to agent" affordance in manual

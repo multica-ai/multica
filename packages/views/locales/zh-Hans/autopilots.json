@@ -90,12 +90,17 @@
   "run_status": {
     "issue_created": "已创建 issue",
     "running": "运行中",
+    "skipped": "已跳过",
     "completed": "已完成",
     "failed": "失败"
   },
   "run": {
     "issue_linked": "已关联 issue",
-    "view_log": "查看执行日志"
+    "view_log": "查看执行日志",
+    "skipped_group": {
+      "label": "已跳过",
+      "summary": "{{count}} 条跳过的运行"
+    }
   },
   "trigger_row": {
     "disabled_badge": "已禁用",

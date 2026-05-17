@@ -7,6 +7,7 @@ import {
   ArrowDown,
   ArrowUp,
   Calendar,
+  CalendarClock,
   FolderOpen,
   Link2,
   MoreHorizontal,
@@ -196,6 +197,33 @@ export function IssueActionsMenuItems({
         <UserMinus className="h-3.5 w-3.5" />
         {t(($) => $.actions.assignee)}
       </P.Item>
+
+      {/* Start date */}
+      <P.Sub>
+        <P.SubTrigger>
+          <CalendarClock className="h-3.5 w-3.5" />
+          {t(($) => $.actions.start_date)}
+        </P.SubTrigger>
+        <P.SubContent>
+          <P.Item onClick={() => updateField({ start_date: now().toISOString() })}>
+            {t(($) => $.actions.start_today)}
+          </P.Item>
+          <P.Item onClick={() => updateField({ start_date: inDays(1) })}>
+            {t(($) => $.actions.start_tomorrow)}
+          </P.Item>
+          <P.Item onClick={() => updateField({ start_date: inDays(7) })}>
+            {t(($) => $.actions.start_next_week)}
+          </P.Item>
+          {issue.start_date && (
+            <>
+              <P.Separator />
+              <P.Item onClick={() => updateField({ start_date: null })}>
+                {t(($) => $.actions.start_clear)}
+              </P.Item>
+            </>
+          )}
+        </P.SubContent>
+      </P.Sub>
 
       {/* Due date */}
       <P.Sub>

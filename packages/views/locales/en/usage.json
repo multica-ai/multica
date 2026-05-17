@@ -18,8 +18,12 @@
   "daily": {
     "title_cost": "Daily cost",
     "title_tokens": "Daily tokens",
+    "title_time": "Daily run time",
+    "title_tasks": "Daily tasks",
     "metric_cost": "Cost",
     "metric_tokens": "Tokens",
+    "metric_time": "Time",
+    "metric_tasks": "Tasks",
     "no_data": "No usage in this window."
   },
   "leaderboard": {

@@ -1,13 +1,13 @@
 {
   "title": "搜索",
-  "description": "搜索页面、issue 和项目",
+  "description": "搜索页面、issue、项目和成员",
   "placeholder": "输入命令或关键词搜索...",
   "_comment_1326": "CEREBRO-PATCH(search-page-1326): JEH-1326 — open_page key for full search page action",
   "open_page": "打开页面",
   "groups": {
     "pages": "页面",
     "commands": "命令",
-    "switch_workspace": "切换工作区",
+    "members": "成员",
     "projects": "项目",
     "issues": "issue",
     "recent": "最近"

@@ -88,55 +88,6 @@ func (q *Queries) CreateCerebroAgentPass(ctx context.Context, arg CreateCerebroA
 	return i, err
 }
 
-const getExhaustedAgentPassForAgentIssue = `-- name: GetExhaustedAgentPassForAgentIssue :one
-SELECT
-    id, workspace_id,
-    issuer_type, issuer_id,
-    agent_id, issue_id, parent_pass_id,
-    scope,
-    spend_ceiling_micros,
-    status,
-    issued_at, expires_at,
-    revoked_by_type, revoked_by_id, revoked_at, revoke_reason,
-    created_at, updated_at
-FROM cerebro_agent_pass
-WHERE agent_id = $1
-  AND issue_id = $2
-  AND status   = 'exhausted'
-ORDER BY updated_at DESC
-LIMIT 1
-`
-
-// Returns the most recently exhausted pass for (agent, issue), if any.
-// Used by the pre-run gate as a fallback when the active-pass lookup returns
-// nothing: a pass flipped to 'exhausted' on a prior enqueue must still block
-// subsequent enqueues until the ceiling is raised or a new pass is issued.
-func (q *Queries) GetExhaustedAgentPassForAgentIssue(ctx context.Context, arg GetActiveAgentPassForAgentIssueParams) (CerebroAgentPass, error) {
-	row := q.db.QueryRow(ctx, getExhaustedAgentPassForAgentIssue, arg.AgentID, arg.IssueID)
-	var i CerebroAgentPass
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.IssuerType,
-		&i.IssuerID,
-		&i.AgentID,
-		&i.IssueID,
-		&i.ParentPassID,
-		&i.Scope,
-		&i.SpendCeilingMicros,
-		&i.Status,
-		&i.IssuedAt,
-		&i.ExpiresAt,
-		&i.RevokedByType,
-		&i.RevokedByID,
-		&i.RevokedAt,
-		&i.RevokeReason,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const getActiveAgentPassForAgentIssue = `-- name: GetActiveAgentPassForAgentIssue :one
 SELECT
     id, workspace_id,
@@ -206,6 +157,60 @@ WHERE id = $1
 
 func (q *Queries) GetCerebroAgentPass(ctx context.Context, id pgtype.UUID) (CerebroAgentPass, error) {
 	row := q.db.QueryRow(ctx, getCerebroAgentPass, id)
+	var i CerebroAgentPass
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssuerType,
+		&i.IssuerID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.ParentPassID,
+		&i.Scope,
+		&i.SpendCeilingMicros,
+		&i.Status,
+		&i.IssuedAt,
+		&i.ExpiresAt,
+		&i.RevokedByType,
+		&i.RevokedByID,
+		&i.RevokedAt,
+		&i.RevokeReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getExhaustedAgentPassForAgentIssue = `-- name: GetExhaustedAgentPassForAgentIssue :one
+SELECT
+    id, workspace_id,
+    issuer_type, issuer_id,
+    agent_id, issue_id, parent_pass_id,
+    scope,
+    spend_ceiling_micros,
+    status,
+    issued_at, expires_at,
+    revoked_by_type, revoked_by_id, revoked_at, revoke_reason,
+    created_at, updated_at
+FROM cerebro_agent_pass
+WHERE agent_id = $1
+  AND issue_id = $2
+  AND status   = 'exhausted'
+ORDER BY updated_at DESC
+LIMIT 1
+`
+
+type GetExhaustedAgentPassForAgentIssueParams struct {
+	AgentID pgtype.UUID `json:"agent_id"`
+	IssueID pgtype.UUID `json:"issue_id"`
+}
+
+// Returns the most recently exhausted pass for (agent, issue), if any.
+// Used by the pre-run gate as a fallback after the active-pass lookup finds
+// nothing: a pass flipped to 'exhausted' on a prior enqueue must still block
+// subsequent enqueues until the ceiling is raised or a new pass is issued.
+func (q *Queries) GetExhaustedAgentPassForAgentIssue(ctx context.Context, arg GetExhaustedAgentPassForAgentIssueParams) (CerebroAgentPass, error) {
+	row := q.db.QueryRow(ctx, getExhaustedAgentPassForAgentIssue, arg.AgentID, arg.IssueID)
 	var i CerebroAgentPass
 	err := row.Scan(
 		&i.ID,

@@ -68,7 +68,7 @@
     "popover_title": "关联 GitHub 仓库",
     "attached_badge": "已关联",
     "remove_tooltip": "移除",
-    "url_placeholder": "https://github.com/owner/repo",
+    "url_placeholder": "https://github.com/owner/repo 或 git@github.com:owner/repo.git",
     "url_submit": "添加",
     "toast_attached": "已关联仓库",
     "toast_attach_failed": "关联失败",

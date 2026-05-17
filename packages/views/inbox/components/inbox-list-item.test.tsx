@@ -13,9 +13,24 @@ vi.mock("@multica/core/workspace/hooks", () => ({
   }),
 }));
 
+vi.mock("@multica/core/paths", () => ({
+  useCurrentWorkspace: () => ({ id: "ws", name: "Test WS", slug: "test" }),
+  useWorkspacePaths: () => ({
+    memberDetail: (id: string) => `/test/members/${id}`,
+    agentDetail: (id: string) => `/test/agents/${id}`,
+  }),
+}));
+
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: (selector: (s: { user: { id: string } }) => unknown) =>
     selector({ user: { id: "me" } }),
+}));
+
+vi.mock("../../navigation", () => ({
+  useNavigation: () => ({
+    push: vi.fn(),
+    openInNewTab: vi.fn(),
+  }),
 }));
 
 // Stub the cerebro row-actions surface — it pulls in feature-flag hooks +

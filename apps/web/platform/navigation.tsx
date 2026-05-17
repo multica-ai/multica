@@ -24,6 +24,12 @@ function NavigationProviderInner({
     searchParams: new URLSearchParams(searchParams.toString()),
     getShareableUrl: (path: string) =>
       typeof window === "undefined" ? path : window.location.origin + path,
+    // router.prefetch is a no-op in dev mode by Next.js design; in production
+    // it warms the RSC payload + route chunk so the next push() commits with
+    // no network round-trip. Safe to call repeatedly — Next dedupes internally.
+    prefetch: (path: string) => {
+      router.prefetch(path);
+    },
   };
 
   return <NavigationProvider value={adapter}>{children}</NavigationProvider>;

@@ -3,10 +3,10 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Plus, Trash2, UserMinus } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, type QueryKey } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
-import type { Issue, IssueStatus, ProjectStatus, ProjectPriority, ProjectTreeItem } from "@multica/core/types";
+import type { Issue, IssueAssigneeGroup, ProjectStatus, ProjectPriority, ProjectTreeItem, UpdateIssueRequest } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 // CEREBRO-PATCH(nested-projects): project detail exposes parent and descendant settings.
@@ -14,7 +14,7 @@ import { projectTreeOptions, useSetProjectParent, useSetProjectShowDescendants }
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
-import { myIssueListOptions, childIssueProgressOptions, type MyIssuesFilter } from "@multica/core/issues/queries";
+import { myIssueAssigneeGroupsOptions, myIssueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter, type MyIssuesFilter } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useModalStore } from "@multica/core/modals";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
@@ -117,11 +117,17 @@ const projectViewStore = createIssueViewStore("project_issues_view");
 function ProjectIssuesContent({
   projectId,
   projectIssues,
+  assigneeGroups,
+  assigneeGroupQueryKey,
+  assigneeGroupFilter,
   scope,
   filter,
 }: {
   projectId: string;
   projectIssues: Issue[];
+  assigneeGroups?: IssueAssigneeGroup[];
+  assigneeGroupQueryKey?: QueryKey;
+  assigneeGroupFilter?: AssigneeGroupedIssuesFilter;
   scope: string;
   filter: MyIssuesFilter;
 }) {
@@ -181,9 +187,7 @@ function ProjectIssuesContent({
 
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
-    (issueId: string, newStatus: IssueStatus, newPosition?: number) => {
-      const updates: Partial<{ status: IssueStatus; position: number }> = { status: newStatus };
-      if (newPosition !== undefined) updates.position = newPosition;
+    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position">) => {
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
         { onError: () => toast.error(t(($) => $.detail.toast_move_issue_failed)) },
@@ -217,7 +221,10 @@ function ProjectIssuesContent({
     <div className="flex flex-col flex-1 min-h-0">
       {viewMode === "board" ? (
         <BoardView
-          issues={issues}
+          issues={assigneeGroups ? projectIssues : issues}
+          assigneeGroups={assigneeGroups}
+          assigneeGroupQueryKey={assigneeGroupQueryKey}
+          assigneeGroupFilter={assigneeGroupFilter}
           visibleStatuses={visibleStatuses}
           hiddenStatuses={hiddenStatuses}
           onMoveIssue={handleMoveIssue}
@@ -239,6 +246,71 @@ function ProjectIssuesContent({
         />
       )}
     </div>
+  );
+}
+
+function ProjectIssuesSurface({
+  projectId,
+  scope,
+  filter,
+}: {
+  projectId: string;
+  scope: string;
+  filter: MyIssuesFilter;
+}) {
+  const wsId = useWorkspaceId();
+  const viewMode = useViewStore((s) => s.viewMode);
+  const grouping = useViewStore((s) => s.grouping);
+  const statusFilters = useViewStore((s) => s.statusFilters);
+  const priorityFilters = useViewStore((s) => s.priorityFilters);
+  const assigneeFilters = useViewStore((s) => s.assigneeFilters);
+  const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
+  const creatorFilters = useViewStore((s) => s.creatorFilters);
+  const labelFilters = useViewStore((s) => s.labelFilters);
+  const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
+  const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
+    () => ({
+      ...filter,
+      statuses: statusFilters.length > 0 ? statusFilters : [...BOARD_STATUSES],
+      priorities: priorityFilters,
+      assignee_filters: assigneeFilters,
+      include_no_assignee: includeNoAssignee,
+      creator_filters: creatorFilters,
+      label_ids: labelFilters,
+    }),
+    [assigneeFilters, creatorFilters, filter, includeNoAssignee, labelFilters, priorityFilters, statusFilters],
+  );
+  const assigneeGroupsOptions = myIssueAssigneeGroupsOptions(
+    wsId,
+    scope,
+    assigneeGroupFilter,
+  );
+  const statusIssuesQuery = useQuery({
+    ...myIssueListOptions(wsId, scope, filter),
+    enabled: !usesAssigneeBoard,
+  });
+  const assigneeGroupsQuery = useQuery({
+    ...assigneeGroupsOptions,
+    enabled: usesAssigneeBoard,
+  });
+  const projectIssues = usesAssigneeBoard
+    ? (assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [])
+    : (statusIssuesQuery.data ?? []);
+
+  return (
+    <>
+      <IssuesHeader scopedIssues={projectIssues} />
+      <ProjectIssuesContent
+        projectId={projectId}
+        projectIssues={projectIssues}
+        assigneeGroups={usesAssigneeBoard ? assigneeGroupsQuery.data?.groups : undefined}
+        assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
+        assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
+        scope={scope}
+        filter={filter}
+      />
+      <BatchActionToolbar />
+    </>
   );
 }
 
@@ -267,9 +339,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const projectFilter = useMemo<MyIssuesFilter>(
     () => ({ project_id: projectId }),
     [projectId],
-  );
-  const { data: projectIssues = [] } = useQuery(
-    myIssueListOptions(wsId, projectScope, projectFilter),
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -767,14 +836,11 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               </TabsList>
               <TabsContent value="issues" className="flex flex-1 flex-col">
                 <ViewStoreProvider store={projectViewStore}>
-                  <IssuesHeader scopedIssues={projectIssues} />
-                  <ProjectIssuesContent
+                  <ProjectIssuesSurface
                     projectId={projectId}
-                    projectIssues={projectIssues}
                     scope={projectScope}
                     filter={projectFilter}
                   />
-                  <BatchActionToolbar />
                 </ViewStoreProvider>
               </TabsContent>
               <TabsContent value="documents" className="flex-1 overflow-auto">

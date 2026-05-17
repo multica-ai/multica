@@ -69,9 +69,9 @@ type SpendLevel string
 
 const (
 	SpendLevelOK        SpendLevel = "ok"        // below 70 %
-	SpendLevelWarn      SpendLevel = "warn"       // 70–89 %
-	SpendLevelDegrade   SpendLevel = "degrade"    // 90–99 %
-	SpendLevelExhausted SpendLevel = "exhausted"  // ≥ 100 %
+	SpendLevelWarn      SpendLevel = "warn"      // 70–89 %
+	SpendLevelDegrade   SpendLevel = "degrade"   // 90–99 %
+	SpendLevelExhausted SpendLevel = "exhausted" // ≥ 100 %
 )
 
 // SpendInfo is populated whenever a pass has a spend ceiling and the gate
@@ -108,7 +108,7 @@ type Now func() time.Time
 // spinning up Postgres. *cerebrodb.Queries satisfies it implicitly.
 type Queries interface {
 	GetActiveAgentPassForAgentIssue(ctx context.Context, arg cerebrodb.GetActiveAgentPassForAgentIssueParams) (cerebrodb.CerebroAgentPass, error)
-	GetExhaustedAgentPassForAgentIssue(ctx context.Context, arg cerebrodb.GetActiveAgentPassForAgentIssueParams) (cerebrodb.CerebroAgentPass, error)
+	GetExhaustedAgentPassForAgentIssue(ctx context.Context, arg cerebrodb.GetExhaustedAgentPassForAgentIssueParams) (cerebrodb.CerebroAgentPass, error)
 	MarkAgentPassStatus(ctx context.Context, arg cerebrodb.MarkAgentPassStatusParams) (cerebrodb.CerebroAgentPass, error)
 	GetCerebroAgentPass(ctx context.Context, id pgtype.UUID) (cerebrodb.CerebroAgentPass, error)
 	SumIssueTreeUsageByModel(ctx context.Context, id pgtype.UUID) ([]cerebrodb.SumIssueTreeUsageByModelRow, error)
@@ -163,7 +163,10 @@ func (s *Service) EvaluateForEnqueue(ctx context.Context, agentID, issueID pgtyp
 			// No active pass. Check for a previously exhausted pass — if one
 			// exists, subsequent enqueues must still be blocked until the
 			// ceiling is raised or a new pass is issued.
-			exhausted, exErr := s.queries.GetExhaustedAgentPassForAgentIssue(ctx, passParams)
+			exhausted, exErr := s.queries.GetExhaustedAgentPassForAgentIssue(ctx, cerebrodb.GetExhaustedAgentPassForAgentIssueParams{
+				AgentID: passParams.AgentID,
+				IssueID: passParams.IssueID,
+			})
 			if exErr != nil {
 				if errors.Is(exErr, pgx.ErrNoRows) {
 					return Result{Decision: DecisionAllow}, nil

@@ -1164,7 +1164,6 @@ INSERT INTO agent_runtime (
     owner_id,
     timezone,
     last_seen_at
--- CEREBRO-PATCH(runtime-timezone-default): zero-value sqlc params must not persist an invalid empty timezone.
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE(NULLIF($10, ''), 'UTC'), now())
 ON CONFLICT (workspace_id, daemon_id, provider)
 DO UPDATE SET
@@ -1189,7 +1188,7 @@ type UpsertAgentRuntimeParams struct {
 	DeviceInfo  string      `json:"device_info"`
 	Metadata    []byte      `json:"metadata"`
 	OwnerID     pgtype.UUID `json:"owner_id"`
-	Timezone    string      `json:"timezone"`
+	Timezone    interface{} `json:"timezone"`
 }
 
 type UpsertAgentRuntimeRow struct {
@@ -1229,6 +1228,7 @@ type UpsertAgentRuntimeRow struct {
 // the web UI we don't want a daemon reconnect (which sends its own system
 // tz) to silently revert it. Daemons can still set the initial value when
 // they're the first to register a brand-new runtime row.
+// CEREBRO-PATCH(runtime-timezone-default): zero-value sqlc params must not persist an invalid empty timezone.
 func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntimeParams) (UpsertAgentRuntimeRow, error) {
 	row := q.db.QueryRow(ctx, upsertAgentRuntime,
 		arg.WorkspaceID,

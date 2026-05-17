@@ -2,8 +2,13 @@ import type {
   DashboardUsageDaily,
   DashboardUsageByAgent,
   DashboardAgentRunTime,
+  DashboardRunTimeDaily,
 } from "@multica/core/types";
 import { estimateCost, estimateCostBreakdown, type DailyTokenData } from "../runtimes/utils";
+import type {
+  DailyTimeData,
+  DailyTasksData,
+} from "../runtimes/components/charts";
 
 // ---------------------------------------------------------------------------
 // Dashboard data aggregations
@@ -210,6 +215,37 @@ export function mergeAgentDashboardRows(
     if (b.cost !== a.cost) return b.cost - a.cost;
     return b.seconds - a.seconds;
   });
+}
+
+// Per-date run-time rows → one row per date with `totalSeconds` for the
+// DailyTimeChart. Sorted ascending so the x-axis reads oldest-to-newest,
+// matching the cost / tokens aggregators.
+export function aggregateDailyTime(rows: DashboardRunTimeDaily[]): DailyTimeData[] {
+  return [...rows]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((r) => ({
+      date: r.date,
+      label: formatDateLabel(r.date),
+      totalSeconds: r.total_seconds,
+    }));
+}
+
+// Per-date run-time rows → one row per date with `completed` and `failed`
+// counts for the DailyTasksChart's stacked bar (failed_count is a subset
+// of task_count, so completed = task_count - failed_count).
+export function aggregateDailyTasks(rows: DashboardRunTimeDaily[]): DailyTasksData[] {
+  return [...rows]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((r) => {
+      const failed = r.failed_count;
+      const completed = Math.max(0, r.task_count - failed);
+      return {
+        date: r.date,
+        label: formatDateLabel(r.date),
+        completed,
+        failed,
+      };
+    });
 }
 
 // Compact human duration: "1h 23m" / "12m 30s" / "45s" / "<1m". Used for

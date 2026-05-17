@@ -1,13 +1,13 @@
 {
   "title": "Search",
-  "description": "Search pages, issues, and projects",
+  "description": "Search pages, issues, projects, and members",
   "placeholder": "Type a command or search...",
   "_comment_1326": "CEREBRO-PATCH(search-page-1326): JEH-1326 — open_page key for full search page action",
   "open_page": "Open page",
   "groups": {
     "pages": "Pages",
     "commands": "Commands",
-    "switch_workspace": "Switch Workspace",
+    "members": "Members",
     "projects": "Projects",
     "issues": "Issues",
     "recent": "Recent"

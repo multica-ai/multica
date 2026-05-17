@@ -18,8 +18,12 @@
   "daily": {
     "title_cost": "每日费用",
     "title_tokens": "每日 Token",
+    "title_time": "每日运行时长",
+    "title_tasks": "每日任务数",
     "metric_cost": "费用",
     "metric_tokens": "Token",
+    "metric_time": "运行时长",
+    "metric_tasks": "任务数",
     "no_data": "所选时间范围内暂无消耗。"
   },
   "leaderboard": {

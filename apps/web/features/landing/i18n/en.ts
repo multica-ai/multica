@@ -285,6 +285,32 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.1",
+        date: "2026-05-15",
+        title: "Faster Navigation, Background Updates & More Reliable Squads",
+        changes: [],
+        features: [
+          "Member and agent detail pages now show related tasks so teams can review who is working on what",
+          "The desktop app downloads updates in the background so a new version is ready when you are",
+          "Self-hosted deployments can send email through SMTP as an alternative to Resend",
+          "Create Squad has a clearer setup flow with member selection that works better for team coordination",
+        ],
+        improvements: [
+          "Page transitions are faster, with issue pages prepared ahead of time and smoother loading states",
+          "Long issue activity blocks collapse so comments and conclusions are easier to scan",
+          "Agents and Squads remember the Mine/All view when you return to the list",
+          "Repository setup accepts more SSH URL formats across settings, projects, and quick create",
+          "Squad handoffs are more dependable when agents have multiple roles or delegate to a specific member",
+        ],
+        fixes: [
+          "Self-hosted local file cards render and preview correctly",
+          "Agent-run tasks are more dependable when local tools or skills need to be found automatically",
+          "Claude usage totals match more of the model names reported by connected tools",
+          "After switching workspaces, live updates come from the correct workspace and show the right source",
+          "Chat session menus and runtime names hold their shape in narrower spaces",
+        ],
+      },
+      {
         version: "0.3.0",
         date: "2026-05-14",
         title: "Squads & Attachment Previews",

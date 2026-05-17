@@ -90,12 +90,17 @@
   "run_status": {
     "issue_created": "Issue Created",
     "running": "Running",
+    "skipped": "Skipped",
     "completed": "Completed",
     "failed": "Failed"
   },
   "run": {
     "issue_linked": "Issue linked",
-    "view_log": "View execution log"
+    "view_log": "View execution log",
+    "skipped_group": {
+      "label": "Skipped",
+      "summary": "{{count}} skipped runs"
+    }
   },
   "trigger_row": {
     "disabled_badge": "Disabled",

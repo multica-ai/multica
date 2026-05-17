@@ -37,6 +37,7 @@ const mockDraftStore = {
     priority: "none" as const,
     assigneeType: undefined as "agent" | "squad" | "member" | undefined,
     assigneeId: undefined as string | undefined,
+    startDate: null,
     dueDate: null,
   },
   lastAssigneeType: undefined,
@@ -153,6 +154,7 @@ vi.mock("../issues/components", () => ({
   StatusPicker: () => <div data-testid="status-picker" />,
   PriorityPicker: () => <div data-testid="priority-picker" />,
   AssigneePicker: () => <div data-testid="assignee-picker" />,
+  StartDatePicker: () => <div data-testid="start-date-picker" />,
   DueDatePicker: () => <div data-testid="due-date-picker" />,
 }));
 
@@ -294,6 +296,7 @@ describe("CreateIssueModal", () => {
         priority: "none",
         assignee_type: undefined,
         assignee_id: undefined,
+        start_date: undefined,
         due_date: undefined,
         attachment_ids: undefined,
         parent_issue_id: undefined,
@@ -340,6 +343,7 @@ describe("CreateIssueModal", () => {
         priority: "none",
         assignee_type: undefined,
         assignee_id: undefined,
+        start_date: undefined,
         due_date: undefined,
         attachment_ids: undefined,
         parent_issue_id: undefined,
@@ -357,6 +361,7 @@ describe("CreateIssueModal", () => {
       priority: "none",
       assigneeType: undefined,
       assigneeId: undefined,
+      startDate: null,
       dueDate: null,
     });
   });

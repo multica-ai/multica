@@ -54,6 +54,27 @@ type GitHubPullRequestResponse struct {
 	ClosedAt        *string `json:"closed_at"`
 	PRCreatedAt     string  `json:"pr_created_at"`
 	PRUpdatedAt     string  `json:"pr_updated_at"`
+	// Mergeable state mirrors GitHub's `mergeable_state` field. We only
+	// surface `clean`/`dirty` in the UI today; other values (`blocked`,
+	// `behind`, `unstable`, `unknown`) round-trip but render as unknown.
+	MergeableState *string `json:"mergeable_state"`
+	// ChecksConclusion is the aggregated state of the latest CI check
+	// suites for the PR's current head SHA. One of "passed", "failed",
+	// "pending", or nil when no completed suite has been observed.
+	ChecksConclusion *string `json:"checks_conclusion"`
+	// Per-suite counts that drive the card's segmented progress bar.
+	// Always present on list rows; bare upsert broadcasts default to 0
+	// and the frontend hides the bar when total == 0.
+	ChecksPassed  int64 `json:"checks_passed"`
+	ChecksFailed  int64 `json:"checks_failed"`
+	ChecksPending int64 `json:"checks_pending"`
+	// Diff stats (lines added/removed and file count) sourced from the
+	// `pull_request` webhook payload. Legacy rows that pre-date this
+	// field default to 0; the frontend treats total == 0 as "unknown"
+	// and hides the stats row.
+	Additions    int32 `json:"additions"`
+	Deletions    int32 `json:"deletions"`
+	ChangedFiles int32 `json:"changed_files"`
 }
 
 type GitHubConnectResponse struct {
@@ -90,7 +111,67 @@ func githubPullRequestToResponse(p db.GithubPullRequest) GitHubPullRequestRespon
 		ClosedAt:        timestampToPtr(p.ClosedAt),
 		PRCreatedAt:     timestampToString(p.PrCreatedAt),
 		PRUpdatedAt:     timestampToString(p.PrUpdatedAt),
+		MergeableState:  textToPtr(p.MergeableState),
+		// A bare PR row has no aggregated check counts — webhook
+		// broadcasts of a single PR fall through here and the frontend
+		// re-queries the list for fresh counts.
+		ChecksConclusion: nil,
+		Additions:        p.Additions,
+		Deletions:        p.Deletions,
+		ChangedFiles:     p.ChangedFiles,
 	}
+}
+
+func issuePullRequestRowToResponse(p db.ListPullRequestsByIssueRow) GitHubPullRequestResponse {
+	return GitHubPullRequestResponse{
+		ID:               uuidToString(p.ID),
+		WorkspaceID:      uuidToString(p.WorkspaceID),
+		RepoOwner:        p.RepoOwner,
+		RepoName:         p.RepoName,
+		Number:           p.PrNumber,
+		Title:            p.Title,
+		State:            p.State,
+		HtmlURL:          p.HtmlUrl,
+		Branch:           textToPtr(p.Branch),
+		AuthorLogin:      textToPtr(p.AuthorLogin),
+		AuthorAvatarURL:  textToPtr(p.AuthorAvatarUrl),
+		MergedAt:         timestampToPtr(p.MergedAt),
+		ClosedAt:         timestampToPtr(p.ClosedAt),
+		PRCreatedAt:      timestampToString(p.PrCreatedAt),
+		PRUpdatedAt:      timestampToString(p.PrUpdatedAt),
+		MergeableState:   textToPtr(p.MergeableState),
+		ChecksConclusion: aggregateChecksConclusion(p.ChecksFailed, p.ChecksPassed, p.ChecksPending, p.ChecksTotal),
+		ChecksPassed:     p.ChecksPassed,
+		ChecksFailed:     p.ChecksFailed,
+		ChecksPending:    p.ChecksPending,
+		Additions:        p.Additions,
+		Deletions:        p.Deletions,
+		ChangedFiles:     p.ChangedFiles,
+	}
+}
+
+// aggregateChecksConclusion collapses the per-PR check_suite counts into a
+// single status surfaced to the UI:
+//   - any failed-class suite wins ("failed");
+//   - any not-yet-completed suite makes the PR "pending";
+//   - all completed and in the passed-class is "passed";
+//   - no observed suite at all is nil (rendered as "no checks" / hidden).
+func aggregateChecksConclusion(failed, passed, pending, total int64) *string {
+	if total == 0 {
+		return nil
+	}
+	var v string
+	switch {
+	case failed > 0:
+		v = "failed"
+	case pending > 0:
+		v = "pending"
+	case passed > 0:
+		v = "passed"
+	default:
+		return nil
+	}
+	return &v
 }
 
 // ── Connect / state token ───────────────────────────────────────────────────
@@ -350,7 +431,7 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 	}
 	out := make([]GitHubPullRequestResponse, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, githubPullRequestToResponse(row))
+		out = append(out, issuePullRequestRowToResponse(row))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"pull_requests": out})
 }
@@ -396,6 +477,8 @@ func (h *Handler) HandleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		h.handleInstallationEvent(ctx, body)
 	case "pull_request":
 		h.handlePullRequestEvent(ctx, body)
+	case "check_suite":
+		h.handleCheckSuiteEvent(ctx, body)
 	default:
 		// Acknowledge every event so GitHub doesn't mark the endpoint failing,
 		// but ignore types we don't model.
@@ -481,25 +564,31 @@ func (h *Handler) handleInstallationEvent(ctx context.Context, body []byte) {
 type ghPullRequestPayload struct {
 	Action      string `json:"action"`
 	PullRequest struct {
-		Number    int32  `json:"number"`
-		HTMLURL   string `json:"html_url"`
-		Title     string `json:"title"`
-		Body      string `json:"body"`
-		State     string `json:"state"`
-		Draft     bool   `json:"draft"`
-		Merged    bool   `json:"merged"`
-		MergedAt  string `json:"merged_at"`
-		ClosedAt  string `json:"closed_at"`
-		CreatedAt string `json:"created_at"`
-		UpdatedAt string `json:"updated_at"`
-		Head      struct {
+		Number         int32  `json:"number"`
+		HTMLURL        string `json:"html_url"`
+		Title          string `json:"title"`
+		Body           string `json:"body"`
+		State          string `json:"state"`
+		Draft          bool   `json:"draft"`
+		Merged         bool   `json:"merged"`
+		MergedAt       string `json:"merged_at"`
+		ClosedAt       string `json:"closed_at"`
+		CreatedAt      string `json:"created_at"`
+		UpdatedAt      string `json:"updated_at"`
+		MergeableState string `json:"mergeable_state"`
+		Additions      int32  `json:"additions"`
+		Deletions      int32  `json:"deletions"`
+		ChangedFiles   int32  `json:"changed_files"`
+		Head           struct {
 			Ref string `json:"ref"`
+			SHA string `json:"sha"`
 		} `json:"head"`
 		User struct {
 			Login     string `json:"login"`
 			AvatarURL string `json:"avatar_url"`
 		} `json:"user"`
 	} `json:"pull_request"`
+	Changes *ghPRChanges `json:"changes"`
 	Repository struct {
 		Name  string `json:"name"`
 		Owner struct {
@@ -531,22 +620,29 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 	}
 
 	state := derivePRState(p.PullRequest.State, p.PullRequest.Draft, p.PullRequest.Merged)
+	mergeable, clearMergeable := derivePRMergeableState(p.Action, p.PullRequest.MergeableState, baseRefChanged(p.Changes))
 	pr, err := h.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
-		WorkspaceID:      inst.WorkspaceID,
-		InstallationID:   inst.InstallationID,
-		RepoOwner:        p.Repository.Owner.Login,
-		RepoName:         p.Repository.Name,
-		PrNumber:         p.PullRequest.Number,
-		Title:            p.PullRequest.Title,
-		State:            state,
-		HtmlUrl:          p.PullRequest.HTMLURL,
-		Branch:           ptrToText(strPtrOrNil(p.PullRequest.Head.Ref)),
-		AuthorLogin:      ptrToText(strPtrOrNil(p.PullRequest.User.Login)),
-		AuthorAvatarUrl:  ptrToText(strPtrOrNil(p.PullRequest.User.AvatarURL)),
-		MergedAt:         parseGHTime(p.PullRequest.MergedAt),
-		ClosedAt:         parseGHTime(p.PullRequest.ClosedAt),
-		PrCreatedAt:      parseGHTimeRequired(p.PullRequest.CreatedAt),
-		PrUpdatedAt:      parseGHTimeRequired(p.PullRequest.UpdatedAt),
+		WorkspaceID:           inst.WorkspaceID,
+		InstallationID:        inst.InstallationID,
+		RepoOwner:             p.Repository.Owner.Login,
+		RepoName:              p.Repository.Name,
+		PrNumber:              p.PullRequest.Number,
+		Title:                 p.PullRequest.Title,
+		State:                 state,
+		HtmlUrl:               p.PullRequest.HTMLURL,
+		Branch:                ptrToText(strPtrOrNil(p.PullRequest.Head.Ref)),
+		AuthorLogin:           ptrToText(strPtrOrNil(p.PullRequest.User.Login)),
+		AuthorAvatarUrl:       ptrToText(strPtrOrNil(p.PullRequest.User.AvatarURL)),
+		MergedAt:              parseGHTime(p.PullRequest.MergedAt),
+		ClosedAt:              parseGHTime(p.PullRequest.ClosedAt),
+		PrCreatedAt:           parseGHTimeRequired(p.PullRequest.CreatedAt),
+		PrUpdatedAt:           parseGHTimeRequired(p.PullRequest.UpdatedAt),
+		HeadSha:               p.PullRequest.Head.SHA,
+		MergeableState:        mergeable,
+		ClearMergeableState:   pgtype.Bool{Bool: clearMergeable, Valid: true},
+		Additions:             p.PullRequest.Additions,
+		Deletions:             p.PullRequest.Deletions,
+		ChangedFiles:          p.PullRequest.ChangedFiles,
 	})
 	if err != nil {
 		slog.Warn("github: upsert pr failed", "err", err)
@@ -609,6 +705,184 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 		"pull_request": resp,
 		"linked_issue_ids": linkedIssueIDs,
 	})
+}
+
+// ── check_suite webhook ────────────────────────────────────────────────────
+
+type ghCheckSuitePayload struct {
+	Action     string `json:"action"`
+	CheckSuite struct {
+		ID         int64  `json:"id"`
+		HeadSHA    string `json:"head_sha"`
+		Status     string `json:"status"`
+		Conclusion string `json:"conclusion"`
+		UpdatedAt  string `json:"updated_at"`
+		App        struct {
+			ID int64 `json:"id"`
+		} `json:"app"`
+		PullRequests []struct {
+			Number int32 `json:"number"`
+		} `json:"pull_requests"`
+	} `json:"check_suite"`
+	Repository struct {
+		Name  string `json:"name"`
+		Owner struct {
+			Login string `json:"login"`
+		} `json:"owner"`
+	} `json:"repository"`
+	Installation struct {
+		ID int64 `json:"id"`
+	} `json:"installation"`
+}
+
+// handleCheckSuiteEvent records the CI suite state for each PR the suite
+// references. MVP only persists terminal events (`completed`); GitHub sends
+// `requested`/`rerequested` for some apps but those carry no useful
+// conclusion and the RFC restricts us to suite-level aggregation.
+//
+// The suite payload may reference multiple PRs (e.g. the same head SHA is
+// open against several base branches), so we iterate. A reference whose PR
+// hasn't been mirrored locally is logged and skipped — auto-backfill from
+// GitHub's REST API is a v2 enhancement.
+func (h *Handler) handleCheckSuiteEvent(ctx context.Context, body []byte) {
+	var p ghCheckSuitePayload
+	if err := json.Unmarshal(body, &p); err != nil {
+		slog.Warn("github: bad check_suite payload", "err", err)
+		return
+	}
+	if p.Action != "completed" {
+		// MVP scope: only completed suites carry a conclusion we can
+		// surface. queued / in_progress events would feed a future
+		// "real pending" display path.
+		return
+	}
+	if p.Installation.ID == 0 {
+		return
+	}
+	inst, err := h.Queries.GetGitHubInstallationByInstallationID(ctx, p.Installation.ID)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("github: lookup installation failed", "err", err)
+		}
+		return
+	}
+	if len(p.CheckSuite.PullRequests) == 0 {
+		// Forks emit suites whose `pull_requests` array is empty for
+		// the upstream repo. We have no way to attribute the result
+		// without polling, so drop with a hint.
+		slog.Info("github: check_suite has no associated PRs", "suite_id", p.CheckSuite.ID)
+		return
+	}
+	updatedAt := parseGHTimeRequired(p.CheckSuite.UpdatedAt)
+
+	affectedWorkspaces := map[string]struct{}{}
+	affectedIssues := map[string]struct{}{}
+	for _, prRef := range p.CheckSuite.PullRequests {
+		// Scope the lookup to the installation's workspace. The
+		// (workspace_id, repo_owner, repo_name, pr_number) tuple is the
+		// real uniqueness key: if the same repo lived under a different
+		// workspace historically, a bare (owner, repo, number) lookup
+		// could return either row arbitrarily and land this suite on
+		// the wrong PR (or skip the right one because the installation
+		// ids no longer match).
+		pr, err := h.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
+			WorkspaceID: inst.WorkspaceID,
+			RepoOwner:   p.Repository.Owner.Login,
+			RepoName:    p.Repository.Name,
+			PrNumber:    prRef.Number,
+		})
+		if err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				slog.Warn("github: lookup pr for check_suite failed", "err", err)
+			}
+			slog.Info("github: check_suite for unknown PR — skipping",
+				"repo", p.Repository.Owner.Login+"/"+p.Repository.Name,
+				"pr", prRef.Number,
+				"suite_id", p.CheckSuite.ID,
+			)
+			continue
+		}
+		if err := h.Queries.UpsertPullRequestCheckSuite(ctx, db.UpsertPullRequestCheckSuiteParams{
+			PrID:       pr.ID,
+			SuiteID:    p.CheckSuite.ID,
+			HeadSha:    p.CheckSuite.HeadSHA,
+			AppID:      p.CheckSuite.App.ID,
+			Conclusion: strToText(p.CheckSuite.Conclusion),
+			Status:     p.CheckSuite.Status,
+			UpdatedAt:  updatedAt,
+		}); err != nil {
+			slog.Warn("github: upsert check_suite failed", "err", err, "suite_id", p.CheckSuite.ID)
+			continue
+		}
+		affectedWorkspaces[uuidToString(pr.WorkspaceID)] = struct{}{}
+		issues, err := h.Queries.ListIssueIDsForPullRequest(ctx, pr.ID)
+		if err == nil {
+			for _, id := range issues {
+				affectedIssues[uuidToString(id)] = struct{}{}
+			}
+		}
+	}
+
+	// Broadcast on the existing event so the issue page just re-queries
+	// the PR list. We don't pass a single pull_request payload here
+	// because a suite can touch several and the listener already
+	// invalidates by issue.
+	for ws := range affectedWorkspaces {
+		linked := make([]string, 0, len(affectedIssues))
+		for id := range affectedIssues {
+			linked = append(linked, id)
+		}
+		h.publish(protocol.EventPullRequestUpdated, ws, "system", "", map[string]any{
+			"linked_issue_ids": linked,
+		})
+	}
+}
+
+// derivePRMergeableState resolves the upsert behaviour for the PR row's
+// mergeable_state column on a `pull_request` webhook. It returns three
+// states encoded as (value, clear):
+//
+//   - clear=true → force the column to NULL. State-changing actions (`opened`,
+//     `synchronize`, `reopened`, or a base-branch swap) must blank the value
+//     because GitHub re-computes mergeability asynchronously; the payload may
+//     still carry the previous head's clean/dirty answer, and trusting it
+//     would surface a stale verdict against the new head.
+//   - clear=false, value valid → write the value. The event carried a
+//     concrete verdict we should persist.
+//   - clear=false, value invalid → preserve the existing column. Metadata
+//     events (labeled/assigned/edited-without-base-swap) ship pull_request
+//     payloads with mergeable_state empty even when the previous verdict is
+//     still accurate, and silently overwriting clean/dirty with NULL would
+//     drop information GitHub only refreshes lazily.
+func derivePRMergeableState(action, payload string, baseRefChanged bool) (pgtype.Text, bool) {
+	if action == "opened" || action == "synchronize" || action == "reopened" {
+		return pgtype.Text{}, true
+	}
+	if action == "edited" && baseRefChanged {
+		return pgtype.Text{}, true
+	}
+	if payload == "" {
+		return pgtype.Text{}, false
+	}
+	return pgtype.Text{String: payload, Valid: true}, false
+}
+
+// ghPRChanges captures the only field of `pull_request.edited`'s `changes`
+// payload we care about: a base-branch swap. Everything else (title, body)
+// leaves mergeability intact.
+type ghPRChanges struct {
+	Base *struct {
+		Ref *struct {
+			From string `json:"from"`
+		} `json:"ref"`
+	} `json:"base"`
+}
+
+// baseRefChanged returns true when a pull_request.edited event indicates the
+// PR's base branch was swapped. Only this kind of edit invalidates the
+// existing mergeable_state.
+func baseRefChanged(c *ghPRChanges) bool {
+	return c != nil && c.Base != nil && c.Base.Ref != nil && c.Base.Ref.From != ""
 }
 
 func derivePRState(state string, draft, merged bool) string {

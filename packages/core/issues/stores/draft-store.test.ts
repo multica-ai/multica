@@ -9,6 +9,7 @@ const RESET_STATE = {
     priority: "none" as const,
     assigneeType: undefined,
     assigneeId: undefined,
+    startDate: null,
     dueDate: null,
   },
   lastAssigneeType: undefined,

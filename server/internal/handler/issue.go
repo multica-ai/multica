@@ -19,6 +19,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -44,6 +45,7 @@ type IssueResponse struct {
 	ParentIssueID *string                 `json:"parent_issue_id"`
 	ProjectID     *string                 `json:"project_id"`
 	Position      float64                 `json:"position"`
+	StartDate     *string                 `json:"start_date"`
 	DueDate       *string                 `json:"due_date"`
 	IsPrivate     bool                    `json:"is_private"`
 	CreatedAt     string                  `json:"created_at"`
@@ -78,6 +80,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
+		StartDate:     timestampToPtr(i.StartDate),
 		DueDate:       timestampToPtr(i.DueDate),
 		IsPrivate:     i.IsPrivate,
 		CreatedAt:     timestampToString(i.CreatedAt),
@@ -105,6 +108,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
+		StartDate:     timestampToPtr(i.StartDate),
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
@@ -161,10 +165,35 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
+		StartDate:     timestampToPtr(i.StartDate),
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 	}
+}
+
+type IssueAssigneeGroupResponse struct {
+	ID           string          `json:"id"`
+	AssigneeType *string         `json:"assignee_type"`
+	AssigneeID   *string         `json:"assignee_id"`
+	Issues       []IssueResponse `json:"issues"`
+	Total        int64           `json:"total"`
+}
+
+type GroupedIssuesResponse struct {
+	Groups []IssueAssigneeGroupResponse `json:"groups"`
+}
+
+type groupedIssueRow struct {
+	db.ListIssuesRow
+	GroupTotal int64
+}
+
+func assigneeGroupID(assigneeType pgtype.Text, assigneeID pgtype.UUID) string {
+	if assigneeType.Valid && assigneeID.Valid {
+		return "assignee:" + assigneeType.String + ":" + uuidToString(assigneeID)
+	}
+	return "assignee:unassigned"
 }
 
 // SearchIssueResponse extends IssueResponse with search metadata.
@@ -473,7 +502,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position,
-		i.due_date, i.created_at, i.updated_at, i.number, i.project_id,
+		i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id,
 		COUNT(*) OVER() AS total_count,
 		%s AS match_source,
 		%s AS matched_comment_content
@@ -561,6 +590,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 			&sr.issue.AcceptanceCriteria,
 			&sr.issue.ContextRefs,
 			&sr.issue.Position,
+			&sr.issue.StartDate,
 			&sr.issue.DueDate,
 			&sr.issue.CreatedAt,
 			&sr.issue.UpdatedAt,
@@ -794,6 +824,376 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		"issues": resp,
 		"total":  total,
 	})
+}
+
+type issueActorFilter struct {
+	actorType string
+	actorID   pgtype.UUID
+}
+
+func splitCommaParam(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func isIssueActorType(s string) bool {
+	return s == "member" || s == "agent" || s == "squad"
+}
+
+func parseUUIDParamList(w http.ResponseWriter, raw, fieldName string) ([]pgtype.UUID, bool) {
+	parts := splitCommaParam(raw)
+	if len(parts) == 0 {
+		return nil, true
+	}
+	ids := make([]pgtype.UUID, 0, len(parts))
+	for _, part := range parts {
+		id, ok := parseUUIDOrBadRequest(w, part, fieldName)
+		if !ok {
+			return nil, false
+		}
+		ids = append(ids, id)
+	}
+	return ids, true
+}
+
+func parseActorFilterList(w http.ResponseWriter, raw, fieldName string) ([]issueActorFilter, bool) {
+	parts := splitCommaParam(raw)
+	if len(parts) == 0 {
+		return nil, true
+	}
+	filters := make([]issueActorFilter, 0, len(parts))
+	for _, part := range parts {
+		pieces := strings.SplitN(part, ":", 2)
+		if len(pieces) != 2 || !isIssueActorType(pieces[0]) || strings.TrimSpace(pieces[1]) == "" {
+			writeError(w, http.StatusBadRequest, "invalid "+fieldName)
+			return nil, false
+		}
+		id, ok := parseUUIDOrBadRequest(w, strings.TrimSpace(pieces[1]), fieldName)
+		if !ok {
+			return nil, false
+		}
+		filters = append(filters, issueActorFilter{
+			actorType: pieces[0],
+			actorID:   id,
+		})
+	}
+	return filters, true
+}
+
+func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if h.DB == nil {
+		writeError(w, http.StatusInternalServerError, "database is unavailable")
+		return
+	}
+
+	groupBy := r.URL.Query().Get("group_by")
+	if groupBy == "" {
+		groupBy = "assignee"
+	}
+	if groupBy != "assignee" {
+		writeError(w, http.StatusBadRequest, "unsupported group_by")
+		return
+	}
+
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+
+	limit := 50
+	offset := 0
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if v, err := strconv.Atoi(o); err == nil && v > 0 {
+			offset = v
+		}
+	}
+
+	where := []string{"i.workspace_id = $1"}
+	args := []any{wsUUID}
+	addArg := func(v any) string {
+		args = append(args, v)
+		return "$" + strconv.Itoa(len(args))
+	}
+
+	statuses := splitCommaParam(r.URL.Query().Get("statuses"))
+	if len(statuses) == 0 {
+		statuses = splitCommaParam(r.URL.Query().Get("status"))
+	}
+	if len(statuses) > 0 {
+		where = append(where, fmt.Sprintf("i.status = ANY(%s::text[])", addArg(statuses)))
+	}
+
+	priorities := splitCommaParam(r.URL.Query().Get("priorities"))
+	if len(priorities) == 0 {
+		priorities = splitCommaParam(r.URL.Query().Get("priority"))
+	}
+	if len(priorities) > 0 {
+		where = append(where, fmt.Sprintf("i.priority = ANY(%s::text[])", addArg(priorities)))
+	}
+
+	assigneeTypes := splitCommaParam(r.URL.Query().Get("assignee_types"))
+	if len(assigneeTypes) > 0 {
+		for _, assigneeType := range assigneeTypes {
+			if !isIssueActorType(assigneeType) {
+				writeError(w, http.StatusBadRequest, "invalid assignee_types")
+				return
+			}
+		}
+		where = append(where, fmt.Sprintf("i.assignee_type = ANY(%s::text[])", addArg(assigneeTypes)))
+	}
+
+	if raw := r.URL.Query().Get("assignee_id"); raw != "" {
+		id, ok := parseUUIDOrBadRequest(w, raw, "assignee_id")
+		if !ok {
+			return
+		}
+		where = append(where, fmt.Sprintf("i.assignee_id = %s::uuid", addArg(id)))
+	}
+	if raw := r.URL.Query().Get("assignee_ids"); raw != "" {
+		ids, ok := parseUUIDParamList(w, raw, "assignee_ids")
+		if !ok {
+			return
+		}
+		if len(ids) > 0 {
+			where = append(where, fmt.Sprintf("i.assignee_id = ANY(%s::uuid[])", addArg(ids)))
+		}
+	}
+	if raw := r.URL.Query().Get("creator_id"); raw != "" {
+		id, ok := parseUUIDOrBadRequest(w, raw, "creator_id")
+		if !ok {
+			return
+		}
+		where = append(where, fmt.Sprintf("i.creator_id = %s::uuid", addArg(id)))
+	}
+	if raw := r.URL.Query().Get("project_id"); raw != "" {
+		id, ok := parseUUIDOrBadRequest(w, raw, "project_id")
+		if !ok {
+			return
+		}
+		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(id)))
+	}
+
+	assigneeFilters, ok := parseActorFilterList(w, r.URL.Query().Get("assignee_filters"), "assignee_filters")
+	if !ok {
+		return
+	}
+	includeNoAssignee := r.URL.Query().Get("include_no_assignee") == "true"
+	if len(assigneeFilters) > 0 || includeNoAssignee {
+		ors := make([]string, 0, len(assigneeFilters)+1)
+		for _, filter := range assigneeFilters {
+			ors = append(ors, fmt.Sprintf(
+				"(i.assignee_type = %s::text AND i.assignee_id = %s::uuid)",
+				addArg(filter.actorType),
+				addArg(filter.actorID),
+			))
+		}
+		if includeNoAssignee {
+			ors = append(ors, "(i.assignee_type IS NULL AND i.assignee_id IS NULL)")
+		}
+		where = append(where, "("+strings.Join(ors, " OR ")+")")
+	}
+
+	creatorFilters, ok := parseActorFilterList(w, r.URL.Query().Get("creator_filters"), "creator_filters")
+	if !ok {
+		return
+	}
+	if len(creatorFilters) > 0 {
+		ors := make([]string, 0, len(creatorFilters))
+		for _, filter := range creatorFilters {
+			ors = append(ors, fmt.Sprintf(
+				"(i.creator_type = %s::text AND i.creator_id = %s::uuid)",
+				addArg(filter.actorType),
+				addArg(filter.actorID),
+			))
+		}
+		where = append(where, "("+strings.Join(ors, " OR ")+")")
+	}
+
+	projectIDs, ok := parseUUIDParamList(w, r.URL.Query().Get("project_ids"), "project_ids")
+	if !ok {
+		return
+	}
+	includeNoProject := r.URL.Query().Get("include_no_project") == "true"
+	if len(projectIDs) > 0 || includeNoProject {
+		ors := make([]string, 0, 2)
+		if len(projectIDs) > 0 {
+			ors = append(ors, fmt.Sprintf("i.project_id = ANY(%s::uuid[])", addArg(projectIDs)))
+		}
+		if includeNoProject {
+			ors = append(ors, "i.project_id IS NULL")
+		}
+		where = append(where, "("+strings.Join(ors, " OR ")+")")
+	}
+
+	labelIDs, ok := parseUUIDParamList(w, r.URL.Query().Get("label_ids"), "label_ids")
+	if !ok {
+		return
+	}
+	if len(labelIDs) > 0 {
+		where = append(where, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM issue_to_label itl WHERE itl.issue_id = i.id AND itl.label_id = ANY(%s::uuid[]))",
+			addArg(labelIDs),
+		))
+	}
+
+	if groupAssigneeType := r.URL.Query().Get("group_assignee_type"); groupAssigneeType != "" {
+		if groupAssigneeType == "none" {
+			where = append(where, "(i.assignee_type IS NULL AND i.assignee_id IS NULL)")
+		} else {
+			if !isIssueActorType(groupAssigneeType) {
+				writeError(w, http.StatusBadRequest, "invalid group_assignee_type")
+				return
+			}
+			rawID := r.URL.Query().Get("group_assignee_id")
+			if rawID == "" {
+				writeError(w, http.StatusBadRequest, "invalid group_assignee_id")
+				return
+			}
+			assigneeID, ok := parseUUIDOrBadRequest(w, rawID, "group_assignee_id")
+			if !ok {
+				return
+			}
+			where = append(where, fmt.Sprintf(
+				"(i.assignee_type = %s::text AND i.assignee_id = %s::uuid)",
+				addArg(groupAssigneeType),
+				addArg(assigneeID),
+			))
+		}
+	}
+
+	offsetRef := addArg(int64(offset))
+	limitRef := addArg(int64(limit))
+	query := fmt.Sprintf(`
+WITH ranked AS (
+	SELECT
+		i.id, i.workspace_id, i.title, i.status, i.priority,
+		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
+		i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at,
+		i.number, i.project_id, i.kind, i.is_private,
+		COUNT(*) OVER (PARTITION BY i.assignee_type, i.assignee_id) AS group_total,
+		ROW_NUMBER() OVER (
+			PARTITION BY i.assignee_type, i.assignee_id
+			ORDER BY i.position ASC, i.created_at DESC
+		) AS rn
+	FROM issue i
+	WHERE %s
+)
+SELECT
+	id, workspace_id, title, status, priority,
+	assignee_type, assignee_id, creator_type, creator_id,
+	parent_issue_id, position, start_date, due_date, created_at, updated_at,
+	number, project_id, kind, is_private, group_total
+FROM ranked
+WHERE rn > %s AND rn <= %s + %s
+ORDER BY
+	CASE assignee_type
+		WHEN 'member' THEN 0
+		WHEN 'agent' THEN 1
+		WHEN 'squad' THEN 2
+		ELSE 3
+	END,
+	assignee_type NULLS LAST,
+	assignee_id NULLS LAST,
+	rn`, strings.Join(where, " AND "), offsetRef, offsetRef, limitRef)
+
+	rows, err := h.DB.Query(ctx, query, args...)
+	if err != nil {
+		slog.Warn("ListGroupedIssues query failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list grouped issues")
+		return
+	}
+	defer rows.Close()
+
+	groupedRows := []groupedIssueRow{}
+	for rows.Next() {
+		var row groupedIssueRow
+		if err := rows.Scan(
+			&row.ID,
+			&row.WorkspaceID,
+			&row.Title,
+			&row.Status,
+			&row.Priority,
+			&row.AssigneeType,
+			&row.AssigneeID,
+			&row.CreatorType,
+			&row.CreatorID,
+			&row.ParentIssueID,
+			&row.Position,
+			&row.StartDate,
+			&row.DueDate,
+			&row.CreatedAt,
+			&row.UpdatedAt,
+			&row.Number,
+			&row.ProjectID,
+			&row.Kind,
+			&row.IsPrivate,
+			&row.GroupTotal,
+		); err != nil {
+			slog.Warn("ListGroupedIssues scan failed", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to list grouped issues")
+			return
+		}
+		groupedRows = append(groupedRows, row)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("ListGroupedIssues rows failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list grouped issues")
+		return
+	}
+
+	ids := make([]pgtype.UUID, len(groupedRows))
+	for i, row := range groupedRows {
+		ids[i] = row.ID
+	}
+	labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
+	prefix := h.getIssuePrefix(ctx, wsUUID)
+
+	groups := []IssueAssigneeGroupResponse{}
+	groupIndex := map[string]int{}
+	for _, row := range groupedRows {
+		groupID := assigneeGroupID(row.AssigneeType, row.AssigneeID)
+		idx, exists := groupIndex[groupID]
+		if !exists {
+			idx = len(groups)
+			groupIndex[groupID] = idx
+			groups = append(groups, IssueAssigneeGroupResponse{
+				ID:           groupID,
+				AssigneeType: textToPtr(row.AssigneeType),
+				AssigneeID:   uuidToPtr(row.AssigneeID),
+				Issues:       []IssueResponse{},
+				Total:        row.GroupTotal,
+			})
+		}
+
+		issue := issueListRowToResponse(row.ListIssuesRow, prefix)
+		labels := labelsMap[issue.ID]
+		if labels == nil {
+			labels = []LabelResponse{}
+		}
+		issue.Labels = &labels
+		groups[idx].Issues = append(groups[idx].Issues, issue)
+	}
+
+	writeJSON(w, http.StatusOK, GroupedIssuesResponse{Groups: groups})
 }
 
 func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
@@ -1167,6 +1567,7 @@ type CreateIssueRequest struct {
 	AssigneeID    *string  `json:"assignee_id"`
 	ParentIssueID *string  `json:"parent_issue_id"`
 	ProjectID     *string  `json:"project_id"`
+	StartDate     *string  `json:"start_date"`
 	DueDate       *string  `json:"due_date"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 	// OriginType / OriginID stamp the new issue with its provenance so
@@ -1176,6 +1577,12 @@ type CreateIssueRequest struct {
 	// origin_id=agent_task_queue.id).
 	OriginType *string `json:"origin_type,omitempty"`
 	OriginID   *string `json:"origin_id,omitempty"`
+
+	AllowDuplicate bool `json:"allow_duplicate,omitempty"`
+}
+
+func duplicateIssueMessage(issue IssueResponse) string {
+	return issueguard.DuplicateMessage(issue.Identifier, issue.Title, issue.Status)
 }
 
 func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
@@ -1263,6 +1670,16 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var startDate pgtype.Timestamptz
+	if req.StartDate != nil && *req.StartDate != "" {
+		t, err := time.Parse(time.RFC3339, *req.StartDate)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid start_date format, expected RFC3339")
+			return
+		}
+		startDate = pgtype.Timestamptz{Time: t, Valid: true}
+	}
+
 	var dueDate pgtype.Timestamptz
 	if req.DueDate != nil && *req.DueDate != "" {
 		t, err := time.Parse(time.RFC3339, *req.DueDate)
@@ -1273,8 +1690,8 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		dueDate = pgtype.Timestamptz{Time: t, Valid: true}
 	}
 
-	// Use a transaction to atomically increment the workspace issue counter
-	// and create the issue with the assigned number.
+	// Use a transaction to atomically guard against active duplicates,
+	// increment the workspace issue counter, and create the issue.
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create issue")
@@ -1283,6 +1700,23 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 
 	qtx := h.Queries.WithTx(tx)
+	duplicate, foundDuplicate, err := issueguard.LockAndFindActiveDuplicate(r.Context(), qtx, wsUUID, projectID, parentIssueID, req.Title, req.AllowDuplicate)
+	if err != nil {
+		slog.Warn("duplicate issue guard failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to create issue")
+		return
+	}
+	if foundDuplicate {
+		prefix := h.getIssuePrefix(r.Context(), duplicate.WorkspaceID)
+		existing := issueToResponse(duplicate, prefix)
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"code":  "active_duplicate_issue",
+			"error": duplicateIssueMessage(existing),
+			"issue": existing,
+		})
+		return
+	}
+
 	issueNumber, err := qtx.IncrementIssueCounter(r.Context(), wsUUID)
 	if err != nil {
 		slog.Warn("increment issue counter failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
@@ -1333,6 +1767,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			CreatorID:     parseUUID(actualCreatorID),
 			ParentIssueID: parentIssueID,
 			Position:      0,
+			StartDate:     startDate,
 			DueDate:       dueDate,
 			Number:        issueNumber,
 			ProjectID:     projectID,
@@ -1352,6 +1787,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			CreatorID:     parseUUID(actualCreatorID),
 			ParentIssueID: parentIssueID,
 			Position:      0,
+			StartDate:     startDate,
 			DueDate:       dueDate,
 			Number:        issueNumber,
 			ProjectID:     projectID,
@@ -1454,6 +1890,7 @@ type UpdateIssueRequest struct {
 	AssigneeType  *string  `json:"assignee_type"`
 	AssigneeID    *string  `json:"assignee_id"`
 	Position      *float64 `json:"position"`
+	StartDate     *string  `json:"start_date"`
 	DueDate       *string  `json:"due_date"`
 	ParentIssueID *string  `json:"parent_issue_id"`
 	ProjectID     *string  `json:"project_id"`
@@ -1496,6 +1933,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		ID:            prevIssue.ID,
 		AssigneeType:  prevIssue.AssigneeType,
 		AssigneeID:    prevIssue.AssigneeID,
+		StartDate:     prevIssue.StartDate,
 		DueDate:       prevIssue.DueDate,
 		ParentIssueID: prevIssue.ParentIssueID,
 		ProjectID:     prevIssue.ProjectID,
@@ -1534,6 +1972,18 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.AssigneeID = id
 		} else {
 			params.AssigneeID = pgtype.UUID{Valid: false} // explicit null = unassign
+		}
+	}
+	if _, ok := rawFields["start_date"]; ok {
+		if req.StartDate != nil && *req.StartDate != "" {
+			t, err := time.Parse(time.RFC3339, *req.StartDate)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid start_date format, expected RFC3339")
+				return
+			}
+			params.StartDate = pgtype.Timestamptz{Time: t, Valid: true}
+		} else {
+			params.StartDate = pgtype.Timestamptz{Valid: false} // explicit null = clear date
 		}
 	}
 	if _, ok := rawFields["due_date"]; ok {
@@ -1654,6 +2104,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	priorityChanged := req.Priority != nil && prevIssue.Priority != issue.Priority
 	descriptionChanged := req.Description != nil && textToPtr(prevIssue.Description) != resp.Description
 	titleChanged := req.Title != nil && prevIssue.Title != issue.Title
+	prevStartDate := timestampToPtr(prevIssue.StartDate)
+	startDateChanged := prevStartDate != resp.StartDate && (prevStartDate == nil) != (resp.StartDate == nil) ||
+		(prevStartDate != nil && resp.StartDate != nil && *prevStartDate != *resp.StartDate)
 	prevDueDate := timestampToPtr(prevIssue.DueDate)
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
@@ -1666,6 +2119,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"assignee_changed":    assigneeChanged,
 		"status_changed":      statusChanged,
 		"priority_changed":    priorityChanged,
+		"start_date_changed":  startDateChanged,
 		"due_date_changed":    dueDateChanged,
 		"description_changed": descriptionChanged,
 		"title_changed":       titleChanged,
@@ -1674,6 +2128,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"prev_assignee_id":    uuidToPtr(prevIssue.AssigneeID),
 		"prev_status":         prevIssue.Status,
 		"prev_priority":       prevIssue.Priority,
+		"prev_start_date":     prevStartDate,
 		"prev_due_date":       prevDueDate,
 		"prev_description":    textToPtr(prevIssue.Description),
 		"creator_type":        prevIssue.CreatorType,
@@ -1955,7 +2410,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		req.Updates.Priority != nil ||
 		req.Updates.Position != nil
 	if !hasMutation {
-		for _, k := range []string{"assignee_type", "assignee_id", "due_date", "parent_issue_id", "project_id"} {
+		for _, k := range []string{"assignee_type", "assignee_id", "start_date", "due_date", "parent_issue_id", "project_id"} {
 			if _, ok := rawUpdates[k]; ok {
 				hasMutation = true
 				break
@@ -1990,6 +2445,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			ID:            prevIssue.ID,
 			AssigneeType:  prevIssue.AssigneeType,
 			AssigneeID:    prevIssue.AssigneeID,
+			StartDate:     prevIssue.StartDate,
 			DueDate:       prevIssue.DueDate,
 			ParentIssueID: prevIssue.ParentIssueID,
 			ProjectID:     prevIssue.ProjectID,
@@ -2026,6 +2482,17 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				params.AssigneeID = assigneeUUID
 			} else {
 				params.AssigneeID = pgtype.UUID{Valid: false}
+			}
+		}
+		if _, ok := rawUpdates["start_date"]; ok {
+			if req.Updates.StartDate != nil && *req.Updates.StartDate != "" {
+				t, err := time.Parse(time.RFC3339, *req.Updates.StartDate)
+				if err != nil {
+					continue
+				}
+				params.StartDate = pgtype.Timestamptz{Time: t, Valid: true}
+			} else {
+				params.StartDate = pgtype.Timestamptz{Valid: false}
 			}
 		}
 		if _, ok := rawUpdates["due_date"]; ok {

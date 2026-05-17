@@ -89,6 +89,48 @@ describe("ApiClient schema fallback", () => {
       const res = await client.listIssues();
       expect(res).toEqual({ issues: [], total: 0 });
     });
+
+    it("defaults missing issue start_date to null for rolling deploy compatibility", async () => {
+      stubFetchJson({
+        issues: [
+          {
+            id: "issue-1",
+            workspace_id: "workspace-1",
+            number: 42,
+            identifier: "MUL-42",
+            title: "Existing issue",
+            description: null,
+            status: "todo",
+            priority: "medium",
+            assignee_type: null,
+            assignee_id: null,
+            creator_type: "member",
+            creator_id: "member-1",
+            parent_issue_id: null,
+            project_id: null,
+            position: 0,
+            due_date: null,
+            created_at: "2026-05-17T00:00:00Z",
+            updated_at: "2026-05-17T00:00:00Z",
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssues();
+      expect(res.issues).toHaveLength(1);
+      expect(res.issues[0]?.start_date).toBeNull();
+      expect(res.total).toBe(1);
+    });
+  });
+
+  describe("listGroupedIssues", () => {
+    it("falls back to empty groups when the response is malformed", async () => {
+      stubFetchJson({ groups: "not-an-array" });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listGroupedIssues({ group_by: "assignee" });
+      expect(res).toEqual({ groups: [] });
+    });
   });
 
   describe("listComments", () => {

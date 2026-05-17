@@ -32,7 +32,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
-import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, DueDatePicker } from "../issues/components";
+import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
 import { BacklogAgentHintContent } from "../issues/components/backlog-agent-hint-dialog";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -100,8 +100,19 @@ export function ManualCreatePanel({
   const [status, setStatus] = useState<IssueStatus>((data?.status as IssueStatus) || draft.status);
   const [priority, setPriority] = useState<IssuePriority>(draft.priority);
   const [submitting, setSubmitting] = useState(false);
-  const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(draft.assigneeType);
-  const [assigneeId, setAssigneeId] = useState<string | undefined>(draft.assigneeId);
+  const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(() => {
+    if (data && "assignee_type" in data) {
+      return (data.assignee_type as IssueAssigneeType | null) ?? undefined;
+    }
+    return draft.assigneeType;
+  });
+  const [assigneeId, setAssigneeId] = useState<string | undefined>(() => {
+    if (data && "assignee_id" in data) {
+      return (data.assignee_id as string | null) ?? undefined;
+    }
+    return draft.assigneeId;
+  });
+  const [startDate, setStartDate] = useState<string | null>(draft.startDate);
   const [dueDate, setDueDate] = useState<string | null>(draft.dueDate);
   const [projectId, setProjectId] = useState<string | undefined>(
     (data?.project_id as string) || undefined,
@@ -141,6 +152,7 @@ export function ManualCreatePanel({
     setAssigneeType(type); setAssigneeId(id);
     setDraft({ assigneeType: type, assigneeId: id });
   };
+  const updateStartDate = (v: string | null) => { setStartDate(v); setDraft({ startDate: v }); };
   const updateDueDate = (v: string | null) => { setDueDate(v); setDraft({ dueDate: v }); };
 
   const createIssueMutation = useCreateIssue();
@@ -149,6 +161,7 @@ export function ManualCreatePanel({
     setTitle("");
     setStatus("todo");
     setPriority("none");
+    setStartDate(null);
     setDueDate(null);
     setProjectId(undefined);
     setParentIssueId(undefined);
@@ -161,6 +174,7 @@ export function ManualCreatePanel({
       priority: "none",
       assigneeType,
       assigneeId,
+      startDate: null,
       dueDate: null,
     });
     descEditorRef.current?.clearContent();
@@ -178,6 +192,7 @@ export function ManualCreatePanel({
         priority,
         assignee_type: assigneeType,
         assignee_id: assigneeId,
+        start_date: startDate || undefined,
         due_date: dueDate || undefined,
         attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
         parent_issue_id: parentIssueId,
@@ -400,6 +415,14 @@ export function ManualCreatePanel({
                   u.assignee_type ?? undefined,
                   u.assignee_id ?? undefined,
                 )}
+                triggerRender={<PillButton />}
+                align="start"
+              />
+
+              {/* Start date */}
+              <StartDatePicker
+                startDate={startDate}
+                onUpdate={(u) => updateStartDate(u.start_date ?? null)}
                 triggerRender={<PillButton />}
                 align="start"
               />

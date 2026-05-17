@@ -12,6 +12,7 @@
   "exports": {
     "./navigation": "./navigation/index.ts",
     "./common/actor-avatar": "./common/actor-avatar.tsx",
+    "./common/actor-issues-panel": "./common/actor-issues-panel.tsx",
     "./common/markdown": "./common/markdown.tsx",
     "./editor": "./editor/index.ts",
     "./issues/components": "./issues/components/index.ts",
@@ -26,6 +27,7 @@
     "./my-issues": "./my-issues/index.ts",
     "./skills": "./skills/index.ts",
     "./agents": "./agents/index.ts",
+    "./members": "./members/index.ts",
     "./inbox": "./inbox/index.ts",
     "./inbox/components/inbox-list-item": "./inbox/components/inbox-list-item.tsx",
     "./inbox/components/inbox-detail-label": "./inbox/components/inbox-detail-label.tsx",

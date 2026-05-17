@@ -1212,6 +1212,39 @@ func TestInjectRuntimeConfigCodexWindowsUsesContentFile(t *testing.T) {
 	}
 }
 
+func TestInjectRuntimeConfigQuickCreateOutputPrefixAgnostic(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{QuickCreatePrompt: "create a task"}
+	if _, err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	s := string(data)
+
+	for _, want := range []string{
+		"quick-create task",
+		"Created <identifier-or-id>: <title>",
+		"identifier` from JSON output",
+		"Do not assume any workspace issue prefix",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("quick-create runtime config missing %q\n---\n%s", want, s)
+		}
+	}
+	for _, absent := range []string{
+		"Created MUL-<n>",
+	} {
+		if strings.Contains(s, absent) {
+			t.Errorf("quick-create runtime config should not contain %q\n---\n%s", absent, s)
+		}
+	}
+}
+
 func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

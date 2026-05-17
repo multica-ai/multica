@@ -106,7 +106,7 @@
     "repos_pill_count_other": "{{count}} repos",
     "repos_heading": "Attach GitHub repos to this project",
     "repos_empty": "No workspace-level repos yet. Paste a URL below to attach one ad-hoc.",
-    "repos_url_placeholder": "https://github.com/owner/repo",
+    "repos_url_placeholder": "https://github.com/owner/repo or git@github.com:owner/repo.git",
     "repos_add": "Add",
     "repos_selected": "Selected"
   },

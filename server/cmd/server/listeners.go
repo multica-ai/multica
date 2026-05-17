@@ -41,7 +41,7 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		if recipientID == "" {
 			return
 		}
-		data, err := json.Marshal(map[string]any{"type": e.Type, "payload": e.Payload, "actor_id": e.ActorID})
+		data, err := json.Marshal(map[string]any{"type": e.Type, "payload": e.Payload, "actor_id": e.ActorID, "actor_type": e.ActorType})
 		if err != nil {
 			return
 		}
@@ -91,7 +91,7 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 			// Fallback for map encoding.
 			if invMap, ok := payload["invitation"].(map[string]any); ok {
 				if uid, _ := invMap["invitee_user_id"].(*string); uid != nil && *uid != "" {
-					data, err := json.Marshal(map[string]any{"type": e.Type, "payload": e.Payload, "actor_id": e.ActorID})
+					data, err := json.Marshal(map[string]any{"type": e.Type, "payload": e.Payload, "actor_id": e.ActorID, "actor_type": e.ActorType})
 					if err != nil {
 						return
 					}
@@ -102,7 +102,7 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 			return
 		}
 		if inv.InviteeUserID != nil && *inv.InviteeUserID != "" {
-			data, err := json.Marshal(map[string]any{"type": e.Type, "payload": e.Payload, "actor_id": e.ActorID})
+			data, err := json.Marshal(map[string]any{"type": e.Type, "payload": e.Payload, "actor_id": e.ActorID, "actor_type": e.ActorType})
 			if err != nil {
 				return
 			}
@@ -143,7 +143,7 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		if userID == "" {
 			return
 		}
-		data, err := json.Marshal(map[string]any{"type": e.Type, "payload": e.Payload, "actor_id": e.ActorID})
+		data, err := json.Marshal(map[string]any{"type": e.Type, "payload": e.Payload, "actor_id": e.ActorID, "actor_type": e.ActorType})
 		if err != nil {
 			return
 		}
@@ -159,9 +159,10 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		}
 
 		msg := map[string]any{
-			"type":     e.Type,
-			"payload":  e.Payload,
-			"actor_id": e.ActorID,
+			"type":       e.Type,
+			"payload":    e.Payload,
+			"actor_id":   e.ActorID,
+			"actor_type": e.ActorType,
 		}
 		data, err := json.Marshal(msg)
 		if err != nil {

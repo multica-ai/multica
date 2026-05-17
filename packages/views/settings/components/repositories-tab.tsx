@@ -128,7 +128,7 @@ export function RepositoriesTab() {
                 >
                   {isEditing ? (
                     <Input
-                      type="url"
+                      type="text"
                       value={repo.url}
                       onChange={(e) => handleRepoChange(index, e.target.value)}
                       disabled={!canManageWorkspace}

@@ -154,7 +154,8 @@
   },
   "charts": {
     "heatmap_less": "少",
-    "heatmap_more": "多"
+    "heatmap_more": "多",
+    "tooltip_total": "总计"
   },
   "list": {
     "_comment_name_col": "CEREBRO-PATCH(runtime-name-own-column): col_name for the separate runtime name column (JEH-1520)",

@@ -17,14 +17,14 @@ import (
 // up the row that GetActiveAgentPassForAgentIssue will return and to
 // observe what MarkAgentPassStatus was called with.
 type fakeQueries struct {
-	pass        cerebrodb.CerebroAgentPass
-	passErr     error
-	markCalled  bool
-	markStatus  string
-	markErr     error
-	markPassID  pgtype.UUID
-	getCalled   bool
-	getArg      cerebrodb.GetActiveAgentPassForAgentIssueParams
+	pass       cerebrodb.CerebroAgentPass
+	passErr    error
+	markCalled bool
+	markStatus string
+	markErr    error
+	markPassID pgtype.UUID
+	getCalled  bool
+	getArg     cerebrodb.GetActiveAgentPassForAgentIssueParams
 	// getByID is used by ValidateChildScope tests.
 	getByID    cerebrodb.CerebroAgentPass
 	getByIDErr error
@@ -46,7 +46,7 @@ func (f *fakeQueries) GetActiveAgentPassForAgentIssue(_ context.Context, arg cer
 	return f.pass, nil
 }
 
-func (f *fakeQueries) GetExhaustedAgentPassForAgentIssue(_ context.Context, _ cerebrodb.GetActiveAgentPassForAgentIssueParams) (cerebrodb.CerebroAgentPass, error) {
+func (f *fakeQueries) GetExhaustedAgentPassForAgentIssue(_ context.Context, _ cerebrodb.GetExhaustedAgentPassForAgentIssueParams) (cerebrodb.CerebroAgentPass, error) {
 	// Return the exhausted pass when it has been marked exhausted.
 	if f.markCalled && f.markStatus == StatusExhausted {
 		p := f.pass
@@ -561,11 +561,11 @@ func TestClassifySpendLevel(t *testing.T) {
 		want           SpendLevel
 	}{
 		{0, 1_000_000, SpendLevelOK},
-		{699_999, 1_000_000, SpendLevelOK},   // 69.9 %
-		{700_000, 1_000_000, SpendLevelWarn},  // 70 %
-		{899_999, 1_000_000, SpendLevelWarn},  // 89.9 %
-		{900_000, 1_000_000, SpendLevelDegrade}, // 90 %
-		{999_999, 1_000_000, SpendLevelDegrade}, // 99.9 %
+		{699_999, 1_000_000, SpendLevelOK},          // 69.9 %
+		{700_000, 1_000_000, SpendLevelWarn},        // 70 %
+		{899_999, 1_000_000, SpendLevelWarn},        // 89.9 %
+		{900_000, 1_000_000, SpendLevelDegrade},     // 90 %
+		{999_999, 1_000_000, SpendLevelDegrade},     // 99.9 %
 		{1_000_000, 1_000_000, SpendLevelExhausted}, // 100 %
 		{1_500_000, 1_000_000, SpendLevelExhausted}, // 150 %
 	}

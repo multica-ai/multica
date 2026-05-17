@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { ActorAvatar } from "@multica/views/common/actor-avatar";
+import { ActorIssuesPanel } from "@multica/views/common/actor-issues-panel";
 import type { MemberRole, MemberWithUser } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
@@ -266,6 +267,13 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
       <EffectiveAccessSection userId={member.user_id} role={member.role} />
       <OwnedResourcesSection userId={member.user_id} isAdmin={canManage} />
       <OverridesPlaceholder />
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium">Tasks</h2>
+        <div className="h-[520px] min-h-0 overflow-hidden rounded-md border">
+          <ActorIssuesPanel actorType="member" actorId={member.user_id} />
+        </div>
+      </section>
 
       {canRemove && (
         <Card>

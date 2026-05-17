@@ -197,6 +197,36 @@ describe("RepositoriesTab — view/edit toggle", () => {
     expect(screen.getByRole("button", { name: /^Save$/ })).toBeDisabled();
   });
 
+  it("accepts scp-like shorthand without browser URL validation blocking submit", async () => {
+    const user = userEvent.setup();
+    mockUpdateWorkspace.mockImplementation(
+      async (_id: string, payload: { repos: { url: string }[] }) => {
+        workspaceRef.current = { ...workspaceRef.current, repos: payload.repos };
+        return workspaceRef.current;
+      },
+    );
+
+    render(<RepositoriesTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByRole("button", { name: "Edit repository" }));
+    const input = screen.getByRole("textbox") as HTMLInputElement;
+    await user.clear(input);
+    await user.type(input, "git@github.com:multica-ai/multica.git");
+
+    // type="text" (not "url") so the browser does not run native URL
+    // validation; the value reaches the server which has the real check.
+    expect(input.type).toBe("text");
+    expect(input.validity.valid).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: /^Save$/ }));
+
+    await waitFor(() => {
+      expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
+        repos: [{ url: "git@github.com:multica-ai/multica.git" }],
+      });
+    });
+  });
+
   it("deleting a row shifts tracked edit indices so the wrong row doesn't open", async () => {
     workspaceRef.current = {
       ...workspaceRef.current,

@@ -63,6 +63,8 @@ vi.mock("@multica/core/paths", () => ({
     documentNew: () => "/ws/documents/new",
     issueDetail: (id: string) => `/ws/issues/${id}`,
     projectDetail: (id: string) => `/ws/projects/${id}`,
+    memberDetail: (id: string) => `/ws/members/${id}`,
+    agentDetail: (id: string) => `/ws/agents/${id}`,
   }),
 }));
 
