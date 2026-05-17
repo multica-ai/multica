@@ -17,6 +17,7 @@ const mockApi = vi.hoisted(() => ({
   listCRMAccounts: vi.fn(),
   listCRMContacts: vi.fn(),
   listCRMEmailMessages: vi.fn(),
+  listCRMEmailThreadAssociationSuggestions: vi.fn(),
   updateCRMEmailThreadAssociation: vi.fn(),
   createCRMContact: vi.fn(),
   listProjects: vi.fn(),
@@ -144,6 +145,7 @@ beforeEach(() => {
     messages: [{ id: "message-1", workspace_id: "ws-1", thread_id: "thread-1", account_id: "account-1", contact_id: "contact-1", from_email: "buyer@example.com", from_name: "Alice", to_emails: ["sales@example.com"], cc_emails: [], bcc_emails: [], subject: "New quotation request", sent_at: "2026-05-12T10:00:00Z", received_at: null, body_text: "Please quote 500 units.", body_html: null, snippet: "Please quote", direction: "inbound", created_at: "2026-05-12T10:00:00Z", updated_at: "2026-05-12T10:00:00Z" }],
     total: 1,
   });
+  mockApi.listCRMEmailThreadAssociationSuggestions.mockResolvedValue({ suggestions: [], total: 0 });
   mockApi.updateCRMEmailThreadAssociation.mockResolvedValue(linkedThread);
   mockApi.createCRMContact.mockResolvedValue({ ...contact, id: "contact-2", name: "Bob", email: "bob@example.com" });
   mockApi.listProjects.mockResolvedValue({ projects: [project], total: 1 });
@@ -271,7 +273,7 @@ describe("CRMEmailsPage", () => {
 
     const linkDialog = screen.getByRole("dialog");
     expect(within(linkDialog).getByLabelText("Related project")).toHaveValue("project-1");
-    expect(within(linkDialog).getByText("ACME-1 · Follow up quotation")).toBeInTheDocument();
+    expect(within(linkDialog).getByText("ACME-1 · Follow up quotation · todo")).toBeInTheDocument();
 
     await userEvent.click(within(linkDialog).getByLabelText("Related issue ACME-1"));
     await userEvent.click(within(linkDialog).getByRole("button", { name: "Save email link" }));
@@ -280,7 +282,7 @@ describe("CRMEmailsPage", () => {
     await userEvent.click(screen.getByRole("button", { name: /Link project \/ issue/ }));
     await userEvent.click(screen.getByRole("button", { name: "Create follow-up issue" }));
     expect(mockClearIssueDraft).toHaveBeenCalled();
-    expect(mockSetIssueDraft).toHaveBeenCalledWith(expect.objectContaining({ title: "Follow up: New quotation request", priority: "medium" }));
+    expect(mockSetIssueDraft).toHaveBeenCalledWith(expect.objectContaining({ title: "Follow up: New quotation request", priority: "medium", status: "in_review" }));
     expect(mockModalOpen).toHaveBeenCalledWith("create-issue", expect.objectContaining({ project_id: "project-1", onCreated: expect.any(Function) }));
   });
 

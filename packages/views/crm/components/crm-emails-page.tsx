@@ -9,7 +9,7 @@ import { issueKeys, useIssueDraftStore } from "@multica/core/issues";
 import { useModalStore } from "@multica/core/modals";
 import { crmAccountListOptions, crmContactListOptions, crmEmailEngineStatusOptions, crmEmailMessageListOptions, crmEmailThreadListOptions, crmKeys } from "@multica/core/crm/queries";
 import { useWorkspacePaths } from "@multica/core/paths";
-import type { CRMAccount, CRMContact, CRMEmailThread, CRMIMAPPreviewMessage, CRMIMAPSetting, CreateCRMContactRequest, Issue, Project } from "@multica/core/types";
+import type { CRMAccount, CRMContact, CRMEmailThread, CRMEmailThreadAssociationSuggestion, CRMIMAPPreviewMessage, CRMIMAPSetting, CreateCRMContactRequest, Issue, Project } from "@multica/core/types";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -64,6 +64,20 @@ function DetailRow({ label, value }: { label: string; value?: string | null }) {
       <div className="mt-1 truncate text-sm">{value || "—"}</div>
     </div>
   );
+}
+
+function sanitizeEmailHtml(html?: string | null) {
+  if (!html) return "";
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/\son\w+="[^"]*"/gi, "")
+    .replace(/\son\w+='[^']*'/gi, "")
+    .replace(/javascript:/gi, "");
+}
+
+function mutationErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 function AssociationChip({ icon, label, value, onClick }: { icon: ReactNode; label: string; value?: string | null; onClick?: () => void }) {
@@ -231,6 +245,9 @@ export function CRMEmailsPage() {
       queryClient.invalidateQueries({ queryKey: ["crm", wsId, "email-drafts"] });
       queryClient.invalidateQueries({ queryKey: crmKeys.emailThreads(wsId) });
     },
+    onError: (error) => {
+      setMailboxStatus(`SMTP send failed: ${mutationErrorMessage(error, "unknown error")}`);
+    },
   });
 
   const saveEmailDraft = useMutation({
@@ -274,13 +291,18 @@ export function CRMEmailsPage() {
     ...crmEmailMessageListOptions(wsId, selectedThread?.id ?? ""),
     enabled: Boolean(selectedThread?.id),
   });
+  const { data: associationSuggestions = [] } = useQuery({
+    queryKey: [...crmKeys.emailThread(wsId, selectedThread?.id ?? ""), "association-suggestions"],
+    queryFn: async () => (await api.listCRMEmailThreadAssociationSuggestions(selectedThread?.id ?? "")).suggestions,
+    enabled: Boolean(selectedThread?.id && !selectedThread?.account_id),
+  });
   const { data: projects = [] } = useQuery({
     queryKey: ["projects", wsId, "crm-email-link-picker"],
     queryFn: async () => (await api.listProjects()).projects,
   });
   const { data: issues = [] } = useQuery({
     queryKey: ["issues", wsId, "crm-email-link-picker", emailLinkDraft?.projectId ?? selectedThread?.project_id ?? ""],
-    queryFn: async () => (await api.listIssues({ project_id: emailLinkDraft?.projectId || selectedThread?.project_id || undefined, open_only: true, limit: 100 })).issues,
+    queryFn: async () => (await api.listIssues({ project_id: emailLinkDraft?.projectId || selectedThread?.project_id || undefined, limit: 100 })).issues,
   });
 
   const selectedAccount = accounts.find((account) => account.id === linkedAccountId) ?? null;
@@ -292,13 +314,13 @@ export function CRMEmailsPage() {
   const crmNamedProject = selectedAccount ? projects.find((project) => project.title === defaultProjectTitle) : null;
 
 
-  const openAssociationDialog = () => {
+  const openAssociationDialog = (suggestion?: CRMEmailThreadAssociationSuggestion) => {
     const inferred = inferContactDraft(messages);
     setAssociationDraft({
-      accountId: selectedThread?.account_id ?? "",
-      contactId: selectedThread?.contact_id ?? "",
-      contactName: selectedContact?.name ?? inferred.contactName,
-      contactEmail: selectedContact?.email ?? inferred.contactEmail,
+      accountId: suggestion?.account_id ?? selectedThread?.account_id ?? "",
+      contactId: suggestion?.contact_id ?? selectedThread?.contact_id ?? "",
+      contactName: suggestion?.contact_name ?? selectedContact?.name ?? inferred.contactName,
+      contactEmail: suggestion?.contact_email ?? selectedContact?.email ?? inferred.contactEmail,
     });
   };
 
@@ -376,6 +398,7 @@ export function CRMEmailsPage() {
       title: `${t(($) => $.emails.follow_up_issue_prefix)} ${selectedThread.subject}`.trim(),
       description: selectedThread.subject,
       priority: "medium",
+      status: "in_review",
     });
     openModal("create-issue", {
       project_id: emailLinkDraft.projectId,
@@ -578,7 +601,7 @@ export function CRMEmailsPage() {
                       {[selectedThread.mailbox, selectedThread.direction, selectedThread.status, messageTime(selectedThread.last_message_at)].filter(Boolean).join(" · ")}
                     </p>
                   </div>
-                  <Button variant={selectedAccount ? "outline" : "default"} size="sm" onClick={openAssociationDialog}>
+                  <Button variant={selectedAccount ? "outline" : "default"} size="sm" onClick={() => openAssociationDialog()}>
                     <Link2 className="mr-1 size-3" />
                     {selectedAccount ? t(($) => $.emails.change_association) : t(($) => $.emails.link_customer_contact)}
                   </Button>
@@ -601,6 +624,22 @@ export function CRMEmailsPage() {
                     </Button>
                   )}
                 </div>
+                {!selectedAccount && associationSuggestions.length > 0 && (
+                  <div className="mt-3 rounded-lg border bg-muted/20 p-3">
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t(($) => $.emails.association_suggestions)}</div>
+                    <div className="space-y-2">
+                      {associationSuggestions.map((suggestion) => (
+                        <div key={`${suggestion.account_id}:${suggestion.contact_id ?? "account"}`} className="flex flex-wrap items-start justify-between gap-3 rounded-md border bg-background p-3 text-sm">
+                          <div className="min-w-0 flex-1">
+                            <div className="font-medium">{suggestion.account_name}{suggestion.contact_name ? ` · ${suggestion.contact_name}` : ""}</div>
+                            <div className="mt-1 text-xs text-muted-foreground">{suggestion.reasons.join("; ")}</div>
+                          </div>
+                          <Button size="sm" variant="outline" onClick={() => openAssociationDialog(suggestion)}>{t(($) => $.emails.use_suggestion)}</Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {updateAssociation.isError && <p className="mt-2 text-xs text-destructive">{t(($) => $.emails.association_error)}</p>}
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto bg-muted/20 p-5">
@@ -622,7 +661,21 @@ export function CRMEmailsPage() {
                         <div className="mt-1 text-xs text-muted-foreground">
                           {message.to_emails.length > 0 ? `${t(($) => $.emails.to_label)}: ${message.to_emails.join(", ")}` : message.direction}
                         </div>
-                        <div className="mt-3 whitespace-pre-wrap leading-6 text-foreground/80">{message.body_text || message.snippet || t(($) => $.emails.no_body)}</div>
+                        {message.body_html ? (
+                          <div className="mt-3 rounded-md border bg-muted/20 p-3 leading-6 text-foreground/80" dangerouslySetInnerHTML={{ __html: sanitizeEmailHtml(message.body_html) }} />
+                        ) : (
+                          <div className="mt-3 whitespace-pre-wrap leading-6 text-foreground/80">{message.body_text || message.snippet || t(($) => $.emails.no_body)}</div>
+                        )}
+                        {Array.isArray((message as any).attachments) && (message as any).attachments.length > 0 ? (
+                          <div className="mt-3 rounded-md border bg-muted/20 p-3 text-xs">
+                            <div className="mb-2 font-medium">{t(($) => $.emails.attachments)}</div>
+                            <ul className="space-y-1 text-muted-foreground">
+                              {(message as any).attachments.map((attachment: any, index: number) => (
+                                <li key={attachment.id ?? attachment.filename ?? index}>{attachment.filename ?? attachment.name ?? t(($) => $.emails.attachment)}{attachment.size ? ` · ${attachment.size}` : ""}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
                       </article>
                     ))}
                   </div>
@@ -734,16 +787,16 @@ export function CRMEmailsPage() {
               <label className="space-y-1 text-sm">
                 <span className="text-xs font-medium text-muted-foreground">{t(($) => $.emails.related_issue)}</span>
                 <div className="max-h-48 space-y-2 overflow-auto rounded-md border bg-background p-2">
-                  {issues.filter((issue: Issue) => !["done", "cancelled"].includes(issue.status)).map((issue: Issue) => {
+                  {issues.map((issue: Issue) => {
                     const checked = emailLinkDraft.issueIds.includes(issue.id);
                     return (
                       <label key={issue.id} className="flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-muted">
                         <input aria-label={`${t(($) => $.emails.related_issue)} ${issue.identifier}`} type="checkbox" checked={checked} onChange={() => setEmailLinkDraft({ ...emailLinkDraft, issueIds: checked ? emailLinkDraft.issueIds.filter((id) => id !== issue.id) : [...emailLinkDraft.issueIds, issue.id] })} />
-                        <span>{issue.identifier} · {issue.title}</span>
+                        <span>{issue.identifier} · {issue.title} · {issue.status.replace(/_/g, " ")}</span>
                       </label>
                     );
                   })}
-                  {!issues.filter((issue: Issue) => !["done", "cancelled"].includes(issue.status)).length && <div className="px-2 py-1 text-xs text-muted-foreground">{t(($) => $.emails.no_issue_link)}</div>}
+                  {!issues.length && <div className="px-2 py-1 text-xs text-muted-foreground">{t(($) => $.emails.no_issue_link)}</div>}
                 </div>
               </label>
               <Button variant="outline" type="button" onClick={openCreateFollowUpIssue}>{t(($) => $.emails.create_follow_up_issue)}</Button>

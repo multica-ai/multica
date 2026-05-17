@@ -95,6 +95,18 @@ const tagSuggestions = (accounts: Array<{ tags?: string[] | null }>) => {
     .slice(0, 12);
 };
 
+function isCRMAccountFollowUpBucket(value: string | null): value is CRMAccountFollowUpBucket {
+  return value === "today" || value === "next_7_days" || value === "overdue" || value === "none";
+}
+
+function isCRMAccountPriority(value: string | null): value is CRMAccountPriority {
+  return value === "high" || value === "medium" || value === "low";
+}
+
+function isCRMAccountSort(value: string | null): value is CRMAccountSort {
+  return value === "name" || value === "updated" || value === "next_follow_up" || value === "priority_rating";
+}
+
 function AccountStatusLabel({ status, t }: { status: CRMAccountStatus; t: Translation }) {
   const labels: Record<CRMAccountStatus, string> = {
     active: t(($) => $.statuses.active),
@@ -219,15 +231,16 @@ export function CRMPage() {
   const { t: rawT, i18n } = useT("crm");
   const t = rawT as Translation;
   const locale = normalizeLocale(i18n.language);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<CRMAccountStatus | "">("");
-  const [ratingFilter, setRatingFilter] = useState<CRMAccountRating | "">("");
-  const [priorityFilter, setPriorityFilter] = useState<CRMAccountPriority | "">("");
-  const [countryFilter, setCountryFilter] = useState("");
-  const [industryFilter, setIndustryFilter] = useState("");
-  const [sourceFilter, setSourceFilter] = useState<CRMAccountSource | "">("");
-  const [followUpBucket, setFollowUpBucket] = useState<CRMAccountFollowUpBucket | "">("");
-  const [sort, setSort] = useState<CRMAccountSort>("name");
+  const searchParams = navigation.searchParams;
+  const [search, setSearch] = useState(() => searchParams.get("search") ?? "");
+  const [statusFilter, setStatusFilter] = useState<CRMAccountStatus | "">(() => (searchParams.get("status") as CRMAccountStatus | null) ?? "");
+  const [ratingFilter, setRatingFilter] = useState<CRMAccountRating | "">(() => (searchParams.get("rating") as CRMAccountRating | null) ?? "");
+  const [priorityFilter, setPriorityFilter] = useState<CRMAccountPriority | "">(() => (searchParams.get("priority") as CRMAccountPriority | null) ?? "");
+  const [countryFilter, setCountryFilter] = useState(() => searchParams.get("country") ?? "");
+  const [industryFilter, setIndustryFilter] = useState(() => searchParams.get("industry") ?? "");
+  const [sourceFilter, setSourceFilter] = useState<CRMAccountSource | "">(() => (searchParams.get("source") as CRMAccountSource | null) ?? "");
+  const [followUpBucket, setFollowUpBucket] = useState<CRMAccountFollowUpBucket | "">(() => (searchParams.get("follow_up") as CRMAccountFollowUpBucket | null) ?? (searchParams.get("follow_up_bucket") as CRMAccountFollowUpBucket | null) ?? "");
+  const [sort, setSort] = useState<CRMAccountSort>(() => (searchParams.get("sort") as CRMAccountSort | null) ?? "name");
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState<AccountFormState>(() => blankAccountForm());
 
@@ -244,8 +257,8 @@ export function CRMPage() {
   }), [countryFilter, followUpBucket, industryFilter, priorityFilter, ratingFilter, search, sort, sourceFilter, statusFilter]);
   const { data: accounts = [], isLoading } = useQuery(crmAccountListOptions(wsId, accountListParams));
   const sortedAccounts = useMemo(
-    () => sort === "name" ? [...accounts].sort((a, b) => a.name.localeCompare(b.name)) : accounts,
-    [accounts, sort],
+    () => sort === "name" ? [...accounts].sort((a, b) => a.name.localeCompare(b.name, locale === "zh-Hans" ? "zh-Hans-CN-u-co-pinyin" : "en")) : accounts,
+    [accounts, locale, sort],
   );
   const suggestedTags = useMemo(() => tagSuggestions(accounts), [accounts]);
 

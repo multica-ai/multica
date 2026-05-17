@@ -286,7 +286,7 @@ describe("CRMAccountDetailPage", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Create follow-up issue" }));
 
-    expect(mockApi.listIssues).toHaveBeenCalledWith({ project_id: "project-1", open_only: true, limit: 50 });
+    expect(mockApi.listIssues).toHaveBeenCalledWith({ project_id: "project-1", limit: 50 });
     expect(mockApi.createCRMFollowUpIssue).not.toHaveBeenCalled();
     expect(mockIssueDraftStore.clearDraft).toHaveBeenCalled();
     expect(mockIssueDraftStore.setDraft).toHaveBeenCalledWith(expect.objectContaining({

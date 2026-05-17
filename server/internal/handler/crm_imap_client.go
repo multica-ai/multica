@@ -3,11 +3,16 @@ package handler
 import (
 	"bufio"
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"html"
 	"io"
+	"log/slog"
 	"mime"
 	"mime/multipart"
 	"mime/quotedprintable"
@@ -63,10 +68,50 @@ type crmIMAPClient struct {
 	tag  int
 }
 
+func crmMailboxSecretKey() []byte {
+	if raw := strings.TrimSpace(os.Getenv("CRM_MAILBOX_SECRET_KEY")); raw != "" {
+		if decoded, err := base64.StdEncoding.DecodeString(raw); err == nil && len(decoded) == 32 {
+			return decoded
+		}
+		if len(raw) == 32 {
+			return []byte(raw)
+		}
+	}
+	fallback := os.Getenv("JWT_SECRET")
+	if fallback == "" {
+		fallback = "multica-dev-secret-change-in-production"
+	}
+	sum := sha256.Sum256([]byte("crm-mailbox-secret:" + fallback))
+	return sum[:]
+}
+
 func resolveCRMIMAPSecret(ref string) (string, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return "", fmt.Errorf("IMAP password is missing")
+	}
+	if strings.HasPrefix(ref, "enc:v1:") {
+		payload, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(ref, "enc:v1:"))
+		if err != nil {
+			return "", fmt.Errorf("invalid encrypted IMAP secret")
+		}
+		block, err := aes.NewCipher(crmMailboxSecretKey())
+		if err != nil {
+			return "", fmt.Errorf("invalid CRM mailbox secret key")
+		}
+		gcm, err := cipher.NewGCM(block)
+		if err != nil {
+			return "", fmt.Errorf("invalid CRM mailbox cipher")
+		}
+		if len(payload) < gcm.NonceSize() {
+			return "", fmt.Errorf("invalid encrypted IMAP secret")
+		}
+		nonce, ciphertext := payload[:gcm.NonceSize()], payload[gcm.NonceSize():]
+		plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+		if err != nil {
+			return "", fmt.Errorf("invalid encrypted IMAP secret")
+		}
+		return string(plaintext), nil
 	}
 	if strings.HasPrefix(ref, "inline:") {
 		decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(ref, "inline:"))
@@ -91,7 +136,24 @@ func resolveCRMIMAPSecret(ref string) (string, error) {
 }
 
 func encodeCRMIMAPInlineSecret(secret string) string {
-	return "inline:" + base64.StdEncoding.EncodeToString([]byte(secret))
+	block, err := aes.NewCipher(crmMailboxSecretKey())
+	if err != nil {
+		slog.Warn("failed to initialize CRM mailbox secret encryption", "error", err)
+		return "inline:" + base64.StdEncoding.EncodeToString([]byte(secret))
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		slog.Warn("failed to initialize CRM mailbox secret cipher", "error", err)
+		return "inline:" + base64.StdEncoding.EncodeToString([]byte(secret))
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		slog.Warn("failed to generate CRM mailbox secret nonce", "error", err)
+		return "inline:" + base64.StdEncoding.EncodeToString([]byte(secret))
+	}
+	ciphertext := gcm.Seal(nil, nonce, []byte(secret), nil)
+	payload := append(nonce, ciphertext...)
+	return "enc:v1:" + base64.StdEncoding.EncodeToString(payload)
 }
 
 func dialCRMIMAP(cfg crmIMAPMailboxConfig) (*crmIMAPClient, error) {

@@ -148,6 +148,8 @@
     "change_association": "Change link",
     "link_customer_contact": "Link customer",
     "link_help": "Choose the customer for this email thread, then link an existing contact or create a new contact from the sender.",
+    "association_suggestions": "Suggested links",
+    "use_suggestion": "Use suggestion",
     "customer_detail": "Customer details from CRM.",
     "contact_detail": "Contact details from CRM.",
     "existing_contact": "Existing contact",
@@ -201,6 +203,8 @@
     "new_mailbox": "New mailbox",
     "mailbox_saved": "Mailbox settings saved",
     "preview_import": "Preview import",
+    "attachments": "Attachments",
+    "attachment": "Attachment",
     "tls_none": "No TLS"
   },
   "notes": {
@@ -297,6 +301,24 @@
     "no_followups": "No overdue follow-ups.",
     "no_hot": "No hot customers yet.",
     "no_customers": "No customers yet.",
-    "no_emails": "No email threads yet."
+    "no_emails": "No email threads yet.",
+    "today_title": "Today's follow-ups",
+    "week_title": "This week's follow-ups",
+    "overdue_title": "Overdue follow-ups",
+    "high_priority_title": "High priority customers",
+    "no_today": "No follow-ups due today.",
+    "no_week": "No follow-ups due this week.",
+    "no_high_priority": "No high priority customers.",
+    "pipeline_title": "Sales pipeline",
+    "pipeline_help": "Customer intent from hot, warm, cold, and unknown ratings. Click any segment to open the filtered customer list.",
+    "status_distribution": "Status distribution",
+    "priority_distribution": "Priority distribution",
+    "overdue_trend": "Follow-up trend",
+    "country_distribution": "Country distribution",
+    "industry_distribution": "Industry distribution",
+    "no_report_data": "No report data yet.",
+    "today_followups": "Due today",
+    "week_followups": "Due this week",
+    "high_priority": "High priority"
   }
 }

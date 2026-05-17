@@ -245,6 +245,21 @@ export interface ListCRMEmailThreadsResponse {
   total: number;
 }
 
+export interface CRMEmailThreadAssociationSuggestion {
+  account_id: string;
+  account_name: string;
+  contact_id?: string | null;
+  contact_name?: string | null;
+  contact_email?: string | null;
+  score: number;
+  reasons: string[];
+}
+
+export interface ListCRMEmailThreadAssociationSuggestionsResponse {
+  suggestions: CRMEmailThreadAssociationSuggestion[];
+  total: number;
+}
+
 export interface ListCRMEmailMessagesResponse {
   messages: CRMEmailMessage[];
   total: number;

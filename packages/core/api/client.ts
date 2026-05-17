@@ -86,6 +86,7 @@ import type {
   ListCRMAccountsResponse,
   ListCRMContactsResponse,
   ListCRMEmailThreadsResponse,
+  ListCRMEmailThreadAssociationSuggestionsResponse,
   ListCRMEmailMessagesResponse,
   ListCRMCommunicationNotesResponse,
   Label,
@@ -1370,6 +1371,10 @@ export class ApiClient {
 
   async getCRMEmailThread(threadId: string): Promise<CRMEmailThread> {
     return this.fetch(`/api/crm/email-threads/${threadId}`);
+  }
+
+  async listCRMEmailThreadAssociationSuggestions(threadId: string): Promise<ListCRMEmailThreadAssociationSuggestionsResponse> {
+    return this.fetch(`/api/crm/email-threads/${threadId}/association-suggestions`);
   }
 
   async updateCRMEmailThreadAssociation(

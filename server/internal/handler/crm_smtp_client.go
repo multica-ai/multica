@@ -8,6 +8,57 @@ import (
 	"strings"
 )
 
+func verifyCRMSMTP(cfg crmIMAPMailboxConfig) error {
+	if strings.TrimSpace(cfg.SMTPHost) == "" {
+		return fmt.Errorf("SMTP host is required")
+	}
+	port := cfg.SMTPPort
+	if port <= 0 {
+		port = 465
+	}
+	username := strings.TrimSpace(cfg.SMTPUsername)
+	if username == "" {
+		username = cfg.Username
+	}
+	secretRef := strings.TrimSpace(cfg.SMTPSecretRef)
+	if secretRef == "" {
+		secretRef = cfg.SecretRef
+	}
+	password, err := resolveCRMIMAPSecret(secretRef)
+	if err != nil {
+		return err
+	}
+	addr := net.JoinHostPort(cfg.SMTPHost, fmt.Sprintf("%d", port))
+	auth := smtp.PlainAuth("", username, password, cfg.SMTPHost)
+	mode := strings.ToLower(strings.TrimSpace(cfg.SMTPTLSMode))
+	if mode == "" || mode == "ssl" {
+		conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: cfg.SMTPHost, MinVersion: tls.VersionTLS12})
+		if err != nil {
+			return err
+		}
+		client, err := smtp.NewClient(conn, cfg.SMTPHost)
+		if err != nil {
+			_ = conn.Close()
+			return err
+		}
+		defer client.Quit()
+		return client.Auth(auth)
+	}
+	client, err := smtp.Dial(addr)
+	if err != nil {
+		return err
+	}
+	defer client.Quit()
+	if mode == "starttls" {
+		if ok, _ := client.Extension("STARTTLS"); ok {
+			if err := client.StartTLS(&tls.Config{ServerName: cfg.SMTPHost, MinVersion: tls.VersionTLS12}); err != nil {
+				return err
+			}
+		}
+	}
+	return client.Auth(auth)
+}
+
 func sendCRMSMTP(cfg crmIMAPMailboxConfig, to, cc, bcc []string, subject, body string) error {
 	if strings.TrimSpace(cfg.SMTPHost) == "" {
 		return fmt.Errorf("SMTP host is required")

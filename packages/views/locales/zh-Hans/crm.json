@@ -148,6 +148,8 @@
     "change_association": "调整关联",
     "link_customer_contact": "关联客户",
     "link_help": "为这个邮件线程选择客户，然后关联已有联系人，或根据发件人一键新建联系人。",
+    "association_suggestions": "关联建议",
+    "use_suggestion": "使用建议",
     "customer_detail": "CRM 客户详情。",
     "contact_detail": "CRM 联系人详情。",
     "existing_contact": "已有联系人",
@@ -201,6 +203,8 @@
     "new_mailbox": "新邮箱",
     "mailbox_saved": "邮箱设置已保存",
     "preview_import": "预览导入",
+    "attachments": "附件",
+    "attachment": "附件",
     "tls_none": "不使用 TLS"
   },
   "notes": {
@@ -297,6 +301,24 @@
     "no_followups": "暂无逾期跟进。",
     "no_hot": "暂无高意向客户。",
     "no_customers": "暂无客户。",
-    "no_emails": "暂无邮件线程。"
+    "no_emails": "暂无邮件线程。",
+    "today_title": "今日跟进",
+    "week_title": "本周跟进",
+    "overdue_title": "逾期跟进",
+    "high_priority_title": "高优先级客户",
+    "no_today": "今天没有需要跟进的客户。",
+    "no_week": "本周没有需要跟进的客户。",
+    "no_high_priority": "没有高优先级客户。",
+    "pipeline_title": "销售漏斗",
+    "pipeline_help": "按高意向、中意向、低意向和未知评级展示客户阶段，点击任一段可跳转筛选后的客户列表。",
+    "status_distribution": "状态分布",
+    "priority_distribution": "优先级分布",
+    "overdue_trend": "跟进趋势",
+    "country_distribution": "国家分布",
+    "industry_distribution": "行业分布",
+    "no_report_data": "暂无报表数据。",
+    "today_followups": "今日跟进",
+    "week_followups": "本周跟进",
+    "high_priority": "高优先级"
   }
 }

@@ -466,7 +466,7 @@ export function CRMAccountDetailPage({ accountId }: { accountId: string }) {
     queryKey: [...issueKeys.all(wsId), "crm-follow-up", selectedFollowUpProjectId],
     queryFn: async () => {
       if (!selectedFollowUpProjectId) return [];
-      const response = await api.listIssues({ project_id: selectedFollowUpProjectId, open_only: true, limit: 50 });
+      const response = await api.listIssues({ project_id: selectedFollowUpProjectId, limit: 50 });
       return response.issues;
     },
     enabled: Boolean(selectedFollowUpProjectId),
