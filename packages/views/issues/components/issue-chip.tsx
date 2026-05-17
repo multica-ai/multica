@@ -30,9 +30,9 @@ export interface IssueChipProps {
   className?: string;
 }
 
-// CEREBRO-PATCH(issue-chip-multilne): single-line inline layout — no max-w cap, title stays on one line (JEH-1253)
+// CEREBRO-PATCH(issue-chip-mobile-wrap): inline + box-decoration-clone so pill wraps across lines on mobile (JEH-1593); supersedes single-line layout from JEH-1253
 const BASE_CLASS =
-  "issue-mention inline-flex items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-xs";
+  "issue-mention inline rounded-md border mx-0.5 px-2 py-0.5 text-xs box-decoration-clone";
 
 export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps) {
   const wsId = useWorkspaceId();
@@ -83,7 +83,8 @@ export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps)
         {runState && <AgentRunPip state={runState} />}
         <span className="font-medium text-muted-foreground text-[10px]">{issue.identifier}</span>
       </span>
-      <span className="text-foreground whitespace-nowrap">{issue.title}</span>
+      {/* CEREBRO-PATCH(issue-chip-mobile-wrap): removed whitespace-nowrap so title wraps inline (JEH-1593) */}
+      <span className="text-foreground">{issue.title}</span>
     </span>
   );
 }
