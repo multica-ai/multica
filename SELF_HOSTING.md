@@ -213,7 +213,7 @@ Watch the pods come up:
 kubectl -n multica get pods -w
 ```
 
-The backend may restart once or twice while it waits on PostgreSQL — that is expected. Once the backend is `Running`, migrations have completed and `/healthz` returns OK:
+On a cold cluster the backend can sit `Running` but not `Ready` for a few minutes while it waits on PostgreSQL and runs migrations — a startupProbe absorbs this, so the pod should not restart. Once the backend reports `Ready`, migrations have completed and `/healthz` returns OK:
 
 ```bash
 curl -H "Host: api.multica.dev.lan" http://<ingress-ip>/healthz
