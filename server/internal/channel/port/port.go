@@ -125,6 +125,23 @@ type InboundEvent struct {
 	Intent              InboundIntent
 	Attachments         []AttachmentInfo
 	RawPayload          json.RawMessage
+
+	// QuotedMessageID is the platform message ID the user explicitly quoted
+	// (e.g. Feishu quote block). Empty if the user did not quote any message.
+	QuotedMessageID string
+
+	// QuotedText is a truncated text summary (~200 runes max) of the quoted
+	// message, extracted directly from the quote block so the LLM can use it
+	// without a second round-trip to fetch the original message.
+	QuotedText string
+
+	// ReplyToMessageID is the platform message ID the user is replying to
+	// (e.g. Feishu "reply to message" parent_id). Empty for standalone msgs.
+	ReplyToMessageID string
+
+	// ThreadID is the platform thread / topic root message ID.
+	// Empty if the message is not inside a thread.
+	ThreadID string
 }
 
 func (e InboundEvent) ConnectionID() string {

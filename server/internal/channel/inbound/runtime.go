@@ -11,8 +11,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/multica-ai/multica/server/internal/channel/conversationctx"
 	chintent "github.com/multica-ai/multica/server/internal/channel/intent"
 	"github.com/multica-ai/multica/server/internal/channel/port"
+	"github.com/multica-ai/multica/server/internal/channel/replyctx"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -25,6 +27,8 @@ const (
 	defaultInboundClarificationTimeout = 30 * time.Minute
 	defaultInboundProcessingLease      = 5 * time.Minute
 	defaultFailureNoticeCooldown       = 5 * time.Minute
+	defaultContextMaxEntities          = 5
+	defaultContextTTL                  = 30 * time.Minute
 )
 
 const (
@@ -79,7 +83,10 @@ type RuntimeConfig struct {
 	ChannelTurn           chintent.ChannelAgentTurnClient
 	DispatchStore         DispatchCompletionStore
 	FailureLimiter        FailureNoticeLimiter
-	ReplyContext          ReplyContextLookup
+	ReplyContext          replyctx.Store
+	ConversationCtx       conversationctx.Store
+	ContextMaxEntities    int
+	ContextTTL            time.Duration
 	ReplySink             ChannelReplySink
 	Workers               int
 	ClaimBatch            int
@@ -122,6 +129,12 @@ func NewRuntime(cfg RuntimeConfig) *Runtime {
 	}
 	if cfg.FailureNoticeCooldown <= 0 {
 		cfg.FailureNoticeCooldown = defaultFailureNoticeCooldown
+	}
+	if cfg.ContextMaxEntities <= 0 {
+		cfg.ContextMaxEntities = defaultContextMaxEntities
+	}
+	if cfg.ContextTTL <= 0 {
+		cfg.ContextTTL = defaultContextTTL
 	}
 	if cfg.FailureLimiter == nil {
 		cfg.FailureLimiter = newMemoryFailureNoticeLimiter()
@@ -319,21 +332,7 @@ func (r *Runtime) resolveIntent(ctx context.Context, rec *InboundEventRecord) (b
 		return false, nil
 	}
 
-	req := chintent.IntentRequest{
-		WorkspaceID:      chatCtx.WorkspaceID,
-		DefaultProjectID: chatCtx.DefaultProjectID,
-		AgentID:          strings.TrimSpace(chatCtx.AgentID),
-		Text:             evt.Text,
-		Channel:          evt.ChannelName,
-		ConnectionID:     evt.ConnectionID(),
-		ChatID:           evt.ChatID,
-		ChatType:         string(evt.ChatType),
-		SenderID:         evt.SenderID,
-		SenderName:       evt.SenderName,
-		InboundEventID:   rec.ID,
-		SourceHint:       chintent.IntentSource(evt.Intent.Source),
-	}
-	req = r.applyReplyContext(ctx, req, evt, &chatCtx)
+	req := r.buildIntentRequest(ctx, rec, evt, &chatCtx)
 
 	if isDeterministicChannelInput(evt, req) {
 		result, ok, err := r.resolveByRules(ctx, req)
@@ -341,6 +340,7 @@ func (r *Runtime) resolveIntent(ctx context.Context, rec *InboundEventRecord) (b
 			return false, err
 		}
 		if ok {
+			result = applyRequestContextToIntentResult(result, req)
 			return r.applyIntentResult(ctx, rec, result, chatCtx, false)
 		}
 		return r.applyIntentResult(ctx, rec, fallbackRuleUnknown(), chatCtx, false)
@@ -352,6 +352,7 @@ func (r *Runtime) resolveIntent(ctx context.Context, rec *InboundEventRecord) (b
 			return false, err
 		}
 		if ok {
+			result = applyRequestContextToIntentResult(result, req)
 			return r.applyIntentResult(ctx, rec, result, chatCtx, false)
 		}
 		return r.applyIntentResult(ctx, rec, fallbackRuleUnknown(), chatCtx, false)
@@ -503,23 +504,11 @@ func (r *Runtime) resumeWaitingAgents(ctx context.Context) {
 				chatCtx.WorkspaceID = rec.WorkspaceID
 				chatCtx.DefaultProjectID = rec.DefaultProjectID
 			}
-			req := chintent.IntentRequest{
-				WorkspaceID:      chatCtx.WorkspaceID,
-				DefaultProjectID: chatCtx.DefaultProjectID,
-				AgentID:          strings.TrimSpace(chatCtx.AgentID),
-				Text:             rec.Event.Text,
-				Channel:          rec.Event.ChannelName,
-				ConnectionID:     rec.Event.ConnectionID(),
-				ChatID:           rec.Event.ChatID,
-				ChatType:         string(rec.Event.ChatType),
-				SenderID:         rec.Event.SenderID,
-				SenderName:       rec.Event.SenderName,
-				InboundEventID:   rec.ID,
-				SourceHint:       chintent.IntentSource(rec.Event.Intent.Source),
-			}
+			req := r.buildIntentRequest(ctx, rec, rec.Event, &chatCtx)
 			if result, ok, ruleErr := r.resolveByRules(ctx, req); ruleErr != nil {
 				slog.Error("channel inbound runtime: fallback rule intent failed", "event_row_id", item.ID, "error", ruleErr)
 			} else if ok {
+				result = applyRequestContextToIntentResult(result, req)
 				if _, applyErr := r.applyIntentResult(ctx, rec, result, chatCtx, true); applyErr != nil {
 					slog.Error("channel inbound runtime: apply fallback rule intent failed", "event_row_id", item.ID, "error", applyErr)
 				}
@@ -535,6 +524,8 @@ func (r *Runtime) resumeWaitingAgents(ctx context.Context) {
 			chatCtx.WorkspaceID = rec.WorkspaceID
 			chatCtx.DefaultProjectID = rec.DefaultProjectID
 		}
+		req := r.buildIntentRequest(ctx, rec, rec.Event, &chatCtx)
+		result = applyRequestContextToIntentResult(result, req)
 		if _, err := r.applyIntentResult(ctx, rec, result, chatCtx, true); err != nil {
 			slog.Error("channel inbound runtime: resume intent failed", "event_row_id", item.ID, "error", err)
 		}
@@ -589,8 +580,37 @@ func (r *Runtime) persistAndSendTurnReply(ctx context.Context, rec *InboundEvent
 		}
 	}
 	r.send(ctx, rec.Event, reply)
+	r.appendTurnContextEntities(ctx, rec, reply)
 	if err := r.cfg.Store.MarkProcessed(ctx, rec.ID); err != nil {
 		slog.Error("channel inbound runtime: mark channel turn processed failed", "event_row_id", rec.ID, "error", err)
+	}
+}
+
+func (r *Runtime) appendTurnContextEntities(ctx context.Context, rec *InboundEventRecord, reply string) {
+	if r == nil || r.cfg.ConversationCtx == nil || rec == nil {
+		return
+	}
+	entities := conversationctx.ExtractEntityKeys(reply)
+	if len(entities) == 0 {
+		return
+	}
+	workspaceID := strings.TrimSpace(rec.WorkspaceID)
+	if workspaceID == "" {
+		workspaceID = strings.TrimSpace(r.lookupChatContext(ctx, rec.Event).WorkspaceID)
+	}
+	if workspaceID == "" {
+		slog.Debug("channel inbound runtime: skip conversation context write without workspace", "event_row_id", rec.ID)
+		return
+	}
+	scope := conversationctx.Scope{
+		ConnectionID: rec.Event.ConnectionID(),
+		WorkspaceID:  workspaceID,
+		ChatID:       rec.Event.ChatID,
+		SenderID:     rec.Event.SenderID,
+		ThreadID:     rec.Event.ThreadID,
+	}
+	if err := r.cfg.ConversationCtx.AppendEntities(ctx, scope, entities, r.cfg.ContextMaxEntities, r.cfg.ContextTTL); err != nil {
+		slog.Error("channel inbound runtime: append conversation context entities failed", "event_row_id", rec.ID, "error", err)
 	}
 }
 
@@ -660,20 +680,33 @@ func (r *Runtime) sweeperLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			n, err := r.cfg.Store.RequeueStaleProcessing(ctx, r.cfg.ProcessingLease)
-			if err != nil {
-				slog.Error("channel inbound runtime: requeue stale processing failed", "error", err)
-			} else if n > 0 {
-				slog.Warn("channel inbound runtime: requeued stale processing events", "count", n)
-			}
-			expired, err := r.cfg.Store.ExpireWaitingUser(ctx, r.cfg.ClaimBatch)
-			if err != nil {
-				slog.Error("channel inbound runtime: expire waiting_user failed", "error", err)
-			}
-			for _, item := range expired {
-				r.send(ctx, item.Event, "长时间没有补充信息，已停止处理，请重新发送完整需求。")
-			}
+			r.sweepOnce(ctx)
 		}
+	}
+}
+
+func (r *Runtime) sweepOnce(ctx context.Context) {
+	n, err := r.cfg.Store.RequeueStaleProcessing(ctx, r.cfg.ProcessingLease)
+	if err != nil {
+		slog.Error("channel inbound runtime: requeue stale processing failed", "error", err)
+	} else if n > 0 {
+		slog.Warn("channel inbound runtime: requeued stale processing events", "count", n)
+	}
+	expired, err := r.cfg.Store.ExpireWaitingUser(ctx, r.cfg.ClaimBatch)
+	if err != nil {
+		slog.Error("channel inbound runtime: expire waiting_user failed", "error", err)
+	}
+	for _, item := range expired {
+		r.send(ctx, item.Event, "长时间没有补充信息，已停止处理，请重新发送完整需求。")
+	}
+	if r.cfg.ConversationCtx == nil {
+		return
+	}
+	deleted, err := r.cfg.ConversationCtx.DeleteExpired(ctx, time.Now())
+	if err != nil {
+		slog.Error("channel inbound runtime: delete expired conversation context failed", "error", err)
+	} else if deleted > 0 {
+		slog.Debug("channel inbound runtime: deleted expired conversation contexts", "count", deleted)
 	}
 }
 
@@ -696,11 +729,39 @@ func (r *Runtime) lookupChatContext(ctx context.Context, evt port.InboundEvent) 
 	return chatCtx
 }
 
+func (r *Runtime) buildIntentRequest(ctx context.Context, rec *InboundEventRecord, evt port.InboundEvent, chatCtx *ChatBindingContext) chintent.IntentRequest {
+	req := chintent.IntentRequest{
+		Text:           evt.Text,
+		Channel:        evt.ChannelName,
+		ConnectionID:   evt.ConnectionID(),
+		ChatID:         evt.ChatID,
+		ChatType:       string(evt.ChatType),
+		SenderID:       evt.SenderID,
+		SenderName:     evt.SenderName,
+		InboundEventID: rec.ID,
+		SourceHint:     chintent.IntentSource(evt.Intent.Source),
+	}
+	if chatCtx != nil {
+		req.WorkspaceID = chatCtx.WorkspaceID
+		req.DefaultProjectID = chatCtx.DefaultProjectID
+		req.AgentID = strings.TrimSpace(chatCtx.AgentID)
+	}
+	return r.applyReplyContext(ctx, req, evt, chatCtx)
+}
+
 func (r *Runtime) applyReplyContext(ctx context.Context, req chintent.IntentRequest, evt port.InboundEvent, chatCtx *ChatBindingContext) chintent.IntentRequest {
+	// Always pass through explicit signals from the inbound event, regardless
+	// of whether a reply-context store is configured.
+	req.ThreadID = evt.ThreadID
+	req.QuotedMessageID = evt.QuotedMessageID
+	req.QuotedText = evt.QuotedText
+	req.ReplyToMessageID = evt.ReplyToMessageID
+	req = r.applyConversationContext(ctx, req, evt)
+
 	if r.cfg.ReplyContext == nil || evt.ChatType != port.ChatTypeDirect {
 		return req
 	}
-	rc, ok, err := r.cfg.ReplyContext.Lookup(ctx, evt.ConnectionID(), evt.SenderID, time.Now())
+	rc, ok, err := r.cfg.ReplyContext.Lookup(ctx, evt.ConnectionID(), evt.SenderID, evt.ChatID, time.Now())
 	if err != nil {
 		slog.Error("channel inbound runtime: lookup reply context failed",
 			"connection_id", evt.ConnectionID(),
@@ -721,6 +782,155 @@ func (r *Runtime) applyReplyContext(ctx context.Context, req chintent.IntentRequ
 		req.ContextMode = "reply"
 	}
 	return req
+}
+
+func (r *Runtime) applyConversationContext(ctx context.Context, req chintent.IntentRequest, evt port.InboundEvent) chintent.IntentRequest {
+	explicitEntities := conversationctx.ExtractEntityKeys(evt.QuotedText)
+	req.ExplicitEntities = mergeContextEntities(req.ExplicitEntities, explicitEntities, r.cfg.ContextMaxEntities)
+	var entities []conversationctx.EntityRef
+	if r.cfg.ConversationCtx != nil && strings.TrimSpace(req.WorkspaceID) != "" {
+		scope := conversationctx.Scope{
+			ConnectionID: evt.ConnectionID(),
+			WorkspaceID:  req.WorkspaceID,
+			ChatID:       evt.ChatID,
+			SenderID:     evt.SenderID,
+			ThreadID:     evt.ThreadID,
+		}
+		if cc, ok, err := r.cfg.ConversationCtx.Get(ctx, scope); err != nil {
+			slog.Error("channel inbound runtime: lookup conversation context failed",
+				"connection_id", evt.ConnectionID(),
+				"workspace_id", req.WorkspaceID,
+				"chat_id", evt.ChatID,
+				"sender_id", evt.SenderID,
+				"thread_id", evt.ThreadID,
+				"error", err,
+			)
+		} else if ok {
+			entities = cc.Entities
+		}
+	}
+	req.ContextEntities = mergeContextEntities(req.ContextEntities, entities, r.cfg.ContextMaxEntities)
+	if req.ContextIssueKey == "" {
+		if key := requestContextIssueKey(req); key != "" {
+			req.ContextIssueKey = key
+			req.ContextMode = "conversation"
+		}
+	}
+	return req
+}
+
+func mergeContextEntities(existing []conversationctx.EntityRef, incoming []conversationctx.EntityRef, max int) []conversationctx.EntityRef {
+	if len(existing) == 0 && len(incoming) == 0 {
+		return nil
+	}
+	merged := make([]conversationctx.EntityRef, 0, len(existing)+len(incoming))
+	seen := make(map[string]int, len(existing)+len(incoming))
+	for _, entity := range append(existing, incoming...) {
+		entity.Key = strings.ToUpper(strings.TrimSpace(entity.Key))
+		if entity.Key == "" {
+			continue
+		}
+		if entity.Type == "" {
+			entity.Type = conversationctx.EntityTypeIssue
+		}
+		if i, ok := seen[entity.Key]; ok {
+			if entity.MentionedAt.After(merged[i].MentionedAt) {
+				merged[i].MentionedAt = entity.MentionedAt
+			}
+			if entity.ID != "" {
+				merged[i].ID = entity.ID
+			}
+			if entity.Display != "" {
+				merged[i].Display = entity.Display
+			}
+			if entity.URL != "" {
+				merged[i].URL = entity.URL
+			}
+			continue
+		}
+		seen[entity.Key] = len(merged)
+		merged = append(merged, entity)
+	}
+	if max > 0 && len(merged) > max {
+		merged = merged[:max]
+	}
+	return merged
+}
+
+func requestContextIssueKey(req chintent.IntentRequest) string {
+	if key := singleExtractedIssueKey(req.QuotedText); key != "" {
+		return key
+	}
+	if len(req.ExplicitEntities) == 1 {
+		entity := req.ExplicitEntities[0]
+		if entity.Type == "" || entity.Type == conversationctx.EntityTypeIssue {
+			return strings.ToUpper(strings.TrimSpace(entity.Key))
+		}
+	}
+	if len(req.ExplicitEntities) > 1 {
+		return ""
+	}
+	if len(req.ContextEntities) != 1 {
+		return ""
+	}
+	entity := req.ContextEntities[0]
+	if entity.Type != "" && entity.Type != conversationctx.EntityTypeIssue {
+		return ""
+	}
+	return strings.ToUpper(strings.TrimSpace(entity.Key))
+}
+
+func singleExtractedIssueKey(text string) string {
+	entities := conversationctx.ExtractEntityKeys(text)
+	if len(entities) != 1 {
+		return ""
+	}
+	return strings.ToUpper(strings.TrimSpace(entities[0].Key))
+}
+
+func applyRequestContextToIntentResult(result chintent.IntentResult, req chintent.IntentRequest) chintent.IntentResult {
+	if !result.Matched || !intentCanUseRequestContextIssue(result.Intent) {
+		return result
+	}
+	key := strings.TrimSpace(req.ContextIssueKey)
+	if key == "" {
+		key = requestContextIssueKey(req)
+	}
+	if key == "" {
+		return result
+	}
+	if result.Intent.Params == nil {
+		result.Intent.Params = map[string]string{}
+	}
+	if strings.TrimSpace(result.Intent.Params["issue_key"]) == "" {
+		result.Intent.Params["issue_key"] = strings.ToUpper(key)
+	}
+	if result.Intent.Kind == chintent.IntentQueryProgress && strings.TrimSpace(result.Intent.Params["scope"]) == "" {
+		result.Intent.Params["scope"] = "issue"
+	}
+	return result
+}
+
+func intentCanUseRequestContextIssue(in chintent.Intent) bool {
+	if strings.TrimSpace(in.Params["issue_key"]) != "" {
+		return false
+	}
+	switch in.Kind {
+	case chintent.IntentAddComment,
+		chintent.IntentIssueDetail,
+		chintent.IntentIssueTimeline,
+		chintent.IntentIssueLogs,
+		chintent.IntentSetStatus,
+		chintent.IntentSetAssignee,
+		chintent.IntentSetPriority,
+		chintent.IntentSetLabel:
+		return true
+	case chintent.IntentQueryProgress:
+		scope := strings.TrimSpace(in.Params["scope"])
+		return scope == "" || scope == "issue"
+	default:
+		return false
+	}
 }
 
 func (r *Runtime) send(ctx context.Context, evt port.InboundEvent, text string) {

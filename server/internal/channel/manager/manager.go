@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/channel"
+	"github.com/multica-ai/multica/server/internal/channel/conversationctx"
 	"github.com/multica-ai/multica/server/internal/channel/gateway"
 	"github.com/multica-ai/multica/server/internal/channel/inbound"
 	chintent "github.com/multica-ai/multica/server/internal/channel/intent"
@@ -25,19 +26,23 @@ import (
 	"github.com/multica-ai/multica/server/internal/channel/outbound"
 	"github.com/multica-ai/multica/server/internal/channel/port"
 	"github.com/multica-ai/multica/server/internal/channel/provider"
+	"github.com/multica-ai/multica/server/internal/channel/replyctx"
 	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 type RuntimeComponents struct {
-	PrePipeline   *inbound.Pipeline
-	PostPipeline  *inbound.Pipeline
-	RuleResolvers []chintent.IntentResolver
-	ChatIntent    chintent.AsyncChatIntentClient
-	TurnPlanner   chintent.ChannelTurnPlanner
-	ChannelTurn   chintent.ChannelAgentTurnClient
-	DispatchStore inbound.DispatchCompletionStore
-	ReplyContext  inbound.ReplyContextLookup
+	PrePipeline        *inbound.Pipeline
+	PostPipeline       *inbound.Pipeline
+	RuleResolvers      []chintent.IntentResolver
+	ChatIntent         chintent.AsyncChatIntentClient
+	TurnPlanner        chintent.ChannelTurnPlanner
+	ChannelTurn        chintent.ChannelAgentTurnClient
+	DispatchStore      inbound.DispatchCompletionStore
+	ReplyContext       replyctx.Store
+	ConversationCtx    conversationctx.Store
+	ContextMaxEntities int
+	ContextTTL         time.Duration
 }
 
 type RuntimeBuilder func() RuntimeComponents
@@ -331,6 +336,9 @@ func (m *Manager) startInboundRuntimeLocked(ctx context.Context) {
 		ChannelTurn:          components.ChannelTurn,
 		DispatchStore:        components.DispatchStore,
 		ReplyContext:         components.ReplyContext,
+		ConversationCtx:      components.ConversationCtx,
+		ContextMaxEntities:   components.ContextMaxEntities,
+		ContextTTL:           components.ContextTTL,
 		ReplySink:            inbound.NewGatewayReplySink(m.cfg.Gateway),
 		Workers:              m.cfg.Workers,
 		ClaimBatch:           m.cfg.ClaimBatch,

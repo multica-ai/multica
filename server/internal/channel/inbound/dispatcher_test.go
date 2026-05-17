@@ -253,10 +253,11 @@ func (f *fakeActionProposalStore) MarkActionProposalStatus(_ context.Context, _ 
 	return nil
 }
 
-type fakeReplyContextLookup struct {
-	ctx inboundReplyContext
-	ok  bool
-	err error
+type fakeReplyContextStore struct {
+	ctx     inboundReplyContext
+	ok      bool
+	err     error
+	upserts []replyctx.Context
 }
 
 type inboundReplyContext = struct {
@@ -267,7 +268,7 @@ type inboundReplyContext = struct {
 	ExpiresAt       time.Time
 }
 
-func (f fakeReplyContextLookup) Lookup(_ context.Context, _, _ string, _ time.Time) (replyctx.Context, bool, error) {
+func (f *fakeReplyContextStore) Lookup(_ context.Context, _, _, _ string, _ time.Time) (replyctx.Context, bool, error) {
 	return replyctx.Context{
 		WorkspaceID:     f.ctx.WorkspaceID,
 		IssueID:         f.ctx.IssueID,
@@ -275,6 +276,15 @@ func (f fakeReplyContextLookup) Lookup(_ context.Context, _, _ string, _ time.Ti
 		IssueTitle:      f.ctx.IssueTitle,
 		ExpiresAt:       f.ctx.ExpiresAt,
 	}, f.ok, f.err
+}
+
+func (f *fakeReplyContextStore) Upsert(_ context.Context, item replyctx.Context) error {
+	f.upserts = append(f.upserts, item)
+	return nil
+}
+
+func (f *fakeReplyContextStore) Clear(_ context.Context, _, _, _ string) error {
+	return nil
 }
 
 func (f *fakeCommentService) AddComment(_ context.Context, req facade.AddCommentReq) (facade.Comment, error) {
@@ -1558,7 +1568,7 @@ func TestDispatchStep_DirectUnknown_UsesReplyContextAsComment(t *testing.T) {
 	t.Parallel()
 
 	cfg, _, commentSvc, recCh := buildDispatchConfig()
-	cfg.ReplyContext = fakeReplyContextLookup{
+	cfg.ReplyContext = &fakeReplyContextStore{
 		ok: true,
 		ctx: inboundReplyContext{
 			WorkspaceID:     uuid(0x01),
@@ -1593,7 +1603,7 @@ func TestDispatchStep_DirectMutation_UsesReplyContextIssue(t *testing.T) {
 
 	cfg, issueSvc, _, recCh := buildDispatchConfig()
 	cfg.ChatBinding = &fakeChatBinding{err: errors.New("direct chat has no workspace binding")}
-	cfg.ReplyContext = fakeReplyContextLookup{
+	cfg.ReplyContext = &fakeReplyContextStore{
 		ok: true,
 		ctx: inboundReplyContext{
 			WorkspaceID:     uuid(0x01),
@@ -1862,5 +1872,534 @@ func TestDispatchStep_Name(t *testing.T) {
 	step := inbound.NewDispatchStep(cfg)
 	if got := step.Name(); got != "dispatch" {
 		t.Errorf("Name = %q, want %q", got, "dispatch")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Reply context write path
+// ---------------------------------------------------------------------------
+
+func TestDispatchStep_CreateIssue_SavesReplyContextInDirectChat(t *testing.T) {
+	t.Parallel()
+
+	cfg, issueSvc, _, recCh := buildDispatchConfig()
+	store := replyctx.NewInMemoryStore()
+	cfg.ReplyContext = store
+	issueSvc.createReturn = facade.Issue{
+		ID:          uuid(0xAA),
+		WorkspaceID: uuid(0x01),
+		Identifier:  "STA-39",
+		Title:       "登录页加载慢",
+		Status:      "todo",
+	}
+	step := inbound.NewDispatchStep(cfg)
+
+	evt := makeEvt(port.IntentCreateIssue, map[string]string{"title": "登录页加载慢"})
+	evt.ChatType = port.ChatTypeDirect
+	_, _, err := step.Run(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(recCh.sends) != 1 {
+		t.Fatalf("expected 1 send, got %d", len(recCh.sends))
+	}
+
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected reply context to be saved")
+	}
+	if got.IssueIdentifier != "STA-39" {
+		t.Errorf("IssueIdentifier = %q, want STA-39", got.IssueIdentifier)
+	}
+	if got.IssueTitle != "登录页加载慢" {
+		t.Errorf("IssueTitle = %q, want 登录页加载慢", got.IssueTitle)
+	}
+}
+
+func TestDispatchStep_CreateIssue_DoesNotSaveReplyContextInGroupChat(t *testing.T) {
+	t.Parallel()
+
+	cfg, issueSvc, _, _ := buildDispatchConfig()
+	store := replyctx.NewInMemoryStore()
+	cfg.ReplyContext = store
+	issueSvc.createReturn = facade.Issue{
+		ID:         uuid(0xAA),
+		Identifier: "STA-39",
+		Title:      "登录页加载慢",
+	}
+	step := inbound.NewDispatchStep(cfg)
+
+	evt := makeEvt(port.IntentCreateIssue, map[string]string{"title": "登录页加载慢"})
+	evt.ChatType = port.ChatTypeGroup
+	_, _, err := step.Run(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	_, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if ok {
+		t.Error("expected no reply context in group chat")
+	}
+}
+
+func TestDispatchStep_AddComment_SavesReplyContext(t *testing.T) {
+	t.Parallel()
+
+	cfg, issueSvc, _, _ := buildDispatchConfig()
+	store := replyctx.NewInMemoryStore()
+	cfg.ReplyContext = store
+	issueSvc.getByIdentifierRet = facade.Issue{ID: uuid(0x30), Identifier: "STA-2", Title: "t", Status: "todo"}
+	step := inbound.NewDispatchStep(cfg)
+
+	evt := makeEvt(port.IntentAddComment, map[string]string{
+		"issue_key": "STA-2",
+		"comment":   "已找产品确认",
+	})
+	evt.ChatType = port.ChatTypeDirect
+	_, _, err := step.Run(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected reply context to be saved")
+	}
+	if got.IssueIdentifier != "STA-2" {
+		t.Errorf("IssueIdentifier = %q, want STA-2", got.IssueIdentifier)
+	}
+}
+
+func TestDispatchStep_SetStatus_SavesReplyContext(t *testing.T) {
+	t.Parallel()
+
+	cfg, issueSvc, _, _ := buildDispatchConfig()
+	store := replyctx.NewInMemoryStore()
+	cfg.ReplyContext = store
+	issueSvc.getByIdentifierRet = facade.Issue{ID: uuid(0x40), Identifier: "STA-7", Title: "t", Status: "todo"}
+	step := inbound.NewDispatchStep(cfg)
+
+	evt := makeEvt(port.IntentSetStatus, map[string]string{
+		"issue_key": "STA-7",
+		"status":    "done",
+	})
+	evt.ChatType = port.ChatTypeDirect
+	_, _, err := step.Run(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected reply context to be saved")
+	}
+	if got.IssueIdentifier != "STA-7" {
+		t.Errorf("IssueIdentifier = %q, want STA-7", got.IssueIdentifier)
+	}
+}
+
+func TestDispatchStep_SetAssignee_SavesReplyContext(t *testing.T) {
+	t.Parallel()
+
+	cfg, issueSvc, _, _ := buildDispatchConfig()
+	store := replyctx.NewInMemoryStore()
+	cfg.ReplyContext = store
+	issueSvc.getByIdentifierRet = facade.Issue{ID: uuid(0x40), Identifier: "STA-7", Title: "t", Status: "todo"}
+	step := inbound.NewDispatchStep(cfg)
+
+	evt := makeEvt(port.IntentSetAssignee, map[string]string{
+		"issue_key": "STA-7",
+		"assignee":  "@张三",
+	})
+	evt.ChatType = port.ChatTypeDirect
+	_, _, err := step.Run(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected reply context to be saved")
+	}
+	if got.IssueIdentifier != "STA-7" {
+		t.Errorf("IssueIdentifier = %q, want STA-7", got.IssueIdentifier)
+	}
+}
+
+func TestDispatchStep_SetPriority_SavesReplyContext(t *testing.T) {
+	t.Parallel()
+
+	cfg, issueSvc, _, _ := buildDispatchConfig()
+	store := replyctx.NewInMemoryStore()
+	cfg.ReplyContext = store
+	issueSvc.getByIdentifierRet = facade.Issue{ID: uuid(0x41), Identifier: "STA-8", Title: "t", Status: "todo"}
+	step := inbound.NewDispatchStep(cfg)
+
+	evt := makeEvt(port.IntentSetPriority, map[string]string{
+		"issue_key": "STA-8",
+		"priority":  "high",
+	})
+	evt.ChatType = port.ChatTypeDirect
+	_, _, err := step.Run(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected reply context to be saved")
+	}
+	if got.IssueIdentifier != "STA-8" {
+		t.Errorf("IssueIdentifier = %q, want STA-8", got.IssueIdentifier)
+	}
+}
+
+func TestDispatchStep_SetLabel_Add_SavesReplyContext(t *testing.T) {
+	t.Parallel()
+
+	cfg, issueSvc, _, _ := buildDispatchConfig()
+	store := replyctx.NewInMemoryStore()
+	cfg.ReplyContext = store
+	issueSvc.getByIdentifierRet = facade.Issue{ID: uuid(0x42), Identifier: "STA-9", Title: "t", Status: "todo"}
+	step := inbound.NewDispatchStep(cfg)
+
+	evt := makeEvt(port.IntentSetLabel, map[string]string{
+		"issue_key": "STA-9",
+		"label":     "bug",
+		"op":        "add",
+	})
+	evt.ChatType = port.ChatTypeDirect
+	_, _, err := step.Run(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected reply context to be saved")
+	}
+	if got.IssueIdentifier != "STA-9" {
+		t.Errorf("IssueIdentifier = %q, want STA-9", got.IssueIdentifier)
+	}
+}
+
+func TestDispatchStep_SetLabel_Remove_SavesReplyContext(t *testing.T) {
+	t.Parallel()
+
+	cfg, issueSvc, _, _ := buildDispatchConfig()
+	store := replyctx.NewInMemoryStore()
+	cfg.ReplyContext = store
+	issueSvc.getByIdentifierRet = facade.Issue{ID: uuid(0x43), Identifier: "STA-10", Title: "t", Status: "todo"}
+	step := inbound.NewDispatchStep(cfg)
+
+	evt := makeEvt(port.IntentSetLabel, map[string]string{
+		"issue_key": "STA-10",
+		"label":     "bug",
+		"op":        "remove",
+	})
+	evt.ChatType = port.ChatTypeDirect
+	_, _, err := step.Run(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected reply context to be saved")
+	}
+	if got.IssueIdentifier != "STA-10" {
+		t.Errorf("IssueIdentifier = %q, want STA-10", got.IssueIdentifier)
+	}
+}
+
+func TestDispatchStep_QueryIssue_SavesReplyContext(t *testing.T) {
+	t.Parallel()
+
+	cfg, issueSvc, _, _ := buildDispatchConfig()
+	store := replyctx.NewInMemoryStore()
+	cfg.ReplyContext = store
+	issueSvc.getByIdentifierRet = facade.Issue{
+		ID:         uuid(0x50),
+		Identifier: "STA-2",
+		Title:      "登录页加载慢",
+		Status:     "in_progress",
+	}
+	step := inbound.NewDispatchStep(cfg)
+
+	evt := makeEvt(port.IntentQueryIssue, map[string]string{"issue_key": "STA-2"})
+	evt.ChatType = port.ChatTypeDirect
+	_, _, err := step.Run(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected reply context to be saved")
+	}
+	if got.IssueIdentifier != "STA-2" {
+		t.Errorf("IssueIdentifier = %q, want STA-2", got.IssueIdentifier)
+	}
+}
+
+func TestDispatchStep_QueryIssue_WithDigestFacade_SavesReplyContext(t *testing.T) {
+	t.Parallel()
+
+	cfg, _, _, _ := buildDispatchConfig()
+	store := replyctx.NewInMemoryStore()
+	cfg.ReplyContext = store
+	cfg.IssueDigestFacade = facade.NewIssueDigestFacade(&fakeIssueDigestService{
+		digest: facade.IssueDigest{
+			Issue: facade.IssueDigestIssue{
+				ID:         uuid(0x50),
+				Identifier: "STA-2",
+				Title:      "登录页加载慢",
+				Status:     "in_review",
+				Priority:   "high",
+			},
+		},
+	})
+	step := inbound.NewDispatchStep(cfg)
+
+	evt := makeEvt(port.IntentQueryIssue, map[string]string{"issue_key": "STA-2"})
+	evt.ChatType = port.ChatTypeDirect
+	_, _, err := step.Run(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected reply context to be saved")
+	}
+	if got.IssueIdentifier != "STA-2" {
+		t.Errorf("IssueIdentifier = %q, want STA-2", got.IssueIdentifier)
+	}
+}
+
+func TestDispatchStep_QueryProgress_SavesReplyContext(t *testing.T) {
+	t.Parallel()
+
+	cfg, _, _, _ := buildDispatchConfig()
+	store := replyctx.NewInMemoryStore()
+	cfg.ReplyContext = store
+	cfg.IssueDigestFacade = facade.NewIssueDigestFacade(&fakeIssueDigestService{
+		progress: facade.IssueProgress{
+			Digest: facade.IssueDigest{
+				Issue: facade.IssueDigestIssue{
+					ID:         uuid(0x60),
+					Identifier: "STA-60",
+					Title:      "远程 agent 接入",
+					Status:     "in_review",
+				},
+			},
+			LatestReply: &facade.IssueProgressReply{
+				AuthorType: "agent",
+				AuthorName: "Orion",
+				Content:    "方案如下",
+				CreatedAt:  time.Date(2026, 5, 12, 13, 0, 0, 0, time.UTC),
+			},
+		},
+	})
+	step := inbound.NewDispatchStep(cfg)
+
+	evt := makeEvt(port.IntentQueryProgress, map[string]string{"scope": "issue", "issue_key": "STA-60"})
+	evt.ChatType = port.ChatTypeDirect
+	_, _, err := step.Run(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected reply context to be saved")
+	}
+	if got.IssueIdentifier != "STA-60" {
+		t.Errorf("IssueIdentifier = %q, want STA-60", got.IssueIdentifier)
+	}
+}
+
+func TestDispatchStep_IssueDetail_SavesReplyContext(t *testing.T) {
+	t.Parallel()
+
+	cfg, _, _, _ := buildDispatchConfig()
+	store := replyctx.NewInMemoryStore()
+	cfg.ReplyContext = store
+	cfg.IssueDigestFacade = facade.NewIssueDigestFacade(&fakeIssueDigestService{
+		detail: facade.IssueDetail{
+			Digest: facade.IssueDigest{
+				Issue: facade.IssueDigestIssue{
+					ID:         uuid(0x51),
+					Identifier: "STA-3",
+					Title:      "远程 agent 接入",
+					Status:     "todo",
+					Priority:   "medium",
+				},
+			},
+		},
+	})
+	step := inbound.NewDispatchStep(cfg)
+
+	evt := makeEvt(port.IntentIssueDetail, map[string]string{"issue_key": "STA-3"})
+	evt.ChatType = port.ChatTypeDirect
+	_, _, err := step.Run(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected reply context to be saved")
+	}
+	if got.IssueIdentifier != "STA-3" {
+		t.Errorf("IssueIdentifier = %q, want STA-3", got.IssueIdentifier)
+	}
+}
+
+func TestDispatchStep_IssueTimeline_SavesReplyContext(t *testing.T) {
+	t.Parallel()
+
+	cfg, _, _, _ := buildDispatchConfig()
+	store := replyctx.NewInMemoryStore()
+	cfg.ReplyContext = store
+	cfg.IssueDigestFacade = facade.NewIssueDigestFacade(&fakeIssueDigestService{
+		timeline: facade.IssueTimelinePage{
+			Issue: facade.IssueDigestIssue{ID: uuid(0x54), Identifier: "STA-4", Title: "timeline test", Status: "in_progress"},
+			Page:  1, PageSize: 5, HasMore: false,
+		},
+	})
+	step := inbound.NewDispatchStep(cfg)
+
+	evt := makeEvt(port.IntentIssueTimeline, map[string]string{"issue_key": "STA-4"})
+	evt.ChatType = port.ChatTypeDirect
+	_, _, err := step.Run(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected reply context to be saved")
+	}
+	if got.IssueIdentifier != "STA-4" {
+		t.Errorf("IssueIdentifier = %q, want STA-4", got.IssueIdentifier)
+	}
+}
+
+func TestDispatchStep_IssueLogs_SavesReplyContext(t *testing.T) {
+	t.Parallel()
+
+	cfg, _, _, _ := buildDispatchConfig()
+	store := replyctx.NewInMemoryStore()
+	cfg.ReplyContext = store
+	cfg.IssueDigestFacade = facade.NewIssueDigestFacade(&fakeIssueDigestService{
+		logs: facade.IssueLogPage{
+			Issue: facade.IssueDigestIssue{ID: uuid(0x55), Identifier: "STA-5", Title: "logs test", Status: "in_progress"},
+			Page:  1, PageSize: 8, HasMore: false,
+		},
+	})
+	step := inbound.NewDispatchStep(cfg)
+
+	evt := makeEvt(port.IntentIssueLogs, map[string]string{"issue_key": "STA-5"})
+	evt.ChatType = port.ChatTypeDirect
+	_, _, err := step.Run(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected reply context to be saved")
+	}
+	if got.IssueIdentifier != "STA-5" {
+		t.Errorf("IssueIdentifier = %q, want STA-5", got.IssueIdentifier)
+	}
+}
+
+func TestDispatchStep_UnknownIntent_DoesNotSaveReplyContext(t *testing.T) {
+	t.Parallel()
+
+	cfg, _, _, _ := buildDispatchConfig()
+	store := replyctx.NewInMemoryStore()
+	cfg.ReplyContext = store
+	step := inbound.NewDispatchStep(cfg)
+
+	evt := makeEvt(port.IntentUnknown, map[string]string{})
+	evt.ChatType = port.ChatTypeDirect
+	_, _, err := step.Run(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	_, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if ok {
+		t.Error("expected no reply context for unknown intent")
+	}
+}
+
+func TestDispatchStep_CreateIssue_NilReplyContext_DoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	cfg, issueSvc, _, _ := buildDispatchConfig()
+	cfg.ReplyContext = nil
+	issueSvc.createReturn = facade.Issue{
+		ID:         uuid(0xAA),
+		Identifier: "STA-39",
+		Title:      "登录页加载慢",
+		Status:     "todo",
+	}
+	step := inbound.NewDispatchStep(cfg)
+
+	evt := makeEvt(port.IntentCreateIssue, map[string]string{"title": "登录页加载慢"})
+	evt.ChatType = port.ChatTypeDirect
+	_, _, err := step.Run(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
 	}
 }
