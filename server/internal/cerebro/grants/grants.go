@@ -48,8 +48,8 @@ var knownSubjectTypes = map[string]struct{}{
 }
 
 // capabilityPattern validates capability identifiers: lowercase letters,
-// digits, underscores, and optional colon-namespacing (e.g. "issues:write").
-var capabilityPattern = regexp.MustCompile(`^[a-z][a-z0-9_:]*$`)
+// digits, underscores, and optional dot/colon-namespacing (e.g. "issue.read").
+var capabilityPattern = regexp.MustCompile(`^[a-z][a-z0-9_.:]*$`)
 
 // resourcePatternPattern validates resource patterns: path segments, wildcards,
 // and placeholder tokens ({id}). Examples: "*", "issues/*", "projects/{id}".
@@ -375,12 +375,6 @@ func (s *Service) Delete(ctx context.Context, grantID, workspaceID, actorID pgty
 	defer tx.Rollback(ctx)
 	qtx := s.Cerebro.WithTx(tx)
 
-	if err := qtx.DeleteCerebroWorkspaceGrant(ctx, cerebrodb.DeleteCerebroWorkspaceGrantParams{
-		ID:          grantID,
-		WorkspaceID: workspaceID,
-	}); err != nil {
-		return err
-	}
 	actorTypePG := pgtype.Text{String: actorType, Valid: actorType != ""}
 	if err := qtx.InsertCerebroGrantAudit(ctx, cerebrodb.InsertCerebroGrantAuditParams{
 		WorkspaceID: workspaceID,
@@ -391,6 +385,12 @@ func (s *Service) Delete(ctx context.Context, grantID, workspaceID, actorID pgty
 		Surface:     surface,
 	}); err != nil {
 		return fmt.Errorf("insert audit: %w", err)
+	}
+	if err := qtx.DeleteCerebroWorkspaceGrant(ctx, cerebrodb.DeleteCerebroWorkspaceGrantParams{
+		ID:          grantID,
+		WorkspaceID: workspaceID,
+	}); err != nil {
+		return err
 	}
 
 	if err := tx.Commit(ctx); err != nil {

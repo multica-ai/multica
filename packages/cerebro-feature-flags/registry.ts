@@ -57,7 +57,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_tasks: false,
   cerebro_pin_input: true,
   cerebro_workflows: false,
-  cerebro_persona_permissions: false,
+  cerebro_persona_permissions: true,
   cerebro_skill_mention: true,
   cerebro_grants: false,
   cerebro_move_comment_to_subissue: true,
@@ -186,7 +186,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     key: "cerebro_persona_permissions",
     label: "Persona permissions",
     description:
-      "Enable the workspace permissions admin page at /:workspace/permissions — list, create, edit, and audit Persona grants (subject × resource × capability). Hidden until the Persona grant API (JEH-1179) is live in this environment.",
+      "Enable the workspace permissions admin page at /:workspace/permissions — list, create, edit, and audit Persona grants (subject × resource × capability).",
   },
   {
     key: "cerebro_skill_mention",

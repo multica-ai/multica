@@ -25,8 +25,8 @@ favour of grants" sync doesn't touch this page.
 
 ## Feature flag
 
-`cerebro_persona_permissions` (defaults OFF). The flag stays off until
-JEH-1179 lands a working backend.
+`cerebro_persona_permissions` (defaults ON). The flag can still be turned off
+per user from feature-flag settings when the admin surface needs to be hidden.
 
 ## Imports
 

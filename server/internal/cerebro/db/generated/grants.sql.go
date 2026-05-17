@@ -151,7 +151,6 @@ func (q *Queries) GetCerebroWorkspaceGrant(ctx context.Context, arg GetCerebroWo
 }
 
 const insertCerebroGrantAudit = `-- name: InsertCerebroGrantAudit :exec
-
 INSERT INTO cerebro_workspace_grant_audit (
     workspace_id, grant_id, action,
     actor_type, actor_id,
@@ -169,7 +168,6 @@ type InsertCerebroGrantAuditParams struct {
 	Diff        []byte      `json:"diff"`
 }
 
-// Audit
 func (q *Queries) InsertCerebroGrantAudit(ctx context.Context, arg InsertCerebroGrantAuditParams) error {
 	_, err := q.db.Exec(ctx, insertCerebroGrantAudit,
 		arg.WorkspaceID,
@@ -181,6 +179,92 @@ func (q *Queries) InsertCerebroGrantAudit(ctx context.Context, arg InsertCerebro
 		arg.Diff,
 	)
 	return err
+}
+
+const listCerebroGrantAudit = `-- name: ListCerebroGrantAudit :many
+
+SELECT
+    a.id, a.workspace_id, a.grant_id, a.action,
+    a.actor_type, a.actor_id,
+    COALESCE(u.name, ag.name, '') AS actor_name,
+    a.surface, a.diff, a.created_at,
+    count(*) OVER()::int AS total
+FROM cerebro_workspace_grant_audit a
+LEFT JOIN cerebro_workspace_grant g
+  ON g.id = a.grant_id
+LEFT JOIN "user" u
+  ON a.actor_type = 'member' AND u.id = a.actor_id
+LEFT JOIN agent ag
+  ON a.actor_type = 'agent' AND ag.id = a.actor_id
+WHERE a.workspace_id = $1
+  AND ($2::uuid IS NULL OR g.subject_id = $2)
+  AND ($3::uuid IS NULL OR a.grant_id = $3)
+  AND ($4::timestamptz IS NULL OR a.created_at >= $4)
+ORDER BY a.created_at DESC
+LIMIT $5 OFFSET $6
+`
+
+type ListCerebroGrantAuditParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Column2     pgtype.UUID        `json:"column_2"`
+	Column3     pgtype.UUID        `json:"column_3"`
+	Column4     pgtype.Timestamptz `json:"column_4"`
+	Limit       int32              `json:"limit"`
+	Offset      int32              `json:"offset"`
+}
+
+type ListCerebroGrantAuditRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	GrantID     pgtype.UUID        `json:"grant_id"`
+	Action      string             `json:"action"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
+	ActorName   string             `json:"actor_name"`
+	Surface     string             `json:"surface"`
+	Diff        []byte             `json:"diff"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	Total       int32              `json:"total"`
+}
+
+// Audit
+func (q *Queries) ListCerebroGrantAudit(ctx context.Context, arg ListCerebroGrantAuditParams) ([]ListCerebroGrantAuditRow, error) {
+	rows, err := q.db.Query(ctx, listCerebroGrantAudit,
+		arg.WorkspaceID,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCerebroGrantAuditRow{}
+	for rows.Next() {
+		var i ListCerebroGrantAuditRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.GrantID,
+			&i.Action,
+			&i.ActorType,
+			&i.ActorID,
+			&i.ActorName,
+			&i.Surface,
+			&i.Diff,
+			&i.CreatedAt,
+			&i.Total,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listCerebroWorkspaceGrants = `-- name: ListCerebroWorkspaceGrants :many
@@ -197,9 +281,10 @@ SELECT
     updated_at
 FROM cerebro_workspace_grant
 WHERE workspace_id = $1
-  AND ($2::text  IS NULL OR subject_type = $2)
+  -- CEREBRO-PATCH(persona-grants-list-filters): treat omitted query params as unfiltered.
+  AND (NULLIF($2::text, '') IS NULL OR subject_type = $2)
   AND ($3::uuid  IS NULL OR subject_id   = $3)
-  AND ($4::text  IS NULL OR status       = $4)
+  AND (NULLIF($4::text, '') IS NULL OR status       = $4)
 ORDER BY granted_at DESC
 `
 

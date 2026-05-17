@@ -64,7 +64,7 @@ export interface PersonaGrant {
   subject: GrantSubject;
   resource: GrantResource;
   // Capability name as Persona's capability register publishes it
-  // (`issues.read`, `repo.push`, `secret.use`, …).
+  // (`issue.read`, `repo.push`, `secret.use`, …).
   capability: string;
   // Maximum data classification this grant may touch.
   classification_ceiling: GrantClassification | string;

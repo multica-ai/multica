@@ -98,7 +98,7 @@ const sampleGrant = {
     avatar_url: null,
   },
   resource: { type: "issue", pattern: "*" },
-  capability: "issues.read",
+  capability: "issue.read",
   classification_ceiling: "internal",
   status: "active",
   approval_required: false,
@@ -111,7 +111,10 @@ const sampleGrant = {
 
 beforeEach(() => {
   mockListGrants.mockReset();
+  mockGetGrant.mockReset();
   mockCreateGrant.mockReset();
+  mockUpdateGrant.mockReset();
+  mockDeleteGrant.mockReset();
   mockUseFeatureFlag.mockReturnValue(true);
   mockUseCurrentMember.mockReturnValue({
     userId: "user-1",
@@ -162,10 +165,48 @@ describe("PermissionsPage", () => {
     render(ui);
 
     expect(await screen.findByText("Marketing")).toBeInTheDocument();
-    expect(screen.getByText("issues.read")).toBeInTheDocument();
+    expect(screen.getByText("issue.read")).toBeInTheDocument();
     // Subject-type chip
     expect(screen.getByText("group")).toBeInTheDocument();
   });
+
+  it("revokes an existing grant from the drawer instead of hard-deleting it", async () => {
+    const user = userEvent.setup();
+    mockListGrants.mockResolvedValue({
+      items: [sampleGrant],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    });
+    mockGetGrant.mockResolvedValue(sampleGrant);
+    mockUpdateGrant.mockResolvedValue({
+      ...sampleGrant,
+      status: "revoked",
+      updated_at: "2026-05-13T10:02:00Z",
+    });
+
+    const { ui } = makePage();
+    render(ui);
+
+    await user.click(await screen.findByText("Marketing"));
+    await user.click(
+      await screen.findByRole("button", { name: /Tilbagekald grant/i }),
+    );
+    await user.click(screen.getByRole("button", { name: /^Tilbagekald$/i }));
+
+    await waitFor(() =>
+      expect(mockUpdateGrant).toHaveBeenCalledWith("ws-1", "grant-1", {
+        resource_pattern: undefined,
+        capability: undefined,
+        classification_ceiling: undefined,
+        time_window_start: null,
+        time_window_end: null,
+        approval_required: undefined,
+        status: "revoked",
+      }),
+    );
+    expect(mockDeleteGrant).not.toHaveBeenCalled();
+  }, 10_000);
 
   it("opens the create-grant dialog when 'Nyt grant' is clicked", async () => {
     const user = userEvent.setup();
@@ -182,8 +223,10 @@ describe("PermissionsPage", () => {
     expect(
       await screen.findByRole("heading", { name: /Nyt grant/i }),
     ).toBeInTheDocument();
-    // Capability input is required-ish; presence proves the form mounted
-    expect(screen.getByPlaceholderText("issues.read")).toBeInTheDocument();
+    // Capability select defaults to the canonical issue-read capability.
+    expect(screen.getByRole("combobox", { name: "Kapabilitet" })).toHaveTextContent(
+      "issue.read",
+    );
   }, 10_000);
 
   it("falls back to an empty list when the API returns malformed data", async () => {

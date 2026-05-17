@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -49,6 +50,21 @@ type grantResponse struct {
 	UpdatedAt             string  `json:"updated_at"`
 }
 
+type grantAuditResponse struct {
+	ID          string  `json:"id"`
+	WorkspaceID string  `json:"workspace_id"`
+	GrantID     *string `json:"grant_id"`
+	Action      string  `json:"action"`
+	ActorType   *string `json:"actor_type"`
+	ActorID     *string `json:"actor_id"`
+	ActorName   *string `json:"actor_name"`
+	Via         string  `json:"via"`
+	Summary     *string `json:"summary"`
+	Before      any     `json:"before"`
+	After       any     `json:"after"`
+	CreatedAt   string  `json:"created_at"`
+}
+
 // --- request types ----------------------------------------------------------
 
 type createGrantRequest struct {
@@ -69,6 +85,7 @@ type updateGrantRequest struct {
 	TimeWindowStart       *string `json:"time_window_start"`
 	TimeWindowEnd         *string `json:"time_window_end"`
 	ApprovalRequired      *bool   `json:"approval_required"`
+	Status                *string `json:"status"`
 }
 
 // --- handlers ---------------------------------------------------------------
@@ -105,6 +122,79 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		resp[i] = toResponse(g)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"grants": resp})
+}
+
+// Audit — GET /api/workspaces/{id}/grants/audit
+// Query params: subject_id, grant_id, since, limit, offset
+func (h *Handler) Audit(w http.ResponseWriter, r *http.Request) {
+	_, workspaceID, ok := h.loadWorkspace(w, r)
+	if !ok {
+		return
+	}
+
+	q := r.URL.Query()
+	filter := cerebrodb.ListCerebroGrantAuditParams{
+		WorkspaceID: workspaceID,
+		Limit:       50,
+		Offset:      0,
+	}
+	if raw := q.Get("subject_id"); raw != "" {
+		subjectID, err := util.ParseUUID(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid subject_id")
+			return
+		}
+		filter.Column2 = subjectID
+	}
+	if raw := q.Get("grant_id"); raw != "" {
+		grantID, err := util.ParseUUID(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid grant_id")
+			return
+		}
+		filter.Column3 = grantID
+	}
+	if raw := q.Get("since"); raw != "" {
+		filter.Column4 = optTimestamp(&raw)
+	}
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 200 {
+			writeError(w, http.StatusBadRequest, "invalid limit")
+			return
+		}
+		filter.Limit = int32(n)
+	}
+	if raw := q.Get("offset"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			writeError(w, http.StatusBadRequest, "invalid offset")
+			return
+		}
+		filter.Offset = int32(n)
+	}
+
+	rows, err := h.Svc.Cerebro.ListCerebroGrantAudit(r.Context(), filter)
+	if err != nil {
+		h.serverError(w, r, "list grant audit", err)
+		return
+	}
+
+	items := make([]grantAuditResponse, len(rows))
+	total := int32(0)
+	for i, row := range rows {
+		if row.Total > total {
+			total = row.Total
+		}
+		items[i] = toAuditResponse(row)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":  items,
+		"total":  total,
+		"limit":  filter.Limit,
+		"offset": filter.Offset,
+	})
 }
 
 // Get — GET /api/workspaces/{id}/grants/{grantId}
@@ -211,8 +301,26 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.ResourcePattern == nil && req.Capability == nil && req.ClassificationCeiling == nil &&
-		req.TimeWindowStart == nil && req.TimeWindowEnd == nil && req.ApprovalRequired == nil {
+		req.TimeWindowStart == nil && req.TimeWindowEnd == nil && req.ApprovalRequired == nil && req.Status == nil {
 		writeError(w, http.StatusBadRequest, "nothing to update")
+		return
+	}
+
+	if req.Status != nil {
+		if *req.Status != "revoked" {
+			writeError(w, http.StatusBadRequest, "unsupported status")
+			return
+		}
+		g, err := h.Svc.Revoke(r.Context(), grantID, workspaceID, member.UserID, "member", surfaceFromHeader(r.Header.Get("X-Cerebro-Surface")))
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "grant not found")
+				return
+			}
+			h.serverError(w, r, "revoke grant", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, toResponse(g))
 		return
 	}
 
@@ -348,6 +456,50 @@ func toResponse(g cerebrodb.CerebroWorkspaceGrant) grantResponse {
 		RevokedByID:           util.UUIDToPtr(g.RevokedByID),
 		RevokedAt:             revokedAt,
 		UpdatedAt:             util.TimestampToString(g.UpdatedAt),
+	}
+}
+
+func toAuditResponse(row cerebrodb.ListCerebroGrantAuditRow) grantAuditResponse {
+	var diff struct {
+		Before any `json:"before"`
+		After  any `json:"after"`
+	}
+	if len(row.Diff) > 0 {
+		_ = json.Unmarshal(row.Diff, &diff)
+	}
+	var actorName *string
+	if row.ActorName != "" {
+		actorName = &row.ActorName
+	}
+	summary := grantAuditSummary(row.Action)
+	return grantAuditResponse{
+		ID:          util.UUIDToString(row.ID),
+		WorkspaceID: util.UUIDToString(row.WorkspaceID),
+		GrantID:     util.UUIDToPtr(row.GrantID),
+		Action:      row.Action,
+		ActorType:   util.TextToPtr(row.ActorType),
+		ActorID:     util.UUIDToPtr(row.ActorID),
+		ActorName:   actorName,
+		Via:         row.Surface,
+		Summary:     &summary,
+		Before:      diff.Before,
+		After:       diff.After,
+		CreatedAt:   util.TimestampToString(row.CreatedAt),
+	}
+}
+
+func grantAuditSummary(action string) string {
+	switch action {
+	case "created":
+		return "Grant oprettet"
+	case "updated":
+		return "Grant opdateret"
+	case "revoked":
+		return "Grant tilbagekaldt"
+	case "deleted":
+		return "Grant slettet"
+	default:
+		return "Grant ændret"
 	}
 }
 

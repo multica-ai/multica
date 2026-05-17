@@ -349,6 +349,9 @@ importers:
       '@multica/cerebro-notifications':
         specifier: workspace:*
         version: link:../../packages/cerebro-notifications
+      '@multica/cerebro-permissions':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-permissions
       '@multica/cerebro-preferences':
         specifier: workspace:*
         version: link:../../packages/cerebro-preferences

@@ -56,13 +56,23 @@ const RESOURCE_TYPES = [
   "skill",
 ];
 
+const CAPABILITIES = [
+  "issue.read",
+  "issue.write",
+  "project.read",
+  "project.write",
+  "agent.run",
+  "repo.push",
+  "secret.use",
+];
+
 export function CreateGrantDialog({ wsId: _wsId, onClose }: CreateGrantDialogProps) {
   const [subjectType, setSubjectType] = useState<GrantSubjectType>("group");
   const [subjectId, setSubjectId] = useState("");
   const [subjectName, setSubjectName] = useState("");
   const [resourceType, setResourceType] = useState("issue");
   const [resourcePattern, setResourcePattern] = useState("*");
-  const [capability, setCapability] = useState("");
+  const [capability, setCapability] = useState("issue.read");
   const [classification, setClassification] = useState<string>("unclassified");
   const [approvalRequired, setApprovalRequired] = useState(false);
   const [endsAt, setEndsAt] = useState("");
@@ -190,12 +200,23 @@ export function CreateGrantDialog({ wsId: _wsId, onClose }: CreateGrantDialogPro
               />
             </Field>
             <Field label="Kapabilitet">
-              <Input
+              <Select
                 value={capability}
-                onChange={(e) => setCapability(e.target.value)}
-                placeholder="issues.read"
-                aria-label="Kapabilitet"
-              />
+                onValueChange={(v) => {
+                  if (v) setCapability(v);
+                }}
+              >
+                <SelectTrigger size="sm" aria-label="Kapabilitet">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CAPABILITIES.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </Field>
           </div>
 

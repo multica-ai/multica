@@ -35,7 +35,6 @@ import {
 import {
   GRANT_CLASSIFICATIONS,
   grantDetailOptions,
-  useDeletePersonaGrant,
   useUpdatePersonaGrant,
   type PersonaGrant,
   type UpdatePersonaGrantRequest,
@@ -131,7 +130,6 @@ function GrantEditor({
   }, [g]);
 
   const update = useUpdatePersonaGrant();
-  const remove = useDeletePersonaGrant();
 
   const handleSave = async () => {
     const body: UpdatePersonaGrantRequest = {
@@ -158,12 +156,12 @@ function GrantEditor({
 
   const handleDelete = async () => {
     try {
-      await remove.mutateAsync(grantId);
-      toast.success("Grant slettet");
+      await update.mutateAsync({ id: grantId, body: { status: "revoked" } });
+      toast.success("Grant tilbagekaldt");
       setConfirmDelete(false);
       onDone();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Kunne ikke slette grant");
+      toast.error(e instanceof Error ? e.message : "Kunne ikke tilbagekalde grant");
     }
   };
 
@@ -274,10 +272,10 @@ function GrantEditor({
           size="sm"
           className="text-destructive hover:bg-destructive/10 hover:text-destructive"
           onClick={() => setConfirmDelete(true)}
-          aria-label="Slet grant"
+          aria-label="Tilbagekald grant"
         >
           <Trash2 className="size-4" />
-          Slet grant
+          Tilbagekald grant
         </Button>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={onDone}>
@@ -296,7 +294,7 @@ function GrantEditor({
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Slet grant?</AlertDialogTitle>
+            <AlertDialogTitle>Tilbagekald grant?</AlertDialogTitle>
             <AlertDialogDescription>
               {g.subject.display_name ?? g.subject.id ?? "Subjektet"} mister
               kapabiliteten "{g.capability}" på {g.resource.type}:
@@ -304,7 +302,7 @@ function GrantEditor({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={remove.isPending}>
+            <AlertDialogCancel disabled={update.isPending}>
               Annullér
             </AlertDialogCancel>
             <AlertDialogAction
@@ -312,9 +310,9 @@ function GrantEditor({
                 e.preventDefault();
                 void handleDelete();
               }}
-              disabled={remove.isPending}
+              disabled={update.isPending}
             >
-              {remove.isPending ? "Sletter…" : "Slet"}
+              {update.isPending ? "Tilbagekalder…" : "Tilbagekald"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -383,4 +381,3 @@ function fromLocalInput(v: string): string {
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? "" : d.toISOString();
 }
-
