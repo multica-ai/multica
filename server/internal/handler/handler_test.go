@@ -266,6 +266,24 @@ func createHandlerTestTaskForAgent(t *testing.T, agentID string) string {
 	return taskID
 }
 
+// CEREBRO-PATCH(task-delegation-context): tests use this helper to model a task started on behalf of the original user.
+func createHandlerTestDelegatedTaskForAgent(t *testing.T, agentID, originalUserID string) string {
+	t.Helper()
+
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, original_user_id, delegation_source)
+		VALUES ($1, $2, 'queued', 0, $3, 'test')
+		RETURNING id
+	`, agentID, handlerTestRuntimeID(t), originalUserID).Scan(&taskID); err != nil {
+		t.Fatalf("failed to create delegated handler test task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+	return taskID
+}
+
 func fetchAgentMcpConfig(t *testing.T, agentID string) []byte {
 	t.Helper()
 
@@ -2691,6 +2709,18 @@ func TestAgentReplyDoesNotInheritParentMentions(t *testing.T) {
 	if countTasks(agentB) != 1 {
 		t.Fatalf("expected 1 task for Agent B after member mention, got %d", countTasks(agentB))
 	}
+	// CEREBRO-PATCH(task-delegation-context): member-authored mentions seed original_user_id on the queued task.
+	var originalUserID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT original_user_id::text
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+	`, issueID, agentB).Scan(&originalUserID); err != nil {
+		t.Fatalf("load member mention delegation context: %v", err)
+	}
+	if originalUserID != testUserID {
+		t.Fatalf("member mention task original_user_id = %s, want %s", originalUserID, testUserID)
+	}
 
 	// 2. Cancel Agent B's task so it's free to be re-triggered.
 	cancelTasks(agentB)
@@ -2781,7 +2811,7 @@ func TestMemberReplyToAgentRootDoesNotInheritParentMentions(t *testing.T) {
 	// This is a deliberate handoff and must enqueue a task for Reviewer.
 	// X-Task-ID is required alongside X-Agent-ID for resolveActor to grant
 	// the "agent" actor identity (defense against header forgery).
-	jAgentTask := createHandlerTestTaskForAgent(t, jAgent)
+	jAgentTask := createHandlerTestDelegatedTaskForAgent(t, jAgent, testUserID)
 	w = httptest.NewRecorder()
 	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
 		"content": fmt.Sprintf("PR ready. [@Reviewer](mention://agent/%s) please review this.", reviewerAgent),
@@ -2877,7 +2907,7 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 	// not enqueue a self-trigger for Agent A. resolveActor requires
 	// X-Task-ID to grant "agent" identity; without it the self-trigger
 	// suppression (authorType=="agent") would not fire.
-	agentATask := createHandlerTestTaskForAgent(t, agentA)
+	agentATask := createHandlerTestDelegatedTaskForAgent(t, agentA, testUserID)
 	explicitMention := fmt.Sprintf("[@Agent B](mention://agent/%s) please take it from here", agentB)
 	w = httptest.NewRecorder()
 	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
@@ -2895,5 +2925,75 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 	}
 	if got := countTasks(agentA); got != 0 {
 		t.Fatalf("expected 0 tasks for Agent A (no self-trigger on own mention), got %d", got)
+	}
+	var originalUserID, delegatingAgentID, sourceTaskID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT original_user_id::text, delegating_agent_id::text, source_task_id::text
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+	`, issueID, agentB).Scan(&originalUserID, &delegatingAgentID, &sourceTaskID); err != nil {
+		t.Fatalf("load delegated mention context: %v", err)
+	}
+	if originalUserID != testUserID {
+		t.Fatalf("delegated task original_user_id = %s, want %s", originalUserID, testUserID)
+	}
+	if delegatingAgentID != agentA {
+		t.Fatalf("delegated task delegating_agent_id = %s, want %s", delegatingAgentID, agentA)
+	}
+	if sourceTaskID != agentATask {
+		t.Fatalf("delegated task source_task_id = %s, want %s", sourceTaskID, agentATask)
+	}
+}
+
+func TestAgentExplicitMentionWithoutOriginalUserIsDenied(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentA := createHandlerTestAgent(t, "Denied Handoff Agent A", nil)
+	agentB := createHandlerTestAgent(t, "Denied Handoff Agent B", nil)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "Agent explicit handoff deny test",
+		"status": "todo",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	issueID := issue.ID
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	agentATask := createHandlerTestTaskForAgent(t, agentA)
+	explicitMention := fmt.Sprintf("[@Agent B](mention://agent/%s) please take it from here", agentB)
+	w = httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": explicitMention,
+	})
+	r = withURLParam(r, "id", issueID)
+	r.Header.Set("X-Agent-ID", agentA)
+	r.Header.Set("X-Task-ID", agentATask)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("agent A handoff comment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var got int
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+		issueID, agentB,
+	).Scan(&got); err != nil {
+		t.Fatalf("count denied delegated tasks: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("expected default-deny to block Agent B task without original_user_id, got %d", got)
 	}
 }

@@ -20,10 +20,10 @@ import (
 )
 
 type CommentResponse struct {
-	ID             string               `json:"id"`
-	IssueID        string               `json:"issue_id"`
-	AuthorType     string               `json:"author_type"`
-	AuthorID       string               `json:"author_id"`
+	ID         string `json:"id"`
+	IssueID    string `json:"issue_id"`
+	AuthorType string `json:"author_type"`
+	AuthorID   string `json:"author_id"`
 	// CEREBRO-PATCH(comment-content-nullable): JEH-1215 — *string so that
 	// a persona-redacted row serialises as `"content": null`. The previous
 	// `string` type forced the empty string `""`, which the UI cannot
@@ -299,6 +299,12 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// must keep the resolved root in sync.
 	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), parentComment, uuidToString(issue.WorkspaceID), authorType, authorID)
 
+	// CEREBRO-PATCH(task-delegation-context): comment/mention task starts must
+	// carry the original human principal. Member comments seed the chain;
+	// agent comments inherit it from X-Task-ID or default-deny the enqueue.
+	commentDelegation, delegationErr := h.TaskService.CommentDelegationContext(r.Context(), authorType, authorID, r.Header.Get("X-Task-ID"), "comment")
+	mentionDelegation, mentionDelegationErr := h.TaskService.CommentDelegationContext(r.Context(), authorType, authorID, r.Header.Get("X-Task-ID"), "mention")
+
 	// If the issue is assigned to an agent with on_comment trigger, enqueue a new task.
 	// Skip when the comment comes from the assigned agent itself to avoid loops.
 	// Also skip when the comment @mentions others but not the assignee agent —
@@ -313,7 +319,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		// thread grouping) is handled downstream by createAgentComment,
 		// which resolves parent_id to the thread root before posting. This
 		// mirrors the mention path's behavior (see enqueueMentionedAgentTasks).
-		if _, err := h.TaskService.EnqueueTaskForIssue(r.Context(), issue, comment.ID); err != nil {
+		if delegationErr != nil {
+			slog.Warn("enqueue agent task on comment blocked by delegation policy", "issue_id", issueID, "error", delegationErr)
+		} else if _, err := h.TaskService.EnqueueTaskForIssueFromComment(r.Context(), issue, comment.ID, commentDelegation); err != nil {
 			slog.Warn("enqueue agent task on comment failed", "issue_id", issueID, "error", err)
 		}
 	}
@@ -323,12 +331,12 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// when a member explicitly @mentions anyone (agent/member/squad/all) — that
 	// counts as deliberate routing and the leader stays out.
 	if h.shouldEnqueueSquadLeaderOnComment(r.Context(), issue, comment.Content, authorType, authorID) {
-		h.enqueueSquadLeaderTask(r.Context(), issue, comment.ID, authorType, authorID)
+		h.enqueueSquadLeaderTask(r.Context(), issue, comment.ID, authorType, authorID, commentTaskDelegation{context: commentDelegation, err: delegationErr})
 	}
 
 	// Trigger @mentioned agents: parse agent mentions and enqueue tasks for each.
 	// Pass parentComment so that replies inherit mentions from the thread root.
-	h.enqueueMentionedAgentTasks(r.Context(), issue, comment, parentComment, authorType, authorID)
+	h.enqueueMentionedAgentTasks(r.Context(), issue, comment, parentComment, authorType, authorID, mentionDelegation, mentionDelegationErr)
 
 	// CEREBRO-PATCH(channel-listen-mode): trigger non-mentioned, non-assignee
 	// agents subscribed to the channel whose listen_mode is 'always'.
@@ -480,7 +488,7 @@ func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util
 // admin/owner can mention a private agent).
 // Note: no status gate here — @mention is an explicit action and should work
 // even on done/cancelled issues (the agent can reopen the issue if needed).
-func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string) {
+func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string, delegation service.TaskDelegationContext, delegationErr error) {
 	wsID := uuidToString(issue.WorkspaceID)
 	mentions := util.ParseMentions(comment.Content)
 	if shouldInheritParentMentions(parentComment, mentions, authorType) {
@@ -526,7 +534,11 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 			if err != nil || hasPending {
 				continue
 			}
-			if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, leaderID, comment.ID); err != nil {
+			if delegationErr != nil {
+				slog.Warn("enqueue squad leader mention task blocked by delegation policy", "issue_id", uuidToString(issue.ID), "squad_id", m.ID, "error", delegationErr)
+				continue
+			}
+			if _, err := h.TaskService.EnqueueTaskForSquadLeaderFromComment(ctx, issue, leaderID, comment.ID, delegation); err != nil {
 				slog.Warn("enqueue squad leader mention task failed", "issue_id", uuidToString(issue.ID), "squad_id", m.ID, "error", err)
 			}
 			continue
@@ -567,7 +579,11 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 		}
 		// Always use the current comment as the trigger so the agent reads the
 		// actual reply that mentioned it, not the thread root.
-		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, comment.ID); err != nil {
+		if delegationErr != nil {
+			slog.Warn("enqueue mention agent task blocked by delegation policy", "issue_id", uuidToString(issue.ID), "agent_id", m.ID, "error", delegationErr)
+			continue
+		}
+		if _, err := h.TaskService.EnqueueTaskForMentionFromComment(ctx, issue, agentUUID, comment.ID, delegation); err != nil {
 			slog.Warn("enqueue mention agent task failed", "issue_id", uuidToString(issue.ID), "agent_id", m.ID, "error", err)
 		}
 	}

@@ -26,7 +26,7 @@ SELECT
 FROM agent_task_queue p
 LEFT JOIN agent a ON a.id = p.agent_id
 WHERE p.id = $1
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, title, model_override
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, title, model_override
 `
 
 // Like CreateRetryTask but resets the attempt counter to 1. Used when
@@ -69,6 +69,10 @@ func (q *Queries) CreateResumeFromPauseTask(ctx context.Context, id pgtype.UUID)
 		&i.TriggerSummary,
 		&i.ForceFreshSession,
 		&i.IsLeaderTask,
+		&i.OriginalUserID,
+		&i.DelegatingAgentID,
+		&i.SourceTaskID,
+		&i.DelegationSource,
 		&i.Title,
 		&i.ModelOverride,
 	)
@@ -105,7 +109,7 @@ func (q *Queries) GetAgentRuntimePauseSnapshot(ctx context.Context, id pgtype.UU
 }
 
 const listResumableTasksForRuntime = `-- name: ListResumableTasksForRuntime :many
-SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.title, t.model_override FROM agent_task_queue t
+SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.original_user_id, t.delegating_agent_id, t.source_task_id, t.delegation_source, t.title, t.model_override FROM agent_task_queue t
 WHERE t.runtime_id = $1
   AND t.status = 'failed'
   AND (
@@ -191,6 +195,10 @@ func (q *Queries) ListResumableTasksForRuntime(ctx context.Context, arg ListResu
 			&i.TriggerSummary,
 			&i.ForceFreshSession,
 			&i.IsLeaderTask,
+			&i.OriginalUserID,
+			&i.DelegatingAgentID,
+			&i.SourceTaskID,
+			&i.DelegationSource,
 			&i.Title,
 			&i.ModelOverride,
 		); err != nil {
@@ -343,7 +351,7 @@ SET status         = 'failed',
     failure_reason = 'runtime_paused'
 WHERE runtime_id = $1
   AND status IN ('dispatched', 'running')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, title, model_override
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, title, model_override
 `
 
 // Called when a runtime is paused: marks any in-flight (dispatched/running)
@@ -386,6 +394,10 @@ func (q *Queries) SuspendActiveTasksForRuntime(ctx context.Context, runtimeID pg
 			&i.TriggerSummary,
 			&i.ForceFreshSession,
 			&i.IsLeaderTask,
+			&i.OriginalUserID,
+			&i.DelegatingAgentID,
+			&i.SourceTaskID,
+			&i.DelegationSource,
 			&i.Title,
 			&i.ModelOverride,
 		); err != nil {

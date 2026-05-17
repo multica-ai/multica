@@ -114,6 +114,10 @@ type AgentTaskQueue struct {
 	TriggerSummary    pgtype.Text        `json:"trigger_summary"`
 	ForceFreshSession bool               `json:"force_fresh_session"`
 	IsLeaderTask      bool               `json:"is_leader_task"`
+	OriginalUserID    pgtype.UUID        `json:"original_user_id"`
+	DelegatingAgentID pgtype.UUID        `json:"delegating_agent_id"`
+	SourceTaskID      pgtype.UUID        `json:"source_task_id"`
+	DelegationSource  pgtype.Text        `json:"delegation_source"`
 	Title             pgtype.Text        `json:"title"`
 	ModelOverride     pgtype.Text        `json:"model_override"`
 }

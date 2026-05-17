@@ -487,7 +487,12 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 		t.Fatalf("count tasks before: %v", err)
 	}
 
-	testHandler.enqueueMentionedAgentTasks(ctx, issue, comment, nil, "member", testUserID)
+	// CEREBRO-PATCH(task-delegation-context): direct dispatcher test must seed the same member provenance as CreateComment.
+	delegation, delegationErr := testHandler.TaskService.CommentDelegationContext(ctx, "member", testUserID, "", "comment")
+	if delegationErr != nil {
+		t.Fatalf("member delegation context: %v", delegationErr)
+	}
+	testHandler.enqueueMentionedAgentTasks(ctx, issue, comment, nil, "member", testUserID, delegation, nil)
 
 	var afterCount int
 	if err := testPool.QueryRow(ctx,

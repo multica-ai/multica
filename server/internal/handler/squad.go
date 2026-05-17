@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -723,8 +724,14 @@ func (h *Handler) isSquadLeaderReady(ctx context.Context, issue db.Issue) bool {
 	return true
 }
 
+// CEREBRO-PATCH(task-delegation-context): carries comment delegation provenance into the squad leader enqueue helper.
+type commentTaskDelegation struct {
+	context service.TaskDelegationContext
+	err     error
+}
+
 // enqueueSquadLeaderTask triggers the squad leader agent for an issue assigned to a squad.
-func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID string) {
+func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID string, commentDelegation ...commentTaskDelegation) {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          issue.AssigneeID,
 		WorkspaceID: issue.WorkspaceID,
@@ -742,11 +749,21 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 		return
 	}
 
-	if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, squad.LeaderID, triggerCommentID); err != nil {
+	var enqueueErr error
+	if len(commentDelegation) > 0 {
+		if commentDelegation[0].err != nil {
+			enqueueErr = commentDelegation[0].err
+		} else {
+			_, enqueueErr = h.TaskService.EnqueueTaskForSquadLeaderFromComment(ctx, issue, squad.LeaderID, triggerCommentID, commentDelegation[0].context)
+		}
+	} else {
+		_, enqueueErr = h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, squad.LeaderID, triggerCommentID)
+	}
+	if enqueueErr != nil {
 		slog.Warn("enqueue squad leader task failed",
 			"issue_id", uuidToString(issue.ID),
 			"squad_id", uuidToString(squad.ID),
 			"leader_id", uuidToString(squad.LeaderID),
-			"error", err)
+			"error", enqueueErr)
 	}
 }

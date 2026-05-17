@@ -108,6 +108,64 @@ func truncateForSummary(s string, maxRunes int) string {
 
 const taskAnalyticsContextCacheMax = 4096
 
+// CEREBRO-PATCH(task-delegation-context): JEH-1436 records the original
+// human principal behind comment/mention task starts and default-denies
+// agent-authored starts when that provenance is missing.
+type TaskDelegationContext struct {
+	OriginalUserID    pgtype.UUID
+	DelegatingAgentID pgtype.UUID
+	SourceTaskID      pgtype.UUID
+	Source            pgtype.Text
+}
+
+func memberCommentDelegationContext(userID string, source string) (TaskDelegationContext, error) {
+	uid, err := util.ParseUUID(userID)
+	if err != nil {
+		return TaskDelegationContext{}, fmt.Errorf("invalid original user id")
+	}
+	return TaskDelegationContext{
+		OriginalUserID: uid,
+		Source:         pgtype.Text{String: source, Valid: true},
+	}, nil
+}
+
+// CommentDelegationContext builds the provenance required before a comment
+// path may enqueue a task. Member-authored comments are the root of the
+// delegation chain. Agent-authored comments must inherit an original user
+// from the currently running source task; otherwise the agent-to-agent start
+// is denied before enqueue.
+func (s *TaskService) CommentDelegationContext(ctx context.Context, authorType, authorID, taskIDHeader, source string) (TaskDelegationContext, error) {
+	if authorType == "member" {
+		return memberCommentDelegationContext(authorID, source)
+	}
+	if authorType != "agent" {
+		return TaskDelegationContext{}, fmt.Errorf("unsupported comment author type %q", authorType)
+	}
+	if taskIDHeader == "" {
+		return TaskDelegationContext{}, fmt.Errorf("agent delegation denied: missing source task")
+	}
+	taskID, err := util.ParseUUID(taskIDHeader)
+	if err != nil {
+		return TaskDelegationContext{}, fmt.Errorf("agent delegation denied: invalid source task")
+	}
+	task, err := s.Queries.GetAgentTask(ctx, taskID)
+	if err != nil {
+		return TaskDelegationContext{}, fmt.Errorf("agent delegation denied: source task not found")
+	}
+	if util.UUIDToString(task.AgentID) != authorID {
+		return TaskDelegationContext{}, fmt.Errorf("agent delegation denied: source task does not belong to author")
+	}
+	if !task.OriginalUserID.Valid {
+		return TaskDelegationContext{}, fmt.Errorf("agent delegation denied: missing original user")
+	}
+	return TaskDelegationContext{
+		OriginalUserID:    task.OriginalUserID,
+		DelegatingAgentID: task.AgentID,
+		SourceTaskID:      task.ID,
+		Source:            pgtype.Text{String: source, Valid: true},
+	}, nil
+}
+
 // buildCommentTriggerSummary fetches the comment content and truncates
 // it for storage on the task row. Returns an invalid pgtype.Text when
 // the comment is missing (deleted / wrong workspace / etc) so the column
@@ -432,7 +490,17 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 	if len(triggerCommentID) > 0 {
 		commentID = triggerCommentID[0]
 	}
-	return s.enqueueIssueTask(ctx, issue, commentID, false)
+	return s.enqueueIssueTask(ctx, issue, commentID, false, TaskDelegationContext{})
+}
+
+// EnqueueTaskForIssueFromComment is the comment-triggered variant. It requires
+// delegation context so agent-authored comment starts cannot run without the
+// original user captured on the source task.
+func (s *TaskService) EnqueueTaskForIssueFromComment(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, delegation TaskDelegationContext) (db.AgentTaskQueue, error) {
+	if !delegation.OriginalUserID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent delegation denied: missing original user")
+	}
+	return s.enqueueIssueTask(ctx, issue, triggerCommentID, false, delegation)
 }
 
 // enqueueIssueTask is the shared implementation behind EnqueueTaskForIssue
@@ -440,7 +508,7 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 // daemon claim handler skips the (agent_id, issue_id) resume lookup — the
 // user already judged the prior output bad, a fresh agent session is the
 // expected behavior.
-func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, delegation TaskDelegationContext) (db.AgentTaskQueue, error) {
 	// CEREBRO-PATCH(task-workspace-pause-guard): block enqueue when the
 	// workspace is paused (kill-switch / pause feature). Lives in the shared
 	// helper so the manual rerun path is also blocked.
@@ -481,6 +549,10 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		// CEREBRO-PATCH(task-title-builder): short display title for inline channel row, inbox, AgentLiveCard, Tasks list.
 		Title:             s.buildTaskTitle(ctx, triggerCommentID, issue.Title),
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
+		OriginalUserID:    delegation.OriginalUserID,
+		DelegatingAgentID: delegation.DelegatingAgentID,
+		SourceTaskID:      delegation.SourceTaskID,
+		DelegationSource:  delegation.Source,
 	})
 	if err != nil {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
@@ -512,7 +584,16 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 		slog.Info("mention task enqueue blocked: workspace paused", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, fmt.Errorf("workspace tasks are paused")
 	}
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false)
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, TaskDelegationContext{})
+}
+
+// EnqueueTaskForMentionFromComment is the comment/mention-triggered variant.
+// It is intentionally default-deny when delegation provenance is missing.
+func (s *TaskService) EnqueueTaskForMentionFromComment(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, delegation TaskDelegationContext) (db.AgentTaskQueue, error) {
+	if !delegation.OriginalUserID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent delegation denied: missing original user")
+	}
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, delegation)
 }
 
 // EnqueueTaskForSquadLeader is the leader-role variant of EnqueueTaskForMention.
@@ -522,10 +603,17 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 // as a worker (do not skip). This matters for agents that are simultaneously
 // the leader and a worker of the same squad — see migration 090.
 func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true)
+	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, TaskDelegationContext{})
 }
 
-func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) EnqueueTaskForSquadLeaderFromComment(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, triggerCommentID pgtype.UUID, delegation TaskDelegationContext) (db.AgentTaskQueue, error) {
+	if !delegation.OriginalUserID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent delegation denied: missing original user")
+	}
+	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, delegation)
+}
+
+func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, delegation TaskDelegationContext) (db.AgentTaskQueue, error) {
 	// CEREBRO-PATCH(agent-pass-gate): JEH-1327 pre-enqueue gate (mention path).
 	if reason, blocked := s.blockedByAgentPass(ctx, agentID, issue.ID); blocked {
 		return db.AgentTaskQueue{}, fmt.Errorf("blocked by agent-pass: %s", reason)
@@ -552,8 +640,12 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 		TriggerCommentID: triggerCommentID,
 		TriggerSummary:   s.buildCommentTriggerSummary(ctx, triggerCommentID),
 		// CEREBRO-PATCH(task-title-builder): short display title for mention-triggered tasks.
-		Title:        s.buildTaskTitle(ctx, triggerCommentID, issue.Title),
-		IsLeaderTask: pgtype.Bool{Bool: isLeader, Valid: isLeader},
+		Title:             s.buildTaskTitle(ctx, triggerCommentID, issue.Title),
+		IsLeaderTask:      pgtype.Bool{Bool: isLeader, Valid: isLeader},
+		OriginalUserID:    delegation.OriginalUserID,
+		DelegatingAgentID: delegation.DelegatingAgentID,
+		SourceTaskID:      delegation.SourceTaskID,
+		DelegationSource:  delegation.Source,
 	})
 	if err != nil {
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -1637,7 +1729,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, trigg
 // as a leader task so the self-trigger guard treats it correctly.
 func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
 	if issue.AssigneeType.String == "agent" {
-		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true)
+		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true, TaskDelegationContext{})
 	}
 	return s.EnqueueTaskForSquadLeader(ctx, issue, agentID, triggerCommentID)
 }

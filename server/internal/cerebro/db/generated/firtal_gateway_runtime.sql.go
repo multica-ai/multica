@@ -46,7 +46,7 @@ WITH next_task AS (
 UPDATE agent_task_queue
 SET status = 'dispatched', dispatched_at = now()
 WHERE id = (SELECT id FROM next_task)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, title, model_override
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, title, model_override
 `
 
 // Claims the next queued task for a Firtal gateway cloud runtime. The cloud
@@ -93,6 +93,10 @@ func (q *Queries) ClaimFirtalGatewayTask(ctx context.Context, runtimeID pgtype.U
 		&i.TriggerSummary,
 		&i.ForceFreshSession,
 		&i.IsLeaderTask,
+		&i.OriginalUserID,
+		&i.DelegatingAgentID,
+		&i.SourceTaskID,
+		&i.DelegationSource,
 		&i.Title,
 		&i.ModelOverride,
 	)

@@ -83,15 +83,19 @@ ORDER BY created_at DESC;
 
 -- name: CreateAgentTask :one
 -- CEREBRO-PATCH(sqlc-agent-task-title): JEH-698 — `title` column is the curated short display label generated at enqueue time (LLM or heuristic), distinct from `trigger_summary` (verbatim provenance snapshot).
+-- CEREBRO-PATCH(task-delegation-context): JEH-1436 records original user and source task provenance for comment/mention starts.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
-    trigger_summary, title, force_fresh_session, is_leader_task
+    trigger_summary, title, force_fresh_session, is_leader_task,
+    original_user_id, delegating_agent_id, source_task_id, delegation_source
 )
 VALUES (
     $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
     sqlc.narg(trigger_summary), sqlc.narg(title),
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
-    COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE)
+    COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
+    sqlc.narg(original_user_id), sqlc.narg(delegating_agent_id),
+    sqlc.narg(source_task_id), sqlc.narg(delegation_source)
 )
 RETURNING *;
 
@@ -122,6 +126,7 @@ SET issue_id = $2
 WHERE id = $1 AND issue_id IS NULL;
 
 -- name: CreateRetryTask :one
+-- CEREBRO-PATCH(task-delegation-context): retry clones preserve delegation provenance from the parent task.
 -- Clones a parent task into a fresh queued attempt. Carries forward the
 -- agent's resume context (session_id/work_dir) so the child can continue
 -- the conversation when the backend supports it. attempt is incremented;
@@ -133,13 +138,15 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, trigger_summary, context,
     session_id, work_dir,
-    attempt, max_attempts, parent_task_id, is_leader_task
+    attempt, max_attempts, parent_task_id, is_leader_task,
+    original_user_id, delegating_agent_id, source_task_id, delegation_source
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
     'queued', p.priority, p.trigger_comment_id, p.trigger_summary, p.context,
     p.session_id, p.work_dir,
-    p.attempt + 1, p.max_attempts, p.id, p.is_leader_task
+    p.attempt + 1, p.max_attempts, p.id, p.is_leader_task,
+    p.original_user_id, p.delegating_agent_id, p.source_task_id, p.delegation_source
 FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING *;

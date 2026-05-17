@@ -382,12 +382,13 @@ func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&runtimeID); err != nil {
 		t.Fatalf("load runtime: %v", err)
 	}
+	// CEREBRO-PATCH(task-delegation-context): legal agent-authored squad delegation requires a source task with original user provenance.
 	var workerTaskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task)
-		VALUES ($1, $2, $3, 'running', FALSE)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, original_user_id, delegation_source)
+		VALUES ($1, $2, $3, 'running', FALSE, $4, 'test')
 		RETURNING id
-	`, fx.LeaderID, runtimeID, issueID).Scan(&workerTaskID); err != nil {
+	`, fx.LeaderID, runtimeID, issueID, testUserID).Scan(&workerTaskID); err != nil {
 		t.Fatalf("seed worker task: %v", err)
 	}
 
