@@ -11,13 +11,14 @@ import { defaultStorage } from "../../platform/storage";
 
 export type ViewMode = "board" | "list";
 export type IssueGrouping = "status" | "assignee";
-export type SortField = "position" | "priority" | "due_date" | "created_at" | "title";
+export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title";
 export type SortDirection = "asc" | "desc";
 
 export interface CardProperties {
   priority: boolean;
   description: boolean;
   assignee: boolean;
+  startDate: boolean;
   dueDate: boolean;
   project: boolean;
   childProgress: boolean;
@@ -32,6 +33,7 @@ export interface ActorFilterValue {
 export const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: "position", label: "Manual" },
   { value: "priority", label: "Priority" },
+  { value: "start_date", label: "Start date" },
   { value: "due_date", label: "Due date" },
   { value: "created_at", label: "Created date" },
   { value: "title", label: "Title" },
@@ -46,6 +48,7 @@ export const CARD_PROPERTY_OPTIONS: { key: keyof CardProperties; label: string }
   { key: "priority", label: "Priority" },
   { key: "description", label: "Description" },
   { key: "assignee", label: "Assignee" },
+  { key: "startDate", label: "Start date" },
   { key: "dueDate", label: "Due date" },
   { key: "project", label: "Project" },
   { key: "labels", label: "Labels" },
@@ -103,6 +106,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     priority: true,
     description: true,
     assignee: true,
+    startDate: true,
     dueDate: true,
     project: true,
     childProgress: true,

@@ -39,6 +39,7 @@ export interface Issue {
   parent_issue_id: string | null;
   project_id: string | null;
   position: number;
+  start_date: string | null;
   due_date: string | null;
   reactions?: IssueReaction[];
   labels?: Label[];
