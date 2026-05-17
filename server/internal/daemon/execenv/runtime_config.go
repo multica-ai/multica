@@ -381,6 +381,13 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("If you need to perform an operation that is not covered by any existing `multica` command, ")
 	b.WriteString("do NOT attempt to work around it. Instead, post a comment mentioning the workspace owner to request the missing functionality.\n\n")
 
+	// CEREBRO-PATCH(agent-table-formatting): instruct agents to use concise cell content so tables wrap correctly on mobile (JEH-1611)
+	b.WriteString("## Table Formatting\n\n")
+	b.WriteString("When writing markdown tables in comments or issue descriptions, keep cell content concise so text wraps correctly on all screen sizes:\n\n")
+	b.WriteString("- Keep cell content under ~60 characters per cell when possible\n")
+	b.WriteString("- For content longer than ~60 characters, prefer a bulleted list — it is more readable on mobile\n")
+	b.WriteString("- Use `<br>` inside a cell to add intentional line breaks when a table is still the right format\n\n")
+
 	b.WriteString("## Output\n\n")
 	switch {
 	case ctx.AutopilotRunID != "":

@@ -261,17 +261,18 @@ function createComponents(
       ),
       ol: ({ children }) => <ol className="my-2 space-y-1 pl-6 list-decimal">{children}</ol>,
       li: ({ children }) => <li>{children}</li>,
+      // CEREBRO-PATCH(table-text-wrap): table-fixed + break-words so text wraps in cells on narrow screens instead of overflowing (JEH-1611)
       // Clean tables
       table: ({ children }) => (
         <div className="my-3 overflow-x-auto">
-          <table className="min-w-full text-sm">{children}</table>
+          <table className="w-full table-fixed text-sm">{children}</table>
         </div>
       ),
       thead: ({ children }) => <thead className="border-b">{children}</thead>,
       th: ({ children }) => (
-        <th className="text-left py-2 px-3 font-semibold text-muted-foreground">{children}</th>
+        <th className="text-left py-2 px-3 font-semibold text-muted-foreground break-words">{children}</th>
       ),
-      td: ({ children }) => <td className="py-2 px-3 border-b border-border/50">{children}</td>,
+      td: ({ children }) => <td className="py-2 px-3 border-b border-border/50 break-words align-top">{children}</td>,
       // Headings - H1/H2 same size, differentiated by weight
       h1: ({ children }) => <h1 className="font-sans text-base font-bold mt-5 mb-3">{children}</h1>,
       h2: ({ children }) => (
@@ -321,16 +322,17 @@ function createComponents(
     ),
     ol: ({ children }) => <ol className="my-3 space-y-1.5 pl-6 list-decimal">{children}</ol>,
     li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+    // CEREBRO-PATCH(table-text-wrap): table-fixed + break-words so text wraps in cells on narrow screens instead of overflowing (JEH-1611)
     // Beautiful tables
     table: ({ children }) => (
       <div className="my-4 overflow-x-auto rounded-md border">
-        <table className="min-w-full divide-y divide-border">{children}</table>
+        <table className="w-full table-fixed divide-y divide-border">{children}</table>
       </div>
     ),
     thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
     tbody: ({ children }) => <tbody className="divide-y divide-border">{children}</tbody>,
-    th: ({ children }) => <th className="text-left py-3 px-4 font-semibold text-sm">{children}</th>,
-    td: ({ children }) => <td className="py-3 px-4 text-sm">{children}</td>,
+    th: ({ children }) => <th className="text-left py-3 px-4 font-semibold text-sm break-words">{children}</th>,
+    td: ({ children }) => <td className="py-3 px-4 text-sm break-words align-top">{children}</td>,
     tr: ({ children }) => <tr className="hover:bg-muted/30 transition-colors">{children}</tr>,
     // Rich headings
     h1: ({ children }) => <h1 className="font-sans text-base font-bold mt-7 mb-4">{children}</h1>,

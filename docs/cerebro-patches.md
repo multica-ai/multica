@@ -35,6 +35,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 
 | Patch name | File(s) | `+` lines | Rationale |
 |---|---|---|---|
+| `table-text-wrap` | packages/ui/markdown/Markdown.tsx | 4 | Add `table-fixed` + `break-words` to table/td in minimal and full render modes so cell text wraps on narrow screens (mobile) instead of overflowing horizontally (JEH-1611). |
+| `agent-table-formatting` | server/internal/daemon/execenv/runtime_config.go | 6 | Add "Table Formatting" section to agent runtime config instructing agents to keep cell content concise for mobile readability (JEH-1611). |
 | `agent-runs-history-expanded-default` | packages/views/issues/components/agent-live-card.tsx | 1 | Initialize `TaskRunHistory` open state to `true` so the "Execution history" section is expanded by default when the Agent Runs tab is opened (JEH-1247). |
 | `agent-tools-api` | packages/core/api/client.ts | 10 | JEH-1290 W8 — `getAgentTools` / `updateAgentTool` wrappers for the W3 registry endpoints (`GET/PUT /api/agents/:id/tools/:name`). Enables the tools tab + toggle. |
 | `agent-tools-tab` | packages/views/agents/components/agent-overview-pane.tsx<br>packages/views/agents/components/tabs/cerebro-tools-tab.tsx (new) | 8 inline + ~220 new | JEH-1290 W8 — "Tools" tab on the agent editor. Fetches tool grants via W3 API, renders name/description/enabled toggle, tool-specific config fields (BQ row-limit, Sheets spreadsheet-id, web-fetch URL-allowlist). Gracefully empty before W3 is deployed. |
