@@ -110,7 +110,7 @@ jobs:
 
       - name: Compute backend image labels
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
         with:
           images: ghcr.io/${{ github.repository_owner }}/multica-backend
           labels: |
@@ -176,7 +176,7 @@ jobs:
 
       - name: Compute backend image tags
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
         with:
           images: ghcr.io/${{ github.repository_owner }}/multica-backend
           flavor: |
@@ -227,7 +227,7 @@ jobs:
 
       - name: Compute web image labels
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
         with:
           images: ghcr.io/${{ github.repository_owner }}/multica-web
           labels: |
@@ -293,7 +293,7 @@ jobs:
 
       - name: Compute web image tags
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
         with:
           images: ghcr.io/${{ github.repository_owner }}/multica-web
           flavor: |
