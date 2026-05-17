@@ -6,6 +6,7 @@ import {
   SWIPE_COMMIT_MIN_PX,
   commitThresholdPx,
   shouldCommitHeldSwipe,
+  shouldInstantArchive,
 } from "./swipe-thresholds";
 
 describe("POST_SWIPE_CLICK_SUPPRESS_MS", () => {
@@ -61,5 +62,27 @@ describe("shouldCommitHeldSwipe", () => {
 
   it("cancels when the user moves back under threshold before release", () => {
     expect(shouldCommitHeldSwipe(80, 414, true)).toBe(false);
+  });
+});
+
+describe("shouldInstantArchive", () => {
+  it("commits when swipe reaches 95% of row width", () => {
+    // 414 px row: 95% = 393.3 px
+    expect(shouldInstantArchive(394, 414)).toBe(true);
+  });
+
+  it("does not commit at 94% of row width", () => {
+    // 414 px row: 94% = 389.2 px
+    expect(shouldInstantArchive(389, 414)).toBe(false);
+  });
+
+  it("commits at exactly 95%", () => {
+    const rowWidth = 400;
+    expect(shouldInstantArchive(rowWidth * 0.95, rowWidth)).toBe(true);
+  });
+
+  it("does not commit at hold-threshold distances without hold", () => {
+    // 35% of 414 = ~145 px — should not instant-archive
+    expect(shouldInstantArchive(145, 414)).toBe(false);
   });
 });

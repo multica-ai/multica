@@ -26,10 +26,14 @@
  *        (mute / mark-unread "did nothing"). Replaced with a timestamp
  *        window so the flag self-clears after `POST_SWIPE_CLICK_SUPPRESS_MS`
  *        regardless of whether the synthetic click ever fires.
- *  - v6 (current): archive is hold-to-commit while the finger is still down.
+ *  - v6: archive is hold-to-commit while the finger is still down.
  *        Release no longer leaves a 1s "stuck" destructive state. The user
  *        must hold beyond the threshold briefly, and moving back under the
  *        threshold cancels before release.
+ *  - v7 (current): full-flick instant archive. A swipe covering ≥95% of the
+ *        row width commits on release without any hold delay — the intent is
+ *        unambiguous at that distance. Hold-to-commit still applies for
+ *        shorter swipes beyond the 35% threshold.
  *
  * Sources:
  *  - "Pointer events vs touch events for swipe" — react-swipeable's README
@@ -97,4 +101,14 @@ export function shouldCommitHeldSwipe(
   holdReady: boolean,
 ): boolean {
   return holdReady && offsetX >= commitThresholdPx(rowWidth);
+}
+
+/** Fraction of row width that triggers instant archive on release
+ * without requiring a hold — the gesture is unambiguous at this distance. */
+export const SWIPE_INSTANT_ARCHIVE_FRACTION = 0.95;
+
+/** Returns true when the user has swiped far enough that archive should
+ * commit immediately on release, bypassing the hold-to-commit timer. */
+export function shouldInstantArchive(offsetX: number, rowWidth: number): boolean {
+  return offsetX >= rowWidth * SWIPE_INSTANT_ARCHIVE_FRACTION;
 }

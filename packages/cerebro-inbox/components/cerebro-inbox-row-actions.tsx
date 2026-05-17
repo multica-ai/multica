@@ -45,6 +45,7 @@ import {
   SWIPE_ROW_TRANSITION_MS,
   commitThresholdPx,
   shouldCommitHeldSwipe,
+  shouldInstantArchive,
 } from "../swipe-thresholds";
 
 interface Props {
@@ -463,7 +464,10 @@ function MobileRowActions({
         swipeEndedAtRef.current = Date.now();
       }
 
-      if (shouldCommitHeldSwipe(live, rowWidth, archiveHoldReadyRef.current)) {
+      if (
+        shouldInstantArchive(live, rowWidth) ||
+        shouldCommitHeldSwipe(live, rowWidth, archiveHoldReadyRef.current)
+      ) {
         setRevealed(false);
         setOffsetX(0);
         onArchiveRef.current();
@@ -941,7 +945,10 @@ function SwipeArchiveOnly({
       if (live > SWIPE_INTENT_PX) {
         swipeEndedAtRef.current = Date.now();
       }
-      if (shouldCommitHeldSwipe(live, rowWidth, archiveHoldReadyRef.current)) {
+      if (
+        shouldInstantArchive(live, rowWidth) ||
+        shouldCommitHeldSwipe(live, rowWidth, archiveHoldReadyRef.current)
+      ) {
         setOffsetX(0);
         onArchiveRef.current();
       } else {
