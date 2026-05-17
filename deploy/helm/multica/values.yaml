@@ -93,6 +93,16 @@ backend:
 # -----------------------------------------------------------------------------
 frontend:
   replicas: 1
+  # Compatibility shim for the prebuilt multica-web image.
+  compatibility:
+    # When true (default) the chart creates an ExternalName Service literally
+    # named "backend" so the REMOTE_API_URL=http://backend:8080 baked into the
+    # web image resolves in-cluster. Because that name is unprefixed, only ONE
+    # release of this chart can run per namespace, and it will collide with any
+    # pre-existing Service/backend (helm install then fails without
+    # --take-ownership). Set to false if you run a web image built with a
+    # patched REMOTE_API_URL and don't need the alias.
+    backendAlias: true
   resources:
     requests:
       cpu: 100m
