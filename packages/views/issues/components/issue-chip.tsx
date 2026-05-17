@@ -78,7 +78,8 @@ export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps)
     // CEREBRO-PATCH(issue-chip-readable): wrap long titles + tooltip instead of single-line truncate (JEH-1113)
     // CEREBRO-PATCH(issue-chip-multilne): identifier-secondary + full-title + run-indicator layout (JEH-1253)
     <span className={cls} title={issue.title}>
-      <span className="flex items-center gap-1 shrink-0">
+      {/* CEREBRO-PATCH(issue-chip-mobile-wrap): inline-flex keeps icon+id as atomic inline — required for box-decoration-clone on outer span (JEH-1593) */}
+      <span className="inline-flex items-center gap-1 align-middle">
         <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
         {runState && <AgentRunPip state={runState} />}
         <span className="font-medium text-muted-foreground text-[10px]">{issue.identifier}</span>
