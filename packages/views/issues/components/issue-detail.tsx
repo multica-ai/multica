@@ -89,6 +89,10 @@ import { useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { PrivacyToggle } from "@multica/cerebro-access/views";
 import { RestrictedRef } from "@multica/cerebro-access/views";
+// CEREBRO-PATCH(mention-access-prefetch): JEH-1250 — warm the project-members
+// cache when viewing an issue in a restricted project so the @mention picker
+// can mark members lacking access synchronously.
+import { useEnsureMentionAccessData } from "@multica/cerebro-access/views";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard, TaskRunHistory, WorkSessionHistory } from "./agent-live-card";
@@ -902,6 +906,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     ...projectDetailOptions(wsId, issue?.project_id ?? ""),
     enabled: !!issue?.project_id,
   });
+  // CEREBRO-PATCH(mention-access-prefetch-call): JEH-1250
+  useEnsureMentionAccessData(
+    issue?.project_id ?? null,
+    projectForBreadcrumb?.access ?? null,
+  );
   const { data: childIssues = [] } = useQuery({
     ...childIssuesOptions(wsId, id),
     enabled: !!issue,

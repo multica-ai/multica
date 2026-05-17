@@ -208,6 +208,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         onUploadFileRef,
         submitOnEnter,
         disableMentions,
+        // CEREBRO-PATCH(mention-access-currentIssueId-wire): JEH-1250 — pass
+        // the editor's current issue id into the mention factory so cerebro
+        // can dim members lacking project access.
+        currentIssueId,
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;

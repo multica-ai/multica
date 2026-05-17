@@ -38,6 +38,11 @@ import {
   sortUserItemsByRecency,
 } from "./mention-recency";
 import { matchesPinyin } from "./pinyin-match";
+// CEREBRO-PATCH(mention-access-import): JEH-1250 — cerebro-only project-access
+// decorator. Returns a synchronously-resolved set of restricted user IDs from
+// the TanStack Query cache, so the picker can mute them with a lock badge.
+import { getMentionAccessContext } from "@multica/cerebro-access/views";
+import { Lock } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -51,6 +56,9 @@ export interface MentionItem {
   description?: string;
   /** Issue status for StatusIcon rendering */
   status?: IssueStatus;
+  // CEREBRO-PATCH(mention-restricted-flag): JEH-1250 — when true, this user
+  // lacks access to the current issue's restricted project; render dimmed.
+  restricted?: boolean;
 }
 
 interface MentionListProps {
@@ -324,13 +332,19 @@ function MentionRow({
     );
   }
 
+  // CEREBRO-PATCH(mention-access-row-style): JEH-1250 — mute the row + render a
+  // lock badge when the user lacks access to the current issue's restricted
+  // project. The row stays clickable so admins/owners can still mention them.
+  const accessLabel = t(($) => $.mention.no_project_access);
   return (
     <button
       ref={buttonRef}
+      data-restricted={item.restricted ? "" : undefined}
       className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors ${
         selected ? "bg-accent" : "hover:bg-accent/50"
-      }`}
+      } ${item.restricted ? "opacity-60" : ""}`}
       onClick={onSelect}
+      title={item.restricted ? accessLabel : undefined}
     >
       <ActorAvatar
         actorType={item.type === "all" ? "member" : item.type}
@@ -341,7 +355,13 @@ function MentionRow({
       <span className="truncate font-medium">
         {item.type === "all" ? t(($) => $.mention.all_members) : item.label}
       </span>
-      {item.type === "agent" && (
+      {item.restricted && (
+        <Lock
+          aria-label={accessLabel}
+          className="ml-auto size-3 shrink-0 text-muted-foreground"
+        />
+      )}
+      {item.type === "agent" && !item.restricted && (
         // "Agent" is a glossary-protected product term — kept un-translated.
         // eslint-disable-next-line i18next/no-literal-string
         <Badge variant="outline" className="ml-auto text-[10px] h-4 px-1.5">Agent</Badge>
@@ -369,10 +389,12 @@ function issueToMention(i: Pick<Issue, "id" | "identifier" | "title" | "status">
   };
 }
 
-export function createMentionSuggestion(qc: QueryClient): Omit<
-  SuggestionOptions<MentionItem>,
-  "editor"
-> {
+// CEREBRO-PATCH(mention-access-currentIssueId): JEH-1250 — accept the editor's
+// current issue id so the picker can mark members lacking project access.
+export function createMentionSuggestion(
+  qc: QueryClient,
+  currentIssueId?: string | null,
+): Omit<SuggestionOptions<MentionItem>, "editor"> {
   // Renderer/popup instances live in this closure so each ContentEditor owns
   // its own TipTap suggestion popup lifecycle.
   let renderer: ReactRenderer<MentionListRef> | null = null;
@@ -432,10 +454,23 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
     // targets come first regardless of type, with an alphabetical fallback
     // for everyone the user hasn't mentioned yet on this device.
     const recency = getRecencyMap(wsId);
-    const userItems = sortUserItemsByRecency(
+    const rankedUserItems = sortUserItemsByRecency(
       [...memberItems, ...agentItems, ...squadItems],
       recency,
     );
+
+    // CEREBRO-PATCH(mention-access-decorate): JEH-1250 — annotate member rows
+    // for which the current issue's restricted project lacks access. Returns
+    // the list unchanged when the issue isn't in a restricted project or
+    // membership data hasn't loaded.
+    const { restrictedUserIds } = getMentionAccessContext(qc, wsId, currentIssueId);
+    const userItems = restrictedUserIds
+      ? rankedUserItems.map((u) =>
+          u.type === "member" && restrictedUserIds.has(u.id)
+            ? { ...u, restricted: true }
+            : u,
+        )
+      : rankedUserItems;
 
     // Cached issues give an instant first paint; MentionList adds server
     // matches for done/cancelled and any other issues not in this cache.

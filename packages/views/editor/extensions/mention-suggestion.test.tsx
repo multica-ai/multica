@@ -66,7 +66,15 @@ function fakeQc(data: {
     name: string;
     archived_at: string | null;
   }>;
-  issues?: Array<{ id: string; identifier: string; title: string; status: string }>;
+  issues?: Array<{
+    id: string;
+    identifier: string;
+    title: string;
+    status: string;
+    project_id?: string | null;
+  }>;
+  projects?: Array<{ id: string; access: "workspace" | "restricted" }>;
+  projectMembers?: Record<string, Array<{ user_id: string }>>;
 }): QueryClient {
   const map = new Map<string, unknown>();
   map.set(JSON.stringify(workspaceKeys.members("ws-1")), data.members ?? []);
@@ -81,6 +89,18 @@ function fakeQc(data: {
     JSON.stringify(issueKeys.list("ws-1")),
     { byStatus } satisfies ListIssuesCache,
   );
+  // Project list keyed under ["projects","ws-1","list"]; cerebro access lookup
+  // reads it to find the issue's project + access state.
+  if (data.projects) {
+    map.set(
+      JSON.stringify(["projects", "ws-1", "list"]),
+      { projects: data.projects, total: data.projects.length },
+    );
+  }
+  // Per-project member cache used by the cerebro decorator.
+  for (const [projectId, members] of Object.entries(data.projectMembers ?? {})) {
+    map.set(JSON.stringify(["projects", projectId, "members"]), { members });
+  }
   return {
     getQueryData: (key: readonly unknown[]) => map.get(JSON.stringify(key)),
   } as unknown as QueryClient;
@@ -335,5 +355,85 @@ describe("createMentionSuggestion", () => {
 
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "agent" && i.label === "魏和尚")).toBe(true);
+  });
+
+  // CEREBRO: JEH-1250 project-access decoration on the @mention list.
+  describe("project-access decoration (JEH-1250)", () => {
+    function setupRestricted(opts: {
+      includeProjectMembers?: boolean;
+      access?: "workspace" | "restricted";
+    }) {
+      return fakeQc({
+        members: [
+          { user_id: "u1", name: "Alice", role: "admin" },
+          { user_id: "u2", name: "Bob", role: "member" },
+          { user_id: "u3", name: "Anna", role: "member" },
+        ],
+        issues: [
+          {
+            id: "i-restricted",
+            identifier: "MUL-99",
+            title: "Behind the wall",
+            status: "todo",
+            project_id: "p1",
+          },
+        ],
+        projects: [{ id: "p1", access: opts.access ?? "restricted" }],
+        projectMembers: opts.includeProjectMembers
+          ? { p1: [{ user_id: "u2" }] }
+          : {},
+      });
+    }
+
+    it("does not decorate when no currentIssueId is provided", () => {
+      const qc = setupRestricted({ includeProjectMembers: true });
+      searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+      const config = createMentionSuggestion(qc);
+      const items = config.items!({ query: "a", editor: {} as never }) as MentionItem[];
+
+      expect(items.every((i) => i.restricted !== true)).toBe(true);
+    });
+
+    it("marks members lacking access when the issue is in a restricted project", () => {
+      const qc = setupRestricted({ includeProjectMembers: true });
+      searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+      const config = createMentionSuggestion(qc, "i-restricted");
+      const items = config.items!({ query: "a", editor: {} as never }) as MentionItem[];
+
+      // Bob is on the project members list → no restriction.
+      const bob = items.find((i) => i.type === "member" && i.label === "Bob");
+      expect(bob?.restricted).toBeFalsy();
+      // Anna is NOT on the list and is not an admin → restricted.
+      const anna = items.find((i) => i.type === "member" && i.label === "Anna");
+      expect(anna?.restricted).toBe(true);
+      // Alice is an admin → restriction does not apply.
+      const alice = items.find((i) => i.type === "member" && i.label === "Alice");
+      expect(alice?.restricted).toBeFalsy();
+    });
+
+    it("does not decorate when project access is 'workspace'", () => {
+      const qc = setupRestricted({
+        includeProjectMembers: true,
+        access: "workspace",
+      });
+      searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+      const config = createMentionSuggestion(qc, "i-restricted");
+      const items = config.items!({ query: "a", editor: {} as never }) as MentionItem[];
+
+      expect(items.every((i) => i.restricted !== true)).toBe(true);
+    });
+
+    it("does not decorate when project members are not yet cached", () => {
+      const qc = setupRestricted({ includeProjectMembers: false });
+      searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+      const config = createMentionSuggestion(qc, "i-restricted");
+      const items = config.items!({ query: "a", editor: {} as never }) as MentionItem[];
+
+      expect(items.every((i) => i.restricted !== true)).toBe(true);
+    });
   });
 });

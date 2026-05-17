@@ -49,11 +49,13 @@
     "copy_failed": "Failed to copy"
   },
   "mention": {
+    "_comment_cerebro_patch": "CEREBRO-PATCH(mention-access-locale-en): JEH-1250 — no_project_access tooltip",
     "group_users": "Users",
     "group_issues": "Issues",
     "all_members": "All members",
     "searching": "Searching...",
-    "no_results": "No results"
+    "no_results": "No results",
+    "no_project_access": "No access to this project"
   },
   "code_block": {
     "copy_code": "Copy code"

@@ -97,6 +97,10 @@ export interface EditorExtensionsOptions {
    * system prompts) but *preserving* an existing one still matters.
    */
   disableMentions?: boolean;
+  // CEREBRO-PATCH(mention-access-currentIssueId-opt): JEH-1250 — thread the
+  // editor's currentIssueId into the @mention factory so cerebro-access can
+  // mark users lacking project access. Optional; unused upstream.
+  currentIssueId?: string | null;
 }
 
 export function createEditorExtensions(
@@ -138,7 +142,13 @@ export function createEditorExtensions(
           BaseMentionExtension.configure({
             HTMLAttributes: { class: "mention" },
             ...(options.queryClient
-              ? { suggestion: createMentionSuggestion(options.queryClient) }
+              ? {
+                  // CEREBRO-PATCH(mention-access-currentIssueId-pass): JEH-1250
+                  suggestion: createMentionSuggestion(
+                    options.queryClient,
+                    options.currentIssueId,
+                  ),
+                }
               : {}),
           }),
           ...(options.queryClient
