@@ -34,6 +34,18 @@ spec:
       app.kubernetes.io/component: backend
   template:
     metadata:
+      annotations:
+        # Roll the backend pods whenever its config changes. envFrom does not
+        # watch the referenced objects, and helm upgrade alone won't change the
+        # pod template hash, so without these checksums editing values.yaml +
+        # `helm upgrade` would leave the old pods running stale config.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        # existingSecret is created out-of-band (not a chart template), so we
+        # checksum the live object via lookup instead of $.Template.BasePath.
+        # lookup returns empty during `helm template`/`--dry-run`, so the
+        # rendered value there is a placeholder; on a real install/upgrade it
+        # reflects the actual Secret and rolls pods on rotation.
+        checksum/secret: {{ (lookup "v1" "Secret" .Release.Namespace .Values.existingSecret).data | toYaml | sha256sum }}
       labels:
         {{- include "multica.labels" . | nindent 8 }}
         app.kubernetes.io/component: backend
