@@ -67,5 +67,9 @@
   "mermaid": {
     "render_error": "Unable to render Mermaid diagram.",
     "rendering": "Rendering diagram…"
+  },
+  "excalidraw": {
+    "expand": "Open full size",
+    "invalid_scene": "This Excalidraw file couldn't be rendered."
   }
 }

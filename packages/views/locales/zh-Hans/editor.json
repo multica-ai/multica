@@ -67,5 +67,9 @@
   "mermaid": {
     "render_error": "无法渲染 Mermaid 图。",
     "rendering": "渲染中…"
+  },
+  "excalidraw": {
+    "expand": "全屏查看",
+    "invalid_scene": "无法渲染该 Excalidraw 文件。"
   }
 }

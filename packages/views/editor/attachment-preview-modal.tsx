@@ -38,7 +38,6 @@ import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Download, FileText, Loader2, X } from "lucide-react";
 import { createLowlight, common } from "lowlight";
-// @ts-expect-error -- hast-util-to-html has no bundled type declarations
 import { toHtml } from "hast-util-to-html";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -49,6 +48,7 @@ import {
 import type { Attachment } from "@multica/core/types";
 import { useT } from "../i18n";
 import { openExternal } from "../platform";
+import { ExcalidrawPreview } from "../excalidraw";
 import { ReadonlyContent } from "./readonly-content";
 import {
   extensionToLanguage,
@@ -291,13 +291,17 @@ function PreviewContent({
     );
   }
 
-  // Text kinds need the attachment id for the /content proxy. The tryOpen
-  // gate prevents URL-only sources from reaching here for text kinds, but
+  // Text kinds (and Excalidraw, which is JSON fetched through the same
+  // proxy) need the attachment id for the /content endpoint. The tryOpen
+  // gate prevents URL-only sources from reaching here for these kinds, but
   // be defensive — a direct mount of <AttachmentPreviewModal> with a URL
   // source whose filename later resolves to a text kind would otherwise
   // crash on a null id.
   if (
-    (kind === "markdown" || kind === "html" || kind === "text") &&
+    (kind === "markdown" ||
+      kind === "html" ||
+      kind === "text" ||
+      kind === "excalidraw") &&
     !state.attachmentId
   ) {
     return (
@@ -371,6 +375,15 @@ function PreviewContent({
             <CodeBlock language={extensionToLanguage(state.filename)} body={text} />
           )}
         />
+      );
+    case "excalidraw":
+      // Source must be `full` here — gate above translates URL-only attempts
+      // into the unsupported fallback before reaching this branch.
+      if (source.kind !== "full") return null;
+      return (
+        <div className="h-full w-full p-4">
+          <ExcalidrawPreview attachment={source.attachment} expanded />
+        </div>
       );
   }
 }
