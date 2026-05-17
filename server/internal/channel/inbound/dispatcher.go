@@ -76,7 +76,6 @@ type DispatchConfig struct {
 	ReplyContext      replyctx.Store
 
 	// ConversationCtx is the context_entries store for sliding-window context.
-	// TODO: wire up after store implementation is complete.
 	ConversationCtx conversationctx.Store
 	// ContextMaxEntities limits how many recent entities are kept per scope.
 	ContextMaxEntities int
@@ -89,6 +88,12 @@ type dispatchStep struct {
 }
 
 func NewDispatchStep(cfg DispatchConfig) Step {
+	if cfg.ContextMaxEntities <= 0 {
+		cfg.ContextMaxEntities = defaultContextMaxEntities
+	}
+	if cfg.ContextTTL <= 0 {
+		cfg.ContextTTL = defaultContextTTL
+	}
 	return &dispatchStep{cfg: cfg}
 }
 
@@ -248,7 +253,7 @@ func (d *dispatchStep) replyContextForEvent(ctx context.Context, evt port.Inboun
 	if evt.ChatType != port.ChatTypeDirect || d.cfg.ReplyContext == nil {
 		return replyctx.Context{}, false, nil
 	}
-	return d.cfg.ReplyContext.Lookup(ctx, evt.ConnectionID(), evt.SenderID, time.Now())
+	return d.cfg.ReplyContext.Lookup(ctx, evt.ConnectionID(), evt.SenderID, evt.ChatID, time.Now())
 }
 
 func (d *dispatchStep) saveReplyContext(ctx context.Context, evt port.InboundEvent, wsID pgtype.UUID, issueID pgtype.UUID, issueIdentifier, issueTitle string) {
@@ -258,6 +263,7 @@ func (d *dispatchStep) saveReplyContext(ctx context.Context, evt port.InboundEve
 	if err := d.cfg.ReplyContext.Upsert(ctx, replyctx.Context{
 		ConnectionID:    evt.ConnectionID(),
 		ExternalUserID:  evt.SenderID,
+		ChatID:          evt.ChatID,
 		WorkspaceID:     wsID,
 		IssueID:         issueID,
 		IssueIdentifier: issueIdentifier,

@@ -20,6 +20,7 @@ func TestInMemoryStore_UpsertAndLookup(t *testing.T) {
 	item := replyctx.Context{
 		ConnectionID:    "feishu",
 		ExternalUserID:  "ou_user1",
+		ChatID:          "chat-1",
 		WorkspaceID:     wsID,
 		IssueID:         issueID,
 		IssueIdentifier: "STA-1",
@@ -31,7 +32,7 @@ func TestInMemoryStore_UpsertAndLookup(t *testing.T) {
 		t.Fatalf("Upsert: %v", err)
 	}
 
-	got, ok, err := store.Lookup(ctx, "feishu", "ou_user1", time.Now())
+	got, ok, err := store.Lookup(ctx, "feishu", "ou_user1", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
@@ -57,6 +58,7 @@ func TestInMemoryStore_LookupExpired(t *testing.T) {
 	item := replyctx.Context{
 		ConnectionID:    "feishu",
 		ExternalUserID:  "ou_user1",
+		ChatID:          "chat-1",
 		WorkspaceID:     wsID,
 		IssueID:         issueID,
 		IssueIdentifier: "STA-1",
@@ -67,7 +69,7 @@ func TestInMemoryStore_LookupExpired(t *testing.T) {
 		t.Fatalf("Upsert: %v", err)
 	}
 
-	_, ok, err := store.Lookup(ctx, "feishu", "ou_user1", time.Now())
+	_, ok, err := store.Lookup(ctx, "feishu", "ou_user1", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
@@ -81,7 +83,7 @@ func TestInMemoryStore_LookupNotFound(t *testing.T) {
 	ctx := context.Background()
 	store := replyctx.NewInMemoryStore()
 
-	_, ok, err := store.Lookup(ctx, "feishu", "ou_unknown", time.Now())
+	_, ok, err := store.Lookup(ctx, "feishu", "ou_unknown", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
@@ -101,6 +103,7 @@ func TestInMemoryStore_Clear(t *testing.T) {
 	item := replyctx.Context{
 		ConnectionID:    "feishu",
 		ExternalUserID:  "ou_user1",
+		ChatID:          "chat-1",
 		WorkspaceID:     wsID,
 		IssueID:         issueID,
 		IssueIdentifier: "STA-1",
@@ -110,11 +113,11 @@ func TestInMemoryStore_Clear(t *testing.T) {
 	if err := store.Upsert(ctx, item); err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
-	if err := store.Clear(ctx, "feishu", "ou_user1"); err != nil {
+	if err := store.Clear(ctx, "feishu", "ou_user1", "chat-1"); err != nil {
 		t.Fatalf("Clear: %v", err)
 	}
 
-	_, ok, err := store.Lookup(ctx, "feishu", "ou_user1", time.Now())
+	_, ok, err := store.Lookup(ctx, "feishu", "ou_user1", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
@@ -128,7 +131,7 @@ func TestInMemoryStore_ClearNotFound(t *testing.T) {
 	ctx := context.Background()
 	store := replyctx.NewInMemoryStore()
 
-	if err := store.Clear(ctx, "feishu", "ou_unknown"); err != nil {
+	if err := store.Clear(ctx, "feishu", "ou_unknown", "chat-1"); err != nil {
 		t.Fatalf("Clear: %v", err)
 	}
 }
@@ -144,6 +147,7 @@ func TestInMemoryStore_LookupZeroNowUsesCurrentTime(t *testing.T) {
 	if err := store.Upsert(ctx, replyctx.Context{
 		ConnectionID:    "feishu",
 		ExternalUserID:  "ou_user1",
+		ChatID:          "chat-1",
 		WorkspaceID:     wsID,
 		IssueID:         issueID,
 		IssueIdentifier: "STA-1",
@@ -152,7 +156,7 @@ func TestInMemoryStore_LookupZeroNowUsesCurrentTime(t *testing.T) {
 		t.Fatalf("Upsert: %v", err)
 	}
 
-	got, ok, err := store.Lookup(ctx, "feishu", "ou_user1", time.Time{})
+	got, ok, err := store.Lookup(ctx, "feishu", "ou_user1", "chat-1", time.Time{})
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
@@ -174,6 +178,7 @@ func TestInMemoryStore_Overwrite(t *testing.T) {
 	if err := store.Upsert(ctx, replyctx.Context{
 		ConnectionID:    "feishu",
 		ExternalUserID:  "ou_user1",
+		ChatID:          "chat-1",
 		WorkspaceID:     wsID,
 		IssueID:         pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
 		IssueIdentifier: "STA-1",
@@ -185,6 +190,7 @@ func TestInMemoryStore_Overwrite(t *testing.T) {
 	if err := store.Upsert(ctx, replyctx.Context{
 		ConnectionID:    "feishu",
 		ExternalUserID:  "ou_user1",
+		ChatID:          "chat-1",
 		WorkspaceID:     wsID,
 		IssueID:         pgtype.UUID{Bytes: [16]byte{2}, Valid: true},
 		IssueIdentifier: "STA-2",
@@ -193,7 +199,7 @@ func TestInMemoryStore_Overwrite(t *testing.T) {
 		t.Fatalf("Upsert: %v", err)
 	}
 
-	got, ok, err := store.Lookup(ctx, "feishu", "ou_user1", time.Now())
+	got, ok, err := store.Lookup(ctx, "feishu", "ou_user1", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
@@ -215,6 +221,7 @@ func TestInMemoryStore_UserIsolation(t *testing.T) {
 	if err := store.Upsert(ctx, replyctx.Context{
 		ConnectionID:    "feishu",
 		ExternalUserID:  "ou_user1",
+		ChatID:          "chat-1",
 		WorkspaceID:     wsID,
 		IssueID:         pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
 		IssueIdentifier: "STA-1",
@@ -223,11 +230,70 @@ func TestInMemoryStore_UserIsolation(t *testing.T) {
 		t.Fatalf("Upsert: %v", err)
 	}
 
-	_, ok, err := store.Lookup(ctx, "feishu", "ou_user2", time.Now())
+	_, ok, err := store.Lookup(ctx, "feishu", "ou_user2", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
 	if ok {
 		t.Error("expected no context for different user")
+	}
+}
+
+func TestInMemoryStore_ChatIsolation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := replyctx.NewInMemoryStore()
+
+	wsID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	if err := store.Upsert(ctx, replyctx.Context{
+		ConnectionID:    "feishu",
+		ExternalUserID:  "ou_user1",
+		ChatID:          "chat-1",
+		WorkspaceID:     wsID,
+		IssueID:         pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
+		IssueIdentifier: "STA-1",
+		ExpiresAt:       time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	_, ok, err := store.Lookup(ctx, "feishu", "ou_user1", "chat-2", time.Now())
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if ok {
+		t.Error("expected no context for different chat")
+	}
+}
+
+func TestInMemoryStore_LookupFallsBackToLegacyEmptyChat(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := replyctx.NewInMemoryStore()
+
+	wsID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	if err := store.Upsert(ctx, replyctx.Context{
+		ConnectionID:    "feishu",
+		ExternalUserID:  "ou_user1",
+		WorkspaceID:     wsID,
+		IssueID:         pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
+		IssueIdentifier: "STA-1",
+		ExpiresAt:       time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	got, ok, err := store.Lookup(ctx, "feishu", "ou_user1", "chat-1", time.Now())
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected legacy empty-chat context to be found")
+	}
+	if got.ChatID != "chat-1" {
+		t.Fatalf("ChatID = %q, want chat-1", got.ChatID)
+	}
+	if got.IssueIdentifier != "STA-1" {
+		t.Fatalf("IssueIdentifier = %q, want STA-1", got.IssueIdentifier)
 	}
 }

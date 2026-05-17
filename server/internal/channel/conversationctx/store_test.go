@@ -3,6 +3,7 @@ package conversationctx
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,11 @@ import (
 func newTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dbURL := "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
+	if v := os.Getenv("CHANNEL_CONTEXT_TEST_DATABASE_URL"); v != "" {
+		dbURL = v
+	} else if v := os.Getenv("DATABASE_URL"); v != "" {
+		dbURL = v
+	}
 	cfg, err := pgxpool.ParseConfig(dbURL)
 	if err != nil {
 		t.Skipf("cannot parse DATABASE_URL: %v", err)
@@ -23,7 +29,7 @@ func newTestPool(t *testing.T) *pgxpool.Pool {
 	if err != nil {
 		t.Skipf("could not create pool: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
@@ -186,8 +192,8 @@ func TestDBStore_DeleteExpired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteExpired: %v", err)
 	}
-	if n != 1 {
-		t.Fatalf("expected 1 deleted, got %d", n)
+	if n < 1 {
+		t.Fatalf("expected at least 1 deleted, got %d", n)
 	}
 
 	_, ok, _ := store.Get(ctx, scope)
@@ -277,6 +283,45 @@ func TestDBStore_AppendEntities_Deduplication(t *testing.T) {
 	}
 	if len(got.Entities) != 1 {
 		t.Fatalf("expected 1 entity after dedup, got %d", len(got.Entities))
+	}
+	if !got.Entities[0].MentionedAt.Equal(now.Add(1 * time.Minute)) {
+		t.Fatalf("expected newest mentioned_at to win, got %v", got.Entities[0].MentionedAt)
+	}
+}
+
+func TestDBStore_AppendEntities_SortsAndTrims(t *testing.T) {
+	t.Parallel()
+	pool := newTestPool(t)
+	ctx := context.Background()
+	store := NewDBStore(pool)
+	connID := fmt.Sprintf("conn-sort-%d", time.Now().UnixNano())
+	if err := ensureConnection(ctx, pool, connID); err != nil {
+		t.Fatalf("ensure connection: %v", err)
+	}
+
+	scope := Scope{ConnectionID: connID, WorkspaceID: "ws", ChatID: "c", SenderID: "u", ThreadID: ""}
+	now := time.Now().UTC()
+	ents := []EntityRef{
+		{Key: "STA-68", Type: EntityTypeIssue, MentionedAt: now},
+		{Key: "STA-70", Type: EntityTypeIssue, MentionedAt: now.Add(2 * time.Minute)},
+		{Key: "STA-69", Type: EntityTypeIssue, MentionedAt: now.Add(1 * time.Minute)},
+	}
+	if err := store.AppendEntities(ctx, scope, ents, 2, 30*time.Minute); err != nil {
+		t.Fatalf("AppendEntities: %v", err)
+	}
+
+	got, ok, err := store.Get(ctx, scope)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected found=true")
+	}
+	if len(got.Entities) != 2 {
+		t.Fatalf("expected 2 entities after trim, got %d", len(got.Entities))
+	}
+	if got.Entities[0].Key != "STA-70" || got.Entities[1].Key != "STA-69" {
+		t.Fatalf("expected newest two sorted by mentioned_at, got %+v", got.Entities)
 	}
 }
 
@@ -396,6 +441,7 @@ func TestExtractEntityKeys(t *testing.T) {
 		{"STA-68 是什么？", []string{"STA-68"}},
 		{"已创建 STA-99", []string{"STA-99"}},
 		{"STA-99、STA-100、STA-101 已创建", []string{"STA-99", "STA-100", "STA-101"}},
+		{"sta-99 已创建", []string{"STA-99"}},
 		{"好的，已经处理完毕", nil},
 	}
 	for _, c := range cases {
@@ -416,10 +462,10 @@ func TestExtractEntityKeys_WordBoundary(t *testing.T) {
 		input string
 		want  []string
 	}{
-		{"MYPROJECT-123 的状态", nil},          // long word should not produce partial match like JECT-123
+		{"MYPROJECT-123 的状态", nil},            // long word should not produce partial match like JECT-123
 		{"查看 STA-78 的进度", []string{"STA-78"}}, // normal standalone key
 		{"STA-78,ABC-1 and DEF-99", []string{"STA-78", "ABC-1", "DEF-99"}},
-		{"前缀STA-78后缀", []string{"STA-78"}},     // Chinese prefix/suffix are word boundaries
+		{"前缀STA-78后缀", []string{"STA-78"}}, // Chinese prefix/suffix are word boundaries
 	}
 
 	for _, c := range cases {

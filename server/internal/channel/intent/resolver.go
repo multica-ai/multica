@@ -49,6 +49,10 @@ type IntentRequest struct {
 	// context_entries for this scope. Empty if no context store is configured
 	// or no recent entities exist.
 	ContextEntities []conversationctx.EntityRef
+	// ExplicitEntities carries entities derived from explicit platform signals
+	// such as quote/reply targets. It has higher priority than temporal
+	// conversation context.
+	ExplicitEntities []conversationctx.EntityRef
 }
 
 // IntentResult is a resolver's answer. Matched=false lets the chain continue.
@@ -199,6 +203,13 @@ func BuildChannelAgentTurnPrompt(req IntentRequest) string {
 }
 
 func appendContextSignals(b *strings.Builder, req IntentRequest) {
+	if len(req.ExplicitEntities) > 0 {
+		b.WriteString("\nExplicit context:\n")
+		b.WriteString("User explicitly referenced these entities, highest priority:\n")
+		for _, e := range req.ExplicitEntities {
+			fmt.Fprintf(b, "- %s (%s)\n", e.Key, e.Type)
+		}
+	}
 	if len(req.ContextEntities) > 0 {
 		b.WriteString("\nConversation context:\n")
 		b.WriteString("Recent entities from this conversation:\n")

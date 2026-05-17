@@ -32,6 +32,32 @@ func TestBuildChatIntentPrompt_IncludesContextEntities(t *testing.T) {
 	}
 }
 
+func TestBuildChatIntentPrompt_IncludesExplicitEntities(t *testing.T) {
+	t.Parallel()
+
+	req := in.IntentRequest{
+		WorkspaceID: "ws-1",
+		Text:        "看看这个",
+		ExplicitEntities: []conversationctx.EntityRef{
+			{Key: "STA-99", Type: conversationctx.EntityTypeIssue, MentionedAt: time.Now()},
+		},
+		ContextEntities: []conversationctx.EntityRef{
+			{Key: "STA-68", Type: conversationctx.EntityTypeIssue, MentionedAt: time.Now()},
+		},
+	}
+
+	prompt := in.BuildChatIntentPrompt(req)
+	if !strings.Contains(prompt, "Explicit context:") {
+		t.Fatal("prompt missing explicit context section")
+	}
+	if !strings.Contains(prompt, "highest priority") {
+		t.Fatal("prompt missing explicit priority hint")
+	}
+	if !strings.Contains(prompt, "STA-99") {
+		t.Fatal("prompt missing explicit entity STA-99")
+	}
+}
+
 func TestBuildChatIntentPrompt_IncludesQuotedText(t *testing.T) {
 	t.Parallel()
 
@@ -96,6 +122,26 @@ func TestBuildChannelAgentTurnPrompt_IncludesContextEntities(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "STA-68") {
 		t.Fatal("prompt missing context entity STA-68")
+	}
+}
+
+func TestBuildChannelAgentTurnPrompt_IncludesExplicitEntities(t *testing.T) {
+	t.Parallel()
+
+	req := in.IntentRequest{
+		WorkspaceID: "ws-1",
+		Text:        "看看这个",
+		ExplicitEntities: []conversationctx.EntityRef{
+			{Key: "STA-99", Type: conversationctx.EntityTypeIssue, MentionedAt: time.Now()},
+		},
+	}
+
+	prompt := in.BuildChannelAgentTurnPrompt(req)
+	if !strings.Contains(prompt, "Explicit context:") {
+		t.Fatal("prompt missing explicit context section")
+	}
+	if !strings.Contains(prompt, "STA-99") {
+		t.Fatal("prompt missing explicit entity STA-99")
 	}
 }
 

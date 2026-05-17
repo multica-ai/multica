@@ -283,14 +283,17 @@ func main() {
 			}
 			components := newChannelInboundRuntimeComponents(pool, pipelineOpt)
 			return channelmanager.RuntimeComponents{
-				PrePipeline:   components.PrePipeline,
-				PostPipeline:  components.PostPipeline,
-				RuleResolvers: components.RuleResolvers,
-				ChatIntent:    components.ChatIntent,
-				TurnPlanner:   components.TurnPlanner,
-				ChannelTurn:   components.ChannelTurn,
-				DispatchStore: components.DispatchStore,
-				ReplyContext:  components.ReplyContext,
+				PrePipeline:        components.PrePipeline,
+				PostPipeline:       components.PostPipeline,
+				RuleResolvers:      components.RuleResolvers,
+				ChatIntent:         components.ChatIntent,
+				TurnPlanner:        components.TurnPlanner,
+				ChannelTurn:        components.ChannelTurn,
+				DispatchStore:      components.DispatchStore,
+				ReplyContext:       components.ReplyContext,
+				ConversationCtx:    components.ConversationCtx,
+				ContextMaxEntities: components.ContextMaxEntities,
+				ContextTTL:         components.ContextTTL,
 			}
 		},
 		ConversationLimit:      envPositiveInt("CHANNEL_INBOUND_CONVERSATION_LIMIT", defaultChannelInboundConversationLimit),

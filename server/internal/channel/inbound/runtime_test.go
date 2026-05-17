@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/channel/conversationctx"
 	chintent "github.com/multica-ai/multica/server/internal/channel/intent"
 	"github.com/multica-ai/multica/server/internal/channel/port"
 )
@@ -268,6 +269,215 @@ func TestRuntimeProcessRecord_NaturalLanguageStartsChannelTurnBeforeRules(t *tes
 	}
 }
 
+func TestRuntimeProcessRecord_StartsChannelTurnWithConversationContext(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeRuntimeStore{}
+	contextStore := conversationctx.NewFakeStore()
+	scope := conversationctx.Scope{
+		ConnectionID: "conn-1",
+		WorkspaceID:  "550e8400-e29b-41d4-a716-446655440001",
+		ChatID:       "oc_1",
+		SenderID:     "ou_1",
+		ThreadID:     "thread-1",
+	}
+	if err := contextStore.Upsert(ctx, conversationctx.ConversationContext{
+		Scope: scope,
+		Entities: []conversationctx.EntityRef{{
+			Key:         "STA-12",
+			Type:        conversationctx.EntityTypeIssue,
+			MentionedAt: time.Now(),
+		}},
+		ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	channelTurn := &recordingChannelTurnClient{taskID: "550e8400-e29b-41d4-a716-446655440000"}
+	rt := NewRuntime(RuntimeConfig{
+		Store:           store,
+		ConversationCtx: contextStore,
+		ChannelTurn:     channelTurn,
+	})
+
+	err := rt.processRecord(ctx, &InboundEventRecord{
+		ID:          "row-1",
+		Phase:       InboundPhaseIntent,
+		WorkspaceID: "550e8400-e29b-41d4-a716-446655440001",
+		Event: port.InboundEvent{
+			ChannelName:         "feishu",
+			ChannelConnectionID: "conn-1",
+			EventID:             "evt-1",
+			Type:                port.EventTypeMessageReceived,
+			ChatID:              "oc_1",
+			ChatType:            port.ChatTypeGroup,
+			SenderID:            "ou_1",
+			ThreadID:            "thread-1",
+			Text:                "把它改成 done",
+		},
+	})
+	if err != nil {
+		t.Fatalf("processRecord: %v", err)
+	}
+	if !store.waitingAgent {
+		t.Fatal("natural-language turn should wait for channel agent")
+	}
+	if len(channelTurn.startReqs) != 1 {
+		t.Fatalf("StartAgentTurn calls = %d, want 1", len(channelTurn.startReqs))
+	}
+	req := channelTurn.startReqs[0]
+	if len(req.ContextEntities) != 1 || req.ContextEntities[0].Key != "STA-12" {
+		t.Fatalf("ContextEntities = %+v, want STA-12", req.ContextEntities)
+	}
+	if req.ContextIssueKey != "STA-12" {
+		t.Fatalf("ContextIssueKey = %q, want STA-12", req.ContextIssueKey)
+	}
+	if req.ThreadID != "thread-1" {
+		t.Fatalf("ThreadID = %q, want thread-1", req.ThreadID)
+	}
+}
+
+func TestRuntimeProcessRecord_FillsRuleIntentIssueKeyBeforePostPhase(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeRuntimeStore{}
+	contextStore := conversationctx.NewFakeStore()
+	scope := conversationctx.Scope{
+		ConnectionID: "conn-1",
+		WorkspaceID:  "550e8400-e29b-41d4-a716-446655440001",
+		ChatID:       "oc_1",
+		SenderID:     "ou_1",
+		ThreadID:     "",
+	}
+	if err := contextStore.Upsert(ctx, conversationctx.ConversationContext{
+		Scope: scope,
+		Entities: []conversationctx.EntityRef{{
+			Key:         "STA-12",
+			Type:        conversationctx.EntityTypeIssue,
+			MentionedAt: time.Now(),
+		}},
+		ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	rt := NewRuntime(RuntimeConfig{
+		Store:           store,
+		ConversationCtx: contextStore,
+		RuleResolvers: []chintent.IntentResolver{fakeResolver{
+			result: chintent.IntentResult{
+				Matched: true,
+				Intent: chintent.Intent{
+					Kind:       chintent.IntentSetStatus,
+					Confidence: 1,
+					Params:     map[string]string{"status": "done"},
+					Source:     chintent.SourceRule,
+				},
+			},
+		}},
+	})
+
+	err := rt.processRecord(ctx, &InboundEventRecord{
+		ID:          "row-1",
+		Phase:       InboundPhaseIntent,
+		WorkspaceID: "550e8400-e29b-41d4-a716-446655440001",
+		Event: port.InboundEvent{
+			ChannelName:         "feishu",
+			ChannelConnectionID: "conn-1",
+			EventID:             "evt-1",
+			Type:                port.EventTypeMessageReceived,
+			ChatID:              "oc_1",
+			ChatType:            port.ChatTypeGroup,
+			SenderID:            "ou_1",
+			Text:                "/done",
+		},
+	})
+	if err != nil {
+		t.Fatalf("processRecord: %v", err)
+	}
+	if store.savedEvent.Intent.Params["issue_key"] != "STA-12" {
+		t.Fatalf("saved issue_key = %q, want STA-12", store.savedEvent.Intent.Params["issue_key"])
+	}
+	if store.savedPhase != InboundPhasePost {
+		t.Fatalf("saved phase = %q, want %q", store.savedPhase, InboundPhasePost)
+	}
+}
+
+func TestRuntimeResumeChannelTurn_AppendsConversationContext(t *testing.T) {
+	ctx := context.Background()
+	contextStore := conversationctx.NewFakeStore()
+	store := &fakeRuntimeStore{load: &InboundEventRecord{
+		ID:          "row-1",
+		WorkspaceID: "550e8400-e29b-41d4-a716-446655440001",
+		Event: port.InboundEvent{
+			ChannelName:         "feishu",
+			ChannelConnectionID: "conn-1",
+			EventID:             "evt-1",
+			ChatID:              "oc_1",
+			ChatType:            port.ChatTypeGroup,
+			SenderID:            "ou_1",
+			ThreadID:            "thread-1",
+		},
+	}}
+	rt := NewRuntime(RuntimeConfig{
+		Store:           store,
+		ReplySink:       &recordingReplySink{},
+		ChannelTurn:     &recordingChannelTurnClient{reply: "已处理 STA-12"},
+		ConversationCtx: contextStore,
+	})
+
+	rt.resumeChannelTurn(ctx, WaitingAgentEvent{ID: "row-1", WaitTaskID: "task-1", WaitKind: WaitKindChannelTurn})
+
+	scope := conversationctx.Scope{
+		ConnectionID: "conn-1",
+		WorkspaceID:  "550e8400-e29b-41d4-a716-446655440001",
+		ChatID:       "oc_1",
+		SenderID:     "ou_1",
+		ThreadID:     "thread-1",
+	}
+	got, ok, err := contextStore.Get(ctx, scope)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !ok || len(got.Entities) != 1 || got.Entities[0].Key != "STA-12" {
+		t.Fatalf("context entities = %+v, ok=%v; want STA-12", got.Entities, ok)
+	}
+	if !store.processed {
+		t.Fatal("expected record to be marked processed")
+	}
+}
+
+func TestRuntimeSweepOnce_DeletesExpiredConversationContext(t *testing.T) {
+	ctx := context.Background()
+	contextStore := conversationctx.NewFakeStore()
+	scope := conversationctx.Scope{
+		ConnectionID: "conn-1",
+		WorkspaceID:  "ws-1",
+		ChatID:       "oc_1",
+		SenderID:     "ou_1",
+		ThreadID:     "thread-1",
+	}
+	if err := contextStore.Upsert(ctx, conversationctx.ConversationContext{
+		Scope: scope,
+		Entities: []conversationctx.EntityRef{{
+			Key:         "STA-12",
+			Type:        conversationctx.EntityTypeIssue,
+			MentionedAt: time.Now().Add(-time.Hour),
+		}},
+		ExpiresAt: time.Now().Add(-time.Minute),
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	rt := NewRuntime(RuntimeConfig{
+		Store:           &fakeRuntimeStore{},
+		ConversationCtx: contextStore,
+	})
+
+	rt.sweepOnce(ctx)
+
+	if _, ok, err := contextStore.Get(ctx, scope); err != nil {
+		t.Fatalf("Get: %v", err)
+	} else if ok {
+		t.Fatal("expected expired conversation context to be deleted")
+	}
+}
+
 func TestRuntimeResumeChannelTurnSendsFinalReply(t *testing.T) {
 	store := &fakeRuntimeStore{
 		load: &InboundEventRecord{
@@ -487,6 +697,8 @@ type fakeRuntimeStore struct {
 	accept               AcceptResult
 	claim                InboundEventRecord
 	load                 *InboundEventRecord
+	savedEvent           port.InboundEvent
+	savedPhase           string
 	claimed              bool
 	waitingAgent         bool
 	waitKind             string
@@ -494,6 +706,7 @@ type fakeRuntimeStore struct {
 	processed            bool
 	retry                RetryResult
 	onRetry              func()
+	chatCtx              ChatBindingContext
 }
 
 func (s *fakeRuntimeStore) AcceptEvent(context.Context, port.InboundEvent, AcceptOptions) (AcceptResult, error) {
@@ -517,7 +730,9 @@ func (s *fakeRuntimeStore) ClaimNext(context.Context, string) (*InboundEventReco
 	return nil, nil
 }
 
-func (s *fakeRuntimeStore) SaveEvent(_ context.Context, _ string, _ port.InboundEvent, _ string, _ ChatBindingContext) error {
+func (s *fakeRuntimeStore) SaveEvent(_ context.Context, _ string, evt port.InboundEvent, phase string, _ ChatBindingContext) error {
+	s.savedEvent = evt
+	s.savedPhase = phase
 	return nil
 }
 
@@ -557,7 +772,7 @@ func (s *fakeRuntimeStore) ListWaitingAgent(context.Context, int) ([]WaitingAgen
 }
 
 func (s *fakeRuntimeStore) LookupChatContext(context.Context, string, string) (ChatBindingContext, error) {
-	return ChatBindingContext{}, nil
+	return s.chatCtx, nil
 }
 
 func (s *fakeRuntimeStore) RequeueStaleProcessing(context.Context, time.Duration) (int64, error) {
@@ -675,6 +890,31 @@ func (f fakeAsyncIntentClient) ParseAgentTurnResult(context.Context, string) (st
 		reply = "channel reply"
 	}
 	return reply, f.done, f.err
+}
+
+type recordingChannelTurnClient struct {
+	taskID    string
+	startReqs []chintent.IntentRequest
+	reply     string
+	done      bool
+	err       error
+}
+
+func (f *recordingChannelTurnClient) StartAgentTurn(_ context.Context, req chintent.IntentRequest) (string, error) {
+	f.startReqs = append(f.startReqs, req)
+	return f.taskID, nil
+}
+
+func (f *recordingChannelTurnClient) ParseAgentTurnResult(context.Context, string) (string, bool, error) {
+	reply := f.reply
+	if reply == "" {
+		reply = "channel reply"
+	}
+	done := f.done
+	if !done {
+		done = true
+	}
+	return reply, done, f.err
 }
 
 type fnStep struct {

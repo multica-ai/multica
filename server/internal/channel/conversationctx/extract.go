@@ -7,8 +7,8 @@ import (
 )
 
 // issueKeyRe matches issue identifiers embedded in natural-language text.
-// Format: 2-5 uppercase letters, hyphen, positive integer (no leading zeros).
-var issueKeyRe = regexp.MustCompile(`\b[A-Z]{2,5}-[1-9][0-9]*\b`)
+// Format: 2-5 letters, hyphen, positive integer (no leading zeros).
+var issueKeyRe = regexp.MustCompile(`(?i)\b[A-Z]{2,5}-[1-9][0-9]*\b`)
 
 // ExtractEntityKeys scans text for issue identifiers and returns them as
 // EntityRef values. Duplicates are deduplicated while preserving first-seen

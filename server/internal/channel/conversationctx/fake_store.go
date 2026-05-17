@@ -2,7 +2,6 @@ package conversationctx
 
 import (
 	"context"
-	"sort"
 	"sync"
 	"time"
 )
@@ -37,31 +36,16 @@ func (f *FakeStore) Upsert(ctx context.Context, cc ConversationContext) error {
 func (f *FakeStore) AppendEntities(ctx context.Context, scope Scope, entities []EntityRef, max int, ttl time.Duration) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	entities = normalizeEntities(entities, 0)
+	if len(entities) == 0 {
+		return nil
+	}
 	cc, ok := f.data[scope]
 	if !ok {
 		cc = ConversationContext{Scope: scope}
 	}
 	now := time.Now()
-	// index tracks existing entity positions for O(1) timestamp updates.
-	index := make(map[string]int, len(cc.Entities))
-	for i, e := range cc.Entities {
-		index[e.Key] = i
-	}
-	for _, e := range entities {
-		if i, exists := index[e.Key]; exists {
-			cc.Entities[i].MentionedAt = e.MentionedAt
-			continue
-		}
-		index[e.Key] = len(cc.Entities)
-		cc.Entities = append(cc.Entities, e)
-	}
-	// sort by MentionedAt DESC
-	sort.Slice(cc.Entities, func(i, j int) bool {
-		return cc.Entities[i].MentionedAt.After(cc.Entities[j].MentionedAt)
-	})
-	if max > 0 && len(cc.Entities) > max {
-		cc.Entities = cc.Entities[:max]
-	}
+	cc.Entities = mergeEntities(cc.Entities, entities, max)
 	cc.ExpiresAt = now.Add(ttl)
 	f.data[scope] = cc
 	return nil

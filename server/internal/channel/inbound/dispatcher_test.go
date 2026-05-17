@@ -268,7 +268,7 @@ type inboundReplyContext = struct {
 	ExpiresAt       time.Time
 }
 
-func (f *fakeReplyContextStore) Lookup(_ context.Context, _, _ string, _ time.Time) (replyctx.Context, bool, error) {
+func (f *fakeReplyContextStore) Lookup(_ context.Context, _, _, _ string, _ time.Time) (replyctx.Context, bool, error) {
 	return replyctx.Context{
 		WorkspaceID:     f.ctx.WorkspaceID,
 		IssueID:         f.ctx.IssueID,
@@ -283,7 +283,7 @@ func (f *fakeReplyContextStore) Upsert(_ context.Context, item replyctx.Context)
 	return nil
 }
 
-func (f *fakeReplyContextStore) Clear(_ context.Context, _, _ string) error {
+func (f *fakeReplyContextStore) Clear(_ context.Context, _, _, _ string) error {
 	return nil
 }
 
@@ -1886,11 +1886,11 @@ func TestDispatchStep_CreateIssue_SavesReplyContextInDirectChat(t *testing.T) {
 	store := replyctx.NewInMemoryStore()
 	cfg.ReplyContext = store
 	issueSvc.createReturn = facade.Issue{
-		ID:         uuid(0xAA),
+		ID:          uuid(0xAA),
 		WorkspaceID: uuid(0x01),
-		Identifier: "STA-39",
-		Title:      "登录页加载慢",
-		Status:     "todo",
+		Identifier:  "STA-39",
+		Title:       "登录页加载慢",
+		Status:      "todo",
 	}
 	step := inbound.NewDispatchStep(cfg)
 
@@ -1905,7 +1905,7 @@ func TestDispatchStep_CreateIssue_SavesReplyContextInDirectChat(t *testing.T) {
 		t.Fatalf("expected 1 send, got %d", len(recCh.sends))
 	}
 
-	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", time.Now())
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
@@ -1940,7 +1940,7 @@ func TestDispatchStep_CreateIssue_DoesNotSaveReplyContextInGroupChat(t *testing.
 		t.Fatalf("Run: %v", err)
 	}
 
-	_, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", time.Now())
+	_, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
@@ -1968,7 +1968,7 @@ func TestDispatchStep_AddComment_SavesReplyContext(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", time.Now())
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
@@ -1999,7 +1999,7 @@ func TestDispatchStep_SetStatus_SavesReplyContext(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", time.Now())
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
@@ -2030,7 +2030,7 @@ func TestDispatchStep_SetAssignee_SavesReplyContext(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", time.Now())
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
@@ -2061,7 +2061,7 @@ func TestDispatchStep_SetPriority_SavesReplyContext(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", time.Now())
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
@@ -2093,7 +2093,7 @@ func TestDispatchStep_SetLabel_Add_SavesReplyContext(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", time.Now())
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
@@ -2125,7 +2125,7 @@ func TestDispatchStep_SetLabel_Remove_SavesReplyContext(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", time.Now())
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
@@ -2158,7 +2158,7 @@ func TestDispatchStep_QueryIssue_SavesReplyContext(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", time.Now())
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
@@ -2196,7 +2196,7 @@ func TestDispatchStep_QueryIssue_WithDigestFacade_SavesReplyContext(t *testing.T
 		t.Fatalf("Run: %v", err)
 	}
 
-	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", time.Now())
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
@@ -2241,7 +2241,7 @@ func TestDispatchStep_QueryProgress_SavesReplyContext(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", time.Now())
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
@@ -2281,7 +2281,7 @@ func TestDispatchStep_IssueDetail_SavesReplyContext(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", time.Now())
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
@@ -2314,7 +2314,7 @@ func TestDispatchStep_IssueTimeline_SavesReplyContext(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", time.Now())
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
@@ -2347,7 +2347,7 @@ func TestDispatchStep_IssueLogs_SavesReplyContext(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", time.Now())
+	got, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
@@ -2374,7 +2374,7 @@ func TestDispatchStep_UnknownIntent_DoesNotSaveReplyContext(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	_, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", time.Now())
+	_, ok, err := store.Lookup(context.Background(), "feishu", "ou_sender1", "chat-1", time.Now())
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
