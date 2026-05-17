@@ -48,6 +48,11 @@ apps/web/test-results/
 
 # feature tracking
 _features/
+docs/plans/
+
+# local deployment bundles and scripts
+scripts/deploy/build-fullstack-bundle.sh
+scripts/deploy/fullstack/
 
 # runtime
 *.pid

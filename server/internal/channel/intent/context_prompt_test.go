@@ -3,9 +3,8 @@ package intent_test
 import (
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/multica-ai/multica/server/internal/channel/conversationctx"
+	channelconversation "github.com/multica-ai/multica/server/internal/channel/conversation"
 	in "github.com/multica-ai/multica/server/internal/channel/intent"
 )
 
@@ -15,8 +14,8 @@ func TestBuildChatIntentPrompt_IncludesContextEntities(t *testing.T) {
 	req := in.IntentRequest{
 		WorkspaceID: "ws-1",
 		Text:        "把它关掉",
-		ContextEntities: []conversationctx.EntityRef{
-			{Key: "STA-68", Type: conversationctx.EntityTypeIssue, MentionedAt: time.Now()},
+		ContextEntities: []channelconversation.EntityRef{
+			{EntityKey: "STA-68", EntityType: channelconversation.EntityTypeIssue},
 		},
 	}
 
@@ -38,11 +37,11 @@ func TestBuildChatIntentPrompt_IncludesExplicitEntities(t *testing.T) {
 	req := in.IntentRequest{
 		WorkspaceID: "ws-1",
 		Text:        "看看这个",
-		ExplicitEntities: []conversationctx.EntityRef{
-			{Key: "STA-99", Type: conversationctx.EntityTypeIssue, MentionedAt: time.Now()},
+		ExplicitEntities: []channelconversation.EntityRef{
+			{EntityKey: "STA-99", EntityType: channelconversation.EntityTypeIssue},
 		},
-		ContextEntities: []conversationctx.EntityRef{
-			{Key: "STA-68", Type: conversationctx.EntityTypeIssue, MentionedAt: time.Now()},
+		ContextEntities: []channelconversation.EntityRef{
+			{EntityKey: "STA-68", EntityType: channelconversation.EntityTypeIssue},
 		},
 	}
 
@@ -111,8 +110,8 @@ func TestBuildChannelAgentTurnPrompt_IncludesContextEntities(t *testing.T) {
 	req := in.IntentRequest{
 		WorkspaceID: "ws-1",
 		Text:        "把它关掉",
-		ContextEntities: []conversationctx.EntityRef{
-			{Key: "STA-68", Type: conversationctx.EntityTypeIssue, MentionedAt: time.Now()},
+		ContextEntities: []channelconversation.EntityRef{
+			{EntityKey: "STA-68", EntityType: channelconversation.EntityTypeIssue},
 		},
 	}
 
@@ -131,8 +130,8 @@ func TestBuildChannelAgentTurnPrompt_IncludesExplicitEntities(t *testing.T) {
 	req := in.IntentRequest{
 		WorkspaceID: "ws-1",
 		Text:        "看看这个",
-		ExplicitEntities: []conversationctx.EntityRef{
-			{Key: "STA-99", Type: conversationctx.EntityTypeIssue, MentionedAt: time.Now()},
+		ExplicitEntities: []channelconversation.EntityRef{
+			{EntityKey: "STA-99", EntityType: channelconversation.EntityTypeIssue},
 		},
 	}
 

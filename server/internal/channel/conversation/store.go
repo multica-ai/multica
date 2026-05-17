@@ -66,7 +66,6 @@ const (
 
 	TurnStatusProcessing   = "processing"
 	TurnStatusWaitingAgent = "waiting_agent"
-	TurnStatusWaitingUser  = "waiting_user"
 	TurnStatusCompleted    = "completed"
 	TurnStatusFailed       = "failed"
 	TurnStatusDead         = "dead"
@@ -188,6 +187,7 @@ type Store interface {
 	FindMessageByPlatformID(ctx context.Context, connectionID, platformMessageID string) (Message, bool, error)
 	FindMessageByInboundEventID(ctx context.Context, inboundEventID string) (Message, bool, error)
 	ListEntityRefsByMessageID(ctx context.Context, messageID string) ([]EntityRef, error)
+	ListRecentContextEntityRefs(ctx context.Context, connectionID, conversationID, senderExternalID, threadID string, since time.Time, limit int) ([]EntityRef, error)
 	ListRecentHandoffMessages(ctx context.Context, connectionID, conversationID, threadID string, since time.Time, limit int) ([]Message, error)
 	CreateTurn(ctx context.Context, item Turn) (Turn, error)
 	UpsertTurn(ctx context.Context, item Turn) (Turn, error)
@@ -582,6 +582,92 @@ ORDER BY created_at ASC
 	return out, rows.Err()
 }
 
+// ListRecentContextEntityRefs returns recent entity references that belong to
+// this user's conversation turn history.
+//
+// Parameters:
+//   - connectionID: configured channel connection id.
+//   - conversationID: channel_conversation id to search within.
+//   - senderExternalID: platform user id whose turn history is considered.
+//   - threadID: optional platform thread id; empty allows conversation-wide lookup.
+//   - since: lower bound for message occurrence time; zero uses a default lookback.
+//   - limit: maximum number of deduplicated entity refs to return.
+//
+// Returns:
+//   - recent entity refs ordered by most recent message first.
+//   - an error when persistence lookup fails.
+func (s *DBStore) ListRecentContextEntityRefs(ctx context.Context, connectionID, conversationID, senderExternalID, threadID string, since time.Time, limit int) ([]EntityRef, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("conversation store is not configured")
+	}
+	if strings.TrimSpace(connectionID) == "" || strings.TrimSpace(conversationID) == "" || strings.TrimSpace(senderExternalID) == "" {
+		return nil, nil
+	}
+	if since.IsZero() {
+		since = time.Now().Add(-30 * time.Minute)
+	}
+	if limit <= 0 {
+		limit = 5
+	}
+	rows, err := s.db.Query(ctx, `
+SELECT r.id::text, r.message_id::text, COALESCE(r.workspace_id::text, ''), r.entity_type,
+       COALESCE(r.entity_id::text, ''), r.entity_key, r.display, r.role, r.metadata, r.created_at
+FROM channel_message_entity_ref r
+JOIN channel_message m ON m.id = r.message_id
+LEFT JOIN channel_turn t
+  ON t.outbound_message_id = m.id
+ AND t.connection_id = m.connection_id
+ AND t.conversation_id = m.conversation_id
+ AND t.sender_external_id = $3
+WHERE m.connection_id = $1
+  AND m.conversation_id = $2::uuid
+  AND m.occurred_at >= $4
+  AND ($5 = '' OR m.thread_id = $5 OR m.thread_id = '')
+  AND (
+      (m.direction = 'inbound' AND m.sender_external_id = $3)
+      OR (m.direction = 'outbound' AND t.id IS NOT NULL)
+  )
+ORDER BY m.occurred_at DESC, r.created_at DESC
+LIMIT $6
+`, connectionID, conversationID, senderExternalID, since, strings.TrimSpace(threadID), limit*4)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	refs := make([]EntityRef, 0, limit)
+	seen := make(map[string]struct{}, limit)
+	for rows.Next() {
+		var ref EntityRef
+		if err := rows.Scan(
+			&ref.ID,
+			&ref.MessageID,
+			&ref.WorkspaceID,
+			&ref.EntityType,
+			&ref.EntityID,
+			&ref.EntityKey,
+			&ref.Display,
+			&ref.Role,
+			&ref.Metadata,
+			&ref.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		key := entityRefDedupeKey(ref)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		refs = append(refs, ref)
+		if len(refs) >= limit {
+			break
+		}
+	}
+	return refs, rows.Err()
+}
+
 // ListRecentHandoffMessages returns recent messages that are waiting for a
 // user response in one conversation.
 func (s *DBStore) ListRecentHandoffMessages(ctx context.Context, connectionID, conversationID, threadID string, since time.Time, limit int) ([]Message, error) {
@@ -921,6 +1007,20 @@ func defaultString(v, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+func entityRefDedupeKey(ref EntityRef) string {
+	entityType := strings.TrimSpace(ref.EntityType)
+	if entityType == "" {
+		return ""
+	}
+	if key := strings.ToUpper(strings.TrimSpace(ref.EntityKey)); key != "" {
+		return entityType + ":key:" + key
+	}
+	if id := strings.TrimSpace(ref.EntityID); id != "" {
+		return entityType + ":id:" + id
+	}
+	return ""
 }
 
 func jsonObjectOrDefault(raw json.RawMessage) []byte {

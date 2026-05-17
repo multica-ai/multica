@@ -323,7 +323,7 @@ func (s *slashStep) maybeSendReply(ctx context.Context, evt port.InboundEvent, t
 		return
 	}
 	if err := s.cfg.ReplySink.SendText(ctx, evt, port.OutboundMessage{
-		ChatID: evt.ChatID,
+		Target: port.TargetChat(evt.ChatID),
 		Text:   text,
 	}); err != nil {
 		slog.Warn("slash_expand: failed to send reply",

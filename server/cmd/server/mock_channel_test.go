@@ -323,11 +323,9 @@ func (d *fnDispatch) Run(ctx context.Context, evt port.InboundEvent) (port.Inbou
 // without re-writing the rule engine.
 //
 // Identity resolution is delegated to the production dispatch step's
-// UserResolver (which looks up channel_user_binding by the *external*
-// SenderID). The M1 in-test identity-bind step is intentionally NOT
-// in this pipeline because it overwrites evt.SenderID with the
-// Multica user_id — that contract is M1-only and is incompatible
-// with the M2 production dispatcher's resolver shape.
+// UserResolver, which looks up channel_user_binding by the external
+// SenderID. This fixture keeps SenderID in platform identity form so
+// dispatcher behaviour matches the production pipeline.
 // ---------------------------------------------------------------------------
 
 func newM2Pipeline(

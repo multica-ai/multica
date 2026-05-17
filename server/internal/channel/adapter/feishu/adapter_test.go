@@ -218,7 +218,7 @@ func TestAdapter_NormalisesTextMessage_AndStripsBotMention(t *testing.T) {
 
 // TC-adapt-2 — outbound text reply via Send.
 //
-// Per Issue STA-7 出口测试 §2: Send(OutboundMessage{ChatID:"oc_001",
+// Per Issue STA-7 出口测试 §2: Send(OutboundMessage{Target:TargetChat("oc_001"),
 // Text:"ok"}) must trigger exactly one im.v1.messages.create call on the
 // fake, with receive_id=oc_001, receive_id_type=chat_id, msg_type=text, and
 // the body containing the literal text "ok". The returned SendResult must
@@ -239,7 +239,7 @@ func TestAdapter_Send_TextReply(t *testing.T) {
 		_ = adapter.Disconnect(context.Background())
 	})
 
-	res, err := adapter.Send(ctx, port.OutboundMessage{ChatID: "oc_001", Text: "ok"})
+	res, err := adapter.Send(ctx, port.OutboundMessage{Target: port.TargetChat("oc_001"), Text: "ok"})
 	if err != nil {
 		t.Fatalf("Send returned error: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestAdapter_SendCard_RendersInteractiveCard(t *testing.T) {
 	t.Cleanup(func() { _ = adapter.Disconnect(context.Background()) })
 
 	res, err := adapter.SendCard(ctx, port.OutboundCardMessage{
-		ChatID: "oc_002",
+		Target: port.TargetChat("oc_002"),
 		Title:  "[STA-2] 测试",
 		Body:   "**状态**: done",
 	})
@@ -440,8 +440,8 @@ func TestAdapter_SendCard_RendersMentions(t *testing.T) {
 	}
 }
 
-// SendCard with empty ChatID must fail fast without calling the Client.
-func TestAdapter_SendCard_EmptyChatID(t *testing.T) {
+// SendCard with an empty target must fail fast without calling the Client.
+func TestAdapter_SendCard_EmptyTarget(t *testing.T) {
 	t.Parallel()
 
 	fake := newFakeFeishuClient("ou_bot_xxx")
@@ -456,11 +456,10 @@ func TestAdapter_SendCard_EmptyChatID(t *testing.T) {
 	t.Cleanup(func() { _ = adapter.Disconnect(context.Background()) })
 
 	_, err := adapter.SendCard(ctx, port.OutboundCardMessage{
-		ChatID: "",
-		Title:  "x",
+		Title: "x",
 	})
 	if err == nil {
-		t.Fatal("SendCard with empty ChatID should return error")
+		t.Fatal("SendCard with empty target should return error")
 	}
 
 	if calls := fake.snapshotSendCalls(); len(calls) != 0 {
@@ -484,7 +483,7 @@ func TestAdapter_SendCard_EmptyBodyRendersTitleOnlyCard(t *testing.T) {
 	t.Cleanup(func() { _ = adapter.Disconnect(context.Background()) })
 
 	_, err := adapter.SendCard(ctx, port.OutboundCardMessage{
-		ChatID: "oc_x",
+		Target: port.TargetChat("oc_x"),
 		Title:  "Only title",
 		Body:   "",
 	})

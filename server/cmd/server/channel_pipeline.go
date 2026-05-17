@@ -2,19 +2,16 @@ package main
 
 import (
 	"log/slog"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/channel/binding"
 	channelconversation "github.com/multica-ai/multica/server/internal/channel/conversation"
-	"github.com/multica-ai/multica/server/internal/channel/conversationctx"
 	"github.com/multica-ai/multica/server/internal/channel/facade"
 	"github.com/multica-ai/multica/server/internal/channel/facadeimpl"
 	"github.com/multica-ai/multica/server/internal/channel/inbound"
 	chintent "github.com/multica-ai/multica/server/internal/channel/intent"
 	"github.com/multica-ai/multica/server/internal/channel/port"
-	"github.com/multica-ai/multica/server/internal/channel/replyctx"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -38,11 +35,8 @@ type channelInboundRuntimeComponents struct {
 	TurnPlanner        chintent.ChannelTurnPlanner
 	ChannelTurn        chintent.ChannelAgentTurnClient
 	DispatchStore      inbound.DispatchCompletionStore
-	ReplyContext       replyctx.Store
 	ConversationStore  channelconversation.Store
-	ConversationCtx    conversationctx.Store
 	ContextMaxEntities int
-	ContextTTL         time.Duration
 }
 
 func newChannelInboundRuntimeComponents(pool *pgxpool.Pool, opts ...channelPipelineOptions) channelInboundRuntimeComponents {
@@ -53,8 +47,6 @@ func newChannelInboundRuntimeComponents(pool *pgxpool.Pool, opts ...channelPipel
 	bindings := inbound.NewDBChatBindingLookup(pool)
 	userResolver := inbound.NewDBUserInfoResolver(pool)
 	issuer := binding.NewTokenIssuer(queries)
-	replyCtxStore := replyctx.NewDBStore(pool)
-	conversationCtxStore := conversationctx.NewDBStore(pool)
 	conversationStore := channelconversation.NewDBStore(pool)
 
 	var opt channelPipelineOptions
@@ -119,8 +111,6 @@ func newChannelInboundRuntimeComponents(pool *pgxpool.Pool, opts ...channelPipel
 			ProjectValidator:  inbound.NewDBProjectWorkspaceValidator(pool),
 			DispatchStore:     inbound.NewDBDispatchCompletionStore(pool),
 			ProposalStore:     inbound.NewDBActionProposalStore(pool),
-			ReplyContext:      replyCtxStore,
-			ConversationCtx:   conversationCtxStore,
 		}),
 	)
 	post := inbound.NewPipeline(postSteps...)
@@ -134,9 +124,7 @@ func newChannelInboundRuntimeComponents(pool *pgxpool.Pool, opts ...channelPipel
 		TurnPlanner:       turnPlannerFromAsync(asyncChatIntent),
 		ChannelTurn:       channelTurnFromAsync(asyncChatIntent),
 		DispatchStore:     inbound.NewDBDispatchCompletionStore(pool),
-		ReplyContext:      replyCtxStore,
 		ConversationStore: conversationStore,
-		ConversationCtx:   conversationCtxStore,
 	}
 }
 

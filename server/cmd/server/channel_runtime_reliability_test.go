@@ -136,7 +136,7 @@ func insertChannelInboundEventForAction(t *testing.T, workspaceID pgtype.UUID) p
 	var id pgtype.UUID
 	if err := testPool.QueryRow(ctx, `
 	INSERT INTO channel_inbound_event (
-	    provider, connection_id, event_id, event_type, conversation_key, chat_id, chat_type,
+	    provider, connection_id, event_id, event_type, processing_key, chat_id, chat_type,
 	    sender_external_id, sender_name, message_id, text, canonical_event,
 	    raw_payload, status, phase, workspace_id
 	) VALUES (

@@ -40,7 +40,6 @@ const (
 	defaultChannelInboundClaimBatch        = 32
 	defaultChannelIntentTaskTimeout        = 15 * time.Minute
 	defaultChannelActionTaskTimeout        = 30 * time.Minute
-	defaultChannelClarificationTimeout     = 30 * time.Minute
 	defaultChannelInboundProcessingLease   = 5 * time.Minute
 )
 
@@ -290,11 +289,8 @@ func main() {
 				TurnPlanner:        components.TurnPlanner,
 				ChannelTurn:        components.ChannelTurn,
 				DispatchStore:      components.DispatchStore,
-				ReplyContext:       components.ReplyContext,
 				ConversationStore:  components.ConversationStore,
-				ConversationCtx:    components.ConversationCtx,
 				ContextMaxEntities: components.ContextMaxEntities,
-				ContextTTL:         components.ContextTTL,
 			}
 		},
 		ConversationLimit:      envPositiveInt("CHANNEL_INBOUND_CONVERSATION_LIMIT", defaultChannelInboundConversationLimit),
@@ -303,7 +299,6 @@ func main() {
 		ClaimBatch:             envPositiveInt("CHANNEL_INBOUND_CLAIM_BATCH", defaultChannelInboundClaimBatch),
 		IntentTaskTimeout:      envDuration("CHANNEL_INTENT_TASK_TIMEOUT", defaultChannelIntentTaskTimeout),
 		ActionTaskTimeout:      envDuration("CHANNEL_ACTION_TASK_TIMEOUT", defaultChannelActionTaskTimeout),
-		ClarificationTimeout:   envDuration("CHANNEL_CLARIFICATION_TIMEOUT", defaultChannelClarificationTimeout),
 		ProcessingLease:        envDuration("CHANNEL_INBOUND_PROCESSING_LEASE", defaultChannelInboundProcessingLease),
 		OutboundCleanupEnabled: true,
 	})

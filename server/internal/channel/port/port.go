@@ -208,8 +208,6 @@ func TargetUser(id string) OutboundTarget {
 // reading and writing share vocabulary.
 type OutboundMessage struct {
 	Target OutboundTarget
-	// ChatID is the legacy chat target. New call sites should set Target.
-	ChatID string
 	Text   string
 }
 
@@ -218,9 +216,7 @@ type OutboundMessage struct {
 // while each adapter owns the platform-specific rendering (Feishu interactive
 // card, Slack Block Kit, WeCom markdown/template card, etc.).
 type OutboundRichMessage struct {
-	Target OutboundTarget
-	// ChatID is the legacy chat target. New call sites should set Target.
-	ChatID   string
+	Target   OutboundTarget
 	Title    string
 	Body     string
 	Actions  []OutboundAction

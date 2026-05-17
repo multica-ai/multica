@@ -107,6 +107,42 @@ describe("ApiClient", () => {
     ]);
   });
 
+  it("falls back for malformed channel management responses", async () => {
+    const malformed = (body: unknown) =>
+      Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => malformed({ providers: "bad" }))
+      .mockImplementationOnce(() => malformed({ connections: "bad", can_manage: "yes" }))
+      .mockImplementationOnce(() => malformed({ id: 123, config_schema: "bad" }))
+      .mockImplementationOnce(() => malformed({ id: 456, config_schema: "bad" }))
+      .mockImplementationOnce(() => malformed({ ok: "yes" }))
+      .mockImplementationOnce(() => malformed({ kind: 123 }))
+      .mockImplementationOnce(() => malformed({ bindings: "bad" }))
+      .mockImplementationOnce(() => malformed({ id: 789, listen_mode: 42 }))
+      .mockImplementationOnce(() => malformed({ provider: 42 }))
+      .mockImplementationOnce(() => malformed({ id: 101112, listen_mode: 42 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.listChannelProviders()).resolves.toEqual({ providers: [] });
+    await expect(client.listChannelConnections()).resolves.toEqual({ connections: [], can_manage: false });
+    await expect(client.createChannelConnection({ provider: "feishu" })).resolves.toMatchObject({ id: "" });
+    await expect(client.updateChannelConnection("conn-1", { enabled: true })).resolves.toMatchObject({ id: "" });
+    await expect(client.testChannelConnection("conn-1")).resolves.toEqual({ ok: false });
+    await expect(client.getChannelBindTokenPreview("tok")).resolves.toMatchObject({ kind: "user", connection_id: "" });
+    await expect(client.listChannelBindings("ws-1")).resolves.toEqual({ bindings: [] });
+    await expect(client.createChannelBinding("ws-1", { token: "tok", provider: "feishu" })).resolves.toMatchObject({ id: "" });
+    await expect(client.createChannelUserBinding({ token: "tok", provider: "feishu" })).resolves.toMatchObject({ provider: "" });
+    await expect(client.updateChannelBinding("ws-1", "bind-1", { is_primary: true })).resolves.toMatchObject({ id: "" });
+  });
+
   it("emits X-Client-* headers when identity is configured", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify([]), {

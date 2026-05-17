@@ -13,24 +13,20 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	channelconversation "github.com/multica-ai/multica/server/internal/channel/conversation"
-	"github.com/multica-ai/multica/server/internal/channel/conversationctx"
 	chintent "github.com/multica-ai/multica/server/internal/channel/intent"
 	"github.com/multica-ai/multica/server/internal/channel/port"
-	"github.com/multica-ai/multica/server/internal/channel/replyctx"
-	"github.com/multica-ai/multica/server/internal/util"
 )
 
 const (
-	defaultInboundWorkers              = 16
-	defaultInboundClaimBatch           = 32
-	defaultInboundPollInterval         = 250 * time.Millisecond
-	defaultInboundIntentTaskTimeout    = 15 * time.Minute
-	defaultInboundActionTaskTimeout    = 30 * time.Minute
-	defaultInboundClarificationTimeout = 30 * time.Minute
-	defaultInboundProcessingLease      = 5 * time.Minute
-	defaultFailureNoticeCooldown       = 5 * time.Minute
-	defaultContextMaxEntities          = 5
-	defaultContextTTL                  = 30 * time.Minute
+	defaultInboundWorkers           = 16
+	defaultInboundClaimBatch        = 32
+	defaultInboundPollInterval      = 250 * time.Millisecond
+	defaultInboundIntentTaskTimeout = 15 * time.Minute
+	defaultInboundActionTaskTimeout = 30 * time.Minute
+	defaultInboundProcessingLease   = 5 * time.Minute
+	defaultFailureNoticeCooldown    = 5 * time.Minute
+	defaultContextMaxEntities       = 5
+	defaultContextLookback          = 30 * time.Minute
 )
 
 const (
@@ -85,18 +81,15 @@ type RuntimeConfig struct {
 	ChannelTurn           chintent.ChannelAgentTurnClient
 	DispatchStore         DispatchCompletionStore
 	FailureLimiter        FailureNoticeLimiter
-	ReplyContext          replyctx.Store
 	ConversationStore     channelconversation.Store
-	ConversationCtx       conversationctx.Store
 	ContextMaxEntities    int
-	ContextTTL            time.Duration
+	ContextLookback       time.Duration
 	ReplySink             ChannelReplySink
 	Workers               int
 	ClaimBatch            int
 	PollInterval          time.Duration
 	IntentTaskTimeout     time.Duration
 	ActionTaskTimeout     time.Duration
-	ClarificationTimeout  time.Duration
 	ProcessingLease       time.Duration
 	FailureNoticeCooldown time.Duration
 }
@@ -124,9 +117,6 @@ func NewRuntime(cfg RuntimeConfig) *Runtime {
 	if cfg.ActionTaskTimeout <= 0 {
 		cfg.ActionTaskTimeout = defaultInboundActionTaskTimeout
 	}
-	if cfg.ClarificationTimeout <= 0 {
-		cfg.ClarificationTimeout = defaultInboundClarificationTimeout
-	}
 	if cfg.ProcessingLease <= 0 {
 		cfg.ProcessingLease = defaultInboundProcessingLease
 	}
@@ -136,8 +126,8 @@ func NewRuntime(cfg RuntimeConfig) *Runtime {
 	if cfg.ContextMaxEntities <= 0 {
 		cfg.ContextMaxEntities = defaultContextMaxEntities
 	}
-	if cfg.ContextTTL <= 0 {
-		cfg.ContextTTL = defaultContextTTL
+	if cfg.ContextLookback <= 0 {
+		cfg.ContextLookback = defaultContextLookback
 	}
 	if cfg.FailureLimiter == nil {
 		cfg.FailureLimiter = newMemoryFailureNoticeLimiter()
@@ -196,9 +186,6 @@ func (r *Runtime) Accept(ctx context.Context, evt port.InboundEvent, opts Accept
 	switch {
 	case result.RejectedBackpressure:
 		r.send(ctx, evt, fmt.Sprintf("我现在忙不过来了，当前会话还有 %d 条在排队，请稍后再发。", result.QueueDepth))
-	case result.ClarificationConsumed:
-		// Legacy stores may still report this, but the product model no longer
-		// sends a mechanical "received clarification" acknowledgement.
 	case result.Accepted && result.QueueDepth == 0:
 		// Normal channel turns should feel like a teammate replying, not a bot
 		// acknowledging a command queue. The final post-pipeline reply is enough.
@@ -557,9 +544,9 @@ func (r *Runtime) resolveMessageContextReply(ctx context.Context, rec *InboundEv
 			Confidence: 1,
 			Source:     chintent.SourceRule,
 			Params: map[string]string{
-				"issue_key":                   issueKey,
-				"comment":                     comment,
-				"_channel_context_message_id": target.ID,
+				"issue_key":                 issueKey,
+				"comment":                   comment,
+				contextMessageIDIntentParam: target.ID,
 			},
 		},
 	}, true, nil
@@ -568,9 +555,10 @@ func (r *Runtime) resolveMessageContextReply(ctx context.Context, rec *InboundEv
 func (r *Runtime) contextTargetMessage(ctx context.Context, rec *InboundEventRecord, evt port.InboundEvent) (channelconversation.Message, bool, error) {
 	hasExplicitContext := false
 	for _, platformMessageID := range []string{evt.QuotedMessageID, evt.ReplyToMessageID} {
-		if strings.TrimSpace(platformMessageID) != "" {
-			hasExplicitContext = true
+		if strings.TrimSpace(platformMessageID) == "" {
+			continue
 		}
+		hasExplicitContext = true
 		msg, ok, err := r.cfg.ConversationStore.FindMessageByPlatformID(ctx, evt.ConnectionID(), platformMessageID)
 		if err != nil || ok {
 			return msg, ok, err
@@ -846,37 +834,8 @@ func (r *Runtime) persistAndSendTurnReply(ctx context.Context, rec *InboundEvent
 		}
 	}
 	r.send(ctx, rec.Event, reply)
-	r.appendTurnContextEntities(ctx, rec, reply)
 	if err := r.cfg.Store.MarkProcessed(ctx, rec.ID); err != nil {
 		slog.Error("channel inbound runtime: mark channel turn processed failed", "event_row_id", rec.ID, "error", err)
-	}
-}
-
-func (r *Runtime) appendTurnContextEntities(ctx context.Context, rec *InboundEventRecord, reply string) {
-	if r == nil || r.cfg.ConversationCtx == nil || rec == nil {
-		return
-	}
-	entities := conversationctx.ExtractEntityKeys(reply)
-	if len(entities) == 0 {
-		return
-	}
-	workspaceID := strings.TrimSpace(rec.WorkspaceID)
-	if workspaceID == "" {
-		workspaceID = strings.TrimSpace(r.lookupChatContext(ctx, rec.Event).WorkspaceID)
-	}
-	if workspaceID == "" {
-		slog.Debug("channel inbound runtime: skip conversation context write without workspace", "event_row_id", rec.ID)
-		return
-	}
-	scope := conversationctx.Scope{
-		ConnectionID: rec.Event.ConnectionID(),
-		WorkspaceID:  workspaceID,
-		ChatID:       rec.Event.ChatID,
-		SenderID:     rec.Event.SenderID,
-		ThreadID:     rec.Event.ThreadID,
-	}
-	if err := r.cfg.ConversationCtx.AppendEntities(ctx, scope, entities, r.cfg.ContextMaxEntities, r.cfg.ContextTTL); err != nil {
-		slog.Error("channel inbound runtime: append conversation context entities failed", "event_row_id", rec.ID, "error", err)
 	}
 }
 
@@ -958,22 +917,6 @@ func (r *Runtime) sweepOnce(ctx context.Context) {
 	} else if n > 0 {
 		slog.Warn("channel inbound runtime: requeued stale processing events", "count", n)
 	}
-	expired, err := r.cfg.Store.ExpireWaitingUser(ctx, r.cfg.ClaimBatch)
-	if err != nil {
-		slog.Error("channel inbound runtime: expire waiting_user failed", "error", err)
-	}
-	for _, item := range expired {
-		r.send(ctx, item.Event, "长时间没有补充信息，已停止处理，请重新发送完整需求。")
-	}
-	if r.cfg.ConversationCtx == nil {
-		return
-	}
-	deleted, err := r.cfg.ConversationCtx.DeleteExpired(ctx, time.Now())
-	if err != nil {
-		slog.Error("channel inbound runtime: delete expired conversation context failed", "error", err)
-	} else if deleted > 0 {
-		slog.Debug("channel inbound runtime: deleted expired conversation contexts", "count", deleted)
-	}
 }
 
 func (r *Runtime) runPipeline(ctx context.Context, pipeline *Pipeline, evt port.InboundEvent) (port.InboundEvent, Outcome, error) {
@@ -1012,109 +955,118 @@ func (r *Runtime) buildIntentRequest(ctx context.Context, rec *InboundEventRecor
 		req.DefaultProjectID = chatCtx.DefaultProjectID
 		req.AgentID = strings.TrimSpace(chatCtx.AgentID)
 	}
-	return r.applyReplyContext(ctx, req, evt, chatCtx)
+	return r.applyMessageContext(ctx, req, evt)
 }
 
-func (r *Runtime) applyReplyContext(ctx context.Context, req chintent.IntentRequest, evt port.InboundEvent, chatCtx *ChatBindingContext) chintent.IntentRequest {
-	// Always pass through explicit signals from the inbound event, regardless
-	// of whether a reply-context store is configured.
+func (r *Runtime) applyMessageContext(ctx context.Context, req chintent.IntentRequest, evt port.InboundEvent) chintent.IntentRequest {
 	req.ThreadID = evt.ThreadID
 	req.QuotedMessageID = evt.QuotedMessageID
 	req.QuotedText = evt.QuotedText
 	req.ReplyToMessageID = evt.ReplyToMessageID
-	req = r.applyConversationContext(ctx, req, evt)
-
-	if r.cfg.ReplyContext == nil || evt.ChatType != port.ChatTypeDirect {
-		return req
-	}
-	rc, ok, err := r.cfg.ReplyContext.Lookup(ctx, evt.ConnectionID(), evt.SenderID, evt.ChatID, time.Now())
-	if err != nil {
-		slog.Error("channel inbound runtime: lookup reply context failed",
-			"connection_id", evt.ConnectionID(),
-			"sender_id", evt.SenderID,
-			"error", err,
-		)
-		return req
-	}
-	if !ok {
-		return req
-	}
-	if chatCtx != nil && chatCtx.WorkspaceID == "" && rc.WorkspaceID.Valid {
-		chatCtx.WorkspaceID = util.UUIDToString(rc.WorkspaceID)
-		req.WorkspaceID = chatCtx.WorkspaceID
-	}
-	if req.ContextIssueKey == "" && strings.TrimSpace(rc.IssueIdentifier) != "" {
-		req.ContextIssueKey = strings.TrimSpace(rc.IssueIdentifier)
-		req.ContextMode = "reply"
-	}
-	return req
-}
-
-func (r *Runtime) applyConversationContext(ctx context.Context, req chintent.IntentRequest, evt port.InboundEvent) chintent.IntentRequest {
-	explicitEntities := conversationctx.ExtractEntityKeys(evt.QuotedText)
+	explicitEntities := channelconversation.ExtractIssueEntityRefs(req.WorkspaceID, evt.QuotedText, channelconversation.EntityRoleContext)
+	explicitEntities = mergeContextEntities(explicitEntities, r.explicitMessageEntityRefs(ctx, evt), r.cfg.ContextMaxEntities)
 	req.ExplicitEntities = mergeContextEntities(req.ExplicitEntities, explicitEntities, r.cfg.ContextMaxEntities)
-	var entities []conversationctx.EntityRef
-	if r.cfg.ConversationCtx != nil && strings.TrimSpace(req.WorkspaceID) != "" {
-		scope := conversationctx.Scope{
-			ConnectionID: evt.ConnectionID(),
-			WorkspaceID:  req.WorkspaceID,
-			ChatID:       evt.ChatID,
-			SenderID:     evt.SenderID,
-			ThreadID:     evt.ThreadID,
-		}
-		if cc, ok, err := r.cfg.ConversationCtx.Get(ctx, scope); err != nil {
-			slog.Error("channel inbound runtime: lookup conversation context failed",
+	if r.cfg.ConversationStore != nil {
+		if inboundMsg, ok, err := r.cfg.ConversationStore.FindMessageByInboundEventID(ctx, req.InboundEventID); err != nil {
+			slog.Error("channel inbound runtime: lookup inbound message context failed",
 				"connection_id", evt.ConnectionID(),
-				"workspace_id", req.WorkspaceID,
-				"chat_id", evt.ChatID,
-				"sender_id", evt.SenderID,
-				"thread_id", evt.ThreadID,
+				"inbound_event_id", req.InboundEventID,
 				"error", err,
 			)
 		} else if ok {
-			entities = cc.Entities
+			lookback := r.cfg.ContextLookback
+			if lookback <= 0 {
+				lookback = defaultContextLookback
+			}
+			entities, err := r.cfg.ConversationStore.ListRecentContextEntityRefs(ctx, evt.ConnectionID(), inboundMsg.ConversationID, evt.SenderID, evt.ThreadID, time.Now().Add(-lookback), r.cfg.ContextMaxEntities)
+			if err != nil {
+				slog.Error("channel inbound runtime: lookup message context entities failed",
+					"connection_id", evt.ConnectionID(),
+					"conversation_id", inboundMsg.ConversationID,
+					"sender_id", evt.SenderID,
+					"thread_id", evt.ThreadID,
+					"error", err,
+				)
+			} else {
+				req.ContextEntities = mergeContextEntities(req.ContextEntities, entities, r.cfg.ContextMaxEntities)
+			}
 		}
 	}
-	req.ContextEntities = mergeContextEntities(req.ContextEntities, entities, r.cfg.ContextMaxEntities)
 	if req.ContextIssueKey == "" {
 		if key := requestContextIssueKey(req); key != "" {
 			req.ContextIssueKey = key
-			req.ContextMode = "conversation"
+			req.ContextMode = "message"
 		}
 	}
 	return req
 }
 
-func mergeContextEntities(existing []conversationctx.EntityRef, incoming []conversationctx.EntityRef, max int) []conversationctx.EntityRef {
+func (r *Runtime) explicitMessageEntityRefs(ctx context.Context, evt port.InboundEvent) []channelconversation.EntityRef {
+	if r == nil || r.cfg.ConversationStore == nil {
+		return nil
+	}
+	var out []channelconversation.EntityRef
+	for _, platformMessageID := range []string{evt.QuotedMessageID, evt.ReplyToMessageID} {
+		if strings.TrimSpace(platformMessageID) == "" {
+			continue
+		}
+		msg, ok, err := r.cfg.ConversationStore.FindMessageByPlatformID(ctx, evt.ConnectionID(), platformMessageID)
+		if err != nil {
+			slog.Error("channel inbound runtime: lookup explicit context message failed",
+				"connection_id", evt.ConnectionID(),
+				"platform_message_id", platformMessageID,
+				"error", err,
+			)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		refs, err := r.cfg.ConversationStore.ListEntityRefsByMessageID(ctx, msg.ID)
+		if err != nil {
+			slog.Error("channel inbound runtime: lookup explicit context entity refs failed",
+				"connection_id", evt.ConnectionID(),
+				"message_id", msg.ID,
+				"error", err,
+			)
+			continue
+		}
+		out = append(out, refs...)
+	}
+	return out
+}
+
+func mergeContextEntities(existing []channelconversation.EntityRef, incoming []channelconversation.EntityRef, max int) []channelconversation.EntityRef {
 	if len(existing) == 0 && len(incoming) == 0 {
 		return nil
 	}
-	merged := make([]conversationctx.EntityRef, 0, len(existing)+len(incoming))
+	merged := make([]channelconversation.EntityRef, 0, len(existing)+len(incoming))
 	seen := make(map[string]int, len(existing)+len(incoming))
 	for _, entity := range append(existing, incoming...) {
-		entity.Key = strings.ToUpper(strings.TrimSpace(entity.Key))
-		if entity.Key == "" {
+		entity.EntityKey = strings.ToUpper(strings.TrimSpace(entity.EntityKey))
+		if entity.EntityKey == "" && strings.TrimSpace(entity.EntityID) == "" {
 			continue
 		}
-		if entity.Type == "" {
-			entity.Type = conversationctx.EntityTypeIssue
+		if entity.EntityType == "" {
+			entity.EntityType = channelconversation.EntityTypeIssue
 		}
-		if i, ok := seen[entity.Key]; ok {
-			if entity.MentionedAt.After(merged[i].MentionedAt) {
-				merged[i].MentionedAt = entity.MentionedAt
-			}
-			if entity.ID != "" {
-				merged[i].ID = entity.ID
+		key := contextEntityDedupeKey(entity)
+		if key == "" {
+			continue
+		}
+		if i, ok := seen[key]; ok {
+			if entity.EntityID != "" {
+				merged[i].EntityID = entity.EntityID
 			}
 			if entity.Display != "" {
 				merged[i].Display = entity.Display
 			}
-			if entity.URL != "" {
-				merged[i].URL = entity.URL
+			if entity.WorkspaceID != "" {
+				merged[i].WorkspaceID = entity.WorkspaceID
 			}
 			continue
 		}
-		seen[entity.Key] = len(merged)
+		seen[key] = len(merged)
 		merged = append(merged, entity)
 	}
 	if max > 0 && len(merged) > max {
@@ -1123,14 +1075,28 @@ func mergeContextEntities(existing []conversationctx.EntityRef, incoming []conve
 	return merged
 }
 
+func contextEntityDedupeKey(entity channelconversation.EntityRef) string {
+	entityType := strings.TrimSpace(entity.EntityType)
+	if entityType == "" {
+		entityType = channelconversation.EntityTypeIssue
+	}
+	if key := strings.ToUpper(strings.TrimSpace(entity.EntityKey)); key != "" {
+		return entityType + ":key:" + key
+	}
+	if id := strings.TrimSpace(entity.EntityID); id != "" {
+		return entityType + ":id:" + id
+	}
+	return ""
+}
+
 func requestContextIssueKey(req chintent.IntentRequest) string {
 	if key := singleExtractedIssueKey(req.QuotedText); key != "" {
 		return key
 	}
 	if len(req.ExplicitEntities) == 1 {
 		entity := req.ExplicitEntities[0]
-		if entity.Type == "" || entity.Type == conversationctx.EntityTypeIssue {
-			return strings.ToUpper(strings.TrimSpace(entity.Key))
+		if entity.EntityType == "" || entity.EntityType == channelconversation.EntityTypeIssue {
+			return strings.ToUpper(strings.TrimSpace(entity.EntityKey))
 		}
 	}
 	if len(req.ExplicitEntities) > 1 {
@@ -1140,18 +1106,18 @@ func requestContextIssueKey(req chintent.IntentRequest) string {
 		return ""
 	}
 	entity := req.ContextEntities[0]
-	if entity.Type != "" && entity.Type != conversationctx.EntityTypeIssue {
+	if entity.EntityType != "" && entity.EntityType != channelconversation.EntityTypeIssue {
 		return ""
 	}
-	return strings.ToUpper(strings.TrimSpace(entity.Key))
+	return strings.ToUpper(strings.TrimSpace(entity.EntityKey))
 }
 
 func singleExtractedIssueKey(text string) string {
-	entities := conversationctx.ExtractEntityKeys(text)
+	entities := channelconversation.ExtractIssueEntityRefs("", text, channelconversation.EntityRoleMentioned)
 	if len(entities) != 1 {
 		return ""
 	}
-	return strings.ToUpper(strings.TrimSpace(entities[0].Key))
+	return strings.ToUpper(strings.TrimSpace(entities[0].EntityKey))
 }
 
 func applyRequestContextToIntentResult(result chintent.IntentResult, req chintent.IntentRequest) chintent.IntentResult {

@@ -757,7 +757,7 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 const createChannelIntentTask = `-- name: CreateChannelIntentTask :one
 INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, context)
 VALUES ($1, $2, NULL, 'queued', $3, $4)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task
 `
 
 type CreateChannelIntentTaskParams struct {
@@ -803,6 +803,7 @@ func (q *Queries) CreateChannelIntentTask(ctx context.Context, arg CreateChannel
 		&i.FailureReason,
 		&i.TriggerSummary,
 		&i.ForceFreshSession,
+		&i.IsLeaderTask,
 	)
 	return i, err
 }
@@ -810,7 +811,7 @@ func (q *Queries) CreateChannelIntentTask(ctx context.Context, arg CreateChannel
 const createChannelTurnTask = `-- name: CreateChannelTurnTask :one
 INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, context)
 VALUES ($1, $2, NULL, 'queued', $3, $4)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task
 `
 
 type CreateChannelTurnTaskParams struct {
@@ -856,6 +857,7 @@ func (q *Queries) CreateChannelTurnTask(ctx context.Context, arg CreateChannelTu
 		&i.FailureReason,
 		&i.TriggerSummary,
 		&i.ForceFreshSession,
+		&i.IsLeaderTask,
 	)
 	return i, err
 }
@@ -1309,7 +1311,7 @@ func (q *Queries) GetAgentTask(ctx context.Context, id pgtype.UUID) (AgentTaskQu
 }
 
 const getChannelIntentTaskByInboundEvent = `-- name: GetChannelIntentTaskByInboundEvent :one
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task FROM agent_task_queue
 WHERE COALESCE(context->>'type', '') = 'channel_intent'
   AND context->>'channel_inbound_event_id' = $1::text
 ORDER BY created_at ASC
@@ -1344,12 +1346,13 @@ func (q *Queries) GetChannelIntentTaskByInboundEvent(ctx context.Context, inboun
 		&i.FailureReason,
 		&i.TriggerSummary,
 		&i.ForceFreshSession,
+		&i.IsLeaderTask,
 	)
 	return i, err
 }
 
 const getContextTaskByInboundEvent = `-- name: GetContextTaskByInboundEvent :one
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task FROM agent_task_queue
 WHERE COALESCE(context->>'type', '') = $1::text
   AND context->>'channel_inbound_event_id' = $2::text
 ORDER BY created_at ASC
@@ -1389,6 +1392,7 @@ func (q *Queries) GetContextTaskByInboundEvent(ctx context.Context, arg GetConte
 		&i.FailureReason,
 		&i.TriggerSummary,
 		&i.ForceFreshSession,
+		&i.IsLeaderTask,
 	)
 	return i, err
 }

@@ -189,7 +189,7 @@ func (s *attachmentStep) sendReply(ctx context.Context, evt port.InboundEvent, t
 	if s.cfg.ReplySink == nil {
 		return
 	}
-	if err := s.cfg.ReplySink.SendText(ctx, evt, port.OutboundMessage{ChatID: evt.ChatID, Text: text}); err != nil {
+	if err := s.cfg.ReplySink.SendText(ctx, evt, port.OutboundMessage{Target: port.TargetChat(evt.ChatID), Text: text}); err != nil {
 		slog.Error("attachment: send reply failed", "channel", evt.ChannelName, "chat_id", evt.ChatID, "error", err)
 	}
 }

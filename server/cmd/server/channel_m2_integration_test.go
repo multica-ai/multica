@@ -377,8 +377,8 @@ func TestChannelIntegration_TC_int_6_M2_PrivateChatCreateIssue(t *testing.T) {
 	if len(sends) != 1 {
 		t.Fatalf("expected 1 outbound, got %d", len(sends))
 	}
-	if sends[0].ChatID != externalChatID {
-		t.Fatalf("reply chat = %q, want %q (DM)", sends[0].ChatID, externalChatID)
+	if sends[0].Target != port.TargetChat(externalChatID) {
+		t.Fatalf("reply target = %+v, want chat %q (DM)", sends[0].Target, externalChatID)
 	}
 	if !strings.Contains(sends[0].Text, "ISSUE_CREATED") {
 		t.Fatalf("reply must include ISSUE_CREATED template: %q", sends[0].Text)

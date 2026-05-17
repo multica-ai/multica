@@ -66,11 +66,6 @@ func (f *fakeAuthzStore) LookupWorkspaceID(_ context.Context, _, _ string) (pgty
 }
 
 func (f *fakeAuthzStore) LookupPrimaryWorkspaceID(_ context.Context, _, _ string) (pgtype.UUID, error) {
-	// For backward compat with existing tests: if primary fields are not
-	// explicitly set, delegate to LookupWorkspaceID.
-	if f.primaryWsIDErr == nil && !f.primaryWsIDFound && f.primaryWsID == (pgtype.UUID{}) {
-		return f.LookupWorkspaceID(nil, "", "")
-	}
 	if f.primaryWsIDErr != nil {
 		return pgtype.UUID{}, f.primaryWsIDErr
 	}

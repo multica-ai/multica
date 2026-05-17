@@ -181,16 +181,16 @@ func (c *TaskBackedChatIntentClient) StartAgentTurn(ctx context.Context, req chi
 		return "", err
 	}
 	task, err := c.tasks.EnqueueChannelTurnTask(ctx, workspaceID, agent.ID, service.ChannelTurnTaskParams{
-		Prompt:            chintent.BuildChannelAgentTurnPrompt(req),
-		Message:           req.Text,
-		RequesterID:       requesterID,
-		Channel:           req.Channel,
-		ChatID:            req.ChatID,
-		ChatType:          req.ChatType,
-		SenderID:          req.SenderID,
-		SenderName:        req.SenderName,
-		InboundEventID:    req.InboundEventID,
-		ReplyContextIssue: req.ContextIssueKey,
+		Prompt:          chintent.BuildChannelAgentTurnPrompt(req),
+		Message:         req.Text,
+		RequesterID:     requesterID,
+		Channel:         req.Channel,
+		ChatID:          req.ChatID,
+		ChatType:        req.ChatType,
+		SenderID:        req.SenderID,
+		SenderName:      req.SenderName,
+		InboundEventID:  req.InboundEventID,
+		ContextIssueKey: req.ContextIssueKey,
 	})
 	if err != nil {
 		return "", err

@@ -18,7 +18,6 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/channel"
 	channelconversation "github.com/multica-ai/multica/server/internal/channel/conversation"
-	"github.com/multica-ai/multica/server/internal/channel/conversationctx"
 	"github.com/multica-ai/multica/server/internal/channel/gateway"
 	"github.com/multica-ai/multica/server/internal/channel/inbound"
 	chintent "github.com/multica-ai/multica/server/internal/channel/intent"
@@ -27,7 +26,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/channel/outbound"
 	"github.com/multica-ai/multica/server/internal/channel/port"
 	"github.com/multica-ai/multica/server/internal/channel/provider"
-	"github.com/multica-ai/multica/server/internal/channel/replyctx"
 	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -40,11 +38,8 @@ type RuntimeComponents struct {
 	TurnPlanner        chintent.ChannelTurnPlanner
 	ChannelTurn        chintent.ChannelAgentTurnClient
 	DispatchStore      inbound.DispatchCompletionStore
-	ReplyContext       replyctx.Store
 	ConversationStore  channelconversation.Store
-	ConversationCtx    conversationctx.Store
 	ContextMaxEntities int
-	ContextTTL         time.Duration
 }
 
 type RuntimeBuilder func() RuntimeComponents
@@ -64,7 +59,6 @@ type Config struct {
 	ClaimBatch             int
 	IntentTaskTimeout      time.Duration
 	ActionTaskTimeout      time.Duration
-	ClarificationTimeout   time.Duration
 	ProcessingLease        time.Duration
 	OutboundCleanupEnabled bool
 }
@@ -329,26 +323,22 @@ func (m *Manager) startInboundRuntimeLocked(ctx context.Context) {
 	}
 	components := m.cfg.RuntimeBuilder()
 	inboundRuntime := inbound.NewRuntime(inbound.RuntimeConfig{
-		Store:                inbound.NewDBInboundEventStore(m.cfg.Pool),
-		PrePipeline:          components.PrePipeline,
-		PostPipeline:         components.PostPipeline,
-		RuleResolvers:        components.RuleResolvers,
-		ChatIntent:           components.ChatIntent,
-		TurnPlanner:          components.TurnPlanner,
-		ChannelTurn:          components.ChannelTurn,
-		DispatchStore:        components.DispatchStore,
-		ReplyContext:         components.ReplyContext,
-		ConversationStore:    components.ConversationStore,
-		ConversationCtx:      components.ConversationCtx,
-		ContextMaxEntities:   components.ContextMaxEntities,
-		ContextTTL:           components.ContextTTL,
-		ReplySink:            inbound.NewGatewayReplySink(m.cfg.Gateway, inbound.WithGatewayReplyConversationStore(channelconversation.NewDBStore(m.cfg.Pool))),
-		Workers:              m.cfg.Workers,
-		ClaimBatch:           m.cfg.ClaimBatch,
-		IntentTaskTimeout:    m.cfg.IntentTaskTimeout,
-		ActionTaskTimeout:    m.cfg.ActionTaskTimeout,
-		ClarificationTimeout: m.cfg.ClarificationTimeout,
-		ProcessingLease:      m.cfg.ProcessingLease,
+		Store:              inbound.NewDBInboundEventStore(m.cfg.Pool),
+		PrePipeline:        components.PrePipeline,
+		PostPipeline:       components.PostPipeline,
+		RuleResolvers:      components.RuleResolvers,
+		ChatIntent:         components.ChatIntent,
+		TurnPlanner:        components.TurnPlanner,
+		ChannelTurn:        components.ChannelTurn,
+		DispatchStore:      components.DispatchStore,
+		ConversationStore:  components.ConversationStore,
+		ContextMaxEntities: components.ContextMaxEntities,
+		ReplySink:          inbound.NewGatewayReplySink(m.cfg.Gateway, inbound.WithGatewayReplyConversationStore(channelconversation.NewDBStore(m.cfg.Pool))),
+		Workers:            m.cfg.Workers,
+		ClaimBatch:         m.cfg.ClaimBatch,
+		IntentTaskTimeout:  m.cfg.IntentTaskTimeout,
+		ActionTaskTimeout:  m.cfg.ActionTaskTimeout,
+		ProcessingLease:    m.cfg.ProcessingLease,
 	})
 	runtimeCtx, cancel := context.WithCancel(ctx)
 	m.cancels = append(m.cancels, cancel)
@@ -586,7 +576,6 @@ func (m *Manager) drainAdapterEvents(ctx context.Context, cfg provider.Connectio
 				"row_id", result.EventID,
 				"duplicate", result.Duplicate,
 				"rejected_backpressure", result.RejectedBackpressure,
-				"clarification_consumed", result.ClarificationConsumed,
 			)
 		}
 	}
@@ -814,7 +803,6 @@ func (s *registryRetrySender) SendCard(ctx context.Context, connectionID string,
 	}
 	result, err := ch.SendCard(ctx, port.OutboundCardMessage{
 		Target:   target,
-		ChatID:   target.ID,
 		Title:    payload.Title,
 		Body:     payload.Body,
 		Mentions: payload.Mentions,

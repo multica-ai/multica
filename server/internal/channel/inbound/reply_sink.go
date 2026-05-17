@@ -8,7 +8,6 @@ import (
 	"time"
 
 	channelconversation "github.com/multica-ai/multica/server/internal/channel/conversation"
-	"github.com/multica-ai/multica/server/internal/channel/conversationctx"
 	"github.com/multica-ai/multica/server/internal/channel/port"
 )
 
@@ -47,9 +46,6 @@ func (s *GatewayReplySink) SendText(ctx context.Context, evt port.InboundEvent, 
 		return nil
 	}
 	msg.Target = defaultReplyTarget(evt, msg.Target)
-	if msg.ChatID == "" {
-		msg.ChatID = evt.ChatID
-	}
 	result, err := s.gateway.SendText(ctx, evt.ConnectionID(), msg)
 	if err == nil {
 		s.recordSentText(ctx, evt, msg, result)
@@ -62,9 +58,6 @@ func (s *GatewayReplySink) SendRich(ctx context.Context, evt port.InboundEvent, 
 		return nil
 	}
 	msg.Target = defaultReplyTarget(evt, msg.Target)
-	if msg.ChatID == "" {
-		msg.ChatID = evt.ChatID
-	}
 	result, err := s.gateway.SendRich(ctx, evt.ConnectionID(), msg)
 	if err == nil {
 		s.recordSentRich(ctx, evt, msg, result)
@@ -82,7 +75,6 @@ func (s *GatewayReplySink) recordSentText(ctx context.Context, evt port.InboundE
 	}
 	s.recordSentMessage(ctx, evt, outboundReplyRecord{
 		Target:             msg.Target,
-		ChatID:             msg.ChatID,
 		Text:               msg.Text,
 		Body:               body,
 		ContentFormat:      channelconversation.ContentFormatPlain,
@@ -109,7 +101,6 @@ func (s *GatewayReplySink) recordSentRich(ctx context.Context, evt port.InboundE
 	}
 	s.recordSentMessage(ctx, evt, outboundReplyRecord{
 		Target:             msg.Target,
-		ChatID:             msg.ChatID,
 		Text:               text,
 		Body:               body,
 		ContentFormat:      channelconversation.ContentFormatCard,
@@ -121,7 +112,6 @@ func (s *GatewayReplySink) recordSentRich(ctx context.Context, evt port.InboundE
 
 type outboundReplyRecord struct {
 	Target             port.OutboundTarget
-	ChatID             string
 	Text               string
 	Body               json.RawMessage
 	ContentFormat      string
@@ -141,7 +131,7 @@ func (s *GatewayReplySink) recordSentMessage(ctx context.Context, evt port.Inbou
 	}
 	conversationID := inboundMsg.ConversationID
 	workspaceID := inboundMsg.WorkspaceID
-	chatID := firstNonEmpty(record.ChatID, record.Target.ID, evt.ChatID)
+	chatID := replyChatID(evt, record.Target)
 	chatType := normalizedRuntimeChatType(evt)
 	if chatType == "" {
 		chatType = string(port.ChatTypeGroup)
@@ -231,13 +221,13 @@ func inboundMessageID(ok bool, id string) string {
 }
 
 func entityRefsFromReplyText(workspaceID, text string) []channelconversation.EntityRef {
-	entities := conversationctx.ExtractEntityKeys(text)
+	entities := channelconversation.ExtractIssueEntityRefs(workspaceID, text, channelconversation.EntityRoleMentioned)
 	if len(entities) == 0 {
 		return nil
 	}
 	refs := make([]channelconversation.EntityRef, 0, len(entities))
 	for _, entity := range entities {
-		key := strings.ToUpper(strings.TrimSpace(entity.Key))
+		key := strings.ToUpper(strings.TrimSpace(entity.EntityKey))
 		if key == "" {
 			continue
 		}
@@ -294,6 +284,13 @@ func defaultReplyTarget(evt port.InboundEvent, target port.OutboundTarget) port.
 		return port.TargetUser(evt.SenderID)
 	}
 	return port.TargetChat(evt.ChatID)
+}
+
+func replyChatID(evt port.InboundEvent, target port.OutboundTarget) string {
+	if target.Type == port.OutboundTargetChat && strings.TrimSpace(target.ID) != "" {
+		return target.ID
+	}
+	return evt.ChatID
 }
 
 var _ ChannelReplySink = (*GatewayReplySink)(nil)

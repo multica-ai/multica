@@ -162,7 +162,7 @@ func (s *identityBindStep) Run(ctx context.Context, evt port.InboundEvent) (port
 			return evt, inbound.DecisionContinue, fmt.Errorf("identity-bind: get channel: %w", getErr)
 		}
 		body := fmt.Sprintf("点击绑定（10 分钟内有效）: https://multica.local/bind?token=%s", token.Plaintext)
-		if _, sendErr := ch.Send(ctx, port.OutboundMessage{ChatID: evt.ChatID, Text: body}); sendErr != nil {
+		if _, sendErr := ch.Send(ctx, port.OutboundMessage{Target: port.TargetChat(evt.ChatID), Text: body}); sendErr != nil {
 			return evt, inbound.DecisionContinue, fmt.Errorf("identity-bind: send link: %w", sendErr)
 		}
 		return evt, inbound.DecisionSkip, nil
@@ -207,7 +207,7 @@ func (s *createIssueDispatchStep) Run(ctx context.Context, evt port.InboundEvent
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		body := "WS_NOT_BOUND: 该群尚未绑定到 workspace，请群主先 /bind"
-		if _, sendErr := ch.Send(ctx, port.OutboundMessage{ChatID: evt.ChatID, Text: body}); sendErr != nil {
+		if _, sendErr := ch.Send(ctx, port.OutboundMessage{Target: port.TargetChat(evt.ChatID), Text: body}); sendErr != nil {
 			return evt, inbound.DecisionContinue, fmt.Errorf("dispatch: send WS_NOT_BOUND: %w", sendErr)
 		}
 		return evt, inbound.DecisionSkip, nil
@@ -263,7 +263,7 @@ func (s *createIssueDispatchStep) Run(ctx context.Context, evt port.InboundEvent
 	identifier := fmt.Sprintf("%s-%d", prefix2, number)
 
 	body := fmt.Sprintf("已创建 %s: %s", identifier, title)
-	if _, sendErr := ch.Send(ctx, port.OutboundMessage{ChatID: evt.ChatID, Text: body}); sendErr != nil {
+	if _, sendErr := ch.Send(ctx, port.OutboundMessage{Target: port.TargetChat(evt.ChatID), Text: body}); sendErr != nil {
 		return evt, inbound.DecisionContinue, fmt.Errorf("dispatch: send reply: %w", sendErr)
 	}
 	return evt, inbound.DecisionContinue, nil

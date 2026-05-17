@@ -307,8 +307,8 @@ func TestChannelIntegration_TC_int_2_GroupCreatesIssue(t *testing.T) {
 	if !strings.Contains(sends[0].Text, expectedIdent) {
 		t.Fatalf("reply text %q must contain identifier %q", sends[0].Text, expectedIdent)
 	}
-	if sends[0].ChatID != externalChatID {
-		t.Fatalf("reply chat id mismatch: got %q want %q", sends[0].ChatID, externalChatID)
+	if sends[0].Target != port.TargetChat(externalChatID) {
+		t.Fatalf("reply target mismatch: got %+v want chat %q", sends[0].Target, externalChatID)
 	}
 }
 

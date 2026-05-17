@@ -114,18 +114,35 @@ CREATE INDEX idx_channel_inbound_event_dedup_retryable
     WHERE status IN ('processing', 'failed');
 
 CREATE TABLE channel_conversation (
+    id                  UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
     provider            TEXT         NOT NULL,
     connection_id       TEXT         NOT NULL REFERENCES channel_connection(id) ON DELETE CASCADE,
     conversation_key    TEXT         NOT NULL,
     chat_id             TEXT         NOT NULL,
     chat_type           TEXT         NOT NULL CHECK (chat_type IN ('group', 'direct')),
-    sender_external_id  TEXT         NOT NULL,
-    active_event_id     UUID,
-    active_since        TIMESTAMPTZ,
+    conversation_type   TEXT         NOT NULL CHECK (conversation_type IN ('group', 'direct', 'thread')),
+    external_thread_id  TEXT         NOT NULL DEFAULT '',
+    workspace_id        UUID         REFERENCES workspace(id) ON DELETE SET NULL,
+    title               TEXT         NOT NULL DEFAULT '',
+    sender_external_id  TEXT         NOT NULL DEFAULT '',
+    status              TEXT         NOT NULL DEFAULT 'active'
+                                      CHECK (status IN ('active', 'archived')),
+    last_message_at     TIMESTAMPTZ,
     created_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    PRIMARY KEY (connection_id, conversation_key)
+    UNIQUE (connection_id, conversation_key)
 );
+
+CREATE INDEX idx_channel_conversation_connection_chat
+    ON channel_conversation(connection_id, chat_id, conversation_type);
+
+CREATE INDEX idx_channel_conversation_workspace
+    ON channel_conversation(workspace_id, updated_at DESC)
+    WHERE workspace_id IS NOT NULL;
+
+CREATE INDEX idx_channel_conversation_last_message
+    ON channel_conversation(connection_id, last_message_at DESC)
+    WHERE last_message_at IS NOT NULL;
 
 CREATE TABLE channel_inbound_event (
     id                    UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -133,7 +150,7 @@ CREATE TABLE channel_inbound_event (
     connection_id         TEXT         NOT NULL REFERENCES channel_connection(id) ON DELETE CASCADE,
     event_id              TEXT         NOT NULL,
     event_type            TEXT         NOT NULL,
-    conversation_key      TEXT         NOT NULL,
+    processing_key        TEXT         NOT NULL,
     chat_id               TEXT         NOT NULL,
     chat_type             TEXT         NOT NULL CHECK (chat_type IN ('group', 'direct')),
     sender_external_id    TEXT         NOT NULL,
@@ -148,16 +165,14 @@ CREATE TABLE channel_inbound_event (
                                             'processing',
                                             'processed',
                                             'waiting_agent',
-                                            'waiting_user',
                                             'failed',
                                             'dead',
                                             'rejected_backpressure'
                                         )),
     phase                 TEXT         NOT NULL DEFAULT 'pre'
                                         CHECK (phase IN ('pre', 'intent', 'post', 'done')),
-    wait_kind             TEXT         CHECK (wait_kind IN ('intent', 'action', 'channel_turn', 'user_clarification')),
+    wait_kind             TEXT         CHECK (wait_kind IN ('intent', 'action', 'channel_turn')),
     wait_task_id          UUID         REFERENCES agent_task_queue(id) ON DELETE SET NULL,
-    wait_expires_at       TIMESTAMPTZ,
     workspace_id          UUID         REFERENCES workspace(id) ON DELETE SET NULL,
     default_project_id    UUID         REFERENCES project(id) ON DELETE SET NULL,
     intent_payload        JSONB,
@@ -188,12 +203,27 @@ CREATE INDEX idx_channel_inbound_event_waiting_agent
     ON channel_inbound_event(status, wait_task_id, updated_at)
     WHERE status = 'waiting_agent';
 
-CREATE INDEX idx_channel_inbound_event_waiting_user_expiry
-    ON channel_inbound_event(status, wait_expires_at)
-    WHERE status = 'waiting_user';
+CREATE INDEX idx_channel_inbound_event_processing_key
+    ON channel_inbound_event(connection_id, processing_key, status, created_at);
 
-CREATE INDEX idx_channel_inbound_event_connection_conversation
-    ON channel_inbound_event(connection_id, conversation_key, status, created_at);
+CREATE TABLE channel_processing_lock (
+    provider         TEXT         NOT NULL,
+    connection_id    TEXT         NOT NULL REFERENCES channel_connection(id) ON DELETE CASCADE,
+    processing_key   TEXT         NOT NULL,
+    active_event_id  UUID         REFERENCES channel_inbound_event(id) ON DELETE SET NULL,
+    active_since     TIMESTAMPTZ,
+    created_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    PRIMARY KEY (connection_id, processing_key)
+);
+
+CREATE INDEX idx_channel_processing_lock_active
+    ON channel_processing_lock(active_event_id)
+    WHERE active_event_id IS NOT NULL;
+
+CREATE INDEX idx_channel_processing_lock_stale
+    ON channel_processing_lock(active_since)
+    WHERE active_event_id IS NOT NULL;
 
 CREATE TABLE channel_action_result (
     id                  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -245,6 +275,10 @@ CREATE TABLE channel_outbound_notification (
     issue_identifier          TEXT         NOT NULL DEFAULT '',
     issue_title               TEXT         NOT NULL DEFAULT '',
     inbox_item_id             UUID         REFERENCES inbox_item(id) ON DELETE SET NULL,
+    actor_type                TEXT         NOT NULL DEFAULT ''
+                                            CHECK (actor_type IN ('', 'member', 'agent', 'system')),
+    actor_id                  UUID,
+    source_comment_id         UUID         REFERENCES comment(id) ON DELETE SET NULL,
     replyable                 BOOLEAN      NOT NULL DEFAULT false,
     created_at                TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at                TIMESTAMPTZ  NOT NULL DEFAULT now()
@@ -298,19 +332,173 @@ CREATE INDEX idx_channel_action_proposal_expiry
     ON channel_action_proposal(status, expires_at)
     WHERE status = 'pending';
 
-CREATE TABLE channel_reply_context (
-    connection_id       TEXT        NOT NULL REFERENCES channel_connection(id) ON DELETE CASCADE,
-    external_user_id    TEXT        NOT NULL,
-    workspace_id        UUID        NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-    issue_id            UUID        NOT NULL REFERENCES issue(id) ON DELETE CASCADE,
-    issue_identifier    TEXT        NOT NULL DEFAULT '',
-    issue_title         TEXT        NOT NULL DEFAULT '',
-    inbox_item_id       UUID        REFERENCES inbox_item(id) ON DELETE SET NULL,
-    expires_at          TIMESTAMPTZ NOT NULL,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (connection_id, external_user_id)
+CREATE TABLE channel_message (
+    id                            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    provider                      TEXT         NOT NULL,
+    connection_id                 TEXT         NOT NULL REFERENCES channel_connection(id) ON DELETE CASCADE,
+    conversation_id               UUID         NOT NULL REFERENCES channel_conversation(id) ON DELETE CASCADE,
+    workspace_id                  UUID         REFERENCES workspace(id) ON DELETE SET NULL,
+    chat_id                       TEXT         NOT NULL,
+    chat_type                     TEXT         NOT NULL CHECK (chat_type IN ('group', 'direct')),
+    thread_id                     TEXT         NOT NULL DEFAULT '',
+    platform_message_id           TEXT         NOT NULL DEFAULT '',
+    event_id                      TEXT         NOT NULL DEFAULT '',
+    inbound_event_id              UUID         REFERENCES channel_inbound_event(id) ON DELETE SET NULL,
+    outbound_notification_id      UUID         REFERENCES channel_outbound_notification(id) ON DELETE SET NULL,
+    direction                     TEXT         NOT NULL CHECK (direction IN ('inbound', 'outbound', 'internal')),
+    message_type                  TEXT         NOT NULL CHECK (message_type IN ('user', 'bot', 'agent', 'system', 'notification')),
+    sender_type                   TEXT         NOT NULL CHECK (sender_type IN ('user', 'bot', 'agent', 'system', 'unknown')),
+    sender_external_id            TEXT         NOT NULL DEFAULT '',
+    sender_user_id                UUID         REFERENCES "user"(id) ON DELETE SET NULL,
+    sender_agent_id               UUID         REFERENCES agent(id) ON DELETE SET NULL,
+    represented_agent_id          UUID         REFERENCES agent(id) ON DELETE SET NULL,
+    text                          TEXT         NOT NULL DEFAULT '',
+    body                          JSONB        NOT NULL DEFAULT '{}'::jsonb,
+    content_format                TEXT         NOT NULL DEFAULT 'plain'
+                                                  CHECK (content_format IN ('plain', 'markdown', 'card', 'json')),
+    reply_to_platform_message_id  TEXT         NOT NULL DEFAULT '',
+    quoted_platform_message_id    TEXT         NOT NULL DEFAULT '',
+    reply_to_message_id           UUID         REFERENCES channel_message(id) ON DELETE SET NULL,
+    quoted_message_id             UUID         REFERENCES channel_message(id) ON DELETE SET NULL,
+    handoff_kind                  TEXT         NOT NULL DEFAULT 'none'
+                                                  CHECK (handoff_kind IN (
+                                                      'none',
+                                                      'approval',
+                                                      'retry',
+                                                      'continue',
+                                                      'need_input',
+                                                      'review_pass',
+                                                      'failure'
+                                                  )),
+    suggested_actions             JSONB        NOT NULL DEFAULT '[]'::jsonb
+                                                  CHECK (jsonb_typeof(suggested_actions) = 'array'),
+    metadata                      JSONB        NOT NULL DEFAULT '{}'::jsonb,
+    occurred_at                   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    created_at                    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at                    TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_channel_reply_context_expiry
-    ON channel_reply_context (expires_at);
+CREATE UNIQUE INDEX idx_channel_message_platform_message
+    ON channel_message(connection_id, platform_message_id)
+    WHERE platform_message_id <> '';
+
+CREATE UNIQUE INDEX idx_channel_message_event
+    ON channel_message(connection_id, event_id)
+    WHERE event_id <> '';
+
+CREATE UNIQUE INDEX idx_channel_message_inbound_event
+    ON channel_message(inbound_event_id)
+    WHERE inbound_event_id IS NOT NULL;
+
+CREATE UNIQUE INDEX idx_channel_message_outbound_notification
+    ON channel_message(outbound_notification_id)
+    WHERE outbound_notification_id IS NOT NULL;
+
+CREATE INDEX idx_channel_message_conversation_occurred
+    ON channel_message(conversation_id, occurred_at DESC);
+
+CREATE INDEX idx_channel_message_thread_occurred
+    ON channel_message(connection_id, chat_id, thread_id, occurred_at DESC)
+    WHERE thread_id <> '';
+
+CREATE INDEX idx_channel_message_handoff
+    ON channel_message(conversation_id, handoff_kind, occurred_at DESC)
+    WHERE handoff_kind <> 'none';
+
+CREATE INDEX idx_channel_message_reply_platform
+    ON channel_message(connection_id, reply_to_platform_message_id)
+    WHERE reply_to_platform_message_id <> '';
+
+CREATE TABLE channel_message_entity_ref (
+    id           UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    message_id   UUID         NOT NULL REFERENCES channel_message(id) ON DELETE CASCADE,
+    workspace_id UUID         REFERENCES workspace(id) ON DELETE SET NULL,
+    entity_type  TEXT         NOT NULL CHECK (entity_type IN (
+                                'issue',
+                                'agent',
+                                'agent_task',
+                                'issue_comment',
+                                'project',
+                                'pull_request',
+                                'inbox_item',
+                                'workspace'
+                              )),
+    entity_id    UUID,
+    entity_key   TEXT         NOT NULL DEFAULT '',
+    display      TEXT         NOT NULL DEFAULT '',
+    role         TEXT         NOT NULL DEFAULT 'mentioned'
+                              CHECK (role IN ('primary', 'mentioned', 'handoff_target', 'source', 'result', 'context')),
+    metadata     JSONB        NOT NULL DEFAULT '{}'::jsonb,
+    created_at   TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX idx_channel_message_entity_ref_unique_id
+    ON channel_message_entity_ref(message_id, entity_type, role, entity_id)
+    WHERE entity_id IS NOT NULL;
+
+CREATE UNIQUE INDEX idx_channel_message_entity_ref_unique_key
+    ON channel_message_entity_ref(message_id, entity_type, role, entity_key)
+    WHERE entity_key <> '';
+
+CREATE INDEX idx_channel_message_entity_ref_message
+    ON channel_message_entity_ref(message_id);
+
+CREATE INDEX idx_channel_message_entity_ref_entity_id
+    ON channel_message_entity_ref(entity_type, entity_id, created_at DESC)
+    WHERE entity_id IS NOT NULL;
+
+CREATE INDEX idx_channel_message_entity_ref_workspace_key
+    ON channel_message_entity_ref(workspace_id, entity_type, entity_key, created_at DESC)
+    WHERE workspace_id IS NOT NULL AND entity_key <> '';
+
+CREATE TABLE channel_turn (
+    id                    UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    provider              TEXT         NOT NULL,
+    connection_id         TEXT         NOT NULL REFERENCES channel_connection(id) ON DELETE CASCADE,
+    conversation_id       UUID         NOT NULL REFERENCES channel_conversation(id) ON DELETE CASCADE,
+    workspace_id          UUID         REFERENCES workspace(id) ON DELETE SET NULL,
+    inbound_event_id      UUID         REFERENCES channel_inbound_event(id) ON DELETE SET NULL,
+    inbound_message_id    UUID         REFERENCES channel_message(id) ON DELETE SET NULL,
+    outbound_message_id   UUID         REFERENCES channel_message(id) ON DELETE SET NULL,
+    sender_external_id    TEXT         NOT NULL DEFAULT '',
+    intent_kind           TEXT         NOT NULL DEFAULT '',
+    intent_source         TEXT         NOT NULL DEFAULT '',
+    intent_payload        JSONB        NOT NULL DEFAULT '{}'::jsonb,
+    authz_status          TEXT         NOT NULL DEFAULT ''
+                                      CHECK (authz_status IN ('', 'allowed', 'denied', 'skipped')),
+    status                TEXT         NOT NULL DEFAULT 'processing'
+                                      CHECK (status IN (
+                                          'processing',
+                                          'waiting_agent',
+                                          'completed',
+                                          'failed',
+                                          'dead',
+                                          'skipped'
+                                      )),
+    wait_kind             TEXT,
+    wait_task_id          UUID         REFERENCES agent_task_queue(id) ON DELETE SET NULL,
+    result_payload        JSONB        NOT NULL DEFAULT '{}'::jsonb,
+    last_error            TEXT,
+    started_at            TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    completed_at          TIMESTAMPTZ,
+    created_at            TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at            TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX idx_channel_turn_inbound_event
+    ON channel_turn(inbound_event_id)
+    WHERE inbound_event_id IS NOT NULL;
+
+CREATE UNIQUE INDEX idx_channel_turn_inbound_message
+    ON channel_turn(inbound_message_id)
+    WHERE inbound_message_id IS NOT NULL;
+
+CREATE INDEX idx_channel_turn_conversation_created
+    ON channel_turn(conversation_id, created_at DESC);
+
+CREATE INDEX idx_channel_turn_status
+    ON channel_turn(status, updated_at);
+
+CREATE INDEX idx_channel_turn_waiting_task
+    ON channel_turn(wait_task_id, updated_at)
+    WHERE wait_task_id IS NOT NULL;

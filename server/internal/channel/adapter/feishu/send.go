@@ -46,7 +46,7 @@ import (
 // non-trivial and likely to grow as we discover more Feishu error codes)
 // has a single home.
 func (a *Adapter) sendText(ctx context.Context, msg port.OutboundMessage) (port.SendResult, error) {
-	receiveIDType, receiveID := resolveReceiveID(msg.Target, msg.ChatID)
+	receiveIDType, receiveID := resolveReceiveID(msg.Target)
 	if receiveID == "" {
 		// 4xx-class: no point retrying, the caller built a malformed
 		// outbound message. Surface as Retryable=false so the outbound
@@ -86,7 +86,7 @@ func (a *Adapter) sendText(ctx context.Context, msg port.OutboundMessage) (port.
 // sends it with msg_type "interactive". The rest of the channel runtime should
 // never construct Feishu card JSON directly.
 func (a *Adapter) sendCard(ctx context.Context, msg port.OutboundCardMessage) (port.SendResult, error) {
-	receiveIDType, receiveID := resolveReceiveID(msg.Target, msg.ChatID)
+	receiveIDType, receiveID := resolveReceiveID(msg.Target)
 	if receiveID == "" {
 		return port.SendResult{Retryable: false}, errors.New("feishu: OutboundCardMessage target is empty")
 	}
@@ -151,20 +151,17 @@ func sanitizeMentionID(id string) string {
 	return id
 }
 
-func resolveReceiveID(target port.OutboundTarget, legacyChatID string) (string, string) {
+func resolveReceiveID(target port.OutboundTarget) (string, string) {
 	if target.ID == "" {
-		if legacyChatID == "" {
-			return "", ""
-		}
-		return "chat_id", legacyChatID
+		return "", ""
 	}
 	switch target.Type {
 	case port.OutboundTargetUser:
 		return "open_id", target.ID
-	case port.OutboundTargetChat, "":
+	case port.OutboundTargetChat:
 		return "chat_id", target.ID
 	default:
-		return "chat_id", target.ID
+		return "", ""
 	}
 }
 

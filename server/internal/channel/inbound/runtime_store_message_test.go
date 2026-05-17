@@ -47,16 +47,19 @@ func TestDBInboundEventStore_AcceptEventCreatesChannelMessage(t *testing.T) {
 	if _, err := pool.Exec(ctx, runtimeStoreMessagePrerequisites); err != nil {
 		t.Fatalf("create prerequisites: %v", err)
 	}
-	upSQL, err := os.ReadFile(migrationPath(t, "093_channel_message_model.up.sql"))
+	upSQL, err := os.ReadFile(migrationPath(t, "090_channel_integration.up.sql"))
 	if err != nil {
-		t.Fatalf("read migration 093 up: %v", err)
+		t.Fatalf("read channel migration up: %v", err)
 	}
 	if _, err := pool.Exec(ctx, string(upSQL)); err != nil {
-		t.Fatalf("apply migration 093: %v", err)
+		t.Fatalf("apply channel migration: %v", err)
 	}
 
 	connID := "conn-message"
-	if _, err := pool.Exec(ctx, `INSERT INTO channel_connection(id) VALUES ($1)`, connID); err != nil {
+	if _, err := pool.Exec(ctx, `
+INSERT INTO channel_connection(id, provider, display_name)
+VALUES ($1, $2, $3)
+`, connID, "feishu", "Test Feishu"); err != nil {
 		t.Fatalf("insert connection: %v", err)
 	}
 	var workspaceID string
@@ -87,7 +90,7 @@ func TestDBInboundEventStore_AcceptEventCreatesChannelMessage(t *testing.T) {
 
 	var firstMessageID, firstConversationKey, firstProcessingKey string
 	if err := pool.QueryRow(ctx, `
-SELECT m.id::text, c.conversation_key, e.conversation_key
+SELECT m.id::text, c.conversation_key, e.processing_key
 FROM channel_message m
 JOIN channel_conversation c ON c.id = m.conversation_id
 JOIN channel_inbound_event e ON e.id = m.inbound_event_id
@@ -186,10 +189,6 @@ func migrationPath(t *testing.T, name string) string {
 }
 
 const runtimeStoreMessagePrerequisites = `
-CREATE TABLE channel_connection (
-    id TEXT PRIMARY KEY
-);
-
 CREATE TABLE workspace (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid()
 );
@@ -210,78 +209,15 @@ CREATE TABLE inbox_item (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid()
 );
 
+CREATE TABLE comment (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid()
+);
+
 CREATE TABLE agent (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid()
 );
 
 CREATE TABLE agent_task_queue (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid()
-);
-
-CREATE TABLE channel_conversation (
-    provider            TEXT         NOT NULL,
-    connection_id       TEXT         NOT NULL REFERENCES channel_connection(id) ON DELETE CASCADE,
-    conversation_key    TEXT         NOT NULL,
-    chat_id             TEXT         NOT NULL,
-    chat_type           TEXT         NOT NULL CHECK (chat_type IN ('group', 'direct')),
-    sender_external_id  TEXT         NOT NULL,
-    active_event_id     UUID,
-    active_since        TIMESTAMPTZ,
-    created_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    updated_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    PRIMARY KEY (connection_id, conversation_key)
-);
-
-CREATE TABLE channel_inbound_event (
-    id                    UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-    provider              TEXT         NOT NULL,
-    connection_id         TEXT         NOT NULL REFERENCES channel_connection(id) ON DELETE CASCADE,
-    event_id              TEXT         NOT NULL,
-    event_type            TEXT         NOT NULL,
-    conversation_key      TEXT         NOT NULL,
-    chat_id               TEXT         NOT NULL,
-    chat_type             TEXT         NOT NULL CHECK (chat_type IN ('group', 'direct')),
-    sender_external_id    TEXT         NOT NULL,
-    sender_name           TEXT         NOT NULL DEFAULT '',
-    message_id            TEXT         NOT NULL DEFAULT '',
-    text                  TEXT         NOT NULL DEFAULT '',
-    canonical_event       JSONB        NOT NULL,
-    raw_payload           JSONB        NOT NULL DEFAULT '{}'::jsonb,
-    status                TEXT         NOT NULL DEFAULT 'queued'
-                                        CHECK (status IN (
-                                            'queued',
-                                            'processing',
-                                            'processed',
-                                            'waiting_agent',
-                                            'waiting_user',
-                                            'failed',
-                                            'dead',
-                                            'rejected_backpressure'
-                                        )),
-    phase                 TEXT         NOT NULL DEFAULT 'pre'
-                                        CHECK (phase IN ('pre', 'intent', 'post', 'done')),
-    wait_kind             TEXT         CHECK (wait_kind IN ('intent', 'action', 'channel_turn', 'user_clarification')),
-    wait_task_id          UUID         REFERENCES agent_task_queue(id) ON DELETE SET NULL,
-    wait_expires_at       TIMESTAMPTZ,
-    workspace_id          UUID         REFERENCES workspace(id) ON DELETE SET NULL,
-    default_project_id    UUID         REFERENCES project(id) ON DELETE SET NULL,
-    intent_payload        JSONB,
-    dispatch_completed_at TIMESTAMPTZ,
-    dispatch_reply_text   TEXT         NOT NULL DEFAULT '',
-    attempts              INTEGER      NOT NULL DEFAULT 0,
-    max_attempts          INTEGER      NOT NULL DEFAULT 3,
-    next_attempt_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    locked_at             TIMESTAMPTZ,
-    locked_by             TEXT,
-    started_at            TIMESTAMPTZ,
-    completed_at          TIMESTAMPTZ,
-    last_error            TEXT,
-    created_at            TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    updated_at            TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    UNIQUE (connection_id, event_id)
-);
-
-CREATE TABLE channel_outbound_notification (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid()
 );
 `

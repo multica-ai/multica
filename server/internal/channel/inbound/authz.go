@@ -241,7 +241,6 @@ func (s *authzStep) maybeSendReply(ctx context.Context, evt port.InboundEvent, t
 	}
 	if err := s.cfg.ReplySink.SendText(ctx, evt, port.OutboundMessage{
 		Target: target,
-		ChatID: evt.ChatID,
 		Text:   text,
 	}); err != nil {
 		slog.Warn("authz: failed to send reply",

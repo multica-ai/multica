@@ -3,127 +3,14 @@ package inbound
 import (
 	"context"
 	"testing"
-	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
-	"github.com/multica-ai/multica/server/internal/channel/conversationctx"
+	channelconversation "github.com/multica-ai/multica/server/internal/channel/conversation"
 	chintent "github.com/multica-ai/multica/server/internal/channel/intent"
 	"github.com/multica-ai/multica/server/internal/channel/port"
-	"github.com/multica-ai/multica/server/internal/channel/replyctx"
 )
 
-// ---------------------------------------------------------------------------
-// TC-10.1 / TC-10.3: ThreadID 透传
-// ---------------------------------------------------------------------------
-
-func TestApplyReplyContext_ThreadID(t *testing.T) {
+func TestApplyMessageContext_ThreadID(t *testing.T) {
 	t.Parallel()
-	store := &fakeReplyContextStore{}
-	rt := NewRuntime(RuntimeConfig{ReplyContext: store})
-	evt := port.InboundEvent{
-		ChannelName: "feishu",
-		ChatType:    port.ChatTypeDirect,
-		SenderID:    "ou_1",
-		ThreadID:    "m_root_1",
-	}
-	req := chintent.IntentRequest{}
-	chatCtx := ChatBindingContext{}
-	got := rt.applyReplyContext(context.Background(), req, evt, &chatCtx)
-	if got.ThreadID != "m_root_1" {
-		t.Fatalf("ThreadID = %q, want %q", got.ThreadID, "m_root_1")
-	}
-}
-
-func TestApplyReplyContext_NonThreadMessage(t *testing.T) {
-	t.Parallel()
-	store := &fakeReplyContextStore{}
-	rt := NewRuntime(RuntimeConfig{ReplyContext: store})
-	evt := port.InboundEvent{
-		ChannelName: "feishu",
-		ChatType:    port.ChatTypeDirect,
-		SenderID:    "ou_1",
-		ThreadID:    "",
-	}
-	req := chintent.IntentRequest{}
-	chatCtx := ChatBindingContext{}
-	got := rt.applyReplyContext(context.Background(), req, evt, &chatCtx)
-	if got.ThreadID != "" {
-		t.Fatalf("ThreadID = %q, want empty", got.ThreadID)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// TC-8.1 / TC-9.1: 显式信号透传（quote + reply-to）
-// ---------------------------------------------------------------------------
-
-func TestApplyReplyContext_ExplicitSignals(t *testing.T) {
-	t.Parallel()
-	store := &fakeReplyContextStore{}
-	rt := NewRuntime(RuntimeConfig{ReplyContext: store})
-	evt := port.InboundEvent{
-		ChannelName:      "feishu",
-		ChatType:         port.ChatTypeDirect,
-		SenderID:         "ou_1",
-		ThreadID:         "m_root",
-		QuotedMessageID:  "m_quoted",
-		QuotedText:       "quoted text",
-		ReplyToMessageID: "m_parent",
-	}
-	req := chintent.IntentRequest{}
-	chatCtx := ChatBindingContext{}
-	got := rt.applyReplyContext(context.Background(), req, evt, &chatCtx)
-	if got.ThreadID != "m_root" {
-		t.Fatalf("ThreadID = %q, want %q", got.ThreadID, "m_root")
-	}
-	if got.QuotedMessageID != "m_quoted" {
-		t.Fatalf("QuotedMessageID = %q, want %q", got.QuotedMessageID, "m_quoted")
-	}
-	if got.QuotedText != "quoted text" {
-		t.Fatalf("QuotedText = %q, want %q", got.QuotedText, "quoted text")
-	}
-	if got.ReplyToMessageID != "m_parent" {
-		t.Fatalf("ReplyToMessageID = %q, want %q", got.ReplyToMessageID, "m_parent")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// TC-9.5: 非飞书 inbound 事件，新字段自然留空
-// ---------------------------------------------------------------------------
-
-func TestApplyReplyContext_NonFeishuEvent(t *testing.T) {
-	t.Parallel()
-	store := &fakeReplyContextStore{}
-	rt := NewRuntime(RuntimeConfig{ReplyContext: store})
-	evt := port.InboundEvent{
-		ChannelName: "slack",
-		ChatType:    port.ChatTypeDirect,
-		SenderID:    "u_1",
-	}
-	req := chintent.IntentRequest{}
-	chatCtx := ChatBindingContext{}
-	got := rt.applyReplyContext(context.Background(), req, evt, &chatCtx)
-	if got.ThreadID != "" {
-		t.Fatalf("ThreadID = %q, want empty", got.ThreadID)
-	}
-	if got.QuotedMessageID != "" {
-		t.Fatalf("QuotedMessageID = %q, want empty", got.QuotedMessageID)
-	}
-	if got.QuotedText != "" {
-		t.Fatalf("QuotedText = %q, want empty", got.QuotedText)
-	}
-	if got.ReplyToMessageID != "" {
-		t.Fatalf("ReplyToMessageID = %q, want empty", got.ReplyToMessageID)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// TC-10.4: thread 消息但 context_entries store 未 wire-up（TODO 占位期）
-// ---------------------------------------------------------------------------
-
-func TestApplyReplyContext_ThreadIDWithoutContextStore(t *testing.T) {
-	t.Parallel()
-	// ReplyContext is nil but ThreadID should still be passed through.
 	rt := NewRuntime(RuntimeConfig{})
 	evt := port.InboundEvent{
 		ChannelName: "feishu",
@@ -131,38 +18,56 @@ func TestApplyReplyContext_ThreadIDWithoutContextStore(t *testing.T) {
 		SenderID:    "ou_1",
 		ThreadID:    "m_root_1",
 	}
-	req := chintent.IntentRequest{}
-	chatCtx := ChatBindingContext{}
-	got := rt.applyReplyContext(context.Background(), req, evt, &chatCtx)
+	got := rt.applyMessageContext(context.Background(), chintent.IntentRequest{}, evt)
 	if got.ThreadID != "m_root_1" {
 		t.Fatalf("ThreadID = %q, want %q", got.ThreadID, "m_root_1")
 	}
 }
 
-func TestApplyReplyContext_ConversationContextEntities(t *testing.T) {
+func TestApplyMessageContext_ExplicitSignals(t *testing.T) {
+	t.Parallel()
+	rt := NewRuntime(RuntimeConfig{})
+	evt := port.InboundEvent{
+		ChannelName:      "feishu",
+		ChatType:         port.ChatTypeDirect,
+		SenderID:         "ou_1",
+		ThreadID:         "m_root",
+		QuotedMessageID:  "m_quoted",
+		QuotedText:       "quoted text STA-99",
+		ReplyToMessageID: "m_parent",
+	}
+	got := rt.applyMessageContext(context.Background(), chintent.IntentRequest{}, evt)
+	if got.ThreadID != "m_root" {
+		t.Fatalf("ThreadID = %q, want %q", got.ThreadID, "m_root")
+	}
+	if got.QuotedMessageID != "m_quoted" {
+		t.Fatalf("QuotedMessageID = %q, want %q", got.QuotedMessageID, "m_quoted")
+	}
+	if got.QuotedText != "quoted text STA-99" {
+		t.Fatalf("QuotedText = %q, want %q", got.QuotedText, "quoted text STA-99")
+	}
+	if got.ReplyToMessageID != "m_parent" {
+		t.Fatalf("ReplyToMessageID = %q, want %q", got.ReplyToMessageID, "m_parent")
+	}
+	if len(got.ExplicitEntities) != 1 || got.ExplicitEntities[0].EntityKey != "STA-99" {
+		t.Fatalf("ExplicitEntities = %+v, want quoted STA-99", got.ExplicitEntities)
+	}
+}
+
+func TestApplyMessageContext_RecentMessageEntities(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	store := conversationctx.NewFakeStore()
-	scope := conversationctx.Scope{
-		ConnectionID: "conn-1",
-		WorkspaceID:  "ws-1",
-		ChatID:       "chat-1",
-		SenderID:     "ou_1",
-		ThreadID:     "thread-1",
-	}
-	if err := store.Upsert(ctx, conversationctx.ConversationContext{
-		Scope: scope,
-		Entities: []conversationctx.EntityRef{{
-			Key:         "STA-12",
-			Type:        conversationctx.EntityTypeIssue,
-			MentionedAt: time.Now(),
+	store := &fakeConversationStore{
+		byInbound: map[string]channelconversation.Message{
+			"evt-row-1": {ConversationID: "00000000-0000-0000-0000-000000000001"},
+		},
+		recentRefs: []channelconversation.EntityRef{{
+			EntityType: channelconversation.EntityTypeIssue,
+			EntityKey:  "STA-12",
+			Role:       channelconversation.EntityRoleMentioned,
 		}},
-		ExpiresAt: time.Now().Add(time.Hour),
-	}); err != nil {
-		t.Fatalf("Upsert: %v", err)
 	}
-
-	rt := NewRuntime(RuntimeConfig{ConversationCtx: store})
+	rt := NewRuntime(RuntimeConfig{ConversationStore: store})
 	evt := port.InboundEvent{
 		ChannelConnectionID: "conn-1",
 		ChannelName:         "feishu",
@@ -171,43 +76,33 @@ func TestApplyReplyContext_ConversationContextEntities(t *testing.T) {
 		SenderID:            "ou_1",
 		ThreadID:            "thread-1",
 	}
-	req := chintent.IntentRequest{WorkspaceID: "ws-1"}
-	got := rt.applyReplyContext(ctx, req, evt, &ChatBindingContext{WorkspaceID: "ws-1"})
-	if len(got.ContextEntities) != 1 || got.ContextEntities[0].Key != "STA-12" {
+	req := chintent.IntentRequest{InboundEventID: "evt-row-1", WorkspaceID: "ws-1"}
+	got := rt.applyMessageContext(ctx, req, evt)
+	if len(got.ContextEntities) != 1 || got.ContextEntities[0].EntityKey != "STA-12" {
 		t.Fatalf("ContextEntities = %+v, want STA-12", got.ContextEntities)
 	}
 	if got.ContextIssueKey != "STA-12" {
 		t.Fatalf("ContextIssueKey = %q, want STA-12", got.ContextIssueKey)
 	}
-	if got.ContextMode != "conversation" {
-		t.Fatalf("ContextMode = %q, want conversation", got.ContextMode)
+	if got.ContextMode != "message" {
+		t.Fatalf("ContextMode = %q, want message", got.ContextMode)
 	}
 }
 
-func TestApplyReplyContext_QuotedTextEntityTakesPriority(t *testing.T) {
+func TestApplyMessageContext_QuotedTextEntityTakesPriority(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	store := conversationctx.NewFakeStore()
-	scope := conversationctx.Scope{
-		ConnectionID: "conn-1",
-		WorkspaceID:  "ws-1",
-		ChatID:       "chat-1",
-		SenderID:     "ou_1",
-		ThreadID:     "",
-	}
-	if err := store.Upsert(ctx, conversationctx.ConversationContext{
-		Scope: scope,
-		Entities: []conversationctx.EntityRef{{
-			Key:         "STA-12",
-			Type:        conversationctx.EntityTypeIssue,
-			MentionedAt: time.Now(),
+	store := &fakeConversationStore{
+		byInbound: map[string]channelconversation.Message{
+			"evt-row-1": {ConversationID: "00000000-0000-0000-0000-000000000001"},
+		},
+		recentRefs: []channelconversation.EntityRef{{
+			EntityType: channelconversation.EntityTypeIssue,
+			EntityKey:  "STA-12",
+			Role:       channelconversation.EntityRoleMentioned,
 		}},
-		ExpiresAt: time.Now().Add(time.Hour),
-	}); err != nil {
-		t.Fatalf("Upsert: %v", err)
 	}
-
-	rt := NewRuntime(RuntimeConfig{ConversationCtx: store})
+	rt := NewRuntime(RuntimeConfig{ConversationStore: store})
 	evt := port.InboundEvent{
 		ChannelConnectionID: "conn-1",
 		ChannelName:         "feishu",
@@ -216,29 +111,64 @@ func TestApplyReplyContext_QuotedTextEntityTakesPriority(t *testing.T) {
 		SenderID:            "ou_1",
 		QuotedText:          "STA-99 已经创建",
 	}
-	req := chintent.IntentRequest{WorkspaceID: "ws-1"}
-	got := rt.applyReplyContext(ctx, req, evt, &ChatBindingContext{WorkspaceID: "ws-1"})
+	req := chintent.IntentRequest{InboundEventID: "evt-row-1", WorkspaceID: "ws-1"}
+	got := rt.applyMessageContext(ctx, req, evt)
 	if got.ContextIssueKey != "STA-99" {
 		t.Fatalf("ContextIssueKey = %q, want quoted STA-99", got.ContextIssueKey)
 	}
-	if len(got.ExplicitEntities) != 1 || got.ExplicitEntities[0].Key != "STA-99" {
+	if len(got.ExplicitEntities) != 1 || got.ExplicitEntities[0].EntityKey != "STA-99" {
 		t.Fatalf("ExplicitEntities = %+v, want quoted STA-99", got.ExplicitEntities)
 	}
-	if len(got.ContextEntities) != 1 || got.ContextEntities[0].Key != "STA-12" {
+	if len(got.ContextEntities) != 1 || got.ContextEntities[0].EntityKey != "STA-12" {
 		t.Fatalf("ContextEntities = %+v, want temporal STA-12", got.ContextEntities)
+	}
+}
+
+func TestApplyMessageContext_QuotedMessageEntityRefsAreExplicit(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := &fakeConversationStore{
+		byPlatform: map[string]channelconversation.Message{
+			"conn-1\x00msg-card": {ID: "msg-1"},
+		},
+		refs: map[string][]channelconversation.EntityRef{
+			"msg-1": {{
+				EntityType: channelconversation.EntityTypeIssue,
+				EntityKey:  "STA-88",
+				Role:       channelconversation.EntityRolePrimary,
+			}},
+		},
+	}
+	rt := NewRuntime(RuntimeConfig{ConversationStore: store})
+	evt := port.InboundEvent{
+		ChannelConnectionID: "conn-1",
+		ChannelName:         "feishu",
+		ChatID:              "chat-1",
+		ChatType:            port.ChatTypeGroup,
+		SenderID:            "ou_1",
+		QuotedMessageID:     "msg-card",
+		QuotedText:          "Review PASS",
+	}
+	req := chintent.IntentRequest{InboundEventID: "evt-row-1", WorkspaceID: "ws-1"}
+	got := rt.applyMessageContext(ctx, req, evt)
+	if len(got.ExplicitEntities) != 1 || got.ExplicitEntities[0].EntityKey != "STA-88" {
+		t.Fatalf("ExplicitEntities = %+v, want quoted message STA-88", got.ExplicitEntities)
+	}
+	if got.ContextIssueKey != "STA-88" {
+		t.Fatalf("ContextIssueKey = %q, want STA-88", got.ContextIssueKey)
 	}
 }
 
 func TestApplyRequestContextToIntentResult_ExplicitEntityTakesPriority(t *testing.T) {
 	t.Parallel()
 	req := chintent.IntentRequest{
-		ExplicitEntities: []conversationctx.EntityRef{{
-			Key:  "STA-99",
-			Type: conversationctx.EntityTypeIssue,
+		ExplicitEntities: []channelconversation.EntityRef{{
+			EntityKey:  "STA-99",
+			EntityType: channelconversation.EntityTypeIssue,
 		}},
-		ContextEntities: []conversationctx.EntityRef{{
-			Key:  "STA-12",
-			Type: conversationctx.EntityTypeIssue,
+		ContextEntities: []channelconversation.EntityRef{{
+			EntityKey:  "STA-12",
+			EntityType: channelconversation.EntityTypeIssue,
 		}},
 	}
 	result := chintent.IntentResult{
@@ -258,9 +188,9 @@ func TestApplyRequestContextToIntentResult_FillsSingleContextIssue(t *testing.T)
 	t.Parallel()
 	req := chintent.IntentRequest{
 		ContextIssueKey: "STA-12",
-		ContextEntities: []conversationctx.EntityRef{{
-			Key:  "STA-12",
-			Type: conversationctx.EntityTypeIssue,
+		ContextEntities: []channelconversation.EntityRef{{
+			EntityKey:  "STA-12",
+			EntityType: channelconversation.EntityTypeIssue,
 		}},
 	}
 	result := chintent.IntentResult{
@@ -279,9 +209,9 @@ func TestApplyRequestContextToIntentResult_FillsSingleContextIssue(t *testing.T)
 func TestApplyRequestContextToIntentResult_DoesNotGuessMultipleContextIssues(t *testing.T) {
 	t.Parallel()
 	req := chintent.IntentRequest{
-		ContextEntities: []conversationctx.EntityRef{
-			{Key: "STA-12", Type: conversationctx.EntityTypeIssue},
-			{Key: "STA-13", Type: conversationctx.EntityTypeIssue},
+		ContextEntities: []channelconversation.EntityRef{
+			{EntityKey: "STA-12", EntityType: channelconversation.EntityTypeIssue},
+			{EntityKey: "STA-13", EntityType: channelconversation.EntityTypeIssue},
 		},
 	}
 	result := chintent.IntentResult{
@@ -300,12 +230,12 @@ func TestApplyRequestContextToIntentResult_DoesNotGuessMultipleContextIssues(t *
 func TestApplyRequestContextToIntentResult_DoesNotFallbackWhenExplicitAmbiguous(t *testing.T) {
 	t.Parallel()
 	req := chintent.IntentRequest{
-		ExplicitEntities: []conversationctx.EntityRef{
-			{Key: "STA-99", Type: conversationctx.EntityTypeIssue},
-			{Key: "STA-100", Type: conversationctx.EntityTypeIssue},
+		ExplicitEntities: []channelconversation.EntityRef{
+			{EntityKey: "STA-99", EntityType: channelconversation.EntityTypeIssue},
+			{EntityKey: "STA-100", EntityType: channelconversation.EntityTypeIssue},
 		},
-		ContextEntities: []conversationctx.EntityRef{
-			{Key: "STA-12", Type: conversationctx.EntityTypeIssue},
+		ContextEntities: []channelconversation.EntityRef{
+			{EntityKey: "STA-12", EntityType: channelconversation.EntityTypeIssue},
 		},
 	}
 	result := chintent.IntentResult{
@@ -319,64 +249,4 @@ func TestApplyRequestContextToIntentResult_DoesNotFallbackWhenExplicitAmbiguous(
 	if got.Intent.Params["issue_key"] != "" {
 		t.Fatalf("issue_key = %q, want empty for ambiguous explicit context", got.Intent.Params["issue_key"])
 	}
-}
-
-// ---------------------------------------------------------------------------
-// 旧逻辑兼容：replyctx.Lookup 仍填充 ContextIssueKey / ContextMode
-// ---------------------------------------------------------------------------
-
-func TestApplyReplyContext_LegacyReplyContext(t *testing.T) {
-	t.Parallel()
-	store := &fakeReplyContextStore{
-		replyCtx: replyctx.Context{
-			IssueIdentifier: "STA-78",
-			WorkspaceID:     pgtype.UUID{},
-		},
-		ok: true,
-	}
-	rt := NewRuntime(RuntimeConfig{ReplyContext: store})
-	evt := port.InboundEvent{
-		ChannelName:     "feishu",
-		ChatType:        port.ChatTypeDirect,
-		SenderID:        "ou_1",
-		ThreadID:        "m_root_1",
-		QuotedMessageID: "m_q",
-	}
-	req := chintent.IntentRequest{}
-	chatCtx := ChatBindingContext{}
-	got := rt.applyReplyContext(context.Background(), req, evt, &chatCtx)
-	if got.ContextIssueKey != "STA-78" {
-		t.Fatalf("ContextIssueKey = %q, want STA-78", got.ContextIssueKey)
-	}
-	if got.ContextMode != "reply" {
-		t.Fatalf("ContextMode = %q, want reply", got.ContextMode)
-	}
-	if got.ThreadID != "m_root_1" {
-		t.Fatalf("ThreadID = %q, want m_root_1", got.ThreadID)
-	}
-	if got.QuotedMessageID != "m_q" {
-		t.Fatalf("QuotedMessageID = %q, want m_q", got.QuotedMessageID)
-	}
-}
-
-type fakeReplyContextStore struct {
-	replyCtx replyctx.Context
-	ok       bool
-	err      error
-}
-
-func (s *fakeReplyContextStore) Lookup(ctx context.Context, connectionID, senderID, chatID string, at time.Time) (replyctx.Context, bool, error) {
-	return s.replyCtx, s.ok, s.err
-}
-
-func (s *fakeReplyContextStore) Save(ctx context.Context, connectionID, senderID, issueIdentifier string) error {
-	return nil
-}
-
-func (s *fakeReplyContextStore) Clear(ctx context.Context, connectionID, senderID, chatID string) error {
-	return nil
-}
-
-func (s *fakeReplyContextStore) Upsert(ctx context.Context, item replyctx.Context) error {
-	return nil
 }

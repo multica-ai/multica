@@ -7,7 +7,6 @@ import (
 	"time"
 
 	channelconversation "github.com/multica-ai/multica/server/internal/channel/conversation"
-	"github.com/multica-ai/multica/server/internal/channel/conversationctx"
 	chintent "github.com/multica-ai/multica/server/internal/channel/intent"
 	"github.com/multica-ai/multica/server/internal/channel/port"
 )
@@ -261,7 +260,7 @@ func TestRuntimeApplyIntentResult_ClarifyContinuesToPostPipeline(t *testing.T) {
 		t.Fatalf("applyIntentResult: %v", err)
 	}
 	if waiting {
-		t.Fatal("ASKClarify should not enter waiting_user")
+		t.Fatal("ASKClarify should continue through the post pipeline")
 	}
 	if rec.Phase != InboundPhasePost {
 		t.Fatalf("phase = %q, want post", rec.Phase)
@@ -309,30 +308,21 @@ func TestRuntimeProcessRecord_NaturalLanguageStartsChannelTurnBeforeRules(t *tes
 func TestRuntimeProcessRecord_StartsChannelTurnWithConversationContext(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeRuntimeStore{}
-	contextStore := conversationctx.NewFakeStore()
-	scope := conversationctx.Scope{
-		ConnectionID: "conn-1",
-		WorkspaceID:  "550e8400-e29b-41d4-a716-446655440001",
-		ChatID:       "oc_1",
-		SenderID:     "ou_1",
-		ThreadID:     "thread-1",
-	}
-	if err := contextStore.Upsert(ctx, conversationctx.ConversationContext{
-		Scope: scope,
-		Entities: []conversationctx.EntityRef{{
-			Key:         "STA-12",
-			Type:        conversationctx.EntityTypeIssue,
-			MentionedAt: time.Now(),
+	conversationStore := &fakeConversationStore{
+		byInbound: map[string]channelconversation.Message{
+			"row-1": {ConversationID: "00000000-0000-0000-0000-000000000001"},
+		},
+		recentRefs: []channelconversation.EntityRef{{
+			EntityType: channelconversation.EntityTypeIssue,
+			EntityKey:  "STA-12",
+			Role:       channelconversation.EntityRoleMentioned,
 		}},
-		ExpiresAt: time.Now().Add(time.Hour),
-	}); err != nil {
-		t.Fatalf("Upsert: %v", err)
 	}
 	channelTurn := &recordingChannelTurnClient{taskID: "550e8400-e29b-41d4-a716-446655440000"}
 	rt := NewRuntime(RuntimeConfig{
-		Store:           store,
-		ConversationCtx: contextStore,
-		ChannelTurn:     channelTurn,
+		Store:             store,
+		ConversationStore: conversationStore,
+		ChannelTurn:       channelTurn,
 	})
 
 	err := rt.processRecord(ctx, &InboundEventRecord{
@@ -361,7 +351,7 @@ func TestRuntimeProcessRecord_StartsChannelTurnWithConversationContext(t *testin
 		t.Fatalf("StartAgentTurn calls = %d, want 1", len(channelTurn.startReqs))
 	}
 	req := channelTurn.startReqs[0]
-	if len(req.ContextEntities) != 1 || req.ContextEntities[0].Key != "STA-12" {
+	if len(req.ContextEntities) != 1 || req.ContextEntities[0].EntityKey != "STA-12" {
 		t.Fatalf("ContextEntities = %+v, want STA-12", req.ContextEntities)
 	}
 	if req.ContextIssueKey != "STA-12" {
@@ -375,28 +365,19 @@ func TestRuntimeProcessRecord_StartsChannelTurnWithConversationContext(t *testin
 func TestRuntimeProcessRecord_FillsRuleIntentIssueKeyBeforePostPhase(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeRuntimeStore{}
-	contextStore := conversationctx.NewFakeStore()
-	scope := conversationctx.Scope{
-		ConnectionID: "conn-1",
-		WorkspaceID:  "550e8400-e29b-41d4-a716-446655440001",
-		ChatID:       "oc_1",
-		SenderID:     "ou_1",
-		ThreadID:     "",
-	}
-	if err := contextStore.Upsert(ctx, conversationctx.ConversationContext{
-		Scope: scope,
-		Entities: []conversationctx.EntityRef{{
-			Key:         "STA-12",
-			Type:        conversationctx.EntityTypeIssue,
-			MentionedAt: time.Now(),
+	conversationStore := &fakeConversationStore{
+		byInbound: map[string]channelconversation.Message{
+			"row-1": {ConversationID: "00000000-0000-0000-0000-000000000001"},
+		},
+		recentRefs: []channelconversation.EntityRef{{
+			EntityType: channelconversation.EntityTypeIssue,
+			EntityKey:  "STA-12",
+			Role:       channelconversation.EntityRoleMentioned,
 		}},
-		ExpiresAt: time.Now().Add(time.Hour),
-	}); err != nil {
-		t.Fatalf("Upsert: %v", err)
 	}
 	rt := NewRuntime(RuntimeConfig{
-		Store:           store,
-		ConversationCtx: contextStore,
+		Store:             store,
+		ConversationStore: conversationStore,
 		RuleResolvers: []chintent.IntentResolver{fakeResolver{
 			result: chintent.IntentResult{
 				Matched: true,
@@ -433,85 +414,6 @@ func TestRuntimeProcessRecord_FillsRuleIntentIssueKeyBeforePostPhase(t *testing.
 	}
 	if store.savedPhase != InboundPhasePost {
 		t.Fatalf("saved phase = %q, want %q", store.savedPhase, InboundPhasePost)
-	}
-}
-
-func TestRuntimeResumeChannelTurn_AppendsConversationContext(t *testing.T) {
-	ctx := context.Background()
-	contextStore := conversationctx.NewFakeStore()
-	store := &fakeRuntimeStore{load: &InboundEventRecord{
-		ID:          "row-1",
-		WorkspaceID: "550e8400-e29b-41d4-a716-446655440001",
-		Event: port.InboundEvent{
-			ChannelName:         "feishu",
-			ChannelConnectionID: "conn-1",
-			EventID:             "evt-1",
-			ChatID:              "oc_1",
-			ChatType:            port.ChatTypeGroup,
-			SenderID:            "ou_1",
-			ThreadID:            "thread-1",
-		},
-	}}
-	rt := NewRuntime(RuntimeConfig{
-		Store:           store,
-		ReplySink:       &recordingReplySink{},
-		ChannelTurn:     &recordingChannelTurnClient{reply: "已处理 STA-12"},
-		ConversationCtx: contextStore,
-	})
-
-	rt.resumeChannelTurn(ctx, WaitingAgentEvent{ID: "row-1", WaitTaskID: "task-1", WaitKind: WaitKindChannelTurn})
-
-	scope := conversationctx.Scope{
-		ConnectionID: "conn-1",
-		WorkspaceID:  "550e8400-e29b-41d4-a716-446655440001",
-		ChatID:       "oc_1",
-		SenderID:     "ou_1",
-		ThreadID:     "thread-1",
-	}
-	got, ok, err := contextStore.Get(ctx, scope)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if !ok || len(got.Entities) != 1 || got.Entities[0].Key != "STA-12" {
-		t.Fatalf("context entities = %+v, ok=%v; want STA-12", got.Entities, ok)
-	}
-	if !store.processed {
-		t.Fatal("expected record to be marked processed")
-	}
-}
-
-func TestRuntimeSweepOnce_DeletesExpiredConversationContext(t *testing.T) {
-	ctx := context.Background()
-	contextStore := conversationctx.NewFakeStore()
-	scope := conversationctx.Scope{
-		ConnectionID: "conn-1",
-		WorkspaceID:  "ws-1",
-		ChatID:       "oc_1",
-		SenderID:     "ou_1",
-		ThreadID:     "thread-1",
-	}
-	if err := contextStore.Upsert(ctx, conversationctx.ConversationContext{
-		Scope: scope,
-		Entities: []conversationctx.EntityRef{{
-			Key:         "STA-12",
-			Type:        conversationctx.EntityTypeIssue,
-			MentionedAt: time.Now().Add(-time.Hour),
-		}},
-		ExpiresAt: time.Now().Add(-time.Minute),
-	}); err != nil {
-		t.Fatalf("Upsert: %v", err)
-	}
-	rt := NewRuntime(RuntimeConfig{
-		Store:           &fakeRuntimeStore{},
-		ConversationCtx: contextStore,
-	})
-
-	rt.sweepOnce(ctx)
-
-	if _, ok, err := contextStore.Get(ctx, scope); err != nil {
-		t.Fatalf("Get: %v", err)
-	} else if ok {
-		t.Fatal("expected expired conversation context to be deleted")
 	}
 }
 
@@ -731,19 +633,18 @@ func TestRuntimeWorker_DeadRetryNotifiesUser(t *testing.T) {
 }
 
 type fakeRuntimeStore struct {
-	accept               AcceptResult
-	claim                InboundEventRecord
-	load                 *InboundEventRecord
-	savedEvent           port.InboundEvent
-	savedPhase           string
-	claimed              bool
-	waitingAgent         bool
-	waitKind             string
-	waitingUserExpiresAt time.Time
-	processed            bool
-	retry                RetryResult
-	onRetry              func()
-	chatCtx              ChatBindingContext
+	accept       AcceptResult
+	claim        InboundEventRecord
+	load         *InboundEventRecord
+	savedEvent   port.InboundEvent
+	savedPhase   string
+	claimed      bool
+	waitingAgent bool
+	waitKind     string
+	processed    bool
+	retry        RetryResult
+	onRetry      func()
+	chatCtx      ChatBindingContext
 }
 
 func (s *fakeRuntimeStore) AcceptEvent(context.Context, port.InboundEvent, AcceptOptions) (AcceptResult, error) {
@@ -783,11 +684,6 @@ func (s *fakeRuntimeStore) MarkWaitingAgent(_ context.Context, _ string, _ port.
 	return nil
 }
 
-func (s *fakeRuntimeStore) MarkWaitingUser(_ context.Context, _ string, _ port.InboundEvent, _ string, _ ChatBindingContext, expiresAt time.Time) error {
-	s.waitingUserExpiresAt = expiresAt
-	return nil
-}
-
 func (s *fakeRuntimeStore) MarkProcessed(context.Context, string) error {
 	s.processed = true
 	return nil
@@ -814,10 +710,6 @@ func (s *fakeRuntimeStore) LookupChatContext(context.Context, string, string) (C
 
 func (s *fakeRuntimeStore) RequeueStaleProcessing(context.Context, time.Duration) (int64, error) {
 	return 0, nil
-}
-
-func (s *fakeRuntimeStore) ExpireWaitingUser(context.Context, int) ([]ExpiredWaitingUserEvent, error) {
-	return nil, nil
 }
 
 type recordingReplySink struct {

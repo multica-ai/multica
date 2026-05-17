@@ -518,7 +518,6 @@ func (s *Subscriber) sendToUser(workspaceID, userID, eventKind, title, body stri
 
 	card := port.OutboundCardMessage{
 		Target:   port.TargetChat(targetChatID),
-		ChatID:   targetChatID,
 		Title:    notificationTitle(title, ctxMeta),
 		Body:     body,
 		Mentions: mentionList(mentionExternalUserID),

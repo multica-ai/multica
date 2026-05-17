@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/multica-ai/multica/server/internal/channel/conversationctx"
+	channelconversation "github.com/multica-ai/multica/server/internal/channel/conversation"
 )
 
 const (
@@ -45,14 +45,13 @@ type IntentRequest struct {
 	QuotedText       string
 	ReplyToMessageID string
 
-	// ContextEntities carries the most recent entity references from
-	// context_entries for this scope. Empty if no context store is configured
-	// or no recent entities exist.
-	ContextEntities []conversationctx.EntityRef
+	// ContextEntities carries recent entity references from channel messages
+	// in this conversation and sender scope.
+	ContextEntities []channelconversation.EntityRef
 	// ExplicitEntities carries entities derived from explicit platform signals
 	// such as quote/reply targets. It has higher priority than temporal
 	// conversation context.
-	ExplicitEntities []conversationctx.EntityRef
+	ExplicitEntities []channelconversation.EntityRef
 }
 
 // IntentResult is a resolver's answer. Matched=false lets the chain continue.
@@ -207,14 +206,14 @@ func appendContextSignals(b *strings.Builder, req IntentRequest) {
 		b.WriteString("\nExplicit context:\n")
 		b.WriteString("User explicitly referenced these entities, highest priority:\n")
 		for _, e := range req.ExplicitEntities {
-			fmt.Fprintf(b, "- %s (%s)\n", e.Key, e.Type)
+			fmt.Fprintf(b, "- %s (%s)\n", e.EntityKey, e.EntityType)
 		}
 	}
 	if len(req.ContextEntities) > 0 {
 		b.WriteString("\nConversation context:\n")
 		b.WriteString("Recent entities from this conversation:\n")
 		for _, e := range req.ContextEntities {
-			fmt.Fprintf(b, "- %s (%s)\n", e.Key, e.Type)
+			fmt.Fprintf(b, "- %s (%s)\n", e.EntityKey, e.EntityType)
 		}
 	}
 	if req.QuotedText != "" {

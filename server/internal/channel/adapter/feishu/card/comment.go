@@ -32,7 +32,7 @@ type CommentData struct {
 	// Body is the comment text; automatically truncated to 200 runes by
 	// CommentCard.
 	Body string
-	// URL is the web link to the issue detail page (reply context).
+	// URL is the web link to the issue detail page.
 	URL string
 }
 

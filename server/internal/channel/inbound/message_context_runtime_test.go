@@ -184,6 +184,7 @@ type fakeConversationStore struct {
 	byPlatform    map[string]channelconversation.Message
 	byInbound     map[string]channelconversation.Message
 	refs          map[string][]channelconversation.EntityRef
+	recentRefs    []channelconversation.EntityRef
 	recent        []channelconversation.Message
 	upsertedTurns []channelconversation.Turn
 }
@@ -222,6 +223,10 @@ func (f *fakeConversationStore) FindMessageByInboundEventID(_ context.Context, i
 
 func (f *fakeConversationStore) ListEntityRefsByMessageID(_ context.Context, messageID string) ([]channelconversation.EntityRef, error) {
 	return append([]channelconversation.EntityRef(nil), f.refs[messageID]...), nil
+}
+
+func (f *fakeConversationStore) ListRecentContextEntityRefs(context.Context, string, string, string, string, time.Time, int) ([]channelconversation.EntityRef, error) {
+	return append([]channelconversation.EntityRef(nil), f.recentRefs...), nil
 }
 
 func (f *fakeConversationStore) ListRecentHandoffMessages(context.Context, string, string, string, time.Time, int) ([]channelconversation.Message, error) {

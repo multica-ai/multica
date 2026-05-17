@@ -73,8 +73,8 @@ func TestDispatchStep_RecallEvent_AnnotatesWithoutMutating(t *testing.T) {
 		t.Fatalf("expected 1 reply, got %d", len(recCh.sends))
 	}
 	reply := recCh.sends[0]
-	if reply.ChatID != "chat-1" {
-		t.Errorf("reply ChatID = %q, want %q", reply.ChatID, "chat-1")
+	if reply.Target != port.TargetChat("chat-1") {
+		t.Errorf("reply Target = %+v, want chat-1", reply.Target)
 	}
 	if !strings.Contains(reply.Text, "MESSAGE_RECALLED") {
 		t.Errorf("reply missing MESSAGE_RECALLED key: %q", reply.Text)
@@ -97,11 +97,11 @@ func TestDispatchStep_NonRecallEventWithMessageID_StillDispatchesIntent(t *testi
 
 	cfg, issueSvc, _, _ := buildDispatchConfig()
 	issueSvc.createReturn = facade.Issue{
-		ID:         uuid(0xAA),
+		ID:          uuid(0xAA),
 		WorkspaceID: uuid(0x01),
-		Identifier: "STA-99",
-		Title:      "placeholder",
-		Status:     "todo",
+		Identifier:  "STA-99",
+		Title:       "placeholder",
+		Status:      "todo",
 	}
 	step := inbound.NewDispatchStep(cfg)
 
