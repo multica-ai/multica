@@ -396,12 +396,15 @@ WHERE i.workspace_id = $1
   AND i.archived = true
   AND i.route = 'inbox'
 ORDER BY i.created_at DESC
+LIMIT $4 OFFSET $5
 `
 
 type ListArchivedInboxFeedParams struct {
 	WorkspaceID   pgtype.UUID `json:"workspace_id"`
 	RecipientType string      `json:"recipient_type"`
 	RecipientID   pgtype.UUID `json:"recipient_id"`
+	Limit         int32       `json:"limit"`
+	Offset        int32       `json:"offset"`
 }
 
 type ListArchivedInboxFeedRow struct {
@@ -427,9 +430,16 @@ type ListArchivedInboxFeedRow struct {
 }
 
 // Archived inbox-routed items for a user. Backs the "show archived" view in
-// the inbox kebab menu.
+// the inbox kebab menu. CEREBRO-PATCH(inbox-archive-pagination): page the
+// archived view so it does not load the full archive on first render.
 func (q *Queries) ListArchivedInboxFeed(ctx context.Context, arg ListArchivedInboxFeedParams) ([]ListArchivedInboxFeedRow, error) {
-	rows, err := q.db.Query(ctx, listArchivedInboxFeed, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
+	rows, err := q.db.Query(ctx, listArchivedInboxFeed,
+		arg.WorkspaceID,
+		arg.RecipientType,
+		arg.RecipientID,
+		arg.Limit,
+		arg.Offset,
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -2,14 +2,15 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import {
+  ARCHIVED_INBOX_PAGE_SIZE,
   inboxListOptions,
-  inboxArchivedListOptions,
+  inboxKeys,
   activeIssueTasksOptions,
   deduplicateInboxItems,
   useInboxUnreadCount,
@@ -35,6 +36,7 @@ import { channelListOptions } from "@multica/core/channels";
 import { useChatStore } from "@multica/core/chat";
 import { ChannelDetail, NewMessageModal } from "../../channels";
 import { IssueDetail } from "../../issues/components";
+import { InfiniteScrollSentinel } from "../../issues/components/infinite-scroll-sentinel";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { useNavigation } from "../../navigation";
 import { SidebarTrigger } from "@multica/ui/components/ui/sidebar";
@@ -131,16 +133,33 @@ export function InboxPage() {
     ...inboxListOptions(wsId),
     enabled: !isArchivedView,
   });
-  const inboxArchivedQuery = useQuery({
-    ...inboxArchivedListOptions(wsId),
+  // CEREBRO-PATCH(inbox-archive-pagination): archived view uses infinite
+  // paging because sara.local can have a large archive; active inbox remains
+  // on the existing query to avoid changing its cache behavior.
+  const inboxArchivedQuery = useInfiniteQuery({
+    queryKey: inboxKeys.archivedList(wsId),
+    queryFn: ({ pageParam }) =>
+      api.listInbox({
+        archived: true,
+        limit: ARCHIVED_INBOX_PAGE_SIZE,
+        offset: pageParam,
+      }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length === ARCHIVED_INBOX_PAGE_SIZE
+        ? allPages.length * ARCHIVED_INBOX_PAGE_SIZE
+        : undefined,
     enabled: isArchivedView,
   });
   const rawItems = isArchivedView
-    ? inboxArchivedQuery.data ?? []
+    ? inboxArchivedQuery.data?.pages.flat() ?? []
     : inboxDefaultQuery.data ?? [];
   const loading = isArchivedView
     ? inboxArchivedQuery.isLoading
     : inboxDefaultQuery.isLoading;
+  const archivedHasNextPage = !!inboxArchivedQuery.hasNextPage;
+  const archivedFetchingNextPage = inboxArchivedQuery.isFetchingNextPage;
+  const fetchNextArchivedPage = inboxArchivedQuery.fetchNextPage;
   const items = useMemo(
     () => (isArchivedView ? rawItems : deduplicateInboxItems(rawItems)),
     [rawItems, isArchivedView],
@@ -968,6 +987,16 @@ export function InboxPage() {
     );
   };
 
+  const loadMoreArchivedItems = useCallback(() => {
+    if (!isArchivedView || !archivedHasNextPage || archivedFetchingNextPage) return;
+    void fetchNextArchivedPage();
+  }, [
+    archivedFetchingNextPage,
+    archivedHasNextPage,
+    fetchNextArchivedPage,
+    isArchivedView,
+  ]);
+
   const emptyMessage = isArchivedView ? "No archived items" : "No notifications";
 
   const listBody = (
@@ -985,6 +1014,12 @@ export function InboxPage() {
         groupedEntries.map((group) => renderGroup(group, 0, ""))
       ) : (
         filteredEntries.map(renderEntry)
+      )}
+      {isArchivedView && archivedHasNextPage && (
+        <InfiniteScrollSentinel
+          onVisible={loadMoreArchivedItems}
+          loading={archivedFetchingNextPage}
+        />
       )}
     </div>
   );

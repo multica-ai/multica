@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { inboxKeys } from "@multica/core/inbox/queries";
@@ -18,6 +18,38 @@ function updateInboxIssueSiblings(
       ? update(item)
       : item,
   );
+}
+
+type InboxPages = InfiniteData<InboxItem[], number>;
+
+function isInboxPages(value: InboxItem[] | InboxPages | undefined): value is InboxPages {
+  return !!value && !Array.isArray(value) && "pages" in value;
+}
+
+function filterArchivedCache(
+  old: InboxItem[] | InboxPages | undefined,
+  id: string,
+  issueId: string | null | undefined,
+): InboxItem[] | InboxPages | undefined {
+  const keep = (item: InboxItem) =>
+    item.id === id || (issueId && item.issue_id === issueId) ? false : true;
+  if (isInboxPages(old)) {
+    return {
+      ...old,
+      pages: old.pages.map((page) => page.filter(keep)),
+    };
+  }
+  return old?.filter(keep);
+}
+
+function findArchivedCacheItem(
+  old: InboxItem[] | InboxPages | undefined,
+  id: string,
+): InboxItem | undefined {
+  if (isInboxPages(old)) {
+    return old.pages.flat().find((item) => item.id === id);
+  }
+  return old?.find((item) => item.id === id);
 }
 
 /**
@@ -86,13 +118,11 @@ export function useUnarchiveInbox() {
     mutationFn: (id: string) => api.unarchiveInbox(id),
     onMutate: async (id) => {
       await qc.cancelQueries({ queryKey: inboxKeys.archivedList(wsId) });
-      const prev = qc.getQueryData<InboxItem[]>(inboxKeys.archivedList(wsId));
-      const target = prev?.find((i) => i.id === id);
+      const prev = qc.getQueryData<InboxItem[] | InboxPages>(inboxKeys.archivedList(wsId));
+      const target = findArchivedCacheItem(prev, id);
       const issueId = target?.issue_id;
-      qc.setQueryData<InboxItem[]>(inboxKeys.archivedList(wsId), (old) =>
-        old?.filter((item) =>
-          item.id === id || (issueId && item.issue_id === issueId) ? false : true,
-        ),
+      qc.setQueryData<InboxItem[] | InboxPages>(inboxKeys.archivedList(wsId), (old) =>
+        filterArchivedCache(old, id, issueId),
       );
       return { prev };
     },

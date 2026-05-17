@@ -1718,9 +1718,12 @@ export class ApiClient {
   }
 
   // Inbox
-  async listInbox(params?: { archived?: boolean }): Promise<InboxItem[]> {
+  // CEREBRO-PATCH(inbox-archive-pagination): archived inbox can request a bounded page.
+  async listInbox(params?: { archived?: boolean; limit?: number; offset?: number }): Promise<InboxItem[]> {
     const qs = new URLSearchParams();
     if (params?.archived) qs.set("archived", "1");
+    if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+    if (params?.offset !== undefined) qs.set("offset", String(params.offset));
     const query = qs.toString();
     return this.fetch(`/api/inbox${query ? `?${query}` : ""}`);
   }

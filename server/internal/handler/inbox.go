@@ -5,12 +5,20 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+)
+
+const (
+	// CEREBRO-PATCH(inbox-archive-pagination): archived inbox is loaded by
+	// the UI in batches; active inbox keeps its existing unpaged endpoint.
+	defaultArchivedInboxLimit = 50
+	maxArchivedInboxLimit     = 100
 )
 
 // InboxItemResponse is the JSON shape returned for an inbox_item row.
@@ -109,10 +117,16 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.URL.Query().Get("archived") == "1" {
+		limit, offset, ok := parseArchivedInboxPageParams(w, r)
+		if !ok {
+			return
+		}
 		archived, err := h.Queries.ListArchivedInboxFeed(r.Context(), db.ListArchivedInboxFeedParams{
 			WorkspaceID:   wsUUID,
 			RecipientType: "member",
 			RecipientID:   parseUUID(userID),
+			Limit:         int32(limit),
+			Offset:        int32(offset),
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list inbox")
@@ -181,6 +195,33 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func parseArchivedInboxPageParams(w http.ResponseWriter, r *http.Request) (int, int, bool) {
+	limit := defaultArchivedInboxLimit
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			writeError(w, http.StatusBadRequest, "invalid limit")
+			return 0, 0, false
+		}
+		limit = parsed
+	}
+	if limit > maxArchivedInboxLimit {
+		limit = maxArchivedInboxLimit
+	}
+
+	offset := 0
+	if raw := r.URL.Query().Get("offset"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			writeError(w, http.StatusBadRequest, "invalid offset")
+			return 0, 0, false
+		}
+		offset = parsed
+	}
+
+	return limit, offset, true
 }
 
 func (h *Handler) MarkInboxRead(w http.ResponseWriter, r *http.Request) {

@@ -3,6 +3,10 @@ import { queryOptions, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import type { InboxItem } from "../types";
 
+// CEREBRO-PATCH(inbox-archive-pagination): keep archived inbox first render
+// bounded; the active inbox query shape is unchanged.
+export const ARCHIVED_INBOX_PAGE_SIZE = 50;
+
 export const inboxKeys = {
   all: (wsId: string) => ["inbox", wsId] as const,
   list: (wsId: string) => [...inboxKeys.all(wsId), "list"] as const,
@@ -35,7 +39,8 @@ export function inboxListOptions(wsId: string) {
 export function inboxArchivedListOptions(wsId: string) {
   return queryOptions({
     queryKey: inboxKeys.archivedList(wsId),
-    queryFn: () => api.listInbox({ archived: true }),
+    queryFn: () =>
+      api.listInbox({ archived: true, limit: ARCHIVED_INBOX_PAGE_SIZE, offset: 0 }),
   });
 }
 

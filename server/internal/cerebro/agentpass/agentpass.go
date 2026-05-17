@@ -164,8 +164,8 @@ func (s *Service) EvaluateForEnqueue(ctx context.Context, agentID, issueID pgtyp
 			// exists, subsequent enqueues must still be blocked until the
 			// ceiling is raised or a new pass is issued.
 			exhausted, exErr := s.queries.GetExhaustedAgentPassForAgentIssue(ctx, cerebrodb.GetExhaustedAgentPassForAgentIssueParams{
-				AgentID: passParams.AgentID,
-				IssueID: passParams.IssueID,
+				AgentID: agentID,
+				IssueID: issueID,
 			})
 			if exErr != nil {
 				if errors.Is(exErr, pgx.ErrNoRows) {

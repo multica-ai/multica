@@ -27,7 +27,8 @@ ORDER BY i.created_at DESC;
 
 -- name: ListArchivedInboxFeed :many
 -- Archived inbox-routed items for a user. Backs the "show archived" view in
--- the inbox kebab menu.
+-- the inbox kebab menu. CEREBRO-PATCH(inbox-archive-pagination): page the
+-- archived view so it does not load the full archive on first render.
 SELECT i.*,
        iss.status as issue_status,
        iss.project_id as project_id
@@ -38,7 +39,8 @@ WHERE i.workspace_id = $1
   AND i.recipient_id = $3
   AND i.archived = true
   AND i.route = 'inbox'
-ORDER BY i.created_at DESC;
+ORDER BY i.created_at DESC
+LIMIT $4 OFFSET $5;
 
 -- name: ListNotificationsItems :many
 -- Notifications-routed items (route='notifications') that are not archived.
