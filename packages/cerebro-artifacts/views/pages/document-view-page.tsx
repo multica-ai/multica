@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Pencil, Trash2, Download } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2, Download, ExternalLink } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import {
@@ -251,7 +251,7 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto w-full max-w-5xl px-4 py-4 md:px-8 md:py-6">
+      <div className="mx-auto w-full px-4 py-4 md:px-8 md:py-6">
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <MobileSidebarTrigger className="mr-0" />
@@ -260,6 +260,13 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
           </Button>
         </div>
         <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => window.open(window.location.href, "_blank", "noreferrer")}
+          >
+            <ExternalLink className="mr-1 size-4" /> Open in new window
+          </Button>
           {canDownload && (
             <Button variant="ghost" size="sm" onClick={handleDownload}>
               <Download className="mr-1 size-4" /> Download
