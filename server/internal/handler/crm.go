@@ -1966,9 +1966,9 @@ func (h *Handler) importCRMIMAPMessages(ctx context.Context, workspaceID pgtype.
 		if !message.Date.IsZero() {
 			receivedAt = pgtype.Timestamptz{Time: message.Date, Valid: true}
 		}
-		_, err := h.DB.Exec(ctx, `INSERT INTO crm_email_message (workspace_id, thread_id, external_message_id, in_reply_to, reference_ids, from_email, from_name, to_emails, cc_emails, subject, received_at, body_text, body_html, snippet, direction) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'inbound')`, workspaceID, threadID, externalID, cleanOptionalText(&message.InReplyTo), message.References, cleanOptionalText(&message.FromEmail), cleanOptionalText(&message.FromName), message.ToEmails, message.CcEmails, cleanOptionalText(&subject), receivedAt, cleanOptionalText(&message.BodyText), cleanOptionalText(&message.BodyHTML), cleanOptionalText(&message.Snippet))
-		if err != nil {
-			return imported, skipped, err
+		_, execErr := h.DB.Exec(ctx, `INSERT INTO crm_email_message (workspace_id, thread_id, external_message_id, in_reply_to, reference_ids, from_email, from_name, to_emails, cc_emails, subject, received_at, body_text, body_html, snippet, direction) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'inbound')`, workspaceID, threadID, externalID, cleanOptionalText(&message.InReplyTo), message.References, cleanOptionalText(&message.FromEmail), cleanOptionalText(&message.FromName), message.ToEmails, message.CcEmails, cleanOptionalText(&subject), receivedAt, cleanOptionalText(&message.BodyText), cleanOptionalText(&message.BodyHTML), cleanOptionalText(&message.Snippet))
+		if execErr != nil {
+			return imported, skipped, execErr
 		}
 		_, _ = h.DB.Exec(ctx, `UPDATE crm_email_thread SET last_message_at=COALESCE($3,last_message_at,now()), updated_at=now() WHERE id=$1 AND workspace_id=$2`, threadID, workspaceID, receivedAt)
 		imported++
