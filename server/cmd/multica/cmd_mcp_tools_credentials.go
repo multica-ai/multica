@@ -1,34 +1,35 @@
 package main
 
-// CEREBRO-PATCH(mcp-cli-cmd-mcp-tools-credentials): credential governance MCP tools (JEH-1199)
+// CEREBRO-PATCH(mcp-cli-cmd-mcp-tools-credentials): credential governance MCP tools (JEH-1199 + JEH-1217 live-wire for credential_list + credential_audit_log).
 
 import (
 	"context"
-	"time"
+	"fmt"
+	"net/url"
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/mcp"
 )
 
-// CEREBRO-PATCH(mcp-credentials-tools-jeh1217): refresh stub deps comments.
 // registerCredentialTools wires the credential governance MCP tools to the
 // stdio server.
 //
 // Status (JEH-1217):
-//   - The credential registry REST API (JEH-1196) HAS shipped at
-//     `/api/workspaces/{id}/credentials` — `credential_list`,
-//     `credential_audit_log` could be wired to it now. Tracked as a
-//     follow-up to JEH-1199 (UI wiring + this MCP wiring should land
-//     together so admins see consistent state from both surfaces).
-//   - `credential_policy_get` / `credential_policy_set` cannot be wired
-//     persistently until JEH-1179 (Persona grants admin API) ships, since
-//     per JEH-1197 the policy checker reads Persona grants. Until then
-//     these tools return a `_stub` echo so callers can prototype against
-//     the contract.
+//   - `credential_list` and `credential_audit_log` are LIVE — they call
+//     the registry REST API mounted at
+//     `/api/workspaces/{id}/credentials` (JEH-1196). Values are always
+//     redacted; the separate `reveal` flow is gated by JEH-1197's
+//     policy chain and is not exposed as an MCP tool here.
+//   - `credential_policy_get` / `credential_policy_set` STAY as stubs.
+//     Per JEH-1197 the credential policy checker reads from Persona
+//     (`firtal-persona`) via `CheckResource`, not from a Multica-local
+//     table. The Persona SDK does not expose subject-grant CRUD, so
+//     "set a credential policy" from Multica is an open architectural
+//     question — see the comment on `credential_policy_set` below.
 //
-// Each handler keeps the `_stub: true` marker so MCP callers can tell
-// they're not looking at live data.
-func registerCredentialTools(srv *mcp.Server, _ *cli.APIClient) {
+// The two policy tools keep their `_stub: true` marker so callers can
+// tell they're not looking at persisted data.
+func registerCredentialTools(srv *mcp.Server, client *cli.APIClient, workspaceID string) {
 	// -----------------------------------------------------------------------
 	// credential_list
 	// -----------------------------------------------------------------------
@@ -39,7 +40,8 @@ Returns id, type, name, status, redacted value, created_at, updated_at,
 last_rotated_at, and expires_at. Values are ALWAYS redacted — use the
 separate reveal flow (gated by policy) if you need plaintext.
 
-STUB: returns deterministic mock data. Live wiring to JEH-1196's /api/workspaces/{id}/credentials is tracked as JEH-1199 follow-up.`,
+Live against /api/workspaces/{id}/credentials (JEH-1196). Falls back to
+deterministic mock data if the MCP process has no workspace context.`,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -47,9 +49,31 @@ STUB: returns deterministic mock data. Live wiring to JEH-1196's /api/workspaces
 				"status": map[string]any{"type": "string", "description": "Filter by status (active, expired, revoked)"},
 			},
 		},
-	}, func(_ context.Context, args map[string]any) (mcp.CallToolResult, error) {
-		out := filterMockCredentials(optString(args, "type"), optString(args, "status"))
-		return jsonText(map[string]any{"credentials": out, "_stub": true})
+	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+		typeFilter := optString(args, "type")
+		statusFilter := optString(args, "status")
+		if workspaceID == "" || client == nil {
+			out := filterMockCredentials(typeFilter, statusFilter)
+			return jsonText(map[string]any{"credentials": out, "_stub": true})
+		}
+		path := fmt.Sprintf("/api/workspaces/%s/credentials", url.PathEscape(workspaceID))
+		var resp struct {
+			Credentials []map[string]any `json:"credentials"`
+		}
+		if err := client.GetJSON(ctx, path, &resp); err != nil {
+			return mcp.ErrorResult("credential_list: " + err.Error()), nil
+		}
+		out := make([]map[string]any, 0, len(resp.Credentials))
+		for _, c := range resp.Credentials {
+			if typeFilter != "" && c["type"] != typeFilter {
+				continue
+			}
+			if statusFilter != "" && c["status"] != statusFilter {
+				continue
+			}
+			out = append(out, c)
+		}
+		return jsonText(map[string]any{"credentials": out})
 	})
 
 	// -----------------------------------------------------------------------
@@ -61,7 +85,10 @@ STUB: returns deterministic mock data. Live wiring to JEH-1196's /api/workspaces
 (member, agent, or group) to the permissions they hold on that credential
 (attach, read_redacted, reveal, rotate, revoke).
 
-STUB: returns deterministic mock data. Live wiring to JEH-1196's /api/workspaces/{id}/credentials is tracked as JEH-1199 follow-up.`,
+STUB: credential policies are evaluated by Persona at check-time, and
+Persona does not expose a "list grants for resource" API. Returns
+deterministic mock data so MCP callers can prototype against the
+contract. See JEH-1217 for the architectural question.`,
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"credential_id"},
@@ -97,9 +124,11 @@ Pass the full list of permissions you want the subject to hold — the
 backend treats this as a replace, not a merge. Permissions: attach,
 read_redacted, reveal, rotate, revoke.
 
-STUB: returns a confirmation echo without persisting anything. Real
-persistence depends on JEH-1179 (Persona grants admin API), since
-per JEH-1197 credential policy = persona grant against the credential.`,
+STUB: returns a confirmation echo without persisting anything. Per
+JEH-1197 the credential policy authority is Persona, but Persona's SDK
+does not expose subject-grant CRUD. Architectural question tracked
+under JEH-1217 — either Persona grows a grant API, or credentials
+get re-pointed at the local cerebro_workspace_grants table.`,
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"credential_id", "subject_kind", "subject_id", "permissions"},
@@ -150,7 +179,7 @@ per JEH-1197 credential policy = persona grant against the credential.`,
 			"subject_id":    subjID,
 			"permissions":   perms,
 			"_stub":         true,
-			"_note":         "Stubbed write — no persistence until JEH-1196 lands.",
+			"_note":         "Not persisted. Set credential policies in the Persona admin UI until JEH-1217's architectural question is resolved.",
 		})
 	})
 
@@ -163,7 +192,9 @@ per JEH-1197 credential policy = persona grant against the credential.`,
 whether the action was allowed or denied. Filter optionally by actor_id
 or action.
 
-STUB: returns deterministic mock data. Live wiring to JEH-1196's /api/workspaces/{id}/credentials is tracked as JEH-1199 follow-up.`,
+Live against /api/workspaces/{id}/credentials/{credId}/audit (JEH-1196 +
+JEH-1197). Falls back to deterministic mock data if the MCP process has
+no workspace context.`,
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"credential_id"},
@@ -171,39 +202,70 @@ STUB: returns deterministic mock data. Live wiring to JEH-1196's /api/workspaces
 				"credential_id": map[string]any{"type": "string", "description": "Credential ID"},
 				"actor_id":      map[string]any{"type": "string", "description": "Filter by actor"},
 				"action":        map[string]any{"type": "string", "description": "Filter by action (attach, read_redacted, reveal, rotate, revoke)"},
+				"limit":         map[string]any{"type": "integer", "description": "Max audit rows (default 100, max 1000)"},
 			},
 		},
-	}, func(_ context.Context, args map[string]any) (mcp.CallToolResult, error) {
+	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
 		credID, err := requireString(args, "credential_id")
 		if err != nil {
 			return mcp.ErrorResult(err.Error()), nil
 		}
 		actorFilter := optString(args, "actor_id")
 		actionFilter := optString(args, "action")
-		out := []mockAuditEntry{}
-		for _, e := range mockAuditEntries {
-			if e.CredentialID != credID {
+		if workspaceID == "" || client == nil {
+			out := []mockAuditEntry{}
+			for _, e := range mockAuditEntries {
+				if e.CredentialID != credID {
+					continue
+				}
+				if actorFilter != "" && e.ActorID != actorFilter {
+					continue
+				}
+				if actionFilter != "" && e.Action != actionFilter {
+					continue
+				}
+				out = append(out, e)
+			}
+			return jsonText(map[string]any{
+				"credential_id": credID,
+				"entries":       out,
+				"_stub":         true,
+			})
+		}
+		path := fmt.Sprintf(
+			"/api/workspaces/%s/credentials/%s/audit",
+			url.PathEscape(workspaceID),
+			url.PathEscape(credID),
+		)
+		if limit := optInt(args, "limit", 0); limit > 0 {
+			path += fmt.Sprintf("?limit=%d", limit)
+		}
+		var resp struct {
+			Audit []map[string]any `json:"audit"`
+		}
+		if err := client.GetJSON(ctx, path, &resp); err != nil {
+			return mcp.ErrorResult("credential_audit_log: " + err.Error()), nil
+		}
+		entries := make([]map[string]any, 0, len(resp.Audit))
+		for _, e := range resp.Audit {
+			if actorFilter != "" && e["actor_id"] != actorFilter {
 				continue
 			}
-			if actorFilter != "" && e.ActorID != actorFilter {
+			if actionFilter != "" && e["action"] != actionFilter {
 				continue
 			}
-			if actionFilter != "" && e.Action != actionFilter {
-				continue
-			}
-			out = append(out, e)
+			entries = append(entries, e)
 		}
 		return jsonText(map[string]any{
 			"credential_id": credID,
-			"entries":       out,
-			"_stub":         true,
+			"entries":       entries,
 		})
 	})
 }
 
 // -----------------------------------------------------------------------------
-// Mock fixtures — match the @multica/cerebro-credentials TS types so the UI
-// and MCP layer agree on the contract until JEH-1196 lands.
+// Mock fixtures — kept as a deterministic fallback for callers that run the
+// MCP server without a configured workspace (e.g. early init, tests).
 // -----------------------------------------------------------------------------
 
 type mockCredential struct {
@@ -242,44 +304,40 @@ type mockAuditEntry struct {
 
 const mockWorkspaceID = "11bd8321-b6ac-4bee-ae41-6659a5064608"
 
-func ts(year int, month time.Month, day, hour, minute int) string {
-	return time.Date(year, month, day, hour, minute, 0, 0, time.UTC).Format(time.RFC3339)
-}
-
 var mockCredentials = []mockCredential{
 	{
 		ID: "cred-001", WorkspaceID: mockWorkspaceID, Type: "repo_deploy_key",
 		Name: "firtal-cerebro deploy key", Description: "Read-only key used by Sliplane to clone main",
 		Status: "active", RedactedValue: "ssh-ed25519 AAAA***...***xyz",
-		CreatedAt: ts(2026, time.January, 12, 9, 0), UpdatedAt: ts(2026, time.April, 2, 14, 11),
-		LastRotatedAt: ts(2026, time.April, 2, 14, 11), ExpiresAt: ts(2026, time.October, 2, 14, 11),
+		CreatedAt: "2026-01-12T09:00:00Z", UpdatedAt: "2026-04-02T14:11:00Z",
+		LastRotatedAt: "2026-04-02T14:11:00Z", ExpiresAt: "2026-10-02T14:11:00Z",
 	},
 	{
 		ID: "cred-002", WorkspaceID: mockWorkspaceID, Type: "mcp_bearer",
 		Name: "multica MCP server",
 		Status: "active", RedactedValue: "mcp_***...***qK",
-		CreatedAt: ts(2026, time.February, 20, 8, 15), UpdatedAt: ts(2026, time.February, 20, 8, 15),
-		ExpiresAt: ts(2026, time.May, 22, 8, 15),
+		CreatedAt: "2026-02-20T08:15:00Z", UpdatedAt: "2026-02-20T08:15:00Z",
+		ExpiresAt: "2026-05-22T08:15:00Z",
 	},
 	{
 		ID: "cred-003", WorkspaceID: mockWorkspaceID, Type: "api_key",
 		Name: "FDR API key (prod)", Description: "Firtal Data Registry — used by dataform jobs",
 		Status: "active", RedactedValue: "fdr_***...***A2",
-		CreatedAt: ts(2026, time.March, 1, 10, 0), UpdatedAt: ts(2026, time.March, 1, 10, 0),
-		LastRotatedAt: ts(2026, time.March, 1, 10, 0),
+		CreatedAt: "2026-03-01T10:00:00Z", UpdatedAt: "2026-03-01T10:00:00Z",
+		LastRotatedAt: "2026-03-01T10:00:00Z",
 	},
 	{
 		ID: "cred-005", WorkspaceID: mockWorkspaceID, Type: "webhook_secret",
 		Name: "GitHub deploy webhook",
 		Status: "expired", RedactedValue: "whsec_***...***99",
-		CreatedAt: ts(2025, time.August, 1, 12, 0), UpdatedAt: ts(2026, time.April, 30, 0, 0),
-		ExpiresAt: ts(2026, time.April, 30, 0, 0),
+		CreatedAt: "2025-08-01T12:00:00Z", UpdatedAt: "2026-04-30T00:00:00Z",
+		ExpiresAt: "2026-04-30T00:00:00Z",
 	},
 	{
 		ID: "cred-006", WorkspaceID: mockWorkspaceID, Type: "oauth_token",
 		Name: "Slack OAuth (notifications)",
 		Status: "revoked", RedactedValue: "xoxb-***...***",
-		CreatedAt: ts(2026, time.January, 4, 14, 0), UpdatedAt: ts(2026, time.April, 20, 9, 30),
+		CreatedAt: "2026-01-04T14:00:00Z", UpdatedAt: "2026-04-20T09:30:00Z",
 	},
 }
 
@@ -311,25 +369,25 @@ var mockAuditEntries = []mockAuditEntry{
 		ID: "aud-001", CredentialID: "cred-001",
 		ActorKind: "agent", ActorID: "fa932ce8-d061-43e9-af23-0731ef5b3bbd", ActorLabel: "Rasp (CTO)",
 		Action: "attach", Outcome: "allow",
-		OccurredAt: ts(2026, time.May, 13, 17, 42),
+		OccurredAt: "2026-05-13T17:42:00Z",
 	},
 	{
 		ID: "aud-002", CredentialID: "cred-001",
 		ActorKind: "member", ActorID: "jesperhvejsel@gmail.com", ActorLabel: "Jesper Hvejsel",
 		Action: "reveal", Outcome: "allow", Reason: "rotation",
-		OccurredAt: ts(2026, time.April, 2, 14, 11),
+		OccurredAt: "2026-04-02T14:11:00Z",
 	},
 	{
 		ID: "aud-003", CredentialID: "cred-002",
 		ActorKind: "agent", ActorID: "unknown", ActorLabel: "unknown agent",
 		Action: "reveal", Outcome: "deny", Reason: "missing reveal permission",
-		OccurredAt: ts(2026, time.May, 10, 8, 21),
+		OccurredAt: "2026-05-10T08:21:00Z",
 	},
 	{
 		ID: "aud-004", CredentialID: "cred-005",
 		ActorKind: "member", ActorID: "jesperhvejsel@gmail.com", ActorLabel: "Jesper Hvejsel",
 		Action: "revoke", Outcome: "allow", Reason: "expired",
-		OccurredAt: ts(2026, time.April, 30, 0, 0),
+		OccurredAt: "2026-04-30T00:00:00Z",
 	},
 }
 

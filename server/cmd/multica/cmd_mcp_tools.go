@@ -103,8 +103,8 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	// CEREBRO-PATCH(mcp-cli-cmd-mcp-tools-grants-wire): JEH-1181 Persona grant control plane MCP tools (HTTP backend, JEH-1179 on main).
 	actorID, actorType := resolveMCPActor(client)
 	registerGrantTools(srv, client, workspaceID, actorID, actorType)
-	// CEREBRO-PATCH(mcp-credentials-tools): credential governance MCP tools (JEH-1199)
-	registerCredentialTools(srv, client)
+	// CEREBRO-PATCH(mcp-credentials-tools): credential governance MCP tools (JEH-1199 + JEH-1217 live-wire).
+	registerCredentialTools(srv, client, workspaceID)
 
 	// -----------------------------------------------------------------------
 	// list_issues
