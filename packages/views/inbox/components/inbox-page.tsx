@@ -1151,7 +1151,8 @@ export function InboxPage() {
               {t(($) => $.page.back)}
             </Button>
             {selectedDetailTitle && (
-              <h1 className="min-w-0 flex-1 truncate pr-2 text-sm font-medium text-foreground">
+              // CEREBRO-PATCH(inbox-mobile-detail-title-scroll): Long titles scroll horizontally instead of truncating with ellipsis (JEH-1515).
+              <h1 className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap pr-2 text-sm font-medium text-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {selectedDetailTitle}
               </h1>
             )}

@@ -1117,9 +1117,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const detailContent = (
     <div className="flex h-full min-w-0 flex-1 flex-col">
         <PageHeader className="gap-2 bg-background text-sm">
-          {/* CEREBRO-PATCH(issue-detail-mobile-topbar-title): Mobile shows the issue title only; desktop keeps full workspace breadcrumb (JEH-1515). */}
+          {/* CEREBRO-PATCH(issue-detail-mobile-topbar-title): Mobile shows the issue title only; long titles scroll horizontally instead of truncating (JEH-1515). */}
           <div className="flex flex-1 items-center gap-1.5 min-w-0 md:hidden">
-            <span className="truncate font-medium text-foreground">{displayTitle}</span>
+            <span className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-medium text-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{displayTitle}</span>
           </div>
           <div className="hidden md:flex flex-1 items-center gap-1.5 min-w-0 overflow-x-auto">
             {workspace && (
