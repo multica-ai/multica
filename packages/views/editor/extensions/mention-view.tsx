@@ -70,7 +70,8 @@ function IssueMention({
   };
 
   return (
-    <a href={issuePath} onClick={handleClick} className="issue-mention inline-flex">
+    // CEREBRO-PATCH(issue-chip-inline-link-wrap): inline (not inline-flex) so the <a> participates in text flow and allows box-decoration-clone to paint across wrapped lines (JEH-1593)
+    <a href={issuePath} onClick={handleClick} className="issue-mention inline">
       <IssueChip
         issueId={issueId}
         fallbackLabel={fallbackLabel}

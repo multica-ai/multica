@@ -126,7 +126,8 @@ function IssueMentionLink({ issueId, label }: { issueId: string; label?: string 
       href={path}
       target={opensInNewTab ? "_blank" : undefined}
       rel={opensInNewTab ? "noopener noreferrer" : undefined}
-      className="issue-mention not-prose inline-flex"
+      // CEREBRO-PATCH(issue-chip-inline-link-wrap): inline (not inline-flex) so box-decoration-clone wraps across lines (JEH-1593)
+      className="issue-mention not-prose inline"
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
