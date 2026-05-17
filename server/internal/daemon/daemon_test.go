@@ -185,10 +185,8 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		want     bool
 	}{
 		{provider: "openclaw", want: true},
-		// Hermes ACP starts in the task cwd and loads AGENTS.md / .agent_context
-		// directly. Inlining the full runtime brief duplicates that context and
-		// can trip upstream provider safety filters on otherwise harmless tasks.
-		{provider: "hermes", want: false},
+		{provider: "opencode", want: true}, // CEREBRO-PATCH(daemon-opencode-inline-brief): OpenCode needs inline daemon workflow instructions.
+		{provider: "hermes", want: true},
 		{provider: "kiro", want: true},
 		{provider: "kimi", want: true},
 		{provider: "codex", want: false},

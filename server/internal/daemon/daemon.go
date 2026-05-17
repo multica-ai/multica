@@ -2338,7 +2338,7 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 
 func providerNeedsInlineSystemPrompt(provider string) bool {
 	switch provider {
-	case "openclaw", "kiro", "kimi":
+	case "opencode", "openclaw", "hermes", "kiro", "kimi", "firtal-gateway": // CEREBRO-PATCH(daemon-opencode-inline-brief): OpenCode needs the runtime workflow brief inline in daemon mode.
 		return true
 	default:
 		return false
