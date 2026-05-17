@@ -41,6 +41,7 @@ export interface CreateSquadRequest {
   name: string;
   description?: string;
   leader_id: string;
+  avatar_url?: string; // CEREBRO-PATCH(upstream-create-squad-avatar): JEH-1541 align create request type with backend.
 }
 
 export interface UpdateSquadRequest {

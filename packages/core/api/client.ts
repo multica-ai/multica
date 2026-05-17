@@ -2402,7 +2402,12 @@ export class ApiClient {
     return this.fetch(`/api/squads/${id}`);
   }
 
-  async createSquad(data: { name: string; description?: string; leader_id: string }): Promise<Squad> {
+  async createSquad(data: {
+    name: string;
+    description?: string;
+    leader_id: string;
+    avatar_url?: string; // CEREBRO-PATCH(upstream-create-squad-avatar): JEH-1541 align typed client with squad create modal/backend.
+  }): Promise<Squad> {
     return this.fetch("/api/squads", { method: "POST", body: JSON.stringify(data) });
   }
 
