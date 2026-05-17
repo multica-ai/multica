@@ -6,11 +6,12 @@ import {
   ArrowLeft,
   Lock,
   MoreHorizontal,
+  Pause,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Agent, UpdateAgentRequest } from "@multica/core/types";
+import type { Agent, AgentRuntime, UpdateAgentRequest } from "@multica/core/types";
 import {
   type AgentPresenceDetail,
   useWorkspacePresenceMap,
@@ -25,6 +26,8 @@ import {
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes";
+// CEREBRO-PATCH(agent-detail-runtime-pause): surface runtime pause state and resume controls on agent detail.
+import { PauseBanner, PauseRuntimeButton } from "@multica/cerebro-runtime/views";
 import { useAgentPermissions } from "@multica/core/permissions";
 import { Button } from "@multica/ui/components/ui/button";
 import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
@@ -205,14 +208,23 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const owner = agent.owner_id
     ? members.find((m) => m.user_id === agent.owner_id) ?? null
     : null;
+  const myRole = currentUser
+    ? members.find((m) => m.user_id === currentUser.id)?.role ?? null
+    : null;
+  const canManageRuntime =
+    !!runtime &&
+    (runtime.owner_id === currentUser?.id || myRole === "owner" || myRole === "admin");
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       <DetailHeader
         agent={agent}
         presence={presence}
+        runtime={runtime}
+        workspaceId={wsId}
         backHref={paths.agents()}
         canArchive={canEdit.allowed}
+        canResumeRuntime={canManageRuntime}
         onArchive={() => setConfirmArchive(true)}
       />
 
@@ -223,6 +235,18 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             resource="agent"
             ownerName={owner?.name}
           />
+        </div>
+      )}
+
+      {runtime?.paused_at && (
+        <div className="px-6 pt-3">
+          <PauseBanner runtime={runtime} />
+          {!canManageRuntime && (
+            <div className="mt-2 flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              <Lock className="h-3.5 w-3.5 shrink-0" />
+              <span>{t(($) => $.detail.runtime_paused_read_only)}</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -314,14 +338,20 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
 function DetailHeader({
   agent,
   presence,
+  runtime,
+  workspaceId,
   backHref,
   canArchive,
+  canResumeRuntime,
   onArchive,
 }: {
   agent: Agent;
   presence: AgentPresenceDetail | null;
+  runtime: AgentRuntime | null;
+  workspaceId: string;
   backHref: string;
   canArchive: boolean;
+  canResumeRuntime: boolean;
   onArchive: () => void;
 }) {
   const { t } = useT("agents");
@@ -356,23 +386,39 @@ function DetailHeader({
         )}
       </div>
 
-      {!isArchived && canArchive && (
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={<Button variant="ghost" size="icon-sm" />}
-          >
-            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-auto">
-            <DropdownMenuItem
-              className="text-destructive"
-              onClick={onArchive}
+      {!isArchived && (
+        <div className="flex items-center gap-1">
+          {runtime?.paused_at && canResumeRuntime && (
+            <PauseRuntimeButton runtime={runtime} workspaceId={workspaceId} compact />
+          )}
+          {runtime?.paused_at && !canResumeRuntime && (
+            <span
+              className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground"
+              title={t(($) => $.detail.runtime_paused_read_only)}
             >
-              <Trash2 className="h-3.5 w-3.5" />
-              {t(($) => $.detail.more_archive)}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              <Pause className="h-3.5 w-3.5" />
+              {t(($) => $.availability.paused)}
+            </span>
+          )}
+          {canArchive && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={<Button variant="ghost" size="icon-sm" />}
+              >
+                <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-auto">
+                <DropdownMenuItem
+                  className="text-destructive"
+                  onClick={onArchive}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {t(($) => $.detail.more_archive)}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
       )}
     </PageHeader>
   );

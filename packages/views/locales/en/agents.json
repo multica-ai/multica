@@ -119,6 +119,8 @@
     "archive_dialog_cancel": "Cancel",
     "archive_dialog_confirm": "Archive",
     "more_archive": "Archive Agent",
+    "_comment_runtime_paused_read_only": "CEREBRO-PATCH(agent-detail-runtime-pause): read-only explanation for paused runtime on agent detail",
+    "runtime_paused_read_only": "This runtime is paused. Only the runtime owner or a workspace admin can resume it.",
     "agent_updated_toast": "Agent updated",
     "update_failed_toast": "Failed to update agent",
     "agent_archived_toast": "Agent archived",

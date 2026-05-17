@@ -115,6 +115,8 @@
     "archive_dialog_cancel": "取消",
     "archive_dialog_confirm": "归档",
     "more_archive": "归档智能体",
+    "_comment_runtime_paused_read_only": "CEREBRO-PATCH(agent-detail-runtime-pause): read-only explanation for paused runtime on agent detail",
+    "runtime_paused_read_only": "此运行时已暂停。只有运行时所有者或工作区管理员可以恢复它。",
     "agent_updated_toast": "已更新智能体",
     "update_failed_toast": "更新智能体失败",
     "agent_archived_toast": "已归档智能体",
