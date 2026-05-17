@@ -73,14 +73,48 @@ const da: StringTable = {
   muted_until_prefix: "Muted til",
 };
 
+// JEH-1322 — zh-Hans table for cerebro inbox row actions. Without this the
+// `useCerebroInboxStrings` hook silently fell back to English under zh-Hans,
+// surfacing an "Unarchive" aria-label on archived rows. Terms align with the
+// upstream zh-Hans inbox.json glossary (归档 / 取消归档 / 标为已读).
+const zhHans: StringTable = {
+  archive_tooltip: "归档 (e)",
+  archive_label: "归档",
+  unarchive_tooltip: "取消归档",
+  unarchive_label: "取消归档",
+  swipe_unarchive: "取消归档",
+  more_actions: "更多操作",
+  mark_read: "标为已读",
+  mark_unread: "标为未读",
+  mark_read_tooltip: "标为已读",
+  mark_unread_tooltip: "标为未读",
+  mute: "静音至早上 8 点",
+  unmute: "取消静音",
+  mute_tooltip: "静音至早上 8 点",
+  unmute_tooltip: "取消静音",
+  swipe_archive: "归档",
+  drawer_title: "操作",
+  muted_until_prefix: "静音至",
+};
+
+/**
+ * Pure language-tag → StringTable picker. Exported separately from the hook
+ * so it can be unit-tested without a React renderer.
+ */
+export function pickCerebroInboxStrings(language: string | undefined): StringTable {
+  const lang = (language ?? "en").toLowerCase();
+  if (lang.startsWith("da")) return da;
+  if (lang.startsWith("zh")) return zhHans;
+  return en;
+}
+
 /**
  * Returns the active StringTable for the user's current i18n language.
- * Falls back to English for any non-Danish locale; "da" / "da-DK" both
- * select the Danish table.
+ * Falls back to English for any unsupported locale; "da" / "da-DK" select
+ * the Danish table, and "zh" / "zh-Hans" / "zh-CN" select the simplified
+ * Chinese table.
  */
 export function useCerebroInboxStrings(): StringTable {
   const { i18n } = useTranslation();
-  const lang = (i18n.language ?? "en").toLowerCase();
-  if (lang.startsWith("da")) return da;
-  return en;
+  return pickCerebroInboxStrings(i18n.language);
 }
