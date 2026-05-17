@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"html"
 	"io"
@@ -49,18 +50,31 @@ type crmIMAPMailboxConfig struct {
 }
 
 type crmIMAPFetchedMessage struct {
-	UID       string
-	MessageID string
-	Subject   string
-	FromEmail string
-	FromName  string
-	ToEmails  []string
-	CcEmails  []string
-	Date      time.Time
-	BodyText  string
-	BodyHTML  string
-	Snippet   string
-	RawSize   int
+	UID          string
+	MessageID    string
+	InReplyTo    string
+	ReferenceIDs []string
+	RawHeaders   map[string][]string
+	Attachments  []crmEmailAttachmentMetadata
+	Subject      string
+	FromEmail    string
+	FromName     string
+	ToEmails     []string
+	CcEmails     []string
+	Date         time.Time
+	BodyText     string
+	BodyHTML     string
+	Snippet      string
+	RawSize      int
+}
+
+type crmEmailAttachmentMetadata struct {
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	SizeBytes   int    `json:"size_bytes"`
+	Inline      bool   `json:"inline"`
+	ContentID   string `json:"content_id,omitempty"`
+	Disposition string `json:"disposition,omitempty"`
 }
 
 type crmIMAPClient struct {
@@ -329,7 +343,10 @@ func parseCRMIMAPMessage(uid, raw string) crmIMAPFetchedMessage {
 		return msg
 	}
 	decode := new(mime.WordDecoder).DecodeHeader
-	msg.MessageID = strings.Trim(parsed.Header.Get("Message-Id"), " <>")
+	msg.RawHeaders = map[string][]string(parsed.Header)
+	msg.MessageID = cleanMessageID(parsed.Header.Get("Message-Id"))
+	msg.InReplyTo = cleanMessageID(parsed.Header.Get("In-Reply-To"))
+	msg.ReferenceIDs = cleanMessageIDList(parsed.Header.Get("References"))
 	if msg.MessageID == "" {
 		msg.MessageID = uid
 	}
@@ -345,7 +362,7 @@ func parseCRMIMAPMessage(uid, raw string) crmIMAPFetchedMessage {
 	}
 	body, _ := io.ReadAll(parsed.Body)
 	contentType := parsed.Header.Get("Content-Type")
-	msg.BodyText, msg.BodyHTML = extractReadableEmailBodies(contentType, body)
+	msg.BodyText, msg.BodyHTML, msg.Attachments = extractReadableEmailParts(contentType, body)
 	if strings.TrimSpace(msg.BodyText) == "" && strings.TrimSpace(msg.BodyHTML) != "" {
 		msg.BodyText = htmlToPlainText(msg.BodyHTML)
 	}
@@ -357,13 +374,19 @@ func parseCRMIMAPMessage(uid, raw string) crmIMAPFetchedMessage {
 }
 
 func extractReadableEmailBodies(contentType string, body []byte) (string, string) {
+	textBody, htmlBody, _ := extractReadableEmailParts(contentType, body)
+	return textBody, htmlBody
+}
+
+func extractReadableEmailParts(contentType string, body []byte) (string, string, []crmEmailAttachmentMetadata) {
 	mediaType, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
-		return decodeTransferBody(body, ""), ""
+		return decodeTransferBody(body, ""), "", nil
 	}
 	if strings.HasPrefix(mediaType, "multipart/") {
 		mr := multipart.NewReader(bytes.NewReader(body), params["boundary"])
 		var textBody, htmlBody string
+		var attachments []crmEmailAttachmentMetadata
 		for {
 			part, err := mr.NextPart()
 			if err == io.EOF {
@@ -374,10 +397,23 @@ func extractReadableEmailBodies(contentType string, body []byte) (string, string
 			}
 			partType := part.Header.Get("Content-Type")
 			partBody, _ := io.ReadAll(part)
-			pt, _, _ := mime.ParseMediaType(partType)
-			decoded := decodeTransferBody(partBody, part.Header.Get("Content-Transfer-Encoding"))
+			pt, partParams, _ := mime.ParseMediaType(partType)
+			disposition, dispositionParams, _ := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
+			decodedBytes := decodeTransferBytes(partBody, part.Header.Get("Content-Transfer-Encoding"))
+			decoded := string(decodedBytes)
+			filename := dispositionParams["filename"]
+			if filename == "" {
+				filename = partParams["name"]
+			}
+			contentID := strings.Trim(part.Header.Get("Content-ID"), " <>")
+			isInline := strings.EqualFold(disposition, "inline") || contentID != ""
+			if filename != "" || strings.EqualFold(disposition, "attachment") || (isInline && strings.HasPrefix(strings.ToLower(pt), "image/")) {
+				attachments = append(attachments, crmEmailAttachmentMetadata{Filename: filename, ContentType: pt, SizeBytes: len(decodedBytes), Inline: isInline, ContentID: contentID, Disposition: disposition})
+				continue
+			}
 			if strings.HasPrefix(pt, "multipart/") {
-				nestedText, nestedHTML := extractReadableEmailBodies(partType, partBody)
+				nestedText, nestedHTML, nestedAttachments := extractReadableEmailParts(partType, partBody)
+				attachments = append(attachments, nestedAttachments...)
 				if textBody == "" {
 					textBody = nestedText
 				}
@@ -390,29 +426,56 @@ func extractReadableEmailBodies(contentType string, body []byte) (string, string
 				htmlBody = decoded
 			}
 		}
-		return textBody, htmlBody
+		return textBody, htmlBody, attachments
 	}
 	decoded := decodeTransferBody(body, "")
 	if strings.EqualFold(mediaType, "text/html") {
-		return htmlToPlainText(decoded), decoded
+		return htmlToPlainText(decoded), decoded, nil
 	}
-	return decoded, ""
+	return decoded, "", nil
 }
 
 func decodeTransferBody(body []byte, encoding string) string {
+	return string(decodeTransferBytes(body, encoding))
+}
+
+func decodeTransferBytes(body []byte, encoding string) []byte {
 	switch strings.ToLower(strings.TrimSpace(encoding)) {
 	case "base64":
 		decoded, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(string(body)), ""))
 		if err == nil {
-			return string(decoded)
+			return decoded
 		}
 	case "quoted-printable":
 		decoded, err := io.ReadAll(quotedprintable.NewReader(bufio.NewReader(bytes.NewReader(body))))
 		if err == nil {
-			return string(decoded)
+			return decoded
 		}
 	}
-	return string(body)
+	return body
+}
+
+func cleanMessageID(value string) string {
+	return strings.Trim(strings.TrimSpace(value), " <>")
+}
+
+func cleanMessageIDList(value string) []string {
+	fields := strings.Fields(value)
+	out := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if id := cleanMessageID(field); id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func crmEmailJSON(value any, fallback string) any {
+	b, err := json.Marshal(value)
+	if err != nil || len(b) == 0 || string(b) == "null" {
+		return json.RawMessage(fallback)
+	}
+	return json.RawMessage(b)
 }
 
 func htmlToPlainText(value string) string {

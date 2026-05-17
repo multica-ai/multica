@@ -405,6 +405,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/{mailboxId}/test", h.TestCRMIMAPSetting)
 				})
 				r.Get("/emailengine/status", h.GetCRMEmailEngineStatus)
+				r.Get("/imap/sync-runs", h.ListCRMIMAPSyncRuns)
+				r.Route("/reminders", func(r chi.Router) {
+					r.Get("/", h.ListCRMReminders)
+					r.Post("/", h.CreateCRMReminder)
+					r.Patch("/{reminderId}", h.UpdateCRMReminderStatus)
+				})
 				r.Post("/imap/preview", h.PreviewCRMIMAP)
 				r.Post("/imap/import", h.ImportCRMIMAP)
 				r.Post("/imap/sync", h.SyncCRMIMAP)

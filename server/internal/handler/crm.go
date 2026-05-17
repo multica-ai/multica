@@ -1862,7 +1862,12 @@ func (h *Handler) ListCRMIMAPSyncRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
-	limit := parsePositiveInt(r.URL.Query().Get("limit"), 50)
+	limit := 50
+	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+		if parsed, err := strconv.Atoi(rawLimit); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
 	if limit > 200 {
 		limit = 200
 	}
@@ -2181,16 +2186,17 @@ func crmIMAPPreviewMessagesToResponse(messages []crmIMAPFetchedMessage) []CRMIMA
 	return out
 }
 
-func (h *Handler) importCRMIMAPMessages(ctx context.Context, workspaceID pgtype.UUID, cfg crmIMAPMailboxConfig, messages []crmIMAPFetchedMessage) (int, int, error) {
+func (h *Handler) importCRMIMAPMessages(ctx context.Context, workspaceID pgtype.UUID, cfg crmIMAPMailboxConfig, folder string, messages []crmIMAPFetchedMessage) (int, int, error) {
 	imported := 0
 	skipped := 0
+	folder = cleanCRMIMAPFolder(&folder)
 	for _, message := range messages {
-		externalID := message.MessageID
+		externalID := strings.TrimSpace(message.MessageID)
 		if externalID == "" {
-			externalID = cfg.ID + ":" + message.UID
+			externalID = cfg.ID + ":" + folder + ":" + message.UID
 		}
 		var exists bool
-		if err := h.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM crm_email_message WHERE workspace_id=$1 AND external_message_id=$2)`, workspaceID, externalID).Scan(&exists); err != nil {
+		if err := h.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM crm_email_message WHERE workspace_id=$1 AND ((source_metadata->>'provider'='imap' AND source_metadata->>'mailbox_id'=$2 AND source_metadata->>'folder'=$3 AND source_metadata->>'uid'=$4) OR external_message_id=$5))`, workspaceID, cfg.ID, folder, message.UID, externalID).Scan(&exists); err != nil {
 			return imported, skipped, err
 		}
 		if exists {
@@ -2201,29 +2207,32 @@ func (h *Handler) importCRMIMAPMessages(ctx context.Context, workspaceID pgtype.
 		if subject == "" {
 			subject = "(no subject)"
 		}
-		var threadID pgtype.UUID
-		threadExternalID := cfg.ID + ":" + subject
-		if err := h.DB.QueryRow(ctx, `SELECT id FROM crm_email_thread WHERE workspace_id=$1 AND external_thread_id=$2 LIMIT 1`, workspaceID, threadExternalID).Scan(&threadID); err != nil {
-			if !errors.Is(err, pgx.ErrNoRows) {
-				return imported, skipped, err
-			}
-			lastAt := pgtype.Timestamptz{}
-			if !message.Date.IsZero() {
-				lastAt = pgtype.Timestamptz{Time: message.Date, Valid: true}
-			}
-			if err := h.DB.QueryRow(ctx, `INSERT INTO crm_email_thread (workspace_id, subject, external_thread_id, mailbox, direction, status, last_message_at) VALUES ($1,$2,$3,$4,'inbound','open',$5) RETURNING id`, workspaceID, subject, threadExternalID, cfg.Email, lastAt).Scan(&threadID); err != nil {
-				return imported, skipped, err
-			}
+		threadExternalID := externalID
+		if threadExternalID == "" {
+			threadExternalID = cfg.ID + ":" + folder + ":" + subject
 		}
 		receivedAt := pgtype.Timestamptz{}
 		if !message.Date.IsZero() {
 			receivedAt = pgtype.Timestamptz{Time: message.Date, Valid: true}
 		}
-		_, err := h.DB.Exec(ctx, `INSERT INTO crm_email_message (workspace_id, thread_id, external_message_id, from_email, from_name, to_emails, cc_emails, subject, received_at, body_text, body_html, snippet, direction) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'inbound')`, workspaceID, threadID, externalID, cleanOptionalText(&message.FromEmail), cleanOptionalText(&message.FromName), message.ToEmails, message.CcEmails, cleanOptionalText(&subject), receivedAt, cleanOptionalText(&message.BodyText), cleanOptionalText(&message.BodyHTML), cleanOptionalText(&message.Snippet))
+		sourceMetadata, err := json.Marshal(map[string]any{"provider": "imap", "mailbox_id": cfg.ID, "mailbox": cfg.Email, "folder": folder, "uid": message.UID, "message_id": message.MessageID, "raw_size": message.RawSize})
 		if err != nil {
 			return imported, skipped, err
 		}
-		_, _ = h.DB.Exec(ctx, `UPDATE crm_email_thread SET last_message_at=COALESCE($3,last_message_at,now()), updated_at=now() WHERE id=$1 AND workspace_id=$2`, threadID, workspaceID, receivedAt)
+		var threadID pgtype.UUID
+		if err := h.DB.QueryRow(ctx, `SELECT id FROM crm_email_thread WHERE workspace_id=$1 AND external_thread_id=$2 LIMIT 1`, workspaceID, threadExternalID).Scan(&threadID); err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return imported, skipped, err
+			}
+			if err := h.DB.QueryRow(ctx, `INSERT INTO crm_email_thread (workspace_id, subject, external_thread_id, mailbox, direction, status, last_message_at, source_metadata) VALUES ($1,$2,$3,$4,'inbound','open',$5,$6::jsonb) RETURNING id`, workspaceID, subject, threadExternalID, cfg.Email, receivedAt, sourceMetadata).Scan(&threadID); err != nil {
+				return imported, skipped, err
+			}
+		}
+		_, err = h.DB.Exec(ctx, `INSERT INTO crm_email_message (workspace_id, thread_id, external_message_id, from_email, from_name, to_emails, cc_emails, subject, received_at, body_text, body_html, snippet, raw_size_bytes, in_reply_to, reference_ids, raw_headers, attachments, direction, source_metadata) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17::jsonb,'inbound',$18::jsonb) ON CONFLICT DO NOTHING`, workspaceID, threadID, externalID, cleanOptionalText(&message.FromEmail), cleanOptionalText(&message.FromName), message.ToEmails, message.CcEmails, cleanOptionalText(&subject), receivedAt, cleanOptionalText(&message.BodyText), cleanOptionalText(&message.BodyHTML), cleanOptionalText(&message.Snippet), optionalInt4(&message.RawSize), cleanOptionalText(&message.InReplyTo), cleanOptionalStringList(message.ReferenceIDs), crmEmailJSON(message.RawHeaders, `{}`), crmEmailJSON(message.Attachments, `[]`), sourceMetadata)
+		if err != nil {
+			return imported, skipped, err
+		}
+		_, _ = h.DB.Exec(ctx, `UPDATE crm_email_thread SET last_message_at=GREATEST(COALESCE(last_message_at,$3,now()),COALESCE($3,last_message_at,now())), updated_at=now() WHERE id=$1 AND workspace_id=$2`, threadID, workspaceID, receivedAt)
 		imported++
 	}
 	return imported, skipped, nil
