@@ -2050,8 +2050,15 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	if err != nil {
 		taskLog.Error("task failed", "error", err)
 		// runTask returned without a TaskResult, so we don't have a SessionID
-		// to forward — best we can do is record the failure.
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "agent_error"); failErr != nil {
+		// to forward — best we can do is record the failure. Classify the
+		// error message for transient patterns so the server can retry
+		// infrastructure failures (database locked, stream interrupted, etc.)
+		// while keeping permanent errors (auth, config) non-retryable.
+		failureReason := "agent_error"
+		if tr := classifyTransientError(err.Error()); tr != "" {
+			failureReason = tr
+		}
+		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", failureReason); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
 		}
 		return
@@ -2617,6 +2624,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		failureReason, _ := classifyPoisonedError(errMsg)
 		if failureReason != "" {
 			taskLog.Warn("agent failed with poisoned API error, classifying as blocked",
+				"failure_reason", failureReason,
+			)
+		} else if reason := classifyTransientError(errMsg); reason != "" {
+			failureReason = reason
+			taskLog.Warn("agent failed with transient error, classifying as blocked (retryable)",
 				"failure_reason", failureReason,
 			)
 		}

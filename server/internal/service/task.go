@@ -1234,10 +1234,15 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // allowed to act on. Agent-side errors (compile failures, model rejections,
 // etc.) are intentionally excluded — those are real problems that the user
 // should see, not infrastructure flakiness.
+//
+// agent_transient covers runtime-level transient failures that the daemon
+// classifies as likely to recover on retry: database-locked, stream
+// interruption, connection resets, and similar operational glitches.
 var retryableReasons = map[string]bool{
 	"runtime_offline":  true,
 	"runtime_recovery": true,
 	"timeout":          true,
+	"agent_transient":  true,
 }
 
 // MaybeRetryFailedTask spawns a fresh queued attempt for a recently-failed
@@ -1259,6 +1264,14 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		reason = parent.FailureReason.String
 	}
 	if !retryableReasons[reason] {
+		if parent.Attempt < parent.MaxAttempts {
+			slog.Warn("task auto-retry skipped: non-retryable failure with remaining attempts",
+				"task_id", util.UUIDToString(parent.ID),
+				"reason", reason,
+				"attempt", parent.Attempt,
+				"max_attempts", parent.MaxAttempts,
+			)
+		}
 		return nil, nil
 	}
 	if parent.Attempt >= parent.MaxAttempts {

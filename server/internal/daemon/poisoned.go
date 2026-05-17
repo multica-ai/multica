@@ -20,6 +20,7 @@ const (
 	FailureReasonIterationLimit    = "iteration_limit"
 	FailureReasonAgentFallbackMsg  = "agent_fallback_message"
 	FailureReasonAPIInvalidRequest = "api_invalid_request"
+	FailureReasonAgentTransient    = "agent_transient"
 )
 
 // poisonedOutputMaxLen caps how long an output can be and still be
@@ -97,4 +98,52 @@ func classifyPoisonedError(errMsg string) (string, bool) {
 		return FailureReasonAPIInvalidRequest, true
 	}
 	return "", false
+}
+
+// transientErrorPatterns lists known transient error substrings that
+// should be classified as FailureReasonAgentTransient instead of the
+// generic agent_error. These are infrastructure/operational failures
+// that are likely to resolve on retry — unlike auth, config, or
+// content-policy errors which are permanent and must not be retried.
+//
+// The server-side retryableReasons map includes agent_transient, so
+// tasks carrying this reason will be auto-retried (subject to the
+// usual attempt < max_attempts guard).
+var transientErrorPatterns = []string{
+	"database is locked",
+	"database locked",
+	"sqlite_busy",
+	"broken pipe",
+	"connection reset",
+	"connection refused",
+	"no route to host",
+	"temporarily unavailable",
+	"service unavailable",
+	"stream interrupted",
+	"returned empty output",
+	"empty response",
+	"no output from",
+	"produced no output",
+}
+
+// classifyTransientError checks whether the error message indicates a
+// transient infrastructure/operational failure that is likely to resolve
+// on retry. Returns FailureReasonAgentTransient when a match is found,
+// or "" when the error should remain in the agent_error bucket.
+//
+// The classifier is intentionally conservative: it only fires on
+// well-known substrings that correspond to operational glitches, not
+// on every error. Unknown errors default to agent_error (non-retryable)
+// to avoid retry storms on auth/config/permission failures.
+func classifyTransientError(errMsg string) string {
+	if errMsg == "" {
+		return ""
+	}
+	lowered := strings.ToLower(errMsg)
+	for _, p := range transientErrorPatterns {
+		if strings.Contains(lowered, p) {
+			return FailureReasonAgentTransient
+		}
+	}
+	return ""
 }

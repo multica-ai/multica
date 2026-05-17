@@ -85,6 +85,134 @@ the matcher being too permissive on long outputs.`,
 	}
 }
 
+func TestClassifyTransientError(t *testing.T) {
+	cases := []struct {
+		name       string
+		errMsg     string
+		wantReason string
+	}{
+		{
+			name:       "database is locked",
+			errMsg:     "sqlite: database is locked",
+			wantReason: FailureReasonAgentTransient,
+		},
+		{
+			name:       "database locked (short form)",
+			errMsg:     "database locked (SQLITE_BUSY)",
+			wantReason: FailureReasonAgentTransient,
+		},
+		{
+			name:       "sqlite busy",
+			errMsg:     "SQLITE_BUSY: database is locked",
+			wantReason: FailureReasonAgentTransient,
+		},
+		{
+			name:       "connection reset",
+			errMsg:     "read tcp 10.0.0.1:443: connection reset by peer",
+			wantReason: FailureReasonAgentTransient,
+		},
+		{
+			name:       "connection refused",
+			errMsg:     "dial tcp 10.0.0.1:8080: connect: connection refused",
+			wantReason: FailureReasonAgentTransient,
+		},
+		{
+			name:       "no route to host",
+			errMsg:     "dial tcp: no route to host",
+			wantReason: FailureReasonAgentTransient,
+		},
+		{
+			name:       "broken pipe",
+			errMsg:     "write /dev/stdout: broken pipe",
+			wantReason: FailureReasonAgentTransient,
+		},
+		{
+			name:       "temporarily unavailable",
+			errMsg:     "resource temporarily unavailable",
+			wantReason: FailureReasonAgentTransient,
+		},
+		{
+			name:       "service unavailable",
+			errMsg:     "503 service unavailable",
+			wantReason: FailureReasonAgentTransient,
+		},
+		{
+			name:       "stream interrupted",
+			errMsg:     "stream interrupted unexpectedly during generation",
+			wantReason: FailureReasonAgentTransient,
+		},
+		{
+			name:       "returned empty output",
+			errMsg:     "kimi returned empty output after processing",
+			wantReason: FailureReasonAgentTransient,
+		},
+		{
+			name:       "empty response",
+			errMsg:     "provider returned empty response",
+			wantReason: FailureReasonAgentTransient,
+		},
+		{
+			name:       "no output from",
+			errMsg:     "error: no output from model after 5 retries",
+			wantReason: FailureReasonAgentTransient,
+		},
+		{
+			name:       "produced no output",
+			errMsg:     "agent produced no output within timeout",
+			wantReason: FailureReasonAgentTransient,
+		},
+		{
+			name:       "case insensitive matching",
+			errMsg:     "Database Is Locked: retry later",
+			wantReason: FailureReasonAgentTransient,
+		},
+		// Non-transient errors that must NOT be classified
+		{
+			name:       "auth failure is not transient",
+			errMsg:     "API Error: 401 authentication_error: invalid api key",
+			wantReason: "",
+		},
+		{
+			name:       "configuration error is not transient",
+			errMsg:     "invalid configuration: agent path not found",
+			wantReason: "",
+		},
+		{
+			name:       "content policy is not transient",
+			errMsg:     "output blocked by content policy filter",
+			wantReason: "",
+		},
+		{
+			name:       "permission denied is not transient",
+			errMsg:     "permission denied: cannot access /etc/secrets",
+			wantReason: "",
+		},
+		{
+			name:       "invalid request error is not transient",
+			errMsg:     `API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"Could not process image"}}`,
+			wantReason: "",
+		},
+		{
+			name:       "empty error message",
+			errMsg:     "",
+			wantReason: "",
+		},
+		{
+			name:       "unrelated agent error is not transient",
+			errMsg:     "failed to compile regex pattern",
+			wantReason: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reason := classifyTransientError(tc.errMsg)
+			if reason != tc.wantReason {
+				t.Fatalf("classifyTransientError(%q) = %q, want %q", tc.errMsg, reason, tc.wantReason)
+			}
+		})
+	}
+}
+
 func TestClassifyPoisonedError(t *testing.T) {
 	cases := []struct {
 		name       string
