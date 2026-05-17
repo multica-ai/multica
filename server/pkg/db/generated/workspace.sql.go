@@ -186,6 +186,42 @@ func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const deleteWorkspaceSetting = `-- name: DeleteWorkspaceSetting :one
+UPDATE workspace
+SET settings = settings - $2::text,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed
+`
+
+type DeleteWorkspaceSettingParams struct {
+	ID  pgtype.UUID `json:"id"`
+	Key string      `json:"key"`
+}
+
+// DeleteWorkspaceSetting removes a single key from workspace.settings,
+// restoring the unset behaviour without touching other keys.
+func (q *Queries) DeleteWorkspaceSetting(ctx context.Context, arg DeleteWorkspaceSettingParams) (Workspace, error) {
+	row := q.db.QueryRow(ctx, deleteWorkspaceSetting, arg.ID, arg.Key)
+	var i Workspace
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.Description,
+		&i.Settings,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Context,
+		&i.Repos,
+		&i.IssuePrefix,
+		&i.IssueCounter,
+		&i.AvatarUrl,
+		&i.AttributionFailClosed,
+	)
+	return i, err
+}
+
 const getDaemonWorkspace = `-- name: GetDaemonWorkspace :one
 SELECT id, name
 FROM workspace
@@ -408,6 +444,45 @@ func (q *Queries) LockWorkspaceForDelete(ctx context.Context, id pgtype.UUID) (p
 	var id_2 pgtype.UUID
 	err := row.Scan(&id_2)
 	return id_2, err
+}
+
+const mergeWorkspaceSetting = `-- name: MergeWorkspaceSetting :one
+UPDATE workspace
+SET settings = settings || jsonb_build_object($2::text, $3::jsonb),
+    updated_at = now()
+WHERE id = $1
+RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed
+`
+
+type MergeWorkspaceSettingParams struct {
+	ID    pgtype.UUID `json:"id"`
+	Key   string      `json:"key"`
+	Value []byte      `json:"value"`
+}
+
+// MergeWorkspaceSetting upserts a single key into workspace.settings.
+// jsonb || jsonb is a server-side merge so concurrent PATCH requests for
+// different keys do not clobber each other (unlike a client-side
+// read / modify / write through UpdateWorkspace.settings).
+func (q *Queries) MergeWorkspaceSetting(ctx context.Context, arg MergeWorkspaceSettingParams) (Workspace, error) {
+	row := q.db.QueryRow(ctx, mergeWorkspaceSetting, arg.ID, arg.Key, arg.Value)
+	var i Workspace
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.Description,
+		&i.Settings,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Context,
+		&i.Repos,
+		&i.IssuePrefix,
+		&i.IssueCounter,
+		&i.AvatarUrl,
+		&i.AttributionFailClosed,
+	)
+	return i, err
 }
 
 const updateWorkspace = `-- name: UpdateWorkspace :one
