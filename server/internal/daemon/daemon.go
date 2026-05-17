@@ -2356,6 +2356,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			agentEnv[k] = v
 		}
 	}
+	// OpenCode stores opencode.db below XDG_DATA_HOME. Apply this after
+	// custom_env so the per-task state isolation cannot be overwritten by
+	// agent settings.
+	applyOpenCodeDataHome(agentEnv, env)
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
@@ -3129,6 +3133,13 @@ func composeOpenclawIncludeRoots(addRoot, userValue string) (string, bool) {
 		parts = append(parts, p)
 	}
 	return strings.Join(parts, string(os.PathListSeparator)), true
+}
+
+func applyOpenCodeDataHome(agentEnv map[string]string, env *execenv.Environment) {
+	if env == nil || env.OpenCodeDataHome == "" {
+		return
+	}
+	agentEnv["XDG_DATA_HOME"] = env.OpenCodeDataHome
 }
 
 // isBlockedEnvKey returns true if the key must not be overridden by user-

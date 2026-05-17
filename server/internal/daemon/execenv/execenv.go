@@ -85,6 +85,11 @@ type Environment struct {
 	WorkDir string
 	// CodexHome is the path to the per-task CODEX_HOME directory (set only for codex provider).
 	CodexHome string
+	// OpenCodeDataHome is the per-task XDG_DATA_HOME used by OpenCode.
+	// OpenCode stores its SQLite state DB under XDG_DATA_HOME/opencode/,
+	// so sharing the daemon user's default data home across parallel tasks
+	// can surface as cross-task "database is locked" failures.
+	OpenCodeDataHome string
 	// OpenclawConfigPath is the path to the per-task synthesized OpenClaw
 	// config (set only for openclaw provider). The daemon exports this as
 	// OPENCLAW_CONFIG_PATH on the openclaw subprocess so its native skill
@@ -166,6 +171,17 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		env.CodexHome = codexHome
 	}
 
+	// OpenCode stores mutable runtime state, including opencode.db, under
+	// XDG_DATA_HOME. Give each task its own data home so concurrent OpenCode
+	// tasks do not contend on the user's global SQLite database.
+	if params.Provider == "opencode" {
+		dataHome, err := ensureOpenCodeDataHome(envRoot)
+		if err != nil {
+			return nil, fmt.Errorf("execenv: prepare opencode data home: %w", err)
+		}
+		env.OpenCodeDataHome = dataHome
+	}
+
 	// For OpenClaw, synthesize a per-task config that pins workspace to
 	// workDir. The skill scanner then reads {workDir}/skills/ (written by
 	// writeContextFiles above). Fail closed on errors: a malformed user
@@ -229,6 +245,15 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		}
 	}
 
+	if params.Provider == "opencode" {
+		dataHome, err := ensureOpenCodeDataHome(env.RootDir)
+		if err != nil {
+			logger.Warn("execenv: refresh opencode data home failed", "error", err)
+			return nil
+		}
+		env.OpenCodeDataHome = dataHome
+	}
+
 	// Refresh the per-task OpenClaw config on reuse — the user may have
 	// added/removed agents or rotated providers since the prior task ran,
 	// and the workspace override always re-targets the current workDir.
@@ -247,6 +272,14 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 
 	logger.Info("execenv: reusing env", "workdir", params.WorkDir)
 	return env
+}
+
+func ensureOpenCodeDataHome(envRoot string) (string, error) {
+	dataHome := filepath.Join(envRoot, "opencode-data")
+	if err := os.MkdirAll(dataHome, 0o755); err != nil {
+		return "", err
+	}
+	return dataHome, nil
 }
 
 // hydrateCodexSkills populates the per-task CODEX_HOME/skills directory with

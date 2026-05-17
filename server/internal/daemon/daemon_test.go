@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
@@ -276,6 +277,21 @@ func TestComposeOpenclawIncludeRoots(t *testing.T) {
 				t.Errorf("got = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestApplyOpenCodeDataHome(t *testing.T) {
+	t.Parallel()
+
+	agentEnv := map[string]string{
+		"XDG_DATA_HOME": "/custom/data",
+	}
+	applyOpenCodeDataHome(agentEnv, &execenv.Environment{
+		OpenCodeDataHome: "/task/opencode-data",
+	})
+
+	if got := agentEnv["XDG_DATA_HOME"]; got != "/task/opencode-data" {
+		t.Fatalf("XDG_DATA_HOME = %q, want per-task OpenCode data home", got)
 	}
 }
 

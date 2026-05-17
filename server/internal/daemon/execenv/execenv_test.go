@@ -1002,6 +1002,75 @@ func TestPrepareWithRepoContextOpencode(t *testing.T) {
 	}
 }
 
+func TestPrepareOpencodeSetsDataHome(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-test-oc-data",
+		TaskID:         "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+		AgentName:      "OpenCode Agent",
+		Provider:       "opencode",
+		Task:           TaskContextForEnv{IssueID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	want := filepath.Join(env.RootDir, "opencode-data")
+	if env.OpenCodeDataHome != want {
+		t.Fatalf("OpenCodeDataHome = %q, want %q", env.OpenCodeDataHome, want)
+	}
+	if fi, err := os.Stat(want); err != nil {
+		t.Fatalf("OpenCodeDataHome should exist: %v", err)
+	} else if !fi.IsDir() {
+		t.Fatalf("OpenCodeDataHome should be a directory")
+	}
+}
+
+func TestReuseOpencodeRestoresDataHome(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-test-oc-reuse",
+		TaskID:         "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+		AgentName:      "OpenCode Agent",
+		Provider:       "opencode",
+		Task:           TaskContextForEnv{IssueID: "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if err := os.RemoveAll(env.OpenCodeDataHome); err != nil {
+		t.Fatalf("remove OpenCodeDataHome: %v", err)
+	}
+
+	reused := Reuse(ReuseParams{
+		WorkDir:  env.WorkDir,
+		Provider: "opencode",
+		Task:     TaskContextForEnv{IssueID: "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"},
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+
+	want := filepath.Join(env.RootDir, "opencode-data")
+	if reused.OpenCodeDataHome != want {
+		t.Fatalf("OpenCodeDataHome = %q, want %q", reused.OpenCodeDataHome, want)
+	}
+	if fi, err := os.Stat(want); err != nil {
+		t.Fatalf("OpenCodeDataHome should be recreated on reuse: %v", err)
+	} else if !fi.IsDir() {
+		t.Fatalf("OpenCodeDataHome should be a directory")
+	}
+}
+
 // TestInjectRuntimeConfigRequiresExplicitCommentPost ensures the injected
 // workflow makes "post a comment with results" an explicit, unmissable step in
 // both the assignment- and comment-triggered branches, plus hard-warns in the
