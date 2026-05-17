@@ -18,12 +18,14 @@ func NewNormalizeStep() Step { return &normalizeStep{} }
 // Name returns the stable telemetry label.
 func (normalizeStep) Name() string { return "normalize" }
 
-// Run rejects malformed events with Skip. The fields enforced here
-// (EventID, ChatID, SenderID) are the keys downstream steps use to
-// dedupe, route, and reply; an event missing any of them is unsafe
-// to forward and is dropped silently.
+// Run rejects malformed events with Skip. Message events require sender identity
+// because downstream authz and dispatch use it. Recall events intentionally do
+// not: Feishu's recall schema has chat/message correlation but no sender.
 func (normalizeStep) Run(_ context.Context, evt port.InboundEvent) (port.InboundEvent, Decision, error) {
-	if evt.EventID == "" || evt.ChatID == "" || evt.SenderID == "" {
+	if evt.EventID == "" || evt.ChatID == "" {
+		return evt, DecisionSkip, nil
+	}
+	if evt.Type != port.EventTypeMessageRecalled && evt.SenderID == "" {
 		return evt, DecisionSkip, nil
 	}
 	return evt, DecisionContinue, nil

@@ -185,7 +185,7 @@ func (r *Runtime) Accept(ctx context.Context, evt port.InboundEvent, opts Accept
 	}
 	switch {
 	case result.RejectedBackpressure:
-		r.send(ctx, evt, fmt.Sprintf("我现在忙不过来了，当前会话还有 %d 条在排队，请稍后再发。", result.QueueDepth))
+		_ = r.send(ctx, evt, fmt.Sprintf("我现在忙不过来了，当前会话还有 %d 条在排队，请稍后再发。", result.QueueDepth))
 	case result.Accepted && result.QueueDepth == 0:
 		// Normal channel turns should feel like a teammate replying, not a bot
 		// acknowledging a command queue. The final post-pipeline reply is enough.
@@ -217,7 +217,7 @@ func (r *Runtime) sendDeferredProcessingAck(ctx context.Context, eventRowID stri
 	if !ok {
 		return
 	}
-	r.send(ctx, evt, "好的，开始处理。")
+	_ = r.send(ctx, evt, "好的，开始处理。")
 }
 
 func (r *Runtime) discardDeferredProcessingAck(eventRowID string) {
@@ -571,7 +571,7 @@ func (r *Runtime) contextTargetMessage(ctx context.Context, rec *InboundEventRec
 	if err != nil || !ok {
 		return channelconversation.Message{}, false, err
 	}
-	recent, err := r.cfg.ConversationStore.ListRecentHandoffMessages(ctx, evt.ConnectionID(), inboundMsg.ConversationID, evt.ThreadID, time.Now().Add(-30*time.Minute), 2)
+	recent, err := r.cfg.ConversationStore.ListRecentHandoffMessages(ctx, evt.ConnectionID(), inboundMsg.ConversationID, evt.SenderID, evt.ThreadID, time.Now().Add(-30*time.Minute), 2)
 	if err != nil || len(recent) != 1 {
 		return channelconversation.Message{}, false, err
 	}
@@ -811,32 +811,37 @@ func (r *Runtime) resumeChannelTurn(ctx context.Context, item WaitingAgentEvent)
 		r.sendFailureOnce(ctx, rec, failureCodeChannelTurnEmpty, "我这边没有拿到有效回复，请再发一次。", true)
 		return
 	}
-	r.persistAndSendTurnReply(ctx, rec, strings.TrimSpace(reply))
+	if err := r.persistAndSendTurnReply(ctx, rec, strings.TrimSpace(reply)); err != nil {
+		slog.Error("channel inbound runtime: send completed channel turn reply failed", "event_row_id", rec.ID, "error", err)
+	}
 }
 
-func (r *Runtime) persistAndSendTurnReply(ctx context.Context, rec *InboundEventRecord, reply string) {
+func (r *Runtime) persistAndSendTurnReply(ctx context.Context, rec *InboundEventRecord, reply string) error {
 	if rec == nil {
-		return
+		return nil
 	}
+	replyToSend := reply
 	if r.cfg.DispatchStore != nil {
 		if saved, ok, err := r.cfg.DispatchStore.GetDispatchCompletion(ctx, rec.ID); err == nil && ok {
 			if saved != "" {
-				slog.Info("channel inbound runtime: channel turn completion already sent", "event_row_id", rec.ID)
+				slog.Info("channel inbound runtime: replaying persisted channel turn completion", "event_row_id", rec.ID)
 			}
-			if err := r.cfg.Store.MarkProcessed(ctx, rec.ID); err != nil {
-				slog.Error("channel inbound runtime: mark completed channel turn processed failed", "event_row_id", rec.ID, "error", err)
-			}
-			return
+			replyToSend = saved
 		} else if err != nil {
 			slog.Error("channel inbound runtime: load channel turn completion failed", "event_row_id", rec.ID, "error", err)
 		} else if markErr := r.cfg.DispatchStore.MarkDispatchCompleted(ctx, rec.ID, reply); markErr != nil {
 			slog.Error("channel inbound runtime: persist channel turn completion failed", "event_row_id", rec.ID, "error", markErr)
 		}
 	}
-	r.send(ctx, rec.Event, reply)
+	if strings.TrimSpace(replyToSend) != "" {
+		if err := r.send(ctx, rec.Event, replyToSend); err != nil {
+			return err
+		}
+	}
 	if err := r.cfg.Store.MarkProcessed(ctx, rec.ID); err != nil {
 		slog.Error("channel inbound runtime: mark channel turn processed failed", "event_row_id", rec.ID, "error", err)
 	}
+	return nil
 }
 
 func (r *Runtime) sendFailureOnce(ctx context.Context, rec *InboundEventRecord, code, reply string, markProcessed bool) {
@@ -883,7 +888,10 @@ func (r *Runtime) sendFailureOnce(ctx context.Context, rec *InboundEventRecord, 
 		}
 	}
 	if shouldSend {
-		r.send(ctx, rec.Event, reply)
+		if err := r.send(ctx, rec.Event, reply); err != nil {
+			slog.Error("channel inbound runtime: send failure notice failed", "event_row_id", rec.ID, "failure_code", code, "error", err)
+			return
+		}
 	}
 	r.markFailureTerminal(ctx, rec.ID, markProcessed)
 }
@@ -1165,9 +1173,9 @@ func intentCanUseRequestContextIssue(in chintent.Intent) bool {
 	}
 }
 
-func (r *Runtime) send(ctx context.Context, evt port.InboundEvent, text string) {
+func (r *Runtime) send(ctx context.Context, evt port.InboundEvent, text string) error {
 	if r.cfg.ReplySink == nil || text == "" {
-		return
+		return nil
 	}
 	if err := r.cfg.ReplySink.SendText(ctx, evt, port.OutboundMessage{Text: text}); err != nil {
 		slog.Error("channel inbound runtime: send reply failed",
@@ -1176,7 +1184,9 @@ func (r *Runtime) send(ctx context.Context, evt port.InboundEvent, text string) 
 			"event_id", evt.EventID,
 			"error", err,
 		)
+		return err
 	}
+	return nil
 }
 
 func applyDefaultProject(evt *port.InboundEvent, chatCtx ChatBindingContext) {

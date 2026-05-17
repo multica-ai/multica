@@ -34,6 +34,24 @@ func TestChannelBindURLIncludesProviderAndConnection(t *testing.T) {
 	}
 }
 
+func TestUserIdentityBindStep_BypassesRecallEvent(t *testing.T) {
+	step := NewUserIdentityBindStep(nil, nil, nil)
+	evt := port.InboundEvent{
+		Type:      port.EventTypeMessageRecalled,
+		EventID:   "evt-recall-1",
+		ChatID:    "chat-1",
+		MessageID: "om_msg_999",
+	}
+
+	_, decision, err := step.Run(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if decision != DecisionContinue {
+		t.Fatalf("decision = %v, want Continue", decision)
+	}
+}
+
 func TestChatBindCommandStepSkipsAlreadyBoundChat(t *testing.T) {
 	reply := &recordingBindReplySink{}
 	step := NewChatBindCommandStep(nil, reply, nil, existingChatBindingLookup{})

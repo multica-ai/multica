@@ -207,8 +207,10 @@ func TargetUser(id string) OutboundTarget {
 // Text is the canonical field name (mirroring InboundEvent.Text) so call sites
 // reading and writing share vocabulary.
 type OutboundMessage struct {
-	Target OutboundTarget
-	Text   string
+	Target           OutboundTarget
+	Text             string
+	HandoffKind      string
+	SuggestedActions []string
 }
 
 // OutboundRichMessage is a platform-neutral rich message to be sent to the
@@ -216,11 +218,13 @@ type OutboundMessage struct {
 // while each adapter owns the platform-specific rendering (Feishu interactive
 // card, Slack Block Kit, WeCom markdown/template card, etc.).
 type OutboundRichMessage struct {
-	Target   OutboundTarget
-	Title    string
-	Body     string
-	Actions  []OutboundAction
-	Mentions []OutboundMention
+	Target           OutboundTarget
+	Title            string
+	Body             string
+	Actions          []OutboundAction
+	Mentions         []OutboundMention
+	HandoffKind      string
+	SuggestedActions []string
 }
 
 type OutboundAction struct {

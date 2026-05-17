@@ -79,8 +79,9 @@ func (s *GatewayReplySink) recordSentText(ctx context.Context, evt port.InboundE
 		Body:               body,
 		ContentFormat:      channelconversation.ContentFormatPlain,
 		PlatformMessageID:  result.PlatformMessageID,
-		HandoffText:        msg.Text,
-		SuggestedActionSet: suggestedActionsForText(msg.Text),
+		EntityText:         msg.Text,
+		HandoffKind:        msg.HandoffKind,
+		SuggestedActionSet: msg.SuggestedActions,
 	})
 }
 
@@ -105,8 +106,9 @@ func (s *GatewayReplySink) recordSentRich(ctx context.Context, evt port.InboundE
 		Body:               body,
 		ContentFormat:      channelconversation.ContentFormatCard,
 		PlatformMessageID:  result.PlatformMessageID,
-		HandoffText:        strings.TrimSpace(msg.Title + "\n" + msg.Body),
-		SuggestedActionSet: suggestedActionsForText(msg.Title + "\n" + msg.Body),
+		EntityText:         strings.TrimSpace(msg.Title + "\n" + msg.Body),
+		HandoffKind:        msg.HandoffKind,
+		SuggestedActionSet: msg.SuggestedActions,
 	})
 }
 
@@ -116,7 +118,8 @@ type outboundReplyRecord struct {
 	Body               json.RawMessage
 	ContentFormat      string
 	PlatformMessageID  string
-	HandoffText        string
+	EntityText         string
+	HandoffKind        string
 	SuggestedActionSet []string
 }
 
@@ -166,8 +169,8 @@ func (s *GatewayReplySink) recordSentMessage(ctx context.Context, evt port.Inbou
 		slog.Error("channel reply sink: marshal metadata failed", "error", err)
 		return
 	}
-	handoffKind := handoffKindForText(record.HandoffText)
-	suggestedActions, err := json.Marshal(record.SuggestedActionSet)
+	handoffKind := normalizeOutboundHandoffKind(record.HandoffKind)
+	suggestedActions, err := json.Marshal(suggestedActionsForHandoff(handoffKind, record.SuggestedActionSet))
 	if err != nil {
 		slog.Error("channel reply sink: marshal suggested actions failed", "error", err)
 		return
@@ -198,7 +201,7 @@ func (s *GatewayReplySink) recordSentMessage(ctx context.Context, evt port.Inbou
 		slog.Error("channel reply sink: create outbound message failed", "runtime_event_id", evt.RuntimeEventID, "platform_message_id", record.PlatformMessageID, "error", err)
 		return
 	}
-	if refs := entityRefsFromReplyText(workspaceID, record.HandoffText); len(refs) > 0 {
+	if refs := entityRefsFromReplyText(workspaceID, record.EntityText); len(refs) > 0 {
 		if err := s.store.AddEntityRefs(ctx, msg.ID, refs); err != nil {
 			slog.Error("channel reply sink: add outbound entity refs failed", "message_id", msg.ID, "error", err)
 		}
@@ -242,22 +245,38 @@ func entityRefsFromReplyText(workspaceID, text string) []channelconversation.Ent
 	return refs
 }
 
-func handoffKindForText(text string) string {
-	lower := strings.ToLower(strings.TrimSpace(text))
-	switch {
-	case strings.Contains(lower, "429") || strings.Contains(lower, "error") || strings.Contains(text, "失败") || strings.Contains(text, "重试"):
-		return channelconversation.HandoffKindFailure
-	case strings.Contains(text, "等待用户审批") || strings.Contains(text, "审批") || strings.Contains(strings.ToUpper(text), "PASS"):
-		return channelconversation.HandoffKindApproval
-	case strings.Contains(text, "继续推进") || strings.Contains(text, "继续"):
-		return channelconversation.HandoffKindContinue
+func normalizeOutboundHandoffKind(kind string) string {
+	switch strings.TrimSpace(kind) {
+	case channelconversation.HandoffKindApproval,
+		channelconversation.HandoffKindRetry,
+		channelconversation.HandoffKindContinue,
+		channelconversation.HandoffKindNeedInput,
+		channelconversation.HandoffKindReviewPass,
+		channelconversation.HandoffKindFailure:
+		return strings.TrimSpace(kind)
 	default:
 		return channelconversation.HandoffKindNone
 	}
 }
 
-func suggestedActionsForText(text string) []string {
-	switch handoffKindForText(text) {
+func suggestedActionsForHandoff(kind string, actions []string) []string {
+	if len(actions) > 0 {
+		out := make([]string, 0, len(actions))
+		seen := make(map[string]struct{}, len(actions))
+		for _, action := range actions {
+			clean := strings.TrimSpace(action)
+			if clean == "" {
+				continue
+			}
+			if _, ok := seen[clean]; ok {
+				continue
+			}
+			seen[clean] = struct{}{}
+			out = append(out, clean)
+		}
+		return out
+	}
+	switch kind {
 	case channelconversation.HandoffKindFailure:
 		return []string{"retry", "comment"}
 	case channelconversation.HandoffKindApproval, channelconversation.HandoffKindContinue:

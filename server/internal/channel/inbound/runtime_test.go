@@ -456,6 +456,59 @@ func TestRuntimeResumeChannelTurnSendsFinalReply(t *testing.T) {
 	}
 }
 
+func TestRuntimeResumeChannelTurnRetriesPersistedReplyAfterSendFailure(t *testing.T) {
+	store := &fakeRuntimeStore{
+		load: &InboundEventRecord{
+			ID: "row-1",
+			Event: port.InboundEvent{
+				ChannelName: "feishu",
+				EventID:     "evt-1",
+				ChatID:      "oc_1",
+				ChatType:    port.ChatTypeGroup,
+				SenderID:    "ou_1",
+			},
+		},
+	}
+	sink := &recordingReplySink{sendErr: errors.New("provider unavailable")}
+	dispatch := &fakeDispatchStore{}
+	rt := NewRuntime(RuntimeConfig{
+		Store:         store,
+		ReplySink:     sink,
+		DispatchStore: dispatch,
+		ChannelTurn:   fakeAsyncIntentClient{done: true},
+	})
+	item := WaitingAgentEvent{
+		ID:         "row-1",
+		WaitKind:   WaitKindChannelTurn,
+		WaitTaskID: "550e8400-e29b-41d4-a716-446655440000",
+	}
+
+	rt.resumeChannelTurn(context.Background(), item)
+
+	if store.processed {
+		t.Fatal("send failure must not mark channel turn processed")
+	}
+	if dispatch.reply != "channel reply" {
+		t.Fatalf("persisted reply = %q", dispatch.reply)
+	}
+	if sink.sendCalls != 1 {
+		t.Fatalf("send calls after failure = %d, want 1", sink.sendCalls)
+	}
+
+	sink.sendErr = nil
+	rt.resumeChannelTurn(context.Background(), item)
+
+	if got := sink.last(); got != "channel reply" {
+		t.Fatalf("reply = %q, want channel reply", got)
+	}
+	if !store.processed {
+		t.Fatal("successful retry should mark channel turn processed")
+	}
+	if sink.sendCalls != 2 {
+		t.Fatalf("send calls after retry = %d, want 2", sink.sendCalls)
+	}
+}
+
 func TestRuntimeStartChannelTurnFailureSendsOncePerEvent(t *testing.T) {
 	store := &fakeRuntimeStore{}
 	sink := &recordingReplySink{}
@@ -713,15 +766,25 @@ func (s *fakeRuntimeStore) RequeueStaleProcessing(context.Context, time.Duration
 }
 
 type recordingReplySink struct {
-	replies []string
+	replies   []string
+	sendErr   error
+	sendCalls int
 }
 
 func (s *recordingReplySink) SendText(_ context.Context, _ port.InboundEvent, msg port.OutboundMessage) error {
+	s.sendCalls++
+	if s.sendErr != nil {
+		return s.sendErr
+	}
 	s.replies = append(s.replies, msg.Text)
 	return nil
 }
 
 func (s *recordingReplySink) SendRich(_ context.Context, _ port.InboundEvent, msg port.OutboundRichMessage) error {
+	s.sendCalls++
+	if s.sendErr != nil {
+		return s.sendErr
+	}
 	s.replies = append(s.replies, msg.Body)
 	return nil
 }

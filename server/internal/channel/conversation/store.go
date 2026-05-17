@@ -188,7 +188,7 @@ type Store interface {
 	FindMessageByInboundEventID(ctx context.Context, inboundEventID string) (Message, bool, error)
 	ListEntityRefsByMessageID(ctx context.Context, messageID string) ([]EntityRef, error)
 	ListRecentContextEntityRefs(ctx context.Context, connectionID, conversationID, senderExternalID, threadID string, since time.Time, limit int) ([]EntityRef, error)
-	ListRecentHandoffMessages(ctx context.Context, connectionID, conversationID, threadID string, since time.Time, limit int) ([]Message, error)
+	ListRecentHandoffMessages(ctx context.Context, connectionID, conversationID, senderExternalID, threadID string, since time.Time, limit int) ([]Message, error)
 	CreateTurn(ctx context.Context, item Turn) (Turn, error)
 	UpsertTurn(ctx context.Context, item Turn) (Turn, error)
 	CompleteTurn(ctx context.Context, id string, outboundMessageID string, status string, resultPayload json.RawMessage, lastError string) error
@@ -668,13 +668,13 @@ LIMIT $6
 	return refs, rows.Err()
 }
 
-// ListRecentHandoffMessages returns recent messages that are waiting for a
-// user response in one conversation.
-func (s *DBStore) ListRecentHandoffMessages(ctx context.Context, connectionID, conversationID, threadID string, since time.Time, limit int) ([]Message, error) {
+// ListRecentHandoffMessages returns recent messages that are waiting for this
+// sender's response in one conversation.
+func (s *DBStore) ListRecentHandoffMessages(ctx context.Context, connectionID, conversationID, senderExternalID, threadID string, since time.Time, limit int) ([]Message, error) {
 	if s == nil || s.db == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
-	if strings.TrimSpace(connectionID) == "" || strings.TrimSpace(conversationID) == "" {
+	if strings.TrimSpace(connectionID) == "" || strings.TrimSpace(conversationID) == "" || strings.TrimSpace(senderExternalID) == "" {
 		return nil, nil
 	}
 	if since.IsZero() {
@@ -684,16 +684,25 @@ func (s *DBStore) ListRecentHandoffMessages(ctx context.Context, connectionID, c
 		limit = 2
 	}
 	rows, err := s.db.Query(ctx, `
-SELECT `+messageSelectColumns+`
-FROM channel_message
-WHERE connection_id = $1
-  AND conversation_id = $2::uuid
-  AND handoff_kind <> 'none'
-  AND occurred_at >= $3
-  AND ($4 = '' OR thread_id = $4 OR thread_id = '')
-ORDER BY occurred_at DESC
-LIMIT $5
-`, connectionID, conversationID, since, strings.TrimSpace(threadID), limit)
+	SELECT `+messageSelectColumns+`
+	FROM channel_message
+	WHERE connection_id = $1
+	  AND conversation_id = $2::uuid
+	  AND handoff_kind <> 'none'
+	  AND occurred_at >= $4
+	  AND ($5 = '' OR thread_id = $5 OR thread_id = '')
+	  AND (
+	      (chat_type = 'direct' AND chat_id = $3)
+	      OR EXISTS (
+	          SELECT 1
+	          FROM channel_turn t
+	          WHERE t.outbound_message_id = channel_message.id
+	            AND t.sender_external_id = $3
+	      )
+	  )
+	ORDER BY occurred_at DESC
+	LIMIT $6
+	`, connectionID, conversationID, strings.TrimSpace(senderExternalID), since, strings.TrimSpace(threadID), limit)
 	if err != nil {
 		return nil, err
 	}

@@ -1,5 +1,6 @@
 DROP INDEX IF EXISTS idx_channel_turn_waiting_task;
 DROP INDEX IF EXISTS idx_channel_turn_status;
+DROP INDEX IF EXISTS idx_channel_turn_outbound_message;
 DROP INDEX IF EXISTS idx_channel_turn_conversation_created;
 DROP INDEX IF EXISTS idx_channel_turn_inbound_message;
 DROP INDEX IF EXISTS idx_channel_turn_inbound_event;

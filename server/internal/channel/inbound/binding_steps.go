@@ -29,6 +29,9 @@ func NewUserIdentityBindStep(pool *pgxpool.Pool, replySink ChannelReplySink, iss
 func (*userIdentityBindStep) Name() string { return "identity-bind" }
 
 func (s *userIdentityBindStep) Run(ctx context.Context, evt port.InboundEvent) (port.InboundEvent, Decision, error) {
+	if evt.Type != port.EventTypeMessageReceived {
+		return evt, DecisionContinue, nil
+	}
 	var userID pgtype.UUID
 	err := s.pool.QueryRow(ctx, `
 		SELECT user_id FROM channel_user_binding

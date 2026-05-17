@@ -13,6 +13,7 @@ package inbound
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -180,21 +181,164 @@ func TestResolveMessageContextReply_PlainShortReplyWithoutContextDoesNotResolve(
 	}
 }
 
+func TestResolveMessageContextReply_RecentHandoffLookupUsesSenderScope(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeConversationStore{
+		byInbound: map[string]channelconversation.Message{
+			"evt-row-1": {ID: "msg-inbound", ConversationID: "conv-1"},
+		},
+		recent: []channelconversation.Message{
+			{
+				ID:             "msg-recent",
+				ConversationID: "conv-1",
+				Direction:      channelconversation.DirectionOutbound,
+				MessageType:    channelconversation.MessageTypeNotification,
+				HandoffKind:    channelconversation.HandoffKindApproval,
+			},
+		},
+		refs: map[string][]channelconversation.EntityRef{
+			"msg-recent": {{EntityType: channelconversation.EntityTypeIssue, EntityKey: "STA-9"}},
+		},
+	}
+	rt := NewRuntime(RuntimeConfig{ConversationStore: store})
+	evt := port.InboundEvent{
+		ChannelName:         "feishu",
+		ChannelConnectionID: "conn-1",
+		Type:                port.EventTypeMessageReceived,
+		ChatID:              "chat-1",
+		ChatType:            port.ChatTypeGroup,
+		SenderID:            "ou-user",
+		Text:                "OK",
+	}
+
+	result, ok, err := rt.resolveMessageContextReply(context.Background(), &InboundEventRecord{ID: "evt-row-1"}, evt)
+	if err != nil {
+		t.Fatalf("resolveMessageContextReply: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected single scoped recent handoff to resolve")
+	}
+	if result.Intent.Params["issue_key"] != "STA-9" {
+		t.Fatalf("issue_key = %q, want STA-9", result.Intent.Params["issue_key"])
+	}
+	if store.lastRecentSender != "ou-user" {
+		t.Fatalf("recent handoff sender scope = %q, want ou-user", store.lastRecentSender)
+	}
+}
+
+func TestGatewayReplySink_DoesNotInferHandoffFromQueryText(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeConversationStore{
+		byInbound: map[string]channelconversation.Message{
+			"evt-row-1": {
+				ID:             "msg-inbound",
+				ConversationID: "conv-1",
+				WorkspaceID:    "11111111-1111-1111-1111-111111111111",
+			},
+		},
+	}
+	sink := NewGatewayReplySink(fakeReplyGateway{}, WithGatewayReplyConversationStore(store))
+	evt := port.InboundEvent{
+		ChannelName:         "feishu",
+		ChannelConnectionID: "conn-1",
+		RuntimeEventID:      "evt-row-1",
+		EventID:             "evt-1",
+		ChatID:              "chat-1",
+		ChatType:            port.ChatTypeGroup,
+		SenderID:            "ou-user",
+		MessageID:           "om-inbound",
+	}
+
+	err := sink.SendRich(context.Background(), evt, port.OutboundRichMessage{
+		Title: "Issue STA-9",
+		Body:  "继续展开：/timeline STA-9 /logs STA-9",
+	})
+	if err != nil {
+		t.Fatalf("SendRich: %v", err)
+	}
+	if len(store.created) != 1 {
+		t.Fatalf("created messages = %d, want 1", len(store.created))
+	}
+	msg := store.created[0]
+	if msg.HandoffKind != channelconversation.HandoffKindNone {
+		t.Fatalf("handoff_kind = %q, want none", msg.HandoffKind)
+	}
+	var actions []string
+	if err := json.Unmarshal(msg.SuggestedActions, &actions); err != nil {
+		t.Fatalf("unmarshal suggested_actions: %v", err)
+	}
+	if len(actions) != 0 {
+		t.Fatalf("suggested_actions = %#v, want empty", actions)
+	}
+}
+
+func TestGatewayReplySink_RecordsStructuredHandoff(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeConversationStore{
+		byInbound: map[string]channelconversation.Message{
+			"evt-row-1": {ID: "msg-inbound", ConversationID: "conv-1"},
+		},
+	}
+	sink := NewGatewayReplySink(fakeReplyGateway{}, WithGatewayReplyConversationStore(store))
+	evt := port.InboundEvent{
+		ChannelName:         "feishu",
+		ChannelConnectionID: "conn-1",
+		RuntimeEventID:      "evt-row-1",
+		EventID:             "evt-1",
+		ChatID:              "chat-1",
+		ChatType:            port.ChatTypeGroup,
+		SenderID:            "ou-user",
+		MessageID:           "om-inbound",
+	}
+
+	err := sink.SendText(context.Background(), evt, port.OutboundMessage{
+		Text:             "Agent 失败，可重试。",
+		HandoffKind:      channelconversation.HandoffKindFailure,
+		SuggestedActions: []string{"retry", "comment"},
+	})
+	if err != nil {
+		t.Fatalf("SendText: %v", err)
+	}
+	if len(store.created) != 1 {
+		t.Fatalf("created messages = %d, want 1", len(store.created))
+	}
+	msg := store.created[0]
+	if msg.HandoffKind != channelconversation.HandoffKindFailure {
+		t.Fatalf("handoff_kind = %q, want failure", msg.HandoffKind)
+	}
+	var actions []string
+	if err := json.Unmarshal(msg.SuggestedActions, &actions); err != nil {
+		t.Fatalf("unmarshal suggested_actions: %v", err)
+	}
+	if got, want := strings.Join(actions, ","), "retry,comment"; got != want {
+		t.Fatalf("suggested_actions = %q, want %q", got, want)
+	}
+}
+
 type fakeConversationStore struct {
-	byPlatform    map[string]channelconversation.Message
-	byInbound     map[string]channelconversation.Message
-	refs          map[string][]channelconversation.EntityRef
-	recentRefs    []channelconversation.EntityRef
-	recent        []channelconversation.Message
-	upsertedTurns []channelconversation.Turn
+	byPlatform       map[string]channelconversation.Message
+	byInbound        map[string]channelconversation.Message
+	refs             map[string][]channelconversation.EntityRef
+	recentRefs       []channelconversation.EntityRef
+	recent           []channelconversation.Message
+	created          []channelconversation.Message
+	upsertedTurns    []channelconversation.Turn
+	lastRecentSender string
 }
 
 func (f *fakeConversationStore) EnsureConversation(context.Context, channelconversation.Conversation) (channelconversation.Conversation, error) {
 	return channelconversation.Conversation{}, nil
 }
 
-func (f *fakeConversationStore) CreateMessage(context.Context, channelconversation.Message) (channelconversation.Message, error) {
-	return channelconversation.Message{}, nil
+func (f *fakeConversationStore) CreateMessage(_ context.Context, msg channelconversation.Message) (channelconversation.Message, error) {
+	if msg.ID == "" {
+		msg.ID = "created-message"
+	}
+	f.created = append(f.created, msg)
+	return msg, nil
 }
 
 func (f *fakeConversationStore) UpdateMessageForInboundEvent(context.Context, string, channelconversation.Message) error {
@@ -229,7 +373,8 @@ func (f *fakeConversationStore) ListRecentContextEntityRefs(context.Context, str
 	return append([]channelconversation.EntityRef(nil), f.recentRefs...), nil
 }
 
-func (f *fakeConversationStore) ListRecentHandoffMessages(context.Context, string, string, string, time.Time, int) ([]channelconversation.Message, error) {
+func (f *fakeConversationStore) ListRecentHandoffMessages(_ context.Context, _, _, senderExternalID, _ string, _ time.Time, _ int) ([]channelconversation.Message, error) {
+	f.lastRecentSender = senderExternalID
 	return append([]channelconversation.Message(nil), f.recent...), nil
 }
 
@@ -251,3 +396,25 @@ func (f *fakeConversationStore) CompleteTurnForInboundEvent(context.Context, str
 }
 
 var _ channelconversation.Store = (*fakeConversationStore)(nil)
+
+type fakeReplyGateway struct{}
+
+func (fakeReplyGateway) SendText(context.Context, string, port.OutboundMessage) (port.SendResult, error) {
+	return port.SendResult{PlatformMessageID: "om-outbound"}, nil
+}
+
+func (fakeReplyGateway) SendRich(context.Context, string, port.OutboundRichMessage) (port.SendResult, error) {
+	return port.SendResult{PlatformMessageID: "om-outbound"}, nil
+}
+
+func (fakeReplyGateway) GetChatInfo(context.Context, string, string) (port.ChatInfo, error) {
+	return port.ChatInfo{}, nil
+}
+
+func (fakeReplyGateway) GetUserInfo(context.Context, string, string) (port.UserInfo, error) {
+	return port.UserInfo{}, nil
+}
+
+func (fakeReplyGateway) FileDownloader(string) (port.FileDownloader, bool) {
+	return nil, false
+}

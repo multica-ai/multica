@@ -496,6 +496,10 @@ CREATE UNIQUE INDEX idx_channel_turn_inbound_message
 CREATE INDEX idx_channel_turn_conversation_created
     ON channel_turn(conversation_id, created_at DESC);
 
+CREATE INDEX idx_channel_turn_outbound_message
+    ON channel_turn(outbound_message_id)
+    WHERE outbound_message_id IS NOT NULL;
+
 CREATE INDEX idx_channel_turn_status
     ON channel_turn(status, updated_at);
 
