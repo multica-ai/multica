@@ -134,6 +134,16 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
+export function invalidateTaskLifecycleQueries(qc: QueryClient, wsId: string) {
+  // CEREBRO-PATCH(inbox-active-run-realtime): task lifecycle events also drive inbox run pips (JEH-1425).
+  qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
+  qc.invalidateQueries({ queryKey: agentActivityKeys.last30d(wsId) });
+  qc.invalidateQueries({ queryKey: agentRunCountsKeys.last30d(wsId) });
+  qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
+  qc.invalidateQueries({ queryKey: ["issues", "tasks"] });
+  qc.invalidateQueries({ queryKey: inboxKeys.activeIssueTasks(wsId) });
+}
+
 export interface RealtimeSyncStores {
   authStore: UseBoundStore<StoreApi<AuthState>>;
 }
@@ -247,25 +257,7 @@ export function useRealtimeSync(
       task: () => {
         const wsId = getCurrentWsId();
         if (!wsId) return;
-        qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
-        // 30d activity series shares the same lifecycle signal — any task
-        // completion / failure shifts the histogram. (Dispatch alone
-        // doesn't change a completed_at-anchored series, but invalidating
-        // here keeps the WS-handler shape uniform; the resulting refetch
-        // is cheap.) Both the list (trailing 7d slice) and the detail
-        // panel read off this single cache.
-        qc.invalidateQueries({ queryKey: agentActivityKeys.last30d(wsId) });
-        // 30-day run count likewise increments per task lifecycle event.
-        qc.invalidateQueries({ queryKey: agentRunCountsKeys.last30d(wsId) });
-        // Per-agent task list (Activity tab "Recent work"). Prefix match
-        // catches every agent's list — the per-agent detail key sits
-        // under agentTasks/<wsId>/<agentId>.
-        qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
-        // Per-issue task list (issue-detail Execution log). Prefix match
-        // across all issues — keeps the contract "any task: event makes
-        // every list-of-tasks query stale" so cache stays fresh even
-        // when the relevant component isn't currently mounted.
-        qc.invalidateQueries({ queryKey: ["issues", "tasks"] });
+        invalidateTaskLifecycleQueries(qc, wsId);
         // Per-issue token usage card (issue-detail right rail). Same
         // shape as the tasks invalidation above — any task lifecycle
         // event shifts the aggregated usage numbers.
