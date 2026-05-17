@@ -253,15 +253,29 @@ function compactDeviceInfo(
     .split(" · ")
     .map((part) => part.trim())
     .filter(Boolean)
-    .filter((part) => part !== title);
+    .filter((part) => part !== title)
+    .filter((part) => !isAgentVersionLike(part));
   const primary = parts[0];
   if (!primary) return null;
 
-  const runtimeVersion = primary.match(/^(.+?)\s+\(([^)]+)\)$/);
-  if (runtimeVersion?.[1] && runtimeVersion[2]) {
-    return `${runtimeVersion[2]} ${runtimeVersion[1]}`;
+  // Reshape OS+arch produced by formatDeviceInfo (e.g. "macOS (x86_64)")
+  // into the more scannable "x86_64 macOS". Version strings — the only
+  // other shape that historically carried parens — are filtered out
+  // above so they can't pollute the per-machine subtitle.
+  const osArch = primary.match(/^(.+?)\s+\(([^)]+)\)$/);
+  if (osArch?.[1] && osArch[2]) {
+    return `${osArch[2]} ${osArch[1]}`;
   }
   return primary;
+}
+
+// True for parts that carry an agent CLI version, not machine info —
+// e.g. "2.1.5 (Claude Code)", "codex-cli 0.118.0", "1.0.20", "claude 1.0.0".
+// Those describe a runtime, not the host, so they should never become a
+// machine's subtitle (otherwise every claude-equipped daemon's row reads
+// "Claude Code …", drowning out actual per-machine differences).
+function isAgentVersionLike(part: string): boolean {
+  return /(?:^|\s)v?\d+\.\d+\.\d+/.test(part);
 }
 
 function latestLastSeenAt(runtimes: AgentRuntime[]): string | null {

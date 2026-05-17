@@ -75,6 +75,37 @@ describe("runtime machine grouping", () => {
     expect(filterRuntimeMachines(machines, "", "issues")).toHaveLength(1);
   });
 
+  it("does not surface agent CLI version branding as the machine subtitle", () => {
+    // Reproduces the bug where every machine row's subtitle read
+    // "Claude Code …" because compactDeviceInfo flipped the parenthetical
+    // of the version string "2.1.5 (Claude Code)" into the description.
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({
+          id: "rt-claude",
+          provider: "claude",
+          name: "Claude (dev.local)",
+          device_info: "dev.local · 2.1.5 (Claude Code)",
+        }),
+        makeRuntime({
+          id: "rt-codex",
+          provider: "codex",
+          name: "Codex (dev.local)",
+          device_info: "dev.local · codex-cli 0.118.0",
+        }),
+      ],
+      { now: NOW, localDaemonId: "daemon-1" },
+    );
+
+    expect(machines).toHaveLength(1);
+    const subtitle = machines[0]?.subtitle ?? "";
+    expect(subtitle.toLowerCase()).not.toContain("claude code");
+    expect(subtitle.toLowerCase()).not.toContain("codex-cli");
+    // Falls back to the daemon-id descriptor — at minimum it must not be
+    // the runtime CLI's marketing string.
+    expect(subtitle).toMatch(/^daemon /);
+  });
+
   it("keeps cloud runtimes as cloud workers when they have no daemon", () => {
     const machines = buildRuntimeMachines(
       [
