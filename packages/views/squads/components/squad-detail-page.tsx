@@ -94,6 +94,8 @@ export function SquadDetailPage() {
     return wsMembers.find((m) => m.user_id === currentUser.id)?.role ?? null;
   }, [wsMembers, currentUser]);
   const isWorkspaceAdmin = myRole === "owner" || myRole === "admin";
+  const canManageSquad =
+    isWorkspaceAdmin || squad?.creator_id === currentUser?.id;
 
   const { data: runtimes = [], isLoading: runtimesLoading } = useQuery({
     ...runtimeListOptions(wsId),
@@ -206,10 +208,12 @@ export function SquadDetailPage() {
           <SquadHeaderAvatar squad={squad} initials={initials} />
           <h1 className="text-sm font-medium">{squad.name}</h1>
         </div>
-        <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => { if (confirm("Archive this squad? Issues will be transferred to the leader.")) deleteMut.mutate(); }}>
-          <Trash2 className="size-3.5 mr-1" />
-          {t(($) => $.inspector.archive_button)}
-        </Button>
+        {canManageSquad && (
+          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => { if (confirm("Archive this squad? Issues will be transferred to the leader.")) deleteMut.mutate(); }}>
+            <Trash2 className="size-3.5 mr-1" />
+            {t(($) => $.inspector.archive_button)}
+          </Button>
+        )}
       </PageHeader>
 
       {/* Two-column grid mirrors agent-detail-page: left inspector (identity +
@@ -222,9 +226,9 @@ export function SquadDetailPage() {
           leaderName={getEntityName("agent", squad.leader_id)}
           creatorName={getEntityName("member", squad.creator_id)}
           uploadingAvatar={updateSquadMut.isPending}
-          onUploadAvatar={(url) => updateSquadMut.mutateAsync({ avatar_url: url })}
-          onRename={async (next) => { await updateSquadMut.mutateAsync({ name: next.trim() }); }}
-          onUpdateDescription={async (next) => { await updateSquadMut.mutateAsync({ description: next }); }}
+          onUploadAvatar={canManageSquad ? (url) => updateSquadMut.mutateAsync({ avatar_url: url }) : undefined}
+          onRename={canManageSquad ? async (next) => { await updateSquadMut.mutateAsync({ name: next.trim() }); } : undefined}
+          onUpdateDescription={canManageSquad ? async (next) => { await updateSquadMut.mutateAsync({ description: next }); } : undefined}
         />
 
         <SquadOverviewPane
@@ -232,12 +236,12 @@ export function SquadDetailPage() {
           members={members}
           isLeader={isLeader}
           getEntityName={getEntityName}
-          onAddMemberClick={() => setShowAddMember(true)}
+          onAddMemberClick={canManageSquad ? () => setShowAddMember(true) : undefined}
           onCreateAgentClick={isWorkspaceAdmin ? () => setShowCreateAgent(true) : undefined}
-          onSetLeader={(id) => setLeaderMut.mutate(id)}
-          onRemoveMember={(m) => removeMemberMut.mutate(m)}
-          onUpdateRole={async (m, role) => { await updateRoleMut.mutateAsync({ member: m, role }); }}
-          onSaveInstructions={async (next) => { await updateSquadMut.mutateAsync({ instructions: next }); toast.success("Instructions saved"); }}
+          onSetLeader={canManageSquad ? (id) => setLeaderMut.mutate(id) : undefined}
+          onRemoveMember={canManageSquad ? (m) => removeMemberMut.mutate(m) : undefined}
+          onUpdateRole={canManageSquad ? async (m, role) => { await updateRoleMut.mutateAsync({ member: m, role }); } : undefined}
+          onSaveInstructions={canManageSquad ? async (next) => { await updateSquadMut.mutateAsync({ instructions: next }); toast.success("Instructions saved"); } : undefined}
           setLeaderPending={setLeaderMut.isPending}
         />
       </div>
@@ -253,10 +257,10 @@ export function SquadDetailPage() {
 
       {/* Squad-scoped create flow: same dialog as the Agents page but
           with squadId set, so the dialog runs api.addSquadMember after
-          api.createAgent and skips the agent-detail navigation. Only
-          mounted for workspace owner/admin since AddSquadMember is
-          owner/admin-gated server-side; for everyone else the trigger
-          never renders. */}
+          api.createAgent and skips the agent-detail navigation. Mounted
+          only for workspace owner/admin because creating a new Agent is
+          a workspace-level governance action — independent of whether
+          the caller can otherwise manage this squad's membership. */}
       {showCreateAgent && isWorkspaceAdmin && (
         <CreateAgentDialog
           runtimes={runtimes}
@@ -302,11 +306,34 @@ function SquadAvatarEditor({
   squad: Squad;
   initials: string;
   uploading: boolean;
-  onUpload: (url: string) => Promise<unknown>;
+  onUpload?: (url: string) => Promise<unknown>;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { upload, uploading: fileUploading } = useFileUpload(api);
   const busy = uploading || fileUploading;
+
+  if (!onUpload) {
+    return (
+      <div
+        className="h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-muted"
+        aria-label="Squad avatar"
+      >
+        {squad.avatar_url ? (
+          <ActorAvatarBase
+            name={squad.name}
+            initials={initials}
+            avatarUrl={squad.avatar_url}
+            size={64}
+            className="rounded-none"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+            <Users className="h-7 w-7" />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -371,8 +398,14 @@ function SquadNameEditor({
   onSave,
 }: {
   value: string;
-  onSave: (next: string) => Promise<void>;
+  onSave?: (next: string) => Promise<void>;
 }) {
+  if (!onSave) {
+    return (
+      <div className="px-1 text-lg font-semibold leading-tight">{value}</div>
+    );
+  }
+
   return (
     <InlineEditPopover
       value={value}
@@ -646,13 +679,19 @@ function AddMemberDialog({
 // click (or click the placeholder when empty) to swap in an input that
 // commits on blur / Enter and cancels on Escape. Avoids opening a modal
 // for what is usually a one-word change.
-function RoleEditor({ value, onSave }: { value: string; onSave: (next: string) => Promise<void> }) {
+function RoleEditor({ value, onSave }: { value: string; onSave?: (next: string) => Promise<void> }) {
   const { t } = useT("squads");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
+
+  if (!onSave) {
+    return (
+      <div className="text-xs text-muted-foreground mt-0.5">{value || "—"}</div>
+    );
+  }
 
   const commit = async () => {
     const next = draft.trim();
@@ -718,9 +757,9 @@ function SquadDetailInspector({
   leaderName: string;
   creatorName: string;
   uploadingAvatar: boolean;
-  onUploadAvatar: (url: string) => Promise<unknown>;
-  onRename: (next: string) => Promise<void>;
-  onUpdateDescription: (next: string) => Promise<void>;
+  onUploadAvatar?: (url: string) => Promise<unknown>;
+  onRename?: (next: string) => Promise<void>;
+  onUpdateDescription?: (next: string) => Promise<void>;
 }) {
   const { t } = useT("squads");
   const initials = squad.name
@@ -800,10 +839,19 @@ function SquadDescriptionEditor({
   onSave,
 }: {
   value: string;
-  onSave: (next: string) => Promise<void>;
+  onSave?: (next: string) => Promise<void>;
 }) {
   const { t } = useT("squads");
   const [open, setOpen] = useState(false);
+
+  if (!onSave) {
+    return (
+      <div className="px-1 text-xs leading-relaxed text-muted-foreground">
+        {value || ""}
+      </div>
+    );
+  }
+
   return (
     <>
       <button
@@ -921,15 +969,15 @@ function SquadOverviewPane({
   members: SquadMember[];
   isLeader: (m: SquadMember) => boolean;
   getEntityName: (type: string, id: string) => string;
-  onAddMemberClick: () => void;
+  onAddMemberClick?: () => void;
   // Optional — only passed when the current user can manage the squad
   // (workspace owner/admin). Hidden otherwise so plain members don't
   // see a button they can't action.
   onCreateAgentClick?: () => void;
-  onSetLeader: (agentId: string) => void;
-  onRemoveMember: (m: SquadMember) => void;
-  onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
-  onSaveInstructions: (next: string) => Promise<void>;
+  onSetLeader?: (agentId: string) => void;
+  onRemoveMember?: (m: SquadMember) => void;
+  onUpdateRole?: (m: SquadMember, role: string) => Promise<void>;
+  onSaveInstructions?: (next: string) => Promise<void>;
   setLeaderPending: boolean;
 }) {
   const { t } = useT("squads");
@@ -1035,12 +1083,12 @@ function SquadMembersTab({
   members: SquadMember[];
   isLeader: (m: SquadMember) => boolean;
   getEntityName: (type: string, id: string) => string;
-  onAddMemberClick: () => void;
+  onAddMemberClick?: () => void;
   // Hidden for non-admins — see SquadOverviewPane.
   onCreateAgentClick?: () => void;
-  onSetLeader: (agentId: string) => void;
-  onRemoveMember: (m: SquadMember) => void;
-  onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
+  onSetLeader?: (agentId: string) => void;
+  onRemoveMember?: (m: SquadMember) => void;
+  onUpdateRole?: (m: SquadMember, role: string) => Promise<void>;
   setLeaderPending: boolean;
 }) {
   const { t } = useT("squads");
@@ -1061,10 +1109,12 @@ function SquadMembersTab({
               {t(($) => $.members_tab.create_agent_button)}
             </Button>
           )}
-          <Button size="sm" variant="outline" onClick={onAddMemberClick}>
-            <Plus className="size-3.5 mr-1.5" />
-            {t(($) => $.members_tab.add_member_button)}
-          </Button>
+          {onAddMemberClick && (
+            <Button size="sm" variant="outline" onClick={onAddMemberClick}>
+              <Plus className="size-3.5 mr-1.5" />
+              {t(($) => $.members_tab.add_member_button)}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1092,7 +1142,11 @@ function SquadMembersTab({
               </div>
               <RoleEditor
                 value={m.role ?? ""}
-                onSave={async (next) => { await onUpdateRole(m, next); }}
+                onSave={
+                  onUpdateRole
+                    ? async (next) => { await onUpdateRole(m, next); }
+                    : undefined
+                }
               />
             </div>
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
@@ -1114,7 +1168,7 @@ function SquadMembersTab({
                   </TooltipContent>
                 </Tooltip>
               )}
-              {m.member_type === "agent" && !isLeader(m) && (
+              {onSetLeader && m.member_type === "agent" && !isLeader(m) && (
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -1135,7 +1189,7 @@ function SquadMembersTab({
                   </TooltipContent>
                 </Tooltip>
               )}
-              {!isLeader(m) && (
+              {onRemoveMember && !isLeader(m) && (
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -1172,7 +1226,7 @@ function SquadInstructionsTab({
   onDirtyChange,
 }: {
   squad: Squad;
-  onSave: (instructions: string) => Promise<void>;
+  onSave?: (instructions: string) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t } = useT("squads");
@@ -1189,6 +1243,7 @@ function SquadInstructionsTab({
   }, [isDirty, onDirtyChange]);
 
   const handleSave = async () => {
+    if (!onSave) return;
     setSaving(true);
     try {
       await onSave(value);
@@ -1198,6 +1253,14 @@ function SquadInstructionsTab({
       setSaving(false);
     }
   };
+
+  if (!onSave) {
+    return (
+      <div className="flex h-full flex-col gap-4">
+        <div className="text-sm whitespace-pre-wrap">{squad.instructions ?? ""}</div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col gap-4">

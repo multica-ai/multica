@@ -69,6 +69,38 @@ func squadMemberToResponse(m db.SquadMember) SquadMemberResponse {
 	}
 }
 
+// ── Authorization helpers ───────────────────────────────────────────────────
+
+// canManageSquad reports whether the caller may mutate this squad.
+// Workspace owner/admin always can; otherwise only the squad's creator.
+func canManageSquad(member db.Member, squad db.Squad) bool {
+	if roleAllowed(member.Role, "owner", "admin") {
+		return true
+	}
+	return member.UserID == squad.CreatorID
+}
+
+// requireSquadManager resolves the calling workspace member, loads the
+// target squad, and confirms the caller may manage it. On any failure it
+// writes the appropriate HTTP response and returns ok=false — callers
+// must return immediately.
+func (h *Handler) requireSquadManager(w http.ResponseWriter, r *http.Request) (db.Squad, db.Member, bool) {
+	workspaceID := workspaceIDFromURL(r, "workspaceId")
+	member, ok := h.requireWorkspaceMember(w, r, workspaceID, "workspace not found")
+	if !ok {
+		return db.Squad{}, db.Member{}, false
+	}
+	squad, _, ok := h.loadSquadInWorkspace(w, r)
+	if !ok {
+		return db.Squad{}, db.Member{}, false
+	}
+	if !canManageSquad(member, squad) {
+		writeError(w, http.StatusForbidden, "insufficient permissions")
+		return db.Squad{}, db.Member{}, false
+	}
+	return squad, member, true
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 // loadSquadInWorkspace loads a squad scoped to the current workspace.
@@ -116,7 +148,7 @@ func (h *Handler) ListSquads(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "workspaceId")
-	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin")
+	member, ok := h.requireWorkspaceMember(w, r, workspaceID, "workspace not found")
 	if !ok {
 		return
 	}
@@ -200,11 +232,7 @@ func (h *Handler) GetSquad(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "workspaceId")
-	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
-		return
-	}
-
-	squad, _, ok := h.loadSquadInWorkspace(w, r)
+	squad, _, ok := h.requireSquadManager(w, r)
 	if !ok {
 		return
 	}
@@ -275,11 +303,7 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteSquad(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "workspaceId")
-	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
-		return
-	}
-
-	squad, _, ok := h.loadSquadInWorkspace(w, r)
+	squad, _, ok := h.requireSquadManager(w, r)
 	if !ok {
 		return
 	}
@@ -336,11 +360,7 @@ func (h *Handler) ListSquadMembers(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "workspaceId")
-	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
-		return
-	}
-
-	squad, _, ok := h.loadSquadInWorkspace(w, r)
+	squad, _, ok := h.requireSquadManager(w, r)
 	if !ok {
 		return
 	}
@@ -412,11 +432,7 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) RemoveSquadMember(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "workspaceId")
-	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
-		return
-	}
-
-	squad, _, ok := h.loadSquadInWorkspace(w, r)
+	squad, _, ok := h.requireSquadManager(w, r)
 	if !ok {
 		return
 	}
@@ -463,11 +479,7 @@ func (h *Handler) RemoveSquadMember(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UpdateSquadMemberRole(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "workspaceId")
-	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
-		return
-	}
-
-	squad, _, ok := h.loadSquadInWorkspace(w, r)
+	squad, _, ok := h.requireSquadManager(w, r)
 	if !ok {
 		return
 	}
