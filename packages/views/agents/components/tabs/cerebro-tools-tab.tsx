@@ -32,6 +32,7 @@ interface ToolConfigFieldsProps {
 }
 
 function ToolConfigFields({ tool, onConfigChange, disabled }: ToolConfigFieldsProps) {
+  const { t } = useT("agents");
   const config = tool.config ?? {};
 
   // Tool-specific config fields based on tool name
@@ -39,7 +40,7 @@ function ToolConfigFields({ tool, onConfigChange, disabled }: ToolConfigFieldsPr
     const rowLimit = String(config.row_limit ?? "1000");
     return (
       <div className="mt-2 pl-10">
-        <Label className="text-xs text-muted-foreground">Row limit</Label>
+        <Label className="text-xs text-muted-foreground">{t(($) => $.tab_body.tools.row_limit_label)}</Label>
         <Input
           type="number"
           value={rowLimit}
@@ -57,7 +58,7 @@ function ToolConfigFields({ tool, onConfigChange, disabled }: ToolConfigFieldsPr
     const spreadsheetId = String(config.spreadsheet_id ?? "");
     return (
       <div className="mt-2 pl-10">
-        <Label className="text-xs text-muted-foreground">Default Spreadsheet ID</Label>
+        <Label className="text-xs text-muted-foreground">{t(($) => $.tab_body.tools.spreadsheet_id_label)}</Label>
         <Input
           type="text"
           value={spreadsheetId}
@@ -74,7 +75,7 @@ function ToolConfigFields({ tool, onConfigChange, disabled }: ToolConfigFieldsPr
     const allowlist = String(config.url_allowlist ?? "");
     return (
       <div className="mt-2 pl-10">
-        <Label className="text-xs text-muted-foreground">URL allowlist (comma-separated)</Label>
+        <Label className="text-xs text-muted-foreground">{t(($) => $.tab_body.tools.url_allowlist_label)}</Label>
         <Input
           type="text"
           value={allowlist}
@@ -98,11 +99,15 @@ interface ToolRowProps {
 }
 
 function ToolRow({ tool, onToggle, onConfigSave, toggling }: ToolRowProps) {
+  const { t } = useT("agents");
   const [localConfig, setLocalConfig] = useState<Record<string, unknown>>(tool.config ?? {});
   const [savingConfig, setSavingConfig] = useState(false);
 
   const isExcluded = tool.status === "explicitly_excluded"; // CEREBRO-PATCH(agent-tools-status): excluded tools are visible but cannot be toggled callable.
   const isDirty = JSON.stringify(localConfig) !== JSON.stringify(tool.config ?? {});
+  const toolName = tool.name.trim();
+  const toolLabel = toolName || t(($) => $.tab_body.tools.unknown_tool);
+  const description = tool.description.trim() || t(($) => $.tab_body.tools.no_description);
 
   const handleConfigChange = (key: string, value: string) => {
     setLocalConfig((prev) => ({ ...prev, [key]: value }));
@@ -125,23 +130,27 @@ function ToolRow({ tool, onToggle, onConfigSave, toggling }: ToolRowProps) {
           <div className="flex items-center justify-between gap-2">
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-medium">{tool.name}</span>
+                <span className="text-sm font-medium">{toolLabel}</span>
                 {isExcluded && (
                   <span className="rounded border border-dashed px-1.5 py-0.5 text-[11px] text-muted-foreground">
                     Excluded
                   </span>
                 )}
               </div>
-              {tool.description && (
-                <p className="mt-0.5 text-xs text-muted-foreground">{tool.description}</p>
-              )}
+              <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
             </div>
-            <Switch
-              checked={tool.enabled}
-              onCheckedChange={(v) => onToggle(tool.name, v)}
-              disabled={toggling || isExcluded}
-              aria-label={`Toggle ${tool.name}`}
-            />
+            <div className="flex shrink-0 items-center gap-2">
+              {/* CEREBRO-PATCH(agent-tools-tab): show enabled state as text as well as the switch. */}
+              <span className="text-xs text-muted-foreground">
+                {tool.enabled ? t(($) => $.tab_body.tools.enabled) : t(($) => $.tab_body.tools.disabled)}
+              </span>
+              <Switch
+                checked={tool.enabled}
+                onCheckedChange={(v) => onToggle(tool.name, v)}
+                disabled={toggling || isExcluded || !toolName}
+                aria-label={`Toggle ${toolLabel}`}
+              />
+            </div>
           </div>
           {tool.enabled && (
             <ToolConfigFields

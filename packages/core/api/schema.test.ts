@@ -287,6 +287,33 @@ describe("ApiClient schema fallback", () => {
       expect(resp.reused_skill_ids).toEqual([]);
     });
   });
+
+  describe("getAgentTools", () => {
+    // CEREBRO-PATCH(agent-tools-schema-test): JEH-1351 covers first W3 snake_case response shape.
+    it("normalizes snake_case tool names so the tools tab can render labels", async () => {
+      stubFetchJson([
+        {
+          tool_name: "firtal_bq_query",
+          description: "Run BigQuery queries",
+          enabled: true,
+          config: { row_limit: 1000 },
+        },
+      ]);
+
+      const client = new ApiClient("https://api.example.test");
+      const tools = await client.getAgentTools("agent-1");
+
+      expect(tools).toEqual([
+        {
+          name: "firtal_bq_query",
+          description: "Run BigQuery queries",
+          status: "implemented",
+          enabled: true,
+          config: { row_limit: 1000 },
+        },
+      ]);
+    });
+  });
 });
 
 // Direct tests for the helper, decoupled from any specific endpoint —

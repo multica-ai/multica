@@ -319,7 +319,7 @@
       "add_failed_toast": "Failed to add skill"
     },
     "tools": {
-      "_comment": "CEREBRO-PATCH(agent-tools-tab-local-empty): JEH-1290/1353/1360 W8 — tools tab body strings",
+      "_comment": "CEREBRO-PATCH(agent-tools-tab): JEH-1290/1351/1353/1360 W8 — tools tab body strings",
       "intro": "Toggle which tools this agent can use. Tool credentials are configured in workspace settings.",
       "local_agent_note": "This agent runs locally via the daemon. Enabling gateway tools here has no effect — the daemon uses its own MCP config. These toggles only apply to cloud-runtime agents.",
       "local_empty_title": "Gateway tools are cloud-only",
@@ -328,7 +328,14 @@
       "load_failed": "Could not load tools for this agent.",
       "toggle_failed_toast": "Failed to update tool",
       "config_saved_toast": "Tool config saved",
-      "config_save_failed_toast": "Failed to save tool config"
+      "config_save_failed_toast": "Failed to save tool config",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "unknown_tool": "Unknown tool",
+      "no_description": "No description provided.",
+      "row_limit_label": "Row limit",
+      "spreadsheet_id_label": "Default Spreadsheet ID",
+      "url_allowlist_label": "URL allowlist (comma-separated)"
     },
     "activity": {
       "section_now": "Now",
