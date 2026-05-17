@@ -134,6 +134,7 @@ describe("CallbackPage", () => {
         settings: {},
         repos: [],
         issue_prefix: "ACME",
+        avatar_url: null,
         created_at: "",
         updated_at: "",
       },

@@ -122,6 +122,10 @@
   },
   "workspace": {
     "section_general": "通用",
+    "change_logo_aria": "更换工作区图标",
+    "click_logo_hint": "点击图标上传新图片",
+    "toast_logo_updated": "工作区图标已更新",
+    "toast_logo_failed": "上传工作区图标失败",
     "name_label": "名称",
     "description_label": "描述",
     "description_placeholder": "这个工作区主要做什么？",

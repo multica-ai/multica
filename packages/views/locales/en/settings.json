@@ -122,6 +122,10 @@
   },
   "workspace": {
     "section_general": "General",
+    "change_logo_aria": "Change workspace logo",
+    "click_logo_hint": "Click the logo to upload a new image",
+    "toast_logo_updated": "Workspace logo updated",
+    "toast_logo_failed": "Failed to upload workspace logo",
     "name_label": "Name",
     "description_label": "Description",
     "description_placeholder": "What does this workspace focus on?",

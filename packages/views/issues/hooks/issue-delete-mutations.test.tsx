@@ -40,6 +40,7 @@ const workspace: Workspace = {
   settings: {},
   repos: [],
   issue_prefix: "TST",
+  avatar_url: null,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };

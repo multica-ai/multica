@@ -41,6 +41,7 @@ type WorkspaceResponse struct {
 	Settings    any     `json:"settings"`
 	Repos       any     `json:"repos"`
 	IssuePrefix string  `json:"issue_prefix"`
+	AvatarURL   *string `json:"avatar_url"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
 }
@@ -69,6 +70,7 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		Settings:    settings,
 		Repos:       repos,
 		IssuePrefix: w.IssuePrefix,
+		AvatarURL:   textToPtr(w.AvatarUrl),
 		CreatedAt:   timestampToString(w.CreatedAt),
 		UpdatedAt:   timestampToString(w.UpdatedAt),
 	}
@@ -243,6 +245,7 @@ type UpdateWorkspaceRequest struct {
 	Settings    any     `json:"settings"`
 	Repos       any     `json:"repos"`
 	IssuePrefix *string `json:"issue_prefix"`
+	AvatarURL   *string `json:"avatar_url"`
 }
 
 func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -288,6 +291,9 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		if prefix != "" {
 			params.IssuePrefix = pgtype.Text{String: prefix, Valid: true}
 		}
+	}
+	if req.AvatarURL != nil {
+		params.AvatarUrl = pgtype.Text{String: *req.AvatarURL, Valid: true}
 	}
 
 	ws, err := h.Queries.UpdateWorkspace(r.Context(), params)

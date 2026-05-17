@@ -122,6 +122,10 @@
   },
   "workspace": {
     "section_general": "일반",
+    "change_logo_aria": "워크스페이스 로고 변경",
+    "click_logo_hint": "로고를 클릭하여 새 이미지를 업로드하세요",
+    "toast_logo_updated": "워크스페이스 로고를 업데이트했습니다",
+    "toast_logo_failed": "워크스페이스 로고를 업로드하지 못했습니다",
     "name_label": "이름",
     "description_label": "설명",
     "description_placeholder": "이 워크스페이스는 무엇에 집중하나요?",
