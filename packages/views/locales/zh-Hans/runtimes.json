@@ -157,7 +157,9 @@
     "heatmap_more": "多"
   },
   "list": {
+    "_comment_name_col": "CEREBRO-PATCH(runtime-name-own-column): col_name for the separate runtime name column (JEH-1520)",
     "col_runtime": "运行时",
+    "col_name": "名称",
     "col_health": "健康度",
     "col_owner": "所有者",
     "col_agents": "智能体",

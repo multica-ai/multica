@@ -162,7 +162,9 @@
     "heatmap_more": "More"
   },
   "list": {
+    "_comment_name_col": "CEREBRO-PATCH(runtime-name-own-column): col_name for the separate runtime name column (JEH-1520)",
     "col_runtime": "Runtime",
+    "col_name": "Name",
     "col_health": "Health",
     "col_owner": "Owner",
     "col_agents": "Agents",

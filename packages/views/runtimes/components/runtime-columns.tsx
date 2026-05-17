@@ -63,12 +63,14 @@ export interface RuntimeRow {
   canDelete: boolean;
 }
 
-// Column widths in px. Runtime, Health, and CLI grow together until the
+// Column widths in px. Name, Health, and CLI grow together until the
 // user resizes them. Their `size` values still flow into table.getTotalSize()
 // to set the table's min-width, giving each grow column a real floor below
 // which the container scrolls horizontally instead of shrinking further.
 const COL_WIDTHS = {
-  runtime: 240,
+  // CEREBRO-PATCH(runtime-name-own-column): split provider logo into its own narrow column (JEH-1520)
+  runtime: 48,
+  name: 200,
   health: 200,
   owner: 60,
   agents: 100,
@@ -103,8 +105,16 @@ export function createRuntimeColumns({
       id: "runtime",
       header: () => t(($) => $.list.col_runtime),
       size: COL_WIDTHS.runtime,
+      // CEREBRO-PATCH(runtime-name-own-column): logo-only; name moved to dedicated column (JEH-1520)
+      cell: ({ row }) => <RuntimeProviderCell runtime={row.original.runtime} />,
+    },
+    {
+      // CEREBRO-PATCH(runtime-name-own-column): separate name column so the runtime name is its own resizable column (JEH-1520)
+      id: "name",
+      header: () => t(($) => $.list.col_name),
+      size: COL_WIDTHS.name,
       meta: { grow: true },
-      cell: ({ row }) => <RuntimeNameCell runtime={row.original.runtime} />,
+      cell: ({ row }) => <RuntimeNameTextCell runtime={row.original.runtime} />,
     },
     {
       id: "health",
@@ -227,31 +237,36 @@ export function splitRuntimeName(name: string): {
 // Cell renderers
 // ---------------------------------------------------------------------------
 
-function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
+// CEREBRO-PATCH(runtime-name-own-column): provider logo cell — RuntimeNameCell split into provider + name (JEH-1520)
+function RuntimeProviderCell({ runtime }: { runtime: AgentRuntime }) {
+  return (
+    <div className="flex h-8 w-8 items-center justify-center">
+      <ProviderLogo provider={runtime.provider} className="h-5 w-5" />
+    </div>
+  );
+}
+
+// CEREBRO-PATCH(runtime-name-own-column): name-only cell with hostname tooltip + visibility badge (JEH-1520)
+function RuntimeNameTextCell({ runtime }: { runtime: AgentRuntime }) {
   const { base: baseName, hostname } = splitRuntimeName(runtime.name);
   return (
-    <div className="flex min-w-0 items-center gap-2">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center">
-        <ProviderLogo provider={runtime.provider} className="h-5 w-5" />
-      </div>
-      <div className="flex min-w-0 flex-1 items-center gap-1.5">
-        <span className="block min-w-0 shrink truncate text-sm font-medium">
-          {baseName}
-        </span>
-        {hostname && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <span className="block min-w-0 flex-1 basis-0 truncate text-xs text-muted-foreground/70">
-                  ({hostname})
-                </span>
-              }
-            />
-            <TooltipContent>{hostname}</TooltipContent>
-          </Tooltip>
-        )}
-        <VisibilityBadge runtime={runtime} />
-      </div>
+    <div className="flex min-w-0 items-center gap-1.5">
+      <span className="block min-w-0 shrink truncate text-sm font-medium">
+        {baseName}
+      </span>
+      {hostname && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span className="block min-w-0 flex-1 basis-0 truncate text-xs text-muted-foreground/70">
+                ({hostname})
+              </span>
+            }
+          />
+          <TooltipContent>{hostname}</TooltipContent>
+        </Tooltip>
+      )}
+      <VisibilityBadge runtime={runtime} />
     </div>
   );
 }
@@ -303,8 +318,9 @@ function HealthCell({
   // CEREBRO-PATCH(runtime-list-paused-cell): when paused, show pause reason
   // + auto-unpause time so humans can tell why work has stopped without
   // opening the detail page.
+  // CEREBRO-PATCH(runtime-pause-reason-display): show actual pause_reason slug instead of collapsing to auto/manual (JEH-1520)
   if (health === "paused") {
-    const reason = runtime.pause_reason === "auto" ? "auto" : "manual";
+    const reason = runtime.pause_reason || "manual";
     const until = runtime.unpause_at ? formatLastSeen(runtime.unpause_at) : null;
     return (
       <div className="flex min-w-0 items-center gap-1.5">
