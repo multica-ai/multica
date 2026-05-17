@@ -41,6 +41,8 @@ import { JumpToLatestButton } from "@multica/cerebro-ui/components/jump-to-lates
 import { useNavScrollState } from "@multica/cerebro-ui/hooks/use-nav-scroll-state";
 // CEREBRO-PATCH(issue-detail-highlight-scroll-hook): JEH-1002 retry-based inbox→comment scroll lives in cerebro-ui (replaces the prior single-shot inline effect).
 import { useHighlightCommentScroll } from "@multica/cerebro-ui/hooks/use-highlight-comment-scroll";
+// CEREBRO-PATCH(issue-detail-unarchive-toolbar): JEH-1321 — unarchive button rendered in detail toolbar when host embeds IssueDetail in archived inbox view.
+import { CerebroUnarchiveToolbarButton } from "@multica/cerebro-inbox";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -556,6 +558,8 @@ interface IssueDetailProps {
   onDelete?: () => void;
   /** Called after the issue is marked as done via the toolbar button. */
   onDone?: () => void;
+  // CEREBRO-PATCH(issue-detail-unarchive-toolbar): JEH-1321 — surface unarchive icon in the detail toolbar when host (inbox archived view) supplies a handler.
+  onUnarchive?: () => void;
   defaultSidebarOpen?: boolean;
   layoutId?: string;
   /** When set, the issue detail will auto-scroll to this comment and briefly highlight it. */
@@ -568,7 +572,8 @@ interface IssueDetailProps {
 // IssueDetail
 // ---------------------------------------------------------------------------
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, linkSelfInBreadcrumb = false }: IssueDetailProps) {
+// CEREBRO-PATCH(issue-detail-unarchive-toolbar): JEH-1321 — accept onUnarchive from host.
+export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, linkSelfInBreadcrumb = false }: IssueDetailProps) {
   const { t } = useT("issues");
   const id = issueId;
   const router = useNavigation();
@@ -1559,6 +1564,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            {/* CEREBRO-PATCH(issue-detail-unarchive-toolbar): JEH-1321 — render unarchive icon when host (archived inbox view) supplies handler. */}
+            {onUnarchive && <CerebroUnarchiveToolbarButton onUnarchive={onUnarchive} />}
             {onDone && issue.status !== "done" && issue.status !== "cancelled" && (
               <Tooltip>
                 <TooltipTrigger
@@ -1592,6 +1599,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 />
                 <TooltipContent side="bottom">{t(($) => $.detail.archive_tooltip)}</TooltipContent>
               </Tooltip>
+            )}
+            {/* CEREBRO-PATCH(issue-detail-unarchive-toolbar): JEH-1321 — render unarchive icon when host (inbox archived view) supplies onUnarchive. */}
+            {onUnarchive && (
+              <CerebroUnarchiveToolbarButton onUnarchive={onUnarchive} />
             )}
             <Tooltip>
               <TooltipTrigger

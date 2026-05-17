@@ -10,6 +10,7 @@ export {
   CerebroSwipeArchive,
   CerebroUnarchiveAction,
 } from "./components/cerebro-inbox-row-actions";
+export { CerebroUnarchiveToolbarButton } from "./components/cerebro-unarchive-toolbar-button";
 export { CerebroInboxTimestamp } from "./components/cerebro-inbox-timestamp";
 export { useInboxKeyboardShortcuts } from "./use-inbox-keyboard-shortcuts";
 export {

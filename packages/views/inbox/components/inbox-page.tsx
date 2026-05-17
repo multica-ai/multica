@@ -1042,9 +1042,11 @@ export function InboxPage() {
           // longer exists.
           setSelectedKey(null, "");
         }}
-        onDone={() => {
-          handleArchive(selected.id);
-        }}
+        // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1321 — archived view wires
+        // onUnarchive into IssueDetail's toolbar and suppresses onDone so the
+        // header no longer offers archive on an already-archived row.
+        onDone={isArchivedView ? undefined : () => handleArchive(selected.id)}
+        onUnarchive={isArchivedView ? () => handleUnarchive(selected.id) : undefined}
       />
     </ErrorBoundary>
   ) : selected ? (

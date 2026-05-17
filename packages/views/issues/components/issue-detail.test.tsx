@@ -452,12 +452,15 @@ function createTestQueryClient() {
   });
 }
 
-function renderIssueDetail(issueId = "issue-1") {
+function renderIssueDetail(
+  issueId = "issue-1",
+  props: Partial<Parameters<typeof IssueDetail>[0]> = {},
+) {
   const queryClient = createTestQueryClient();
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={queryClient}>
-        <IssueDetail issueId={issueId} />
+        <IssueDetail issueId={issueId} {...props} />
       </QueryClientProvider>
     </I18nProvider>,
   );
@@ -970,5 +973,52 @@ describe("IssueDetail (channel/DM)", () => {
 
     // Activity (not Messages) is the section heading for issues.
     expect(screen.getAllByText("Activity").length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// CEREBRO-PATCH(issue-detail-unarchive-toolbar): JEH-1321 — IssueDetail must
+// expose an unarchive button in its header toolbar when the embedding host
+// (archived inbox view) supplies `onUnarchive`. Without it the user can
+// hover-unarchive on the row but has no equivalent action once the detail
+// panel is open. Lives outside the channel/DM describe-block so the
+// regular-issue mock setup (Properties sidebar, Activity heading) applies.
+describe("IssueDetail unarchive toolbar (cerebro)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockViewport.isMobile = false;
+    mockApiObj.getIssue.mockResolvedValue(mockIssue);
+    mockApiObj.listTimeline.mockResolvedValue(mockTimeline);
+    mockApiObj.listIssueReactions.mockResolvedValue([]);
+    mockApiObj.listIssueSubscribers.mockResolvedValue([]);
+    mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
+    mockApiObj.listIssues.mockResolvedValue({ issues: [], total: 0 });
+    mockApiObj.getActiveTasksForIssue.mockResolvedValue({ tasks: [] });
+    mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    mockApiObj.listMembers.mockResolvedValue([
+      { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
+    ]);
+    mockApiObj.listAgents.mockResolvedValue([]);
+  });
+
+  it("does not render the unarchive button when onUnarchive is not provided", async () => {
+    renderIssueDetail("issue-1");
+    await waitFor(() => {
+      expect(screen.getByText("Properties")).toBeInTheDocument();
+    });
+    expect(screen.queryAllByRole("button", { name: /unarchive/i })).toHaveLength(0);
+  });
+
+  it("renders the unarchive button and fires onUnarchive when supplied", async () => {
+    const onUnarchive = vi.fn();
+    renderIssueDetail("issue-1", { onUnarchive });
+    // IssueDetail mirrors the header toolbar across the desktop pane and a
+    // hidden mobile sheet, so the unarchive button appears more than once;
+    // clicking either should still fire the callback exactly one time.
+    const buttons = await screen.findAllByRole("button", { name: /unarchive/i });
+    expect(buttons.length).toBeGreaterThan(0);
+    const first = buttons[0];
+    if (!first) throw new Error("expected at least one unarchive button");
+    fireEvent.click(first);
+    expect(onUnarchive).toHaveBeenCalledTimes(1);
   });
 });
