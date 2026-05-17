@@ -49,10 +49,10 @@ func TestDBInboundEventStore_AcceptEventCreatesChannelMessage(t *testing.T) {
 	}
 	upSQL, err := os.ReadFile(migrationPath(t, "093_channel_message_model.up.sql"))
 	if err != nil {
-		t.Fatalf("read migration 092 up: %v", err)
+		t.Fatalf("read migration 093 up: %v", err)
 	}
 	if _, err := pool.Exec(ctx, string(upSQL)); err != nil {
-		t.Fatalf("apply migration 092: %v", err)
+		t.Fatalf("apply migration 093: %v", err)
 	}
 
 	connID := "conn-message"

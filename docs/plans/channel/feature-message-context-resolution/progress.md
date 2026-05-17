@@ -16,8 +16,8 @@
   - 新增 `ProcessingKey` 保留原“群聊按 sender 串行”的处理粒度。
   - `AcceptEvent`、`ClaimNext`、active 清理逻辑切换到 `channel_processing_lock`。
 - 新增 migration DDL 测试：
-  - `TestMigration092DDL` 默认跳过。
-  - 设置 `CHANNEL_MIGRATION_TEST_DATABASE_URL` 后，在独立 schema + transaction 中验证 092 up/down。
+  - `TestMigration093DDL` 默认跳过。
+  - 设置 `CHANNEL_MIGRATION_TEST_DATABASE_URL` 后，在独立 schema + transaction 中验证 093 up/down。
 
 ### 实现思路
 
@@ -34,13 +34,13 @@
 
 - `channel_inbound_event.conversation_key` 字段名现在实际代表 processing key，后续如果继续深化，可考虑新增 `processing_key` 字段并迁移命名。
 - `channel_message` / `channel_turn` 已有 Store，但尚未接入 runtime/outbox，因此当前只是 schema 与持久化边界，不改变用户可见行为。
-- 临时测试库的 `schema_migrations` 与实际表状态不一致，无法直接用 `cmd/migrate up` 跑到 092；已用独立 schema DDL 测试替代验证。
+- 临时测试库的 `schema_migrations` 与实际表状态不一致，无法直接用 `cmd/migrate up` 跑到 093；已用独立 schema DDL 测试替代验证。
 
 ### 验证
 
 - `go test ./internal/channel/...` 通过。
 - `go test ./cmd/server` 通过。
-- `CHANNEL_MIGRATION_TEST_DATABASE_URL=... go test ./internal/channel/conversation -run TestMigration092DDL -count=1` 通过。
+- `CHANNEL_MIGRATION_TEST_DATABASE_URL=... go test ./internal/channel/conversation -run TestMigration093DDL -count=1` 通过。
 
 ### 下一步
 
@@ -126,7 +126,7 @@
 
 ### 与 Plan 的差异
 
-- Plan 没明确要求扩展 `channel_outbound_notification`；实现时发现如果不保留 actor/comment 来源，后续无法把“同意/重试”准确 @ 回对应 agent，因此在 092 migration 中补充了 `actor_type / actor_id / source_comment_id`。
+- Plan 没明确要求扩展 `channel_outbound_notification`；实现时发现如果不保留 actor/comment 来源，后续无法把“同意/重试”准确 @ 回对应 agent，因此在 093 migration 中补充了 `actor_type / actor_id / source_comment_id`。
 - `ChannelReplySink` 的接口仍保持返回 `error`，没有把 `SendResult` 扩散给所有调用方；PlatformMessageID 在 sink 内被持久化，降低调用面改动。
 
 ### 后续待优化
@@ -138,7 +138,7 @@
 
 - `go test ./internal/channel/...` 通过。
 - `go test ./cmd/server` 通过。
-- 临时 PostgreSQL 独立 schema：`TestMigration092DDL` 通过。
+- 临时 PostgreSQL 独立 schema：`TestMigration093DDL` 通过。
 - 临时 PostgreSQL 独立 schema：`TestDBInboundEventStore_AcceptEventCreatesChannelMessage` 通过。
 
 ## 里程碑 4 / 5
@@ -222,7 +222,7 @@
 
 - `go test ./internal/channel/...` 通过。
 - `go test ./cmd/server` 通过。
-- `CHANNEL_MIGRATION_TEST_DATABASE_URL=... go test ./internal/channel/conversation -run TestMigration092DDL -count=1` 通过。
+- `CHANNEL_MIGRATION_TEST_DATABASE_URL=... go test ./internal/channel/conversation -run TestMigration093DDL -count=1` 通过。
 - `CHANNEL_MIGRATION_TEST_DATABASE_URL=... go test ./internal/channel/inbound -run TestDBInboundEventStore_AcceptEventCreatesChannelMessage -count=1` 通过。
 
 ## 审阅修复
@@ -251,5 +251,23 @@
 - `go test ./internal/channel/...` 通过。
 - `go test ./cmd/server` 通过。
 - `git diff --check` 通过。
-- `CHANNEL_MIGRATION_TEST_DATABASE_URL=... go test ./internal/channel/conversation -run TestMigration092DDL -count=1` 通过。
+- `CHANNEL_MIGRATION_TEST_DATABASE_URL=... go test ./internal/channel/conversation -run TestMigration093DDL -count=1` 通过。
 - `CHANNEL_MIGRATION_TEST_DATABASE_URL=... go test ./internal/channel/inbound -run TestDBInboundEventStore_AcceptEventCreatesChannelMessage -count=1` 通过。
+
+## PR 前收口
+
+### 本阶段实现内容
+
+- 将 channel message model migration 顺延到 `093` 后的测试名、错误信息和进度记录统一同步为 `093`。
+- 确认仓库中不再残留旧 migration 文件名或旧 DDL 测试名引用。
+
+### 最终验证
+
+- `go test ./internal/channel/...` 通过。
+- `go test ./cmd/server` 通过。
+- `go test ./...`（server）通过。
+- `pnpm test` 通过。
+- `git diff --check` 通过。
+- `CHANNEL_MIGRATION_TEST_DATABASE_URL=... go test ./internal/channel/conversation -run TestMigration093DDL -count=1` 通过。
+- `CHANNEL_MIGRATION_TEST_DATABASE_URL=... go test ./internal/channel/inbound -run TestDBInboundEventStore_AcceptEventCreatesChannelMessage -count=1` 通过。
+- `make test` 未执行完成：该命令会读取当前 `.env` 并对远程 `multica` 数据库执行迁移，风险范围超过本次临时 `test_multica` 验证库。

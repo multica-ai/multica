@@ -13,10 +13,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestMigration092DDL(t *testing.T) {
+func TestMigration093DDL(t *testing.T) {
 	dbURL := os.Getenv("CHANNEL_MIGRATION_TEST_DATABASE_URL")
 	if dbURL == "" {
-		t.Skip("set CHANNEL_MIGRATION_TEST_DATABASE_URL to validate migration 092 DDL")
+		t.Skip("set CHANNEL_MIGRATION_TEST_DATABASE_URL to validate migration 093 DDL")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dbURL)
@@ -38,7 +38,7 @@ func TestMigration092DDL(t *testing.T) {
 	if _, err := tx.Exec(ctx, "SET LOCAL search_path TO "+schema+", public"); err != nil {
 		t.Fatalf("set migration check search_path: %v", err)
 	}
-	if _, err := tx.Exec(ctx, migration092Prerequisites); err != nil {
+	if _, err := tx.Exec(ctx, migration093Prerequisites); err != nil {
 		t.Fatalf("create migration prerequisites: %v", err)
 	}
 	if _, err := tx.Exec(ctx, `
@@ -67,21 +67,21 @@ INSERT INTO channel_conversation (
 	}
 	upSQL, err := os.ReadFile(filepath.Join("..", "..", "..", "migrations", "093_channel_message_model.up.sql"))
 	if err != nil {
-		t.Fatalf("read migration 092 up: %v", err)
+		t.Fatalf("read migration 093 up: %v", err)
 	}
 	if _, err := tx.Exec(ctx, string(upSQL)); err != nil {
-		t.Fatalf("run migration 092 up: %v", err)
+		t.Fatalf("run migration 093 up: %v", err)
 	}
 	downSQL, err := os.ReadFile(filepath.Join("..", "..", "..", "migrations", "093_channel_message_model.down.sql"))
 	if err != nil {
-		t.Fatalf("read migration 092 down: %v", err)
+		t.Fatalf("read migration 093 down: %v", err)
 	}
 	if _, err := tx.Exec(ctx, string(downSQL)); err != nil {
-		t.Fatalf("run migration 092 down: %v", err)
+		t.Fatalf("run migration 093 down: %v", err)
 	}
 }
 
-const migration092Prerequisites = `
+const migration093Prerequisites = `
 CREATE TABLE channel_connection (
     id TEXT PRIMARY KEY
 );
