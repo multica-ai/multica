@@ -1474,6 +1474,191 @@ func (h *Handler) GetCRMEmailThread(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, crmEmailThreadToResponse(thread))
 }
 
+func (h *Handler) SuggestCRMEmailThreadAssociations(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.crmWorkspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	threadID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "threadId"), "thread id")
+	if !ok {
+		return
+	}
+	if _, ok := h.getCRMEmailThread(w, r, threadID, workspaceID); !ok {
+		return
+	}
+
+	messageRows, err := h.DB.Query(r.Context(), `
+		SELECT from_email, to_emails, cc_emails
+		FROM crm_email_message
+		WHERE workspace_id = $1 AND thread_id = $2
+		ORDER BY COALESCE(received_at, sent_at, created_at) ASC
+	`, workspaceID, threadID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load CRM email messages")
+		return
+	}
+	defer messageRows.Close()
+
+	emails := map[string]bool{}
+	domains := map[string]bool{}
+	for messageRows.Next() {
+		var from pgtype.Text
+		var toEmails, ccEmails []string
+		if err := messageRows.Scan(&from, &toEmails, &ccEmails); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to scan CRM email messages")
+			return
+		}
+		candidates := append([]string{}, toEmails...)
+		candidates = append(candidates, ccEmails...)
+		if from.Valid {
+			candidates = append(candidates, from.String)
+		}
+		for _, candidate := range candidates {
+			email := strings.ToLower(strings.TrimSpace(candidate))
+			domain := emailDomain(email)
+			if email != "" && strings.Contains(email, "@") {
+				emails[email] = true
+			}
+			if domain != "" {
+				domains[domain] = true
+			}
+		}
+	}
+
+	type suggestionAccumulator struct {
+		suggestion CRMEmailThreadAssociationSuggestion
+	}
+	suggestions := map[string]*suggestionAccumulator{}
+	rows, err := h.DB.Query(r.Context(), `
+		SELECT a.id, a.name, a.website, c.id, c.name, c.email
+		FROM crm_account a
+		LEFT JOIN crm_contact c ON c.account_id = a.id AND c.workspace_id = a.workspace_id
+		WHERE a.workspace_id = $1
+		ORDER BY a.updated_at DESC, c.is_primary DESC NULLS LAST
+		LIMIT 500
+	`, workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load CRM association candidates")
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var accountID pgtype.UUID
+		var accountName string
+		var contactID pgtype.UUID
+		var website, contactName, contactEmail pgtype.Text
+		if err := rows.Scan(&accountID, &accountName, &website, &contactID, &contactName, &contactEmail); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to scan CRM association candidates")
+			return
+		}
+		key := uuidToString(accountID)
+		if contactID.Valid {
+			key += ":" + uuidToString(contactID)
+		}
+		acc := suggestions[key]
+		if acc == nil {
+			acc = &suggestionAccumulator{suggestion: CRMEmailThreadAssociationSuggestion{AccountID: uuidToString(accountID), AccountName: accountName}}
+			if contactID.Valid {
+				v := uuidToString(contactID)
+				acc.suggestion.ContactID = &v
+			}
+			if contactName.Valid {
+				v := contactName.String
+				acc.suggestion.ContactName = &v
+			}
+			if contactEmail.Valid {
+				v := contactEmail.String
+				acc.suggestion.ContactEmail = &v
+			}
+			suggestions[key] = acc
+		}
+		if contactEmail.Valid && emails[strings.ToLower(strings.TrimSpace(contactEmail.String))] {
+			acc.suggestion.Score += 100
+			acc.suggestion.Reasons = addSuggestionReason(acc.suggestion.Reasons, "contact email matches a thread sender or recipient")
+		}
+		if contactEmail.Valid && domains[emailDomain(contactEmail.String)] {
+			acc.suggestion.Score += 40
+			acc.suggestion.Reasons = addSuggestionReason(acc.suggestion.Reasons, "contact email domain matches the thread")
+		}
+		if website.Valid && domains[emailDomain(website.String)] {
+			acc.suggestion.Score += 70
+			acc.suggestion.Reasons = addSuggestionReason(acc.suggestion.Reasons, "customer website domain matches the sender domain")
+		}
+	}
+
+	out := []CRMEmailThreadAssociationSuggestion{}
+	for _, acc := range suggestions {
+		if acc.suggestion.Score > 0 {
+			out = append(out, acc.suggestion)
+		}
+	}
+	for i := 0; i < len(out); i++ {
+		for j := i + 1; j < len(out); j++ {
+			if out[j].Score > out[i].Score {
+				out[i], out[j] = out[j], out[i]
+			}
+		}
+	}
+	if len(out) > 5 {
+		out = out[:5]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"suggestions": out, "total": len(out)})
+}
+
+func (h *Handler) ListCRMIMAPSyncRuns(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.crmWorkspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	limit := 50
+	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+		if parsed, err := strconv.Atoi(rawLimit); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	query := `SELECT r.id, r.mailbox_id, s.email, r.folder, r.status, r.requested_limit, r.fetched_count, r.imported_count, r.skipped_count, r.error_message, r.started_at, r.finished_at, r.created_at, r.updated_at
+		FROM crm_imap_sync_run r
+		LEFT JOIN crm_imap_setting s ON s.id = r.mailbox_id AND s.workspace_id = r.workspace_id
+		WHERE r.workspace_id=$1`
+	args := []any{workspaceID}
+	if status != "" && status != "all" {
+		query += ` AND r.status=$2`
+		args = append(args, status)
+	}
+	query += ` ORDER BY r.created_at DESC LIMIT $` + strconv.Itoa(len(args)+1)
+	args = append(args, limit)
+
+	rows, err := h.DB.Query(r.Context(), query, args...)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list CRM IMAP sync runs")
+		return
+	}
+	defer rows.Close()
+
+	runs := []CRMIMAPSyncRunResponse{}
+	for rows.Next() {
+		var id, mailboxID pgtype.UUID
+		var mailboxEmail, errorMessage pgtype.Text
+		var folder, runStatus string
+		var requestedLimit, fetchedCount, importedCount, skippedCount int32
+		var startedAt, finishedAt, createdAt, updatedAt pgtype.Timestamptz
+		if err := rows.Scan(&id, &mailboxID, &mailboxEmail, &folder, &runStatus, &requestedLimit, &fetchedCount, &importedCount, &skippedCount, &errorMessage, &startedAt, &finishedAt, &createdAt, &updatedAt); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to scan CRM IMAP sync run")
+			return
+		}
+		runs = append(runs, CRMIMAPSyncRunResponse{
+			ID: uuidToString(id), MailboxID: uuidToPtr(mailboxID), MailboxEmail: textToPtr(mailboxEmail), Folder: folder, Status: runStatus,
+			RequestedLimit: requestedLimit, FetchedCount: fetchedCount, ImportedCount: importedCount, SkippedCount: skippedCount,
+			ErrorMessage: textToPtr(errorMessage), StartedAt: timestampToString(startedAt), FinishedAt: timestampToPtr(finishedAt), CreatedAt: timestampToString(createdAt), UpdatedAt: timestampToString(updatedAt),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runs": runs, "total": len(runs)})
+}
+
 func (h *Handler) UpdateCRMEmailThreadAssociation(w http.ResponseWriter, r *http.Request) {
 	workspaceID, ok := h.crmWorkspaceUUID(w, r)
 	if !ok {
