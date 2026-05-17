@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -469,5 +470,350 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin') RETURN
 	}
 	if memberExists {
 		t.Fatal("member row was not deleted")
+	}
+}
+
+// handlerTestAgentID returns the agent created by the shared fixture in
+// setupHandlerTestFixture (handler_test.go). Tests that need an agent ID
+// without creating their own should reach for this — duplicate fixtures
+// have caused races against the shared workspace before.
+func handlerTestAgentID(t *testing.T) string {
+	t.Helper()
+	var agentID string
+	err := testPool.QueryRow(context.Background(),
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		testWorkspaceID, "Handler Test Agent",
+	).Scan(&agentID)
+	if err != nil {
+		t.Fatalf("failed to find test agent: %v", err)
+	}
+	return agentID
+}
+
+// resetWorkspaceSettings empties the test workspace's settings JSONB so a
+// test can start from a known state. The default-unassigned-to feature is
+// stateful per workspace, so leakage between tests would mask bugs.
+func resetWorkspaceSettings(t *testing.T) {
+	t.Helper()
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE workspace SET settings = '{}'::jsonb WHERE id = $1`,
+		testWorkspaceID,
+	); err != nil {
+		t.Fatalf("reset workspace settings: %v", err)
+	}
+}
+
+func TestUpdateWorkspaceSetting_RejectsUnknownKey(t *testing.T) {
+	t.Cleanup(func() { resetWorkspaceSettings(t) })
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/workspaces/"+testWorkspaceID+"/settings", map[string]any{
+		"key":   "totally_made_up",
+		"value": "x",
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	testHandler.UpdateWorkspaceSetting(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown key, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateWorkspaceSetting_RejectsInvalidAgentUUID(t *testing.T) {
+	t.Cleanup(func() { resetWorkspaceSettings(t) })
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/workspaces/"+testWorkspaceID+"/settings", map[string]any{
+		"key":   "default_unassigned_to",
+		"value": "not-a-uuid",
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	testHandler.UpdateWorkspaceSetting(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for malformed uuid, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateWorkspaceSetting_RejectsNonexistentAgent(t *testing.T) {
+	t.Cleanup(func() { resetWorkspaceSettings(t) })
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/workspaces/"+testWorkspaceID+"/settings", map[string]any{
+		"key":   "default_unassigned_to",
+		"value": "00000000-0000-0000-0000-000000000000",
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	testHandler.UpdateWorkspaceSetting(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing agent, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateWorkspaceSetting_PersistsAndClearsAgent(t *testing.T) {
+	t.Cleanup(func() { resetWorkspaceSettings(t) })
+	agentID := handlerTestAgentID(t)
+
+	// Set the value.
+	wSet := httptest.NewRecorder()
+	reqSet := newRequest("PATCH", "/api/workspaces/"+testWorkspaceID+"/settings", map[string]any{
+		"key":   "default_unassigned_to",
+		"value": agentID,
+	})
+	reqSet = withURLParam(reqSet, "id", testWorkspaceID)
+	testHandler.UpdateWorkspaceSetting(wSet, reqSet)
+	if wSet.Code != http.StatusOK {
+		t.Fatalf("PATCH settings: expected 200, got %d: %s", wSet.Code, wSet.Body.String())
+	}
+
+	// Verify persisted in DB.
+	var raw []byte
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT settings FROM workspace WHERE id = $1`,
+		testWorkspaceID,
+	).Scan(&raw); err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	var stored map[string]any
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		t.Fatalf("unmarshal settings: %v", err)
+	}
+	if stored["default_unassigned_to"] != agentID {
+		t.Fatalf("expected default_unassigned_to=%q, got %v", agentID, stored)
+	}
+
+	// Clear with explicit null.
+	wClear := httptest.NewRecorder()
+	reqClear := newRequest("PATCH", "/api/workspaces/"+testWorkspaceID+"/settings", map[string]any{
+		"key":   "default_unassigned_to",
+		"value": nil,
+	})
+	reqClear = withURLParam(reqClear, "id", testWorkspaceID)
+	testHandler.UpdateWorkspaceSetting(wClear, reqClear)
+	if wClear.Code != http.StatusOK {
+		t.Fatalf("PATCH settings (clear): expected 200, got %d: %s", wClear.Code, wClear.Body.String())
+	}
+
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT settings FROM workspace WHERE id = $1`,
+		testWorkspaceID,
+	).Scan(&raw); err != nil {
+		t.Fatalf("read settings post-clear: %v", err)
+	}
+	var stored2 map[string]any
+	if err := json.Unmarshal(raw, &stored2); err != nil {
+		t.Fatalf("unmarshal settings post-clear: %v", err)
+	}
+	if _, exists := stored2["default_unassigned_to"]; exists {
+		t.Fatalf("expected key removed, still present: %v", stored2)
+	}
+}
+
+func TestUpdateWorkspaceSetting_RejectsArchivedAgent(t *testing.T) {
+	ctx := context.Background()
+	t.Cleanup(func() { resetWorkspaceSettings(t) })
+
+	// Spin up a dedicated archived agent so we don't poison the shared
+	// fixture's "Handler Test Agent" used by every other test.
+	var archivedAgentID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO agent (workspace_id, name, description, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id, archived_at)
+VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'workspace', 1, $4, now())
+RETURNING id
+`, testWorkspaceID, "Handler Archived Default Assignee", testRuntimeID, testUserID).Scan(&archivedAgentID); err != nil {
+		t.Fatalf("create archived agent: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, archivedAgentID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/workspaces/"+testWorkspaceID+"/settings", map[string]any{
+		"key":   "default_unassigned_to",
+		"value": archivedAgentID,
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	testHandler.UpdateWorkspaceSetting(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for archived agent, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestCreateIssue_DefaultAssigneeAppliedWhenMissing covers acceptance #3:
+// when the workspace setting is configured and the request itself omits an
+// assignee, the issue is created with assignee = configured agent.
+func TestCreateIssue_DefaultAssigneeAppliedWhenMissing(t *testing.T) {
+	ctx := context.Background()
+	t.Cleanup(func() { resetWorkspaceSettings(t) })
+	agentID := handlerTestAgentID(t)
+
+	if _, err := testPool.Exec(ctx,
+		`UPDATE workspace SET settings = jsonb_build_object('default_unassigned_to', $2::text) WHERE id = $1`,
+		testWorkspaceID, agentID,
+	); err != nil {
+		t.Fatalf("seed default_unassigned_to: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Default-assignee feature: no assignee in request",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode issue: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+		cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+		testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+	})
+
+	if created.AssigneeType == nil || *created.AssigneeType != "agent" {
+		t.Fatalf("expected assignee_type=agent, got %v", created.AssigneeType)
+	}
+	if created.AssigneeID == nil || *created.AssigneeID != agentID {
+		t.Fatalf("expected assignee_id=%s, got %v", agentID, created.AssigneeID)
+	}
+}
+
+// TestCreateIssue_ExplicitAssigneeBeatsDefault covers the contract that an
+// explicit assignee in the request must always win. Without this guard, the
+// auto-fill could silently rewrite a member assignment to an agent.
+func TestCreateIssue_ExplicitAssigneeBeatsDefault(t *testing.T) {
+	ctx := context.Background()
+	t.Cleanup(func() { resetWorkspaceSettings(t) })
+	agentID := handlerTestAgentID(t)
+
+	if _, err := testPool.Exec(ctx,
+		`UPDATE workspace SET settings = jsonb_build_object('default_unassigned_to', $2::text) WHERE id = $1`,
+		testWorkspaceID, agentID,
+	); err != nil {
+		t.Fatalf("seed default_unassigned_to: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         "Default-assignee feature: explicit assignee wins",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode issue: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+		cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+		testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+	})
+
+	if created.AssigneeType == nil || *created.AssigneeType != "member" {
+		t.Fatalf("expected assignee_type=member, got %v", created.AssigneeType)
+	}
+	if created.AssigneeID == nil || *created.AssigneeID != testUserID {
+		t.Fatalf("expected assignee_id=%s, got %v", testUserID, created.AssigneeID)
+	}
+}
+
+// TestCreateIssue_StaleDefaultAssigneeFallsBackUnassigned covers the soft
+// fallback property: if the configured agent is archived (or otherwise
+// invisible) by the time an issue is created, the issue is created
+// unassigned rather than 4xx-failing the caller. Acceptance #5.
+func TestCreateIssue_StaleDefaultAssigneeFallsBackUnassigned(t *testing.T) {
+	ctx := context.Background()
+	t.Cleanup(func() { resetWorkspaceSettings(t) })
+
+	// Create an agent that exists at config-time, then archive it before the
+	// issue create — simulating the "admin set it, agent later went away"
+	// scenario. The PATCH validator would have rejected an archived agent at
+	// write time; this test exercises only the read-path soft fallback.
+	var staleAgentID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO agent (workspace_id, name, description, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id)
+VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'workspace', 1, $4)
+RETURNING id
+`, testWorkspaceID, "Handler Stale Default Assignee", testRuntimeID, testUserID).Scan(&staleAgentID); err != nil {
+		t.Fatalf("create stale agent: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, staleAgentID)
+	})
+
+	if _, err := testPool.Exec(ctx,
+		`UPDATE workspace SET settings = jsonb_build_object('default_unassigned_to', $2::text) WHERE id = $1`,
+		testWorkspaceID, staleAgentID,
+	); err != nil {
+		t.Fatalf("seed default_unassigned_to: %v", err)
+	}
+
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET archived_at = now() WHERE id = $1`, staleAgentID); err != nil {
+		t.Fatalf("archive agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Default-assignee feature: stale config falls back",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201 (soft fallback, not 4xx), got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode issue: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+		cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+		testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+	})
+
+	if created.AssigneeType != nil || created.AssigneeID != nil {
+		t.Fatalf("expected unassigned issue from stale config, got type=%v id=%v", created.AssigneeType, created.AssigneeID)
+	}
+}
+
+// TestCreateIssue_NoSettingLeavesUnassigned is the regression guard for
+// acceptance #5 ("留空时退回未指派"): the legacy unassigned path must keep
+// working when no setting is configured. Without this, an over-eager
+// auto-fill could surface a default that the user never asked for.
+func TestCreateIssue_NoSettingLeavesUnassigned(t *testing.T) {
+	t.Cleanup(func() { resetWorkspaceSettings(t) })
+	resetWorkspaceSettings(t) // make doubly sure we start from {}.
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Default-assignee feature: no setting, no assignee",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode issue: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+		cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+		testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+	})
+
+	if created.AssigneeType != nil || created.AssigneeID != nil {
+		t.Fatalf("expected unassigned, got type=%v id=%v", created.AssigneeType, created.AssigneeID)
 	}
 }

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -290,6 +292,174 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventWorkspaceUpdated, uuidToString(ws.ID), "member", userID, map[string]any{"workspace": workspaceToResponse(ws)})
 
 	writeJSON(w, http.StatusOK, workspaceToResponse(ws))
+}
+
+// SettingKeyDefaultUnassignedTo is the workspace setting that controls which
+// agent receives newly created issues that arrive without an assignee. The
+// stored value is the agent's UUID as a JSON string. Absence (or null) keeps
+// the legacy behaviour of leaving the issue unassigned.
+const SettingKeyDefaultUnassignedTo = "default_unassigned_to"
+
+// settingsKeyAllowlist is the set of workspace.settings keys writable through
+// the dedicated PATCH endpoint. Any other key is rejected so a typo or a
+// rogue caller cannot mint arbitrary settings; this also lets the read-side
+// auto-fill logic in CreateIssue assume each known key has been validated.
+var settingsKeyAllowlist = map[string]struct{}{
+	SettingKeyDefaultUnassignedTo: {},
+}
+
+type UpdateWorkspaceSettingRequest struct {
+	Key   string `json:"key"`
+	// Value is the new value for the setting. JSON null deletes the key,
+	// restoring the unset default. Anything else is validated per-key
+	// before being merged in.
+	Value json.RawMessage `json:"value"`
+}
+
+// UpdateWorkspaceSetting writes a single key into workspace.settings using
+// an atomic server-side jsonb merge. Strict write validation is intentional:
+// a stale value (archived/private/missing agent) becomes invisible noise on
+// the read side (CreateIssue logs and falls back to unassigned to avoid
+// blocking issue creation), so admin mistakes must be caught here, at the
+// moment they are made.
+func (h *Handler) UpdateWorkspaceSetting(w http.ResponseWriter, r *http.Request) {
+	id := workspaceIDFromURL(r, "id")
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "workspace id")
+	if !ok {
+		return
+	}
+
+	var req UpdateWorkspaceSettingRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	key := strings.TrimSpace(req.Key)
+	if key == "" {
+		writeError(w, http.StatusBadRequest, "key is required")
+		return
+	}
+	if _, allowed := settingsKeyAllowlist[key]; !allowed {
+		writeError(w, http.StatusBadRequest, "unknown setting key: "+key)
+		return
+	}
+
+	// Treat absent / explicit null as a delete. json.RawMessage is nil for an
+	// omitted field and exactly the four bytes of "null" for an explicit one.
+	deleteSetting := len(req.Value) == 0 || string(req.Value) == "null"
+
+	if !deleteSetting {
+		if status, msg := h.validateSettingValue(r.Context(), r, id, key, req.Value); status != 0 {
+			writeError(w, status, msg)
+			return
+		}
+	}
+
+	var ws db.Workspace
+	var err error
+	if deleteSetting {
+		ws, err = h.Queries.DeleteWorkspaceSetting(r.Context(), db.DeleteWorkspaceSettingParams{
+			ID:  idUUID,
+			Key: key,
+		})
+	} else {
+		ws, err = h.Queries.MergeWorkspaceSetting(r.Context(), db.MergeWorkspaceSettingParams{
+			ID:    idUUID,
+			Key:   key,
+			Value: []byte(req.Value),
+		})
+	}
+	if err != nil {
+		slog.Warn("update workspace setting failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", id, "key", key)...)
+		writeError(w, http.StatusInternalServerError, "failed to update workspace setting")
+		return
+	}
+
+	slog.Info("workspace setting updated", append(logger.RequestAttrs(r), "workspace_id", id, "key", key, "deleted", deleteSetting)...)
+	userID := requestUserID(r)
+	h.publish(protocol.EventWorkspaceUpdated, uuidToString(ws.ID), "member", userID, map[string]any{"workspace": workspaceToResponse(ws)})
+
+	writeJSON(w, http.StatusOK, workspaceToResponse(ws))
+}
+
+// validateSettingValue runs per-key write validation. Returning a non-zero
+// status code signals rejection; the caller surfaces the message verbatim.
+// Keep validation here (not in the SQL layer) so we can reuse handler-side
+// helpers like canAccessPrivateAgent that depend on the request actor.
+func (h *Handler) validateSettingValue(ctx context.Context, r *http.Request, workspaceID, key string, raw json.RawMessage) (int, string) {
+	switch key {
+	case SettingKeyDefaultUnassignedTo:
+		var agentID string
+		if err := json.Unmarshal(raw, &agentID); err != nil {
+			return http.StatusBadRequest, "default_unassigned_to must be a string agent id"
+		}
+		agentID = strings.TrimSpace(agentID)
+		if agentID == "" {
+			return http.StatusBadRequest, "default_unassigned_to cannot be empty; pass null to clear"
+		}
+		// Reuse validateAssigneePair so the write-side rules match the
+		// runtime rules CreateIssue applies to an explicit assignee — same
+		// allow/deny set, same error vocabulary.
+		assigneeUUID, err := util.ParseUUID(agentID)
+		if err != nil {
+			return http.StatusBadRequest, "default_unassigned_to is not a valid uuid"
+		}
+		assigneeType := pgtype.Text{String: "agent", Valid: true}
+		if status, msg := h.validateAssigneePair(ctx, r, workspaceID, assigneeType, assigneeUUID); status != 0 {
+			return status, msg
+		}
+		return 0, ""
+	default:
+		// settingsKeyAllowlist guards reachability — a key landing here
+		// without a case is a wiring bug, not user input.
+		return http.StatusInternalServerError, "no validator registered for setting key"
+	}
+}
+
+// defaultAssigneeForUnassignedIssue resolves the workspace's
+// default_unassigned_to setting into a validated (type, id) pair, suitable
+// for substituting into CreateIssue when the request itself carries no
+// assignee. Stale configuration (missing / archived / private agent) is
+// logged and treated as "no default" — the read path must never block
+// issue creation on an admin's misconfiguration.
+//
+// Returns ok=false when no default is configured, when the configured
+// agent is no longer eligible, or on any underlying lookup error.
+func (h *Handler) defaultAssigneeForUnassignedIssue(ctx context.Context, r *http.Request, wsUUID pgtype.UUID, workspaceID string) (pgtype.Text, pgtype.UUID, bool) {
+	ws, err := h.Queries.GetWorkspace(ctx, wsUUID)
+	if err != nil {
+		return pgtype.Text{}, pgtype.UUID{}, false
+	}
+	var settings map[string]any
+	if len(ws.Settings) > 0 {
+		if err := json.Unmarshal(ws.Settings, &settings); err != nil {
+			return pgtype.Text{}, pgtype.UUID{}, false
+		}
+	}
+	raw, found := settings[SettingKeyDefaultUnassignedTo]
+	if !found || raw == nil {
+		return pgtype.Text{}, pgtype.UUID{}, false
+	}
+	agentIDStr, isString := raw.(string)
+	if !isString || strings.TrimSpace(agentIDStr) == "" {
+		slog.Warn("default_unassigned_to is not a valid string; skipping",
+			append(logger.RequestAttrs(r), "workspace_id", workspaceID, "raw", raw)...)
+		return pgtype.Text{}, pgtype.UUID{}, false
+	}
+	assigneeUUID, err := util.ParseUUID(strings.TrimSpace(agentIDStr))
+	if err != nil {
+		slog.Warn("default_unassigned_to is not a valid uuid; skipping",
+			append(logger.RequestAttrs(r), "workspace_id", workspaceID, "value", agentIDStr, "error", err)...)
+		return pgtype.Text{}, pgtype.UUID{}, false
+	}
+	assigneeType := pgtype.Text{String: "agent", Valid: true}
+	if status, msg := h.validateAssigneePair(ctx, r, workspaceID, assigneeType, assigneeUUID); status != 0 {
+		slog.Warn("default_unassigned_to agent is not eligible; falling back to unassigned",
+			append(logger.RequestAttrs(r), "workspace_id", workspaceID, "agent_id", agentIDStr, "status", status, "reason", msg)...)
+		return pgtype.Text{}, pgtype.UUID{}, false
+	}
+	return assigneeType, assigneeUUID, true
 }
 
 func (h *Handler) ListMembers(w http.ResponseWriter, r *http.Request) {
