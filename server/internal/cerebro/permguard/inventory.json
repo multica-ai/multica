@@ -1397,6 +1397,26 @@
       "gate": "via:PATCH /api/groups/{id}"
     },
     {
+      "id": "document create",
+      "gate": "via:POST /api/artifacts"
+    },
+    {
+      "id": "document delete",
+      "gate": "via:DELETE /api/artifacts/{id}"
+    },
+    {
+      "id": "document get",
+      "exempt": "read-only — wraps GET /api/artifacts/{id}"
+    },
+    {
+      "id": "document list",
+      "exempt": "read-only — wraps GET /api/artifacts/search"
+    },
+    {
+      "id": "document update",
+      "gate": "via:PUT /api/artifacts/{id}"
+    },
+    {
       "id": "issue assign",
       "gate": "via:PUT /api/issues/{id}"
     },

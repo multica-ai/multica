@@ -149,7 +149,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica autopilot get <id> --output json` — Get autopilot details including triggers\n")
 	b.WriteString("- `multica autopilot runs <id> [--limit N] --output json` — List execution history for an autopilot\n")
 	b.WriteString("- `multica project get <id> --output json` — Get project details. Includes `resource_count`; the resources themselves live at the sub-collection below.\n")
-	b.WriteString("- `multica project resource list <project-id> --output json` — List resources (e.g. github_repo) attached to a project. Use this when `resource_count > 0` and you need the actual refs.\n\n")
+	b.WriteString("- `multica project resource list <project-id> --output json` — List resources (e.g. github_repo) attached to a project. Use this when `resource_count > 0` and you need the actual refs.\n")
+	b.WriteString("- `multica document list [--folder <id>] [--limit N] [--offset N] --output json` — List workspace documents (markdown notes). `--folder` filters client-side.\n")
+	b.WriteString("- `multica document get <id> --output json` — Get a document including markdown content (`content` field)\n\n")
 
 	b.WriteString("### Write\n")
 	b.WriteString("- `multica issue create --title \"...\" [--description \"...\"] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue. **Always pick a `--project` if one fits**: run `multica project list --output json` first and match the issue's topic to an existing project. Only omit `--project` if no project fits (e.g. one-off scratch tasks, generic workspace admin). `--attachment` may be repeated to upload multiple files; labels and subscribers are not accepted here, attach them after create with the commands below.\n")
@@ -187,7 +189,10 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica autopilot create --title \"...\" --agent <name> --mode create_issue|run_only [--description \"...\"] [--project <project-id>]` — Create an autopilot. Set `--project` so issues created by the autopilot inherit it.\n")
 	b.WriteString("- `multica autopilot update <id> [--title X] [--description X] [--status active|paused] [--mode create_issue|run_only] [--project <project-id>]` — Update an autopilot (use empty string for `--project` to clear)\n")
 	b.WriteString("- `multica autopilot trigger <id>` — Manually trigger an autopilot to run once\n")
-	b.WriteString("- `multica autopilot delete <id>` — Delete an autopilot\n\n")
+	b.WriteString("- `multica autopilot delete <id>` — Delete an autopilot\n")
+	b.WriteString("- `multica document create --title \"...\" [--folder <id>] [--content \"...\" | --content-stdin]` — Create a new markdown document. For multi-line / special-character content, pipe via stdin: `cat file.md | multica document create --title \"...\" --content-stdin`.\n")
+	b.WriteString("- `multica document update <id> [--title X] [--content X | --content-stdin]` — Update a document's title or content (only the original author or a workspace admin can edit)\n")
+	b.WriteString("- `multica document delete <id>` — Delete a document\n\n")
 
 	if provider == "codex" {
 		b.WriteString("## Codex-Specific Comment Formatting\n\n")
