@@ -2,7 +2,7 @@
 // credentials-list-page.tsx / credential-detail-page.tsx. The shape mirrors
 // `server/internal/cerebro/credentials/types.go` and `handler.go`.
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { api } from "@multica/core/api";
 import { parseWithFallback } from "@multica/core/api/schema";
@@ -47,6 +47,8 @@ const AuditServerSchema = z
     actor_type: z.string(),
     actor_id: z.string(),
     metadata: z.unknown().optional(),
+    result: z.string().optional(),
+    reason: z.string().optional(),
     created_at: z.string(),
   })
   .loose();
@@ -109,10 +111,8 @@ function toUIAudit(a: z.infer<typeof AuditServerSchema>): AuditEntry {
     actor_id: a.actor_id,
     actor_label: a.actor_id,
     action: a.action as AuditEntry["action"],
-    // The backend doesn't yet record allow/deny per row — every audit row is
-    // an action that actually happened, so default to "allow". JEH-1197
-    // (policy enforcement) will introduce deny entries.
-    outcome: "allow",
+    outcome: a.result === "deny" ? "deny" : "allow",
+    reason: a.reason || undefined,
     occurred_at: a.created_at,
   };
 }
@@ -192,6 +192,28 @@ export function useCredentialBindings(wsId: string, credId: string | null) {
         { endpoint: "GET /api/workspaces/:id/credentials/:credId/bindings" },
       );
       return parsed.bindings.map(toUIBinding);
+    },
+  });
+}
+
+export function useRotateCredential(wsId: string, credId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (value: string) =>
+      api.rotateCerebroCredential(wsId, credId, { value }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: credentialKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: credentialKeys.audit(wsId, credId) });
+    },
+  });
+}
+
+export function useRevokeCredential(wsId: string, credId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.revokeCerebroCredential(wsId, credId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: credentialKeys.all(wsId) });
     },
   });
 }

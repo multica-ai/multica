@@ -629,6 +629,22 @@ export class ApiClient {
   ): Promise<T> {
     return this.fetch<T>(`/api/workspaces/${wsId}/credentials/${credId}/bindings`);
   }
+  // CEREBRO-PATCH(cerebro-credentials-client): JEH-1530 browser rotation/revoke actions.
+  async rotateCerebroCredential<T = unknown>(
+    wsId: string,
+    credId: string,
+    body: { value: string },
+  ): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/credentials/${credId}/rotate`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+  async revokeCerebroCredential(wsId: string, credId: string): Promise<void> {
+    await this.fetch<void>(`/api/workspaces/${wsId}/credentials/${credId}`, {
+      method: "DELETE",
+    });
+  }
 
   // CEREBRO-PATCH(cerebro-groups-client): JEH-1006 workspace groups CRUD + member management.
   // Endpoints are mounted by `cerebro-groups-routes` in server/cmd/server/router.go.
