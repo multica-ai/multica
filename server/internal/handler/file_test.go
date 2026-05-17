@@ -290,6 +290,81 @@ func TestUploadFile_AttachesToChatSession(t *testing.T) {
 	})
 }
 
+// TestUploadFile_ExcalidrawContentType is the regression test for CAR-711:
+// .excalidraw uploads must land with content_type
+// "application/vnd.excalidraw+json", not the sniffer's "text/plain" /
+// "application/json" guess. Without the extension override, the file would
+// still roundtrip, but the frontend can't distinguish it from a regular JSON
+// upload — which breaks the Excalidraw modal trigger.
+func TestUploadFile_ExcalidrawContentType(t *testing.T) {
+	store := &mockStorage{}
+	origStorage := testHandler.Storage
+	testHandler.Storage = store
+	defer func() { testHandler.Storage = origStorage }()
+
+	payload := []byte(`{"type":"excalidraw","version":2,"source":"https://excalidraw.com","elements":[],"appState":{},"files":{}}`)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "diagram.excalidraw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	writer.Close()
+
+	req := httptest.NewRequest("POST", "/api/upload-file", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+
+	w := httptest.NewRecorder()
+	testHandler.UploadFile(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UploadFile: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp AttachmentResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v; body: %s", err, w.Body.String())
+	}
+	if want := "application/vnd.excalidraw+json"; resp.ContentType != want {
+		t.Errorf("content_type = %q, want %q", resp.ContentType, want)
+	}
+	if resp.Filename != "diagram.excalidraw" {
+		t.Errorf("filename = %q, want %q", resp.Filename, "diagram.excalidraw")
+	}
+	if int(resp.SizeBytes) != len(payload) {
+		t.Errorf("size_bytes = %d, want %d", resp.SizeBytes, len(payload))
+	}
+
+	// Verify the file went to storage bit-identical (no JSON re-marshal,
+	// no pretty-print, no BOM injection).
+	stored, err := io.ReadAll(mustGetReader(t, store, store.KeyFromURL(resp.URL)))
+	if err != nil {
+		t.Fatalf("read stored body: %v", err)
+	}
+	if !bytes.Equal(stored, payload) {
+		t.Errorf("stored body diverged from uploaded payload\n got:  %q\n want: %q", stored, payload)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id = $1`, resp.ID)
+	})
+}
+
+func mustGetReader(t *testing.T, s *mockStorage, key string) io.Reader {
+	t.Helper()
+	rc, err := s.GetReader(context.Background(), key)
+	if err != nil {
+		t.Fatalf("mockStorage.GetReader(%q): %v", key, err)
+	}
+	t.Cleanup(func() { rc.Close() })
+	return rc
+}
+
 // TestUploadFile_RejectsForeignChatSession verifies a chat_session in another
 // workspace (or owned by another user) is rejected with 403/404, preventing
 // cross-tenant attachment binding.

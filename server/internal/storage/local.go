@@ -184,13 +184,25 @@ func (s *LocalStorage) ServeFile(w http.ResponseWriter, r *http.Request, filenam
 	// UUID + extension) instead of the human-readable name the uploader
 	// chose. Uploads from before the sidecar landed have no .meta.json on
 	// disk and fall through to the existing behavior.
-	if meta, ok := readLocalMeta(filePath); ok && meta.Filename != "" {
-		safe := sanitizeFilename(meta.Filename)
-		disposition := "attachment"
-		if isInlineContentType(meta.ContentType) {
-			disposition = "inline"
+	//
+	// Also restore Content-Type from the sidecar. http.ServeFile falls back
+	// to mime.TypeByExtension(ext) for unknown extensions and otherwise
+	// sniffs the body — for vendor types like application/vnd.excalidraw+json
+	// both paths return the wrong header (text/plain for JSON-looking bytes,
+	// empty for unknown extensions). The uploader-sniffed content_type is
+	// authoritative; surface it so clients see the exact MIME they uploaded.
+	if meta, ok := readLocalMeta(filePath); ok {
+		if meta.ContentType != "" {
+			w.Header().Set("Content-Type", meta.ContentType)
 		}
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`%s; filename="%s"`, disposition, safe))
+		if meta.Filename != "" {
+			safe := sanitizeFilename(meta.Filename)
+			disposition := "attachment"
+			if isInlineContentType(meta.ContentType) {
+				disposition = "inline"
+			}
+			w.Header().Set("Content-Disposition", fmt.Sprintf(`%s; filename="%s"`, disposition, safe))
+		}
 	}
 
 	// Use http.ServeFile which has built-in path traversal protection
