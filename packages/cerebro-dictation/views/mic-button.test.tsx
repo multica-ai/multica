@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MicButton } from "./mic-button";
 
 const mocks = vi.hoisted(() => ({
-  useFeatureFlag: vi.fn(() => true),
+  useFeatureFlag: vi.fn((key: string) =>
+    key === "cerebro_voice_dictation_enabled" ||
+    key === "cerebro_voice_output_enabled"
+  ),
   useDictation: vi.fn(),
 }));
 
@@ -17,7 +20,11 @@ vi.mock("../use-dictation", () => ({
 
 describe("MicButton", () => {
   beforeEach(() => {
-    mocks.useFeatureFlag.mockReturnValue(true);
+    mocks.useFeatureFlag.mockImplementation(
+      (key: string) =>
+        key === "cerebro_voice_dictation_enabled" ||
+        key === "cerebro_voice_output_enabled",
+    );
     mocks.useDictation.mockReturnValue({
       status: "idle",
       error: null,
@@ -30,7 +37,19 @@ describe("MicButton", () => {
   });
 
   it("does not render when the dictation flag is disabled", () => {
-    mocks.useFeatureFlag.mockReturnValue(false);
+    mocks.useFeatureFlag.mockImplementation(
+      (key: string) => key === "cerebro_voice_output_enabled",
+    );
+
+    render(<MicButton onTranscribed={vi.fn()} />);
+
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("does not render when Cerebro Voice is disabled", () => {
+    mocks.useFeatureFlag.mockImplementation(
+      (key: string) => key === "cerebro_voice_dictation_enabled",
+    );
 
     render(<MicButton onTranscribed={vi.fn()} />);
 

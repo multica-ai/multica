@@ -36,7 +36,9 @@ export function MicButton({
   onTranscribed,
   onError,
 }: MicButtonProps) {
-  const enabled = useFeatureFlag("cerebro_voice_dictation_enabled");
+  const dictationEnabled = useFeatureFlag("cerebro_voice_dictation_enabled");
+  const voiceEnabled = useFeatureFlag("cerebro_voice_output_enabled");
+  const enabled = dictationEnabled && voiceEnabled;
   const pointerRecordingRef = useRef(false);
   const suppressClickRef = useRef(false);
   const defaultStreamTranscribe = useMemo(
