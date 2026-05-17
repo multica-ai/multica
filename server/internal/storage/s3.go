@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"strings"
 
@@ -191,6 +192,56 @@ func (s *S3Storage) DeleteKeys(ctx context.Context, keys []string) {
 	for _, key := range keys {
 		s.Delete(ctx, key)
 	}
+}
+
+// ServeFile proxies a GET /uploads/* request to S3/COS.
+// It extracts the key from the URL path, fetches the object from storage,
+// and streams it to the client with appropriate headers.
+func (s *S3Storage) ServeFile(w http.ResponseWriter, r *http.Request, key string) {
+	if key == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Prevent path traversal - key should not contain ".."
+	if strings.Contains(key, "..") {
+		http.NotFound(w, r)
+		return
+	}
+
+	obj, err := s.client.GetObject(r.Context(), &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		slog.Error("s3 proxy GetObject failed", "key", key, "error", err)
+		http.NotFound(w, r)
+		return
+	}
+	defer obj.Body.Close()
+
+	// Set content-type if provided by S3
+	contentType := ""
+	if obj.ContentType != nil {
+		contentType = *obj.ContentType
+		w.Header().Set("Content-Type", contentType)
+	}
+
+	// Set content-length if known
+	if obj.ContentLength != nil {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", *obj.ContentLength))
+	}
+
+	// Set content-disposition if provided
+	if obj.ContentDisposition != nil {
+		w.Header().Set("Content-Disposition", *obj.ContentDisposition)
+	}
+
+	// Set cache headers - uploads are immutable
+	w.Header().Set("Cache-Control", "max-age=31536000,public")
+
+	w.WriteHeader(http.StatusOK)
+	io.Copy(w, obj.Body)
 }
 
 func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error) {

@@ -197,11 +197,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		realtime.HandleWebSocket(hub, mc, pr, slugResolver, w, r)
 	})
 
-	// Local file serving (when using local storage)
+	// File serving (local storage or S3/COS proxy)
 	if local, ok := store.(*storage.LocalStorage); ok {
 		r.Get("/uploads/*", func(w http.ResponseWriter, r *http.Request) {
 			file := strings.TrimPrefix(r.URL.Path, "/uploads/")
 			local.ServeFile(w, r, file)
+		})
+	} else if s3, ok := store.(*storage.S3Storage); ok {
+		r.Get("/uploads/*", func(w http.ResponseWriter, r *http.Request) {
+			file := strings.TrimPrefix(r.URL.Path, "/uploads/")
+			s3.ServeFile(w, r, file)
 		})
 	}
 
