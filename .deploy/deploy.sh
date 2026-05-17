@@ -38,7 +38,16 @@ while ! mkdir "$LOCK" 2>/dev/null; do
   WAIT=$((WAIT + 2))
 done
 echo $$ >"$LOCK/pid"
-trap 'rm -rf "$LOCK"' EXIT
+
+cleanup_deploy_lock() {
+  # If a failed deploy leaves a child Next build alive, it can keep
+  # apps/web/.next.new wedged and block the next deploy attempt.
+  pkill -f "next build" 2>/dev/null || true
+  rm -rf "$REPO/apps/web/.next.new"
+  rm -rf "$LOCK"
+}
+
+trap cleanup_deploy_lock EXIT
 
 LOG="$LOG_DIR/deploy-$(date +%Y%m%d-%H%M%S).log"
 LATEST="$LOG_DIR/deploy-latest.log"
@@ -66,7 +75,7 @@ LAST_OK_SHA=$(cat "$LAST_OK_FILE" 2>/dev/null || true)
 # deploy-latest.log; an operator paging on "DEPLOY FAILED" gets an
 # unambiguous signal. Keep this lightweight — Slack/Multica issue
 # integration belongs in run-webhook.sh, not here.
-trap 'rc=$?; if [ "$rc" -ne 0 ]; then echo "=== DEPLOY FAILED (exit $rc): $(date -Iseconds) ===" >&2; fi; rm -rf "$LOCK"' EXIT
+trap 'rc=$?; if [ "$rc" -ne 0 ]; then echo "=== DEPLOY FAILED (exit $rc): $(date -Iseconds) ===" >&2; fi; cleanup_deploy_lock' EXIT
 
 OLD_SHA=$(git rev-parse HEAD)
 echo "Current SHA:    $OLD_SHA"
