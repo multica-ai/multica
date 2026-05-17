@@ -56,8 +56,10 @@ type AgentRuntimeResponse struct {
 	// 083 and canUseRuntimeForAgent.
 	Visibility string `json:"visibility"`
 	Timezone   string `json:"timezone"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
+	// CEREBRO-PATCH(runtime-account-id-response): expose current_account_id so RuntimeAccountsCard can link runtime→account (JEH-1461).
+	CurrentAccountID *string `json:"current_account_id"`
+	CreatedAt        string  `json:"created_at"`
+	UpdatedAt        string  `json:"updated_at"`
 }
 
 func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
@@ -97,10 +99,12 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		PausedAt:    timestampToPtr(rt.PausedAt),
 		UnpauseAt:   timestampToPtr(rt.UnpauseAt),
 		PauseReason: textToPtr(rt.PauseReason),
-		Visibility:  rt.Visibility,
-		Timezone:    rt.Timezone,
-		CreatedAt:   timestampToString(rt.CreatedAt),
-		UpdatedAt:   timestampToString(rt.UpdatedAt),
+		Visibility: rt.Visibility,
+		Timezone:   rt.Timezone,
+		// CEREBRO-PATCH(runtime-account-id-response): map current_account_id from DB row to API response (JEH-1461).
+		CurrentAccountID: uuidToPtr(rt.CurrentAccountID),
+		CreatedAt:        timestampToString(rt.CreatedAt),
+		UpdatedAt:        timestampToString(rt.UpdatedAt),
 	}
 }
 
