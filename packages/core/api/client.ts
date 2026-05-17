@@ -1321,6 +1321,10 @@ export class ApiClient {
     });
   }
 
+  async listCRMIMAPSyncRuns(): Promise<{ runs: any[]; total: number }> {
+    return this.fetch("/api/crm/imap/sync-runs");
+  }
+
   async getCRMEmailEngineStatus(mailboxId?: string | null): Promise<CRMEmailEngineStatus> {
     const search = new URLSearchParams();
     if (mailboxId) search.set("mailbox_id", mailboxId);
