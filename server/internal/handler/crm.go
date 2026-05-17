@@ -362,6 +362,16 @@ type UpdateCRMEmailThreadAssociationRequest struct {
 	IssueIDs  []string `json:"issue_ids"`
 }
 
+type CRMEmailThreadAssociationSuggestion struct {
+	AccountID    string   `json:"account_id"`
+	AccountName  string   `json:"account_name"`
+	ContactID    *string  `json:"contact_id"`
+	ContactName  *string  `json:"contact_name"`
+	ContactEmail *string  `json:"contact_email"`
+	Score        int      `json:"score"`
+	Reasons      []string `json:"reasons"`
+}
+
 type CreateCRMEmailMessageRequest struct {
 	AccountID         *string  `json:"account_id"`
 	ContactID         *string  `json:"contact_id"`
@@ -527,6 +537,23 @@ type UpsertCRMIMAPSettingRequest struct {
 	SMTPUsername  *string `json:"smtp_username"`
 	SMTPSecretRef *string `json:"smtp_secret_ref"`
 	SMTPSecret    *string `json:"smtp_secret"`
+}
+
+type CRMIMAPSyncRunResponse struct {
+	ID             string  `json:"id"`
+	MailboxID      *string `json:"mailbox_id"`
+	MailboxEmail   *string `json:"mailbox_email"`
+	Folder         string  `json:"folder"`
+	Status         string  `json:"status"`
+	RequestedLimit int32   `json:"requested_limit"`
+	FetchedCount   int32   `json:"fetched_count"`
+	ImportedCount  int32   `json:"imported_count"`
+	SkippedCount   int32   `json:"skipped_count"`
+	ErrorMessage   *string `json:"error_message"`
+	StartedAt      string  `json:"started_at"`
+	FinishedAt     *string `json:"finished_at"`
+	CreatedAt      string  `json:"created_at"`
+	UpdatedAt      string  `json:"updated_at"`
 }
 
 type CRMIMAPPreviewRequest struct {
@@ -1472,6 +1499,31 @@ func (h *Handler) GetCRMEmailThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, crmEmailThreadToResponse(thread))
+}
+
+func emailDomain(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if at := strings.LastIndex(value, "@"); at >= 0 {
+		value = value[at+1:]
+	}
+	value = strings.TrimPrefix(strings.TrimPrefix(value, "https://"), "http://")
+	value = strings.TrimPrefix(value, "www.")
+	if slash := strings.Index(value, "/"); slash >= 0 {
+		value = value[:slash]
+	}
+	if colon := strings.Index(value, ":"); colon >= 0 {
+		value = value[:colon]
+	}
+	return value
+}
+
+func addSuggestionReason(reasons []string, reason string) []string {
+	for _, existing := range reasons {
+		if existing == reason {
+			return reasons
+		}
+	}
+	return append(reasons, reason)
 }
 
 func (h *Handler) SuggestCRMEmailThreadAssociations(w http.ResponseWriter, r *http.Request) {
