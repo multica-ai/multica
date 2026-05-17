@@ -333,6 +333,19 @@ export function InboxPage() {
     replace(wsPaths.issueDetail(selectedKey));
   }, [loading, channelsLoading, selectedKey, selected, channelMap, selectedChatSession, replace, wsPaths, setSelectedKey, urlChat, urlIssue]);
 
+  // CEREBRO-PATCH(inbox-mute-auto-advance): JEH-1457 — when the selected item is
+  // muted while the view hides muted entries, advance to the next visible item
+  // so the detail panel never shows a hidden row.
+  useEffect(() => {
+    if (!selected || isArchivedView || view === "muted" || !isMuted(selected.muted_until)) return;
+    const visible = items.filter((i) => !isMuted(i.muted_until));
+    const midx = items.indexOf(selected);
+    const nexts = visible.filter((i) => items.indexOf(i) > midx);
+    const prevs = visible.filter((i) => items.indexOf(i) < midx);
+    const next = nexts[0] ?? prevs[prevs.length - 1] ?? null;
+    setSelectedKey(next ? "issue" : null, next ? (next.issue_id ?? next.id) : "");
+  }, [selected, items, view, isArchivedView, setSelectedKey]);
+
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_inbox_layout",
   });
@@ -379,10 +392,14 @@ export function InboxPage() {
     const wasSelected =
       !!archived && (archived.issue_id ?? archived.id) === selectedKey;
     if (wasSelected) {
-      // List is sorted newest-first; prefer the next (older) item, fall back
-      // to the previous (newer) one when archiving at the bottom, and only
-      // clear the selection when nothing else is left.
-      const next = items[idx + 1] ?? items[idx - 1] ?? null;
+      // CEREBRO-PATCH(inbox-mute-select-next): JEH-1457 — pick next within the
+      // set the user actually sees: non-muted items in regular views, muted
+      // items in the muted view (where they are visible).
+      const visible = view === "muted"
+        ? items.filter((i) => isMuted(i.muted_until))
+        : items.filter((i) => !isMuted(i.muted_until));
+      const vidx = visible.findIndex((i) => i.id === id);
+      const next = (vidx >= 0 ? visible[vidx + 1] ?? visible[vidx - 1] : null) ?? null;
       setSelectedKey(next ? "issue" : null, next ? (next.issue_id ?? next.id) : "");
     }
     archiveMutation.mutate(id, {
@@ -400,7 +417,13 @@ export function InboxPage() {
     const wasSelected =
       !!target && (target.issue_id ?? target.id) === selectedKey;
     if (wasSelected) {
-      const next = items[idx + 1] ?? items[idx - 1] ?? null;
+      // CEREBRO-PATCH(inbox-mute-select-next): JEH-1457 — pick next within the
+      // set the user actually sees (same rule as handleArchive).
+      const visible = view === "muted"
+        ? items.filter((i) => isMuted(i.muted_until))
+        : items.filter((i) => !isMuted(i.muted_until));
+      const vidx = visible.findIndex((i) => i.id === id);
+      const next = (vidx >= 0 ? visible[vidx + 1] ?? visible[vidx - 1] : null) ?? null;
       setSelectedKey(next ? "issue" : null, next ? (next.issue_id ?? next.id) : "");
     }
     unarchiveMutation.mutate(id, {
