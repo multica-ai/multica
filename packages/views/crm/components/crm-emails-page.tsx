@@ -2,12 +2,12 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArrowRight, Building2, ExternalLink, Inbox, Link2, Mail, MailOpen, Search, Send, Settings, Star, UserRound } from "lucide-react";
+import { Archive, ArrowRight, Building2, Inbox, Link2, Mail, MailOpen, Search, Send, Settings, Star, UserRound } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueKeys, useIssueDraftStore } from "@multica/core/issues";
 import { useModalStore } from "@multica/core/modals";
-import { crmAccountListOptions, crmContactListOptions, crmEmailEngineStatusOptions, crmEmailMessageListOptions, crmEmailThreadListOptions, crmKeys } from "@multica/core/crm/queries";
+import { crmAccountListOptions, crmContactListOptions, crmEmailMessageListOptions, crmEmailThreadListOptions, crmKeys } from "@multica/core/crm/queries";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { CRMAccount, CRMContact, CRMEmailThread, CRMEmailThreadAssociationSuggestion, CRMIMAPPreviewMessage, CRMIMAPSetting, CreateCRMContactRequest, Issue, Project } from "@multica/core/types";
 import { Badge } from "@multica/ui/components/ui/badge";
@@ -116,7 +116,6 @@ export function CRMEmailsPage() {
   const [associationDraft, setAssociationDraft] = useState<AssociationDraft | null>(null);
   const [emailLinkDraft, setEmailLinkDraft] = useState<EmailLinkDraft | null>(null);
   const [composeDraft, setComposeDraft] = useState<ComposeDraft | null>(null);
-  const [viewMode, setViewMode] = useState<"embed" | "native">("embed");
   const openModal = useModalStore((state) => state.open);
   const setIssueDraft = useIssueDraftStore((state) => state.setDraft);
   const clearIssueDraft = useIssueDraftStore((state) => state.clearDraft);
@@ -131,11 +130,7 @@ export function CRMEmailsPage() {
     enabled: Boolean(wsId),
   });
   const mailboxes = mailboxData?.settings ?? [];
-  const selectedMailboxId = mailboxDraft.id ?? mailboxes[0]?.id ?? "";
-  const { data: emailEngineStatus } = useQuery(crmEmailEngineStatusOptions(wsId, selectedMailboxId));
   const emailDrafts = draftsData?.drafts ?? [];
-  const emailEngineEmbedUrl = "/emailengine/";
-  const canTryEmailEngineEmbed = Boolean(emailEngineStatus?.enabled && emailEngineStatus?.configured);
 
   const folderThreads = useMemo(() => {
     return threads.filter((thread) => {
@@ -171,7 +166,7 @@ export function CRMEmailsPage() {
       id: mailboxDraft.id,
       label: mailboxDraft.label,
       email: mailboxDraft.email,
-      host: mailboxDraft.host || "emailengine",
+      host: mailboxDraft.host,
       port: Number(mailboxDraft.port) || 993,
       tls_mode: mailboxDraft.tls_mode,
       username: mailboxDraft.username || mailboxDraft.email,
@@ -429,10 +424,6 @@ export function CRMEmailsPage() {
           {!isLoading && <Badge variant="secondary" className="tabular-nums">{threads.length}</Badge>}
         </div>
         <div className="flex items-center gap-2">
-          <div className="rounded-md border bg-muted p-1">
-            <Button variant={viewMode === "embed" ? "secondary" : "ghost"} size="sm" onClick={() => setViewMode("embed")}>Embed POC</Button>
-            <Button variant={viewMode === "native" ? "secondary" : "ghost"} size="sm" onClick={() => setViewMode("native")}>CRM UI</Button>
-          </div>
           <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)}>
             <Settings className="mr-1 size-3" />
             {t(($) => $.emails.mailbox_settings)}
@@ -440,73 +431,17 @@ export function CRMEmailsPage() {
         </div>
       </PageHeader>
 
-      {viewMode === "embed" ? (
-        <div className="min-h-0 flex-1 bg-muted/30 p-4">
-          <section className="flex h-full min-h-[620px] flex-col overflow-hidden rounded-xl border bg-background shadow-sm">
-            <div className="border-b bg-card/80 p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">EmailEngine webmail embed POC</div>
-                  <h2 className="mt-1 text-lg font-semibold">Same-origin iframe trial for `/emailengine/`</h2>
-                  <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-                    This mode intentionally tries the EmailEngine UI without exposing tokens in the browser. If proxy, auth, or frame headers block it, switch back to the CRM UI while we keep the native fallback intact.
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Badge variant={canTryEmailEngineEmbed ? "default" : "outline"}>{canTryEmailEngineEmbed ? "EmailEngine configured" : "Embed not ready"}</Badge>
-                  {emailEngineStatus?.state ? <Badge variant="secondary">{emailEngineStatus.state}</Badge> : null}
-                  <Button variant="outline" size="sm" onClick={() => setViewMode("native")}>Use CRM UI</Button>
-                  <a className="inline-flex h-8 items-center rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted" href={emailEngineEmbedUrl} target="_blank" rel="noreferrer">
-                    <ExternalLink className="mr-1 size-3" />Open EmailEngine
-                  </a>
-                </div>
-              </div>
-              <div className="mt-3 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-                {canTryEmailEngineEmbed
-                  ? "Attempting to render EmailEngine through the same origin path. A blank/login/refused frame means the POC needs reverse-proxy or EmailEngine frame/auth settings before continuing."
-                  : emailEngineStatus?.last_error || "EmailEngine is not enabled/configured for this workspace yet, so this POC keeps the native CRM mailbox available as the safe fallback."}
-              </div>
-            </div>
-            {canTryEmailEngineEmbed ? (
-              <iframe title="EmailEngine webmail embed POC" src={emailEngineEmbedUrl} className="min-h-0 flex-1 border-0 bg-white" />
-            ) : (
-              <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground">
-                <div className="max-w-md rounded-lg border border-dashed bg-card p-6">
-                  <Mail className="mx-auto mb-3 size-8" />
-                  <p>EmailEngine embed is blocked until the backend reports an enabled and configured account. Use the CRM UI fallback for current mailbox work.</p>
-                </div>
-              </div>
-            )}
-          </section>
-        </div>
-      ) : (
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 lg:grid-cols-[220px_360px_minmax(0,1fr)]">
         <aside className="flex min-h-0 flex-col border-r bg-card/80 p-3">
           <div className="mb-3 rounded-lg border bg-background p-3">
             <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t(($) => $.emails.mailboxes)}</div>
-            <div className="mt-2 truncate text-sm font-medium">{mailboxes[0]?.email ?? emailEngineStatus?.account ?? "sales@example.com"}</div>
+            <div className="mt-2 truncate text-sm font-medium">{mailboxes[0]?.email ?? "sales@example.com"}</div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <Badge variant={emailEngineStatus?.enabled && emailEngineStatus?.configured ? "default" : "outline"}>
-                {emailEngineStatus?.enabled ? (emailEngineStatus.configured ? "EmailEngine" : "Not configured") : "IMAP fallback"}
-              </Badge>
-              {emailEngineStatus?.state ? <Badge variant="secondary">{emailEngineStatus.state}</Badge> : null}
-              {emailEngineStatus?.syncing ? <Badge variant="secondary">Syncing</Badge> : null}
+              <Badge variant={mailboxes[0]?.last_test_status === "ok" ? "default" : "outline"}>IMAP/SMTP</Badge>
+              {mailboxes[0]?.sync_enabled ? <Badge variant="secondary">Sync enabled</Badge> : null}
             </div>
-            <div className="mt-2 text-xs text-muted-foreground">{emailEngineStatus?.last_error || mailboxes[0]?.last_test_message || t(($) => $.emails.imap_not_connected)}</div>
+            <div className="mt-2 text-xs text-muted-foreground">{mailboxes[0]?.last_test_message || t(($) => $.emails.imap_not_connected)}</div>
           </div>
-          {emailEngineStatus?.folders?.length ? (
-            <div className="mb-3 rounded-lg border bg-background p-2">
-              <div className="px-1 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">EmailEngine folders</div>
-              <div className="max-h-44 space-y-1 overflow-y-auto">
-                {emailEngineStatus.folders.map((folder) => (
-                  <div key={folder.path} className="flex items-center justify-between rounded-md px-2 py-1.5 text-xs text-muted-foreground">
-                    <span className="truncate">{folder.name || folder.path}</span>
-                    <span className="shrink-0 tabular-nums">{folder.unread ? `${folder.unread}/` : ""}{folder.total}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
           <nav className="space-y-1" aria-label={t(($) => $.emails.folder_nav)}>
             {([
               ["inbox", Inbox, t(($) => $.emails.folder_inbox)],
@@ -685,7 +620,6 @@ export function CRMEmailsPage() {
           )}
         </section>
       </div>
-      )}
 
       <Dialog open={detailDialog !== null} onOpenChange={(open) => !open && setDetailDialog(null)}>
         <DialogContent className="sm:max-w-lg">
@@ -851,52 +785,46 @@ export function CRMEmailsPage() {
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>EmailEngine mailbox backend</DialogTitle>
+            <DialogTitle>CRM mailbox settings</DialogTitle>
             <DialogDescription>
-              Multica now uses EmailEngine for mailbox sync and sending while keeping this CRM email workspace as the user interface.
+              Multica stores mailbox ownership, encrypted IMAP credentials, SMTP settings, import range, and CRM linkage here.
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-lg border bg-muted/30 p-4 text-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <div className="font-medium">Provider: EmailEngine</div>
-                <p className="mt-1 text-xs text-muted-foreground">Connect or verify accounts in EmailEngine, then keep the Multica mailbox record below for CRM ownership, import range, and rollback metadata.</p>
+                <div className="font-medium">Provider: IMAP + SMTP</div>
+                <p className="mt-1 text-xs text-muted-foreground">Use IMAP for import/sync and SMTP for human-approved sending. Credentials stay server-side and are not echoed back to the browser.</p>
               </div>
               <Badge variant="outline">Active backend</Badge>
             </div>
             <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
-              <div className="rounded-md border bg-background px-3 py-2">1. Add account in EmailEngine</div>
-              <div className="rounded-md border bg-background px-3 py-2">2. Set account id on the server</div>
-              <div className="rounded-md border bg-background px-3 py-2">3. Preview, import, and send from Multica CRM</div>
+              <div className="rounded-md border bg-background px-3 py-2">1. Save encrypted mailbox credentials</div>
+              <div className="rounded-md border bg-background px-3 py-2">2. Import selected date range</div>
+              <div className="rounded-md border bg-background px-3 py-2">3. Draft and send from Multica CRM</div>
             </div>
-          </div>
-          <div className="grid gap-3 rounded-lg border bg-background p-3 text-xs sm:grid-cols-4">
-            <DetailRow label="Account" value={emailEngineStatus?.account} />
-            <DetailRow label="State" value={emailEngineStatus?.state ?? (emailEngineStatus?.configured ? "unknown" : "not configured")} />
-            <DetailRow label="Folders" value={String(emailEngineStatus?.folders?.length ?? 0)} />
-            <DetailRow label="Fallback" value={emailEngineStatus?.fallback_provider ?? "imap_smtp"} />
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <select
-              aria-label="EmailEngine CRM mailbox record"
+              aria-label="CRM mailbox record"
               className="h-9 rounded-md border bg-background px-3 text-sm sm:col-span-2"
               value={mailboxDraft.id ?? "new"}
               onChange={(event) => setMailboxDraft(event.target.value === "new" ? emptyMailboxDraft : mailboxToDraft(mailboxes.find((mailbox) => mailbox.id === event.target.value)))}
             >
-              <option value="new">New CRM mailbox record</option>
+              <option value="new">New CRM mailbox</option>
               {mailboxes.map((mailbox) => <option key={mailbox.id} value={mailbox.id}>{mailbox.label} · {mailbox.email}</option>)}
             </select>
             <Input aria-label="Mailbox display name" placeholder="Mailbox display name" value={mailboxDraft.label} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, label: event.target.value }))} />
             <Input aria-label={t(($) => $.emails.email_address)} placeholder="sales@example.com" value={mailboxDraft.email} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, email: event.target.value }))} />
-            <Input aria-label="Fallback IMAP host" placeholder="Fallback IMAP host" value={mailboxDraft.host} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, host: event.target.value }))} />
-            <Input aria-label="Fallback IMAP port" placeholder="993" value={mailboxDraft.port} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, port: event.target.value }))} />
+            <Input aria-label="IMAP host" placeholder="IMAP host" value={mailboxDraft.host} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, host: event.target.value }))} />
+            <Input aria-label="IMAP port" placeholder="993" value={mailboxDraft.port} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, port: event.target.value }))} />
             <select aria-label={t(($) => $.emails.tls_mode)} className="h-9 rounded-md border bg-background px-3 text-sm" value={mailboxDraft.tls_mode} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, tls_mode: event.target.value as MailboxDraft["tls_mode"] }))}>
               <option value="ssl">{t(($) => $.emails.tls_ssl)}</option>
               <option value="starttls">{t(($) => $.emails.tls_starttls)}</option>
               <option value="none">{t(($) => $.emails.tls_none)}</option>
             </select>
             <Input aria-label={t(($) => $.emails.username)} placeholder={t(($) => $.emails.username)} value={mailboxDraft.username} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, username: event.target.value }))} />
-            <Input className="sm:col-span-2" aria-label="Fallback secret reference" placeholder="Fallback secret reference; EmailEngine credentials are stored outside Multica" value={mailboxDraft.secret_ref} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, secret_ref: event.target.value }))} />
+            <Input className="sm:col-span-2" aria-label="Secret reference" placeholder="Existing secret reference (optional)" value={mailboxDraft.secret_ref} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, secret_ref: event.target.value }))} />
             <label className="space-y-1 text-sm sm:col-span-2">
               <span className="text-xs font-medium text-muted-foreground">Bind mailbox to member or AI agent</span>
               <select className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={`${mailboxDraft.owner_type}:${mailboxDraft.owner_id}`} onChange={(event) => { const [owner_type, owner_id] = event.target.value.split(":"); setMailboxDraft((draft) => ({ ...draft, owner_type: owner_type || "", owner_id: owner_id || "" })); }}>
@@ -914,16 +842,16 @@ export function CRMEmailsPage() {
                 <option value={365}>Recent 1 year</option>
               </select>
             </label>
-            <Input aria-label="Fallback SMTP host" placeholder="Fallback SMTP host" value={mailboxDraft.smtp_host} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_host: event.target.value }))} />
-            <Input aria-label="Fallback SMTP port" placeholder="465" value={mailboxDraft.smtp_port} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_port: event.target.value }))} />
-            <select aria-label="Fallback SMTP TLS mode" className="h-9 rounded-md border bg-background px-3 text-sm" value={mailboxDraft.smtp_tls_mode} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_tls_mode: event.target.value }))}>
-              <option value="ssl">Fallback SMTP SSL</option>
-              <option value="starttls">Fallback SMTP STARTTLS</option>
+            <Input aria-label="SMTP host" placeholder="SMTP host" value={mailboxDraft.smtp_host} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_host: event.target.value }))} />
+            <Input aria-label="SMTP port" placeholder="465" value={mailboxDraft.smtp_port} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_port: event.target.value }))} />
+            <select aria-label="SMTP TLS mode" className="h-9 rounded-md border bg-background px-3 text-sm" value={mailboxDraft.smtp_tls_mode} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_tls_mode: event.target.value }))}>
+              <option value="ssl">SMTP SSL</option>
+              <option value="starttls">SMTP STARTTLS</option>
             </select>
-            <Input aria-label="Fallback SMTP username" placeholder="Fallback SMTP username" value={mailboxDraft.smtp_username} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_username: event.target.value }))} />
-            <Input className="sm:col-span-2" aria-label="Fallback SMTP password" placeholder="Fallback SMTP app password; EmailEngine is primary" value={mailboxDraft.smtp_secret} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_secret: event.target.value }))} />
+            <Input aria-label="SMTP username" placeholder="SMTP username" value={mailboxDraft.smtp_username} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_username: event.target.value }))} />
+            <Input className="sm:col-span-2" aria-label="SMTP password" placeholder="SMTP app password" value={mailboxDraft.smtp_secret} onChange={(event) => setMailboxDraft((draft) => ({ ...draft, smtp_secret: event.target.value }))} />
           </div>
-          <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">Primary mail transport is EmailEngine. These IMAP/SMTP fields are kept only as CRM mailbox metadata and rollback fallback while account credentials live in EmailEngine.</p>
+          <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">IMAP imports incoming mail. SMTP sends drafts only after human confirmation. Password fields update server-side secrets and are not displayed after save.</p>
           {mailboxStatus ? <p className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">{mailboxStatus}</p> : null}
           {previewMessages.length > 0 ? (
             <div className="max-h-80 space-y-2 overflow-y-auto rounded-md border bg-muted/20 p-3">
@@ -951,8 +879,8 @@ export function CRMEmailsPage() {
           ) : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => { setSettingsOpen(false); setMailboxStatus(null); }}>{t(($) => $.actions.cancel)}</Button>
-            <Button variant="outline" disabled={testMailbox.isPending || saveMailbox.isPending || !mailboxDraft.id} onClick={() => testMailbox.mutate()}>Check provider</Button>
-            <Button disabled={saveMailbox.isPending || previewMailbox.isPending || importPreviewMessages.isPending || !mailboxDraft.label || !mailboxDraft.email} onClick={() => void saveAndImportMailbox()}>Save CRM record and import</Button>
+            <Button variant="outline" disabled={testMailbox.isPending || saveMailbox.isPending || !mailboxDraft.id} onClick={() => testMailbox.mutate()}>Test IMAP/SMTP</Button>
+            <Button disabled={saveMailbox.isPending || previewMailbox.isPending || importPreviewMessages.isPending || !mailboxDraft.label || !mailboxDraft.email} onClick={() => void saveAndImportMailbox()}>Save and import</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
