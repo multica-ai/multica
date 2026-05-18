@@ -19,7 +19,9 @@ import type { Agent, AgentRuntime, Workspace } from "@multica/core/types";
 import { DragStrip } from "@multica/views/platform";
 import { StepHeader } from "./components/step-header";
 import { StepWelcome } from "./steps/step-welcome";
-import { StepQuestionnaire } from "./steps/step-questionnaire";
+import { StepSource } from "./steps/step-source";
+import { StepRole } from "./steps/step-role";
+import { StepUseCase } from "./steps/step-use-case";
 import { StepWorkspace } from "./steps/step-workspace";
 import { StepRuntimeConnect } from "./steps/step-runtime-connect";
 import { StepPlatformFork } from "./steps/step-platform-fork";
@@ -28,18 +30,34 @@ import { StepFirstIssue } from "./steps/step-first-issue";
 import { useT } from "../i18n";
 
 const EMPTY_QUESTIONNAIRE: QuestionnaireAnswers = {
-  team_size: null,
-  team_size_other: null,
+  source: null,
+  source_other: null,
+  source_skipped: false,
   role: null,
   role_other: null,
+  role_skipped: false,
   use_case: null,
   use_case_other: null,
+  use_case_skipped: false,
+  version: 2,
 };
 
+/**
+ * Merge persisted answers into the empty default. Re-entry pre-fills
+ * answered slots but treats `*_skipped` as fresh (the user can answer
+ * this time) — the v1 skip marker is dropped on read, the analytics
+ * record of the prior skip stays in the DB.
+ */
 function mergeQuestionnaire(
   raw: Record<string, unknown>,
 ): QuestionnaireAnswers {
-  return { ...EMPTY_QUESTIONNAIRE, ...(raw as Partial<QuestionnaireAnswers>) };
+  const merged = { ...EMPTY_QUESTIONNAIRE, ...(raw as Partial<QuestionnaireAnswers>) };
+  return {
+    ...merged,
+    source_skipped: false,
+    role_skipped: false,
+    use_case_skipped: false,
+  };
 }
 
 /**
@@ -63,11 +81,12 @@ export function OnboardingFlow({
     throw new Error("OnboardingFlow requires an authenticated user");
   }
 
-  // Questionnaire answers are server-persisted and pre-fill Step 1
-  // on re-entry. That's the only piece of onboarding state persisted
-  // across sessions — which step the user is on is deliberately not
-  // saved, so every entry starts at Welcome.
+  // Questionnaire answers are server-persisted and pre-fill the per-
+  // question steps on re-entry. That's the only piece of onboarding
+  // state persisted across sessions — which step the user is on is
+  // deliberately not saved, so every entry starts at Welcome.
   const storedQuestionnaire = mergeQuestionnaire(user.onboarding_questionnaire);
+  const [answers, setAnswers] = useState<QuestionnaireAnswers>(storedQuestionnaire);
 
   const qc = useQueryClient();
 
@@ -111,8 +130,25 @@ export function OnboardingFlow({
   const isWeb = !!runtimeInstructions;
 
   const handleWelcomeNext = useCallback(() => {
-    setStep("questionnaire");
+    setStep("source");
   }, []);
+
+  // Apply an in-memory patch and fire-and-forget a PATCH to persist
+  // it. We never block UI on the request — the next step's render is
+  // what matters; a transient save failure surfaces as a toast but
+  // does not roll the user back.
+  const applyAnswers = useCallback(
+    (patch: Partial<QuestionnaireAnswers>) => {
+      setAnswers((a) => {
+        const next = { ...a, ...patch };
+        void saveQuestionnaire(next).catch((err) => {
+          if (err instanceof Error) toast.error(err.message);
+        });
+        return next;
+      });
+    },
+    [],
+  );
 
   // "I've done this before" path — returning user who already has a
   // workspace and just wants to land there. Marks onboarding complete
@@ -132,14 +168,6 @@ export function OnboardingFlow({
     }
     onComplete(workspaces[0] ?? undefined);
   }, [workspaces, onComplete]);
-
-  const handleQuestionnaireSubmit = useCallback(
-    async (answers: QuestionnaireAnswers) => {
-      await saveQuestionnaire(answers);
-      setStep("workspace");
-    },
-    [],
-  );
 
   const handleWorkspaceCreated = useCallback((ws: Workspace) => {
     setWorkspace(ws);
@@ -175,7 +203,11 @@ export function OnboardingFlow({
 
   const handleBack = useCallback((from: OnboardingStep) => {
     const idx = ONBOARDING_STEP_ORDER.indexOf(from);
-    if (idx <= 0) return;
+    if (idx <= 0) {
+      // Source (the first persisted step) returns to Welcome.
+      setStep("welcome");
+      return;
+    }
     const prev = ONBOARDING_STEP_ORDER[idx - 1]!;
     setStep(prev);
   }, []);
@@ -202,11 +234,38 @@ export function OnboardingFlow({
     );
   }
 
-  if (step === "questionnaire") {
+  if (step === "source") {
     return (
-      <StepQuestionnaire
-        initial={storedQuestionnaire}
-        onSubmit={handleQuestionnaireSubmit}
+      <StepSource
+        answers={answers}
+        onChange={applyAnswers}
+        onAdvance={() => setStep("role")}
+        onSkip={() => setStep("role")}
+        onBack={() => handleBack("source")}
+      />
+    );
+  }
+
+  if (step === "role") {
+    return (
+      <StepRole
+        answers={answers}
+        onChange={applyAnswers}
+        onAdvance={() => setStep("use_case")}
+        onSkip={() => setStep("use_case")}
+        onBack={() => handleBack("role")}
+      />
+    );
+  }
+
+  if (step === "use_case") {
+    return (
+      <StepUseCase
+        answers={answers}
+        onChange={applyAnswers}
+        onAdvance={() => setStep("workspace")}
+        onSkip={() => setStep("workspace")}
+        onBack={() => handleBack("use_case")}
       />
     );
   }
@@ -260,7 +319,7 @@ export function OnboardingFlow({
     return (
       <StepAgent
         runtime={runtime}
-        questionnaire={storedQuestionnaire}
+        questionnaire={answers}
         onCreated={handleAgentCreated}
         onBack={() => handleBack("agent")}
       />

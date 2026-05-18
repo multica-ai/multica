@@ -15,7 +15,9 @@ import type { OnboardingStep } from "./types";
  * as progress toward completing setup.
  */
 export const ONBOARDING_STEP_ORDER: readonly OnboardingStep[] = [
-  "questionnaire",
+  "source",
+  "role",
+  "use_case",
   "workspace",
   "runtime",
   "agent",
