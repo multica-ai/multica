@@ -1,54 +1,48 @@
 import { describe, expect, it } from "vitest";
+import type { TFunction } from "i18next";
 import { createI18n } from "@multica/core/i18n/react";
 import enAutopilots from "../../locales/en/autopilots.json";
 import zhAutopilots from "../../locales/zh-Hans/autopilots.json";
+import { formatSchedulePartialFailureToast } from "./autopilot-dialog-toast";
 
-// Contract test for the autopilot-dialog partial-success i18n keys.
+// Contract test for the autopilot-dialog partial-success toast formatting.
 //
-// These keys are interpolated via `t(($) => $.dialog.toast_*_with_reason,
-// { reason })`. i18next requires DOUBLE-brace placeholders (`{{reason}}`).
-// A previous draft used single braces, which renders the literal string
-// `{reason}` to the user — exactly the bug the issue is meant to fix.
-//
-// We instantiate real i18next here (not a mock) so any future regression
-// in either the JSON template or the call-site variable name fails this
-// test with a substring assertion.
+// The dialog routes its partial-success branches through
+// `formatSchedulePartialFailureToast`, so this test drives that exact
+// helper rather than calling `t(...)` independently. That means a regression
+// in either side — the JSON template (e.g. `{reason}` instead of `{{reason}}`)
+// or the call-site variable name (e.g. `{ msg: ... }` instead of
+// `{ reason: ... }`) — fails this test with the substring assertion.
 
-describe("autopilot dialog partial-success i18n", () => {
+describe("autopilot dialog partial-success toast", () => {
   const reason = "schedule conflict: 09:00 overlaps existing trigger";
 
   describe("en", () => {
     const i18n = createI18n("en", { en: { autopilots: enAutopilots } });
-    const tFn = i18n.getFixedT("en", "autopilots");
-    // The repo's `t` is typed as selector-only (enableSelector: true). We
-    // call it as `t(selector, opts)` to mirror what the dialog does.
-    const t = tFn as unknown as (
-      selector: (src: typeof enAutopilots) => string,
-      opts?: Record<string, unknown>,
-    ) => string;
+    const t = i18n.getFixedT("en", "autopilots") as TFunction<"autopilots">;
 
-    it("interpolates reason into the create partial-success key", () => {
-      const rendered = t(($) => $.dialog.toast_create_partial_with_reason, { reason });
+    it("renders create partial-success with the server reason verbatim", () => {
+      const rendered = formatSchedulePartialFailureToast(t, "create", reason);
       expect(rendered).toContain(reason);
       expect(rendered).not.toContain("{{");
       expect(rendered).not.toContain("{reason}");
     });
 
-    it("interpolates reason into the update partial-success key", () => {
-      const rendered = t(($) => $.dialog.toast_update_partial_with_reason, { reason });
+    it("renders update partial-success with the server reason verbatim", () => {
+      const rendered = formatSchedulePartialFailureToast(t, "update", reason);
       expect(rendered).toContain(reason);
       expect(rendered).not.toContain("{{");
       expect(rendered).not.toContain("{reason}");
     });
 
-    it("keeps the no-reason create fallback unchanged", () => {
-      expect(t(($) => $.dialog.toast_create_partial)).toBe(
+    it("falls back to the no-reason create string when reason is null", () => {
+      expect(formatSchedulePartialFailureToast(t, "create", null)).toBe(
         "Autopilot created, but schedule failed to save",
       );
     });
 
-    it("keeps the no-reason update fallback unchanged", () => {
-      expect(t(($) => $.dialog.toast_update_partial)).toBe(
+    it("falls back to the no-reason update string when reason is null", () => {
+      expect(formatSchedulePartialFailureToast(t, "update", null)).toBe(
         "Autopilot updated, but schedule failed to save",
       );
     });
@@ -59,21 +53,17 @@ describe("autopilot dialog partial-success i18n", () => {
       "zh-Hans": { autopilots: zhAutopilots },
       en: { autopilots: enAutopilots },
     });
-    const tFn = i18n.getFixedT("zh-Hans", "autopilots");
-    const t = tFn as unknown as (
-      selector: (src: typeof zhAutopilots) => string,
-      opts?: Record<string, unknown>,
-    ) => string;
+    const t = i18n.getFixedT("zh-Hans", "autopilots") as TFunction<"autopilots">;
 
-    it("interpolates reason into the create partial-success key", () => {
-      const rendered = t(($) => $.dialog.toast_create_partial_with_reason, { reason });
+    it("renders create partial-success with the server reason verbatim", () => {
+      const rendered = formatSchedulePartialFailureToast(t, "create", reason);
       expect(rendered).toContain(reason);
       expect(rendered).not.toContain("{{");
       expect(rendered).not.toContain("{reason}");
     });
 
-    it("interpolates reason into the update partial-success key", () => {
-      const rendered = t(($) => $.dialog.toast_update_partial_with_reason, { reason });
+    it("renders update partial-success with the server reason verbatim", () => {
+      const rendered = formatSchedulePartialFailureToast(t, "update", reason);
       expect(rendered).toContain(reason);
       expect(rendered).not.toContain("{{");
       expect(rendered).not.toContain("{reason}");

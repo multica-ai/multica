@@ -62,6 +62,7 @@ import {
   type TriggerFrequency,
 } from "./trigger-config";
 import { useT } from "../../i18n";
+import { formatSchedulePartialFailureToast } from "./autopilot-dialog-toast";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -358,17 +359,11 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         onOpenChange(false);
         if (triggerOk) {
           toast.success(t(($) => $.dialog.toast_created));
-        } else if (triggerErrMessage) {
+        } else {
           // Partial success: autopilot saved, schedule failed. Show the
           // server-provided reason so the user can act on it (cron syntax
           // error, conflict, etc.) instead of seeing a generic message.
-          toast.error(
-            t(($) => $.dialog.toast_create_partial_with_reason, {
-              reason: triggerErrMessage,
-            }),
-          );
-        } else {
-          toast.error(t(($) => $.dialog.toast_create_partial));
+          toast.error(formatSchedulePartialFailureToast(t, "create", triggerErrMessage));
         }
       } else {
         await updateAutopilot.mutateAsync({
@@ -410,14 +405,8 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         onOpenChange(false);
         if (scheduleOk) {
           toast.success(t(($) => $.dialog.toast_updated));
-        } else if (scheduleErrMessage) {
-          toast.error(
-            t(($) => $.dialog.toast_update_partial_with_reason, {
-              reason: scheduleErrMessage,
-            }),
-          );
         } else {
-          toast.error(t(($) => $.dialog.toast_update_partial));
+          toast.error(formatSchedulePartialFailureToast(t, "update", scheduleErrMessage));
         }
       }
     } catch (err) {

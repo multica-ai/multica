@@ -303,8 +303,12 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
       await rotateToken.mutateAsync({ autopilotId, triggerId: trigger.id });
       toast.success(t(($) => $.trigger_row.toast_rotated));
       setRotateOpen(false);
-    } catch {
-      toast.error(t(($) => $.trigger_row.toast_rotate_failed));
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.trigger_row.toast_rotate_failed),
+      );
     }
   };
 
