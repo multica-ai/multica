@@ -24,8 +24,8 @@ import {
   type AssigneeGroupedIssuesFilter,
 } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
-import { useTimerStore } from "@multica/core/time-entries/timer-store";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
+import { suggestTimerForIssue } from "../../time-tracking/suggest-timer-for-issue";
 import { PageHeader } from "../../layout/page-header";
 import { IssuesHeader } from "./issues-header";
 import { BoardView } from "./board-view";
@@ -184,26 +184,9 @@ export function IssuesPage() {
         },
       );
 
-      if (
-        updates.status === "in_progress" &&
-        !useTimerStore.getState().activeTimer
-      ) {
+      if (updates.status === "in_progress") {
         const issue = allIssues.find((i) => i.id === issueId);
-        if (!issue) return;
-
-        toast("Start tracking time?", {
-          description: `${issue.identifier} is now in progress`,
-          action: {
-            label: "Start timer",
-            onClick: () => {
-              useTimerStore
-                .getState()
-                .startTimer(issue.id, issue.identifier, issue.title);
-              toast.success(`Timer started for ${issue.identifier}`);
-            },
-          },
-          duration: 8000,
-        });
+        if (issue) suggestTimerForIssue(issue);
       }
     },
     [updateIssueMutation, t, allIssues],

@@ -26,6 +26,7 @@ import { myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-st
 import { PageHeader } from "../../layout/page-header";
 import { useT } from "../../i18n";
 import { MyIssuesHeader } from "./my-issues-header";
+import { suggestTimerForIssue } from "../../time-tracking/suggest-timer-for-issue";
 
 export function MyIssuesPage() {
   const { t } = useT("my-issues");
@@ -145,8 +146,13 @@ export function MyIssuesPage() {
             ),
         },
       );
+
+      if (updates.status === "in_progress") {
+        const issue = myIssues.find((i) => i.id === issueId);
+        if (issue) suggestTimerForIssue(issue);
+      }
     },
-    [updateIssueMutation, t],
+    [updateIssueMutation, t, myIssues],
   );
 
   if (loading) {
