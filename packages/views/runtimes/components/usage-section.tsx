@@ -11,7 +11,6 @@ import type { RuntimeUsage, AgentRuntime } from "@multica/core/types";
 import {
   runtimeUsageOptions,
   runtimeUsageByAgentOptions,
-  runtimeUsageByHourOptions,
 } from "@multica/core/runtimes/queries";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import {
@@ -22,7 +21,6 @@ import {
   aggregateByWeek,
   aggregateCostByAgent,
   aggregateCostByModel,
-  aggregateCostByHour,
   collectUnmappedModels,
   pctChange,
   sliceWindow,
@@ -35,7 +33,6 @@ import {
   DailyTokensChart,
   WeeklyCostChart,
   WeeklyTokensChart,
-  HourlyActivityChart,
   ActivityHeatmap,
 } from "./charts";
 import { CustomPricingDialog } from "./custom-pricing-dialog";
@@ -45,26 +42,24 @@ import { useT } from "../../i18n";
 // Cost-by tabs, and the CSV export all read from the same `days` value so
 // the labels ("· 30D") and the data slice never disagree.
 //
-// `dims` declares which dimensions each range is allowed in. Some
-// combinations are pruned for cardinality reasons (180 days × 24 hours is
-// 4320 buckets — unreadable) or for being trivially small (7 days at the
-// weekly grain is one bar).
+// `dims` declares which dimensions each range is allowed in. 7 days at the
+// weekly grain is one bar, so 7d is daily-only; 180d is weekly-only because
+// 180 daily bars are visually unreadable.
 const TIME_RANGES = [
-  { label: "7d", days: 7, dims: ["daily", "hourly"] as const },
-  { label: "30d", days: 30, dims: ["daily", "weekly", "hourly"] as const },
+  { label: "7d", days: 7, dims: ["daily"] as const },
+  { label: "30d", days: 30, dims: ["daily", "weekly"] as const },
   { label: "90d", days: 90, dims: ["daily", "weekly"] as const },
   { label: "180d", days: 180, dims: ["weekly"] as const },
 ] as const;
 
 type TimeRange = (typeof TIME_RANGES)[number]["days"];
-type WhenTab = "daily" | "weekly" | "hourly" | "heatmap";
+type WhenTab = "daily" | "weekly" | "heatmap";
 
 // Default time range per dimension. Switching dimensions resets the period
 // to its default rather than keeping a now-invalid value.
 const DEFAULT_DAYS_BY_DIM: Record<Exclude<WhenTab, "heatmap">, TimeRange> = {
   daily: 30,
   weekly: 90,
-  hourly: 7,
 };
 
 function rangesForDim(dim: Exclude<WhenTab, "heatmap">) {
@@ -183,10 +178,10 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
   return (
     <div className="space-y-5">
       {/* Page-wide period selector. Lives at the top because it controls
-          basically everything below: the KPI numbers and labels, the daily
-          / hourly chart windows, and the cost-by aggregations. The Heatmap
-          tab is the only sub-view that ignores it (always shows 90d), and
-          its tab disables this control to telegraph that. */}
+          basically everything below: the KPI numbers and labels, the
+          daily / weekly chart window, and the cost-by aggregations. The
+          Heatmap tab is the only sub-view that ignores it (always shows
+          26 weeks), and its tab disables this control to telegraph that. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <span className="text-xs uppercase tracking-wider text-muted-foreground">
@@ -199,7 +194,6 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
               [
                 { label: t(($) => $.usage.when_tab_daily), value: "daily" },
                 { label: t(($) => $.usage.when_tab_weekly), value: "weekly" },
-                { label: t(($) => $.usage.when_tab_hourly), value: "hourly" },
               ] as const
             }
           />
@@ -276,12 +270,11 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
         />
       </div>
 
-      {/* Layer 2 — WHEN chart. Dimension (Daily / Weekly / Hourly) is owned
-          by the parent so the period selector at the top can react to it.
-          The Heatmap is an independent toggle inside this card — it ignores
+      {/* Layer 2 — WHEN chart. Dimension (Daily / Weekly) is owned by the
+          parent so the period selector at the top can react to it. The
+          Heatmap is an independent toggle inside this card — it ignores
           the period selector by design (it's a fixed 26-week long-view). */}
       <WhenChart
-        runtimeId={runtimeId}
         usage={usage}
         filtered={filtered}
         days={days}
@@ -289,12 +282,11 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
         tz={tz}
       />
 
-      {/* Layer 3 — WHO/WHAT burned the spend. By-hour was dropped — that
-          dimension lives in the WHEN chart now. */}
+      {/* Layer 3 — WHO/WHAT burned the spend. */}
       <CostByBlock runtimeId={runtimeId} days={days} usage={filtered} />
 
-      {/* Layer 4 — Folded raw view. Hourly and Heatmap used to live here;
-          they were promoted into the WHEN chart's tabs, leaving only the
+      {/* Layer 4 — Folded raw view. The Heatmap used to live here too; it
+          was promoted into the WHEN chart's toggle, leaving only the
           breakdown table behind. */}
       <FoldedRow usage={filtered} />
     </div>
@@ -303,24 +295,22 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
 
 // ---------------------------------------------------------------------------
 // WhenChart — answers "WHEN was this runtime spending money?".
-// Dimension (Daily / Weekly / Hourly) is owned by the parent so the
-// page-level period selector can react to it. Heatmap is an independent
-// view toggled inside this card; it ignores both the dimension and the
-// period selector, always showing the long 26-week view.
+// Dimension (Daily / Weekly) is owned by the parent so the page-level
+// period selector can react to it. Heatmap is an independent view toggled
+// inside this card; it ignores both the dimension and the period selector,
+// always showing the long 26-week view.
 // ---------------------------------------------------------------------------
 
 type Dim = Exclude<WhenTab, "heatmap">;
 type DailyMetric = "cost" | "tokens";
 
 function WhenChart({
-  runtimeId,
   usage,
   filtered,
   days,
   dim,
   tz,
 }: {
-  runtimeId: string;
   usage: RuntimeUsage[];
   filtered: RuntimeUsage[];
   days: TimeRange;
@@ -331,19 +321,12 @@ function WhenChart({
   // Heatmap is the "independent" sibling — toggled here, not part of the
   // page-level dimension segmented (per the RFC).
   const [showHeatmap, setShowHeatmap] = useState(false);
-  // Daily/Weekly share a Cost-vs-Tokens metric toggle (Hourly is cost-only).
+  // Daily and Weekly share a Cost-vs-Tokens metric toggle.
   const [chartMetric, setChartMetric] = useState<DailyMetric>("cost");
   // Memo dep — the aggregates below run `estimateCost`, which now consults
   // the user override store. Without listing pricings here the memos cache
   // pre-override totals when query data hasn't changed.
   const pricings = useCustomPricingStore((s) => s.pricings);
-
-  // Lazy-fetch hourly cost — only needed when the Hourly dim is active.
-  // Daily / Weekly / Heatmap all derive from the cached 180d usage prop.
-  const { data: byHourRows = [] } = useQuery({
-    ...runtimeUsageByHourOptions(runtimeId, days),
-    enabled: !showHeatmap && dim === "hourly",
-  });
 
   const { dailyCostStack, dailyTokens } = useMemo(
     () => aggregateByDate(filtered),
@@ -359,20 +342,9 @@ function WhenChart({
     () => aggregateByWeek(usage, tz, weekCount),
     [usage, tz, weekCount, pricings],
   );
-  const hourlyCost = useMemo(
-    () =>
-      aggregateCostByHour(byHourRows).map((row) => ({
-        hour: Number(row.key),
-        cost: row.cost,
-      })),
-    [byHourRows, pricings],
-  );
 
-  const metricToggleVisible = !showHeatmap && (dim === "daily" || dim === "weekly");
-  const legendIncludesCacheRead =
-    !showHeatmap &&
-    (dim === "daily" || dim === "weekly") &&
-    chartMetric === "tokens";
+  const metricToggleVisible = !showHeatmap;
+  const legendIncludesCacheRead = !showHeatmap && chartMetric === "tokens";
 
   return (
     <div className="rounded-lg border bg-card p-4">
@@ -430,15 +402,13 @@ function WhenChart({
             tokensData={dailyTokens}
             usage={filtered}
           />
-        ) : dim === "weekly" ? (
+        ) : (
           <WeeklyTab
             metric={chartMetric}
             costData={weeklyCostStack}
             tokensData={weeklyTokens}
             usage={filtered}
           />
-        ) : (
-          <HourlyTab data={hourlyCost} usage={filtered} />
         )}
       </div>
     </div>
@@ -494,18 +464,6 @@ function WeeklyTab({
   const totalCost = costData.reduce((s, d) => s + d.total, 0);
   if (totalCost === 0) return <EmptyChartState usage={usage} />;
   return <WeeklyCostChart data={costData} />;
-}
-
-function HourlyTab({
-  data,
-  usage,
-}: {
-  data: { hour: number; cost: number }[];
-  usage: RuntimeUsage[];
-}) {
-  const totalCost = data.reduce((s, d) => s + d.cost, 0);
-  if (totalCost === 0) return <EmptyChartState usage={usage} />;
-  return <HourlyActivityChart data={data} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -634,9 +592,7 @@ function ChartLegend({ includeCacheRead = false }: { includeCacheRead?: boolean 
 }
 
 // ---------------------------------------------------------------------------
-// Cost-by block: two-tab attribution view. By-hour was removed — that
-// dimension lives in the WhenChart's "Hourly" tab, which is more legible
-// as a 24-bucket bar than as a sorted list.
+// Cost-by block: two-tab attribution view (by agent / by model).
 // ---------------------------------------------------------------------------
 
 function CostByBlock({
@@ -784,8 +740,8 @@ function CostByList({
 
 // ---------------------------------------------------------------------------
 // Folded row — single chevron-toggle link revealing the raw breakdown
-// table. Hourly distribution and Activity heatmap used to live here; both
-// were promoted to WhenChart tabs, leaving only the table behind.
+// table. The Activity heatmap used to live here too; it was promoted to a
+// WhenChart toggle, leaving only the breakdown table behind.
 // ---------------------------------------------------------------------------
 
 function FoldedRow({ usage }: { usage: RuntimeUsage[] }) {

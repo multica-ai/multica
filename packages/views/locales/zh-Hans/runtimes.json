@@ -213,7 +213,6 @@
     "when_title": "这个运行时在何时消耗",
     "when_tab_daily": "按天",
     "when_tab_weekly": "按周",
-    "when_tab_hourly": "按小时",
     "when_tab_heatmap": "热力图",
     "daily_metric_cost": "费用",
     "daily_metric_tokens": "Token",

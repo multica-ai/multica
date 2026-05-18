@@ -1,7 +1,6 @@
 import type {
   RuntimeUsage,
   RuntimeUsageByAgent,
-  RuntimeUsageByHour,
 } from "@multica/core/types";
 import { getCustomPricing } from "@multica/core/runtimes/custom-pricing-store";
 
@@ -488,8 +487,22 @@ export function aggregateByDate(usage: RuntimeUsage[]): {
 // dropped; without this guard `.slice(-weekCount)` on a sparse 180-day
 // aggregate would surface old populated weeks instead of the empty
 // in-range buckets the user asked for (MUL-2382 weekly window scoping).
+// Accepts any row carrying `date` + token counts + the model needed for
+// pricing. Both `RuntimeUsage` (runtime detail) and `DashboardUsageDaily`
+// (workspace dashboard) match this shape — there's no behavioural difference,
+// just slightly different surrounding fields neither aggregator cares about.
+type WeeklyAggregable = Pick<
+  RuntimeUsage,
+  | "date"
+  | "model"
+  | "input_tokens"
+  | "output_tokens"
+  | "cache_read_tokens"
+  | "cache_write_tokens"
+>;
+
 export function aggregateByWeek(
-  usage: RuntimeUsage[],
+  usage: readonly WeeklyAggregable[],
   tz: string,
   weekCount: number,
 ): {
@@ -616,8 +629,8 @@ function diffDaysIso(from: string, to: string): number {
 // Calendar helpers — all date math runs on YYYY-MM-DD strings in the
 // runtime's IANA timezone. The backend already groups daily usage by
 // `start-of-day in runtime tz`, so we keep the entire frontend aggregation
-// on the same axis (Daily / Weekly / Hourly) to avoid one-day drift when
-// the browser and runtime sit in different time zones.
+// on the same axis (Daily / Weekly) to avoid one-day drift when the browser
+// and runtime sit in different time zones.
 // ---------------------------------------------------------------------------
 
 // Today's calendar date (YYYY-MM-DD) in the given IANA timezone. `en-CA`
@@ -715,24 +728,6 @@ export function aggregateCostByModel(rows: RuntimeUsage[]): CostByKey[] {
     map.set(key, entry);
   }
   return [...map.values()].sort((a, b) => b.cost - a.cost);
-}
-
-// Per-(hour, model) rows → 24 fixed buckets (0..23). Hours with no activity
-// stay in the list as empty rows so the bar chart axis stays continuous.
-export function aggregateCostByHour(rows: RuntimeUsageByHour[]): CostByKey[] {
-  const buckets = new Map<number, CostByKey>();
-  for (let h = 0; h < 24; h++) {
-    buckets.set(h, { key: String(h), tokens: 0, cost: 0, taskCount: 0 });
-  }
-  for (const r of rows) {
-    const entry = buckets.get(r.hour);
-    if (!entry) continue;
-    entry.tokens +=
-      r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
-    entry.cost += estimateCost(r);
-    entry.taskCount += r.task_count;
-  }
-  return [...buckets.values()];
 }
 
 // "Cost · 30D" KPI hint: percentage delta vs. the immediately prior window

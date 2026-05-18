@@ -222,7 +222,6 @@
     "when_title": "When this runtime spent",
     "when_tab_daily": "Daily",
     "when_tab_weekly": "Weekly",
-    "when_tab_hourly": "Hourly",
     "when_tab_heatmap": "Heatmap",
     "daily_metric_cost": "Cost",
     "daily_metric_tokens": "Tokens",
