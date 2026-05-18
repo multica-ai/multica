@@ -47,6 +47,8 @@ ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
 ENV NEXT_PUBLIC_APP_VERSION=$NEXT_PUBLIC_APP_VERSION
 ENV STANDALONE=true
 
+RUN test -n "$NEXT_PUBLIC_FEISHU_APP_ID" || (echo "NEXT_PUBLIC_FEISHU_APP_ID build arg is required" >&2; exit 1)
+
 # Build the web app (standalone output for minimal runtime). Next 16 defaults
 # production builds to Turbopack, which is currently flaky in Docker on our
 # builder; use webpack until that stabilizes.
