@@ -303,7 +303,6 @@ export function OnboardingFlow({
         onNext={handleRuntimeNext}
         onBack={() => handleBack("runtime")}
         cliInstructions={runtimeInstructions}
-        onWaitlistSubmitted={() => setWaitlistSubmitted(true)}
       />
     );
   }

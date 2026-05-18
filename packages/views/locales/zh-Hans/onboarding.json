@@ -108,7 +108,7 @@
   },
   "cli_install": {
     "copy_aria": "复制",
-    "intro": "这台电脑上需要装一个 AI 编程工具（Claude Code、Codex、Cursor 等）才能运行你的智能体。也支持服务器和远程开发机。",
+    "intro": "这台电脑上需要装一个 agent 运行时（Claude Code、Codex、Cursor 等）才能运行你的智能体。也支持服务器和远程开发机。",
     "step1_label": "安装 Multica CLI",
     "step2_label": "启动守护进程"
   },
@@ -291,7 +291,6 @@
     "lede": "你的智能体运行在你连接到 Multica 的一台真实电脑上。选一种你想要的连接方式。",
     "hint_default": "在上方选一种方式 —— 或先跳过，之后再连接电脑。",
     "hint_downloaded": "在下载页完成安装，然后回到此标签页。",
-    "hint_waitlist": "已在候补名单 —— 选择\"跳过\"继续探索。",
     "download_title": "使用这台电脑",
     "download_title_after": "正在打开下载页...",
     "download_subtitle": "安装我们的桌面端来连接这台电脑。零配置 —— 下一页选你的平台。",
@@ -301,9 +300,8 @@
     "cli_subtitle": "连接一台服务器、远程开发机或任意无头电脑。需要终端。",
     "cli_action": "查看步骤",
     "cloud_title": "使用云电脑",
-    "cloud_subtitle": "我们会在云上为你运行一台电脑。尚未上线 —— 加入候补。",
-    "cloud_action": "加入候补",
-    "cloud_action_done": "已在名单",
+    "cloud_subtitle": "我们会在云上为你运行一台电脑。尚未上线。",
+    "cloud_action": "即将推出",
     "cli_dialog_title": "通过终端连接",
     "cli_dialog_description": "和桌面端相同的连接，通过终端配置。适用于服务器、远程开发机或任意无头电脑。",
     "cli_dialog_pick_hint": "在上方选一台电脑。",

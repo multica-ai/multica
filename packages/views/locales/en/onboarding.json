@@ -108,7 +108,7 @@
   },
   "cli_install": {
     "copy_aria": "Copy",
-    "intro": "You'll need an AI coding tool on this computer (Claude Code, Codex, Cursor, …) for it to run your agent. Also works on servers and remote dev boxes.",
+    "intro": "You'll need an agent runtime on this computer (Claude Code, Codex, Cursor, …) for it to run your agent. Also works on servers and remote dev boxes.",
     "step1_label": "Install the Multica CLI",
     "step2_label": "Start the daemon"
   },
@@ -292,7 +292,6 @@
     "lede": "Your agent runs on a real computer that you connect to Multica. Pick how you want to connect one.",
     "hint_default": "Pick a way to connect — or skip and connect a computer later.",
     "hint_downloaded": "Finish setup on the download page, then come back to this tab.",
-    "hint_waitlist": "You're on the waitlist — pick Skip to keep exploring.",
     "download_title": "Use this computer",
     "download_title_after": "Opening the download page…",
     "download_subtitle": "Install our desktop app to connect this computer. Zero setup — pick your platform on the next page.",
@@ -302,9 +301,8 @@
     "cli_subtitle": "Connect a server, remote dev box, or any headless computer. Terminal required.",
     "cli_action": "Show steps",
     "cloud_title": "Use a cloud computer",
-    "cloud_subtitle": "We'll run a computer for you in the cloud. Not live yet — join the waitlist.",
-    "cloud_action": "Join waitlist",
-    "cloud_action_done": "On the list",
+    "cloud_subtitle": "We'll run a computer for you in the cloud. Not live yet.",
+    "cloud_action": "Coming soon",
     "cli_dialog_title": "Connect from the terminal",
     "cli_dialog_description": "Same connection as Desktop, set up from the terminal. Use it for servers, remote dev boxes, or any headless computer.",
     "cli_dialog_pick_hint": "Pick a computer above.",
