@@ -94,6 +94,7 @@ type Handler struct {
 	Analytics             analytics.Client
 	PATCache              *auth.PATCache
 	DaemonTokenCache      *auth.DaemonTokenCache
+	MembershipCache       *auth.MembershipCache
 	// ServiceCtx is a long-lived context (typically the cmd/server
 	// sweepCtx) handlers can hand to background goroutines that
 	// outlive the request (Phase 7b's merge train, future async
