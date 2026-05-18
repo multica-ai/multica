@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { ShieldCheck, ShieldOff } from "lucide-react";
-import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useCurrentMember } from "@multica/core/permissions";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import {
@@ -23,20 +22,18 @@ type PageTab = "grants" | "audit";
 // Top-level workspace admin page for Persona grants (JEH-1180). Backed by
 // the `/api/workspaces/{id}/grants` surface in JEH-1179 — UI is built
 // against the proposed shape and parseWithFallback handles drift. Hidden
-// when the `cerebro_persona_permissions` flag is off, and when the viewer
-// is not a workspace owner/admin (JEH-1217 — admin-gate; backend already
+// from sidebar navigation by the `cerebro_persona_permissions` flag, but
+// the direct route still renders for admins so a stale flag override cannot
+// blank the page. Non-admins are gated here too (JEH-1217 — admin-gate; backend already
 // rejects writes from non-admins, this is defense-in-depth in the UI so a
 // non-admin doesn't see a misleading admin surface).
 export function PermissionsPage() {
-  const enabled = useFeatureFlag("cerebro_persona_permissions");
   const workspace = useCurrentWorkspace();
   const { role, isLoading: isMemberLoading } = useCurrentMember(workspace?.id ?? "");
 
   const [activeTab, setActiveTab] = useState<PageTab>("grants");
   const [showCreate, setShowCreate] = useState(false);
   const [selectedGrantId, setSelectedGrantId] = useState<string | null>(null);
-
-  if (!enabled) return null;
 
   if (!workspace || isMemberLoading) {
     return (

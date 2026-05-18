@@ -221,6 +221,10 @@
       "gate": "cerebro_runtime_access"
     },
     {
+      "id": "PATCH /api/runtimes/{runtimeId}/tools-config",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "PATCH /api/squads/{id}/members/role",
       "gate": "workspace_member"
     },

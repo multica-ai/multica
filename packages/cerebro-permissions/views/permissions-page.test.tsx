@@ -125,7 +125,7 @@ beforeEach(() => {
 });
 
 describe("PermissionsPage", () => {
-  it("returns null when cerebro_persona_permissions flag is off", () => {
+  it("renders the direct route for admins even when the nav feature flag is off", async () => {
     mockUseFeatureFlag.mockReturnValueOnce(false);
     mockListGrants.mockResolvedValueOnce({
       items: [],
@@ -134,8 +134,9 @@ describe("PermissionsPage", () => {
       offset: 0,
     });
     const { ui } = makePage();
-    const { container } = render(ui);
-    expect(container.firstChild).toBeNull();
+    render(ui);
+    expect(await screen.findByText(/Ingen grants matcher/i)).toBeInTheDocument();
+    expect(mockListGrants).toHaveBeenCalled();
   });
 
   it("renders the empty state with no grants", async () => {

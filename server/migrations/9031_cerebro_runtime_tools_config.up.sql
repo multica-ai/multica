@@ -9,4 +9,4 @@
 --
 -- NULL means "no runtime-level MCP defaults" — the daemon falls back to
 -- agent.mcp_config alone, matching pre-patch behaviour.
-ALTER TABLE agent_runtime ADD COLUMN tools_config JSONB;
+ALTER TABLE agent_runtime ADD COLUMN IF NOT EXISTS tools_config JSONB;
