@@ -188,7 +188,7 @@ function DefaultsInstructionsTab({
           <div className="flex-1 min-h-0 overflow-y-auto rounded-md border bg-background px-4 py-3 transition-colors focus-within:border-input">
             <ContentEditor
               key={`defaults-instructions-${initialValue}`}
-              defaultValue={value}
+              defaultValue={initialValue}
               onUpdate={setValue}
               placeholder={t(($) => $.tab_body.instructions.placeholder)}
               debounceMs={150}
