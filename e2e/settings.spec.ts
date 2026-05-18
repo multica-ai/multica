@@ -7,13 +7,25 @@ test.describe("Settings", () => {
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     const api = await createTestApi();
-    const workspace = await api.ensureWorkspace("E2E Workspace", "e2e-workspace");
-    await api.dismissStarterContent(workspace.id);
-    const workspaceSlug = await loginAsDefault(page);
+    const workspaceId = api.getWorkspaceId();
+    const workspaceSlug = api.getWorkspaceSlug();
+    if (!workspaceId || !workspaceSlug) {
+      throw new Error("Expected createTestApi() to ensure an E2E workspace");
+    }
+
+    // This endpoint is one-way for the shared E2E user. Keep it in this
+    // regression only to prevent the starter modal from covering the mobile
+    // sidebar trigger.
+    await api.dismissStarterContent(workspaceId);
+    await page.addInitScript((token) => {
+      localStorage.setItem("multica_token", token);
+    }, api.getToken());
     await page.goto(`/${workspaceSlug}/settings`);
     await page.waitForURL("**/settings");
 
-    const sidebarTrigger = page.locator('[data-slot="sidebar-trigger"]').first();
+    const sidebarTrigger = page.getByRole("button", {
+      name: /toggle sidebar/i,
+    });
     await expect(sidebarTrigger).toBeVisible();
 
     await sidebarTrigger.click();
