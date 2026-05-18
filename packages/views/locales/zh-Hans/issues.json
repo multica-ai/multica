@@ -241,6 +241,8 @@
     "send_reply_failed": "发送回复失败",
     "delete_failed": "删除评论失败",
     "reply_count_other": "{{count}} 条回复",
+    "_issue_ask_ui": "CEREBRO-PATCH(i18n-issue-ask-ui): JEH-1576 user-question badge for ask primitive",
+    "question_badge": "给用户的问题",
     "leave_comment_placeholder": "留下评论...",
     "send_tooltip": "发送",
     "expand_tooltip": "展开",

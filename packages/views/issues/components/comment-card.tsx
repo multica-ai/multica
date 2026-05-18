@@ -3,7 +3,7 @@
 // CEREBRO-PATCH(comment-card-cerebro): cerebro modification of upstream file
 
 import { memo, useCallback, useRef, useState } from "react";
-import { CheckCircle2, ChevronRight, Copy, GitFork, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, Copy, GitFork, MessageCircleQuestion, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -64,6 +64,11 @@ export function flattenReplies(
   visit(rootId);
   flat.sort((a, b) => a.created_at.localeCompare(b.created_at));
   return flat;
+}
+
+// CEREBRO-PATCH(issue-ask-ui): JEH-1576 renders `multica issue ask` comments as user questions in the browser.
+export function isUserQuestionComment(entry: Pick<TimelineEntry, "type" | "comment_type">): boolean {
+  return entry.type === "comment" && entry.comment_type === "question";
 }
 
 // ---------------------------------------------------------------------------
@@ -469,6 +474,7 @@ function CommentCardImpl({
   const reactions = entry.reactions ?? [];
   const contentText = entry.content ?? "";
   const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
+  const isQuestion = isUserQuestionComment(entry);
 
   const isHighlighted = highlightedCommentId === entry.id;
   const handleConfirmMove = useCallback(async () => {
@@ -485,7 +491,15 @@ function CommentCardImpl({
   }, [entry.id, onMoveToSubIssue, t]);
 
   return (
-    <Card className={cn("!py-0 !gap-0 overflow-hidden transition-colors duration-700", isTemp && "opacity-60", isHighlighted && "ring-2 ring-brand/50 bg-brand/5")}>
+    <Card
+      className={cn(
+        "!py-0 !gap-0 overflow-hidden transition-colors duration-700",
+        isQuestion && "border-primary/35 bg-primary/[0.03]",
+        isTemp && "opacity-60",
+        isHighlighted && "ring-2 ring-brand/50 bg-brand/5",
+      )}
+      data-testid={isQuestion ? "user-question-comment" : undefined}
+    >
       {onCollapseResolved && (
         <button
           type="button"
@@ -511,6 +525,12 @@ function CommentCardImpl({
             <span className="shrink-0 cursor-pointer text-sm font-medium">
               {getActorName(entry.actor_type, entry.actor_id)}
             </span>
+            {isQuestion && (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/25 bg-background px-2 py-0.5 text-[11px] font-medium text-primary">
+                <MessageCircleQuestion className="h-3 w-3" />
+                {t(($) => $.comment.question_badge)}
+              </span>
+            )}
             <Tooltip>
               <TooltipTrigger
                 render={

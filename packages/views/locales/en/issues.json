@@ -243,6 +243,8 @@
     "delete_failed": "Failed to delete comment",
     "reply_count_one": "{{count}} reply",
     "reply_count_other": "{{count}} replies",
+    "_issue_ask_ui": "CEREBRO-PATCH(i18n-issue-ask-ui): JEH-1576 user-question badge for ask primitive",
+    "question_badge": "Question for user",
     "leave_comment_placeholder": "Leave a comment...",
     "send_tooltip": "Send",
     "expand_tooltip": "Expand",

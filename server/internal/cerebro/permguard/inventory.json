@@ -1425,6 +1425,10 @@
       "gate": "via:PUT /api/issues/{id}"
     },
     {
+      "id": "issue ask",
+      "gate": "via:POST /api/issues/{id}/comments"
+    },
+    {
       "id": "issue cancel-task",
       "gate": "via:POST /api/tasks/{taskId}/cancel"
     },

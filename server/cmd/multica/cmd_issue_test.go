@@ -272,6 +272,115 @@ func TestRunIssueCreateShowsDuplicateMessage(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(issue-ask-cli): JEH-1576 regression helper for the user-question primitive.
+func newIssueAskTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "ask"}
+	cmd.Flags().String("content", "", "")
+	cmd.Flags().Bool("content-stdin", false, "")
+	cmd.Flags().String("content-file", "", "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func TestRunIssueAskPostsQuestionForAssignedAgent(t *testing.T) {
+	var posted map[string]any
+	gets := 0
+	issue := map[string]any{
+		"id":            "issue-1",
+		"identifier":    "MUL-1",
+		"title":         "Needs clarification",
+		"assignee_type": "agent",
+		"assignee_id":   "agent-1",
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			gets++
+			json.NewEncoder(w).Encode(issue)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/issue-1":
+			gets++
+			json.NewEncoder(w).Encode(issue)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/issue-1/comments":
+			if got := r.Header.Get("X-Agent-ID"); got != "agent-1" {
+				t.Errorf("X-Agent-ID = %q, want agent-1", got)
+			}
+			if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":       "comment-1",
+				"issue_id": "issue-1",
+				"content":  posted["content"],
+				"type":     "comment",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_AGENT_ID", "agent-1")
+
+	cmd := newIssueAskTestCmd()
+	_ = cmd.Flags().Set("content", `Kan du bekræfte målet?\nSvar gerne kort.`)
+	if err := runIssueAsk(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueAsk: %v", err)
+	}
+	if gets != 2 {
+		t.Fatalf("GET issue calls = %d, want 2", gets)
+	}
+	if got := posted["content"]; got != "Kan du bekræfte målet?\nSvar gerne kort." {
+		t.Fatalf("posted content = %#v", got)
+	}
+	if got := posted["type"]; got != "question" {
+		t.Fatalf("posted type = %#v, want question", got)
+	}
+}
+
+func TestRunIssueAskRejectsDifferentAssignedAgent(t *testing.T) {
+	posted := false
+	issue := map[string]any{
+		"id":            "issue-1",
+		"identifier":    "MUL-1",
+		"title":         "Needs clarification",
+		"assignee_type": "agent",
+		"assignee_id":   "other-agent",
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && (r.URL.Path == "/api/issues/MUL-1" || r.URL.Path == "/api/issues/issue-1"):
+			json.NewEncoder(w).Encode(issue)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/issue-1/comments":
+			posted = true
+			json.NewEncoder(w).Encode(map[string]any{"id": "comment-1"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_AGENT_ID", "agent-1")
+
+	cmd := newIssueAskTestCmd()
+	_ = cmd.Flags().Set("content", "Kan du bekræfte målet?")
+	err := runIssueAsk(cmd, []string{"MUL-1"})
+	if err == nil {
+		t.Fatal("runIssueAsk: expected assignee mismatch error")
+	}
+	if !strings.Contains(err.Error(), "calling agent to be the issue assignee") {
+		t.Fatalf("error = %q", err)
+	}
+	if posted {
+		t.Fatal("runIssueAsk posted a question despite assignee mismatch")
+	}
+}
+
 func TestTruncateID(t *testing.T) {
 	tests := []struct {
 		name string

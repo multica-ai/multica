@@ -121,6 +121,13 @@ var issueAssignCmd = &cobra.Command{
 	RunE:  runIssueAssign,
 }
 
+var issueAskCmd = &cobra.Command{
+	Use:   "ask <issue-id>",
+	Short: "Post a user question and stop for the reply",
+	Args:  exactArgs(1),
+	RunE:  runIssueAsk, // CEREBRO-PATCH(issue-ask-cli): JEH-1576 user-question primitive.
+}
+
 var issueStatusCmd = &cobra.Command{
 	Use:   "status <id> <status>",
 	Short: "Change issue status",
@@ -234,6 +241,7 @@ func init() {
 	issueCmd.AddCommand(issueCreateCmd)
 	issueCmd.AddCommand(issueUpdateCmd)
 	issueCmd.AddCommand(issueAssignCmd)
+	issueCmd.AddCommand(issueAskCmd)
 	issueCmd.AddCommand(issueStatusCmd)
 	issueCmd.AddCommand(issueCommentCmd)
 	issueCmd.AddCommand(issueSubscriberCmd)
@@ -305,6 +313,12 @@ func init() {
 	issueAssignCmd.Flags().String("to-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --to)")
 	issueAssignCmd.Flags().Bool("unassign", false, "Remove current assignee")
 	issueAssignCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// issue ask
+	issueAskCmd.Flags().String("content", "", "Question content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
+	issueAskCmd.Flags().Bool("content-stdin", false, "Read question content from stdin (preserves multi-line content verbatim)")
+	issueAskCmd.Flags().String("content-file", "", "Read question content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
+	issueAskCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue comment list
 	issueCommentListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -901,6 +915,57 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 	return nil
+}
+
+func runIssueAsk(cmd *cobra.Command, args []string) error {
+	content, hasContent, err := resolveTextFlag(cmd, "content")
+	if err != nil {
+		return err
+	}
+	if !hasContent {
+		return fmt.Errorf("--content, --content-stdin, or --content-file is required")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	var issue map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+issueRef.ID, &issue); err != nil {
+		return fmt.Errorf("get issue: %w", err)
+	}
+
+	if agentID := os.Getenv("MULTICA_AGENT_ID"); agentID != "" {
+		if strVal(issue, "assignee_type") != "agent" || strVal(issue, "assignee_id") != agentID {
+			return fmt.Errorf("issue ask requires the calling agent to be the issue assignee so a user reply can resume the same agent")
+		}
+	}
+
+	body := map[string]any{
+		"content": content,
+		"type":    "question", // CEREBRO-PATCH(issue-ask-cli): JEH-1576 marks ask comments for the browser UI.
+	}
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+issueRef.ID+"/comments", body, &result); err != nil {
+		return fmt.Errorf("ask user: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Question posted on issue %s. Stop this run and wait for the user's reply.\n", issueRef.Display)
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
 }
 
 // ---------------------------------------------------------------------------

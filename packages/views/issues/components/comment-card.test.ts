@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { TimelineEntry } from "@multica/core/types";
-import { flattenReplies } from "./comment-card";
+import { flattenReplies, isUserQuestionComment } from "./comment-card";
 
 function reply(id: string, parentId: string, createdAt: string): TimelineEntry {
   return {
@@ -85,5 +85,13 @@ describe("flattenReplies", () => {
     const timestamps = flat.map((e) => e.created_at);
     const sorted = [...timestamps].sort();
     expect(timestamps).toEqual(sorted);
+  });
+});
+
+describe("isUserQuestionComment", () => {
+  it("only treats question comment entries as user-question prompts", () => {
+    expect(isUserQuestionComment({ type: "comment", comment_type: "question" })).toBe(true);
+    expect(isUserQuestionComment({ type: "comment", comment_type: "comment" })).toBe(false);
+    expect(isUserQuestionComment({ type: "activity", comment_type: "question" })).toBe(false);
   });
 });
