@@ -634,7 +634,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   });
   // CEREBRO-PATCH(issue-detail-nav-overlay-state): JEH-1518 — tabs ref + nav scroll state for multi-function overlay button
   const tabsRef = useRef<HTMLDivElement>(null);
-  const { scrollPercent, isInTabsArea, scrollToTop, scrollToTabs } = useNavScrollState(scrollContainerRef, tabsRef);
+  const { scrollPercent, isInTabsArea, scrollToPageTop, scrollToTop, scrollToTabs } = useNavScrollState(scrollContainerRef, tabsRef); // CEREBRO-PATCH(issue-detail-page-top-button): JEH-1558 — add scrollToPageTop for page-top nav button.
   // CEREBRO-PATCH(issue-detail-highlight-scroll-hook): see import above (JEH-1002).
   const highlightedId = useHighlightCommentScroll(highlightCommentId);
 
@@ -2245,6 +2245,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           isInTabsArea={isInTabsArea}
           onScrollToLatest={() => scrollToBottom()}
           onScrollToTabs={scrollToTabs}
+          onScrollToPageTop={scrollToPageTop} // CEREBRO-PATCH(issue-detail-page-top-button): JEH-1558 — wire page-top handler to NavOverlayButton.
           onScrollToTop={scrollToTop}
           // CEREBRO-PATCH(issue-detail-latest-pill-top-right): JEH-1143 — pin to top-right under PageHeader
           // CEREBRO-PATCH(issue-detail-latest-hide-on-highlight): JEH-1143 — hide during inbox highlight

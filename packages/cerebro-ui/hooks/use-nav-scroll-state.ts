@@ -6,7 +6,9 @@ interface NavScrollState {
   scrollPercent: number;
   /** True when the tabs anchor is at or above the viewport midpoint. */
   isInTabsArea: boolean;
-  /** Scroll to page top, OR to the top of the current comment thread (when in tabs area). */
+  /** Always scroll to page top (container position 0). */
+  scrollToPageTop: () => void;
+  /** Scroll to the top of the current comment thread (when in tabs area), or page top otherwise. */
   scrollToTop: () => void;
   /** Scroll so the tabs section appears at the top of the container. */
   scrollToTabs: () => void;
@@ -45,6 +47,10 @@ export function useNavScrollState(
     return () => el.removeEventListener("scroll", update);
   }, [containerRef, tabsRef]);
 
+  const scrollToPageTop = useCallback(() => {
+    containerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [containerRef]);
+
   const scrollToTop = useCallback(() => {
     const c = containerRef.current;
     if (!c) return;
@@ -72,5 +78,5 @@ export function useNavScrollState(
     c.scrollTo({ top: c.scrollTop + delta, behavior: "smooth" });
   }, [containerRef, tabsRef]);
 
-  return { scrollPercent, isInTabsArea, scrollToTop, scrollToTabs };
+  return { scrollPercent, isInTabsArea, scrollToPageTop, scrollToTop, scrollToTabs };
 }

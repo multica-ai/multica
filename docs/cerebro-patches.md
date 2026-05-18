@@ -636,3 +636,4 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `mention-access-prefetch-call` | packages/views/issues/components/issue-detail.tsx | 5 | JEH-1250 — invokes `useEnsureMentionAccessData(project_id, project.access)` next to the existing breadcrumb project query. Only fetches when the project is restricted. |
 | `mention-access-locale-en` | packages/views/locales/en/editor.json | 2 | JEH-1250 — adds `mention.no_project_access` tooltip for restricted-project @mention rows. |
 | `mention-access-locale-zh` | packages/views/locales/zh-Hans/editor.json | 2 | JEH-1250 — Chinese counterpart for `mention.no_project_access`. |
+| `issue-detail-page-top-button` | packages/views/issues/components/issue-detail.tsx | 2 | JEH-1558 — wire `scrollToPageTop` from `useNavScrollState` to `onScrollToPageTop` on JumpToLatestButton so the page-top button always scrolls the container to position 0. |

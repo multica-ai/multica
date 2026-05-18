@@ -20,7 +20,9 @@ interface JumpToLatestButtonProps {
   onScrollToLatest?: () => void;
   /** Scroll to the tabs section header. Hidden when already in tabs area. */
   onScrollToTabs?: () => void;
-  /** Scroll to page top (above tabs) or current comment thread top (in tabs area). */
+  /** Always scroll to page top. Always shown when visible. */
+  onScrollToPageTop?: () => void;
+  /** Scroll to the top of the current comment thread. Shown only when in tabs area. */
   onScrollToTop?: () => void;
   className?: string;
   /** @deprecated — use onScrollToLatest. Kept for call-site compatibility. */
@@ -80,9 +82,10 @@ function NavBtn({
 /**
  * Multi-function navigation overlay — redesigned Latest button (JEH-1518).
  * Renders a vertical group of small blue circular buttons:
- *   - Top/Thread top: page top above tabs, current thread top when in comments
- *   - Go to comments: visible only when above the tabs section
- *   - Latest (primary): always the bottom button, with scroll-position fill
+ *   - Page top (ChevronsUp): always shown when visible
+ *   - Thread top (ArrowUp): only shown when in tabs area
+ *   - Go to comments (MessageSquare): only shown above tabs section
+ *   - Latest (primary, ChevronDown): always the bottom button, with scroll-position fill
  */
 export function JumpToLatestButton({
   visible,
@@ -90,6 +93,7 @@ export function JumpToLatestButton({
   isInTabsArea = false,
   onScrollToLatest,
   onScrollToTabs,
+  onScrollToPageTop,
   onScrollToTop,
   className,
   onClick,
@@ -109,10 +113,18 @@ export function JumpToLatestButton({
         className,
       )}
     >
-      {onScrollToTop && (
+      {onScrollToPageTop && (
         <NavBtn
-          icon={isInTabsArea ? ArrowUp : ChevronsUp}
-          label={isInTabsArea ? "Thread top" : "Page top"}
+          icon={ChevronsUp}
+          label="Page top"
+          onClick={onScrollToPageTop}
+          stateClassName={stateClassName}
+        />
+      )}
+      {onScrollToTop && isInTabsArea && (
+        <NavBtn
+          icon={ArrowUp}
+          label="Thread top"
           onClick={onScrollToTop}
           stateClassName={stateClassName}
         />
