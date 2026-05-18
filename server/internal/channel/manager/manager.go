@@ -17,15 +17,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/channel"
+	chcommand "github.com/multica-ai/multica/server/internal/channel/command"
 	channelconversation "github.com/multica-ai/multica/server/internal/channel/conversation"
 	"github.com/multica-ai/multica/server/internal/channel/gateway"
 	"github.com/multica-ai/multica/server/internal/channel/inbound"
-	chintent "github.com/multica-ai/multica/server/internal/channel/intent"
 	"github.com/multica-ai/multica/server/internal/channel/leader"
 	channelmetrics "github.com/multica-ai/multica/server/internal/channel/metrics"
 	"github.com/multica-ai/multica/server/internal/channel/outbound"
 	"github.com/multica-ai/multica/server/internal/channel/port"
 	"github.com/multica-ai/multica/server/internal/channel/provider"
+	chturn "github.com/multica-ai/multica/server/internal/channel/turn"
 	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -33,10 +34,8 @@ import (
 type RuntimeComponents struct {
 	PrePipeline        *inbound.Pipeline
 	PostPipeline       *inbound.Pipeline
-	RuleResolvers      []chintent.IntentResolver
-	ChatIntent         chintent.AsyncChatIntentClient
-	TurnPlanner        chintent.ChannelTurnPlanner
-	ChannelTurn        chintent.ChannelAgentTurnClient
+	RuleResolvers      []chcommand.Resolver
+	ChannelTurn        chturn.AgentClient
 	DispatchStore      inbound.DispatchCompletionStore
 	ConversationStore  channelconversation.Store
 	ContextMaxEntities int
@@ -57,7 +56,7 @@ type Config struct {
 	GlobalLimit            int
 	Workers                int
 	ClaimBatch             int
-	IntentTaskTimeout      time.Duration
+	AgentTaskTimeout       time.Duration
 	ActionTaskTimeout      time.Duration
 	ProcessingLease        time.Duration
 	OutboundCleanupEnabled bool
@@ -327,8 +326,6 @@ func (m *Manager) startInboundRuntimeLocked(ctx context.Context) {
 		PrePipeline:        components.PrePipeline,
 		PostPipeline:       components.PostPipeline,
 		RuleResolvers:      components.RuleResolvers,
-		ChatIntent:         components.ChatIntent,
-		TurnPlanner:        components.TurnPlanner,
 		ChannelTurn:        components.ChannelTurn,
 		DispatchStore:      components.DispatchStore,
 		ConversationStore:  components.ConversationStore,
@@ -336,7 +333,7 @@ func (m *Manager) startInboundRuntimeLocked(ctx context.Context) {
 		ReplySink:          inbound.NewGatewayReplySink(m.cfg.Gateway, inbound.WithGatewayReplyConversationStore(channelconversation.NewDBStore(m.cfg.Pool))),
 		Workers:            m.cfg.Workers,
 		ClaimBatch:         m.cfg.ClaimBatch,
-		IntentTaskTimeout:  m.cfg.IntentTaskTimeout,
+		AgentTaskTimeout:   m.cfg.AgentTaskTimeout,
 		ActionTaskTimeout:  m.cfg.ActionTaskTimeout,
 		ProcessingLease:    m.cfg.ProcessingLease,
 	})

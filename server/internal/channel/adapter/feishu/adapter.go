@@ -17,10 +17,10 @@ const channelName = "feishu"
 
 // Config carries the static configuration the adapter needs at construction
 // time. Network credentials (AppID / AppSecret / EncryptKey / VerifyToken)
-// are read from the environment at the wiring site (T7) and passed through
-// here so the adapter struct itself stays platform-credential-aware but
-// transport-agnostic — the same struct can be used in tests with a fake
-// Client and zero credentials.
+// are read from a channel connection row in production and passed through
+// here so the adapter stays credential-aware but transport-agnostic. Local
+// development may bootstrap that row from FEISHU_* environment variables,
+// but the adapter does not read environment state directly.
 type Config struct {
 	// AppID is the Feishu open-platform application id ("cli_…").
 	AppID string
@@ -32,9 +32,8 @@ type Config struct {
 	// EncryptKey enables Feishu's webhook payload encryption. Optional —
 	// when empty the SDK falls back to an unencrypted channel.
 	EncryptKey string
-	// VerifyToken is the legacy webhook verification token. Required only
-	// for the HTTP webhook fallback; the WebSocket transport this adapter
-	// uses authenticates via app credentials only.
+	// VerifyToken is passed to the Feishu SDK event dispatcher so inbound
+	// events can be verified consistently with the app's event configuration.
 	VerifyToken string
 }
 

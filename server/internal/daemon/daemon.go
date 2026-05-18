@@ -745,7 +745,6 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		"launched_by":       d.cfg.LaunchedBy,
 		"timezone":          detectLocalTimezone(),
 		"capabilities": []string{
-			protocol.DaemonCapabilityChannelIntent,
 			protocol.DaemonCapabilityChannelTurn,
 		},
 		"runtimes": runtimes,
@@ -2223,7 +2222,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AutopilotTriggerPayload: strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 		QuickCreatePrompt:       task.QuickCreatePrompt,
 		IsSquadLeader:           strings.Contains(instructions, "## Squad Operating Protocol"),
-		ChannelIntentPrompt:     task.ChannelIntentPrompt,
 		ChannelTurnPrompt:       task.ChannelTurnPrompt,
 	}
 
@@ -2291,13 +2289,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// task completion and passed back via PriorWorkDir on the next claim.
 
 	prompt := BuildPrompt(task, provider)
-	channelIntentTask := task.ChannelIntentPrompt != ""
 
-	// Pass task context to the spawned agent CLI. Regular issue/chat tasks also
-	// receive daemon auth credentials so they can call the Multica API and local
-	// daemon helpers (e.g. `multica repo checkout`). Internal channel intent
-	// classification tasks are intentionally not given those credentials: they
-	// must return JSON only and cannot perform workspace side effects.
+	// Pass task context and daemon auth credentials to the spawned agent CLI so
+	// it can call the Multica API and local daemon helpers (e.g. `multica repo checkout`).
 	// MULTICA_TASK_SLOT is allocated from the daemon-wide concurrency pool, not
 	// per-agent. When one daemon hosts multiple agents, slots index shared
 	// daemon-level resources such as GPUs.
@@ -2308,33 +2302,29 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"MULTICA_TASK_ID":      task.ID,
 		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
 	}
-	if !channelIntentTask {
-		agentEnv["MULTICA_TOKEN"] = d.client.Token()
-		agentEnv["MULTICA_SERVER_URL"] = d.cfg.ServerBaseURL
-		agentEnv["MULTICA_DAEMON_PORT"] = fmt.Sprintf("%d", d.cfg.HealthPort)
-		if task.AutopilotRunID != "" {
-			agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
-		}
-		if task.AutopilotID != "" {
-			agentEnv["MULTICA_AUTOPILOT_ID"] = task.AutopilotID
-		}
+	agentEnv["MULTICA_TOKEN"] = d.client.Token()
+	agentEnv["MULTICA_SERVER_URL"] = d.cfg.ServerBaseURL
+	agentEnv["MULTICA_DAEMON_PORT"] = fmt.Sprintf("%d", d.cfg.HealthPort)
+	if task.AutopilotRunID != "" {
+		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
+	}
+	if task.AutopilotID != "" {
+		agentEnv["MULTICA_AUTOPILOT_ID"] = task.AutopilotID
 	}
 	// Quick-create marker — when set, the multica CLI's `issue create`
 	// command stamps the new issue with origin_type=quick_create +
 	// origin_id=<task_id> so the completion handler can find it
 	// deterministically (see GetIssueByOrigin).
-	if !channelIntentTask && task.QuickCreatePrompt != "" {
+	if task.QuickCreatePrompt != "" {
 		agentEnv["MULTICA_QUICK_CREATE_TASK_ID"] = task.ID
 	}
 	// Ensure the multica CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
 	// inherit the daemon's PATH. Prepend the directory of the running
 	// multica binary so that `multica` commands in the agent always resolve.
-	if !channelIntentTask {
-		if selfBin, err := os.Executable(); err == nil {
-			binDir := filepath.Dir(selfBin)
-			agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
-		}
+	if selfBin, err := os.Executable(); err == nil {
+		binDir := filepath.Dir(selfBin)
+		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
 	}
 	// Point Codex to the per-task CODEX_HOME so it discovers skills natively
 	// without polluting the system ~/.codex/skills/.

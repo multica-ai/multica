@@ -5,19 +5,20 @@ import (
 	"strings"
 	"testing"
 
+	chaction "github.com/multica-ai/multica/server/internal/channel/action"
+	chcommand "github.com/multica-ai/multica/server/internal/channel/command"
 	"github.com/multica-ai/multica/server/internal/channel/facade"
 	"github.com/multica-ai/multica/server/internal/channel/inbound"
-	chintent "github.com/multica-ai/multica/server/internal/channel/intent"
 	"github.com/multica-ai/multica/server/internal/channel/port"
 )
 
-// ruleIntentStep runs the production regex intent matcher (T9 rules).
+// ruleIntentStep runs the production deterministic command matcher.
 type ruleIntentStep struct{}
 
-func (ruleIntentStep) Name() string { return "intent-recog" }
+func (ruleIntentStep) Name() string { return "command-recog" }
 
 func (ruleIntentStep) Run(_ context.Context, evt port.InboundEvent) (port.InboundEvent, inbound.Decision, error) {
-	m := chintent.NewRuleMatcher()
+	m := chcommand.NewRuleMatcher()
 	if in, ok := m.Match(evt.Text); ok {
 		evt.Intent = port.InboundIntent{
 			Kind:       port.IntentKind(in.Kind),
@@ -33,7 +34,7 @@ func (ruleIntentStep) Run(_ context.Context, evt port.InboundEvent) (port.Inboun
 
 func assertRuleHit(t *testing.T, expanded string) {
 	t.Helper()
-	m := chintent.NewRuleMatcher()
+	m := chcommand.NewRuleMatcher()
 	in, ok := m.Match(expanded)
 	if !ok {
 		t.Fatalf("rule matcher missed expanded text %q", expanded)
@@ -41,7 +42,7 @@ func assertRuleHit(t *testing.T, expanded string) {
 	if in.Confidence != 1 {
 		t.Fatalf("confidence = %f, want 1", in.Confidence)
 	}
-	if in.Source != chintent.SourceRule {
+	if in.Source != chaction.SourceRule {
 		t.Fatalf("source = %s, want rule", in.Source)
 	}
 }

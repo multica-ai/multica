@@ -1434,26 +1434,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Channel-intent task: internal resolver work with no issue / chat /
-	// autopilot link. It reuses the daemon runtime but must only return the
-	// structured intent JSON captured in task completion output.
-	hasChannelIntent := false
-	if task.Context != nil && !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid {
-		var ci service.ChannelIntentContext
-		if json.Unmarshal(task.Context, &ci) == nil && ci.Type == service.ChannelIntentContextType {
-			hasChannelIntent = true
-			resp.ChannelIntentPrompt = ci.Prompt
-			resp.ChannelIntentMessage = ci.Message
-			resp.WorkspaceID = ci.WorkspaceID
-			if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(ci.WorkspaceID)); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
-				}
-			}
-		}
-	}
-
 	// Channel-turn task: natural-language channel work with no issue / chat /
 	// autopilot link. It reuses the daemon runtime and returns the final
 	// channel reply from task completion output.
@@ -1493,7 +1473,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			"has_chat", task.ChatSessionID.Valid,
 			"has_autopilot_run", task.AutopilotRunID.Valid,
 			"has_quick_create", hasQuickCreate,
-			"has_channel_intent", hasChannelIntent,
 			"has_channel_turn", hasChannelTurn,
 		)
 		if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {

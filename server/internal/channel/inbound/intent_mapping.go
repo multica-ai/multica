@@ -1,11 +1,11 @@
 package inbound
 
 import (
-	chintent "github.com/multica-ai/multica/server/internal/channel/intent"
+	chaction "github.com/multica-ai/multica/server/internal/channel/action"
 	"github.com/multica-ai/multica/server/internal/channel/port"
 )
 
-func toPortIntent(in chintent.Intent) port.InboundIntent {
+func toPortIntent(in chaction.Intent) port.InboundIntent {
 	params := in.Params
 	if params == nil {
 		params = map[string]string{}

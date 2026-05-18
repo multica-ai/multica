@@ -159,44 +159,6 @@ func (q *Queries) ListChannelConnections(ctx context.Context) ([]ChannelConnecti
 	return items, nil
 }
 
-const listEnabledChannelConnections = `-- name: ListEnabledChannelConnections :many
-SELECT id, provider, display_name, enabled, is_default, config, secret_config, status, last_error, created_at, updated_at FROM channel_connection
-WHERE enabled = true
-ORDER BY provider ASC, created_at ASC
-`
-
-func (q *Queries) ListEnabledChannelConnections(ctx context.Context) ([]ChannelConnection, error) {
-	rows, err := q.db.Query(ctx, listEnabledChannelConnections)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ChannelConnection{}
-	for rows.Next() {
-		var i ChannelConnection
-		if err := rows.Scan(
-			&i.ID,
-			&i.Provider,
-			&i.DisplayName,
-			&i.Enabled,
-			&i.IsDefault,
-			&i.Config,
-			&i.SecretConfig,
-			&i.Status,
-			&i.LastError,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const updateChannelConnection = `-- name: UpdateChannelConnection :one
 UPDATE channel_connection SET
     display_name = $2,

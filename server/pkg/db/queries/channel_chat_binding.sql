@@ -13,12 +13,14 @@ WHERE connection_id = $1 AND external_chat_id = $2;
 
 -- name: GetChannelChatBindingContextForInbound :one
 SELECT
-    workspace_id::text AS workspace_id,
-    COALESCE(default_project_id::text, '') AS default_project_id,
-    listen_mode,
-    COALESCE(agent_id::text, '') AS agent_id
-FROM channel_chat_binding
-WHERE connection_id = $1 AND external_chat_id = $2;
+    b.workspace_id::text AS workspace_id,
+    COALESCE(b.default_project_id::text, '') AS default_project_id,
+    b.listen_mode,
+    COALESCE(b.agent_id::text, '') AS agent_id,
+    w.issue_prefix
+FROM channel_chat_binding b
+JOIN workspace w ON w.id = b.workspace_id
+WHERE b.connection_id = $1 AND b.external_chat_id = $2;
 
 -- name: CreateChannelChatBinding :one
 INSERT INTO channel_chat_binding (

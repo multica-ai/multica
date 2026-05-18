@@ -38,7 +38,7 @@ const (
 	defaultChannelInboundGlobalLimit       = 5000
 	defaultChannelInboundWorkers           = 16
 	defaultChannelInboundClaimBatch        = 32
-	defaultChannelIntentTaskTimeout        = 15 * time.Minute
+	defaultChannelAgentTaskTimeout        = 15 * time.Minute
 	defaultChannelActionTaskTimeout        = 30 * time.Minute
 	defaultChannelInboundProcessingLease   = 5 * time.Minute
 )
@@ -285,8 +285,6 @@ func main() {
 				PrePipeline:        components.PrePipeline,
 				PostPipeline:       components.PostPipeline,
 				RuleResolvers:      components.RuleResolvers,
-				ChatIntent:         components.ChatIntent,
-				TurnPlanner:        components.TurnPlanner,
 				ChannelTurn:        components.ChannelTurn,
 				DispatchStore:      components.DispatchStore,
 				ConversationStore:  components.ConversationStore,
@@ -297,7 +295,7 @@ func main() {
 		GlobalLimit:            envPositiveInt("CHANNEL_INBOUND_GLOBAL_PENDING_LIMIT", defaultChannelInboundGlobalLimit),
 		Workers:                envPositiveInt("CHANNEL_INBOUND_WORKERS", defaultChannelInboundWorkers),
 		ClaimBatch:             envPositiveInt("CHANNEL_INBOUND_CLAIM_BATCH", defaultChannelInboundClaimBatch),
-		IntentTaskTimeout:      envDuration("CHANNEL_INTENT_TASK_TIMEOUT", defaultChannelIntentTaskTimeout),
+		AgentTaskTimeout:       envDuration("CHANNEL_AGENT_TASK_TIMEOUT", defaultChannelAgentTaskTimeout),
 		ActionTaskTimeout:      envDuration("CHANNEL_ACTION_TASK_TIMEOUT", defaultChannelActionTaskTimeout),
 		ProcessingLease:        envDuration("CHANNEL_INBOUND_PROCESSING_LEASE", defaultChannelInboundProcessingLease),
 		OutboundCleanupEnabled: true,

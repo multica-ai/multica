@@ -134,7 +134,7 @@ type AuthzConfig struct {
 }
 
 // authzStep is the Step that enforces authorization policies on every
-// inbound event. It sits in the pipeline after intent-recog (so it can
+// inbound event. It sits in the pipeline after command-recog (so it can
 // inspect IntentKind) and before dispatch (so it can block unauthorised
 // actions before they reach the facade layer).
 //
@@ -158,6 +158,9 @@ func NewAuthzStep(cfg AuthzConfig) Step {
 func (*authzStep) Name() string { return "authz" }
 
 func (s *authzStep) Run(ctx context.Context, evt port.InboundEvent) (port.InboundEvent, Decision, error) {
+	if evt.Type == port.EventTypeMessageRecalled {
+		return evt, DecisionContinue, nil
+	}
 	if evt.ChatType == port.ChatTypeDirect {
 		// Production direct chats are stopped by direct-chat-policy before
 		// authz. Keep this bypass as defence against duplicate rejection if a

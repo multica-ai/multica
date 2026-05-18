@@ -1,37 +1,38 @@
-package intent_test
+package command_test
 
 import (
 	"reflect"
 	"testing"
 
-	in "github.com/multica-ai/multica/server/internal/channel/intent"
+	chaction "github.com/multica-ai/multica/server/internal/channel/action"
+	chcommand "github.com/multica-ai/multica/server/internal/channel/command"
 )
 
-// TC-intent-1 rule-engine rows from STA-37 (source=rule corpus).
+// TC-command-1 rule-engine rows from STA-37 (source=rule corpus).
 func TestRuleMatcher_Corpus_Table(t *testing.T) {
 	t.Parallel()
-	m := in.NewRuleMatcher()
+	m := chcommand.NewRuleMatcher()
 
 	cases := []struct {
 		text       string
-		wantKind   in.IntentKind
+		wantKind   chaction.Kind
 		wantParams map[string]string
 	}{
-		{"帮我记一个 登录页加载慢", in.IntentCreateIssue, map[string]string{"title": "登录页加载慢"}},
-		{"创建一个 Issue：导出报错 500", in.IntentCreateIssue, map[string]string{"title": "导出报错 500"}},
-		{"在 [STA-2] 上加一条评论：已找产品确认", in.IntentAddComment, map[string]string{"issue_key": "STA-2", "comment": "已找产品确认"}},
-		{"在 [sta-2] 上加一条评论：已找产品确认", in.IntentAddComment, map[string]string{"issue_key": "STA-2", "comment": "已找产品确认"}},
-		{"STA-12 评论：请补一下截图", in.IntentAddComment, map[string]string{"issue_key": "STA-12", "comment": "请补一下截图"}},
-		{"[STA-2] 到哪了？", in.IntentQueryProgress, map[string]string{"scope": "issue", "issue_key": "STA-2"}},
-		{"sta-1 这个 issue 怎么样了", in.IntentQueryProgress, map[string]string{"scope": "issue", "issue_key": "STA-1"}},
-		{"STA-5 现在状态", in.IntentQueryProgress, map[string]string{"scope": "issue", "issue_key": "STA-5"}},
-		{"我的待办", in.IntentQueryIssue, map[string]string{}},
-		{"把 [STA-2] 标成 done", in.IntentSetStatus, map[string]string{"issue_key": "STA-2", "status": "done"}},
-		{"STA-7 完成了", in.IntentSetStatus, map[string]string{"issue_key": "STA-7", "status": "done"}},
-		{"STA-5 改成 in_progress", in.IntentSetStatus, map[string]string{"issue_key": "STA-5", "status": "in_progress"}},
-		{"删除 [STA-2]", in.IntentUnsupported, map[string]string{"issue_key": "STA-2"}},
-		{"上传一张图给 [STA-2]", in.IntentUnsupported, map[string]string{"issue_key": "STA-2"}},
-		{"在么", in.IntentUnknown, map[string]string{}},
+		{"帮我记一个 登录页加载慢", chaction.KindCreateIssue, map[string]string{"title": "登录页加载慢"}},
+		{"创建一个 Issue：导出报错 500", chaction.KindCreateIssue, map[string]string{"title": "导出报错 500"}},
+		{"在 [STA-2] 上加一条评论：已找产品确认", chaction.KindAddComment, map[string]string{"issue_key": "STA-2", "comment": "已找产品确认"}},
+		{"在 [sta-2] 上加一条评论：已找产品确认", chaction.KindAddComment, map[string]string{"issue_key": "STA-2", "comment": "已找产品确认"}},
+		{"STA-12 评论：请补一下截图", chaction.KindAddComment, map[string]string{"issue_key": "STA-12", "comment": "请补一下截图"}},
+		{"[STA-2] 到哪了？", chaction.KindQueryProgress, map[string]string{"scope": "issue", "issue_key": "STA-2"}},
+		{"sta-1 这个 issue 怎么样了", chaction.KindQueryProgress, map[string]string{"scope": "issue", "issue_key": "STA-1"}},
+		{"STA-5 现在状态", chaction.KindQueryProgress, map[string]string{"scope": "issue", "issue_key": "STA-5"}},
+		{"我的待办", chaction.KindQueryIssue, map[string]string{}},
+		{"把 [STA-2] 标成 done", chaction.KindSetStatus, map[string]string{"issue_key": "STA-2", "status": "done"}},
+		{"STA-7 完成了", chaction.KindSetStatus, map[string]string{"issue_key": "STA-7", "status": "done"}},
+		{"STA-5 改成 in_progress", chaction.KindSetStatus, map[string]string{"issue_key": "STA-5", "status": "in_progress"}},
+		{"删除 [STA-2]", chaction.KindUnsupported, map[string]string{"issue_key": "STA-2"}},
+		{"上传一张图给 [STA-2]", chaction.KindUnsupported, map[string]string{"issue_key": "STA-2"}},
+		{"在么", chaction.KindUnknown, map[string]string{}},
 	}
 
 	for _, tc := range cases {
@@ -47,8 +48,8 @@ func TestRuleMatcher_Corpus_Table(t *testing.T) {
 			if got.Confidence != 1 {
 				t.Errorf("Confidence = %v, want 1", got.Confidence)
 			}
-			if got.Source != in.SourceRule {
-				t.Errorf("Source = %q, want %q", got.Source, in.SourceRule)
+			if got.Source != chaction.SourceRule {
+				t.Errorf("Source = %q, want %q", got.Source, chaction.SourceRule)
 			}
 			if !reflect.DeepEqual(got.Params, tc.wantParams) {
 				t.Errorf("Params = %#v, want %#v", got.Params, tc.wantParams)
@@ -59,7 +60,7 @@ func TestRuleMatcher_Corpus_Table(t *testing.T) {
 
 func TestRuleMatcher_CreateIssue_Variants(t *testing.T) {
 	t.Parallel()
-	m := in.NewRuleMatcher()
+	m := chcommand.NewRuleMatcher()
 	variants := []string{
 		"帮我记一个 BUG：首页白屏",
 		"帮我记一个  P99 延迟飙升 ",
@@ -73,7 +74,7 @@ func TestRuleMatcher_CreateIssue_Variants(t *testing.T) {
 			continue
 		}
 		got, _ := m.Match(s)
-		if got.Kind != in.IntentCreateIssue {
+		if got.Kind != chaction.KindCreateIssue {
 			t.Errorf("%q: got kind %q", s, got.Kind)
 		}
 		if got.Params["title"] == "" {
@@ -84,7 +85,7 @@ func TestRuleMatcher_CreateIssue_Variants(t *testing.T) {
 
 func TestRuleMatcher_AddComment_Variants(t *testing.T) {
 	t.Parallel()
-	m := in.NewRuleMatcher()
+	m := chcommand.NewRuleMatcher()
 	variants := []struct {
 		text    string
 		wantKey string
@@ -98,7 +99,7 @@ func TestRuleMatcher_AddComment_Variants(t *testing.T) {
 	}
 	for _, tc := range variants {
 		got, ok := m.Match(tc.text)
-		if !ok || got.Kind != in.IntentAddComment {
+		if !ok || got.Kind != chaction.KindAddComment {
 			t.Fatalf("%q: want AddComment hit", tc.text)
 		}
 		if got.Params["issue_key"] != tc.wantKey {
@@ -109,7 +110,7 @@ func TestRuleMatcher_AddComment_Variants(t *testing.T) {
 
 func TestRuleMatcher_QueryIssue_Variants(t *testing.T) {
 	t.Parallel()
-	m := in.NewRuleMatcher()
+	m := chcommand.NewRuleMatcher()
 	variants := []struct {
 		text    string
 		wantKey string
@@ -125,7 +126,7 @@ func TestRuleMatcher_QueryIssue_Variants(t *testing.T) {
 	}
 	for _, tc := range variants {
 		got, ok := m.Match(tc.text)
-		if !ok || got.Kind != in.IntentQueryProgress {
+		if !ok || got.Kind != chaction.KindQueryProgress {
 			t.Fatalf("%q: want QueryProgress hit", tc.text)
 		}
 		if tc.wantKey != "" && got.Params["issue_key"] != tc.wantKey {
@@ -137,7 +138,7 @@ func TestRuleMatcher_QueryIssue_Variants(t *testing.T) {
 	}
 	for _, text := range []string{"我的待办", "待办列表", "看一下待办", "我有哪些待办"} {
 		got, ok := m.Match(text)
-		if !ok || got.Kind != in.IntentQueryIssue || len(got.Params) != 0 {
+		if !ok || got.Kind != chaction.KindQueryIssue || len(got.Params) != 0 {
 			t.Fatalf("%q should be empty-param QueryIssue, got ok=%v kind=%q params=%#v", text, ok, got.Kind, got.Params)
 		}
 	}
@@ -145,7 +146,7 @@ func TestRuleMatcher_QueryIssue_Variants(t *testing.T) {
 
 func TestRuleMatcher_SetStatus_Variants(t *testing.T) {
 	t.Parallel()
-	m := in.NewRuleMatcher()
+	m := chcommand.NewRuleMatcher()
 	variants := []struct {
 		text       string
 		wantStatus string
@@ -159,7 +160,7 @@ func TestRuleMatcher_SetStatus_Variants(t *testing.T) {
 	}
 	for _, tc := range variants {
 		got, ok := m.Match(tc.text)
-		if !ok || got.Kind != in.IntentSetStatus {
+		if !ok || got.Kind != chaction.KindSetStatus {
 			t.Fatalf("%q: want SetStatus hit", tc.text)
 		}
 		if got.Params["status"] != tc.wantStatus {
@@ -170,7 +171,7 @@ func TestRuleMatcher_SetStatus_Variants(t *testing.T) {
 
 func TestRuleMatcher_SetAssignee_Variants(t *testing.T) {
 	t.Parallel()
-	m := in.NewRuleMatcher()
+	m := chcommand.NewRuleMatcher()
 	variants := []struct {
 		text       string
 		wantKey    string
@@ -183,7 +184,7 @@ func TestRuleMatcher_SetAssignee_Variants(t *testing.T) {
 	}
 	for _, tc := range variants {
 		got, ok := m.Match(tc.text)
-		if !ok || got.Kind != in.IntentSetAssignee {
+		if !ok || got.Kind != chaction.KindSetAssignee {
 			t.Fatalf("%q: want SetAssignee hit", tc.text)
 		}
 		if got.Params["issue_key"] != tc.wantKey {
@@ -197,7 +198,7 @@ func TestRuleMatcher_SetAssignee_Variants(t *testing.T) {
 
 func TestRuleMatcher_SetPriority_Variants(t *testing.T) {
 	t.Parallel()
-	m := in.NewRuleMatcher()
+	m := chcommand.NewRuleMatcher()
 	variants := []struct {
 		text         string
 		wantKey      string
@@ -209,7 +210,7 @@ func TestRuleMatcher_SetPriority_Variants(t *testing.T) {
 	}
 	for _, tc := range variants {
 		got, ok := m.Match(tc.text)
-		if !ok || got.Kind != in.IntentSetPriority {
+		if !ok || got.Kind != chaction.KindSetPriority {
 			t.Fatalf("%q: want SetPriority hit", tc.text)
 		}
 		if got.Params["issue_key"] != tc.wantKey {
@@ -223,7 +224,7 @@ func TestRuleMatcher_SetPriority_Variants(t *testing.T) {
 
 func TestRuleMatcher_SetLabel_Variants(t *testing.T) {
 	t.Parallel()
-	m := in.NewRuleMatcher()
+	m := chcommand.NewRuleMatcher()
 	variants := []struct {
 		text      string
 		wantKey   string
@@ -237,7 +238,7 @@ func TestRuleMatcher_SetLabel_Variants(t *testing.T) {
 	}
 	for _, tc := range variants {
 		got, ok := m.Match(tc.text)
-		if !ok || got.Kind != in.IntentSetLabel {
+		if !ok || got.Kind != chaction.KindSetLabel {
 			t.Fatalf("%q: want SetLabel hit", tc.text)
 		}
 		if got.Params["issue_key"] != tc.wantKey {
@@ -254,10 +255,10 @@ func TestRuleMatcher_SetLabel_Variants(t *testing.T) {
 
 func TestRuleMatcher_Unknown_Variants(t *testing.T) {
 	t.Parallel()
-	m := in.NewRuleMatcher()
+	m := chcommand.NewRuleMatcher()
 	for _, s := range []string{"在吗", "你好", "Hello", "Hi", "您好"} {
 		got, ok := m.Match(s)
-		if !ok || got.Kind != in.IntentUnknown {
+		if !ok || got.Kind != chaction.KindUnknown {
 			t.Errorf("%q: want Unknown, got ok=%v kind=%v", s, ok, got.Kind)
 		}
 	}
@@ -266,7 +267,7 @@ func TestRuleMatcher_Unknown_Variants(t *testing.T) {
 // Negatives: must not match any rule (chat semantic resolver may handle these).
 func TestRuleMatcher_NoHit_Negatives(t *testing.T) {
 	t.Parallel()
-	m := in.NewRuleMatcher()
+	m := chcommand.NewRuleMatcher()
 	negatives := []string{
 		// chatter / ambiguous (≥5)
 		"今天食堂不好吃",
@@ -299,7 +300,7 @@ func TestRuleMatcher_NoHit_Negatives(t *testing.T) {
 
 func TestRuleMatcher_EmptyString_NoHit(t *testing.T) {
 	t.Parallel()
-	if _, ok := in.NewRuleMatcher().Match(""); ok {
+	if _, ok := chcommand.NewRuleMatcher().Match(""); ok {
 		t.Fatal("empty text should not hit")
 	}
 }
@@ -307,7 +308,7 @@ func TestRuleMatcher_EmptyString_NoHit(t *testing.T) {
 // Negatives for new intents: missing params / no issue identifier.
 func TestRuleMatcher_NewIntents_NegativeCases(t *testing.T) {
 	t.Parallel()
-	m := in.NewRuleMatcher()
+	m := chcommand.NewRuleMatcher()
 	negatives := []string{
 		// SetAssignee: missing assignee
 		"把 STA-1 指派给",

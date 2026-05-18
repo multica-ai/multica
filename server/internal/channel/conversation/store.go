@@ -188,11 +188,14 @@ type Store interface {
 	FindMessageByInboundEventID(ctx context.Context, inboundEventID string) (Message, bool, error)
 	ListEntityRefsByMessageID(ctx context.Context, messageID string) ([]EntityRef, error)
 	ListRecentContextEntityRefs(ctx context.Context, connectionID, conversationID, senderExternalID, threadID string, since time.Time, limit int) ([]EntityRef, error)
-	ListRecentHandoffMessages(ctx context.Context, connectionID, conversationID, threadID string, since time.Time, limit int) ([]Message, error)
+	ListRecentHandoffMessages(ctx context.Context, connectionID, conversationID, senderExternalID, threadID string, since time.Time, limit int) ([]Message, error)
+	FindLatestCompletedTurn(ctx context.Context, connectionID, conversationID, senderExternalID, threadID string, since time.Time) (Turn, bool, error)
+	FindLatestContextReset(ctx context.Context, connectionID, conversationID, senderExternalID, threadID string, since time.Time) (Turn, bool, error)
 	CreateTurn(ctx context.Context, item Turn) (Turn, error)
 	UpsertTurn(ctx context.Context, item Turn) (Turn, error)
 	CompleteTurn(ctx context.Context, id string, outboundMessageID string, status string, resultPayload json.RawMessage, lastError string) error
 	CompleteTurnForInboundEvent(ctx context.Context, inboundEventID string, outboundMessageID string, status string, resultPayload json.RawMessage, lastError string) error
+	MergeTurnResultForInboundEvent(ctx context.Context, inboundEventID string, resultPayload json.RawMessage) error
 }
 
 type dbHandle interface {
@@ -217,6 +220,24 @@ COALESCE(represented_agent_id::text, ''), text, body, content_format,
 reply_to_platform_message_id, quoted_platform_message_id,
 COALESCE(reply_to_message_id::text, ''), COALESCE(quoted_message_id::text, ''),
 handoff_kind, suggested_actions, metadata, occurred_at, created_at, updated_at
+`
+
+const turnSelectColumns = `
+id::text, provider, connection_id, conversation_id::text, COALESCE(workspace_id::text, ''),
+COALESCE(inbound_event_id::text, ''), COALESCE(inbound_message_id::text, ''),
+COALESCE(outbound_message_id::text, ''), sender_external_id, intent_kind,
+intent_source, intent_payload, authz_status, status, COALESCE(wait_kind, ''),
+COALESCE(wait_task_id::text, ''), result_payload, COALESCE(last_error, ''),
+started_at, COALESCE(completed_at, 'epoch'::timestamptz), created_at, updated_at
+`
+
+const turnSelectColumnsWithTurnAlias = `
+t.id::text, t.provider, t.connection_id, t.conversation_id::text, COALESCE(t.workspace_id::text, ''),
+COALESCE(t.inbound_event_id::text, ''), COALESCE(t.inbound_message_id::text, ''),
+COALESCE(t.outbound_message_id::text, ''), t.sender_external_id, t.intent_kind,
+t.intent_source, t.intent_payload, t.authz_status, t.status, COALESCE(t.wait_kind, ''),
+COALESCE(t.wait_task_id::text, ''), t.result_payload, COALESCE(t.last_error, ''),
+t.started_at, COALESCE(t.completed_at, 'epoch'::timestamptz), t.created_at, t.updated_at
 `
 
 type scanner interface {
@@ -668,13 +689,13 @@ LIMIT $6
 	return refs, rows.Err()
 }
 
-// ListRecentHandoffMessages returns recent messages that are waiting for a
-// user response in one conversation.
-func (s *DBStore) ListRecentHandoffMessages(ctx context.Context, connectionID, conversationID, threadID string, since time.Time, limit int) ([]Message, error) {
+// ListRecentHandoffMessages returns recent messages that are waiting for this
+// sender's response in one conversation.
+func (s *DBStore) ListRecentHandoffMessages(ctx context.Context, connectionID, conversationID, senderExternalID, threadID string, since time.Time, limit int) ([]Message, error) {
 	if s == nil || s.db == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
-	if strings.TrimSpace(connectionID) == "" || strings.TrimSpace(conversationID) == "" {
+	if strings.TrimSpace(connectionID) == "" || strings.TrimSpace(conversationID) == "" || strings.TrimSpace(senderExternalID) == "" {
 		return nil, nil
 	}
 	if since.IsZero() {
@@ -684,16 +705,25 @@ func (s *DBStore) ListRecentHandoffMessages(ctx context.Context, connectionID, c
 		limit = 2
 	}
 	rows, err := s.db.Query(ctx, `
-SELECT `+messageSelectColumns+`
-FROM channel_message
-WHERE connection_id = $1
-  AND conversation_id = $2::uuid
-  AND handoff_kind <> 'none'
-  AND occurred_at >= $3
-  AND ($4 = '' OR thread_id = $4 OR thread_id = '')
-ORDER BY occurred_at DESC
-LIMIT $5
-`, connectionID, conversationID, since, strings.TrimSpace(threadID), limit)
+	SELECT `+messageSelectColumns+`
+	FROM channel_message
+	WHERE connection_id = $1
+	  AND conversation_id = $2::uuid
+	  AND handoff_kind <> 'none'
+	  AND occurred_at >= $4
+	  AND ($5 = '' OR thread_id = $5 OR thread_id = '')
+	  AND (
+	      (chat_type = 'direct' AND chat_id = $3)
+	      OR EXISTS (
+	          SELECT 1
+	          FROM channel_turn t
+	          WHERE t.outbound_message_id = channel_message.id
+	            AND t.sender_external_id = $3
+	      )
+	  )
+	ORDER BY occurred_at DESC
+	LIMIT $6
+	`, connectionID, conversationID, strings.TrimSpace(senderExternalID), since, strings.TrimSpace(threadID), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -707,6 +737,77 @@ LIMIT $5
 		out = append(out, item)
 	}
 	return out, rows.Err()
+}
+
+// FindLatestCompletedTurn returns the newest terminal turn in this sender's
+// conversation scope.
+func (s *DBStore) FindLatestCompletedTurn(ctx context.Context, connectionID, conversationID, senderExternalID, threadID string, since time.Time) (Turn, bool, error) {
+	if s == nil || s.db == nil {
+		return Turn{}, false, errors.New("conversation store is not configured")
+	}
+	if strings.TrimSpace(connectionID) == "" || strings.TrimSpace(conversationID) == "" || strings.TrimSpace(senderExternalID) == "" {
+		return Turn{}, false, nil
+	}
+	if since.IsZero() {
+		since = time.Now().Add(-30 * time.Minute)
+	}
+	var item Turn
+	err := scanTurn(s.db.QueryRow(ctx, `
+SELECT `+turnSelectColumnsWithTurnAlias+`
+FROM channel_turn t
+LEFT JOIN channel_message m ON m.id = t.inbound_message_id
+WHERE t.connection_id = $1
+  AND t.conversation_id = $2::uuid
+  AND t.sender_external_id = $3
+  AND t.status = 'completed'
+  AND t.completed_at >= $4
+  AND ($5 = '' OR COALESCE(m.thread_id, '') = $5 OR COALESCE(m.thread_id, '') = '')
+ORDER BY t.completed_at DESC, t.updated_at DESC
+LIMIT 1
+`, connectionID, conversationID, senderExternalID, since, strings.TrimSpace(threadID)), &item)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Turn{}, false, nil
+	}
+	if err != nil {
+		return Turn{}, false, err
+	}
+	return item, true, nil
+}
+
+// FindLatestContextReset returns the newest user-requested context boundary in
+// this sender's conversation scope.
+func (s *DBStore) FindLatestContextReset(ctx context.Context, connectionID, conversationID, senderExternalID, threadID string, since time.Time) (Turn, bool, error) {
+	if s == nil || s.db == nil {
+		return Turn{}, false, errors.New("conversation store is not configured")
+	}
+	if strings.TrimSpace(connectionID) == "" || strings.TrimSpace(conversationID) == "" || strings.TrimSpace(senderExternalID) == "" {
+		return Turn{}, false, nil
+	}
+	if since.IsZero() {
+		since = time.Now().Add(-30 * time.Minute)
+	}
+	var item Turn
+	err := scanTurn(s.db.QueryRow(ctx, `
+SELECT `+turnSelectColumnsWithTurnAlias+`
+FROM channel_turn t
+LEFT JOIN channel_message m ON m.id = t.inbound_message_id
+WHERE t.connection_id = $1
+  AND t.conversation_id = $2::uuid
+  AND t.sender_external_id = $3
+  AND t.status = 'completed'
+  AND t.completed_at >= $4
+  AND t.result_payload ? 'context_reset'
+  AND ($5 = '' OR COALESCE(m.thread_id, '') = $5 OR COALESCE(m.thread_id, '') = '')
+ORDER BY t.completed_at DESC, t.updated_at DESC
+LIMIT 1
+`, connectionID, conversationID, senderExternalID, since, strings.TrimSpace(threadID)), &item)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Turn{}, false, nil
+	}
+	if err != nil {
+		return Turn{}, false, err
+	}
+	return item, true, nil
 }
 
 // CreateTurn starts a channel processing turn.
@@ -908,6 +1009,26 @@ SET outbound_message_id = COALESCE(nullif($2, '')::uuid, outbound_message_id),
     updated_at = now()
 WHERE inbound_event_id = $1::uuid
 `, inboundEventID, outboundMessageID, status, payload, lastError)
+	return err
+}
+
+// MergeTurnResultForInboundEvent merges additional machine-readable result
+// payload into the turn associated with an inbound event.
+func (s *DBStore) MergeTurnResultForInboundEvent(ctx context.Context, inboundEventID string, resultPayload json.RawMessage) error {
+	if s == nil || s.db == nil {
+		return errors.New("conversation store is not configured")
+	}
+	inboundEventID = strings.TrimSpace(inboundEventID)
+	if inboundEventID == "" || len(resultPayload) == 0 {
+		return nil
+	}
+	payload := jsonObjectOrDefault(resultPayload)
+	_, err := s.db.Exec(ctx, `
+UPDATE channel_turn
+SET result_payload = result_payload || $2::jsonb,
+    updated_at = now()
+WHERE inbound_event_id = $1::uuid
+`, inboundEventID, payload)
 	return err
 }
 

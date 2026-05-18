@@ -26,6 +26,10 @@ func (*Factory) DisplayName() string {
 	return "Feishu"
 }
 
+// EnvConfig returns an optional local-development bootstrap connection.
+// Production wiring uses DB-backed channel_connection rows created through
+// Settings -> Integrations; this path only seeds an empty non-production DB
+// when CHANNEL_ENV_BOOTSTRAP permits it.
 func (*Factory) EnvConfig() provider.ConnectionConfig {
 	appID := os.Getenv("FEISHU_APP_ID")
 	appSecret := os.Getenv("FEISHU_APP_SECRET")

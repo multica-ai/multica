@@ -61,8 +61,6 @@ type Task struct {
 	QuickCreatePrompt       string                `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
 	SquadID                 string                `json:"squad_id,omitempty"`                  // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
 	SquadName               string                `json:"squad_name,omitempty"`                // display name for the picker squad, used in prompt text
-	ChannelIntentPrompt     string                `json:"channel_intent_prompt,omitempty"`     // internal channel semantic resolver prompt
-	ChannelIntentMessage    string                `json:"channel_intent_message,omitempty"`    // original channel message being classified
 	ChannelTurnPrompt       string                `json:"channel_turn_prompt,omitempty"`       // channel agent turn prompt
 	ChannelTurnMessage      string                `json:"channel_turn_message,omitempty"`      // original channel message for a channel turn
 }

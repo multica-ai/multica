@@ -160,12 +160,14 @@ func (q *Queries) GetChannelChatBindingByProviderAndChatID(ctx context.Context, 
 
 const getChannelChatBindingContextForInbound = `-- name: GetChannelChatBindingContextForInbound :one
 SELECT
-    workspace_id::text AS workspace_id,
-    COALESCE(default_project_id::text, '') AS default_project_id,
-    listen_mode,
-    COALESCE(agent_id::text, '') AS agent_id
-FROM channel_chat_binding
-WHERE connection_id = $1 AND external_chat_id = $2
+    b.workspace_id::text AS workspace_id,
+    COALESCE(b.default_project_id::text, '') AS default_project_id,
+    b.listen_mode,
+    COALESCE(b.agent_id::text, '') AS agent_id,
+    w.issue_prefix
+FROM channel_chat_binding b
+JOIN workspace w ON w.id = b.workspace_id
+WHERE b.connection_id = $1 AND b.external_chat_id = $2
 `
 
 type GetChannelChatBindingContextForInboundParams struct {
@@ -178,6 +180,7 @@ type GetChannelChatBindingContextForInboundRow struct {
 	DefaultProjectID interface{} `json:"default_project_id"`
 	ListenMode       string      `json:"listen_mode"`
 	AgentID          interface{} `json:"agent_id"`
+	IssuePrefix      string      `json:"issue_prefix"`
 }
 
 func (q *Queries) GetChannelChatBindingContextForInbound(ctx context.Context, arg GetChannelChatBindingContextForInboundParams) (GetChannelChatBindingContextForInboundRow, error) {
@@ -188,6 +191,7 @@ func (q *Queries) GetChannelChatBindingContextForInbound(ctx context.Context, ar
 		&i.DefaultProjectID,
 		&i.ListenMode,
 		&i.AgentID,
+		&i.IssuePrefix,
 	)
 	return i, err
 }

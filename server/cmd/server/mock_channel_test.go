@@ -268,7 +268,7 @@ func (noopCommentService) AddComment(_ context.Context, _ facade.AddCommentReq) 
 	return facade.Comment{}, errors.New("noopCommentService: not implemented for M2 tests")
 }
 
-// staticIntentStep — test-time intent-recog step. Production (T9/T10)
+// staticIntentStep — test-time command-recog step. Production (T9/T10)
 // has rule + chat resolvers; the M2 integration tests do not exercise
 // classification accuracy (that lives in TC-risk-1~3 in STA-65 and the
 // resolver unit tests). They DO exercise the dispatcher's response to

@@ -518,7 +518,7 @@ func TestChannelIntegration_TC_int_7_M2_DedupIdempotentOnReplay(t *testing.T) {
 // PRD E10 wording focuses on the user-visible response, so this test
 // asserts on the reply text rather than on a specific intent
 // constant. If a future task introduces a dedicated IntentImageCreate,
-// only the intent-recog step will need to change — the rejection
+// only the command-recog step will need to change — the rejection
 // reply contract stays.
 // ---------------------------------------------------------------------------
 

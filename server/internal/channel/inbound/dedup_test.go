@@ -185,7 +185,7 @@ func TestPipeline_DedupSkipPreventsDownstreamSteps(t *testing.T) {
 
 	var log []string
 	identityBind := newSpy("identity-bind", inbound.DecisionContinue, &log)
-	intentRecog := newSpy("intent-recog", inbound.DecisionContinue, &log)
+	intentRecog := newSpy("command-recog", inbound.DecisionContinue, &log)
 	dispatch := newSpy("dispatch", inbound.DecisionContinue, &log)
 	reply := newSpy("reply", inbound.DecisionContinue, &log)
 

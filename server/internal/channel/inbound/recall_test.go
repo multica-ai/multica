@@ -89,6 +89,39 @@ func TestDispatchStep_RecallEvent_AnnotatesWithoutMutating(t *testing.T) {
 	}
 }
 
+func TestRecallEventPipeline_AllowsMissingSender(t *testing.T) {
+	t.Parallel()
+
+	cfg, _, _, recCh := buildDispatchConfig()
+	p := inbound.NewPipeline(
+		inbound.NewNormalizeStep(),
+		inbound.NewAuthzStep(inbound.AuthzConfig{Store: &fakeAuthzStore{}}),
+		inbound.NewDispatchStep(cfg),
+	)
+	evt := port.InboundEvent{
+		ChannelName: "feishu",
+		EventID:     "evt-recall-1",
+		Type:        port.EventTypeMessageRecalled,
+		ChatID:      "chat-1",
+		ChatType:    port.ChatTypeGroup,
+		MessageID:   "om_msg_999",
+	}
+
+	_, outcome, err := p.RunEvent(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("RunEvent returned error: %v", err)
+	}
+	if outcome.Decision != inbound.DecisionContinue {
+		t.Fatalf("decision = %v, want Continue", outcome.Decision)
+	}
+	if len(recCh.sends) != 1 {
+		t.Fatalf("expected 1 recall annotation, got %d", len(recCh.sends))
+	}
+	if !strings.Contains(recCh.sends[0].Text, "MESSAGE_RECALLED") {
+		t.Fatalf("reply missing MESSAGE_RECALLED: %q", recCh.sends[0].Text)
+	}
+}
+
 // Defensive guard: a non-recall event must not accidentally bypass intent
 // dispatch even if MessageID is set (i.e. the special-casing is keyed on
 // Type, not MessageID).

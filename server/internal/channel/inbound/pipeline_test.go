@@ -52,7 +52,7 @@ func TestPipeline_RunsAllStepsInOrder_WhenEachReturnsContinue(t *testing.T) {
 	steps := []inbound.Step{
 		newSpy("normalize", inbound.DecisionContinue, &log),
 		newSpy("identity-bind", inbound.DecisionContinue, &log),
-		newSpy("intent-recog", inbound.DecisionContinue, &log),
+		newSpy("command-recog", inbound.DecisionContinue, &log),
 		newSpy("dispatch", inbound.DecisionContinue, &log),
 	}
 
@@ -66,7 +66,7 @@ func TestPipeline_RunsAllStepsInOrder_WhenEachReturnsContinue(t *testing.T) {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
 
-	wantOrder := []string{"normalize", "identity-bind", "intent-recog", "dispatch"}
+	wantOrder := []string{"normalize", "identity-bind", "command-recog", "dispatch"}
 	if !equalStrings(log, wantOrder) {
 		t.Fatalf("call order = %v, want %v", log, wantOrder)
 	}
@@ -95,7 +95,7 @@ func TestPipeline_SkipShortCircuitsSubsequentSteps(t *testing.T) {
 	var log []string
 	step1 := newSpy("normalize", inbound.DecisionContinue, &log)
 	step2 := newSpy("identity-bind", inbound.DecisionSkip, &log) // <-- Skip here
-	step3 := newSpy("intent-recog", inbound.DecisionContinue, &log)
+	step3 := newSpy("command-recog", inbound.DecisionContinue, &log)
 	step4 := newSpy("dispatch", inbound.DecisionContinue, &log)
 
 	p := inbound.NewPipeline(step1, step2, step3, step4)
@@ -137,7 +137,7 @@ func TestPipeline_StepError_AbortsAndPropagates(t *testing.T) {
 
 	step1 := newSpy("normalize", inbound.DecisionContinue, &log)
 	step2 := &spyStep{name: "identity-bind", decision: inbound.DecisionContinue, err: wantErr, log: &log}
-	step3 := newSpy("intent-recog", inbound.DecisionContinue, &log)
+	step3 := newSpy("command-recog", inbound.DecisionContinue, &log)
 
 	p := inbound.NewPipeline(step1, step2, step3)
 	_, err := p.Run(context.Background(), port.InboundEvent{})

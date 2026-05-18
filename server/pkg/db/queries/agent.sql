@@ -96,14 +96,6 @@ INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, 
 VALUES ($1, $2, NULL, 'queued', $3, $4)
 RETURNING *;
 
--- name: CreateChannelIntentTask :one
--- Channel-intent tasks are internal semantic classification jobs. They have no
--- issue / chat / autopilot link; the daemon detects them via
--- context.type == "channel_intent" and returns structured JSON only.
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, context)
-VALUES ($1, $2, NULL, 'queued', $3, $4)
-RETURNING *;
-
 -- name: CreateChannelTurnTask :one
 -- Channel-turn tasks are internal channel agent turns. They have no issue /
 -- chat / autopilot link; the daemon detects them via context.type ==
@@ -111,13 +103,6 @@ RETURNING *;
 INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, context)
 VALUES ($1, $2, NULL, 'queued', $3, $4)
 RETURNING *;
-
--- name: GetChannelIntentTaskByInboundEvent :one
-SELECT * FROM agent_task_queue
-WHERE COALESCE(context->>'type', '') = 'channel_intent'
-  AND context->>'channel_inbound_event_id' = sqlc.arg(inbound_event_id)::text
-ORDER BY created_at ASC
-LIMIT 1;
 
 -- name: GetContextTaskByInboundEvent :one
 SELECT * FROM agent_task_queue

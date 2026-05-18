@@ -62,7 +62,6 @@ type TaskContextForEnv struct {
 	AutopilotTriggerPayload string
 	QuickCreatePrompt       string // non-empty for quick-create tasks
 	IsSquadLeader           bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
-	ChannelIntentPrompt     string // non-empty for internal channel intent tasks
 	ChannelTurnPrompt       string // non-empty for channel agent turn tasks
 }
 
