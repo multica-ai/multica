@@ -601,10 +601,14 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 	s := string(content)
 	for _, want := range []string{
 		"## Available Commands",
-		"only the commands needed for the core agent loop",
+		"core agent loop and common issue create/update tasks",
 		"`multica <command> --help`",
 		"multica issue get <id> --output json",
 		"multica issue comment list <issue-id>",
+		"multica issue create --title",
+		"multica issue update <id>",
+		"--description-file <path>",
+		"--parent \"\"",
 		"multica repo checkout <url>",
 		"multica issue status <id> <status>",
 		"multica issue comment add <issue-id>",
