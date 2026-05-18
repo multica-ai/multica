@@ -1,8 +1,18 @@
 import { create } from "zustand";
 import type { User, StorageAdapter } from "../types";
 import { identify as identifyAnalytics, resetAnalytics } from "../analytics";
-import { ApiError, type ApiClient } from "../api/client";
+import {
+  isTransientAuthProbeError,
+  isUnauthorizedError,
+  type ApiClient,
+} from "../api/client";
 import { setCurrentWorkspace } from "../platform/workspace-storage";
+
+export type AuthStatus =
+  | "loading"
+  | "authenticated"
+  | "unauthenticated"
+  | "temporarily_unreachable";
 
 export interface AuthStoreOptions {
   api: ApiClient;
@@ -16,6 +26,8 @@ export interface AuthStoreOptions {
 export interface AuthState {
   user: User | null;
   isLoading: boolean;
+  authStatus: AuthStatus;
+  authUnavailableSince: number | null;
 
   initialize: () => Promise<void>;
   sendCode: (email: string) => Promise<void>;
@@ -33,6 +45,8 @@ export function createAuthStore(options: AuthStoreOptions) {
   return create<AuthState>((set) => ({
     user: null,
     isLoading: true,
+    authStatus: "loading",
+    authUnavailableSince: null,
 
     initialize: async () => {
       if (cookieAuth) {
@@ -40,9 +54,31 @@ export function createAuthStore(options: AuthStoreOptions) {
         // Try to fetch the current user — if the cookie exists the server will accept it.
         try {
           const user = await api.getMe();
-          set({ user, isLoading: false });
-        } catch {
-          set({ user: null, isLoading: false });
+          set({
+            user,
+            isLoading: false,
+            authStatus: "authenticated",
+            authUnavailableSince: null,
+          });
+        } catch (err) {
+          if (isUnauthorizedError(err)) {
+            setCurrentWorkspace(null, null);
+            set({
+              user: null,
+              isLoading: false,
+              authStatus: "unauthenticated",
+              authUnavailableSince: null,
+            });
+            return;
+          }
+          if (isTransientAuthProbeError(err)) {
+            set((state) => ({
+              user: state.user,
+              isLoading: false,
+              authStatus: "temporarily_unreachable",
+              authUnavailableSince: state.authUnavailableSince ?? Date.now(),
+            }));
+          }
         }
         return;
       }
@@ -50,7 +86,12 @@ export function createAuthStore(options: AuthStoreOptions) {
       // Token mode: read from localStorage (Electron / legacy).
       const token = storage.getItem("multica_token");
       if (!token) {
-        set({ isLoading: false });
+        set({
+          user: null,
+          isLoading: false,
+          authStatus: "unauthenticated",
+          authUnavailableSince: null,
+        });
         return;
       }
 
@@ -58,7 +99,12 @@ export function createAuthStore(options: AuthStoreOptions) {
 
       try {
         const user = await api.getMe();
-        set({ user, isLoading: false });
+        set({
+          user,
+          isLoading: false,
+          authStatus: "authenticated",
+          authUnavailableSince: null,
+        });
       } catch (err) {
         // Only clear the stored token on a genuine auth failure (401). For
         // transient errors — network blips, backend rolling restarts, 5xx,
@@ -67,10 +113,31 @@ export function createAuthStore(options: AuthStoreOptions) {
         // cleanup is handled upstream by ApiClient.handleUnauthorized via
         // the onUnauthorized callback; we only need to reset the in-memory
         // user + workspace state here.
-        if (err instanceof ApiError && err.status === 401) {
+        if (isUnauthorizedError(err)) {
           setCurrentWorkspace(null, null);
+          set({
+            user: null,
+            isLoading: false,
+            authStatus: "unauthenticated",
+            authUnavailableSince: null,
+          });
+          return;
         }
-        set({ user: null, isLoading: false });
+        if (isTransientAuthProbeError(err)) {
+          set((state) => ({
+            user: state.user,
+            isLoading: false,
+            authStatus: "temporarily_unreachable",
+            authUnavailableSince: state.authUnavailableSince ?? Date.now(),
+          }));
+          return;
+        }
+        set({
+          user: null,
+          isLoading: false,
+          authStatus: "unauthenticated",
+          authUnavailableSince: null,
+        });
       }
     },
 
@@ -83,11 +150,16 @@ export function createAuthStore(options: AuthStoreOptions) {
       if (!cookieAuth) {
         // Token mode: persist for Electron / legacy.
         storage.setItem("multica_token", token);
-        api.setToken(token);
       }
+      api.setToken(token);
       onLogin?.();
       identifyAnalytics(user.id, { email: user.email, name: user.name });
-      set({ user });
+      set({
+        user,
+        isLoading: false,
+        authStatus: "authenticated",
+        authUnavailableSince: null,
+      });
       return user;
     },
 
@@ -95,11 +167,16 @@ export function createAuthStore(options: AuthStoreOptions) {
       const { token, user } = await api.googleLogin(code, redirectUri);
       if (!cookieAuth) {
         storage.setItem("multica_token", token);
-        api.setToken(token);
       }
+      api.setToken(token);
       onLogin?.();
       identifyAnalytics(user.id, { email: user.email, name: user.name });
-      set({ user });
+      set({
+        user,
+        isLoading: false,
+        authStatus: "authenticated",
+        authUnavailableSince: null,
+      });
       return user;
     },
 
@@ -109,7 +186,12 @@ export function createAuthStore(options: AuthStoreOptions) {
       const user = await api.getMe();
       onLogin?.();
       identifyAnalytics(user.id, { email: user.email, name: user.name });
-      set({ user, isLoading: false });
+      set({
+        user,
+        isLoading: false,
+        authStatus: "authenticated",
+        authUnavailableSince: null,
+      });
       return user;
     },
 
@@ -123,16 +205,49 @@ export function createAuthStore(options: AuthStoreOptions) {
       setCurrentWorkspace(null, null);
       resetAnalytics();
       onLogout?.();
-      set({ user: null });
+      set({
+        user: null,
+        isLoading: false,
+        authStatus: "unauthenticated",
+        authUnavailableSince: null,
+      });
     },
 
     setUser: (user: User) => {
-      set({ user });
+      set({
+        user,
+        authStatus: "authenticated",
+        authUnavailableSince: null,
+      });
     },
 
     refreshMe: async () => {
-      const user = await api.getMe();
-      set({ user });
+      try {
+        const user = await api.getMe();
+        set({
+          user,
+          authStatus: "authenticated",
+          authUnavailableSince: null,
+        });
+      } catch (err) {
+        if (isUnauthorizedError(err)) {
+          setCurrentWorkspace(null, null);
+          set({
+            user: null,
+            isLoading: false,
+            authStatus: "unauthenticated",
+            authUnavailableSince: null,
+          });
+        } else if (isTransientAuthProbeError(err)) {
+          set((state) => ({
+            user: state.user,
+            isLoading: false,
+            authStatus: "temporarily_unreachable",
+            authUnavailableSince: state.authUnavailableSince ?? Date.now(),
+          }));
+        }
+        throw err;
+      }
     },
   }));
 }

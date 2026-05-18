@@ -21,15 +21,20 @@ export default function WorkspaceLayout({
   const { workspaceSlug } = use(params);
   const user = useAuthStore((s) => s.user);
   const isAuthLoading = useAuthStore((s) => s.isLoading);
+  const authStatus = useAuthStore((s) => s.authStatus);
   const router = useRouter();
+  const authTemporarilyUnavailable =
+    authStatus === "temporarily_unreachable";
 
   // Workspace routes require auth. If user is unauthenticated (initial visit
   // without a session, token expired, another tab logged out, etc.), bounce
   // to /login. Without this, the layout renders null and the user sees a
   // blank page stuck on /{slug}/...
   useEffect(() => {
-    if (!isAuthLoading && !user) router.replace(paths.login());
-  }, [isAuthLoading, user, router]);
+    if (!isAuthLoading && !authTemporarilyUnavailable && !user) {
+      router.replace(paths.login());
+    }
+  }, [isAuthLoading, authTemporarilyUnavailable, user, router]);
 
   // Resolve workspace by slug from the React Query list cache.
   // Enabled only when user is authenticated — otherwise the list query isn't seeded.
@@ -67,7 +72,7 @@ export default function WorkspaceLayout({
     </div>
   );
 
-  if (isAuthLoading) return loadingIndicator;
+  if (isAuthLoading || authTemporarilyUnavailable) return loadingIndicator;
   // Don't render children until workspace is resolved. useWorkspaceId()
   // throws when the list hasn't populated or the slug is unknown — gating
   // here makes that invariant hold for every descendant.

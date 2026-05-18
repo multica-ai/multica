@@ -82,6 +82,34 @@ func connectWS(t *testing.T, server *httptest.Server) *websocket.Conn {
 }
 
 // totalClients counts all currently registered clients.
+func TestHandleWebSocket_InvalidCookieSessionReportsAuthError(t *testing.T) {
+	_, server := newTestHub(t)
+	defer server.Close()
+
+	header := http.Header{}
+	header.Add("Cookie", (&http.Cookie{
+		Name:  auth.AuthCookieName,
+		Value: "not-a-valid-jwt",
+	}).String())
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws?workspace_id=" + testWorkspaceID
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatalf("failed to connect WebSocket: %v", err)
+	}
+	defer conn.Close()
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, raw, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("failed to read auth error: %v", err)
+	}
+	if !strings.Contains(string(raw), "invalid token") {
+		t.Fatalf("expected invalid token auth error, got %s", raw)
+	}
+}
+
+// totalClients counts all clients across all rooms.
 func totalClients(hub *Hub) int {
 	hub.mu.RLock()
 	defer hub.mu.RUnlock()

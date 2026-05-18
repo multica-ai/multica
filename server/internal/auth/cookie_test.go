@@ -43,7 +43,10 @@ func TestCookieDomain(t *testing.T) {
 		{"IPv4 rejected", "192.168.5.5", ""},
 		{"IPv4 with leading dot rejected", ".192.168.5.5", ""},
 		{"IPv6 rejected", "::1", ""},
-		{"IPv6 bracketed is not a valid IP literal → passthrough", "[::1]", "[::1]"},
+		{"IPv6 bracketed rejected", "[::1]", ""},
+		{"localhost rejected", "localhost", ""},
+		{"URL rejected", "https://example.com", ""},
+		{"single-label rejected", "example", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -52,6 +55,28 @@ func TestCookieDomain(t *testing.T) {
 				t.Errorf("cookieDomain() = %q, want %q (COOKIE_DOMAIN=%q)", got, tc.want, tc.env)
 			}
 		})
+	}
+}
+
+func TestSetAuthCookies_UsesConfiguredSessionLifetime(t *testing.T) {
+	t.Setenv("FRONTEND_ORIGIN", "https://app.example.com")
+	t.Setenv("COOKIE_DOMAIN", "app.example.com")
+	t.Setenv("MULTICA_SESSION_TTL", "24h")
+
+	rec := httptest.NewRecorder()
+	before := time.Now().Add(24 * time.Hour)
+	if err := SetAuthCookies(rec, "test-token"); err != nil {
+		t.Fatalf("SetAuthCookies: %v", err)
+	}
+	after := time.Now().Add(24 * time.Hour)
+
+	for _, c := range rec.Result().Cookies() {
+		if c.MaxAge != 24*60*60 {
+			t.Errorf("cookie %q MaxAge = %d, want 86400", c.Name, c.MaxAge)
+		}
+		if c.Expires.Before(before.Add(-time.Second)) || c.Expires.After(after.Add(time.Second)) {
+			t.Errorf("cookie %q Expires = %s, want around 24h from now", c.Name, c.Expires)
+		}
 	}
 }
 

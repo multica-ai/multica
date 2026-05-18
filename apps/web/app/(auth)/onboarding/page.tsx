@@ -29,6 +29,9 @@ export default function OnboardingPage() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
+  const authStatus = useAuthStore((s) => s.authStatus);
+  const authTemporarilyUnavailable =
+    authStatus === "temporarily_unreachable";
   const hasOnboarded = useHasOnboarded();
   const { data: workspaces = [], isFetched: workspacesFetched } = useQuery({
     ...workspaceListOptions(),
@@ -44,6 +47,7 @@ export default function OnboardingPage() {
   const completingRef = useRef(false);
 
   useEffect(() => {
+    if (authTemporarilyUnavailable) return;
     if (isLoading || !user) {
       if (!isLoading && !user) router.replace(paths.login());
       return;
@@ -60,9 +64,9 @@ export default function OnboardingPage() {
     if (hasOnboarded) {
       router.replace(resolvePostAuthDestination(workspaces, hasOnboarded));
     }
-  }, [isLoading, user, hasOnboarded, workspacesFetched, workspaces, router]);
+  }, [isLoading, authTemporarilyUnavailable, user, hasOnboarded, workspacesFetched, workspaces, router]);
 
-  if (isLoading || !user || hasOnboarded) return null;
+  if (isLoading || authTemporarilyUnavailable || !user || hasOnboarded) return null;
 
   // Layout: page owns its own scroll (root layout sets `body {
   // overflow: hidden }` for the app-shell convention). OnboardingFlow
