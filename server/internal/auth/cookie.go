@@ -28,19 +28,39 @@ var (
 	authTokenTTLCached     time.Duration
 )
 
-// parseAuthTokenTTL parses a raw AUTH_TOKEN_TTL value (seconds string) into a
-// duration. Returns the parsed duration and true on success; zero and false
-// when the input is empty or invalid.
+// parseAuthTokenTTL parses a raw AUTH_TOKEN_TTL value into a duration.
+// It first tries time.ParseDuration (e.g. "8760h", "720h30m"), then falls
+// back to parsing as integer seconds. Returns the parsed duration and true
+// on success; zero and false when the input is empty or invalid.
 func parseAuthTokenTTL(raw string) (time.Duration, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return 0, false
 	}
+
+	// Try Go duration string first (e.g. "8760h", "720h30m").
+	if d, err := time.ParseDuration(raw); err == nil {
+		if d <= 0 {
+			return 0, false
+		}
+		if d > 10*365*24*time.Hour {
+			slog.Warn("AUTH_TOKEN_TTL exceeds 10 years; accepting but verify this is intentional",
+				"value", raw, "hours", d.Hours())
+		}
+		return d, true
+	}
+
+	// Fall back to plain integer seconds.
 	secs, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || secs <= 0 {
 		return 0, false
 	}
-	return time.Duration(secs) * time.Second, true
+	d := time.Duration(secs) * time.Second
+	if d > 10*365*24*time.Hour {
+		slog.Warn("AUTH_TOKEN_TTL exceeds 10 years; accepting but verify this is intentional",
+			"value", raw, "hours", d.Hours())
+	}
+	return d, true
 }
 
 // AuthTokenTTL returns the configured auth token lifetime. It reads the
@@ -57,7 +77,7 @@ func AuthTokenTTL() time.Duration {
 		}
 		authTokenTTLCached = defaultAuthTokenTTL
 		if strings.TrimSpace(raw) != "" {
-			slog.Warn("AUTH_TOKEN_TTL is not a valid positive integer; using default",
+			slog.Warn("AUTH_TOKEN_TTL is not a valid duration or positive integer; using default",
 				"value", raw, "default_seconds", int(defaultAuthTokenTTL.Seconds()))
 		}
 	})
@@ -125,14 +145,16 @@ func generateCSRFToken(authToken string) (string, error) {
 func SetAuthCookies(w http.ResponseWriter, token string) error {
 	secure := isSecureCookie()
 	domain := cookieDomain()
+	ttl := AuthTokenTTL()
+	now := time.Now()
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     AuthCookieName,
 		Value:    token,
 		Path:     "/",
 		Domain:   domain,
-		MaxAge:   int(AuthTokenTTL().Seconds()),
-		Expires:  time.Now().Add(AuthTokenTTL()),
+		MaxAge:   int(ttl.Seconds()),
+		Expires:  now.Add(ttl),
 		HttpOnly: true,
 		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
@@ -148,8 +170,8 @@ func SetAuthCookies(w http.ResponseWriter, token string) error {
 		Value:    csrfToken,
 		Path:     "/",
 		Domain:   domain,
-		MaxAge:   int(AuthTokenTTL().Seconds()),
-		Expires:  time.Now().Add(AuthTokenTTL()),
+		MaxAge:   int(ttl.Seconds()),
+		Expires:  now.Add(ttl),
 		HttpOnly: false,
 		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,

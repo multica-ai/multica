@@ -96,6 +96,11 @@ func TestParseAuthTokenTTL(t *testing.T) {
 		{"zero", "0", 0, false},
 		{"non-numeric", "abc", 0, false},
 		{"whitespace trimmed", " 7200 ", 2 * time.Hour, true},
+		{"duration hours", "8760h", 8760 * time.Hour, true},
+		{"duration compound", "720h30m", 720*time.Hour + 30*time.Minute, true},
+		{"duration minutes", "90m", 90 * time.Minute, true},
+		{"duration negative", "-1h", 0, false},
+		{"duration zero", "0s", 0, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
