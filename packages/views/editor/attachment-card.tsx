@@ -1,84 +1,24 @@
 "use client";
 
 /**
- * AttachmentCard — shared attachment row UI used by every entry point that
- * renders a non-image attachment in the editor surface.
+ * AttachmentCard — shared file-card row UI (icon + filename + Eye + Download).
  *
- * Three call sites:
- *   1. `extensions/file-card.tsx` — Tiptap NodeView for `!file[name](url)`
- *      inline in markdown.
- *   2. `readonly-content.tsx` — readonly file-card `<div data-type="fileCard">`
- *      branch, rendered through preprocessMarkdown.
- *   3. `comment-card.tsx` `AttachmentList` — standalone attachments that were
- *      not referenced by URL inside the markdown body.
+ * Rendered for every attachment kind that does not have a richer inline
+ * renderer. Three call sites reach it indirectly through AttachmentBlock,
+ * which picks the right component per kind:
  *
- * Centralizing this avoids the third-instance trap: every previous attempt to
- * add a feature here had to be added in three places, and dropping one
- * silently re-introduced the bug — MUL-2330's HTML chart was a standalone
- * attachment, so the inline HTML preview only works if THIS path is covered.
+ *   1. `extensions/file-card.tsx`        — Tiptap NodeView for `!file[name](url)`.
+ *   2. `readonly-content.tsx`            — readonly `<div data-type="fileCard">`.
+ *   3. `comment-card.tsx` AttachmentList — standalone attachments not inlined.
  *
- * HTML kind extension:
- *   - When the attachment is HTML and the caller can provide an
- *     `attachmentId` (i.e. the attachment record is known — required for the
- *     ID-keyed `/api/attachments/{id}/content` proxy), the card mounts an
- *     inline `CodeBlockIframe` underneath the row to render the HTML body
- *     directly. Loading errors and 413/415 cases collapse back to the bare
- *     row + Eye/Download buttons.
- *   - For non-HTML kinds (or HTML where we only have a URL), the card looks
- *     and behaves exactly like the previous handwritten rows.
+ * Kind-aware routing (e.g. HTML → inline iframe preview) lives in
+ * AttachmentBlock — keep that decision out of this file so this stays a
+ * single-purpose row UI.
  */
 
 import { Download, Eye, FileText, Loader2 } from "lucide-react";
 import { useT } from "../i18n";
 import { getPreviewKind } from "./utils/preview";
-import { CodeBlockIframe } from "./code-block-iframe";
-import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
-
-// ---------------------------------------------------------------------------
-// Inline HTML preview body
-// ---------------------------------------------------------------------------
-
-// Fixed height per the V2 plan; auto-resize via postMessage handshake is
-// explicitly out of scope for V1.
-const INLINE_HTML_HEIGHT = "h-[480px]";
-
-function InlineHtmlIframe({
-  attachmentId,
-  filename,
-}: {
-  attachmentId: string;
-  filename: string;
-}) {
-  const { t } = useT("editor");
-  const query = useAttachmentHtmlText(attachmentId);
-
-  if (query.isLoading) {
-    return (
-      <div className="mt-1 flex h-[480px] items-center justify-center gap-2 rounded-md border border-border bg-muted/30 text-xs text-muted-foreground">
-        <Loader2 className="size-3.5 animate-spin" />
-        {t(($) => $.attachment.preview_loading)}
-      </div>
-    );
-  }
-  // Any error path (413 / 415 / transport) — fall back silently. The
-  // surrounding card still offers Eye → modal (which surfaces the typed
-  // error) and Download as escape hatches.
-  if (query.error || !query.data) return null;
-
-  return (
-    <div className="mt-1">
-      <CodeBlockIframe
-        html={query.data.text}
-        title={filename}
-        heightClassName={INLINE_HTML_HEIGHT}
-      />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Card chrome — icon + filename + optional Eye + Download
-// ---------------------------------------------------------------------------
 
 interface AttachmentCardChromeProps {
   filename: string;
@@ -149,23 +89,18 @@ function AttachmentCardChrome({
   );
 }
 
-// ---------------------------------------------------------------------------
-// AttachmentCard — public component
-// ---------------------------------------------------------------------------
-
 export interface AttachmentCardProps {
   /** Filename used for icon label and previewable-kind detection. */
   filename: string;
   /** Content type used in addition to filename for previewable-kind detection. */
   contentType?: string;
   /**
-   * Attachment id — required for HTML inline rendering (the `/content`
-   * proxy is ID-keyed). Undefined means we only have a URL (e.g. a
-   * cross-comment `!file[]()` reference) — the card still renders, the
-   * HTML iframe just doesn't expand.
+   * Attachment id — required when the preview proxy is ID-keyed (text kinds
+   * like markdown / html / text). Media kinds (pdf/video/audio) preview from
+   * the URL alone.
    */
   attachmentId?: string;
-  /** Download URL — used purely as a non-null sentinel for the download button. */
+  /** Download URL — used as a non-null sentinel for the download button. */
   href?: string;
   /** True while a synchronous upload is in flight (file-card NodeView only). */
   uploading?: boolean;
@@ -173,12 +108,6 @@ export interface AttachmentCardProps {
   onPreview: () => void;
   /** Pressed when the Download button is clicked. */
   onDownload: () => void;
-  /**
-   * Set to false to disable the HTML inline preview branch (and behave like
-   * the legacy chrome-only card). Useful for editor NodeViews while a draft
-   * upload is still in flight.
-   */
-  inlineHtmlEnabled?: boolean;
 }
 
 export function AttachmentCard({
@@ -189,7 +118,6 @@ export function AttachmentCard({
   uploading,
   onPreview,
   onDownload,
-  inlineHtmlEnabled = true,
 }: AttachmentCardProps) {
   const kind = filename ? getPreviewKind(contentType, filename) : null;
   // Media kinds (pdf/video/audio) are previewable from a URL alone — the
@@ -202,14 +130,6 @@ export function AttachmentCard({
   const canPreview =
     !!href && kind !== null && (!!attachmentId || isUrlPreviewableKind);
 
-  // Mount the inline iframe only when we can hit the /content proxy
-  // (attachmentId present) AND kind is HTML AND no upload is in flight.
-  const showInlineHtml =
-    inlineHtmlEnabled &&
-    !uploading &&
-    kind === "html" &&
-    !!attachmentId;
-
   return (
     <div className="my-1">
       <AttachmentCardChrome
@@ -220,9 +140,6 @@ export function AttachmentCard({
         onPreview={onPreview}
         onDownload={onDownload}
       />
-      {showInlineHtml && (
-        <InlineHtmlIframe attachmentId={attachmentId!} filename={filename} />
-      )}
     </div>
   );
 }

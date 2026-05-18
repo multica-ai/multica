@@ -48,7 +48,7 @@ import { MermaidDiagram } from "./mermaid-diagram";
 import { HtmlBlockPreview } from "./html-block-preview";
 import { useDownloadAttachment } from "./use-download-attachment";
 import { useAttachmentPreview, type PreviewSource } from "./attachment-preview-modal";
-import { AttachmentCard } from "./attachment-card";
+import { AttachmentBlock } from "./attachment-block";
 import "katex/dist/katex.min.css";
 import "./content-editor.css";
 
@@ -276,7 +276,7 @@ function ReadonlyFileCard({
     }
   };
   return (
-    <AttachmentCard
+    <AttachmentBlock
       filename={filename}
       contentType={attachment?.content_type ?? ""}
       attachmentId={attachment?.id}
