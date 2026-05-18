@@ -34,7 +34,7 @@ const (
 	feishuProjectManualLookback    = 30 * 24 * time.Hour
 	feishuProjectIncrementalReplay = 10 * time.Minute
 	feishuProjectSyncMaxPages      = 1000
-	feishuProjectAttachmentMaxSize = 100 << 20
+	feishuProjectAttachmentMaxSize = 10 << 20
 )
 
 var ErrFeishuProjectSyncScopeRequired = errors.New("Feishu Project sync requires a bounded sync scope before searching work items")
@@ -178,18 +178,20 @@ func (s *FeishuProjectSyncService) SyncWithRunAndOptions(ctx context.Context, cf
 
 	status := "succeeded"
 	var errText pgtype.Text
+	finishCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	if syncErr != nil {
 		status = "failed"
 		errText = pgtype.Text{String: syncErr.Error(), Valid: true}
-		_ = s.Queries.MarkFeishuProjectIntegrationError(ctx, db.MarkFeishuProjectIntegrationErrorParams{
+		_ = s.Queries.MarkFeishuProjectIntegrationError(finishCtx, db.MarkFeishuProjectIntegrationErrorParams{
 			ID:        cfg.ID,
 			LastError: pgtype.Text{String: syncErr.Error(), Valid: true},
 		})
 	} else {
-		_ = s.Queries.MarkFeishuProjectIntegrationSynced(ctx, cfg.ID)
+		_ = s.Queries.MarkFeishuProjectIntegrationSynced(finishCtx, cfg.ID)
 	}
 	if run.ID.Valid {
-		if err := s.Queries.FinishFeishuProjectSyncRun(ctx, db.FinishFeishuProjectSyncRunParams{
+		if err := s.Queries.FinishFeishuProjectSyncRun(finishCtx, db.FinishFeishuProjectSyncRunParams{
 			ID:           run.ID,
 			Status:       status,
 			CreatedCount: int32(summary.Created),
@@ -503,11 +505,35 @@ func (s *FeishuProjectSyncService) syncExternalAttachments(ctx context.Context, 
 			lines = append(lines, attachmentMarkdown(att.Filename, feishuProjectAttachmentContentURL(att), att.ContentType))
 			continue
 		}
+		if feishuProjectAttachmentTooLarge(ext) {
+			slog.Info("Feishu Project attachment skipped: too large",
+				"workspace_id", UUIDString(cfg.WorkspaceID),
+				"project_key", cfg.ProjectKey,
+				"work_item_type", item.Type,
+				"work_item_id", item.ID,
+				"filename", ext.Name,
+				"size_bytes", ext.SizeBytes,
+				"max_bytes", feishuProjectAttachmentMaxSize,
+			)
+			continue
+		}
 		data, filename, contentType, err := s.Client.DownloadAttachment(ctx, cfg, item, ext)
 		if err != nil {
 			return "", err
 		}
-		if len(data) == 0 || len(data) > feishuProjectAttachmentMaxSize {
+		if len(data) == 0 {
+			continue
+		}
+		if len(data) > feishuProjectAttachmentMaxSize {
+			slog.Info("Feishu Project attachment skipped after download: too large",
+				"workspace_id", UUIDString(cfg.WorkspaceID),
+				"project_key", cfg.ProjectKey,
+				"work_item_type", item.Type,
+				"work_item_id", item.ID,
+				"filename", ext.Name,
+				"size_bytes", len(data),
+				"max_bytes", feishuProjectAttachmentMaxSize,
+			)
 			continue
 		}
 		filename = firstNonEmpty(filename, ext.Name)
@@ -554,6 +580,10 @@ func feishuProjectAttachmentKey(cfg db.FeishuProjectIntegration, item FeishuProj
 		feishuProjectSafePathSegment(UUIDString(cfg.ID)) + "/" +
 		feishuProjectSafePathSegment(item.Type) + "/" +
 		feishuProjectSafePathSegment(item.ID) + "/" + id + extension
+}
+
+func feishuProjectAttachmentTooLarge(att FeishuProjectAttachment) bool {
+	return att.SizeBytes > feishuProjectAttachmentMaxSize
 }
 
 func feishuProjectSafePathSegment(s string) string {
@@ -1681,11 +1711,46 @@ func feishuProjectInt64Value(values ...any) int64 {
 			n, _ := strconv.ParseInt(x.String(), 10, 64)
 			return n
 		case string:
-			n, _ := strconv.ParseInt(strings.TrimSpace(x), 10, 64)
-			return n
+			return feishuProjectParseSizeBytes(x)
 		}
 	}
 	return 0
+}
+
+func feishuProjectParseSizeBytes(raw string) int64 {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return 0
+	}
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return n
+	}
+	re := regexp.MustCompile(`(?i)^\s*([0-9]+(?:\.[0-9]+)?)\s*([KMGT]?I?B?|B)\s*$`)
+	match := re.FindStringSubmatch(s)
+	if len(match) != 3 {
+		return 0
+	}
+	value, err := strconv.ParseFloat(match[1], 64)
+	if err != nil {
+		return 0
+	}
+	unit := strings.ToUpper(match[2])
+	multiplier := float64(1)
+	switch unit {
+	case "", "B":
+		multiplier = 1
+	case "K", "KB", "KIB":
+		multiplier = 1 << 10
+	case "M", "MB", "MIB":
+		multiplier = 1 << 20
+	case "G", "GB", "GIB":
+		multiplier = 1 << 30
+	case "T", "TB", "TIB":
+		multiplier = 1 << 40
+	default:
+		return 0
+	}
+	return int64(value * multiplier)
 }
 
 func feishuProjectStatusValue(v any) string {

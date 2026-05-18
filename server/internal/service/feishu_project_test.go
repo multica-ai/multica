@@ -373,8 +373,31 @@ func TestFeishuProjectOpenAPIFieldAttachmentsExtractsMultiFileUID(t *testing.T) 
 		t.Fatalf("len(attachments) = %d, want 1: %#v", len(attachments), attachments)
 	}
 	got := attachments[0]
-	if got.ID != "file-uid" || got.Name != "20260511-182223.mp4" || got.ContentType != "video/mp4" || got.URL == "" {
+	if got.ID != "file-uid" || got.Name != "20260511-182223.mp4" || got.ContentType != "video/mp4" || got.URL == "" || got.SizeBytes != 2411724 {
 		t.Fatalf("attachment = %#v", got)
+	}
+}
+
+func TestFeishuProjectAttachmentTooLarge(t *testing.T) {
+	if feishuProjectAttachmentTooLarge(FeishuProjectAttachment{Name: "small.log", SizeBytes: 10 << 20}) {
+		t.Fatal("10MB attachment should be allowed")
+	}
+	if !feishuProjectAttachmentTooLarge(FeishuProjectAttachment{Name: "large.log", SizeBytes: (10 << 20) + 1}) {
+		t.Fatal("attachment larger than 10MB should be skipped")
+	}
+}
+
+func TestFeishuProjectParseSizeBytes(t *testing.T) {
+	cases := map[string]int64{
+		"1234":  1234,
+		"2.3MB": 2411724,
+		"10 MB": 10 << 20,
+		"1GiB":  1 << 30,
+	}
+	for raw, want := range cases {
+		if got := feishuProjectParseSizeBytes(raw); got != want {
+			t.Fatalf("feishuProjectParseSizeBytes(%q) = %d, want %d", raw, got, want)
+		}
 	}
 }
 
