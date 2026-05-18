@@ -1590,10 +1590,10 @@ func TestClaimTaskByRuntime_SurfacesIssueTriggerAndAttachmentSignals(t *testing.
 
 		var commentID string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO comment (issue_id, author_type, author_id, content)
-			VALUES ($1, 'member', $2, $3)
+			INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content)
+			VALUES ($1, $2, 'member', $3, $4)
 			RETURNING id
-		`, issueID, testUserID, triggerCommentBody).Scan(&commentID); err != nil {
+		`, testWorkspaceID, issueID, testUserID, triggerCommentBody).Scan(&commentID); err != nil {
 			t.Fatalf("create trigger comment: %v", err)
 		}
 

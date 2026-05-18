@@ -43,7 +43,7 @@ func deriveRuntimeCapabilities(ctx TaskContextForEnv) runtimeCapabilities {
 	if ctx.HasIssueOrCommentAttachments || len(ctx.ChatMessageAttachments) > 0 || (allowTextDrivenBlocks && containsAny(text, attachmentIntentKeywords)) {
 		caps.flags |= capabilityAttachments
 	}
-	if strings.Contains(text, "mention://") || containsAny(text, mentionIntentKeywords) || ctx.IsSquadLeader {
+	if containsSideEffectMentionLink(text) || containsAny(text, mentionIntentKeywords) || ctx.IsSquadLeader {
 		caps.flags |= capabilityFullMentions
 	}
 	if allowTextDrivenBlocks && containsAny(text, labelSubscriberIntentKeywords) {
@@ -101,6 +101,10 @@ func containsAny(text string, needles []string) bool {
 		}
 	}
 	return false
+}
+
+func containsSideEffectMentionLink(text string) bool {
+	return strings.Contains(text, "mention://member/") || strings.Contains(text, "mention://agent/")
 }
 
 var attachmentIntentKeywords = []string{

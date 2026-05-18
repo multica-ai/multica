@@ -1210,6 +1210,23 @@ func TestInjectRuntimeConfigConditionalRuleBlocks(t *testing.T) {
 		)
 	})
 
+	t.Run("issue mention link does not trigger full mention block", func(t *testing.T) {
+		s := render(t, TaskContextForEnv{
+			IssueID:               "issue-1",
+			TriggerCommentID:      "comment-1",
+			TriggerCommentContent: "Please follow up on [MUL-123](mention://issue/issue-123) while fixing this.",
+		})
+		assertContains(t, s,
+			"Do not create member or agent mention links unless the task explicitly requires",
+			"multica issue comment add issue-1",
+		)
+		assertAbsent(t, s,
+			"side-effecting actions",
+			"enqueues a new run for that agent",
+			"When a mention IS appropriate",
+		)
+	})
+
 	t.Run("attachment context gets attachment block", func(t *testing.T) {
 		s := render(t, TaskContextForEnv{
 			IssueID:                      "issue-1",
