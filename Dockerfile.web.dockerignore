@@ -1,0 +1,47 @@
+# Keep the web image build context tight. This file is used only when building
+# with `-f Dockerfile.web`, so the server image can still see `server/`.
+*
+
+# Root workspace files used by Dockerfile.web.
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!package.json
+!turbo.json
+!.npmrc
+
+# Web app source.
+!apps/
+apps/*
+!apps/web/
+!apps/web/**
+
+# Workspace packages needed by the web build.
+!packages/
+packages/*
+!packages/core/
+!packages/core/**
+!packages/ui/
+!packages/ui/**
+!packages/views/
+!packages/views/**
+!packages/tsconfig/
+!packages/tsconfig/**
+!packages/eslint-config/
+!packages/eslint-config/**
+
+# Generated outputs and local dependency folders inside included paths.
+apps/web/.next
+apps/web/.next/**
+apps/web/.turbo
+apps/web/.turbo/**
+apps/web/node_modules
+apps/web/node_modules/**
+apps/web/tsconfig.tsbuildinfo
+
+packages/**/.turbo
+packages/**/.turbo/**
+packages/**/dist
+packages/**/dist/**
+packages/**/node_modules
+packages/**/node_modules/**
+packages/**/tsconfig.tsbuildinfo
