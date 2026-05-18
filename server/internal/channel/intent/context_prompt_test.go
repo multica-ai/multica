@@ -172,3 +172,19 @@ func TestBuildChannelAgentTurnPrompt_ContextResolutionRules(t *testing.T) {
 		t.Fatal("prompt missing new context-resolution rule")
 	}
 }
+
+func TestBuildChannelAgentTurnPrompt_CloseIssueRuleIsLanguageNeutral(t *testing.T) {
+	t.Parallel()
+
+	req := in.IntentRequest{WorkspaceID: "ws-1", Text: "close it"}
+	prompt := in.BuildChannelAgentTurnPrompt(req)
+	if !strings.Contains(prompt, "in any language") {
+		t.Fatal("prompt should describe close/cancel semantics as language-neutral")
+	}
+	if !strings.Contains(prompt, "status update to `cancelled`") {
+		t.Fatal("prompt missing issue cancelled status rule")
+	}
+	if !strings.Contains(prompt, "confirmation code") {
+		t.Fatal("prompt should distinguish issue cancellation from action-code cancellation")
+	}
+}
