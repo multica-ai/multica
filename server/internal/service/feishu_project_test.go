@@ -379,11 +379,11 @@ func TestFeishuProjectOpenAPIFieldAttachmentsExtractsMultiFileUID(t *testing.T) 
 }
 
 func TestFeishuProjectAttachmentTooLarge(t *testing.T) {
-	if feishuProjectAttachmentTooLarge(FeishuProjectAttachment{Name: "small.log", SizeBytes: 10 << 20}) {
-		t.Fatal("10MB attachment should be allowed")
+	if feishuProjectAttachmentTooLarge(FeishuProjectAttachment{Name: "small.log", SizeBytes: 5 << 20}) {
+		t.Fatal("5MB attachment should be allowed")
 	}
-	if !feishuProjectAttachmentTooLarge(FeishuProjectAttachment{Name: "large.log", SizeBytes: (10 << 20) + 1}) {
-		t.Fatal("attachment larger than 10MB should be skipped")
+	if !feishuProjectAttachmentTooLarge(FeishuProjectAttachment{Name: "large.log", SizeBytes: (5 << 20) + 1}) {
+		t.Fatal("attachment larger than 5MB should be skipped")
 	}
 }
 
@@ -391,7 +391,7 @@ func TestFeishuProjectParseSizeBytes(t *testing.T) {
 	cases := map[string]int64{
 		"1234":  1234,
 		"2.3MB": 2411724,
-		"10 MB": 10 << 20,
+		"5 MB":  5 << 20,
 		"1GiB":  1 << 30,
 	}
 	for raw, want := range cases {

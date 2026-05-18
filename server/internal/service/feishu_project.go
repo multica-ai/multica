@@ -34,7 +34,7 @@ const (
 	feishuProjectManualLookback    = 30 * 24 * time.Hour
 	feishuProjectIncrementalReplay = 10 * time.Minute
 	feishuProjectSyncMaxPages      = 1000
-	feishuProjectAttachmentMaxSize = 10 << 20
+	feishuProjectAttachmentMaxSize = 5 << 20
 )
 
 var ErrFeishuProjectSyncScopeRequired = errors.New("Feishu Project sync requires a bounded sync scope before searching work items")
