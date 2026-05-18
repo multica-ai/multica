@@ -397,6 +397,17 @@ export interface DashboardAgentRunTime {
   failed_count: number;
 }
 
+// One (date) bucket of terminal-task run-time + counts for the workspace
+// dashboard. Powers the Time and Tasks metrics on the daily-trend toggle
+// — same toggle as Tokens / Cost, anchored on completed_at so day buckets
+// line up with the per-agent run-time card.
+export interface DashboardRunTimeDaily {
+  date: string;
+  total_seconds: number;
+  task_count: number;
+  failed_count: number;
+}
+
 export type RuntimeUpdateStatus =
   | "pending"
   | "running"

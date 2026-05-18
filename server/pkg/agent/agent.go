@@ -31,10 +31,18 @@ type ExecOptions struct {
 	MaxTurns                  int
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
-	ResumeSessionID           string          // if non-empty, resume a previous agent session
-	ExtraArgs                 []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
-	CustomArgs                []string        // per-agent CLI arguments appended after ExtraArgs
-	McpConfig                 json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	// ExecCommandStuckTimeout bounds how long a single exec_command (or v2
+	// commandExecution item) may stay open without a matching end / progress
+	// event before the turn is declared stuck. Currently honoured by the codex
+	// backend, which has a known bug where two parallel exec_command calls
+	// racing through the yield_time_ms boundary can drop the second
+	// function_call_output, leaving the model waiting forever. Zero means use
+	// the backend default.
+	ExecCommandStuckTimeout time.Duration
+	ResumeSessionID         string          // if non-empty, resume a previous agent session
+	ExtraArgs               []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
+	CustomArgs              []string        // per-agent CLI arguments appended after ExtraArgs
+	McpConfig               json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
 }
 
 // Session represents a running agent execution.

@@ -65,7 +65,14 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
       if (!issueId) return;
       updateIssue.mutate(
         { id: issueId, ...updates },
-        { onError: () => toast.error(t(($) => $.detail.update_failed)) },
+        {
+          onError: (err) =>
+            toast.error(
+              err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.detail.update_failed),
+            ),
+        },
       );
       // Hint: assigning an agent to a backlog issue won't trigger execution
       // until the issue is moved to an active status.

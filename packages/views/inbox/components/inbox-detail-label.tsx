@@ -23,6 +23,7 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     assignee_changed: t(($) => $.types.assignee_changed),
     status_changed: t(($) => $.types.status_changed),
     priority_changed: t(($) => $.types.priority_changed),
+    start_date_changed: t(($) => $.types.start_date_changed),
     due_date_changed: t(($) => $.types.due_date_changed),
     new_comment: t(($) => $.types.new_comment),
     mentioned: t(($) => $.types.mentioned),
@@ -111,6 +112,10 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
         );
       }
       return <span>{typeLabels[item.type]}</span>;
+    }
+    case "start_date_changed": {
+      if (details.to) return <span>{t(($) => $.labels.set_start_date_to, { date: shortDate(details.to) })}</span>;
+      return <span>{t(($) => $.labels.removed_start_date)}</span>;
     }
     case "due_date_changed": {
       if (details.to)

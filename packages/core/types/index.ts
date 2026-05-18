@@ -38,6 +38,7 @@ export type {
   DashboardUsageDaily,
   DashboardUsageByAgent,
   DashboardAgentRunTime,
+  DashboardRunTimeDaily,
   RuntimeUpdate,
   RuntimeUpdateStatus,
   RuntimeModel,
@@ -117,7 +118,9 @@ export type {
 } from "./pin";
 export type {
   GitHubInstallation,
+  GitHubMergeableState,
   GitHubPullRequest,
+  GitHubPullRequestChecksConclusion,
   GitHubPullRequestState,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
@@ -138,6 +141,10 @@ export type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  WebhookDelivery,
+  WebhookDeliveryStatus,
+  WebhookSignatureStatus,
+  ListWebhookDeliveriesResponse,
 } from "./autopilot";
 export type {
   Squad,

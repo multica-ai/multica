@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -26,33 +27,34 @@ import (
 
 // IssueResponse is the JSON response for an issue.
 type IssueResponse struct {
-	ID                 string                  `json:"id"`
-	WorkspaceID        string                  `json:"workspace_id"`
-	Number             int32                   `json:"number"`
-	Identifier         string                  `json:"identifier"`
-	Title              string                  `json:"title"`
-	Description        *string                 `json:"description"`
-	Status             string                  `json:"status"`
-	Priority           string                  `json:"priority"`
-	AssigneeType       *string                 `json:"assignee_type"`
-	AssigneeID         *string                 `json:"assignee_id"`
-	CreatorType        string                  `json:"creator_type"`
-	CreatorID          string                  `json:"creator_id"`
-	ParentIssueID      *string                 `json:"parent_issue_id"`
-	ProjectID          *string                 `json:"project_id"`
-	Position           float64                 `json:"position"`
-	DueDate            *string                 `json:"due_date"`
-	CreatedAt          string                  `json:"created_at"`
-	UpdatedAt          string                  `json:"updated_at"`
-	Reactions          []IssueReactionResponse `json:"reactions,omitempty"`
-	Attachments        []AttachmentResponse    `json:"attachments,omitempty"`
+	ID            string                  `json:"id"`
+	WorkspaceID   string                  `json:"workspace_id"`
+	Number        int32                   `json:"number"`
+	Identifier    string                  `json:"identifier"`
+	Title         string                  `json:"title"`
+	Description   *string                 `json:"description"`
+	Status        string                  `json:"status"`
+	Priority      string                  `json:"priority"`
+	AssigneeType  *string                 `json:"assignee_type"`
+	AssigneeID    *string                 `json:"assignee_id"`
+	CreatorType   string                  `json:"creator_type"`
+	CreatorID     string                  `json:"creator_id"`
+	ParentIssueID *string                 `json:"parent_issue_id"`
+	ProjectID     *string                 `json:"project_id"`
+	Position      float64                 `json:"position"`
+	StartDate     *string                 `json:"start_date"`
+	DueDate       *string                 `json:"due_date"`
+	CreatedAt     string                  `json:"created_at"`
+	UpdatedAt     string                  `json:"updated_at"`
+	Reactions     []IssueReactionResponse `json:"reactions,omitempty"`
+	Attachments   []AttachmentResponse    `json:"attachments,omitempty"`
 	// Labels are bulk-attached by list/detail endpoints so the client can render
 	// chips without an N+1 round-trip per row. Pointer + omitempty so paths that
 	// don't load labels (e.g. UpdateIssue, batch UpdateIssues, the issue:updated
 	// WS broadcast) emit no `labels` field at all — the client merge then
 	// preserves whatever labels are already in cache. nil pointer = "field
 	// absent, do not touch"; non-nil (incl. empty slice) = authoritative list.
-	Labels             *[]LabelResponse        `json:"labels,omitempty"`
+	Labels *[]LabelResponse `json:"labels,omitempty"`
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -73,6 +75,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
+		StartDate:     timestampToPtr(i.StartDate),
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
@@ -98,6 +101,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
+		StartDate:     timestampToPtr(i.StartDate),
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
@@ -153,40 +157,76 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
+		StartDate:     timestampToPtr(i.StartDate),
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 	}
 }
 
+type IssueAssigneeGroupResponse struct {
+	ID           string          `json:"id"`
+	AssigneeType *string         `json:"assignee_type"`
+	AssigneeID   *string         `json:"assignee_id"`
+	Issues       []IssueResponse `json:"issues"`
+	Total        int64           `json:"total"`
+}
+
+type GroupedIssuesResponse struct {
+	Groups []IssueAssigneeGroupResponse `json:"groups"`
+}
+
+type groupedIssueRow struct {
+	db.ListIssuesRow
+	GroupTotal int64
+}
+
+func assigneeGroupID(assigneeType pgtype.Text, assigneeID pgtype.UUID) string {
+	if assigneeType.Valid && assigneeID.Valid {
+		return "assignee:" + assigneeType.String + ":" + uuidToString(assigneeID)
+	}
+	return "assignee:unassigned"
+}
+
 // SearchIssueResponse extends IssueResponse with search metadata.
 type SearchIssueResponse struct {
 	IssueResponse
-	MatchSource    string  `json:"match_source"`
-	MatchedSnippet *string `json:"matched_snippet,omitempty"`
+	MatchSource                string  `json:"match_source"`
+	MatchedSnippet             *string `json:"matched_snippet,omitempty"`
+	MatchedDescriptionSnippet  *string `json:"matched_description_snippet,omitempty"`
+	MatchedCommentSnippet      *string `json:"matched_comment_snippet,omitempty"`
 }
 
 // extractSnippet extracts a snippet of text around the first occurrence of query.
 // Returns up to ~120 runes centered on the match. Uses rune-based slicing to
 // avoid splitting multi-byte UTF-8 characters (important for CJK content).
+// For multi-word queries, tries phrase match first; if not found, locates the
+// earliest occurring individual term and centers the snippet around it.
 func extractSnippet(content, query string) string {
 	runes := []rune(content)
 	lowerRunes := []rune(strings.ToLower(content))
 	queryRunes := []rune(strings.ToLower(query))
 
-	idx := -1
-	if len(queryRunes) > 0 && len(lowerRunes) >= len(queryRunes) {
-		for i := 0; i <= len(lowerRunes)-len(queryRunes); i++ {
-			match := true
-			for j := range queryRunes {
-				if lowerRunes[i+j] != queryRunes[j] {
-					match = false
-					break
+	idx := findRuneSubstring(lowerRunes, queryRunes)
+
+	// If phrase not found, try individual terms for multi-word queries.
+	matchLen := len(queryRunes)
+	if idx < 0 {
+		terms := strings.Fields(strings.ToLower(query))
+		if len(terms) > 1 {
+			earliest := -1
+			earliestLen := 0
+			for _, term := range terms {
+				termRunes := []rune(term)
+				pos := findRuneSubstring(lowerRunes, termRunes)
+				if pos >= 0 && (earliest < 0 || pos < earliest) {
+					earliest = pos
+					earliestLen = len(termRunes)
 				}
 			}
-			if match {
-				idx = i
-				break
+			if earliest >= 0 {
+				idx = earliest
+				matchLen = earliestLen
 			}
 		}
 	}
@@ -201,7 +241,7 @@ func extractSnippet(content, query string) string {
 	if start < 0 {
 		start = 0
 	}
-	end := idx + len(queryRunes) + 80
+	end := idx + matchLen + 80
 	if end > len(runes) {
 		end = len(runes)
 	}
@@ -213,6 +253,46 @@ func extractSnippet(content, query string) string {
 		snippet = snippet + "..."
 	}
 	return snippet
+}
+
+// findRuneSubstring returns the index of needle in haystack, or -1 if not found.
+func findRuneSubstring(haystack, needle []rune) int {
+	if len(needle) == 0 || len(haystack) < len(needle) {
+		return -1
+	}
+	for i := 0; i <= len(haystack)-len(needle); i++ {
+		match := true
+		for j := range needle {
+			if haystack[i+j] != needle[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return i
+		}
+	}
+	return -1
+}
+
+// descriptionContains checks if the description text contains the search phrase or all terms.
+func descriptionContains(desc pgtype.Text, phrase string, terms []string) bool {
+	if !desc.Valid || desc.String == "" {
+		return false
+	}
+	lower := strings.ToLower(desc.String)
+	if strings.Contains(lower, strings.ToLower(phrase)) {
+		return true
+	}
+	if len(terms) > 1 {
+		for _, t := range terms {
+			if !strings.Contains(lower, strings.ToLower(t)) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // escapeLike escapes LIKE special characters (%, _, \) in user input.
@@ -268,6 +348,7 @@ type searchResult struct {
 // buildSearchQuery builds a dynamic SQL query for issue search.
 // It uses LOWER(column) LIKE for case-insensitive matching compatible with pg_bigm 1.2 GIN indexes.
 // Search patterns are lowercased in Go to avoid redundant LOWER() on the pattern side in SQL.
+// LIKE patterns are pre-built in Go (e.g. "%html%") so pg_bigm can extract bigrams from a single parameter value.
 func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool) (string, []any) {
 	// Lowercase in Go so SQL only needs LOWER() on the column side.
 	phrase = strings.ToLower(phrase)
@@ -286,19 +367,21 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	}
 
 	escapedPhrase := escapeLike(phrase)
-	phraseParam := nextArg(escapedPhrase)               // $1
-	phraseContains := "'%' || " + phraseParam + " || '%'"
-	phraseStartsWith := phraseParam + " || '%'"
+	// $1: exact phrase (for exact title match)
+	phraseParam := nextArg(escapedPhrase)
+	// $2: "%phrase%" (contains pattern — pre-built for pg_bigm index usage)
+	phraseContainsParam := nextArg("%" + escapedPhrase + "%")
+	// $3: "phrase%" (starts-with pattern)
+	phraseStartsWithParam := nextArg(escapedPhrase + "%")
 
-	wsParam := nextArg(nil) // $2 — workspace_id, will be filled by caller position
+	wsParam := nextArg(nil) // $4 — workspace_id, will be filled by caller position
 
 	// Build per-term LIKE conditions only for multi-word search.
-	// For single-word queries, the phrase parameter already covers the term.
-	var termParams []string
+	var termContainsParams []string
 	if len(terms) > 1 {
 		for _, t := range terms {
 			et := escapeLike(t)
-			termParams = append(termParams, nextArg(et))
+			termContainsParams = append(termContainsParams, nextArg("%"+et+"%"))
 		}
 	}
 
@@ -308,18 +391,17 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	// Full phrase match: title, description, or comment
 	phraseMatch := fmt.Sprintf(
 		"(LOWER(i.title) LIKE %s OR LOWER(COALESCE(i.description, '')) LIKE %s OR EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND LOWER(c.content) LIKE %s))",
-		phraseContains, phraseContains, phraseContains,
+		phraseContainsParam, phraseContainsParam, phraseContainsParam,
 	)
 	whereParts = append(whereParts, phraseMatch)
 
 	// Multi-word AND match (each term must appear somewhere)
-	if len(termParams) > 1 {
+	if len(termContainsParams) > 1 {
 		var termConditions []string
-		for _, tp := range termParams {
-			tc := "'%' || " + tp + " || '%'"
+		for _, tp := range termContainsParams {
 			termConditions = append(termConditions, fmt.Sprintf(
 				"(LOWER(i.title) LIKE %s OR LOWER(COALESCE(i.description, '')) LIKE %s OR EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND LOWER(c.content) LIKE %s))",
-				tc, tc, tc,
+				tp, tp, tp,
 			))
 		}
 		whereParts = append(whereParts, "("+strings.Join(termConditions, " AND ")+")")
@@ -351,33 +433,45 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(i.title) = %s THEN 1", phraseParam))
 
 	// Tier 2: Title starts with phrase
-	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(i.title) LIKE %s THEN 2", phraseStartsWith))
+	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(i.title) LIKE %s THEN 2", phraseStartsWithParam))
 
 	// Tier 3: Title contains phrase
-	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(i.title) LIKE %s THEN 3", phraseContains))
+	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(i.title) LIKE %s THEN 3", phraseContainsParam))
 
 	// Tier 4: Title matches all words (multi-word only)
-	if len(termParams) > 1 {
+	if len(termContainsParams) > 1 {
 		var titleTerms []string
-		for _, tp := range termParams {
-			titleTerms = append(titleTerms, fmt.Sprintf("LOWER(i.title) LIKE '%s' || %s || '%s'", "%", tp, "%"))
+		for _, tp := range termContainsParams {
+			titleTerms = append(titleTerms, fmt.Sprintf("LOWER(i.title) LIKE %s", tp))
 		}
 		rankCases = append(rankCases, fmt.Sprintf("WHEN (%s) THEN 4", strings.Join(titleTerms, " AND ")))
 	}
 
 	// Tier 5: Description contains phrase
-	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN 5", phraseContains))
+	rankCases = append(rankCases, fmt.Sprintf("WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN 5", phraseContainsParam))
 
 	// Tier 6: Description matches all words (multi-word only)
-	if len(termParams) > 1 {
+	if len(termContainsParams) > 1 {
 		var descTerms []string
-		for _, tp := range termParams {
-			descTerms = append(descTerms, fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE '%s' || %s || '%s'", "%", tp, "%"))
+		for _, tp := range termContainsParams {
+			descTerms = append(descTerms, fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE %s", tp))
 		}
 		rankCases = append(rankCases, fmt.Sprintf("WHEN (%s) THEN 6", strings.Join(descTerms, " AND ")))
 	}
 
-	rankExpr := "CASE " + strings.Join(rankCases, " ") + " ELSE 7 END"
+	// Tier 7: Comment contains phrase
+	rankCases = append(rankCases, fmt.Sprintf("WHEN EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND LOWER(c.content) LIKE %s) THEN 7", phraseContainsParam))
+
+	// Tier 8: Comment matches all words (multi-word only)
+	if len(termContainsParams) > 1 {
+		var commentTerms []string
+		for _, tp := range termContainsParams {
+			commentTerms = append(commentTerms, fmt.Sprintf("LOWER(c.content) LIKE %s", tp))
+		}
+		rankCases = append(rankCases, fmt.Sprintf("WHEN EXISTS (SELECT 1 FROM comment c WHERE c.issue_id = i.id AND (%s)) THEN 8", strings.Join(commentTerms, " AND ")))
+	}
+
+	rankExpr := "CASE " + strings.Join(rankCases, " ") + " ELSE 9 END"
 
 	// Status priority: active issues first
 	statusRank := `CASE i.status
@@ -396,15 +490,15 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		WHEN LOWER(i.title) LIKE %s THEN 'title'
 		WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN 'description'
 		ELSE 'comment'
-	END`, phraseContains, phraseContains)
+	END`, phraseContainsParam, phraseContainsParam)
 
 	// For multi-word: also check if all terms match in title/description
-	if len(termParams) > 1 {
+	if len(termContainsParams) > 1 {
 		var titleTerms []string
 		var descTerms []string
-		for _, tp := range termParams {
-			titleTerms = append(titleTerms, fmt.Sprintf("LOWER(i.title) LIKE '%s' || %s || '%s'", "%", tp, "%"))
-			descTerms = append(descTerms, fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE '%s' || %s || '%s'", "%", tp, "%"))
+		for _, tp := range termContainsParams {
+			titleTerms = append(titleTerms, fmt.Sprintf("LOWER(i.title) LIKE %s", tp))
+			descTerms = append(descTerms, fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE %s", tp))
 		}
 		matchSourceExpr = fmt.Sprintf(`CASE
 			WHEN LOWER(i.title) LIKE %s THEN 'title'
@@ -413,50 +507,32 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 			WHEN (%s) THEN 'description'
 			ELSE 'comment'
 		END`,
-			phraseContains, strings.Join(titleTerms, " AND "),
-			phraseContains, strings.Join(descTerms, " AND "),
+			phraseContainsParam, strings.Join(titleTerms, " AND "),
+			phraseContainsParam, strings.Join(descTerms, " AND "),
 		)
 	}
 
 	// --- matched_comment_content subquery ---
-	// Find the most recent matching comment for comment-source matches.
-	commentSubquery := fmt.Sprintf(`CASE
-		WHEN LOWER(i.title) LIKE %s THEN ''
-		WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN ''
-		ELSE COALESCE(
+	// Always return matching comment content regardless of match_source,
+	// so frontend can display comment snippet alongside title/description matches.
+	commentSubquery := fmt.Sprintf(`COALESCE(
+		(SELECT c.content FROM comment c
+		 WHERE c.issue_id = i.id AND LOWER(c.content) LIKE %s
+		 ORDER BY c.created_at DESC LIMIT 1),
+		''
+	)`, phraseContainsParam)
+
+	if len(termContainsParams) > 1 {
+		var commentTerms []string
+		for _, tp := range termContainsParams {
+			commentTerms = append(commentTerms, fmt.Sprintf("LOWER(c.content) LIKE %s", tp))
+		}
+		commentSubquery = fmt.Sprintf(`COALESCE(
 			(SELECT c.content FROM comment c
-			 WHERE c.issue_id = i.id AND LOWER(c.content) LIKE %s
+			 WHERE c.issue_id = i.id AND (LOWER(c.content) LIKE %s OR (%s))
 			 ORDER BY c.created_at DESC LIMIT 1),
 			''
-		)
-	END`, phraseContains, phraseContains, phraseContains)
-
-	// For multi-word, also find comment matching individual terms
-	if len(termParams) > 1 {
-		var titleTerms []string
-		var descTerms []string
-		var commentTerms []string
-		for _, tp := range termParams {
-			titleTerms = append(titleTerms, fmt.Sprintf("LOWER(i.title) LIKE '%s' || %s || '%s'", "%", tp, "%"))
-			descTerms = append(descTerms, fmt.Sprintf("LOWER(COALESCE(i.description, '')) LIKE '%s' || %s || '%s'", "%", tp, "%"))
-			commentTerms = append(commentTerms, fmt.Sprintf("LOWER(c.content) LIKE '%s' || %s || '%s'", "%", tp, "%"))
-		}
-		commentSubquery = fmt.Sprintf(`CASE
-			WHEN LOWER(i.title) LIKE %s THEN ''
-			WHEN (%s) THEN ''
-			WHEN LOWER(COALESCE(i.description, '')) LIKE %s THEN ''
-			WHEN (%s) THEN ''
-			ELSE COALESCE(
-				(SELECT c.content FROM comment c
-				 WHERE c.issue_id = i.id AND (LOWER(c.content) LIKE %s OR (%s))
-				 ORDER BY c.created_at DESC LIMIT 1),
-				''
-			)
-		END`,
-			phraseContains, strings.Join(titleTerms, " AND "),
-			phraseContains, strings.Join(descTerms, " AND "),
-			phraseContains, strings.Join(commentTerms, " AND "),
-		)
+		)`, phraseContainsParam, strings.Join(commentTerms, " AND "))
 	}
 
 	limitParam := nextArg(nil)  // placeholder
@@ -465,7 +541,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position,
-		i.due_date, i.created_at, i.updated_at, i.number, i.project_id,
+		i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id,
 		COUNT(*) OVER() AS total_count,
 		%s AS match_source,
 		%s AS matched_comment_content
@@ -522,8 +598,8 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	queryNum, hasNum := parseQueryNumber(q)
 
 	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed)
-	// Fill placeholder args: $2 = workspace_id, last two = limit, offset
-	args[1] = wsUUID
+	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
+	args[3] = wsUUID
 	args[len(args)-2] = limit
 	args[len(args)-1] = offset
 
@@ -553,6 +629,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 			&sr.issue.AcceptanceCriteria,
 			&sr.issue.ContextRefs,
 			&sr.issue.Position,
+			&sr.issue.StartDate,
 			&sr.issue.DueDate,
 			&sr.issue.CreatedAt,
 			&sr.issue.UpdatedAt,
@@ -586,9 +663,21 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 			IssueResponse: issueToResponse(sr.issue, prefix),
 			MatchSource:   sr.matchSource,
 		}
-		if sr.matchSource == "comment" && sr.matchedCommentContent != "" {
+		// Always populate comment snippet when a matching comment exists
+		if sr.matchedCommentContent != "" {
 			snippet := extractSnippet(sr.matchedCommentContent, q)
-			sir.MatchedSnippet = &snippet
+			sir.MatchedCommentSnippet = &snippet
+			// Keep backward compat: also set MatchedSnippet for comment-source matches
+			if sr.matchSource == "comment" {
+				sir.MatchedSnippet = &snippet
+			}
+		}
+		// Populate description snippet when description matches
+		if sr.matchSource == "description" || descriptionContains(sr.issue.Description, q, terms) {
+			if sr.issue.Description.Valid && sr.issue.Description.String != "" {
+				snippet := extractSnippet(sr.issue.Description.String, q)
+				sir.MatchedDescriptionSnippet = &snippet
+			}
 		}
 		resp[i] = sir
 	}
@@ -759,6 +848,374 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		"issues": resp,
 		"total":  total,
 	})
+}
+
+type issueActorFilter struct {
+	actorType string
+	actorID   pgtype.UUID
+}
+
+func splitCommaParam(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func isIssueActorType(s string) bool {
+	return s == "member" || s == "agent" || s == "squad"
+}
+
+func parseUUIDParamList(w http.ResponseWriter, raw, fieldName string) ([]pgtype.UUID, bool) {
+	parts := splitCommaParam(raw)
+	if len(parts) == 0 {
+		return nil, true
+	}
+	ids := make([]pgtype.UUID, 0, len(parts))
+	for _, part := range parts {
+		id, ok := parseUUIDOrBadRequest(w, part, fieldName)
+		if !ok {
+			return nil, false
+		}
+		ids = append(ids, id)
+	}
+	return ids, true
+}
+
+func parseActorFilterList(w http.ResponseWriter, raw, fieldName string) ([]issueActorFilter, bool) {
+	parts := splitCommaParam(raw)
+	if len(parts) == 0 {
+		return nil, true
+	}
+	filters := make([]issueActorFilter, 0, len(parts))
+	for _, part := range parts {
+		pieces := strings.SplitN(part, ":", 2)
+		if len(pieces) != 2 || !isIssueActorType(pieces[0]) || strings.TrimSpace(pieces[1]) == "" {
+			writeError(w, http.StatusBadRequest, "invalid "+fieldName)
+			return nil, false
+		}
+		id, ok := parseUUIDOrBadRequest(w, strings.TrimSpace(pieces[1]), fieldName)
+		if !ok {
+			return nil, false
+		}
+		filters = append(filters, issueActorFilter{
+			actorType: pieces[0],
+			actorID:   id,
+		})
+	}
+	return filters, true
+}
+
+func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if h.DB == nil {
+		writeError(w, http.StatusInternalServerError, "database is unavailable")
+		return
+	}
+
+	groupBy := r.URL.Query().Get("group_by")
+	if groupBy == "" {
+		groupBy = "assignee"
+	}
+	if groupBy != "assignee" {
+		writeError(w, http.StatusBadRequest, "unsupported group_by")
+		return
+	}
+
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+
+	limit := 50
+	offset := 0
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if v, err := strconv.Atoi(o); err == nil && v > 0 {
+			offset = v
+		}
+	}
+
+	where := []string{"i.workspace_id = $1"}
+	args := []any{wsUUID}
+	addArg := func(v any) string {
+		args = append(args, v)
+		return "$" + strconv.Itoa(len(args))
+	}
+
+	statuses := splitCommaParam(r.URL.Query().Get("statuses"))
+	if len(statuses) == 0 {
+		statuses = splitCommaParam(r.URL.Query().Get("status"))
+	}
+	if len(statuses) > 0 {
+		where = append(where, fmt.Sprintf("i.status = ANY(%s::text[])", addArg(statuses)))
+	}
+
+	priorities := splitCommaParam(r.URL.Query().Get("priorities"))
+	if len(priorities) == 0 {
+		priorities = splitCommaParam(r.URL.Query().Get("priority"))
+	}
+	if len(priorities) > 0 {
+		where = append(where, fmt.Sprintf("i.priority = ANY(%s::text[])", addArg(priorities)))
+	}
+
+	assigneeTypes := splitCommaParam(r.URL.Query().Get("assignee_types"))
+	if len(assigneeTypes) > 0 {
+		for _, assigneeType := range assigneeTypes {
+			if !isIssueActorType(assigneeType) {
+				writeError(w, http.StatusBadRequest, "invalid assignee_types")
+				return
+			}
+		}
+		where = append(where, fmt.Sprintf("i.assignee_type = ANY(%s::text[])", addArg(assigneeTypes)))
+	}
+
+	if raw := r.URL.Query().Get("assignee_id"); raw != "" {
+		id, ok := parseUUIDOrBadRequest(w, raw, "assignee_id")
+		if !ok {
+			return
+		}
+		where = append(where, fmt.Sprintf("i.assignee_id = %s::uuid", addArg(id)))
+	}
+	if raw := r.URL.Query().Get("assignee_ids"); raw != "" {
+		ids, ok := parseUUIDParamList(w, raw, "assignee_ids")
+		if !ok {
+			return
+		}
+		if len(ids) > 0 {
+			where = append(where, fmt.Sprintf("i.assignee_id = ANY(%s::uuid[])", addArg(ids)))
+		}
+	}
+	if raw := r.URL.Query().Get("creator_id"); raw != "" {
+		id, ok := parseUUIDOrBadRequest(w, raw, "creator_id")
+		if !ok {
+			return
+		}
+		where = append(where, fmt.Sprintf("i.creator_id = %s::uuid", addArg(id)))
+	}
+	if raw := r.URL.Query().Get("project_id"); raw != "" {
+		id, ok := parseUUIDOrBadRequest(w, raw, "project_id")
+		if !ok {
+			return
+		}
+		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(id)))
+	}
+
+	assigneeFilters, ok := parseActorFilterList(w, r.URL.Query().Get("assignee_filters"), "assignee_filters")
+	if !ok {
+		return
+	}
+	includeNoAssignee := r.URL.Query().Get("include_no_assignee") == "true"
+	if len(assigneeFilters) > 0 || includeNoAssignee {
+		ors := make([]string, 0, len(assigneeFilters)+1)
+		for _, filter := range assigneeFilters {
+			ors = append(ors, fmt.Sprintf(
+				"(i.assignee_type = %s::text AND i.assignee_id = %s::uuid)",
+				addArg(filter.actorType),
+				addArg(filter.actorID),
+			))
+		}
+		if includeNoAssignee {
+			ors = append(ors, "(i.assignee_type IS NULL AND i.assignee_id IS NULL)")
+		}
+		where = append(where, "("+strings.Join(ors, " OR ")+")")
+	}
+
+	creatorFilters, ok := parseActorFilterList(w, r.URL.Query().Get("creator_filters"), "creator_filters")
+	if !ok {
+		return
+	}
+	if len(creatorFilters) > 0 {
+		ors := make([]string, 0, len(creatorFilters))
+		for _, filter := range creatorFilters {
+			ors = append(ors, fmt.Sprintf(
+				"(i.creator_type = %s::text AND i.creator_id = %s::uuid)",
+				addArg(filter.actorType),
+				addArg(filter.actorID),
+			))
+		}
+		where = append(where, "("+strings.Join(ors, " OR ")+")")
+	}
+
+	projectIDs, ok := parseUUIDParamList(w, r.URL.Query().Get("project_ids"), "project_ids")
+	if !ok {
+		return
+	}
+	includeNoProject := r.URL.Query().Get("include_no_project") == "true"
+	if len(projectIDs) > 0 || includeNoProject {
+		ors := make([]string, 0, 2)
+		if len(projectIDs) > 0 {
+			ors = append(ors, fmt.Sprintf("i.project_id = ANY(%s::uuid[])", addArg(projectIDs)))
+		}
+		if includeNoProject {
+			ors = append(ors, "i.project_id IS NULL")
+		}
+		where = append(where, "("+strings.Join(ors, " OR ")+")")
+	}
+
+	labelIDs, ok := parseUUIDParamList(w, r.URL.Query().Get("label_ids"), "label_ids")
+	if !ok {
+		return
+	}
+	if len(labelIDs) > 0 {
+		where = append(where, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM issue_to_label itl WHERE itl.issue_id = i.id AND itl.label_id = ANY(%s::uuid[]))",
+			addArg(labelIDs),
+		))
+	}
+
+	if groupAssigneeType := r.URL.Query().Get("group_assignee_type"); groupAssigneeType != "" {
+		if groupAssigneeType == "none" {
+			where = append(where, "(i.assignee_type IS NULL AND i.assignee_id IS NULL)")
+		} else {
+			if !isIssueActorType(groupAssigneeType) {
+				writeError(w, http.StatusBadRequest, "invalid group_assignee_type")
+				return
+			}
+			rawID := r.URL.Query().Get("group_assignee_id")
+			if rawID == "" {
+				writeError(w, http.StatusBadRequest, "invalid group_assignee_id")
+				return
+			}
+			assigneeID, ok := parseUUIDOrBadRequest(w, rawID, "group_assignee_id")
+			if !ok {
+				return
+			}
+			where = append(where, fmt.Sprintf(
+				"(i.assignee_type = %s::text AND i.assignee_id = %s::uuid)",
+				addArg(groupAssigneeType),
+				addArg(assigneeID),
+			))
+		}
+	}
+
+	offsetRef := addArg(int64(offset))
+	limitRef := addArg(int64(limit))
+	query := fmt.Sprintf(`
+WITH ranked AS (
+	SELECT
+		i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
+		i.parent_issue_id, i.position, i.due_date, i.created_at, i.updated_at,
+		i.number, i.project_id,
+		COUNT(*) OVER (PARTITION BY i.assignee_type, i.assignee_id) AS group_total,
+		ROW_NUMBER() OVER (
+			PARTITION BY i.assignee_type, i.assignee_id
+			ORDER BY i.position ASC, i.created_at DESC
+		) AS rn
+	FROM issue i
+	WHERE %s
+)
+SELECT
+	id, workspace_id, title, description, status, priority,
+	assignee_type, assignee_id, creator_type, creator_id,
+	parent_issue_id, position, due_date, created_at, updated_at,
+	number, project_id, group_total
+FROM ranked
+WHERE rn > %s AND rn <= %s + %s
+ORDER BY
+	CASE assignee_type
+		WHEN 'member' THEN 0
+		WHEN 'agent' THEN 1
+		WHEN 'squad' THEN 2
+		ELSE 3
+	END,
+	assignee_type NULLS LAST,
+	assignee_id NULLS LAST,
+	rn`, strings.Join(where, " AND "), offsetRef, offsetRef, limitRef)
+
+	rows, err := h.DB.Query(ctx, query, args...)
+	if err != nil {
+		slog.Warn("ListGroupedIssues query failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list grouped issues")
+		return
+	}
+	defer rows.Close()
+
+	groupedRows := []groupedIssueRow{}
+	for rows.Next() {
+		var row groupedIssueRow
+		if err := rows.Scan(
+			&row.ID,
+			&row.WorkspaceID,
+			&row.Title,
+			&row.Description,
+			&row.Status,
+			&row.Priority,
+			&row.AssigneeType,
+			&row.AssigneeID,
+			&row.CreatorType,
+			&row.CreatorID,
+			&row.ParentIssueID,
+			&row.Position,
+			&row.DueDate,
+			&row.CreatedAt,
+			&row.UpdatedAt,
+			&row.Number,
+			&row.ProjectID,
+			&row.GroupTotal,
+		); err != nil {
+			slog.Warn("ListGroupedIssues scan failed", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to list grouped issues")
+			return
+		}
+		groupedRows = append(groupedRows, row)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("ListGroupedIssues rows failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list grouped issues")
+		return
+	}
+
+	ids := make([]pgtype.UUID, len(groupedRows))
+	for i, row := range groupedRows {
+		ids[i] = row.ID
+	}
+	labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
+	prefix := h.getIssuePrefix(ctx, wsUUID)
+
+	groups := []IssueAssigneeGroupResponse{}
+	groupIndex := map[string]int{}
+	for _, row := range groupedRows {
+		groupID := assigneeGroupID(row.AssigneeType, row.AssigneeID)
+		idx, exists := groupIndex[groupID]
+		if !exists {
+			idx = len(groups)
+			groupIndex[groupID] = idx
+			groups = append(groups, IssueAssigneeGroupResponse{
+				ID:           groupID,
+				AssigneeType: textToPtr(row.AssigneeType),
+				AssigneeID:   uuidToPtr(row.AssigneeID),
+				Issues:       []IssueResponse{},
+				Total:        row.GroupTotal,
+			})
+		}
+
+		issue := issueListRowToResponse(row.ListIssuesRow, prefix)
+		labels := labelsMap[issue.ID]
+		if labels == nil {
+			labels = []LabelResponse{}
+		}
+		issue.Labels = &labels
+		groups[idx].Issues = append(groups[idx].Issues, issue)
+	}
+
+	writeJSON(w, http.StatusOK, GroupedIssuesResponse{Groups: groups})
 }
 
 func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
@@ -1118,16 +1575,17 @@ func readRuntimeCLIVersion(metadata []byte) string {
 }
 
 type CreateIssueRequest struct {
-	Title              string   `json:"title"`
-	Description        *string  `json:"description"`
-	Status             string   `json:"status"`
-	Priority           string   `json:"priority"`
-	AssigneeType       *string  `json:"assignee_type"`
-	AssigneeID         *string  `json:"assignee_id"`
-	ParentIssueID      *string  `json:"parent_issue_id"`
-	ProjectID          *string  `json:"project_id"`
-	DueDate            *string  `json:"due_date"`
-	AttachmentIDs      []string `json:"attachment_ids,omitempty"`
+	Title         string   `json:"title"`
+	Description   *string  `json:"description"`
+	Status        string   `json:"status"`
+	Priority      string   `json:"priority"`
+	AssigneeType  *string  `json:"assignee_type"`
+	AssigneeID    *string  `json:"assignee_id"`
+	ParentIssueID *string  `json:"parent_issue_id"`
+	ProjectID     *string  `json:"project_id"`
+	StartDate     *string  `json:"start_date"`
+	DueDate       *string  `json:"due_date"`
+	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 	// OriginType / OriginID stamp the new issue with its provenance so
 	// platform-internal flows can deterministically locate it later. Only
 	// trusted callers should set these — currently the daemon CLI passes
@@ -1135,6 +1593,12 @@ type CreateIssueRequest struct {
 	// origin_id=agent_task_queue.id).
 	OriginType *string `json:"origin_type,omitempty"`
 	OriginID   *string `json:"origin_id,omitempty"`
+
+	AllowDuplicate bool `json:"allow_duplicate,omitempty"`
+}
+
+func duplicateIssueMessage(issue IssueResponse) string {
+	return issueguard.DuplicateMessage(issue.Identifier, issue.Title, issue.Status)
 }
 
 func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
@@ -1222,6 +1686,16 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var startDate pgtype.Timestamptz
+	if req.StartDate != nil && *req.StartDate != "" {
+		t, err := time.Parse(time.RFC3339, *req.StartDate)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid start_date format, expected RFC3339")
+			return
+		}
+		startDate = pgtype.Timestamptz{Time: t, Valid: true}
+	}
+
 	var dueDate pgtype.Timestamptz
 	if req.DueDate != nil && *req.DueDate != "" {
 		t, err := time.Parse(time.RFC3339, *req.DueDate)
@@ -1232,8 +1706,8 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		dueDate = pgtype.Timestamptz{Time: t, Valid: true}
 	}
 
-	// Use a transaction to atomically increment the workspace issue counter
-	// and create the issue with the assigned number.
+	// Use a transaction to atomically guard against active duplicates,
+	// increment the workspace issue counter, and create the issue.
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create issue")
@@ -1242,6 +1716,23 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 
 	qtx := h.Queries.WithTx(tx)
+	duplicate, foundDuplicate, err := issueguard.LockAndFindActiveDuplicate(r.Context(), qtx, wsUUID, projectID, parentIssueID, req.Title, req.AllowDuplicate)
+	if err != nil {
+		slog.Warn("duplicate issue guard failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to create issue")
+		return
+	}
+	if foundDuplicate {
+		prefix := h.getIssuePrefix(r.Context(), duplicate.WorkspaceID)
+		existing := issueToResponse(duplicate, prefix)
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"code":  "active_duplicate_issue",
+			"error": duplicateIssueMessage(existing),
+			"issue": existing,
+		})
+		return
+	}
+
 	issueNumber, err := qtx.IncrementIssueCounter(r.Context(), wsUUID)
 	if err != nil {
 		slog.Warn("increment issue counter failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
@@ -1292,6 +1783,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			CreatorID:     parseUUID(actualCreatorID),
 			ParentIssueID: parentIssueID,
 			Position:      0,
+			StartDate:     startDate,
 			DueDate:       dueDate,
 			Number:        issueNumber,
 			ProjectID:     projectID,
@@ -1311,6 +1803,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			CreatorID:     parseUUID(actualCreatorID),
 			ParentIssueID: parentIssueID,
 			Position:      0,
+			StartDate:     startDate,
 			DueDate:       dueDate,
 			Number:        issueNumber,
 			ProjectID:     projectID,
@@ -1406,16 +1899,17 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
-	Title              *string  `json:"title"`
-	Description        *string  `json:"description"`
-	Status             *string  `json:"status"`
-	Priority           *string  `json:"priority"`
-	AssigneeType       *string  `json:"assignee_type"`
-	AssigneeID         *string  `json:"assignee_id"`
-	Position           *float64 `json:"position"`
-	DueDate            *string  `json:"due_date"`
-	ParentIssueID      *string  `json:"parent_issue_id"`
-	ProjectID          *string  `json:"project_id"`
+	Title         *string  `json:"title"`
+	Description   *string  `json:"description"`
+	Status        *string  `json:"status"`
+	Priority      *string  `json:"priority"`
+	AssigneeType  *string  `json:"assignee_type"`
+	AssigneeID    *string  `json:"assignee_id"`
+	Position      *float64 `json:"position"`
+	StartDate     *string  `json:"start_date"`
+	DueDate       *string  `json:"due_date"`
+	ParentIssueID *string  `json:"parent_issue_id"`
+	ProjectID     *string  `json:"project_id"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings
@@ -1454,6 +1948,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		ID:            prevIssue.ID,
 		AssigneeType:  prevIssue.AssigneeType,
 		AssigneeID:    prevIssue.AssigneeID,
+		StartDate:     prevIssue.StartDate,
 		DueDate:       prevIssue.DueDate,
 		ParentIssueID: prevIssue.ParentIssueID,
 		ProjectID:     prevIssue.ProjectID,
@@ -1492,6 +1987,18 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.AssigneeID = id
 		} else {
 			params.AssigneeID = pgtype.UUID{Valid: false} // explicit null = unassign
+		}
+	}
+	if _, ok := rawFields["start_date"]; ok {
+		if req.StartDate != nil && *req.StartDate != "" {
+			t, err := time.Parse(time.RFC3339, *req.StartDate)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid start_date format, expected RFC3339")
+				return
+			}
+			params.StartDate = pgtype.Timestamptz{Time: t, Valid: true}
+		} else {
+			params.StartDate = pgtype.Timestamptz{Valid: false} // explicit null = clear date
 		}
 	}
 	if _, ok := rawFields["due_date"]; ok {
@@ -1595,6 +2102,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	priorityChanged := req.Priority != nil && prevIssue.Priority != issue.Priority
 	descriptionChanged := req.Description != nil && textToPtr(prevIssue.Description) != resp.Description
 	titleChanged := req.Title != nil && prevIssue.Title != issue.Title
+	prevStartDate := timestampToPtr(prevIssue.StartDate)
+	startDateChanged := prevStartDate != resp.StartDate && (prevStartDate == nil) != (resp.StartDate == nil) ||
+		(prevStartDate != nil && resp.StartDate != nil && *prevStartDate != *resp.StartDate)
 	prevDueDate := timestampToPtr(prevIssue.DueDate)
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
@@ -1607,6 +2117,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"assignee_changed":    assigneeChanged,
 		"status_changed":      statusChanged,
 		"priority_changed":    priorityChanged,
+		"start_date_changed":  startDateChanged,
 		"due_date_changed":    dueDateChanged,
 		"description_changed": descriptionChanged,
 		"title_changed":       titleChanged,
@@ -1615,6 +2126,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"prev_assignee_id":    uuidToPtr(prevIssue.AssigneeID),
 		"prev_status":         prevIssue.Status,
 		"prev_priority":       prevIssue.Priority,
+		"prev_start_date":     prevStartDate,
 		"prev_due_date":       prevDueDate,
 		"prev_description":    textToPtr(prevIssue.Description),
 		"creator_type":        prevIssue.CreatorType,
@@ -1862,7 +2374,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		req.Updates.Priority != nil ||
 		req.Updates.Position != nil
 	if !hasMutation {
-		for _, k := range []string{"assignee_type", "assignee_id", "due_date", "parent_issue_id", "project_id"} {
+		for _, k := range []string{"assignee_type", "assignee_id", "start_date", "due_date", "parent_issue_id", "project_id"} {
 			if _, ok := rawUpdates[k]; ok {
 				hasMutation = true
 				break
@@ -1897,6 +2409,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			ID:            prevIssue.ID,
 			AssigneeType:  prevIssue.AssigneeType,
 			AssigneeID:    prevIssue.AssigneeID,
+			StartDate:     prevIssue.StartDate,
 			DueDate:       prevIssue.DueDate,
 			ParentIssueID: prevIssue.ParentIssueID,
 			ProjectID:     prevIssue.ProjectID,
@@ -1933,6 +2446,17 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				params.AssigneeID = assigneeUUID
 			} else {
 				params.AssigneeID = pgtype.UUID{Valid: false}
+			}
+		}
+		if _, ok := rawUpdates["start_date"]; ok {
+			if req.Updates.StartDate != nil && *req.Updates.StartDate != "" {
+				t, err := time.Parse(time.RFC3339, *req.Updates.StartDate)
+				if err != nil {
+					continue
+				}
+				params.StartDate = pgtype.Timestamptz{Time: t, Valid: true}
+			} else {
+				params.StartDate = pgtype.Timestamptz{Valid: false}
 			}
 		}
 		if _, ok := rawUpdates["due_date"]; ok {

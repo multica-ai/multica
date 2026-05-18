@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import { ChevronRight, ListTodo } from "lucide-react";
-import type { IssueStatus } from "@multica/core/types";
+import type { UpdateIssueRequest } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -18,8 +18,10 @@ import { useCurrentWorkspace } from "@multica/core/paths";
 import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
+  issueAssigneeGroupsOptions,
   issueListOptions,
   childIssueProgressOptions,
+  type AssigneeGroupedIssuesFilter,
 } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useTimerStore } from "@multica/core/time-entries/timer-store";
@@ -34,13 +36,11 @@ import { useT } from "../../i18n";
 export function IssuesPage() {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
-  const { data: allIssues = [], isLoading: loading } = useQuery(
-    issueListOptions(wsId),
-  );
 
   const workspace = useCurrentWorkspace();
   const scope = useIssuesScopeStore((s) => s.scope);
   const viewMode = useIssueViewStore((s) => s.viewMode);
+  const grouping = useIssueViewStore((s) => s.grouping);
   const statusFilters = useIssueViewStore((s) => s.statusFilters);
   const priorityFilters = useIssueViewStore((s) => s.priorityFilters);
   const assigneeFilters = useIssueViewStore((s) => s.assigneeFilters);
@@ -49,6 +49,58 @@ export function IssuesPage() {
   const projectFilters = useIssueViewStore((s) => s.projectFilters);
   const includeNoProject = useIssueViewStore((s) => s.includeNoProject);
   const labelFilters = useIssueViewStore((s) => s.labelFilters);
+  const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
+
+  const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(() => {
+    const filter: AssigneeGroupedIssuesFilter = {
+      statuses: statusFilters.length > 0 ? statusFilters : [...BOARD_STATUSES],
+      priorities: priorityFilters,
+      assignee_filters: assigneeFilters,
+      include_no_assignee: includeNoAssignee,
+      creator_filters: creatorFilters,
+      project_ids: projectFilters,
+      include_no_project: includeNoProject,
+      label_ids: labelFilters,
+    };
+    if (scope === "members") filter.assignee_types = ["member"];
+    if (scope === "agents") filter.assignee_types = ["agent", "squad"];
+    return filter;
+  }, [
+    assigneeFilters,
+    creatorFilters,
+    includeNoAssignee,
+    includeNoProject,
+    labelFilters,
+    priorityFilters,
+    projectFilters,
+    scope,
+    statusFilters,
+  ]);
+
+  const assigneeGroupsOptions = issueAssigneeGroupsOptions(
+    wsId,
+    assigneeGroupFilter,
+  );
+  const statusIssuesQuery = useQuery({
+    ...issueListOptions(wsId),
+    enabled: !usesAssigneeBoard,
+  });
+  const assigneeGroupsQuery = useQuery({
+    ...assigneeGroupsOptions,
+    enabled: usesAssigneeBoard,
+  });
+  const allIssues = useMemo(
+    () => statusIssuesQuery.data ?? [],
+    [statusIssuesQuery.data],
+  );
+  const assigneeIssues = useMemo(
+    () =>
+      assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [],
+    [assigneeGroupsQuery.data],
+  );
+  const loading = usesAssigneeBoard
+    ? assigneeGroupsQuery.isLoading
+    : statusIssuesQuery.isLoading;
 
   // Clear filter state when switching between workspaces (URL-driven).
   useClearFiltersOnWorkspaceChange(useIssueViewStore, wsId);
@@ -62,9 +114,13 @@ export function IssuesPage() {
     if (scope === "members")
       return allIssues.filter((i) => i.assignee_type === "member");
     if (scope === "agents")
-      return allIssues.filter((i) => i.assignee_type === "agent" || i.assignee_type === "squad");
+      return allIssues.filter(
+        (i) => i.assignee_type === "agent" || i.assignee_type === "squad",
+      );
     return allIssues;
   }, [allIssues, scope]);
+
+  const headerIssues = usesAssigneeBoard ? assigneeIssues : scopedIssues;
 
   const issues = useMemo(
     () =>
@@ -109,19 +165,27 @@ export function IssuesPage() {
 
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
-    (issueId: string, newStatus: IssueStatus, newPosition?: number) => {
-      const updates: Partial<{ status: IssueStatus; position: number }> = {
-        status: newStatus,
-      };
-      if (newPosition !== undefined) updates.position = newPosition;
-
+    (
+      issueId: string,
+      updates: Pick<
+        UpdateIssueRequest,
+        "status" | "assignee_type" | "assignee_id" | "position"
+      >,
+    ) => {
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
-        { onError: () => toast.error(t(($) => $.page.move_failed)) },
+        {
+          onError: (err) =>
+            toast.error(
+              err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.page.move_failed),
+            ),
+        },
       );
 
       if (
-        newStatus === "in_progress" &&
+        updates.status === "in_progress" &&
         !useTimerStore.getState().activeTimer
       ) {
         const issue = allIssues.find((i) => i.id === issueId);
@@ -201,10 +265,10 @@ export function IssuesPage() {
 
       <ViewStoreProvider store={useIssueViewStore}>
         {/* Header 2: Scope tabs + filters */}
-        <IssuesHeader scopedIssues={scopedIssues} />
+        <IssuesHeader scopedIssues={headerIssues} />
 
         {/* Content: scrollable */}
-        {scopedIssues.length === 0 ? (
+        {headerIssues.length === 0 ? (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
             <ListTodo className="h-10 w-10 text-muted-foreground/40" />
             <p className="text-sm">{t(($) => $.page.empty_title)}</p>
@@ -214,7 +278,18 @@ export function IssuesPage() {
           <div className="flex flex-col flex-1 min-h-0">
             {viewMode === "board" ? (
               <BoardView
-                issues={issues}
+                issues={usesAssigneeBoard ? assigneeIssues : issues}
+                assigneeGroups={
+                  usesAssigneeBoard
+                    ? assigneeGroupsQuery.data?.groups
+                    : undefined
+                }
+                assigneeGroupQueryKey={
+                  usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined
+                }
+                assigneeGroupFilter={
+                  usesAssigneeBoard ? assigneeGroupFilter : undefined
+                }
                 visibleStatuses={visibleStatuses}
                 hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}

@@ -28,6 +28,21 @@ var codexBlockedArgs = map[string]blockedArgMode{
 const (
 	codexStderrTailBytes                  = 2048
 	defaultCodexSemanticInactivityTimeout = 10 * time.Minute
+
+	// defaultCodexExecStuckTimeout bounds how long a single exec_command may
+	// stay open without a matching end or output-delta event before we
+	// declare the turn stuck. Codex itself can drop the second
+	// function_call_output when two exec_command calls fan out in the same
+	// turn and both async-yield through the yield_time_ms boundary (observed
+	// 2026-05-18, MUL-2334). When that happens the model waits forever for
+	// the missing output; this watchdog ends the turn so the next run can
+	// recover instead of burning the overall semantic inactivity budget.
+	defaultCodexExecStuckTimeout = 3 * time.Minute
+
+	// codexExecStuckCheckInterval is how often the lifecycle loop polls for
+	// stuck exec calls. Kept short so the watchdog fires close to the
+	// threshold rather than up to one full interval late.
+	codexExecStuckCheckInterval = 5 * time.Second
 )
 
 // codexBackend implements Backend by spawning `codex app-server --listen stdio://`
@@ -233,6 +248,23 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		semanticTimer := time.NewTimer(semanticInactivityTimeout)
 		defer semanticTimer.Stop()
 
+		execStuckTimeout := opts.ExecCommandStuckTimeout
+		if execStuckTimeout == 0 {
+			execStuckTimeout = defaultCodexExecStuckTimeout
+		}
+		// Scale the polling cadence so tests with short thresholds don't have
+		// to wait up to 5 s for the first watchdog tick. Production thresholds
+		// stay on the codexExecStuckCheckInterval (5 s) baseline.
+		checkInterval := codexExecStuckCheckInterval
+		if execStuckTimeout < 2*checkInterval {
+			checkInterval = execStuckTimeout / 4
+			if checkInterval < 10*time.Millisecond {
+				checkInterval = 10 * time.Millisecond
+			}
+		}
+		execStuckTicker := time.NewTicker(checkInterval)
+		defer execStuckTicker.Stop()
+
 		waitingForTurn := true
 		for waitingForTurn {
 			select {
@@ -263,6 +295,24 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 					"timeout", semanticInactivityTimeout.String(),
 					"last_activity", lastSemanticActivityDescription,
 					"idle_for", time.Since(lastSemanticActivity).Round(time.Millisecond).String(),
+				)
+			case <-execStuckTicker.C:
+				callID, info, ok := c.findStuckExec(execStuckTimeout)
+				if !ok {
+					continue
+				}
+				waitingForTurn = false
+				finalStatus = "timeout"
+				finalError = fmt.Sprintf("codex exec_command stuck for %s without progress (call_id=%s command=%s); likely a dropped function_call_output from app-server", time.Since(info.LastProgressAt).Round(time.Second), callID, truncate(info.Command, 120))
+				b.cfg.Logger.Warn("codex exec_command stuck",
+					"pid", cmd.Process.Pid,
+					"thread_id", threadID,
+					"turn_id", c.turnID,
+					"call_id", callID,
+					"command", truncate(info.Command, 200),
+					"started_at", info.StartedAt.Format(time.RFC3339),
+					"stuck_for", time.Since(info.LastProgressAt).Round(time.Millisecond).String(),
+					"threshold", execStuckTimeout.String(),
 				)
 			case <-runCtx.Done():
 				waitingForTurn = false
@@ -383,6 +433,21 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 	return threadID, false, nil
 }
 
+// truncate returns s shortened to at most n runes, suffixed with "…" when
+// truncation actually happened. Used for embedding potentially large
+// command strings into log fields and error messages without unbounded
+// growth.
+func truncate(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "…"
+}
+
 func resetTimer(timer *time.Timer, d time.Duration) {
 	if !timer.Stop() {
 		select {
@@ -455,6 +520,80 @@ type codexClient struct {
 
 	turnErrorMu sync.Mutex
 	turnError   string // captured from turn/completed status=failed or terminal error notifications
+
+	// openExec tracks exec_command / commandExecution calls that have a
+	// begin event but no end event yet. The lifecycle goroutine polls
+	// findStuckExec to detect calls stuck past the watchdog threshold.
+	// outputDelta resets the LastProgressAt timestamp so long-running
+	// commands that keep streaming output are not falsely flagged.
+	execMu   sync.Mutex
+	openExec map[string]openExecInfo
+}
+
+type openExecInfo struct {
+	Command        string
+	StartedAt      time.Time
+	LastProgressAt time.Time
+}
+
+func (c *codexClient) recordExecBegin(callID, command string) {
+	if callID == "" {
+		return
+	}
+	c.execMu.Lock()
+	defer c.execMu.Unlock()
+	if c.openExec == nil {
+		c.openExec = map[string]openExecInfo{}
+	}
+	now := time.Now()
+	c.openExec[callID] = openExecInfo{
+		Command:        command,
+		StartedAt:      now,
+		LastProgressAt: now,
+	}
+}
+
+func (c *codexClient) recordExecProgress(callID string) {
+	if callID == "" {
+		return
+	}
+	c.execMu.Lock()
+	defer c.execMu.Unlock()
+	if info, ok := c.openExec[callID]; ok {
+		info.LastProgressAt = time.Now()
+		c.openExec[callID] = info
+	}
+}
+
+func (c *codexClient) recordExecEnd(callID string) {
+	if callID == "" {
+		return
+	}
+	c.execMu.Lock()
+	defer c.execMu.Unlock()
+	delete(c.openExec, callID)
+}
+
+// findStuckExec returns the oldest exec call whose last progress event is
+// older than threshold, or ok=false if nothing is stuck. "Oldest" is by
+// LastProgressAt so the most-overdue call is surfaced first.
+func (c *codexClient) findStuckExec(threshold time.Duration) (callID string, info openExecInfo, ok bool) {
+	c.execMu.Lock()
+	defer c.execMu.Unlock()
+	cutoff := time.Now().Add(-threshold)
+	var oldest time.Time
+	for id, ei := range c.openExec {
+		if ei.LastProgressAt.After(cutoff) {
+			continue
+		}
+		if !ok || ei.LastProgressAt.Before(oldest) {
+			callID = id
+			info = ei
+			oldest = ei.LastProgressAt
+			ok = true
+		}
+	}
+	return
 }
 
 func (c *codexClient) setTurnError(msg string) {
@@ -709,6 +848,7 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 	case "exec_command_begin":
 		callID, _ := msg["call_id"].(string)
 		command, _ := msg["command"].(string)
+		c.recordExecBegin(callID, command)
 		if c.onMessage != nil {
 			c.onMessage(Message{
 				Type:   MessageToolUse,
@@ -717,9 +857,16 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 				Input:  map[string]any{"command": command},
 			})
 		}
+	case "exec_command_output_delta":
+		// Legacy peer of item/commandExecution/outputDelta. Refresh the
+		// watchdog so long-running streaming commands don't get flagged as
+		// stuck. We don't emit a Message here — raw v2 doesn't either.
+		callID, _ := msg["call_id"].(string)
+		c.recordExecProgress(callID)
 	case "exec_command_end":
 		callID, _ := msg["call_id"].(string)
 		output, _ := msg["output"].(string)
+		c.recordExecEnd(callID)
 		if c.onMessage != nil {
 			c.onMessage(Message{
 				Type:   MessageToolResult,
@@ -865,6 +1012,7 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 	switch {
 	case method == "item/started" && itemType == "commandExecution":
 		command, _ := item["command"].(string)
+		c.recordExecBegin(itemID, command)
 		if c.onMessage != nil {
 			c.onMessage(Message{
 				Type:   MessageToolUse,
@@ -874,8 +1022,12 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 			})
 		}
 
+	case method == "item/commandExecution/outputDelta":
+		c.recordExecProgress(itemID)
+
 	case method == "item/completed" && itemType == "commandExecution":
 		output, _ := item["aggregatedOutput"].(string)
+		c.recordExecEnd(itemID)
 		if c.onMessage != nil {
 			c.onMessage(Message{
 				Type:   MessageToolResult,
