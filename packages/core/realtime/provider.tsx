@@ -16,6 +16,7 @@ import type { StoreApi, UseBoundStore } from "zustand";
 import type { AuthState } from "../auth/store";
 import {
   getCurrentSlug,
+  setCurrentWorkspace,
   subscribeToCurrentSlug,
 } from "../platform/workspace-storage";
 import { createLogger } from "../logger";
@@ -95,6 +96,16 @@ export function WSProvider({
               os: identityOS,
             }
           : undefined,
+      onInvalidSession: () => {
+        storage.removeItem("multica_token");
+        setCurrentWorkspace(null, null);
+        authStore.setState({
+          user: null,
+          isLoading: false,
+          authStatus: "unauthenticated",
+          authUnavailableSince: null,
+        });
+      },
     });
     ws.setAuth(token, wsSlug);
     setWsClient(ws);

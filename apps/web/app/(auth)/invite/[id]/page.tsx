@@ -13,6 +13,9 @@ export default function InviteAcceptPage() {
   const params = useParams<{ id: string }>();
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
+  const authStatus = useAuthStore((s) => s.authStatus);
+  const authTemporarilyUnavailable =
+    authStatus === "temporarily_unreachable";
   const { data: wsList = [] } = useQuery({
     ...workspaceListOptions(),
     enabled: !!user,
@@ -20,14 +23,14 @@ export default function InviteAcceptPage() {
 
   // Redirect to login if not authenticated, with a redirect back to this page.
   useEffect(() => {
-    if (!isLoading && !user) {
+    if (!isLoading && !authTemporarilyUnavailable && !user) {
       router.replace(
         `${paths.login()}?next=${encodeURIComponent(paths.invite(params.id))}`,
       );
     }
-  }, [isLoading, user, router, params.id]);
+  }, [isLoading, authTemporarilyUnavailable, user, router, params.id]);
 
-  if (isLoading || !user) return null;
+  if (isLoading || authTemporarilyUnavailable || !user) return null;
 
   const onBack =
     wsList.length > 0 ? () => router.push(paths.root()) : undefined;

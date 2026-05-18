@@ -48,6 +48,9 @@ export function useDashboardGuard() {
   const { pathname, replace } = useNavigation();
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
+  const authStatus = useAuthStore((s) => s.authStatus);
+  const authTemporarilyUnavailable =
+    authStatus === "temporarily_unreachable";
   const workspace = useCurrentWorkspace();
   const hasOnboarded = useHasOnboarded();
   const { data: workspaces = [], isFetched: workspaceListFetched } = useQuery({
@@ -57,6 +60,7 @@ export function useDashboardGuard() {
 
   useEffect(() => {
     if (isLoading) return;
+    if (authTemporarilyUnavailable) return;
     if (!user) {
       replace(paths.login());
       return;
@@ -65,7 +69,7 @@ export function useDashboardGuard() {
     if (!workspace) {
       replace(resolvePostAuthDestination(workspaces, hasOnboarded));
     }
-  }, [user, isLoading, workspaceListFetched, workspace, workspaces, hasOnboarded, replace]);
+  }, [user, isLoading, authTemporarilyUnavailable, workspaceListFetched, workspace, workspaces, hasOnboarded, replace]);
 
   useEffect(() => {
     useNavigationStore.getState().onPathChange(pathname);

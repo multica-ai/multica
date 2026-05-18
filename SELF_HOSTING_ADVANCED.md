@@ -14,6 +14,8 @@ All configuration is done via environment variables. Copy `.env.example` as a st
 | `JWT_SECRET` | **Must change from default.** Secret key for signing JWT tokens. Use a long random string. | `openssl rand -hex 32` |
 | `FRONTEND_ORIGIN` | URL where the frontend is served (used for CORS) | `https://app.example.com` |
 
+Production backend startup fails when `APP_ENV=production` and `JWT_SECRET` is unset or left at the example placeholder. Keep the same `JWT_SECRET` across backend recreates; rotating it invalidates existing browser sessions.
+
 ### Database Pool Tuning (Optional)
 
 These have sensible defaults and only need to be set when tuning a large or constrained deployment. Precedence (highest first): env var → `pool_*` query params on `DATABASE_URL` → built-in default.
@@ -105,8 +107,11 @@ For file uploads and attachments, configure S3 and (optionally) CloudFront:
 | Variable | Description |
 |----------|-------------|
 | `COOKIE_DOMAIN` | Optional `Domain` attribute for session + CloudFront cookies. **Leave empty** for single-host deployments (localhost, LAN IP, or a single hostname). Only set it when the frontend and backend sit on different subdomains of one registered domain (e.g. `.example.com`). **Do not use an IP literal** — RFC 6265 forbids IP addresses in the cookie `Domain` attribute and browsers will drop such `Set-Cookie` headers. |
+| `MULTICA_SESSION_TTL` | Browser session lifetime for the JWT, `multica_auth`, and `multica_csrf` cookies. Uses Go duration syntax. | `720h` |
 
 The `Secure` flag on session cookies is derived automatically from the scheme of `FRONTEND_ORIGIN`: HTTPS origins get `Secure` cookies; plain-HTTP origins (LAN / private-network self-host) get non-secure cookies so the browser can actually store them.
+
+Session recovery is cookie-first for the web UI. Routine frontend/backend/Postgres recreates should behave like reconnects as long as `JWT_SECRET` is stable and the browser cookies have not expired. Transient `/api/me` startup gaps or `5xx` responses should not force logout; confirmed `401` responses and explicit logout still clear the session.
 
 ### Server
 
@@ -117,6 +122,16 @@ The `Secure` flag on session cookies is derived automatically from the scheme of
 | `FRONTEND_PORT` | `3000` | Frontend port |
 | `CORS_ALLOWED_ORIGINS` | Value of `FRONTEND_ORIGIN` | Comma-separated list of allowed origins. Governs **both** the HTTP CORS allowlist **and** the WebSocket `Origin` check. A browser origin that isn't listed here (and isn't `localhost`) has its real-time WebSocket upgrade rejected with `403`, so live updates stop working until a manual refresh. |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+
+### Session Persistence Verification
+
+Run the session closeout check from the repository root after deployment or container maintenance:
+
+```bash
+bash scripts/verify-session-persistence.sh
+```
+
+The check reports only sanitized facts: whether `JWT_SECRET` is present, whether the Multica containers have CPU, memory, swap, and PID ceilings, restart counts, container start times, and recent auth-warning counts. It never prints `JWT_SECRET`, session cookies, JWTs, CSRF tokens, or PATs.
 
 ### CLI / Daemon
 

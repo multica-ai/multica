@@ -33,6 +33,48 @@ describe("ApiClient", () => {
     }
   });
 
+  it("calls onUnauthorized only for confirmed 401 responses", async () => {
+    const onUnauthorized = vi.fn();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: "missing authorization" }), {
+          status: 401,
+          statusText: "Unauthorized",
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: "starting up" }), {
+          status: 503,
+          statusText: "Service Unavailable",
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test", {
+      onUnauthorized,
+    });
+
+    await expect(client.getMe()).rejects.toMatchObject({ status: 401 });
+    await expect(client.getMe()).rejects.toMatchObject({ status: 503 });
+
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not call onUnauthorized for network failures", async () => {
+    const onUnauthorized = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")));
+
+    const client = new ApiClient("https://api.example.test", {
+      onUnauthorized,
+    });
+
+    await expect(client.getMe()).rejects.toThrow("fetch failed");
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
   it("uses the expected HTTP contract for autopilot endpoints", async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({ autopilots: [], runs: [], total: 0 }), {
