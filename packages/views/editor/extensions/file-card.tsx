@@ -20,6 +20,7 @@ import type { NodeViewProps } from "@tiptap/react";
 import { Eye, FileText, Loader2, Download } from "lucide-react";
 import { FILE_CARD_URL_PATTERN } from "@multica/ui/markdown";
 import { useT } from "../../i18n";
+import { ExcalidrawPreview } from "../../excalidraw";
 import { useAttachmentDownloadResolver } from "../attachment-download-context";
 import { useAttachmentPreview } from "../attachment-preview-modal";
 import { getPreviewKind } from "../utils/preview";
@@ -62,6 +63,7 @@ function FileCardView({ node }: NodeViewProps) {
     : null;
   const isMediaKind = kind === "pdf" || kind === "video" || kind === "audio";
   const canPreview = !!href && kind !== null && (!!attachment || isMediaKind);
+  const isExcalidraw = kind === "excalidraw" && !!attachment;
 
   const openPreview = () => {
     if (attachment) {
@@ -117,6 +119,12 @@ function FileCardView({ node }: NodeViewProps) {
           </button>
         )}
       </div>
+      {isExcalidraw && attachment && (
+        <ExcalidrawPreview
+          attachment={attachment}
+          onExpand={() => preview.tryOpen({ kind: "full", attachment })}
+        />
+      )}
       {preview.modal}
     </NodeViewWrapper>
   );

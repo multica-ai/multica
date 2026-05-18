@@ -16,7 +16,8 @@ export type PreviewKind =
   | "audio"
   | "markdown"
   | "html"
-  | "text";
+  | "text"
+  | "excalidraw";
 
 const EXT_LANGUAGE_MAP: Record<string, string> = {
   // Markdown
@@ -163,6 +164,12 @@ export function getPreviewKind(
   if (ct === "application/pdf" || ext === "pdf") return "pdf";
   if (ct.startsWith("video/") || (ext && VIDEO_EXTS.has(ext))) return "video";
   if (ct.startsWith("audio/") || (ext && AUDIO_EXTS.has(ext))) return "audio";
+
+  // Excalidraw — JSON scene rendered as inline SVG. Matched before the
+  // generic JSON / text branches so we don't fall back to a code block.
+  if (ct === "application/vnd.excalidraw+json" || ext === "excalidraw") {
+    return "excalidraw";
+  }
 
   // Markdown — covers both the well-typed case and the common
   // server-side sniffer fallback (text/plain for .md).
