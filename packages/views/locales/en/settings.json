@@ -179,6 +179,8 @@
     "feishu_project_plugin_id": "Plugin ID",
     "feishu_project_plugin_secret": "Plugin Secret",
     "feishu_project_actor_user_key": "Actor User Key",
+    "feishu_project_assign_owner_agent": "Assign reopened/new items to the owner's agent",
+    "feishu_project_assign_owner_agent_hint": "When enabled, synced items in OPEN or REOPENED states are assigned to an agent owned by the Feishu handler. If no matching workspace member or agent exists, the assignee is empty.",
     "feishu_project_mql_filter": "MQL filter",
     "feishu_project_status_mapping": "Feishu status -> Multica status",
     "feishu_project_reverse_mapping": "Multica status -> Feishu status",

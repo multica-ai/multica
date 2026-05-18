@@ -1201,6 +1201,47 @@ func (q *Queries) GetAgentTask(ctx context.Context, id pgtype.UUID) (AgentTaskQu
 	return i, err
 }
 
+const getFirstAgentByOwnerInWorkspace = `-- name: GetFirstAgentByOwnerInWorkspace :one
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model FROM agent
+WHERE workspace_id = $1 AND owner_id = $2 AND archived_at IS NULL
+ORDER BY created_at ASC
+LIMIT 1
+`
+
+type GetFirstAgentByOwnerInWorkspaceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+}
+
+func (q *Queries) GetFirstAgentByOwnerInWorkspace(ctx context.Context, arg GetFirstAgentByOwnerInWorkspaceParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, getFirstAgentByOwnerInWorkspace, arg.WorkspaceID, arg.OwnerID)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
+		&i.Model,
+	)
+	return i, err
+}
+
 const getLastTaskSession = `-- name: GetLastTaskSession :one
 SELECT session_id, work_dir, runtime_id FROM agent_task_queue
 WHERE agent_id = $1 AND issue_id = $2

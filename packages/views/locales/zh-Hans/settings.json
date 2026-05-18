@@ -179,6 +179,8 @@
     "feishu_project_plugin_id": "插件 ID",
     "feishu_project_plugin_secret": "插件 Secret",
     "feishu_project_actor_user_key": "操作人 User Key",
+    "feishu_project_assign_owner_agent": "新建/重新打开时分配给处理人的智能体",
+    "feishu_project_assign_owner_agent_hint": "开启后，同步到新建或重新打开状态的单子会按飞书处理人查找其拥有的智能体；处理人不在工作区或没有智能体时不分配。",
     "feishu_project_mql_filter": "MQL 过滤条件",
     "feishu_project_status_mapping": "飞书状态 -> Multica 状态",
     "feishu_project_reverse_mapping": "Multica 状态 -> 飞书状态",

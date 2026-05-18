@@ -65,6 +65,7 @@ export function IntegrationsTab() {
   const [pluginId, setPluginId] = useState("");
   const [pluginSecret, setPluginSecret] = useState("");
   const [actorUserKey, setActorUserKey] = useState("");
+  const [assignOpenItemsToOwnerAgent, setAssignOpenItemsToOwnerAgent] = useState(false);
   const [syncWorkItemId, setSyncWorkItemId] = useState("");
   const [statusMapping, setStatusMapping] = useState<Record<string, string>>({});
   const [reverseStatusMapping, setReverseStatusMapping] = useState<Record<string, string>>({});
@@ -113,6 +114,7 @@ export function IntegrationsTab() {
     setPluginId(feishuProject.plugin_id);
     setPluginSecret("");
     setActorUserKey(feishuProject.actor_user_key ?? "");
+    setAssignOpenItemsToOwnerAgent(feishuProject.assign_open_items_to_owner_agent);
     setStatusMapping(feishuProject.status_mapping);
     setReverseStatusMapping(feishuProject.reverse_status_mapping);
   }, [feishuProject]);
@@ -192,6 +194,7 @@ export function IntegrationsTab() {
         mql_filter: "",
         status_mapping: compactMapping(statusMapping),
         reverse_status_mapping: compactMapping(reverseStatusMapping),
+        assign_open_items_to_owner_agent: assignOpenItemsToOwnerAgent,
       });
       await queryClient.invalidateQueries({ queryKey: feishuProjectKeys.integration(wsId) });
       await queryClient.invalidateQueries({ queryKey: feishuProjectKeys.issueStatuses(wsId) });
@@ -341,6 +344,20 @@ export function IntegrationsTab() {
                       {t(($) => $.integrations.feishu_project_actor_user_key)}
                       <Input value={actorUserKey} onChange={(e) => setActorUserKey(e.target.value)} />
                     </label>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 rounded-md border border-border/70 px-3 py-3">
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium">
+                        {t(($) => $.integrations.feishu_project_assign_owner_agent)}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {t(($) => $.integrations.feishu_project_assign_owner_agent_hint)}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={assignOpenItemsToOwnerAgent}
+                      onCheckedChange={setAssignOpenItemsToOwnerAgent}
+                    />
                   </div>
                 </div>
 

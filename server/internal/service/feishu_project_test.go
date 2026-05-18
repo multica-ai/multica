@@ -434,6 +434,30 @@ func TestFeishuProjectAttachmentTooLarge(t *testing.T) {
 	}
 }
 
+func TestFeishuProjectOwnerAgentAssignableStatus(t *testing.T) {
+	cases := []struct {
+		name           string
+		externalStatus string
+		localStatus    string
+		want           bool
+	}{
+		{name: "open key", externalStatus: "OPEN", want: true},
+		{name: "reopened key", externalStatus: "REOPENED", want: true},
+		{name: "new label", externalStatus: "新建", want: true},
+		{name: "reopened label", externalStatus: "重新打开", want: true},
+		{name: "mapped todo custom key", externalStatus: "BVtdwq9Vd", localStatus: "todo", want: true},
+		{name: "in progress", externalStatus: "IN PROGRESS", localStatus: "in_progress", want: false},
+		{name: "unmapped unknown falls back elsewhere", externalStatus: "custom", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isFeishuProjectOwnerAgentAssignableStatus(tc.externalStatus, tc.localStatus); got != tc.want {
+				t.Fatalf("isFeishuProjectOwnerAgentAssignableStatus(%q, %q) = %v, want %v", tc.externalStatus, tc.localStatus, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestFeishuProjectParseSizeBytes(t *testing.T) {
 	cases := map[string]int64{
 		"1234":  1234,
