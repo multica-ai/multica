@@ -462,6 +462,12 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 		if priority == "" {
 			priority = "high"
 		}
+		welcomePos, err := nextIssuePosition(r.Context(), qtx, wsUUID, "todo")
+		if err != nil {
+			slog.Warn("import starter content: alloc welcome position failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to create welcome issue")
+			return
+		}
 		welcome, err := qtx.CreateIssue(r.Context(), db.CreateIssueParams{
 			WorkspaceID:  wsUUID,
 			Title:        req.WelcomeIssueTemplate.Title,
@@ -473,6 +479,7 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 			CreatorType:  "member",
 			CreatorID:    actorID,
 			Number:       welcomeNumber,
+			Position:     welcomePos,
 		})
 		if err != nil {
 			slog.Warn("import starter content: create welcome issue failed", append(logger.RequestAttrs(r), "error", err)...)
@@ -510,6 +517,12 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 		if priority == "" {
 			priority = "none"
 		}
+		subPos, err := nextIssuePosition(r.Context(), qtx, wsUUID, status)
+		if err != nil {
+			slog.Warn("import starter content: alloc sub-issue position failed", append(logger.RequestAttrs(r), "error", err, "title", sub.Title)...)
+			writeError(w, http.StatusInternalServerError, "failed to create sub-issues")
+			return
+		}
 		issue, err := qtx.CreateIssue(r.Context(), db.CreateIssueParams{
 			WorkspaceID:  wsUUID,
 			Title:        sub.Title,
@@ -522,6 +535,7 @@ func (h *Handler) ImportStarterContent(w http.ResponseWriter, r *http.Request) {
 			CreatorID:    actorID,
 			Number:       number,
 			ProjectID:    project.ID,
+			Position:     subPos,
 		})
 		if err != nil {
 			slog.Warn("import starter content: create sub-issue failed", append(logger.RequestAttrs(r), "error", err, "title", sub.Title)...)

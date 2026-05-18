@@ -132,6 +132,28 @@ FROM issue
 WHERE workspace_id = $1 AND status = $2
 ORDER BY position ASC, created_at DESC, id DESC;
 
+-- name: GetIssueNeighborGap :one
+-- Hot-path query used by MaybeEnqueueRebalance: returns the largest position
+-- strictly less than @target_position (prev) and the smallest position strictly
+-- greater than @target_position (next) within the same (workspace_id, status)
+-- bucket. Bucket-edge issues have no prev or no next; we COALESCE the missing
+-- side to (target ± 1.0) so the computed gap is always finite and large (= 1.0,
+-- well above any plausible rebalance threshold), which means edge drags never
+-- trigger a rebalance — correct, because there is no precision pressure on the
+-- side without a neighbour. Backed by idx_issue_workspace_status_position, so
+-- both subqueries are bounded-cost index seeks regardless of bucket size.
+SELECT
+  COALESCE(
+    (SELECT MAX(i1.position) FROM issue i1
+       WHERE i1.workspace_id = @workspace_id AND i1.status = @status AND i1.position < @target_position),
+    @target_position::float8 - 1.0
+  )::float8 AS prev_position,
+  COALESCE(
+    (SELECT MIN(i2.position) FROM issue i2
+       WHERE i2.workspace_id = @workspace_id AND i2.status = @status AND i2.position > @target_position),
+    @target_position::float8 + 1.0
+  )::float8 AS next_position;
+
 -- name: UpdateIssuePositionOnly :exec
 -- Worker-only: rewrite a single issue's `position` without bumping
 -- `updated_at`. Going through the full UpdateIssue mutation would broadcast

@@ -79,12 +79,19 @@ func (s *PositionRebalanceService) Start(ctx context.Context) {
 	})
 }
 
-// MaybeEnqueueRebalance compares the saved position against its immediate
-// neighbours in the bucket and enqueues a rebalance if either gap fell below
+// MaybeEnqueueRebalance compares the dragged issue's position against its two
+// immediate neighbours and enqueues a rebalance if either gap fell below
 // GapThreshold. Called from the UpdateIssue handler after the position write
 // has committed. Never blocks; if the queue is saturated we drop the request
 // — the next drag in the bucket will retry, and saturated queues only happen
 // during contended drag bursts where the next rebalance is imminent anyway.
+//
+// The hot path queries ONLY the prev/next neighbours of `position` (two
+// indexed-seek subqueries), never the whole bucket. The full-bucket scan
+// stays inside the worker, where it runs off the user's drag latency budget
+// and only when a rebalance is actually scheduled. Before MUL-2314 reviewer
+// note #3 this method scanned the entire bucket on every drag — O(N) per
+// drag in a bucket of N issues, killed responsiveness on large columns.
 //
 // We compute neighbours from the persisted bucket rather than trusting the
 // client-supplied prev/next ids: the active drag's `position` is now in the
@@ -94,31 +101,33 @@ func (s *PositionRebalanceService) MaybeEnqueueRebalance(
 	ctx context.Context,
 	workspaceID pgtype.UUID,
 	status string,
+	position float64,
 ) {
 	if s == nil || s.Bus == nil || s.Queries == nil {
 		return
 	}
-	rows, err := s.Queries.ListIssuePositionsByBucket(ctx, db.ListIssuePositionsByBucketParams{
-		WorkspaceID: workspaceID,
-		Status:      status,
+	gap, err := s.Queries.GetIssueNeighborGap(ctx, db.GetIssueNeighborGapParams{
+		WorkspaceID:    workspaceID,
+		Status:         status,
+		TargetPosition: position,
 	})
 	if err != nil {
-		slog.Warn("rebalance gap check: list bucket positions failed", "error", err)
-		return
-	}
-	if len(rows) < 2 {
+		slog.Warn("rebalance gap check: neighbor query failed", "error", err)
 		return
 	}
 	threshold := s.GapThreshold
 	if threshold == 0 {
 		threshold = 1e-9
 	}
-	minGap := rows[1].Position - rows[0].Position
-	for i := 2; i < len(rows); i++ {
-		gap := rows[i].Position - rows[i-1].Position
-		if gap < minGap {
-			minGap = gap
-		}
+	// Edge-of-bucket case is handled inside SQL: missing prev/next gets a
+	// sentinel of (position ± 1.0), so the gap is always ≥ 1.0 (well above
+	// any plausible threshold) and never triggers a rebalance — correct,
+	// because there is no precision pressure on a side without a neighbour.
+	prevGap := position - gap.PrevPosition
+	nextGap := gap.NextPosition - position
+	minGap := prevGap
+	if nextGap < minGap {
+		minGap = nextGap
 	}
 	if minGap >= threshold {
 		return

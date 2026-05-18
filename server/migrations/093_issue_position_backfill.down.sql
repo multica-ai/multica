@@ -1,6 +1,14 @@
+-- Drop only the supporting index. The `position` column itself is NOT
+-- reset, because doing so would destroy any drag-drop edits and freshly
+-- created issues whose `position` values were assigned AFTER the up
+-- migration ran — i.e. real user data, not just backfilled values.
+--
+-- Per MUL-2314 reviewer note #4: rolling back the data side of this
+-- migration is out-of-band. The deploy runbook for MUL-2314 takes a
+-- `position` snapshot (`pg_dump --table=issue --data-only` filtered to
+-- `id, position`) immediately before applying 093.up. If a rollback is
+-- needed, restore from that snapshot. Doing a destructive `UPDATE issue
+-- SET position = 0` here would silently lose every drag and every newly
+-- created issue's sparse position, which is exactly the regression the
+-- whole change set is meant to prevent.
 DROP INDEX IF EXISTS idx_issue_workspace_status_position;
-
--- Cannot losslessly reverse the backfill; the original value was 0.0 for every
--- row. Reset to 0.0 so the bucket ordering falls back to `created_at DESC` and
--- behaves like pre-migration state for older clients that read `position` directly.
-UPDATE issue SET position = 0;

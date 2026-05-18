@@ -441,30 +441,89 @@ func TestDeleteIssueRejectsInvalidUUID(t *testing.T) {
 }
 
 // TestListIssuesSortByUnknownDowngrades guards the API compatibility contract
-// in MUL-2314: passing an unknown sort_by value must return 200 with the
-// default ordering (created_at DESC) rather than 400. Older desktop builds
-// that hard-code a now-renamed sort key keep working.
+// in MUL-2314: missing / unknown sort_by AND illegal sort_direction must all
+// collapse to the documented default ordering — `created_at DESC, id DESC` —
+// not 400, not ASC. Older desktop builds that hard-code a now-renamed sort key
+// keep working; freshly-created issues stay at the top.
+//
+// We seed three issues in time order, then assert that under every degenerate
+// query string the response is newest → oldest.
 func TestListIssuesSortByUnknownDowngrades(t *testing.T) {
-	// Seed a single issue so the response has something to assert against.
-	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title": "sort_by fallback test",
-	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	createOne := func(title string) IssueResponse {
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+			"title": title,
+		})
+		testHandler.CreateIssue(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateIssue %q: expected 201, got %d: %s", title, w.Code, w.Body.String())
+		}
+		var seeded IssueResponse
+		if err := json.NewDecoder(w.Body).Decode(&seeded); err != nil {
+			t.Fatalf("decode CreateIssue %q: %v", title, err)
+		}
+		return seeded
 	}
-	var seeded IssueResponse
-	json.NewDecoder(w.Body).Decode(&seeded)
+
+	first := createOne("sort fallback A (oldest)")
+	time.Sleep(10 * time.Millisecond)
+	second := createOne("sort fallback B")
+	time.Sleep(10 * time.Millisecond)
+	third := createOne("sort fallback C (newest)")
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, seeded.ID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = ANY($1::uuid[])`,
+			[]string{first.ID, second.ID, third.ID})
 	})
 
-	w = httptest.NewRecorder()
-	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&sort_by=this_field_does_not_exist&sort_direction=banana", nil)
-	testHandler.ListIssues(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ListIssues: expected 200 with unknown sort, got %d: %s", w.Code, w.Body.String())
+	// Each row is a (label, query-string) pair that must produce the same
+	// newest-first ordering — every input that the contract says should
+	// downgrade goes through the same assertion.
+	cases := []struct {
+		name  string
+		query string
+	}{
+		{"missing sort_by and direction", ""},
+		{"unknown sort_by, garbage direction", "&sort_by=this_field_does_not_exist&sort_direction=banana"},
+		{"empty sort_by, garbage direction", "&sort_direction=banana"},
+		{"known sort_by, garbage direction (full downgrade)", "&sort_by=priority&sort_direction=sideways"},
+	}
+
+	wantOrder := []string{third.ID, second.ID, first.ID}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := newRequest("GET",
+				"/api/issues?workspace_id="+testWorkspaceID+tc.query, nil)
+			testHandler.ListIssues(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+			}
+			var resp struct {
+				Issues []IssueResponse `json:"issues"`
+			}
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			// Filter to the three issues we seeded — other tests may have
+			// left issues in the workspace and we only care about relative
+			// order among ours.
+			seen := make(map[string]int)
+			for i, it := range resp.Issues {
+				seen[it.ID] = i
+			}
+			for i := 0; i < len(wantOrder)-1; i++ {
+				a, okA := seen[wantOrder[i]]
+				b, okB := seen[wantOrder[i+1]]
+				if !okA || !okB {
+					t.Fatalf("seeded issues missing from response: ids=%v seen=%v", wantOrder, seen)
+				}
+				if a >= b {
+					t.Fatalf("expected %s before %s, got positions %d vs %d",
+						wantOrder[i], wantOrder[i+1], a, b)
+				}
+			}
+		})
 	}
 }
 

@@ -892,6 +892,47 @@ func (q *Queries) GetMinIssuePosition(ctx context.Context, arg GetMinIssuePositi
 	return min_position, err
 }
 
+const getIssueNeighborGap = `-- name: GetIssueNeighborGap :one
+SELECT
+  COALESCE(
+    (SELECT MAX(i1.position) FROM issue i1
+       WHERE i1.workspace_id = $1 AND i1.status = $2 AND i1.position < $3),
+    $3::float8 - 1.0
+  )::float8 AS prev_position,
+  COALESCE(
+    (SELECT MIN(i2.position) FROM issue i2
+       WHERE i2.workspace_id = $1 AND i2.status = $2 AND i2.position > $3),
+    $3::float8 + 1.0
+  )::float8 AS next_position
+`
+
+type GetIssueNeighborGapParams struct {
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	Status         string      `json:"status"`
+	TargetPosition float64     `json:"target_position"`
+}
+
+type GetIssueNeighborGapRow struct {
+	PrevPosition float64 `json:"prev_position"`
+	NextPosition float64 `json:"next_position"`
+}
+
+// Hot-path query used by MaybeEnqueueRebalance: returns the largest position
+// strictly less than @target_position (prev) and the smallest position strictly
+// greater than @target_position (next) within the same (workspace_id, status)
+// bucket. Bucket-edge issues have no prev or no next; we COALESCE the missing
+// side to (target ± 1.0) so the computed gap is always finite and large (= 1.0,
+// well above any plausible rebalance threshold), which means edge drags never
+// trigger a rebalance — correct, because there is no precision pressure on the
+// side without a neighbour. Backed by idx_issue_workspace_status_position, so
+// both subqueries are bounded-cost index seeks regardless of bucket size.
+func (q *Queries) GetIssueNeighborGap(ctx context.Context, arg GetIssueNeighborGapParams) (GetIssueNeighborGapRow, error) {
+	row := q.db.QueryRow(ctx, getIssueNeighborGap, arg.WorkspaceID, arg.Status, arg.TargetPosition)
+	var i GetIssueNeighborGapRow
+	err := row.Scan(&i.PrevPosition, &i.NextPosition)
+	return i, err
+}
+
 const listIssuePositionsByBucket = `-- name: ListIssuePositionsByBucket :many
 SELECT id, position, created_at
 FROM issue

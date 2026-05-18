@@ -100,14 +100,34 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 //
 // `tablePrefix` is the alias used in the surrounding query — `""` for the flat
 // ListIssues query (column-only), `"i."` for ListGroupedIssues (table alias `i`).
+//
+// Three inputs collapse to the same fallback `created_at DESC, id DESC`:
+//
+//  1. sort_by missing (empty string)
+//  2. sort_by unknown (server renamed / older client guesses)
+//  3. sort_direction not "asc" or "desc" (typos, garbage params)
+//
+// The fallback is DESC, not ASC: "newest first" is the documented default and
+// the only ordering that keeps freshly-created issues visible at the top of
+// the list. Older code defaulted to ASC, which silently flipped recently-added
+// issues to the bottom — see MUL-2314 reviewer note #1.
 func issueOrderByClause(sortBy, sortDirection, tablePrefix string) string {
-	dir := "ASC"
-	rev := "DESC"
-	if strings.EqualFold(sortDirection, "desc") {
-		dir = "DESC"
-		rev = "ASC"
-	}
 	p := tablePrefix
+	defaultClause := fmt.Sprintf("%screated_at DESC, %sid DESC", p, p)
+
+	dir := ""
+	switch {
+	case strings.EqualFold(sortDirection, "asc"):
+		dir = "ASC"
+	case strings.EqualFold(sortDirection, "desc"):
+		dir = "DESC"
+	}
+	// Illegal direction triggers full downgrade. We do this BEFORE the sort_by
+	// switch so a garbage direction can never partially apply to a known key.
+	if dir == "" {
+		return defaultClause
+	}
+
 	switch sortBy {
 	case "position":
 		// Manual sort: `position ASC, created_at DESC, id DESC` is the legacy
@@ -123,10 +143,7 @@ func issueOrderByClause(sortBy, sortDirection, tablePrefix string) string {
 	case "priority":
 		// CASE expression inlined per plan — five-element enum, no materialized
 		// rank column needed. Lower number = higher priority, so ASC = urgent
-		// first. We reuse `rev` for the tie-breaker tail when direction is DESC,
-		// keeping "issues with the same priority order newest first" intuitive
-		// in either direction.
-		_ = rev // reserved for future symmetric ordering
+		// first.
 		return fmt.Sprintf(
 			"(CASE %spriority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END) %s, %screated_at DESC, %sid DESC",
 			p, dir, p, p,
@@ -138,13 +155,41 @@ func issueOrderByClause(sortBy, sortDirection, tablePrefix string) string {
 	case "title":
 		return fmt.Sprintf("%stitle %s NULLS LAST, %sid DESC", p, dir, p)
 	case "created_at":
-		fallthrough
-	default:
-		// Unknown sort_by silently downgrades to the documented default.
-		// `ListIssues` returning HTTP 400 here would white-screen older desktop
-		// builds that hard-coded a sort key the server later renamed.
 		return fmt.Sprintf("%screated_at %s, %sid DESC", p, dir, p)
+	default:
+		// Empty / unknown sort_by silently downgrades to the documented default.
+		// Returning 400 would white-screen older desktop builds that hard-coded
+		// a sort key the server later renamed.
+		return defaultClause
 	}
+}
+
+// nextIssuePosition allocates the float8 `position` value for a freshly-created
+// issue inside a (workspace_id, status) bucket. Always `MIN(position) - 1.0`,
+// so under the legacy `position ASC, created_at DESC` ordering still used by
+// older desktop clients the new issue lands at the top of the bucket.
+//
+// Every code path that creates an issue MUST go through this helper. Before
+// MUL-2314 reviewer note #2, two onboarding paths (welcome issue, sub-issues)
+// called `qtx.CreateIssue` without a Position and silently inherited Go's zero
+// value, re-introducing the "all positions collapse to 0" root cause that the
+// rest of the change set was supposed to fix. Centralising the allocation
+// here is the 三次原则 consolidation: there is exactly one place to update if
+// the strategy ever changes (e.g. when Lexorank lands in Phase 3).
+//
+// Must be called with the same `qtx` that will run `CreateIssue` so the
+// allocation participates in the create transaction — the row-lock taken by
+// `IncrementIssueCounter` on the workspace row in the same tx is what
+// serialises concurrent creates inside one bucket.
+func nextIssuePosition(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID, status string) (float64, error) {
+	minPos, err := qtx.GetMinIssuePosition(ctx, db.GetMinIssuePositionParams{
+		WorkspaceID: workspaceID,
+		Status:      status,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return minPos - 1.0, nil
 }
 
 // issueListRowToResponse converts a list-query row (no description) to an IssueResponse.
@@ -1803,20 +1848,17 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Allocate position = MIN(position) - 1.0 within the same (workspace,
-	// status) bucket. The serializing `UPDATE workspace` in
+	// Allocate position via the shared helper so every create path (this one
+	// plus onboarding welcome / sub-issues) writes a sparse value instead of
+	// the zero default. The serializing `UPDATE workspace` in
 	// IncrementIssueCounter above already row-locked this workspace, so
 	// concurrent creates pick up our value without an extra advisory lock.
-	minPosition, err := qtx.GetMinIssuePosition(r.Context(), db.GetMinIssuePositionParams{
-		WorkspaceID: wsUUID,
-		Status:      status,
-	})
+	newPosition, err := nextIssuePosition(r.Context(), qtx, wsUUID, status)
 	if err != nil {
 		slog.Warn("get min issue position failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create issue")
 		return
 	}
-	newPosition := minPosition - 1.0
 
 	// Determine creator identity: agent (via X-Agent-ID header) or member.
 	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
@@ -2167,11 +2209,13 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// After a successful position write, ask the rebalance service to inspect
-	// the (workspace, status) bucket and enqueue an async rebalance if the
-	// neighbour gap is approaching the float8 precision floor. The check is
-	// async (worker goroutine), so it never blocks the user's drag response.
+	// the dragged issue's prev/next gap and enqueue an async rebalance if
+	// either neighbour is approaching the float8 precision floor. The check
+	// itself is a bounded-cost neighbour query (NOT a full bucket scan), so
+	// the user's drag response stays O(1). The actual rebalance — which does
+	// scan the whole bucket — runs on a worker goroutine off the request path.
 	if req.Position != nil {
-		h.PositionRebalanceService.MaybeEnqueueRebalance(r.Context(), issue.WorkspaceID, issue.Status)
+		h.PositionRebalanceService.MaybeEnqueueRebalance(r.Context(), issue.WorkspaceID, issue.Status, issue.Position)
 	}
 
 	if len(attachmentIDs) > 0 {
