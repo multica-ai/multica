@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -224,10 +225,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		})
 	}
 
-	// Auth (public)
-	r.Post("/auth/send-code", h.SendCode)
-	r.Post("/auth/verify-code", h.VerifyCode)
-	r.Post("/auth/google", h.GoogleLogin)
+	// Auth (public) — per-IP rate limiting.
+	if rdb == nil {
+		slog.Warn("rate limiting disabled: REDIS_URL not configured")
+	}
+	trustedProxies := middleware.ParseTrustedProxies(os.Getenv("RATE_LIMIT_TRUSTED_PROXIES"))
+	authRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH", 5), time.Minute, trustedProxies)
+	authVerifyRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH_VERIFY", 20), time.Minute, trustedProxies)
+	r.With(authRL).Post("/auth/send-code", h.SendCode)
+	r.With(authVerifyRL).Post("/auth/verify-code", h.VerifyCode)
+	r.With(authRL).Post("/auth/google", h.GoogleLogin)
 	r.Post("/auth/logout", h.Logout)
 
 	// Public API
