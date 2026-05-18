@@ -94,6 +94,21 @@ func (h *Handler) loadSquadInWorkspace(w http.ResponseWriter, r *http.Request) (
 	return squad, workspaceID, true
 }
 
+// requireSquadManager verifies the caller is allowed to manage (update/delete/
+// add-member etc.) the given squad. Owner/admin can manage any squad; a regular
+// member may only manage squads they created.
+func (h *Handler) requireSquadManager(w http.ResponseWriter, r *http.Request, workspaceID string, squad db.Squad) (db.Member, bool) {
+	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin", "member")
+	if !ok {
+		return db.Member{}, false
+	}
+	if member.Role == "member" && member.UserID != squad.CreatorID {
+		writeError(w, http.StatusForbidden, "only the squad creator or an admin can manage this squad")
+		return db.Member{}, false
+	}
+	return member, true
+}
+
 // ── Handlers ────────────────────────────────────────────────────────────────
 
 func (h *Handler) ListSquads(w http.ResponseWriter, r *http.Request) {
@@ -116,7 +131,7 @@ func (h *Handler) ListSquads(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "workspaceId")
-	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin")
+	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin", "member")
 	if !ok {
 		return
 	}
@@ -200,12 +215,12 @@ func (h *Handler) GetSquad(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "workspaceId")
-	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
-		return
-	}
 
 	squad, _, ok := h.loadSquadInWorkspace(w, r)
 	if !ok {
+		return
+	}
+	if _, ok := h.requireSquadManager(w, r, workspaceID, squad); !ok {
 		return
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
@@ -275,12 +290,12 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteSquad(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "workspaceId")
-	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
-		return
-	}
 
 	squad, _, ok := h.loadSquadInWorkspace(w, r)
 	if !ok {
+		return
+	}
+	if _, ok := h.requireSquadManager(w, r, workspaceID, squad); !ok {
 		return
 	}
 
@@ -336,12 +351,12 @@ func (h *Handler) ListSquadMembers(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "workspaceId")
-	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
-		return
-	}
 
 	squad, _, ok := h.loadSquadInWorkspace(w, r)
 	if !ok {
+		return
+	}
+	if _, ok := h.requireSquadManager(w, r, workspaceID, squad); !ok {
 		return
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
@@ -412,12 +427,12 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) RemoveSquadMember(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "workspaceId")
-	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
-		return
-	}
 
 	squad, _, ok := h.loadSquadInWorkspace(w, r)
 	if !ok {
+		return
+	}
+	if _, ok := h.requireSquadManager(w, r, workspaceID, squad); !ok {
 		return
 	}
 
@@ -463,12 +478,12 @@ func (h *Handler) RemoveSquadMember(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UpdateSquadMemberRole(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "workspaceId")
-	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
-		return
-	}
 
 	squad, _, ok := h.loadSquadInWorkspace(w, r)
 	if !ok {
+		return
+	}
+	if _, ok := h.requireSquadManager(w, r, workspaceID, squad); !ok {
 		return
 	}
 
