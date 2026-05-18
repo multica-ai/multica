@@ -186,6 +186,7 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 			Body:          textToPtr(item.Body),
 			Read:          item.Read,
 			Archived:      item.Archived,
+			MutedUntil:    timestampToPtr(item.MutedUntil), // CEREBRO-PATCH(cerebro-inbox-fields)
 			CreatedAt:     timestampToString(item.CreatedAt),
 			IssueStatus:   textToPtr(item.IssueStatus),
 			ActorType:     textToPtr(item.ActorType),

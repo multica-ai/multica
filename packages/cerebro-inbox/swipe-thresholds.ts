@@ -30,10 +30,18 @@
  *        Release no longer leaves a 1s "stuck" destructive state. The user
  *        must hold beyond the threshold briefly, and moving back under the
  *        threshold cancels before release.
- *  - v7 (current): full-flick instant archive. A swipe covering ≥95% of the
- *        row width commits on release without any hold delay — the intent is
- *        unambiguous at that distance. Hold-to-commit still applies for
- *        shorter swipes beyond the 35% threshold.
+ *  - v7: full-flick instant archive. A swipe covering ≥95% of the row width
+ *        commits on release without any hold delay — the intent is unambiguous
+ *        at that distance. Hold-to-commit still applies for shorter swipes
+ *        beyond the 35% threshold.
+ *  - v8: raised hold-to-commit threshold from 35% → 80% to reduce accidental
+ *        archives. Users must swipe nearly the full row width to trigger the
+ *        hold-to-commit path. Max clamp raised from 200 → 400 px so 80% of
+ *        standard phone widths (320–430 px) is never clipped.
+ *  - v9 (current): instant-archive threshold lowered from 95% → 80% to match
+ *        the commit threshold. Any swipe reaching 80% now archives immediately
+ *        on release; the hold-to-commit path is only reached at exactly the
+ *        commit boundary, making the two thresholds consistent.
  *
  * Sources:
  *  - "Pointer events vs touch events for swipe" — react-swipeable's README
@@ -42,9 +50,9 @@
  *  - Material 3 swipe-to-dismiss positional threshold — 25–30%.
  */
 
-export const SWIPE_COMMIT_FRACTION = 0.35;
+export const SWIPE_COMMIT_FRACTION = 0.80;
 export const SWIPE_COMMIT_MIN_PX = 80;
-export const SWIPE_COMMIT_MAX_PX = 200;
+export const SWIPE_COMMIT_MAX_PX = 400;
 
 /** Pixels of finger travel that count as "the user tried to swipe" — used
  * to suppress the synthetic click after touchend even when the swipe didn't
@@ -83,12 +91,12 @@ export const LEFT_PANEL_REVEAL_PX = 144;
 
 /**
  * Commit threshold (px) needed to fire archive / panel-reveal for a row of
- * the given width. 35% with a [80, 200] clamp:
+ * the given width. 80% with a [80, 400] clamp:
  *
- *   iPhone SE (320 px) → 112 px (35%)
- *   iPhone Pro (414 px) → 145 px (35%)
- *   iPhone 16 Pro Max (430 px) → 151 px (35%)
- *   iPad split-view (~600 px) → 200 px (clamp cap, ~33%)
+ *   iPhone SE (320 px) → 256 px (80%)
+ *   iPhone Pro (414 px) → 331 px (80%)
+ *   iPhone 16 Pro Max (430 px) → 344 px (80%)
+ *   iPad split-view (~600 px) → 400 px (clamp cap, ~67%)
  */
 export function commitThresholdPx(rowWidth: number): number {
   const target = rowWidth * SWIPE_COMMIT_FRACTION;
@@ -104,8 +112,9 @@ export function shouldCommitHeldSwipe(
 }
 
 /** Fraction of row width that triggers instant archive on release
- * without requiring a hold — the gesture is unambiguous at this distance. */
-export const SWIPE_INSTANT_ARCHIVE_FRACTION = 0.95;
+ * without requiring a hold — must match SWIPE_COMMIT_FRACTION so reaching
+ * the archive zone always commits immediately. */
+export const SWIPE_INSTANT_ARCHIVE_FRACTION = 0.80;
 
 /** Returns true when the user has swiped far enough that archive should
  * commit immediately on release, bypassing the hold-to-commit timer. */
