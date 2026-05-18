@@ -34,6 +34,14 @@ INSERT INTO issue (
 SELECT * FROM issue
 WHERE workspace_id = $1 AND number = $2;
 
+-- name: GetIssueByFeishuExternalIdentifier :one
+SELECT * FROM issue
+WHERE workspace_id = $1
+  AND (title = '[' || sqlc.arg('external_identifier')::text || ']'
+       OR title LIKE '[' || sqlc.arg('external_identifier')::text || '] %')
+ORDER BY created_at DESC
+LIMIT 1;
+
 -- name: UpdateIssue :one
 UPDATE issue SET
     title = COALESCE(sqlc.narg('title'), title),

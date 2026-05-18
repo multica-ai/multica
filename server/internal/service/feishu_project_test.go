@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -83,6 +84,52 @@ func TestFeishuProjectIssueStatusOptionsUsesTemplateStateFlow(t *testing.T) {
 	}
 	if statuses[1].Key != "IN PROGRESS" || statuses[1].Name != "处理中" {
 		t.Fatalf("second status = %#v", statuses[1])
+	}
+}
+
+func TestFeishuProjectPluginTokenCachesAndRefreshes(t *testing.T) {
+	var calls int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/open_api/authen/plugin_token" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		call := atomic.AddInt32(&calls, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"err_code":0,"data":{"plugin_token":"plugin-token-` + strconv.Itoa(int(call)) + `"}}`))
+	}))
+	defer server.Close()
+
+	client := &FeishuProjectClient{
+		HTTPClient: server.Client(),
+		BaseURL:    server.URL,
+	}
+	token1, err := client.pluginToken(context.Background(), "plugin-id", "plugin-secret")
+	if err != nil {
+		t.Fatalf("pluginToken first call: %v", err)
+	}
+	token2, err := client.pluginToken(context.Background(), "plugin-id", "plugin-secret")
+	if err != nil {
+		t.Fatalf("pluginToken cached call: %v", err)
+	}
+	if token1 != "plugin-token-1" || token2 != token1 {
+		t.Fatalf("tokens = %q, %q; want cached first token", token1, token2)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("plugin token calls = %d, want 1", got)
+	}
+
+	client.pluginTokenMu.Lock()
+	client.pluginTokenTill = time.Now().Add(-time.Second)
+	client.pluginTokenMu.Unlock()
+	token3, err := client.pluginToken(context.Background(), "plugin-id", "plugin-secret")
+	if err != nil {
+		t.Fatalf("pluginToken after expiry: %v", err)
+	}
+	if token3 != "plugin-token-2" {
+		t.Fatalf("token after expiry = %q, want refreshed token", token3)
+	}
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Fatalf("plugin token calls after refresh = %d, want 2", got)
 	}
 }
 
