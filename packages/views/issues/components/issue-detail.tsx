@@ -10,6 +10,8 @@ import {
   ArrowDownToLine,
   ArrowUpToLine,
   Calendar,
+  CalendarClock,
+  CalendarDays,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -25,6 +27,7 @@ import {
   MessageSquareReply,
   Square,
   Terminal,
+  Tag,
   Users,
 } from "lucide-react";
 import { PageHeader } from "../../layout/page-header";
@@ -71,6 +74,8 @@ import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { useIssueActions } from "../actions";
 import { IssueActionsMenuItems, dropdownPrimitives } from "../actions/issue-actions-menu-items";
+import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
+import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
 import { CommentInput, type CommentInputRef } from "./comment-input";
@@ -88,6 +93,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { useClearIssueHistory } from "@multica/core/issues/mutations";
+import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
@@ -251,6 +257,11 @@ function formatActivity(
       if (details.from_id && !details.to_id) return t(($) => $.activity.removed_assignee);
       return t(($) => $.activity.changed_assignee);
     }
+    case "start_date_changed": {
+      if (!details.to) return t(($) => $.activity.start_date_removed);
+      const formatted = new Date(details.to).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      return t(($) => $.activity.start_date_set, { date: formatted });
+    }
     case "due_date_changed": {
       if (!details.to) return t(($) => $.activity.due_date_removed);
       const formatted = new Date(details.to).toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -304,6 +315,63 @@ function formatTokenCount(n: number): string {
 
 // Stable reference for threads with no replies. Inline `[]` would create a
 // new array on every render and bust React.memo on CommentCard / ResolvedThreadBar.
+const EMPTY_REPLIES: TimelineEntry[] = [];
+
+// ---------------------------------------------------------------------------
+// Sidebar progressive disclosure
+// ---------------------------------------------------------------------------
+//
+// Properties shown in the sidebar split into two groups:
+//   - core: always rendered (status / assignee / project)
+//   - optional: rendered only when the issue has a value for that field OR
+//     the user explicitly added it via "+ Add property" in this session
+//     (priority / due_date / labels)
+//
+// Parent is not in either group — it has its own standalone section below
+// the Properties block, rendered only when the issue actually has a parent.
+//
+// `OPTIONAL_PROP_KEYS` is the open set — adding a new optional field
+// means appending here, wiring its row in the JSX switch below, and
+// adding a locale key. The picker, visibility rules, and add-property
+// menu all flow from this one list.
+const OPTIONAL_PROP_KEYS = ["priority", "start_date", "due_date", "labels"] as const;
+type OptionalPropKey = (typeof OPTIONAL_PROP_KEYS)[number];
+
+function isOptionalPropSet(
+  issue: Issue,
+  key: OptionalPropKey,
+  attachedLabelsCount: number,
+): boolean {
+  switch (key) {
+    case "priority":
+      return issue.priority !== "none";
+    case "start_date":
+      return !!issue.start_date;
+    case "due_date":
+      return !!issue.due_date;
+    case "labels":
+      return attachedLabelsCount > 0;
+  }
+}
+
+// Shallow array equality by element identity. Used to reuse the previous
+// render's per-thread reply slice when nothing in *this* thread changed,
+// even if the surrounding `timeline` array was rebuilt by a WS event in
+// some unrelated thread.
+function shallowEqualEntries(a: TimelineEntry[], b: TimelineEntry[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+// Flat per-item shape consumed by <Virtuoso>. Virtuoso needs a flat array
+// where each entry is one rendered row; we keep the grouping logic from
+// `timelineView.groups` (consecutive same-actor activities still collapse
+// into one activity-group row) but project it into a discriminated union
+// the itemContent dispatcher can switch on.
 type TimelineItem =
   | { kind: "comment"; id: string; entry: TimelineEntry }
   | { kind: "resolved-bar"; id: string; entry: TimelineEntry }
@@ -475,6 +543,7 @@ function ActivityBlock({
         const details = (entry.details ?? {}) as Record<string, string>;
         const isStatusChange = entry.action === "status_changed";
         const isPriorityChange = entry.action === "priority_changed";
+        const isStartDateChange = entry.action === "start_date_changed";
         const isDueDateChange = entry.action === "due_date_changed";
 
         let leadIcon: React.ReactNode;
@@ -482,6 +551,8 @@ function ActivityBlock({
           leadIcon = <StatusIcon status={details.to as IssueStatus} className="h-4 w-4 shrink-0" />;
         } else if (isPriorityChange && details.to) {
           leadIcon = <PriorityIcon priority={details.to as IssuePriority} className="h-4 w-4 shrink-0" />;
+        } else if (isStartDateChange) {
+          leadIcon = <CalendarClock className="h-4 w-4 shrink-0 text-muted-foreground" />;
         } else if (isDueDateChange) {
           leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
         } else {
@@ -539,7 +610,14 @@ function SubIssueRow({ child }: { child: Issue }) {
     (updates: Partial<UpdateIssueRequest>) => {
       updateIssue.mutate(
         { id: child.id, ...updates },
-        { onError: () => toast.error(t(($) => $.detail.update_failed)) },
+        {
+          onError: (err) =>
+            toast.error(
+              err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.detail.update_failed),
+            ),
+        },
       );
     },
     [child.id, updateIssue, t],
@@ -705,6 +783,24 @@ export function IssueDetail({
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
   const [previewLogs, setPreviewLogs] = useState<{ title: string; logs: string } | null>(null);
+
+  // Per-issue, per-session set of optional properties currently visible in
+  // the sidebar Properties section. Seeded on issue switch with whichever
+  // fields are already set; "+ Add property" adds an entry, clearing a
+  // value does *not* remove one (avoids row-flicker on edit → clear).
+  // Resets when the user navigates to a different issue.
+  const [visibleOptionalProps, setVisibleOptionalProps] = useState<Set<OptionalPropKey>>(
+    () => new Set(),
+  );
+  // Optional property to auto-open as soon as it's mounted (the user just
+  // picked it from "+ Add property" and we want them dropped straight into
+  // edit state). Consumed by the row that matches this key, cleared after.
+  const [autoOpenProp, setAutoOpenProp] = useState<OptionalPropKey | null>(null);
+  // Controlled state for the "+ Add property" popover. Base UI's Popover
+  // doesn't auto-dismiss on item click (it's not a Menu primitive), so the
+  // popover would stay open behind the newly auto-opened picker — two
+  // popovers stacked. We close it explicitly in `addOptionalProp`.
+  const [addPropPopoverOpen, setAddPropPopoverOpen] = useState(false);
   // Virtuoso's `customScrollParent` wants the HTMLElement, not a ref. A plain
   // `useRef.current` does not trigger a re-render when it populates, so the
   // Virtuoso prop would never receive the element. Callback ref + state fixes
@@ -1351,6 +1447,65 @@ export function IssueDetail({
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [closeQuoteMenu, quoteMenu]);
+  // Labels live in their own query (not on the issue body) — fetch the count
+  // here so seeding can decide whether the "Labels" optional row should be
+  // shown for an issue that already has labels attached.
+  const { data: attachedLabels = [] } = useQuery(issueLabelsOptions(wsId, id));
+  const attachedLabelsCount = attachedLabels.length;
+
+  // Seed the visible-optional-props set:
+  //   - on issue switch, reset to whichever fields are currently set
+  //   - on the SAME issue, additively pick up fields the user just set
+  //     (so the row stays visible after they edit + clear in one session)
+  // Removal happens only on issue switch — never on clear.
+  const seededIssueIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!issue) return;
+    if (seededIssueIdRef.current !== issue.id) {
+      seededIssueIdRef.current = issue.id;
+      setAutoOpenProp(null);
+      const seed = new Set<OptionalPropKey>();
+      for (const k of OPTIONAL_PROP_KEYS) {
+        if (isOptionalPropSet(issue, k, attachedLabelsCount)) seed.add(k);
+      }
+      setVisibleOptionalProps(seed);
+      return;
+    }
+    setVisibleOptionalProps((prev) => {
+      let next = prev;
+      for (const k of OPTIONAL_PROP_KEYS) {
+        if (isOptionalPropSet(issue, k, attachedLabelsCount) && !next.has(k)) {
+          if (next === prev) next = new Set(prev);
+          next.add(k);
+        }
+      }
+      return next;
+    });
+  }, [issue, attachedLabelsCount]);
+
+  const addOptionalProp = useCallback(
+    (key: OptionalPropKey) => {
+      setVisibleOptionalProps((prev) => {
+        if (prev.has(key)) return prev;
+        const next = new Set(prev);
+        next.add(key);
+        return next;
+      });
+      setAutoOpenProp(key);
+      // Dismiss the "+ Add property" popover so it doesn't sit stacked
+      // behind the picker we're about to auto-open.
+      setAddPropPopoverOpen(false);
+    },
+    [],
+  );
+
+  // Clear the auto-open flag after the next render so pickers (which read
+  // `defaultOpen` once via a useState initializer) keep the open state they
+  // captured on mount, but later interactions don't re-trigger it.
+  useEffect(() => {
+    if (autoOpenProp === null) return;
+    setAutoOpenProp(null);
+  }, [autoOpenProp]);
 
   const handleToggleSidebar = useCallback(() => {
     if (isMobile) {
@@ -1454,24 +1609,110 @@ export function IssueDetail({
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
         </button>
         {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
+          {/* Core props — always rendered. */}
           <PropRow label={t(($) => $.detail.prop_status)}>
             <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
-          </PropRow>
-          <PropRow label={t(($) => $.detail.prop_priority)}>
-            <PriorityPicker priority={issue.priority} onUpdate={handleUpdateField} align="start" />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
           </PropRow>
-          <PropRow label={t(($) => $.detail.prop_due_date)}>
-            <DueDatePicker dueDate={issue.due_date} onUpdate={handleUpdateField} />
-          </PropRow>
           <PropRow label={t(($) => $.detail.prop_project)}>
-            <ProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} />
+            <ProjectPicker
+              projectId={issue.project_id}
+              onUpdate={handleUpdateField}
+            />
           </PropRow>
-          <PropRow label={t(($) => $.detail.prop_labels)}>
-            <LabelPicker issueId={issue.id} align="start" />
-          </PropRow>
+
+          {/* Optional props — rendered only when set on the issue OR added
+              via "+ Add property" in this session. Row order follows the
+              order of `OPTIONAL_PROP_KEYS`. */}
+          {visibleOptionalProps.has("priority") && (
+            <PropRow label={t(($) => $.detail.prop_priority)}>
+              <PriorityPicker
+                priority={issue.priority}
+                onUpdate={handleUpdateField}
+                align="start"
+                defaultOpen={autoOpenProp === "priority"}
+              />
+            </PropRow>
+          )}
+          {visibleOptionalProps.has("start_date") && (
+            <PropRow label={t(($) => $.detail.prop_start_date)}>
+              <StartDatePicker
+                startDate={issue.start_date}
+                onUpdate={handleUpdateField}
+                defaultOpen={autoOpenProp === "start_date"}
+              />
+            </PropRow>
+          )}
+          {visibleOptionalProps.has("due_date") && (
+            <PropRow label={t(($) => $.detail.prop_due_date)}>
+              <DueDatePicker
+                dueDate={issue.due_date}
+                onUpdate={handleUpdateField}
+                defaultOpen={autoOpenProp === "due_date"}
+              />
+            </PropRow>
+          )}
+          {visibleOptionalProps.has("labels") && (
+            <PropRow label={t(($) => $.detail.prop_labels)}>
+              <LabelPicker
+                issueId={issue.id}
+                align="start"
+                defaultOpen={autoOpenProp === "labels"}
+              />
+            </PropRow>
+          )}
+
+          {/* "+ Add property" — opens a Popover listing optional fields
+              not yet displayed. Hidden once every optional field is on
+              screen. Sits inside the same grid as a full-row, with its
+              own padding so the visual rhythm follows the rows above. */}
+          {OPTIONAL_PROP_KEYS.some((k) => !visibleOptionalProps.has(k)) && (
+            <div className="col-span-2 mt-1">
+              <Popover open={addPropPopoverOpen} onOpenChange={setAddPropPopoverOpen}>
+                <PopoverTrigger
+                  className="flex items-center gap-1.5 rounded-md px-2 py-1 -mx-2 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+                >
+                  <Plus className="h-3 w-3 shrink-0" />
+                  <span>{t(($) => $.detail.add_property_action)}</span>
+                </PopoverTrigger>
+                {/* Item visuals mirror the inspector rows' typography
+                    (text-xs, muted icons) and each option leads with the
+                    icon the resulting picker uses, so the dropdown reads
+                    as a preview of what will show up below. */}
+                <PopoverContent align="start" className="w-44 p-1">
+                  {OPTIONAL_PROP_KEYS.filter((k) => !visibleOptionalProps.has(k)).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => addOptionalProp(k)}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-foreground/90 transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+                    >
+                      {k === "priority" && (
+                        <PriorityIcon priority="medium" inheritColor className="text-muted-foreground" />
+                      )}
+                      {k === "start_date" && (
+                        <CalendarClock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      )}
+                      {k === "due_date" && (
+                        <CalendarDays className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      )}
+                      {k === "labels" && (
+                        <Tag className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      )}
+                      <span className="truncate">
+                        {k === "priority" && t(($) => $.detail.prop_priority)}
+                        {k === "start_date" && t(($) => $.detail.prop_start_date)}
+                        {k === "due_date" && t(($) => $.detail.prop_due_date)}
+                        {k === "labels" && t(($) => $.detail.prop_labels)}
+                      </span>
+                    </button>
+                  ))}
+                </PopoverContent>
+              </Popover>
+            </div>
+          )}
         </div>}
       </div>
 
@@ -1555,6 +1796,10 @@ export function IssueDetail({
       )}
 
       {/* Parent issue */}
+      {/* Parent issue — standalone section, only when the issue has a
+          parent. Setting a parent is reachable via the issue actions menu;
+          this card surfaces an existing parent without occupying sidebar
+          space for issues that don't have one. */}
       {parentIssue && (
         <div>
           <button

@@ -15,10 +15,12 @@
  *   - markdown : fetch text via api.getAttachmentTextContent, render via
  *                the existing ReadonlyContent (full mention/mermaid/katex
  *                pipeline included).
- *   - html     : fetch text, hand to <iframe srcdoc={text} sandbox="">.
- *                Empty sandbox attribute = max restriction (no scripts,
- *                no forms, no top-nav, no popups, no same-origin) — the
- *                recommended pattern for previewing untrusted HTML.
+ *   - html     : fetch text, hand to <iframe srcdoc={text}
+ *                sandbox="allow-scripts">. The iframe runs in an opaque
+ *                origin: scripts execute (chart libraries / vanilla SVG
+ *                JS work), but cookie / localStorage / parent access /
+ *                top-navigation / popups / forms stay blocked because
+ *                `allow-same-origin` is intentionally NOT included.
  *   - text     : fetch text, highlight with lowlight if the extension
  *                maps to a known hljs language; otherwise plain <pre>.
  *
@@ -35,17 +37,11 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { useQuery } from "@tanstack/react-query";
-import { Download, FileText, Loader2, X } from "lucide-react";
-import { createLowlight, common } from "lowlight";
-// @ts-expect-error -- hast-util-to-html has no bundled type declarations
-import { toHtml } from "hast-util-to-html";
-import { cn } from "@multica/ui/lib/utils";
 import {
-  api,
   PreviewTooLargeError,
   PreviewUnsupportedError,
 } from "@multica/core/api";
+import { Download, FileText, Loader2, X } from "lucide-react";
 import type { Attachment } from "@multica/core/types";
 import { useT } from "../i18n";
 import { openExternal } from "../platform";
@@ -56,6 +52,8 @@ import {
   type PreviewKind,
 } from "./utils/preview";
 import { useDownloadAttachment } from "./use-download-attachment";
+import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
+import { CodeBlockStatic } from "./code-block-static";
 
 // ---------------------------------------------------------------------------
 // Preview source — full attachment, or URL-only (media types only)
@@ -355,7 +353,12 @@ function PreviewContent({
           render={(text) => (
             <iframe
               srcDoc={text}
-              sandbox=""
+              // `allow-scripts` without `allow-same-origin` — scripts run
+              // in an opaque origin and cannot read cookies / localStorage
+              // / parent state, nor escape via top-nav / popups / forms.
+              // Required so JS-driven charts (echarts / Plotly / vanilla
+              // SVG injection) render instead of showing a blank `<svg>`.
+              sandbox="allow-scripts"
               className="h-full w-full bg-background"
               title={state.filename}
             />
@@ -368,7 +371,11 @@ function PreviewContent({
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
           render={(text) => (
-            <CodeBlock language={extensionToLanguage(state.filename)} body={text} />
+            <CodeBlockStatic
+              language={extensionToLanguage(state.filename)}
+              body={text}
+              className="px-6 py-4"
+            />
           )}
         />
       );
@@ -393,19 +400,7 @@ function TextBackedPreview({
   render: (text: string) => ReactNode;
 }) {
   const { t } = useT("editor");
-  const query = useQuery({
-    queryKey: ["attachment-content", attachmentId] as const,
-    queryFn: () => api.getAttachmentTextContent(attachmentId),
-    // Errors are surfaced as typed fallbacks, not retried — 413 / 415 won't
-    // become 200 on a retry, and a transient failure is easier to recover
-    // from by closing and reopening the modal than waiting on background
-    // retries that have no UI affordance.
-    retry: false,
-    // 413 / 415 bodies are tiny; keep the result around for the session so
-    // the user can flip away and back without refetching.
-    staleTime: 5 * 60_000,
-    gcTime: 30 * 60_000,
-  });
+  const query = useAttachmentHtmlText(attachmentId);
 
   if (query.isLoading) {
     return (
@@ -441,44 +436,6 @@ function TextBackedPreview({
   }
   if (!query.data) return null;
   return <>{render(query.data.text)}</>;
-}
-
-// ---------------------------------------------------------------------------
-// Code block — lowlight, matches readonly-content's hljs CSS
-// ---------------------------------------------------------------------------
-
-const lowlight = createLowlight(common);
-
-function CodeBlock({ language, body }: { language: string | undefined; body: string }) {
-  const html = useMemo(() => {
-    const code = body.replace(/\n$/, "");
-    try {
-      const tree = language
-        ? lowlight.highlight(language, code)
-        : lowlight.highlightAuto(code);
-      return toHtml(tree) as string;
-    } catch {
-      // Fallthrough to a plain escaped <pre> when lowlight rejects the
-      // language tag. Avoids crashing the preview on an unknown extension.
-      return escapeHtml(code);
-    }
-  }, [body, language]);
-
-  return (
-    <pre className="rich-text-editor m-0 overflow-auto px-6 py-4 text-sm">
-      <code
-        className={cn("hljs", language && `language-${language}`)}
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
-    </pre>
-  );
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
 }
 
 // ---------------------------------------------------------------------------

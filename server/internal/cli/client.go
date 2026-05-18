@@ -59,6 +59,17 @@ type APIClient struct {
 	OS       string
 }
 
+type HTTPError struct {
+	Method     string
+	Path       string
+	StatusCode int
+	Body       string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("%s %s returned %d: %s", e.Method, e.Path, e.StatusCode, strings.TrimSpace(e.Body))
+}
+
 // NewAPIClient creates a new API client for ctrl commands.
 func NewAPIClient(baseURL, workspaceID, token string) *APIClient {
 	return &APIClient{
@@ -227,7 +238,12 @@ func (c *APIClient) PostJSON(ctx context.Context, path string, body any, out any
 
 	if resp.StatusCode >= 400 {
 		respData, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("POST %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(respData)))
+		return &HTTPError{
+			Method:     http.MethodPost,
+			Path:       path,
+			StatusCode: resp.StatusCode,
+			Body:       strings.TrimSpace(string(respData)),
+		}
 	}
 	if out == nil {
 		return nil

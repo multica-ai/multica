@@ -277,6 +277,13 @@ export function useIssueTimeline(
         await createComment({ content, type, attachmentIds });
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t(($) => $.comment.send_failed));
+        await createComment({ content, attachmentIds });
+      } catch (err) {
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.comment.send_failed),
+        );
       } finally {
         setSubmitting(false);
       }
@@ -300,6 +307,11 @@ export function useIssueTimeline(
         });
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t(($) => $.comment.send_reply_failed));
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.comment.send_reply_failed),
+        );
       }
     },
     [userId, createComment, t],
@@ -309,8 +321,12 @@ export function useIssueTimeline(
     async (commentId: string, content: string, attachmentIds?: string[]) => {
       try {
         await updateComment({ commentId, content, attachmentIds });
-      } catch {
-        toast.error(t(($) => $.comment.update_failed));
+      } catch (err) {
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.comment.update_failed),
+        );
       }
     },
     [updateComment, t],
@@ -320,8 +336,12 @@ export function useIssueTimeline(
     async (commentId: string) => {
       try {
         await deleteCommentAsync(commentId);
-      } catch {
-        toast.error(t(($) => $.comment.delete_failed));
+      } catch (err) {
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.comment.delete_failed),
+        );
       }
     },
     [deleteCommentAsync, t],
@@ -331,11 +351,13 @@ export function useIssueTimeline(
     async (commentId: string, resolved: boolean) => {
       try {
         await resolveCommentAsync({ commentId, resolved });
-      } catch {
+      } catch (err) {
         toast.error(
-          resolved
-            ? t(($) => $.comment.resolve.resolve_failed)
-            : t(($) => $.comment.resolve.unresolve_failed),
+          err instanceof Error && err.message
+            ? err.message
+            : resolved
+              ? t(($) => $.comment.resolve.resolve_failed)
+              : t(($) => $.comment.resolve.unresolve_failed),
         );
       }
     },

@@ -422,6 +422,7 @@ const mockIssue: Issue = {
   parent_issue_id: null,
   project_id: null,
   position: 0,
+  start_date: null,
   due_date: "2026-06-01T00:00:00Z",
   created_at: "2026-01-15T00:00:00Z",
   updated_at: "2026-01-20T00:00:00Z",
@@ -642,17 +643,55 @@ describe("IssueDetail (shared)", () => {
     expect(wsLink.closest("a")).toHaveAttribute("href", "/test/issues");
   });
 
-  it("renders properties sidebar with status, priority, assignee, due date", async () => {
+  it("renders properties sidebar with all core rows plus set optional rows", async () => {
     renderIssueDetail();
 
     await waitFor(() => {
       expect(screen.getAllByText("Properties").length).toBeGreaterThanOrEqual(1);
     });
 
+    // Core rows — always rendered regardless of whether the issue has a value.
     expect(screen.getByText("Status")).toBeInTheDocument();
-    expect(screen.getByText("Priority")).toBeInTheDocument();
     expect(screen.getByText("Assignee")).toBeInTheDocument();
+    // "Project" appears twice (row label + picker stub), so disambiguate by id.
+    expect(screen.getByTestId("project-picker")).toBeInTheDocument();
+    // priority="high" + due_date are set in the fixture, so both optional rows show.
+    expect(screen.getByText("Priority")).toBeInTheDocument();
     expect(screen.getByText("Due date")).toBeInTheDocument();
+    // No labels are attached in the fixture — the Labels optional row
+    // must stay hidden by default.
+    expect(screen.queryByText("Labels")).not.toBeInTheDocument();
+    // Parent issue lives in its own section and only renders when the
+    // issue actually has a parent — the fixture has none.
+    expect(screen.queryByText("Parent issue")).not.toBeInTheDocument();
+    // The "+ Add property" affordance is always offered while any
+    // optional field is still hidden.
+    expect(screen.getByText("Add property")).toBeInTheDocument();
+  });
+
+  it("hides every optional property row when none are set", async () => {
+    // Override the default fixture: nothing optional set.
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      priority: "none",
+      start_date: null,
+      due_date: null,
+    });
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Properties")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("Priority")).not.toBeInTheDocument();
+    expect(screen.queryByText("Due date")).not.toBeInTheDocument();
+    expect(screen.queryByText("Labels")).not.toBeInTheDocument();
+    // Project stays as a core row regardless of value.
+    expect(screen.getByTestId("project-picker")).toBeInTheDocument();
+    // No parent → no standalone Parent issue section either.
+    expect(screen.queryByText("Parent issue")).not.toBeInTheDocument();
+    expect(screen.getByText("Add property")).toBeInTheDocument();
   });
 
   it("uses a wider default max sidebar size on the standalone issue page", async () => {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { RuntimesPage } from "@multica/views/runtimes";
-import { DaemonRuntimeCard } from "./daemon-runtime-card";
+import { DaemonRuntimeActions } from "./daemon-runtime-card";
 import type { DaemonStatus } from "../../../shared/daemon-types";
 
 /**
@@ -32,7 +32,9 @@ export function DesktopRuntimesPage() {
 
   return (
     <RuntimesPage
-      topSlot={<DaemonRuntimeCard />}
+      localDaemonId={status.daemonId ?? null}
+      localMachineName={status.deviceName ?? null}
+      localMachineActions={<DaemonRuntimeActions />}
       bootstrapping={bootstrapping}
     />
   );

@@ -41,6 +41,7 @@ export type {
   DashboardUsageDaily,
   DashboardUsageByAgent,
   DashboardAgentRunTime,
+  DashboardRunTimeDaily,
   RuntimeUpdate,
   RuntimeUpdateStatus,
   CLIUpdateManifest,
@@ -113,7 +114,9 @@ export type {
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
 export type {
   GitHubInstallation,
+  GitHubMergeableState,
   GitHubPullRequest,
+  GitHubPullRequestChecksConclusion,
   GitHubPullRequestState,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
@@ -134,6 +137,10 @@ export type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  WebhookDelivery,
+  WebhookDeliveryStatus,
+  WebhookSignatureStatus,
+  ListWebhookDeliveriesResponse,
 } from "./autopilot";
 export type {
   AgentDefaults,
@@ -163,4 +170,8 @@ export type {
   RemoveSquadMemberRequest,
   UpdateSquadMemberRoleRequest,
   CreateSquadActivityLogRequest,
+  SquadMemberStatusValue,
+  SquadActiveIssueBrief,
+  SquadMemberStatus,
+  SquadMemberStatusListResponse,
 } from "./squad";

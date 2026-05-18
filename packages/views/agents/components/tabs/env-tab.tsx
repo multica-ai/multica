@@ -127,6 +127,12 @@ export function EnvTab({
             ? e.message
             : t(($) => $.tab_body.env.save_failed_toast);
       toast.error(msg);
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.tab_body.env.save_failed_toast),
+      );
     } finally {
       setSaving(false);
     }

@@ -1,9 +1,10 @@
 import { useState, useCallback } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { api } from "../api";
 import {
   issueKeys,
   ISSUE_PAGE_SIZE,
+  type AssigneeGroupedIssuesFilter,
   type MyIssuesFilter,
 } from "./queries";
 import {
@@ -31,6 +32,7 @@ import { useWorkspaceId } from "../hooks";
 import { useRecentIssuesStore } from "./stores";
 import { workspaceKeys } from "../workspace/queries";
 import type { Issue, IssueReaction, IssueStatus } from "../types";
+import type { GroupedIssuesResponse, Issue, IssueAssigneeGroup, IssueReaction, IssueStatus } from "../types";
 import type {
   CreateIssueRequest,
   UpdateIssueRequest,
@@ -116,6 +118,58 @@ export function useLoadMoreByStatusForWorkspace(
   return { loadMore, hasMore, isLoading, total };
 }
 
+export function useLoadMoreByAssigneeGroup(
+  group: Pick<IssueAssigneeGroup, "id" | "assignee_type" | "assignee_id">,
+  queryKey: QueryKey,
+  filter: AssigneeGroupedIssuesFilter,
+) {
+  const qc = useQueryClient();
+  const [isLoading, setIsLoading] = useState(false);
+
+  const cache = qc.getQueryData<GroupedIssuesResponse>(queryKey);
+  const cachedGroup = cache?.groups.find((g) => g.id === group.id);
+  const loaded = cachedGroup?.issues.length ?? 0;
+  const total = cachedGroup?.total ?? 0;
+  const hasMore = loaded < total;
+
+  const loadMore = useCallback(async () => {
+    if (isLoading || !hasMore) return;
+    setIsLoading(true);
+    try {
+      const res = await api.listGroupedIssues({
+        group_by: "assignee",
+        limit: ISSUE_PAGE_SIZE,
+        offset: loaded,
+        ...filter,
+        group_assignee_type: group.assignee_type ?? "none",
+        group_assignee_id: group.assignee_id ?? undefined,
+      });
+      const nextGroup = res.groups[0];
+      if (!nextGroup) return;
+
+      qc.setQueryData<GroupedIssuesResponse>(queryKey, (old) => {
+        if (!old) return old;
+        return {
+          groups: old.groups.map((existing) => {
+            if (existing.id !== nextGroup.id) return existing;
+            const existingIds = new Set(existing.issues.map((issue) => issue.id));
+            const appended = nextGroup.issues.filter((issue) => !existingIds.has(issue.id));
+            return {
+              ...existing,
+              issues: [...existing.issues, ...appended],
+              total: nextGroup.total,
+            };
+          }),
+        };
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [filter, group.assignee_id, group.assignee_type, hasMore, isLoading, loaded, qc, queryKey]);
+
+  return { loadMore, hasMore, isLoading, total };
+}
+
 // ---------------------------------------------------------------------------
 // Issue CRUD
 // ---------------------------------------------------------------------------
@@ -140,6 +194,8 @@ export function useCreateIssue() {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
     },
   });
 }
@@ -220,6 +276,8 @@ export function useUpdateIssue() {
       invalidateIssueDetailQueries(qc, wsId, data?.id ?? vars.id);
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       // Refresh the issue's attachments cache when the description editor
       // bound new uploads — the description editor reads `issueAttachments`
       // to resolve text-preview Eye gates, and unlike other mutations this
@@ -301,6 +359,8 @@ export function useDeleteIssue() {
     },
     onSettled: (_data, _err, _id, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       if (ctx?.metadata) invalidateDeletedIssueParentCaches(qc, wsId, ctx.metadata);
     },
   });
@@ -358,6 +418,8 @@ export function useBatchUpdateIssues() {
     },
     onSettled: (_data, _err, _vars, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       if (ctx?.affectedParentIds && ctx.affectedParentIds.size > 0) {
         for (const parentId of ctx.affectedParentIds) {
           qc.invalidateQueries({
@@ -458,6 +520,8 @@ export function useBatchDeleteIssues() {
     },
     onSettled: (_data, _err, _ids, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       if (ctx?.parentIssueIds && ctx.parentIssueIds.size > 0) {
         invalidateDeletedIssueParentCaches(qc, wsId, {
           parentIssueIds: Array.from(ctx.parentIssueIds),
