@@ -308,15 +308,8 @@ void resolveLoggedInDestination(qc, hasOnboarded, list).then((dest) =>
   return (
     <LoginPage
       onSuccess={handleSuccess}
-      google={
-        resolvedGoogleClientId
-          ? {
-              clientId: resolvedGoogleClientId,
-              redirectUri: `${window.location.origin}/auth/callback`,
-              state: googleState,
-            }
-          : undefined
-      }
+      // Google OAuth is still handled by the callback/direct provider paths
+      // above for existing users, but it is no longer shown as a login option.
       dingtalk={
         dingtalkClientId
           ? {

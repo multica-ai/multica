@@ -307,15 +307,15 @@ export function InboxPage() {
             onClick={() => {
               // Seed the legacy advanced form with the original prompt so the
               // user can recover their input in the full editor instead of
-              // retyping. The agent picker hint becomes the assignee
-              // candidate (still editable).
+              // retyping. Do not carry the failed quick-create agent forward
+              // as the assignee: that would immediately enqueue the same
+              // agent again from the manual form and turn a recovery path into
+              // a second failed run.
               const prompt = selected.details?.original_prompt ?? "";
-              const agentId = selected.details?.agent_id;
               useIssueDraftStore.getState().setDraft({
                 description: prompt,
-                ...(agentId
-                  ? { assigneeType: "agent" as const, assigneeId: agentId }
-                  : {}),
+                assigneeType: undefined,
+                assigneeId: undefined,
               });
               useModalStore.getState().open("create-issue");
             }}

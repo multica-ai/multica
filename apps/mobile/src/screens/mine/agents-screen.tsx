@@ -1317,7 +1317,7 @@ function SkillPickerModal({
             disabled={saving}
             key={skill.id}
             label={skill.name}
-            meta={skill.description}
+            meta={skill.description ?? undefined}
             onPress={() => onSelect(skill.id)}
             selected={false}
           />

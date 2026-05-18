@@ -17,6 +17,8 @@ import type {
   CreateAgentFromTemplateResponse,
   UpdateAgentRequest,
   AgentTask,
+  LocalPreview,
+  LocalPreviewLogs,
   TaskInteraction,
   TaskTraceResponse,
   AgentActivityBucket,
@@ -1023,6 +1025,39 @@ export class ApiClient {
     return res.json() as Promise<TaskTraceResponse>;
   }
 
+  async listLocalPreviews(healthPort: number, params?: { workspace_id?: string; issue_id?: string }): Promise<{ previews: LocalPreview[] }> {
+    const search = new URLSearchParams();
+    if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
+    if (params?.issue_id) search.set("issue_id", params.issue_id);
+    const suffix = search.toString() ? `?${search}` : "";
+    const res = await fetch(`http://127.0.0.1:${healthPort}/preview/list${suffix}`);
+    if (!res.ok) {
+      throw new ApiError(await this.parseErrorMessage(res, "Failed to load local previews"), res.status, res.statusText);
+    }
+    return res.json() as Promise<{ previews: LocalPreview[] }>;
+  }
+
+  async stopLocalPreview(healthPort: number, id: string): Promise<LocalPreview> {
+    const res = await fetch(`http://127.0.0.1:${healthPort}/preview/stop`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    if (!res.ok) {
+      throw new ApiError(await this.parseErrorMessage(res, "Failed to stop local preview"), res.status, res.statusText);
+    }
+    return res.json() as Promise<LocalPreview>;
+  }
+
+  async getLocalPreviewLogs(healthPort: number, id: string, tail = 200): Promise<LocalPreviewLogs> {
+    const search = new URLSearchParams({ id, tail: String(tail) });
+    const res = await fetch(`http://127.0.0.1:${healthPort}/preview/logs?${search}`);
+    if (!res.ok) {
+      throw new ApiError(await this.parseErrorMessage(res, "Failed to load local preview logs"), res.status, res.statusText);
+    }
+    return res.json() as Promise<LocalPreviewLogs>;
+  }
+
   getLocalTaskTraceStreamUrl(
     healthPort: number,
     taskId: string,
@@ -1824,7 +1859,7 @@ export class ApiClient {
     return this.fetch(`/api/squads/${id}`);
   }
 
-  async createSquad(data: { name: string; description?: string; leader_id: string }): Promise<Squad> {
+  async createSquad(data: { name: string; description?: string; leader_id: string; avatar_url?: string }): Promise<Squad> {
     return this.fetch("/api/squads", { method: "POST", body: JSON.stringify(data) });
   }
 

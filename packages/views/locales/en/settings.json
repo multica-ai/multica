@@ -174,11 +174,17 @@
   "repositories": {
     "section_title": "Repositories",
     "description": "Git repositories associated with this workspace. Agents use these to clone and work on code.",
-    "url_placeholder": "https://git.example.com/org/repo.git",
+    "url_placeholder": "https://git.example.com/org/repo.git or git@git.example.com:org/repo.git",
+    "url_empty": "(empty URL)",
     "description_placeholder": "Description (e.g. Go backend + Next.js frontend)",
     "add": "Add repository",
     "save": "Save",
     "saving": "Saving...",
+    "saved_hint": "All changes saved",
+    "empty": "No repositories yet.",
+    "edit_aria": "Edit repository",
+    "cancel_aria": "Cancel edit",
+    "delete_aria": "Delete repository",
     "manage_hint": "Only admins and owners can manage repositories.",
     "toast_saved": "Repositories saved",
     "toast_save_failed": "Failed to save repositories"

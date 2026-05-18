@@ -30,6 +30,16 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 		// context section is conditional and must not be an apology log
 		"include ONLY when the input cited external resources",
 		"never use it as an apology log",
+		// output/reporting must be workspace-prefix agnostic. Workspaces can
+		// use custom issue prefixes, so a successful issue creation should
+		// not look failed merely because the identifier does not match one
+		// fixed prefix.
+		"multica issue create --output json",
+		"JSON response",
+		"identifier",
+		"Do not scrape human output",
+		"do not assume any workspace issue prefix",
+		"Created <identifier-or-id>: <title>",
 		// hard rules
 		"never invent requirements",
 		"never reduce multi-sentence input",

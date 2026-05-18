@@ -420,7 +420,10 @@ describe("createMentionSuggestion", () => {
 
   it("matches Chinese agent names by pinyin", () => {
     const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      members: [
+        { user_id: "u-current", name: "Current User", role: "member" },
+        { user_id: "u1", name: "Alice", role: "member" },
+      ],
       agents: [
         { id: "a1", name: "魏和尚", archived_at: null, visibility: "workspace", owner_id: null },
       ],

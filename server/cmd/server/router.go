@@ -392,6 +392,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
 					r.Post("/rerun", h.RerunIssue)
 					r.Get("/task-runs", h.ListTasksByIssue)
+					r.Post("/local-runs", h.CreateLocalCLIRun)
 					r.Get("/usage", h.GetIssueUsage)
 					r.Post("/reactions", h.AddIssueReaction)
 					r.Delete("/reactions", h.RemoveIssueReaction)
@@ -407,6 +408,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Task messages (user-facing, not daemon auth)
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
+			r.Route("/api/local-runs/{runId}", func(r chi.Router) {
+				r.Patch("/", h.UpdateLocalCLIRun)
+				r.Get("/messages", h.ListLocalCLIMessages)
+				r.Post("/messages", h.CreateLocalCLIMessage)
+			})
 
 			// Interaction endpoints — user side (list + respond)
 			r.Get("/api/tasks/{taskId}/interactions", h.ListTaskInteractions)
@@ -499,16 +505,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/attachments/{id}/content", h.GetAttachmentContent)
 			r.Delete("/api/attachments/{id}", h.DeleteAttachment)
 
-				// Comments
-				r.Route("/api/comments/{commentId}", func(r chi.Router) {
-					r.Put("/", h.UpdateComment)
-					r.Delete("/", h.DeleteComment)
-					r.Post("/retry-agent", h.RetryAgentComment)
-					r.Post("/resolve", h.ResolveComment)
-					r.Delete("/resolve", h.UnresolveComment)
-					r.Post("/reactions", h.AddReaction)
-					r.Delete("/reactions", h.RemoveReaction)
-				})
+			// Comments
+			r.Route("/api/comments/{commentId}", func(r chi.Router) {
+				r.Put("/", h.UpdateComment)
+				r.Delete("/", h.DeleteComment)
+				r.Post("/retry-agent", h.RetryAgentComment)
+				r.Post("/resolve", h.ResolveComment)
+				r.Delete("/resolve", h.UnresolveComment)
+				r.Post("/reactions", h.AddReaction)
+				r.Delete("/reactions", h.RemoveReaction)
+			})
 
 			// Agents
 			r.Route("/api/agents", func(r chi.Router) {
