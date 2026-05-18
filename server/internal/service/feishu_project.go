@@ -36,7 +36,8 @@ const (
 	feishuProjectIncrementalReplay = 10 * time.Minute
 	feishuProjectSyncMaxPages      = 1000
 	feishuProjectAttachmentMaxSize = 5 << 20
-	feishuProjectSyncWorkers       = 6
+	feishuProjectSyncWorkers       = 20
+	feishuProjectSlowItemLogAfter  = 500 * time.Millisecond
 )
 
 var ErrFeishuProjectSyncScopeRequired = errors.New("Feishu Project sync requires a bounded sync scope before searching work items")
@@ -106,6 +107,23 @@ type FeishuProjectAttachment struct {
 type FeishuProjectStatusOption struct {
 	Key  string `json:"key"`
 	Name string `json:"name"`
+}
+
+type feishuProjectSyncTiming struct {
+	ownerLookup             time.Duration
+	bindingLookup           time.Duration
+	issueLookup             time.Duration
+	issueUpdate             time.Duration
+	issueCreate             time.Duration
+	bindingUpsert           time.Duration
+	attachments             time.Duration
+	attachmentList          time.Duration
+	attachmentDownload      time.Duration
+	attachmentUpload        time.Duration
+	attachmentDB            time.Duration
+	attachmentsUploaded     int
+	attachmentsSkippedLarge int
+	attachmentsExisting     int
 }
 
 func NewFeishuProjectClient() *FeishuProjectClient {
@@ -268,7 +286,39 @@ func enabledFeishuProjectTypes(cfg db.FeishuProjectIntegration) []string {
 	return out
 }
 
-func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.FeishuProjectIntegration, item FeishuProjectWorkItem, skipExisting bool) (string, error) {
+func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.FeishuProjectIntegration, item FeishuProjectWorkItem, skipExisting bool) (result string, retErr error) {
+	started := time.Now()
+	timing := &feishuProjectSyncTiming{}
+	defer func() {
+		elapsed := time.Since(started)
+		if elapsed < feishuProjectSlowItemLogAfter && retErr == nil {
+			return
+		}
+		slog.Info("Feishu Project item sync timing",
+			"workspace_id", UUIDString(cfg.WorkspaceID),
+			"project_key", cfg.ProjectKey,
+			"work_item_type", item.Type,
+			"work_item_id", item.ID,
+			"result", result,
+			"error", retErr,
+			"elapsed_ms", elapsed.Milliseconds(),
+			"owner_lookup_ms", timing.ownerLookup.Milliseconds(),
+			"binding_lookup_ms", timing.bindingLookup.Milliseconds(),
+			"issue_lookup_ms", timing.issueLookup.Milliseconds(),
+			"issue_update_ms", timing.issueUpdate.Milliseconds(),
+			"issue_create_ms", timing.issueCreate.Milliseconds(),
+			"binding_upsert_ms", timing.bindingUpsert.Milliseconds(),
+			"attachments_ms", timing.attachments.Milliseconds(),
+			"attachment_list_ms", timing.attachmentList.Milliseconds(),
+			"attachment_download_ms", timing.attachmentDownload.Milliseconds(),
+			"attachment_upload_ms", timing.attachmentUpload.Milliseconds(),
+			"attachment_db_ms", timing.attachmentDB.Milliseconds(),
+			"attachments_total", len(item.Attachments),
+			"attachments_existing", timing.attachmentsExisting,
+			"attachments_uploaded", timing.attachmentsUploaded,
+			"attachments_skipped_large", timing.attachmentsSkippedLarge,
+		)
+	}()
 	if item.ID == "" || item.Title == "" {
 		return "skipped", nil
 	}
@@ -276,22 +326,30 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 	if status == "" {
 		status = "todo"
 	}
+	phaseStarted := time.Now()
 	assigneeType, assigneeID := s.resolveOwner(ctx, cfg.WorkspaceID, item.OwnerEmail)
+	timing.ownerLookup += time.Since(phaseStarted)
 
+	phaseStarted = time.Now()
 	binding, err := s.Queries.GetFeishuProjectIssueBindingByExternal(ctx, db.GetFeishuProjectIssueBindingByExternalParams{
 		IntegrationID: cfg.ID,
 		WorkItemType:  item.Type,
 		WorkItemID:    item.ID,
 	})
+	timing.bindingLookup += time.Since(phaseStarted)
 	if err == nil {
 		if skipExisting {
 			return "skipped", nil
 		}
+		phaseStarted = time.Now()
 		issue, err := s.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: binding.IssueID, WorkspaceID: cfg.WorkspaceID})
+		timing.issueLookup += time.Since(phaseStarted)
 		if err != nil {
 			return "skipped", nil
 		}
-		attachmentMarkdown, attachErr := s.syncExternalAttachments(ctx, cfg, issue.ID, item)
+		phaseStarted = time.Now()
+		attachmentMarkdown, attachErr := s.syncExternalAttachments(ctx, cfg, issue.ID, item, timing)
+		timing.attachments += time.Since(phaseStarted)
 		if attachErr != nil {
 			return "skipped", attachErr
 		}
@@ -300,6 +358,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		if issue.Title == nextTitle && issue.Description.String == nextDesc && issue.Status == status {
 			return "skipped", nil
 		}
+		phaseStarted = time.Now()
 		_, err = s.Queries.UpdateIssue(ctx, db.UpdateIssueParams{
 			ID:            issue.ID,
 			Title:         pgtype.Text{String: nextTitle, Valid: true},
@@ -312,27 +371,20 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 			ParentIssueID: issue.ParentIssueID,
 			ProjectID:     issue.ProjectID,
 		})
+		timing.issueUpdate += time.Since(phaseStarted)
 		if err != nil {
 			return "skipped", err
 		}
+		phaseStarted = time.Now()
 		_, _ = s.Queries.UpsertFeishuProjectIssueBinding(ctx, bindingParams(cfg, issue.ID, item))
+		timing.bindingUpsert += time.Since(phaseStarted)
 		return "updated", nil
-	}
-
-	if skipExisting {
-		issue, err := s.Queries.GetIssueByFeishuExternalIdentifier(ctx, db.GetIssueByFeishuExternalIdentifierParams{
-			WorkspaceID:        cfg.WorkspaceID,
-			ExternalIdentifier: externalIdentifier(item),
-		})
-		if err == nil {
-			_, _ = s.Queries.UpsertFeishuProjectIssueBinding(ctx, bindingParams(cfg, issue.ID, item))
-			return "skipped", nil
-		}
 	}
 
 	if !cfg.CreatedByID.Valid {
 		return "skipped", fmt.Errorf("feishu project integration has no creator")
 	}
+	phaseStarted = time.Now()
 	tx, err := s.Tx.Begin(ctx)
 	if err != nil {
 		return "skipped", err
@@ -365,11 +417,15 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 	if err := tx.Commit(ctx); err != nil {
 		return "skipped", err
 	}
-	attachmentMarkdown, err := s.syncExternalAttachments(ctx, cfg, issue.ID, item)
+	timing.issueCreate += time.Since(phaseStarted)
+	phaseStarted = time.Now()
+	attachmentMarkdown, err := s.syncExternalAttachments(ctx, cfg, issue.ID, item, timing)
+	timing.attachments += time.Since(phaseStarted)
 	if err != nil {
 		return "created", err
 	}
 	if attachmentMarkdown != "" {
+		phaseStarted = time.Now()
 		_, err = s.Queries.UpdateIssue(ctx, db.UpdateIssueParams{
 			ID:            issue.ID,
 			Title:         pgtype.Text{String: externalTitle(item), Valid: true},
@@ -382,6 +438,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 			ParentIssueID: issue.ParentIssueID,
 			ProjectID:     issue.ProjectID,
 		})
+		timing.issueUpdate += time.Since(phaseStarted)
 		if err != nil {
 			return "created", err
 		}
@@ -534,14 +591,18 @@ func collapseExcessBlankLines(s string) string {
 	return re.ReplaceAllString(s, "\n\n")
 }
 
-func (s *FeishuProjectSyncService) syncExternalAttachments(ctx context.Context, cfg db.FeishuProjectIntegration, issueID pgtype.UUID, item FeishuProjectWorkItem) (string, error) {
+func (s *FeishuProjectSyncService) syncExternalAttachments(ctx context.Context, cfg db.FeishuProjectIntegration, issueID pgtype.UUID, item FeishuProjectWorkItem, timing *feishuProjectSyncTiming) (string, error) {
 	if s.Storage == nil || len(item.Attachments) == 0 || !cfg.CreatedByID.Valid {
 		return "", nil
 	}
+	phaseStarted := time.Now()
 	existing, _ := s.Queries.ListAttachmentsByIssue(ctx, db.ListAttachmentsByIssueParams{
 		IssueID:     issueID,
 		WorkspaceID: cfg.WorkspaceID,
 	})
+	if timing != nil {
+		timing.attachmentList += time.Since(phaseStarted)
+	}
 	byName := make(map[string]db.Attachment, len(existing))
 	for _, att := range existing {
 		byName[att.Filename] = att
@@ -554,10 +615,16 @@ func (s *FeishuProjectSyncService) syncExternalAttachments(ctx context.Context, 
 			continue
 		}
 		if att, ok := byName[ext.Name]; ok {
+			if timing != nil {
+				timing.attachmentsExisting++
+			}
 			lines = append(lines, attachmentMarkdown(att.Filename, feishuProjectAttachmentContentURL(att), att.ContentType))
 			continue
 		}
 		if feishuProjectAttachmentTooLarge(ext) {
+			if timing != nil {
+				timing.attachmentsSkippedLarge++
+			}
 			slog.Info("Feishu Project attachment skipped: too large",
 				"workspace_id", UUIDString(cfg.WorkspaceID),
 				"project_key", cfg.ProjectKey,
@@ -569,7 +636,11 @@ func (s *FeishuProjectSyncService) syncExternalAttachments(ctx context.Context, 
 			)
 			continue
 		}
+		phaseStarted = time.Now()
 		data, filename, contentType, err := s.Client.DownloadAttachment(ctx, cfg, item, ext)
+		if timing != nil {
+			timing.attachmentDownload += time.Since(phaseStarted)
+		}
 		if err != nil {
 			return "", err
 		}
@@ -577,6 +648,9 @@ func (s *FeishuProjectSyncService) syncExternalAttachments(ctx context.Context, 
 			continue
 		}
 		if len(data) > feishuProjectAttachmentMaxSize {
+			if timing != nil {
+				timing.attachmentsSkippedLarge++
+			}
 			slog.Info("Feishu Project attachment skipped after download: too large",
 				"workspace_id", UUIDString(cfg.WorkspaceID),
 				"project_key", cfg.ProjectKey,
@@ -595,10 +669,15 @@ func (s *FeishuProjectSyncService) syncExternalAttachments(ctx context.Context, 
 			return "", err
 		}
 		key := feishuProjectAttachmentKey(cfg, item, ext, id.String(), filename)
+		phaseStarted = time.Now()
 		link, err := s.Storage.Upload(ctx, key, data, contentType, filename)
+		if timing != nil {
+			timing.attachmentUpload += time.Since(phaseStarted)
+		}
 		if err != nil {
 			return "", err
 		}
+		phaseStarted = time.Now()
 		att, err := s.Queries.CreateAttachment(ctx, db.CreateAttachmentParams{
 			ID:           pgtype.UUID{Bytes: id, Valid: true},
 			WorkspaceID:  cfg.WorkspaceID,
@@ -610,8 +689,14 @@ func (s *FeishuProjectSyncService) syncExternalAttachments(ctx context.Context, 
 			ContentType:  contentType,
 			SizeBytes:    int64(len(data)),
 		})
+		if timing != nil {
+			timing.attachmentDB += time.Since(phaseStarted)
+		}
 		if err != nil {
 			return "", err
+		}
+		if timing != nil {
+			timing.attachmentsUploaded++
 		}
 		byName[att.Filename] = att
 		lines = append(lines, attachmentMarkdown(att.Filename, feishuProjectAttachmentContentURL(att), att.ContentType))

@@ -207,7 +207,7 @@ func (h *Handler) SyncFeishuProjectIntegration(w http.ResponseWriter, r *http.Re
 	}
 	req.WorkItemID = strings.TrimSpace(req.WorkItemID)
 	if latest, err := h.Queries.GetLatestFeishuProjectManualSyncRun(r.Context(), cfg.ID); err == nil && latest.Status == "running" {
-		if latest.StartedAt.Valid && time.Since(latest.StartedAt.Time) > 30*time.Minute {
+		if latest.StartedAt.Valid && time.Since(latest.StartedAt.Time) > 2*time.Hour {
 			_ = h.Queries.FinishFeishuProjectSyncRun(r.Context(), db.FinishFeishuProjectSyncRunParams{
 				ID:           latest.ID,
 				Status:       "failed",
@@ -233,7 +233,7 @@ func (h *Handler) SyncFeishuProjectIntegration(w http.ResponseWriter, r *http.Re
 		return
 	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 		defer cancel()
 		svc := &service.FeishuProjectSyncService{Queries: h.Queries, Tx: h.TxStarter, Client: service.NewFeishuProjectClient(), Storage: h.Storage}
 		if _, err := svc.SyncWithRunAndOptions(ctx, cfg, "manual", run, service.FeishuProjectSyncOptions{WorkItemID: req.WorkItemID}); err != nil {
