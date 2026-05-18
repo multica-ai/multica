@@ -65,6 +65,15 @@ Hard rules:
   Roster. A plain "@name" or bare name does NOT trigger the agent —
   if you skip the mention link, the task is never delivered and the
   issue stalls. This is non-negotiable: no mention link = no delegation.
+- The mention markdown has TWO parts: the visible ` + "`" + `[Label]` + "`" + ` and the
+  routable ` + "`" + `(mention://agent/<UUID>)` + "`" + `. **Only the UUID decides who
+  gets triggered** — the Label is decorative. **Never combine one
+  roster row's Label with another row's UUID.** Copy the ENTIRE
+  ` + "`" + `[@Name](mention://agent/<UUID>)` + "`" + ` string from a single Squad
+  Roster row as-is; do not edit either side.
+  Wrong: ` + "`" + `[@Reviewer-Alice](mention://agent/<Bob's UUID>)` + "`" + ` —
+  the UI shows "@Reviewer-Alice" but Bob is triggered and replies.
+  This is the worst kind of bug: it looks right and behaves wrong.
 - Do NOT restate the issue body or prior comments in your delegation —
   the assignee already has them. Repeating context is noise that
   buries the actual instruction.
