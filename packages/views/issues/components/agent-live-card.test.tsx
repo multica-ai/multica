@@ -73,9 +73,12 @@ vi.mock("@multica/core/api", () => ({
   api: mockApi,
 }));
 
-vi.mock("sonner", () => ({
-  toast: { error: vi.fn(), success: vi.fn() },
-}));
+vi.mock("sonner", () => {
+  const toastFn = vi.fn();
+  toastFn.error = vi.fn();
+  toastFn.success = vi.fn();
+  return { toast: toastFn };
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
