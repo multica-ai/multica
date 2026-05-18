@@ -5,6 +5,7 @@ import type {
   MemberRole,
   RuntimeDevice,
   Skill,
+  Squad,
 } from "../types";
 import { ALLOW, deny, type Decision, type PermissionContext } from "./types";
 
@@ -42,6 +43,20 @@ export function isAgentSelectable(
   if (agent.visibility === "workspace") return true;
   if (agent.owner_id === null) return true;
   return agent.owner_id === userId;
+}
+
+/**
+ * Squads route work to their leader agent. A squad is selectable only when
+ * the current user could also select that leader directly.
+ */
+export function isSquadSelectable(
+  squad: Squad,
+  agentsById: Map<string, Agent>,
+  userId: string | null,
+): boolean {
+  if (squad.archived_at) return false;
+  const leader = agentsById.get(squad.leader_id);
+  return !!leader && isAgentSelectable(leader, userId);
 }
 
 /**

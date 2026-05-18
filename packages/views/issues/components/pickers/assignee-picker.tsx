@@ -5,7 +5,7 @@ import { Lock, UserMinus } from "lucide-react";
 import type { Agent, IssueAssigneeType, UpdateIssueRequest } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
-import { canAssignAgentToIssue, isAgentSelectable } from "@multica/core/permissions";
+import { canAssignAgentToIssue, isAgentSelectable, isSquadSelectable } from "@multica/core/permissions";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, squadListOptions, assigneeFrequencyOptions } from "@multica/core/workspace/queries";
@@ -82,6 +82,11 @@ export function AssigneePicker({
   }, [frequency]);
 
   const getFreq = (type: string, id: string) => freqMap.get(`${type}:${id}`) ?? 0;
+  const agentsById = useMemo(() => {
+    const map = new Map<string, Agent>();
+    for (const agent of agents) map.set(agent.id, agent);
+    return map;
+  }, [agents]);
 
   const query = filter.trim().toLowerCase();
   const filteredMembers = members
@@ -91,7 +96,11 @@ export function AssigneePicker({
     .filter((a) => isAgentSelectable(a, user?.id ?? null) && (a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query)))
     .sort((a, b) => getFreq("agent", b.id) - getFreq("agent", a.id));
   const filteredSquads = squads
-    .filter((s) => !s.archived_at && (s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)))
+    .filter(
+      (s) =>
+        isSquadSelectable(s, agentsById, user?.id ?? null) &&
+        (s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)),
+    )
     .sort((a, b) => getFreq("squad", b.id) - getFreq("squad", a.id));
 
   const isSelected = (type: string, id: string) =>

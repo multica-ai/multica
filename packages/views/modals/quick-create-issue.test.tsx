@@ -52,7 +52,7 @@ vi.mock("@tanstack/react-query", () => ({
         return { data: [{ user_id: "user-1", role: "admin" }] };
       case "agents":
         return {
-          data: [{ id: "agent-1", name: "Bohan", archived_at: null, runtime_id: "runtime-1" }],
+          data: [{ id: "agent-1", name: "Bohan", archived_at: null, runtime_id: "runtime-1", visibility: "workspace", owner_id: "user-2" }],
         };
       case "runtimes":
         return { data: [{ id: "runtime-1", metadata: { cli_version: "1.2.3" } }] };

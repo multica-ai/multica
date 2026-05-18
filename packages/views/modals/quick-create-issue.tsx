@@ -39,6 +39,7 @@ import {
 } from "../issues/components/pickers/property-picker";
 import { useAuthStore } from "@multica/core/auth";
 import { memberListOptions } from "@multica/core/workspace/queries";
+import { isSquadSelectable } from "@multica/core/permissions";
 import {
   ContentEditor,
   type ContentEditorRef,
@@ -115,12 +116,17 @@ export function AgentCreatePanel({
     () => new Set(visibleAgents.map((a) => a.id)),
     [visibleAgents],
   );
+  const agentsById = useMemo(() => {
+    const map = new Map<string, Agent>();
+    for (const agent of agents) map.set(agent.id, agent);
+    return map;
+  }, [agents]);
   const visibleSquads = useMemo(
     () =>
       squads.filter(
-        (s) => !s.archived_at && visibleAgentIds.has(s.leader_id),
+        (s) => isSquadSelectable(s, agentsById, userId ?? null),
       ),
-    [squads, visibleAgentIds],
+    [squads, agentsById, userId],
   );
 
   const lastActorType = useQuickCreateStore((s) => s.lastActorType);

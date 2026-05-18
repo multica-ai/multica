@@ -7,6 +7,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { isAgentSelectable } from "@multica/core/permissions";
 import { isImeComposing, timeAgo } from "@multica/core/utils";
 import { agentListOptions, memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes";
@@ -185,7 +186,12 @@ export function SquadDetailPage() {
     return <div className="p-6 text-muted-foreground text-sm">Loading...</div>;
   }
 
-  const availableAgents = agents.filter((a: Agent) => !a.archived_at && !members.some((m) => m.member_type === "agent" && m.member_id === a.id));
+  const availableAgents = agents.filter(
+    (a: Agent) =>
+      !a.archived_at &&
+      isAgentSelectable(a, currentUser?.id ?? null) &&
+      !members.some((m) => m.member_type === "agent" && m.member_id === a.id),
+  );
   const availableMembers = wsMembers.filter((m) => !members.some((sm) => sm.member_type === "member" && sm.member_id === m.user_id));
   const isLeader = (m: SquadMember) => m.member_type === "agent" && squad.leader_id === m.member_id;
 

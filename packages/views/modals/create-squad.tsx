@@ -7,6 +7,7 @@ import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { isAgentSelectable } from "@multica/core/permissions";
 import {
   agentListOptions,
   memberListOptions,
@@ -66,8 +67,14 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
   const { data: wsMembers = [] } = useQuery(memberListOptions(wsId));
 
   const activeAgents = useMemo(
-    () => agents.filter((a: Agent) => !a.archived_at && a.runtime_id),
-    [agents],
+    () =>
+      agents.filter(
+        (a: Agent) =>
+          !a.archived_at &&
+          a.runtime_id &&
+          isAgentSelectable(a, currentUserId),
+      ),
+    [agents, currentUserId],
   );
 
   const [name, setName] = useState("");

@@ -1735,9 +1735,16 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 		if squad.ArchivedAt.Valid {
 			return http.StatusBadRequest, "cannot assign to an archived squad"
 		}
-		leader, err := h.Queries.GetAgent(ctx, squad.LeaderID)
+		leader, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID:          squad.LeaderID,
+			WorkspaceID: wsUUID,
+		})
 		if err != nil || leader.ArchivedAt.Valid {
 			return http.StatusBadRequest, "squad leader is archived; cannot assign to this squad"
+		}
+		actorType, _ := h.resolveActor(r, requestUserID(r), workspaceID)
+		if actorType != "agent" && !memberCanSelectSquadAgent(leader, requestUserID(r)) {
+			return http.StatusForbidden, "squad leader must be one of your agents or a workspace agent"
 		}
 		return 0, ""
 	default:

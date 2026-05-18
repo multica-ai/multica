@@ -109,6 +109,54 @@ func (h *Handler) requireSquadManager(w http.ResponseWriter, r *http.Request, wo
 	return member, true
 }
 
+func memberCanSelectSquadAgent(agent db.Agent, userID string) bool {
+	if agent.ArchivedAt.Valid {
+		return false
+	}
+	if agent.Visibility == "workspace" {
+		return true
+	}
+	if !agent.OwnerID.Valid {
+		return true
+	}
+	if userID == "" {
+		return false
+	}
+	return uuidToString(agent.OwnerID) == userID
+}
+
+func (h *Handler) loadSelectableSquadAgent(w http.ResponseWriter, r *http.Request, wsUUID pgtype.UUID, agentUUID pgtype.UUID, subject string) (db.Agent, bool) {
+	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		ID:          agentUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		if subject == "leader" {
+			writeError(w, http.StatusBadRequest, "leader must be a valid agent in this workspace")
+		} else {
+			writeError(w, http.StatusBadRequest, "agent not found in this workspace")
+		}
+		return db.Agent{}, false
+	}
+	if agent.ArchivedAt.Valid {
+		if subject == "leader" {
+			writeError(w, http.StatusBadRequest, "leader is archived")
+		} else {
+			writeError(w, http.StatusBadRequest, "agent is archived")
+		}
+		return db.Agent{}, false
+	}
+	if !memberCanSelectSquadAgent(agent, requestUserID(r)) {
+		if subject == "leader" {
+			writeError(w, http.StatusForbidden, "leader must be one of your agents or a workspace agent")
+		} else {
+			writeError(w, http.StatusForbidden, "agent must be one of your agents or a workspace agent")
+		}
+		return db.Agent{}, false
+	}
+	return agent, true
+}
+
 // ── Handlers ────────────────────────────────────────────────────────────────
 
 func (h *Handler) ListSquads(w http.ResponseWriter, r *http.Request) {
@@ -164,13 +212,7 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate leader is an agent in this workspace.
-	_, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-		ID:          leaderUUID,
-		WorkspaceID: wsUUID,
-	})
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "leader must be a valid agent in this workspace")
+	if _, ok := h.loadSelectableSquadAgent(w, r, wsUUID, leaderUUID, "leader"); !ok {
 		return
 	}
 
@@ -258,11 +300,7 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		// Validate new leader is an agent in workspace.
-		if _, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-			ID: lid, WorkspaceID: wsUUID,
-		}); err != nil {
-			writeError(w, http.StatusBadRequest, "leader must be a valid agent in this workspace")
+		if _, ok := h.loadSelectableSquadAgent(w, r, wsUUID, lid, "leader"); !ok {
 			return
 		}
 		// Ensure new leader is a squad member; auto-add if not.
@@ -389,10 +427,7 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 
 	// Validate the member belongs to this workspace.
 	if req.MemberType == "agent" {
-		if _, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-			ID: memberUUID, WorkspaceID: wsUUID,
-		}); err != nil {
-			writeError(w, http.StatusBadRequest, "agent not found in this workspace")
+		if _, ok := h.loadSelectableSquadAgent(w, r, wsUUID, memberUUID, "agent"); !ok {
 			return
 		}
 	} else {
