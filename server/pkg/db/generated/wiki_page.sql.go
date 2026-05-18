@@ -15,7 +15,7 @@ const countWikiPageChildren = `-- name: CountWikiPageChildren :one
 WITH RECURSIVE descendants AS (
     SELECT id
     FROM wiki_page
-    WHERE parent_id = $1 AND workspace_id = $2
+    WHERE wiki_page.parent_id = $1 AND wiki_page.workspace_id = $2
   UNION ALL
     SELECT child.id
     FROM wiki_page child
@@ -39,17 +39,17 @@ func (q *Queries) CountWikiPageChildren(ctx context.Context, arg CountWikiPageCh
 
 const createWikiPage = `-- name: CreateWikiPage :one
 INSERT INTO wiki_page (workspace_id, parent_id, title, slug, content, position, created_by, updated_by)
-VALUES ($1, $2, $3, $4, COALESCE($5, ''), $6, $7, $8)
+VALUES ($1, $5, $2, $3, COALESCE($6, ''), $4, $7, $8)
 RETURNING id, workspace_id, parent_id, title, slug, content, position, created_by, updated_by, created_at, updated_at
 `
 
 type CreateWikiPageParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	ParentID    pgtype.UUID `json:"parent_id"`
 	Title       string      `json:"title"`
 	Slug        string      `json:"slug"`
-	Content     pgtype.Text `json:"content"`
 	Position    float64     `json:"position"`
+	ParentID    pgtype.UUID `json:"parent_id"`
+	Content     interface{} `json:"content"`
 	CreatedBy   pgtype.UUID `json:"created_by"`
 	UpdatedBy   pgtype.UUID `json:"updated_by"`
 }
@@ -57,11 +57,11 @@ type CreateWikiPageParams struct {
 func (q *Queries) CreateWikiPage(ctx context.Context, arg CreateWikiPageParams) (WikiPage, error) {
 	row := q.db.QueryRow(ctx, createWikiPage,
 		arg.WorkspaceID,
-		arg.ParentID,
 		arg.Title,
 		arg.Slug,
-		arg.Content,
 		arg.Position,
+		arg.ParentID,
+		arg.Content,
 		arg.CreatedBy,
 		arg.UpdatedBy,
 	)
@@ -114,9 +114,9 @@ type GetMaxWikiPagePositionParams struct {
 
 func (q *Queries) GetMaxWikiPagePosition(ctx context.Context, arg GetMaxWikiPagePositionParams) (float64, error) {
 	row := q.db.QueryRow(ctx, getMaxWikiPagePosition, arg.WorkspaceID, arg.ParentID)
-	var max_position float64
-	err := row.Scan(&max_position)
-	return max_position, err
+	var column_1 float64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const getWikiPage = `-- name: GetWikiPage :one

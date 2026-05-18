@@ -123,6 +123,7 @@ vi.mock("../../editor", () => ({
   useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
   FileDropOverlay: () => null,
   useDownloadAttachment: () => vi.fn(),
+  useAttachmentPreview: () => ({ open: vi.fn(), tryOpen: vi.fn(), modal: null }),
 }));
 
 vi.mock("./reply-input", () => ({

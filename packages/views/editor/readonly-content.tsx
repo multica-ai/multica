@@ -33,15 +33,15 @@ import { toHtml } from "hast-util-to-html";
 import { Maximize2, Download, Eye, Link as LinkIcon, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
-import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
+import { useWorkspaceSlug } from "@multica/core/paths";
 import type { Attachment } from "@multica/core/types";
-import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { openExternal } from "../platform";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { ImageLightbox } from "./extensions/image-view";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
+import { isAllowedFileCardHref } from "@multica/ui/markdown";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { MermaidDiagram } from "./mermaid-diagram";
 import { useDownloadAttachment } from "./use-download-attachment";
@@ -101,27 +101,7 @@ function urlTransform(url: string): string {
 // ---------------------------------------------------------------------------
 
 function IssueMentionLink({ issueId, label }: { issueId: string; label?: string }) {
-  const { push, openInNewTab } = useNavigation();
-  const p = useWorkspacePaths();
-  const path = p.issueDetail(issueId);
-  return (
-    <span
-      className="inline align-middle"
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.metaKey || e.ctrlKey || e.shiftKey) {
-          if (openInNewTab) {
-            openInNewTab(path, label);
-          }
-          return;
-        }
-        push(path);
-      }}
-    >
-      <IssueMentionCard issueId={issueId} fallbackLabel={label} />
-    </span>
-  );
+  return <IssueMentionCard issueId={issueId} fallbackLabel={label} />;
 }
 
 // Named component so it can call useWorkspaceSlug() — arrow function inlined
@@ -332,8 +312,7 @@ function buildComponents(
       const dataType = node?.properties?.dataType as string | undefined;
       if (dataType === "fileCard") {
         const rawHref = (node?.properties?.dataHref as string) || "";
-        // Only allow http(s) URLs to prevent javascript: and other dangerous schemes.
-        const href = /^https?:\/\//i.test(rawHref) ? rawHref : "";
+        const href = isAllowedFileCardHref(rawHref) ? rawHref : "";
         const filename = (node?.properties?.dataFilename as string) || "";
         return (
           <ReadonlyFileCard

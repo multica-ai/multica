@@ -397,7 +397,7 @@ function CommentRow({
       <div className="flex items-center gap-2.5">
         <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
         <span className="cursor-pointer text-sm font-medium">
-          {getActorName(entry.actor_type, entry.actor_id)}
+          {entry.actor_display_name ?? getActorName(entry.actor_type, entry.actor_id)}
         </span>
         <Tooltip>
           <TooltipTrigger
@@ -725,7 +725,7 @@ function CommentCardImpl({
             </CollapsibleTrigger>
             <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
             <span className="shrink-0 cursor-pointer text-sm font-medium">
-              {getActorName(entry.actor_type, entry.actor_id)}
+              {entry.actor_display_name ?? getActorName(entry.actor_type, entry.actor_id)}
             </span>
             <Tooltip>
               <TooltipTrigger

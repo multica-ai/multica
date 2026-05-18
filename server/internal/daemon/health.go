@@ -468,20 +468,31 @@ func (d *Daemon) isAllowedTraceOrigin(origin string) bool {
 }
 
 func (d *Daemon) traceAllowedOrigins() []string {
+	origins := make([]string, 0, len(defaultTraceOrigins)+4)
+	seen := map[string]struct{}{}
+	addOrigins := func(raw string) {
+		for _, origin := range splitOrigins(raw) {
+			if _, ok := seen[origin]; ok {
+				continue
+			}
+			seen[origin] = struct{}{}
+			origins = append(origins, origin)
+		}
+	}
+
 	for _, raw := range []string{
 		strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS")),
 		strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN")),
 		strings.TrimSpace(os.Getenv("MULTICA_APP_URL")),
 	} {
-		if origins := splitOrigins(raw); len(origins) > 0 {
-			return origins
-		}
+		addOrigins(raw)
 	}
 	cfg, err := cli.LoadCLIConfigForInstance(d.cfg.Profile, d.cfg.ConfigPath)
 	if err == nil {
-		if origins := splitOrigins(strings.TrimSpace(cfg.AppURL)); len(origins) > 0 {
-			return origins
-		}
+		addOrigins(strings.TrimSpace(cfg.AppURL))
+	}
+	if len(origins) > 0 {
+		return origins
 	}
 	return append([]string(nil), defaultTraceOrigins...)
 }

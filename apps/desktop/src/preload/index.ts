@@ -207,8 +207,11 @@ const updaterAPI = {
     ipcRenderer.on("updater:download-progress", handler);
     return () => ipcRenderer.removeListener("updater:download-progress", handler);
   },
-  onUpdateDownloaded: (callback: () => void) => {
-    const handler = () => callback();
+  onUpdateDownloaded: (
+    callback: (info: { version: string; releaseNotes?: string }) => void,
+  ) => {
+    const handler = (_: unknown, info: { version: string; releaseNotes?: string }) =>
+      callback(info);
     ipcRenderer.on("updater:update-downloaded", handler);
     return () => ipcRenderer.removeListener("updater:update-downloaded", handler);
   },

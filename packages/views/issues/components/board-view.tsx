@@ -107,6 +107,7 @@ export function BoardView({
   myIssuesScope,
   myIssuesFilter,
   projectId,
+  columnCounts,
 }: {
   issues: Issue[];
   visibleStatuses: IssueStatus[];
@@ -122,6 +123,8 @@ export function BoardView({
   myIssuesFilter?: MyIssuesFilter;
   /** When set, the per-column "+" pre-fills the project on the create form. */
   projectId?: string;
+  /** Optional display count override for callers that apply client-side filters. */
+  columnCounts?: Partial<Record<IssueStatus, number>>;
 }) {
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
@@ -293,6 +296,7 @@ export function BoardView({
             childProgressMap={childProgressMap}
             myIssuesOpts={myIssuesOpts}
             projectId={projectId}
+            displayCount={columnCounts?.[status]}
           />
         ))}
 
@@ -300,6 +304,7 @@ export function BoardView({
           <HiddenColumnsPanel
             hiddenStatuses={hiddenStatuses}
             myIssuesOpts={myIssuesOpts}
+            columnCounts={columnCounts}
           />
         )}
       </div>
@@ -322,6 +327,7 @@ function PaginatedBoardColumn({
   childProgressMap,
   myIssuesOpts,
   projectId,
+  displayCount,
 }: {
   status: IssueStatus;
   issueIds: string[];
@@ -329,6 +335,7 @@ function PaginatedBoardColumn({
   childProgressMap?: Map<string, ChildProgress>;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
   projectId?: string;
+  displayCount?: number;
 }) {
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
     status,
@@ -340,7 +347,7 @@ function PaginatedBoardColumn({
       issueIds={issueIds}
       issueMap={issueMap}
       childProgressMap={childProgressMap}
-      totalCount={total}
+      totalCount={displayCount ?? total}
       projectId={projectId}
       footer={
         hasMore ? (
@@ -354,9 +361,11 @@ function PaginatedBoardColumn({
 function HiddenColumnsPanel({
   hiddenStatuses,
   myIssuesOpts,
+  columnCounts,
 }: {
   hiddenStatuses: IssueStatus[];
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  columnCounts?: Partial<Record<IssueStatus, number>>;
 }) {
   const { t } = useT("issues");
   return (
@@ -372,6 +381,7 @@ function HiddenColumnsPanel({
             key={status}
             status={status}
             myIssuesOpts={myIssuesOpts}
+            displayCount={columnCounts?.[status]}
           />
         ))}
       </div>
@@ -382,9 +392,11 @@ function HiddenColumnsPanel({
 function HiddenColumnRow({
   status,
   myIssuesOpts,
+  displayCount,
 }: {
   status: IssueStatus;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  displayCount?: number;
 }) {
   const { t } = useT("issues");
   const viewStoreApi = useViewStoreApi();
@@ -396,7 +408,7 @@ function HiddenColumnRow({
         <span className="text-sm">{t(($) => $.status[status])}</span>
       </div>
       <div className="flex items-center gap-1.5">
-        <span className="text-xs text-muted-foreground">{total}</span>
+        <span className="text-xs text-muted-foreground">{displayCount ?? total}</span>
         <DropdownMenu>
           <DropdownMenuTrigger
             render={

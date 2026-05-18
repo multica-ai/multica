@@ -4,10 +4,13 @@ import (
 	"crypto/tls"
 	"fmt"
 	"html"
+	"mime"
+	"mime/quotedprintable"
+	"net"
 	"net/smtp"
 	"os"
-	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -19,162 +22,204 @@ import (
 // a full phishing pitch into a workspace name that gets sent from our domain.
 const maxSubjectFieldRunes = 60
 
-// emailSender abstracts the actual send mechanism (Resend API or SMTP).
+// emailSender abstracts the actual send mechanism. Tests inject a mock sender
+// through this interface so the HTML/subject generation remains unit-testable.
 type emailSender interface {
 	Send(from string, to []string, subject, htmlBody string) error
 }
 
 type EmailService struct {
-	sender    emailSender
-	fromEmail string
-	fromName  string
-}
-
-// resendSender wraps the Resend SDK client.
-type resendSender struct {
-	client *resend.Client
-}
-
-func (s *resendSender) Send(from string, to []string, subject, htmlBody string) error {
-	_, err := s.client.Emails.Send(&resend.SendEmailRequest{
-		From:    from,
-		To:      to,
-		Subject: subject,
-		Html:    htmlBody,
-	})
-	return err
-}
-
-// smtpSender sends mail via SMTP (supports SSL/TLS on port 465 and STARTTLS).
-type smtpSender struct {
-	host     string
-	port     int
-	username string
-	password string
-	useSSL   bool
-}
-
-func (s *smtpSender) Send(from string, to []string, subject, htmlBody string) error {
-	// Build RFC 2822 message
-	var msg strings.Builder
-	msg.WriteString("From: " + from + "\r\n")
-	msg.WriteString("To: " + strings.Join(to, ", ") + "\r\n")
-	msg.WriteString("Subject: " + subject + "\r\n")
-	msg.WriteString("MIME-Version: 1.0\r\n")
-	msg.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
-	msg.WriteString("\r\n")
-	msg.WriteString(htmlBody)
-
-	addr := fmt.Sprintf("%s:%d", s.host, s.port)
-
-	// Extract the bare email from a "Name <email>" formatted from address.
-	senderAddr := from
-	if idx := strings.Index(from, "<"); idx >= 0 {
-		senderAddr = strings.Trim(from[idx:], "<> ")
-	}
-
-	if s.useSSL {
-		return s.sendSSL(addr, senderAddr, to, msg.String())
-	}
-	return s.sendStartTLS(addr, senderAddr, to, msg.String())
-}
-
-// sendSSL connects via TLS first (implicit TLS, typically port 465).
-func (s *smtpSender) sendSSL(addr, from string, to []string, msg string) error {
-	tlsCfg := &tls.Config{ServerName: s.host}
-	conn, err := tls.Dial("tcp", addr, tlsCfg)
-	if err != nil {
-		return fmt.Errorf("smtp ssl dial: %w", err)
-	}
-
-	client, err := smtp.NewClient(conn, s.host)
-	if err != nil {
-		conn.Close()
-		return fmt.Errorf("smtp ssl new client: %w", err)
-	}
-	defer client.Close()
-
-	if s.username != "" {
-		auth := smtp.PlainAuth("", s.username, s.password, s.host)
-		if err := client.Auth(auth); err != nil {
-			return fmt.Errorf("smtp ssl auth: %w", err)
-		}
-	}
-
-	if err := client.Mail(from); err != nil {
-		return fmt.Errorf("smtp ssl MAIL: %w", err)
-	}
-	for _, rcpt := range to {
-		if err := client.Rcpt(rcpt); err != nil {
-			return fmt.Errorf("smtp ssl RCPT %s: %w", rcpt, err)
-		}
-	}
-
-	w, err := client.Data()
-	if err != nil {
-		return fmt.Errorf("smtp ssl DATA: %w", err)
-	}
-	if _, err := w.Write([]byte(msg)); err != nil {
-		return fmt.Errorf("smtp ssl write: %w", err)
-	}
-	if err := w.Close(); err != nil {
-		return fmt.Errorf("smtp ssl close data: %w", err)
-	}
-	return client.Quit()
-}
-
-// sendStartTLS connects in plain text and upgrades via STARTTLS (typically port 587).
-func (s *smtpSender) sendStartTLS(addr, from string, to []string, msg string) error {
-	auth := smtp.PlainAuth("", s.username, s.password, s.host)
-	return smtp.SendMail(addr, auth, from, to, []byte(msg))
+	sender          emailSender
+	client          *resend.Client
+	fromEmail       string
+	fromName        string
+	smtpHost        string
+	smtpPort        string
+	smtpUsername    string
+	smtpPassword    string
+	smtpTLSInsecure bool
+	smtpImplicitTLS bool
 }
 
 func NewEmailService() *EmailService {
-	fromName := os.Getenv("SMTP_FROM_NAME")
-
-	var sender emailSender
-	var from string
-
-	// Priority: SMTP > Resend API > dev console (nil sender)
-	smtpHost := os.Getenv("SMTP_HOST")
-	smtpUsername := os.Getenv("SMTP_USERNAME")
-	if smtpHost != "" {
-		port := 465
-		if p := os.Getenv("SMTP_PORT"); p != "" {
-			if parsed, err := strconv.Atoi(p); err == nil {
-				port = parsed
-			}
-		}
-		useSSL := true
-		if v := os.Getenv("SMTP_SSL"); v == "false" {
-			useSSL = false
-		}
-		sender = &smtpSender{
-			host:     smtpHost,
-			port:     port,
-			username: smtpUsername,
-			password: os.Getenv("SMTP_PASSWORD"),
-			useSSL:   useSSL,
-		}
-		// When SMTP is used, the envelope sender MUST match the auth user
-		// for most providers (QQ Exmail, Office365, etc.).
-		from = smtpUsername
-	} else if apiKey := os.Getenv("RESEND_API_KEY"); apiKey != "" {
-		sender = &resendSender{client: resend.NewClient(apiKey)}
-	}
-
-	// Allow explicit override via RESEND_FROM_EMAIL (works for both backends).
-	if override := os.Getenv("RESEND_FROM_EMAIL"); override != "" {
-		from = override
-	}
+	apiKey := strings.TrimSpace(os.Getenv("RESEND_API_KEY"))
+	fromName := strings.TrimSpace(os.Getenv("SMTP_FROM_NAME"))
+	from := strings.TrimSpace(os.Getenv("RESEND_FROM_EMAIL"))
 	if from == "" {
 		from = "noreply@multica.ai"
 	}
 
+	smtpHost := strings.TrimSpace(os.Getenv("SMTP_HOST"))
+	smtpPort := strings.TrimSpace(os.Getenv("SMTP_PORT"))
+	smtpImplicitTLS := os.Getenv("SMTP_SSL") == "true"
+	if smtpPort == "" {
+		if smtpImplicitTLS {
+			smtpPort = "465"
+		} else {
+			smtpPort = "25"
+		}
+	}
+	smtpUsername := strings.TrimSpace(os.Getenv("SMTP_USERNAME"))
+	smtpPassword := os.Getenv("SMTP_PASSWORD")
+	smtpTLSInsecure := os.Getenv("SMTP_TLS_INSECURE") == "true"
+
+	var client *resend.Client
+	if apiKey != "" {
+		client = resend.NewClient(apiKey)
+	}
+
+	switch {
+	case smtpHost != "":
+		fmt.Printf("EmailService: SMTP relay %s:%s from=%s\n", smtpHost, smtpPort, from)
+	case client != nil:
+		fmt.Printf("EmailService: Resend API from=%s\n", from)
+	default:
+		fmt.Println("EmailService: DEV mode — codes printed to stdout (set MULTICA_DEV_VERIFICATION_CODE in .env for a fixed local code)")
+	}
+
 	return &EmailService{
-		sender:    sender,
-		fromEmail: from,
-		fromName:  fromName,
+		client:          client,
+		fromEmail:       from,
+		fromName:        fromName,
+		smtpHost:        smtpHost,
+		smtpPort:        smtpPort,
+		smtpUsername:    smtpUsername,
+		smtpPassword:    smtpPassword,
+		smtpTLSInsecure: smtpTLSInsecure,
+		smtpImplicitTLS: smtpImplicitTLS,
+	}
+}
+
+// sendSMTP delivers an HTML email via an SMTP server.
+// Supports unauthenticated relay (SMTP_USERNAME empty) and authenticated SMTP.
+// Upgrades to STARTTLS when advertised by the server and optionally supports
+// implicit TLS when SMTP_SSL=true. Set SMTP_TLS_INSECURE=true for self-signed or
+// private CA certificates.
+func (s *EmailService) sendSMTP(to []string, subject, htmlBody string) error {
+	addr := net.JoinHostPort(s.smtpHost, s.smtpPort)
+
+	var (
+		conn net.Conn
+		err  error
+	)
+	if s.smtpImplicitTLS {
+		tlsCfg := &tls.Config{
+			ServerName:         s.smtpHost,
+			InsecureSkipVerify: s.smtpTLSInsecure, //nolint:gosec // opt-in via SMTP_TLS_INSECURE=true
+		}
+		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: 10 * time.Second}, "tcp", addr, tlsCfg)
+		if err != nil {
+			return fmt.Errorf("smtp implicit tls dial %s: %w", addr, err)
+		}
+	} else {
+		conn, err = net.DialTimeout("tcp", addr, 10*time.Second)
+		if err != nil {
+			return fmt.Errorf("smtp dial %s: %w", addr, err)
+		}
+	}
+	if err = conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		conn.Close()
+		return fmt.Errorf("smtp set deadline: %w", err)
+	}
+
+	c, err := smtp.NewClient(conn, s.smtpHost)
+	if err != nil {
+		conn.Close()
+		return fmt.Errorf("smtp client: %w", err)
+	}
+	defer c.Close()
+
+	if !s.smtpImplicitTLS {
+		// STARTTLS if advertised — refreshes the extension list for 8BITMIME check below.
+		if ok, _ := c.Extension("STARTTLS"); ok {
+			tlsCfg := &tls.Config{
+				ServerName:         s.smtpHost,
+				InsecureSkipVerify: s.smtpTLSInsecure, //nolint:gosec // opt-in via SMTP_TLS_INSECURE=true
+			}
+			if err = c.StartTLS(tlsCfg); err != nil {
+				return fmt.Errorf("smtp starttls: %w", err)
+			}
+		}
+	}
+
+	if s.smtpUsername != "" {
+		auth := smtp.PlainAuth("", s.smtpUsername, s.smtpPassword, s.smtpHost)
+		if err = c.Auth(auth); err != nil {
+			return fmt.Errorf("smtp auth: %w", err)
+		}
+	}
+
+	// Probe 8BITMIME after (possible) STARTTLS so the extension list is current.
+	// Use quoted-printable for relays that don't advertise 8BITMIME — safer for
+	// non-ASCII workspace/inviter names crossing strict or older SMTP hops.
+	has8Bit, _ := c.Extension("8BITMIME")
+	encodedSubject := mime.QEncoding.Encode("utf-8", subject)
+	msgID := fmt.Sprintf("<%d@%s>", time.Now().UnixNano(), s.smtpHost)
+
+	var bodyBytes []byte
+	var cte string
+	if has8Bit {
+		bodyBytes = []byte(htmlBody)
+		cte = "8bit"
+	} else {
+		var buf strings.Builder
+		qpw := quotedprintable.NewWriter(&buf)
+		_, _ = qpw.Write([]byte(htmlBody))
+		_ = qpw.Close()
+		bodyBytes = []byte(buf.String())
+		cte = "quoted-printable"
+	}
+
+	envelopeFrom := s.fromEmail
+	if s.smtpUsername != "" {
+		envelopeFrom = s.smtpUsername
+	}
+	if err = c.Mail(envelopeFrom); err != nil {
+		return fmt.Errorf("smtp MAIL FROM: %w", err)
+	}
+	for _, recipient := range to {
+		if err = c.Rcpt(recipient); err != nil {
+			return fmt.Errorf("smtp RCPT TO <%s>: %w", recipient, err)
+		}
+	}
+	w, err := c.Data()
+	if err != nil {
+		return fmt.Errorf("smtp DATA: %w", err)
+	}
+	headers := "From: " + s.formatFrom() + "\r\n" +
+		"To: " + strings.Join(to, ", ") + "\r\n" +
+		"Subject: " + encodedSubject + "\r\n" +
+		"Date: " + time.Now().UTC().Format(time.RFC1123Z) + "\r\n" +
+		"Message-ID: " + msgID + "\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: text/html; charset=UTF-8\r\n" +
+		"Content-Transfer-Encoding: " + cte + "\r\n" +
+		"\r\n"
+	if _, err = fmt.Fprintf(w, "%s%s", headers, bodyBytes); err != nil {
+		return fmt.Errorf("smtp write body: %w", err)
+	}
+	if err = w.Close(); err != nil {
+		return fmt.Errorf("smtp end data: %w", err)
+	}
+	return c.Quit()
+}
+
+func (s *EmailService) deliver(to []string, subject, htmlBody string) (bool, error) {
+	switch {
+	case s.sender != nil:
+		return true, s.sender.Send(s.formatFrom(), to, subject, htmlBody)
+	case s.smtpHost != "":
+		return true, s.sendSMTP(to, subject, htmlBody)
+	case s.client != nil:
+		_, err := s.client.Emails.Send(&resend.SendEmailRequest{
+			From:    s.formatFrom(),
+			To:      to,
+			Subject: subject,
+			Html:    htmlBody,
+		})
+		return true, err
+	default:
+		return false, nil
 	}
 }
 
@@ -188,24 +233,23 @@ func (s *EmailService) formatFrom() string {
 
 // SendVerificationCode sends a one-time login code. The code is server-generated
 // (6-digit numeric) so no user-controlled text reaches the email body here.
-// If that ever changes, escape the user-controlled fields the same way
-// SendInvitationEmail does.
+// Delivery priority: injected sender → SMTP relay → Resend API → DEV stdout.
 func (s *EmailService) SendVerificationCode(to, code string) error {
 	subject := "Your Multica verification code"
 	htmlBody := fmt.Sprintf(
 		`<div style="font-family: sans-serif; max-width: 400px; margin: 0 auto;">
-				<h2>Your verification code</h2>
-				<p style="font-size: 32px; font-weight: bold; letter-spacing: 8px; margin: 24px 0;">%s</p>
-				<p>This code expires in 10 minutes.</p>
-				<p style="color: #666; font-size: 14px;">If you didn't request this code, you can safely ignore this email.</p>
-			</div>`, code)
+			<h2>Your verification code</h2>
+			<p style="font-size: 32px; font-weight: bold; letter-spacing: 8px; margin: 24px 0;">%s</p>
+			<p>This code expires in 10 minutes.</p>
+			<p style="color: #666; font-size: 14px;">If you didn't request this code, you can safely ignore this email.</p>
+		</div>`, code)
 
-	if s.sender == nil {
-		fmt.Printf("[DEV] Verification code for %s: %s\n", to, code)
-		return nil
+	if sent, err := s.deliver([]string{to}, subject, htmlBody); sent {
+		return err
 	}
 
-	return s.sender.Send(s.formatFrom(), []string{to}, subject, htmlBody)
+	fmt.Printf("[DEV] Verification code for %s: %s\n", to, code)
+	return nil
 }
 
 // SendInvitationEmail notifies the invitee that they have been invited to a workspace.
@@ -216,14 +260,14 @@ func (s *EmailService) SendInvitationEmail(to, inviterName, workspaceName, invit
 		appURL = "https://app.multica.ai"
 	}
 	inviteURL := fmt.Sprintf("%s/invite/%s", appURL, invitationID)
+	subject, htmlBody := buildInvitationEmail(inviterName, workspaceName, inviteURL)
 
-	if s.sender == nil {
-		fmt.Printf("[DEV] Invitation email to %s: %s invited you to %s — %s\n", to, inviterName, workspaceName, inviteURL)
-		return nil
+	if sent, err := s.deliver([]string{to}, subject, htmlBody); sent {
+		return err
 	}
 
-	subject, htmlBody := buildInvitationEmail(inviterName, workspaceName, inviteURL)
-	return s.sender.Send(s.formatFrom(), []string{to}, subject, htmlBody)
+	fmt.Printf("[DEV] Invitation email to %s: %s invited you to %s — %s\n", to, inviterName, workspaceName, inviteURL)
+	return nil
 }
 
 // SendNotificationEmail sends a notification email (e.g. when a user is @mentioned).
@@ -259,16 +303,16 @@ func (s *EmailService) SendNotificationEmail(to, title, body, link, senderName s
 			<p style="color: #666; font-size: 14px;">You received this email because notifications are enabled in your Multica settings.</p>
 		</div>`, safeTitle, senderHTML, safeBody, linkHTML)
 
-	if s.sender == nil {
-		if strings.TrimSpace(senderName) != "" {
-			fmt.Printf("[DEV] Notification email to %s from %s: %s — %s\n", to, strings.TrimSpace(senderName), title, link)
-		} else {
-			fmt.Printf("[DEV] Notification email to %s: %s — %s\n", to, title, link)
-		}
-		return nil
+	if sent, err := s.deliver([]string{to}, subject, htmlBody); sent {
+		return err
 	}
 
-	return s.sender.Send(s.formatFrom(), []string{to}, subject, htmlBody)
+	if strings.TrimSpace(senderName) != "" {
+		fmt.Printf("[DEV] Notification email to %s from %s: %s — %s\n", to, strings.TrimSpace(senderName), title, link)
+	} else {
+		fmt.Printf("[DEV] Notification email to %s: %s — %s\n", to, title, link)
+	}
+	return nil
 }
 
 func buildNotificationEmailSubject(title, senderName string) string {
@@ -299,14 +343,25 @@ func buildInvitationEmail(inviterName, workspaceName, inviteURL string) (subject
 	subject = fmt.Sprintf("%s invited you to %s on Multica", subjectInviter, subjectWorkspace)
 	htmlBody = fmt.Sprintf(
 		`<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-				<h2>You're invited to join %s</h2>
-				<p><strong>%s</strong> invited you to collaborate in the <strong>%s</strong> workspace on Multica.</p>
-				<p style="margin: 24px 0;">
-					<a href="%s" style="display: inline-block; padding: 12px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 500;">Accept invitation</a>
-				</p>
-				<p style="color: #666; font-size: 14px;">You'll need to log in to accept or decline the invitation.</p>
-			</div>`, safeWorkspace, safeInviter, safeWorkspace, inviteURL)
+			<h2>You're invited to join %s</h2>
+			<p><strong>%s</strong> invited you to collaborate in the <strong>%s</strong> workspace on Multica.</p>
+			<p style="margin: 24px 0;">
+				<a href="%s" style="display: inline-block; padding: 12px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 500;">Accept invitation</a>
+			</p>
+			<p style="color: #666; font-size: 14px;">You'll need to log in to accept or decline the invitation.</p>
+		</div>`, safeWorkspace, safeInviter, safeWorkspace, inviteURL)
 	return
+}
+
+// buildInvitationParams assembles the Resend payload for an invitation.
+func buildInvitationParams(from, to, inviterName, workspaceName, inviteURL string) *resend.SendEmailRequest {
+	subject, htmlBody := buildInvitationEmail(inviterName, workspaceName, inviteURL)
+	return &resend.SendEmailRequest{
+		From:    from,
+		To:      []string{to},
+		Subject: subject,
+		Html:    htmlBody,
+	}
 }
 
 // sanitizeSubjectField prepares user-controlled text for the email Subject line.

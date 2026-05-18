@@ -1859,7 +1859,7 @@ export class ApiClient {
     return this.fetch(`/api/squads/${id}`);
   }
 
-  async createSquad(data: { name: string; description?: string; leader_id: string }): Promise<Squad> {
+  async createSquad(data: { name: string; description?: string; leader_id: string; avatar_url?: string }): Promise<Squad> {
     return this.fetch("/api/squads", { method: "POST", body: JSON.stringify(data) });
   }
 

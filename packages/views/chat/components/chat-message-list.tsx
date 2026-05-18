@@ -466,6 +466,9 @@ function ItemRow({ item }: { item: ChatTimelineItem }) {
       return <ToolResultRow item={item} />;
     case "thinking":
       return <ThinkingRow item={item} />;
+    case "raw":
+    case "final":
+      return <MiddleTextRow item={item} />;
     case "error":
       return <ErrorRow item={item} />;
     default:
@@ -593,4 +596,3 @@ function ErrorRow({ item }: { item: ChatTimelineItem }) {
 }
 
 // ─── Shared ──────────────────────────────────────────────────────────────
-

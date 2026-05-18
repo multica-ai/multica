@@ -106,12 +106,16 @@ export interface AgentTask {
    * tasks that have no linked issue (so e.g. quick-create tasks render
    * with a meaningful title instead of falling through to "Untracked").
    */
-  kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct";
+  kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct" | "local_cli";
+  owner_id?: string;
+  cli_name?: string;
+  exit_code?: number;
   /**
    * Local working directory pinned for this task by the daemon. Empty until
    * the daemon reports a work_dir (typically once execution starts).
    */
   work_dir?: string;
+  context_dir?: string;
 }
 
 export interface LocalPreview {

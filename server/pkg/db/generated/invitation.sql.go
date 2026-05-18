@@ -226,21 +226,6 @@ func (q *Queries) DeclineInvitation(ctx context.Context, id pgtype.UUID) (Worksp
 	return i, err
 }
 
-const deleteInviteLink = `-- name: DeleteInviteLink :exec
-DELETE FROM workspace_invitation
-WHERE id = $1 AND workspace_id = $2 AND invite_type = 'link'
-`
-
-type DeleteInviteLinkParams struct {
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-}
-
-func (q *Queries) DeleteInviteLink(ctx context.Context, arg DeleteInviteLinkParams) error {
-	_, err := q.db.Exec(ctx, deleteInviteLink, arg.ID, arg.WorkspaceID)
-	return err
-}
-
 const deleteExpiredInviteLinks = `-- name: DeleteExpiredInviteLinks :many
 WITH expired AS (
     SELECT id
@@ -264,7 +249,7 @@ func (q *Queries) DeleteExpiredInviteLinks(ctx context.Context, limit int32) ([]
 		return nil, err
 	}
 	defer rows.Close()
-	var items []WorkspaceInvitation
+	items := []WorkspaceInvitation{}
 	for rows.Next() {
 		var i WorkspaceInvitation
 		if err := rows.Scan(
@@ -295,6 +280,21 @@ func (q *Queries) DeleteExpiredInviteLinks(ctx context.Context, limit int32) ([]
 		return nil, err
 	}
 	return items, nil
+}
+
+const deleteInviteLink = `-- name: DeleteInviteLink :exec
+DELETE FROM workspace_invitation
+WHERE id = $1 AND workspace_id = $2 AND invite_type = 'link'
+`
+
+type DeleteInviteLinkParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) DeleteInviteLink(ctx context.Context, arg DeleteInviteLinkParams) error {
+	_, err := q.db.Exec(ctx, deleteInviteLink, arg.ID, arg.WorkspaceID)
+	return err
 }
 
 const expireStalePendingInvitations = `-- name: ExpireStalePendingInvitations :exec

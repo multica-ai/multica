@@ -99,6 +99,7 @@ type AgentTaskQueue struct {
 	TriggerActorID    pgtype.UUID        `json:"trigger_actor_id"`
 	TriggerSummary    pgtype.Text        `json:"trigger_summary"`
 	ForceFreshSession bool               `json:"force_fresh_session"`
+	IsLeaderTask      bool               `json:"is_leader_task"`
 }
 
 type Attachment struct {
@@ -388,6 +389,40 @@ type IssueSubscriber struct {
 type IssueToLabel struct {
 	IssueID pgtype.UUID `json:"issue_id"`
 	LabelID pgtype.UUID `json:"label_id"`
+}
+
+type LocalCliMessage struct {
+	ID        pgtype.UUID        `json:"id"`
+	RunID     pgtype.UUID        `json:"run_id"`
+	CommentID pgtype.UUID        `json:"comment_id"`
+	Seq       int32              `json:"seq"`
+	Type      string             `json:"type"`
+	Tool      pgtype.Text        `json:"tool"`
+	Content   pgtype.Text        `json:"content"`
+	Input     []byte             `json:"input"`
+	Output    pgtype.Text        `json:"output"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	Source    pgtype.Text        `json:"source"`
+	SourceKey pgtype.Text        `json:"source_key"`
+}
+
+type LocalCliRun struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	IssueID      pgtype.UUID        `json:"issue_id"`
+	OwnerID      pgtype.UUID        `json:"owner_id"`
+	CliName      string             `json:"cli_name"`
+	Status       string             `json:"status"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
+	ExitCode     pgtype.Int4        `json:"exit_code"`
+	WorkDir      pgtype.Text        `json:"work_dir"`
+	ContextDir   pgtype.Text        `json:"context_dir"`
+	CommentsMode string             `json:"comments_mode"`
+	TopCommentID pgtype.UUID        `json:"top_comment_id"`
+	Error        pgtype.Text        `json:"error"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Member struct {
@@ -691,6 +726,20 @@ type VerificationCode struct {
 	Attempts  int32              `json:"attempts"`
 }
 
+type WikiPage struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ParentID    pgtype.UUID        `json:"parent_id"`
+	Title       string             `json:"title"`
+	Slug        string             `json:"slug"`
+	Content     string             `json:"content"`
+	Position    float64            `json:"position"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	UpdatedBy   pgtype.UUID        `json:"updated_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Workspace struct {
 	ID           pgtype.UUID        `json:"id"`
 	Name         string             `json:"name"`
@@ -704,20 +753,6 @@ type Workspace struct {
 	IssuePrefix  string             `json:"issue_prefix"`
 	IssueCounter int32              `json:"issue_counter"`
 	WikiContent  pgtype.Text        `json:"wiki_content"`
-}
-
-type WikiPage struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	ParentID    pgtype.UUID        `json:"parent_id"`
-	Title       string             `json:"title"`
-	Slug        string             `json:"slug"`
-	Content     string             `json:"content"`
-	Position    float64            `json:"position"`
-	CreatedBy   pgtype.UUID        `json:"created_by"`
-	UpdatedBy   pgtype.UUID        `json:"updated_by"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type WorkspaceInvitation struct {
