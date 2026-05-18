@@ -14,7 +14,7 @@ function requireRuntimeAppUrl(): string {
 
 export function DesktopLoginPage() {
   const webUrl = requireRuntimeAppUrl();
-  const handleGoogleLogin = () => {
+  const handleFeishuLogin = () => {
     // Open web login page in the default browser with platform=desktop flag.
     // The web callback will redirect back via multica:// deep link with the token.
     window.desktopAPI.openExternal(
@@ -31,7 +31,7 @@ export function DesktopLoginPage() {
           // Auth store update triggers AppContent re-render → shows DesktopShell.
           // Initial workspace navigation happens in routes.tsx via IndexRedirect.
         }}
-        onGoogleLogin={handleGoogleLogin}
+        onFeishuLogin={handleFeishuLogin}
       />
     </div>
   );

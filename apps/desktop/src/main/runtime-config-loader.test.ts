@@ -46,9 +46,9 @@ describe("loadRuntimeConfig", () => {
       ok: true,
       config: {
         schemaVersion: 1,
-        apiUrl: "https://api.multica.ai",
-        wsUrl: "wss://api.multica.ai/ws",
-        appUrl: "https://multica.ai",
+        apiUrl: "https://multica.lilithgames.com",
+        wsUrl: "wss://multica.lilithgames.com/ws",
+        appUrl: "https://multica.lilithgames.com",
       },
     });
   });

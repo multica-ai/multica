@@ -118,8 +118,8 @@ export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
 
 const INSTALL_CMD = "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
 
-const CONFIGURE_CMD = `multica config set server_url https://api.multica.ai
-multica config set app_url https://multica.ai`;
+const CONFIGURE_CMD = `multica config set server_url https://multica.lilithgames.com
+multica config set app_url https://multica.lilithgames.com`;
 
 const LOGIN_CMD = "multica login --token <YOUR_TOKEN>";
 
