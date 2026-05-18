@@ -1,6 +1,6 @@
 import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -96,9 +96,45 @@ vi.mock("@multica/core/hooks/use-file-upload", () => ({
   useFileUpload: () => ({ uploadWithToast: vi.fn() }),
 }));
 
-vi.mock("@multica/core/api", () => ({
-  api: {},
-}));
+// Hoisted ApiError class so both the vi.mock factory and the tests below
+// can construct/instanceof-check the same identity. vi.mock is hoisted, so
+// a normal `class` declaration above it would still be in the TDZ at mock
+// evaluation time.
+const { ApiError } = vi.hoisted(() => {
+  class ApiErrorImpl extends Error {
+    readonly status: number;
+    readonly statusText: string;
+    readonly body?: unknown;
+    constructor(message: string, status: number, statusText: string, body?: unknown) {
+      super(message);
+      this.name = "ApiError";
+      this.status = status;
+      this.statusText = statusText;
+      this.body = body;
+    }
+  }
+  return { ApiError: ApiErrorImpl };
+});
+
+vi.mock("@multica/core/api", async () => {
+  // Pull real `parseWithFallback` + `DuplicateIssueErrorBodySchema` from the
+  // schema modules so the drift-fallback branch in create-issue.tsx runs the
+  // actual validation logic (not a stub). Only `ApiError` is local — the
+  // component imports it from this module and the cross-realm `instanceof`
+  // check requires a single class identity.
+  const { parseWithFallback } = await vi.importActual<typeof import("@multica/core/api/schema")>(
+    "@multica/core/api/schema",
+  );
+  const { DuplicateIssueErrorBodySchema } = await vi.importActual<
+    typeof import("@multica/core/api/schemas")
+  >("@multica/core/api/schemas");
+  return {
+    api: {},
+    ApiError,
+    parseWithFallback,
+    DuplicateIssueErrorBodySchema,
+  };
+});
 
 vi.mock("../editor", () => {
   const ContentEditor = forwardRef(({ defaultValue, onUpdate, placeholder }: any, ref: any) => {
@@ -285,7 +321,9 @@ describe("CreateIssueModal", () => {
 
     renderModal(<CreateIssueModal onClose={onClose} />);
 
-    await user.type(screen.getByPlaceholderText("Issue title"), "  Ship create issue regression coverage  ");
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+      target: { value: "  Ship create issue regression coverage  " },
+    });
     await user.click(screen.getByRole("button", { name: "Create Issue" }));
 
     await waitFor(() => {
@@ -400,6 +438,94 @@ describe("CreateIssueModal", () => {
   // Manual → agent must forward the picked project so the new modal pins to
   // the same target. Without this the agent panel re-seeds from its own
   // persisted `lastProjectId` and silently routes the issue to a stale one.
+  // Reporter scenario: backend rejects same-titled create with a 409 +
+  // structured duplicate body. The user should land on a duplicate toast
+  // pointing at the existing issue, not a generic "create failed" message.
+  it("shows duplicate-issue toast with a working view-existing link", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    mockCreateIssue.mockRejectedValue(
+      new ApiError("An active issue with this title already exists: MUL-7 – Login bug", 409, "Conflict", {
+        code: "active_duplicate_issue",
+        error: "An active issue with this title already exists: MUL-7 – Login bug",
+        issue: {
+          id: "issue-dup",
+          identifier: "MUL-7",
+          title: "Login bug",
+        },
+      }),
+    );
+
+    renderModal(<CreateIssueModal onClose={onClose} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Login bug");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockToastCustom).toHaveBeenCalledTimes(1));
+    expect(mockToastError).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+
+    const renderToast = mockToastCustom.mock.calls[0]?.[0];
+    expect(typeof renderToast).toBe("function");
+    render(renderToast("toast-dup"));
+
+    expect(screen.getByText("Duplicate issue")).toBeInTheDocument();
+    expect(screen.getByText(/MUL-7/)).toBeInTheDocument();
+    expect(screen.getByText(/Login bug/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "View existing issue" }));
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-dup");
+    expect(mockToastDismiss).toHaveBeenCalledWith("toast-dup");
+  });
+
+  // Schema drift safety: server returns a 409 with a body that doesn't match
+  // the duplicate schema (renamed code, missing issue object, etc.). UI must
+  // not throw — it must fall back to a normal error toast carrying the
+  // backend message so the user still sees a useful reason.
+  it("falls back to a normal error toast when a 409 body does not match the duplicate schema", async () => {
+    const user = userEvent.setup();
+    mockCreateIssue.mockRejectedValue(
+      new ApiError("Backend says title is taken", 409, "Conflict", {
+        code: "renamed_duplicate_marker",
+      }),
+    );
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Login bug");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledTimes(1));
+    expect(mockToastError).toHaveBeenCalledWith("Backend says title is taken");
+    expect(mockToastCustom).not.toHaveBeenCalled();
+  });
+
+  // Non-409 errors with a real message: surface the backend reason rather
+  // than the generic i18n fallback. This is the whole point of the issue.
+  it("surfaces err.message verbatim for non-duplicate errors", async () => {
+    const user = userEvent.setup();
+    mockCreateIssue.mockRejectedValue(new Error("Server is overloaded, try again"));
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Anything");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledTimes(1));
+    expect(mockToastError).toHaveBeenCalledWith("Server is overloaded, try again");
+  });
+
+  // Non-Error throws (string, plain object) have no `.message`. Fall back to
+  // the i18n key so the user always sees something readable.
+  it("falls back to the generic toast when the thrown value is not an Error", async () => {
+    const user = userEvent.setup();
+    mockCreateIssue.mockRejectedValue("network exploded");
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Anything");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledTimes(1));
+    expect(mockToastError).toHaveBeenCalledWith("Failed to create issue");
+  });
+
   it("forwards the picked project when switching to agent mode", async () => {
     const user = userEvent.setup();
     const onSwitchMode = vi.fn();

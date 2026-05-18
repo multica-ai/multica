@@ -89,6 +89,8 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  ListWebhookDeliveriesResponse,
+  WebhookDelivery,
   NotificationPreferenceResponse,
   NotificationPreferences,
   GitHubPullRequest,
@@ -122,11 +124,15 @@ import {
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_SQUAD_MEMBER_STATUS_LIST,
   EMPTY_TIMELINE_ENTRIES,
+  EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
+  EMPTY_WEBHOOK_DELIVERY,
   GroupedIssuesResponseSchema,
   ListIssuesResponseSchema,
+  ListWebhookDeliveriesResponseSchema,
   SquadMemberStatusListResponseSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
+  WebhookDeliveryResponseSchema,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1592,6 +1598,13 @@ export class ApiClient {
     return this.fetch(`/api/autopilots/${id}/runs?${search}`);
   }
 
+  // Returns a single run including its full trigger_payload. List responses
+  // omit trigger_payload to keep them small (a webhook envelope can be
+  // up to 256 KiB × limit rows), so the detail view fetches via this route.
+  async getAutopilotRun(autopilotId: string, runId: string): Promise<AutopilotRun> {
+    return this.fetch(`/api/autopilots/${autopilotId}/runs/${runId}`);
+  }
+
   async createAutopilotTrigger(autopilotId: string, data: CreateAutopilotTriggerRequest): Promise<AutopilotTrigger> {
     return this.fetch(`/api/autopilots/${autopilotId}/triggers`, {
       method: "POST",
@@ -1608,6 +1621,74 @@ export class ApiClient {
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
+  }
+
+  async rotateAutopilotTriggerWebhookToken(
+    autopilotId: string,
+    triggerId: string,
+  ): Promise<AutopilotTrigger> {
+    return this.fetch(
+      `/api/autopilots/${autopilotId}/triggers/${triggerId}/rotate-webhook-token`,
+      { method: "POST" },
+    );
+  }
+
+  // Webhook deliveries — list is slim (no raw_body / selected_headers /
+  // response_body); detail returns the full row. Both responses are parsed
+  // through a lenient schema so an unknown server-side `status` /
+  // `signature_status` value degrades to a generic row instead of dropping
+  // the whole list.
+  async listAutopilotDeliveries(
+    autopilotId: string,
+    params?: { limit?: number; offset?: number },
+  ): Promise<ListWebhookDeliveriesResponse> {
+    const search = new URLSearchParams();
+    if (params?.limit) search.set("limit", params.limit.toString());
+    if (params?.offset) search.set("offset", params.offset.toString());
+    const raw = await this.fetch<unknown>(
+      `/api/autopilots/${autopilotId}/deliveries?${search}`,
+    );
+    return parseWithFallback(
+      raw,
+      ListWebhookDeliveriesResponseSchema,
+      EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
+      { endpoint: "GET /api/autopilots/:id/deliveries" },
+    );
+  }
+
+  async getAutopilotDelivery(
+    autopilotId: string,
+    deliveryId: string,
+  ): Promise<WebhookDelivery> {
+    const raw = await this.fetch<unknown>(
+      `/api/autopilots/${autopilotId}/deliveries/${deliveryId}`,
+    );
+    return parseWithFallback(
+      raw,
+      WebhookDeliveryResponseSchema,
+      { ...EMPTY_WEBHOOK_DELIVERY, id: deliveryId, autopilot_id: autopilotId },
+      { endpoint: "GET /api/autopilots/:id/deliveries/:deliveryId" },
+    );
+  }
+
+  // Replay creates a NEW delivery row referencing the original via
+  // `replayed_from_delivery_id`. Server rejects replays of
+  // signature-invalid / rejected deliveries with 400 — the UI keeps the
+  // button disabled for those rows, but the server is the source of truth.
+  async replayAutopilotDelivery(
+    autopilotId: string,
+    deliveryId: string,
+  ): Promise<WebhookDelivery> {
+    const raw = await this.fetch<unknown>(
+      `/api/autopilots/${autopilotId}/deliveries/${deliveryId}/replay`,
+      { method: "POST" },
+    );
+    return parseWithFallback(
+      raw,
+      WebhookDeliveryResponseSchema,
+      { ...EMPTY_WEBHOOK_DELIVERY, autopilot_id: autopilotId },
+      { endpoint: "POST /api/autopilots/:id/deliveries/:deliveryId/replay" },
+    );
   }
 
   // GitHub integration

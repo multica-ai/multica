@@ -122,6 +122,8 @@
     "toast_created": "已创建 issue",
     "view_issue": "查看 issue",
     "toast_failed": "创建 issue 失败",
+    "toast_duplicate_title": "已存在同名 issue",
+    "toast_duplicate_view": "查看已有 issue",
     "toast_link_subissues_all_failed": "关联子 issue 失败",
     "toast_link_subissues_partial": "{{total}} 个子 issue 中有 {{failed}} 个关联失败",
     "switch_to_agent": "切换到智能体",

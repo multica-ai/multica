@@ -158,6 +158,8 @@ type AutopilotTrigger struct {
 	LastFiredAt    pgtype.Timestamptz `json:"last_fired_at"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	Provider       string             `json:"provider"`
+	SigningSecret  pgtype.Text        `json:"signing_secret"`
 }
 
 type ChatMessage struct {
@@ -602,6 +604,31 @@ type VerificationCode struct {
 	Used      bool               `json:"used"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	Attempts  int32              `json:"attempts"`
+}
+
+type WebhookDelivery struct {
+	ID                     pgtype.UUID        `json:"id"`
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	AutopilotID            pgtype.UUID        `json:"autopilot_id"`
+	TriggerID              pgtype.UUID        `json:"trigger_id"`
+	Provider               string             `json:"provider"`
+	Event                  string             `json:"event"`
+	DedupeKey              pgtype.Text        `json:"dedupe_key"`
+	DedupeSource           pgtype.Text        `json:"dedupe_source"`
+	SignatureStatus        string             `json:"signature_status"`
+	Status                 string             `json:"status"`
+	AttemptCount           int32              `json:"attempt_count"`
+	SelectedHeaders        []byte             `json:"selected_headers"`
+	ContentType            pgtype.Text        `json:"content_type"`
+	RawBody                []byte             `json:"raw_body"`
+	ResponseStatus         pgtype.Int4        `json:"response_status"`
+	ResponseBody           pgtype.Text        `json:"response_body"`
+	AutopilotRunID         pgtype.UUID        `json:"autopilot_run_id"`
+	ReplayedFromDeliveryID pgtype.UUID        `json:"replayed_from_delivery_id"`
+	Error                  pgtype.Text        `json:"error"`
+	ReceivedAt             pgtype.Timestamptz `json:"received_at"`
+	LastAttemptAt          pgtype.Timestamptz `json:"last_attempt_at"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 }
 
 type Workspace struct {

@@ -81,7 +81,14 @@ export const BoardCardContent = memo(function BoardCardContent({
     (updates: Partial<UpdateIssueRequest>) => {
       updateIssueMutation.mutate(
         { id: issue.id, ...updates },
-        { onError: () => toast.error(t(($) => $.card.update_failed)) },
+        {
+          onError: (err) =>
+            toast.error(
+              err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.card.update_failed),
+            ),
+        },
       );
     },
     [issue.id, updateIssueMutation, t],

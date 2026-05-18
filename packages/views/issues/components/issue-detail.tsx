@@ -496,7 +496,14 @@ function SubIssueRow({ child }: { child: Issue }) {
     (updates: Partial<UpdateIssueRequest>) => {
       updateIssue.mutate(
         { id: child.id, ...updates },
-        { onError: () => toast.error(t(($) => $.detail.update_failed)) },
+        {
+          onError: (err) =>
+            toast.error(
+              err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.detail.update_failed),
+            ),
+        },
       );
     },
     [child.id, updateIssue, t],

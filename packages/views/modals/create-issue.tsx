@@ -4,6 +4,7 @@ import { useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "../navigation";
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowLeftRight,
   ArrowUp,
@@ -43,7 +44,13 @@ import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-st
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { api } from "@multica/core/api";
+import {
+  api,
+  ApiError,
+  DuplicateIssueErrorBodySchema,
+  type DuplicateIssueErrorBody,
+  parseWithFallback,
+} from "@multica/core/api";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { PillButton } from "../common/pill-button";
 import { IssuePickerModal } from "./issue-picker-modal";
@@ -211,6 +218,15 @@ export function ManualCreatePanel({
             }),
           ),
         );
+        // Aggregate fan-out: N independent requests can fail for N different
+        // reasons. The user-facing toast stays count-based (any single
+        // err.message would mislead), but log each rejection so developers
+        // still have signal in dev-tools / Sentry.
+        for (const result of results) {
+          if (result.status === "rejected") {
+            console.error("[create-issue] sub-issue link failed", result.reason);
+          }
+        }
         const failed = results.filter((r) => r.status === "rejected").length;
         if (failed > 0) {
           toast.error(
@@ -265,8 +281,55 @@ export function ManualCreatePanel({
           </div>
         ), { duration: 5000 });
       }
-    } catch {
-      toast.error(t(($) => $.create_issue.toast_failed));
+    } catch (err) {
+      // Duplicate-issue is the only structured 409 the create endpoint
+      // returns. We schema-guard the body (ApiError.body is `unknown`) so a
+      // future server-side rename / drop of `code` / `issue` degrades to the
+      // normal error toast instead of throwing inside the toast renderer.
+      if (err instanceof ApiError && err.status === 409) {
+        const dup = parseWithFallback<DuplicateIssueErrorBody | null>(
+          err.body,
+          DuplicateIssueErrorBodySchema,
+          null,
+          { endpoint: "POST /api/workspaces/:wsId/issues (active_duplicate_issue)" },
+        );
+        if (dup) {
+          toast.custom(
+            (toastId) => (
+              <div className="bg-popover text-popover-foreground border rounded-lg shadow-lg p-4 w-[360px]">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="flex items-center justify-center size-5 rounded-full bg-amber-500/15 text-amber-500">
+                    <AlertTriangle className="size-3" />
+                  </div>
+                  <span className="text-sm font-medium">
+                    {t(($) => $.create_issue.toast_duplicate_title)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground ml-7">
+                  <span className="truncate">{dup.issue.identifier} – {dup.issue.title}</span>
+                </div>
+                <button
+                  type="button"
+                  className="ml-7 mt-2 text-sm text-primary hover:underline cursor-pointer"
+                  onClick={() => {
+                    router.push(p.issueDetail(dup.issue.id));
+                    toast.dismiss(toastId);
+                  }}
+                >
+                  {t(($) => $.create_issue.toast_duplicate_view)}
+                </button>
+              </div>
+            ),
+            { duration: 5000 },
+          );
+          return;
+        }
+      }
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.create_issue.toast_failed),
+      );
     } finally {
       setSubmitting(false);
     }
@@ -312,7 +375,14 @@ export function ManualCreatePanel({
             onMoveToTodo={() => {
               updateIssueMutation.mutate(
                 { id: backlogHintIssueId, status: "todo" },
-                { onError: () => toast.error(t(($) => $.backlog_hint.toast_status_failed)) },
+                {
+                  onError: (err) =>
+                    toast.error(
+                      err instanceof Error && err.message
+                        ? err.message
+                        : t(($) => $.backlog_hint.toast_status_failed),
+                    ),
+                },
               );
               setBacklogHintIssueId(null);
               onClose();

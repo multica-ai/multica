@@ -56,7 +56,9 @@
     "no_results": "No results"
   },
   "code_block": {
-    "copy_code": "Copy code"
+    "copy_code": "Copy code",
+    "show_preview": "Show preview",
+    "show_source": "Show source"
   },
   "file_card": {
     "uploading": "Uploading {{filename}}"
