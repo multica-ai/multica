@@ -221,6 +221,15 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Canonicalize agent/member/squad mention labels so the visible label
+	// always matches the entity the UUID actually resolves to. Without this,
+	// an author (typically an LLM) can post a comment whose mention link
+	// says "[@A](mention://agent/<B-uuid>)" — the UI renders @A but the
+	// routing layer triggers B, so the wrong agent picks up the task while
+	// humans see the right name. Done before ExpandIssueIdentifiers so the
+	// issue-identifier pass operates on already-cleaned content.
+	req.Content = mention.CanonicalizeMentions(r.Context(), h.Queries, issue.WorkspaceID, req.Content)
+
 	// Expand bare issue identifiers (e.g. MUL-117) into mention links.
 	req.Content = mention.ExpandIssueIdentifiers(r.Context(), h.Queries, issue.WorkspaceID, req.Content)
 
@@ -585,6 +594,11 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// NOTE: See CreateComment — Markdown is sanitized at render/edit time, not here.
+
+	// Canonicalize mention labels on edit too: an author editing their own
+	// comment can introduce the same label/UUID mismatch addressed in
+	// CreateComment, so we run the same defense before persisting.
+	req.Content = mention.CanonicalizeMentions(r.Context(), h.Queries, wsUUID, req.Content)
 
 	comment, err := h.Queries.UpdateComment(r.Context(), db.UpdateCommentParams{
 		ID:      commentUUID,
