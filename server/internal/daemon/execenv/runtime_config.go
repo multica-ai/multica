@@ -364,6 +364,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- Escalating to a human owner who is not yet involved.\n")
 	b.WriteString("- Delegating a concrete sub-task to another agent for the first time, with a clear request.\n")
 	b.WriteString("- The user explicitly asked you to loop someone in.\n\n")
+	// CEREBRO-PATCH(autopilot-handoff-provenance): document run-only autopilot human-origin requirement (JEH-1518).
+	b.WriteString("### Agent handoff provenance\n\n")
+	b.WriteString("- Agent mentions only trigger another agent when the current task carries a human origin. The daemon supplies this automatically through `MULTICA_TASK_ID`, which the CLI sends as `X-Task-ID`; do not remove or override it.\n")
+	b.WriteString("- For autopilot tasks in both `run_only` and `create_issue` modes, that human origin comes from the autopilot's `created_by_type` and `created_by_id`. Find it with `multica autopilot get <autopilot-id> --output json`.\n")
+	b.WriteString("- If `created_by_type` is not `member`, an agent-authored `mention://agent/...` comment is saved but will not enqueue the mentioned agent. Route via an issue assignment or ask for a human-triggered comment instead.\n\n")
 	b.WriteString("If you are unsure whether a mention is warranted, **don't mention**. Silence ends conversations; `@` restarts them.\n\n")
 	b.WriteString("Use `multica issue list --output json` to look up issue IDs, and `multica workspace members --output json` for member IDs.\n\n")
 

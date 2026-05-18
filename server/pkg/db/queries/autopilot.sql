@@ -178,8 +178,15 @@ RETURNING t.*, a.workspace_id AS autopilot_workspace_id;
 -- =====================
 
 -- name: CreateAutopilotTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary)
-VALUES ($1, $2, NULL, 'queued', $3, $4, sqlc.narg(trigger_summary))
+-- CEREBRO-PATCH(autopilot-handoff-provenance): carry original_user_id + delegation_source on autopilot tasks so agent handoffs receive a human origin (JEH-1518).
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, autopilot_run_id,
+    trigger_summary, original_user_id, delegation_source
+)
+VALUES (
+    $1, $2, NULL, 'queued', $3, $4,
+    sqlc.narg(trigger_summary), sqlc.narg(original_user_id), sqlc.narg(delegation_source)
+)
 RETURNING *;
 
 -- =====================

@@ -83,6 +83,13 @@ middleware runs, downstream handlers see:
   agent for the lifetime of the task.
 - `X-Agent-ID` and `X-Task-ID` are set so comments and other writes
   show the agent as the author rather than the human owner.
+- Agent-authored comments that mention another agent only enqueue the
+  mentioned agent when the source task has `original_user_id`. For
+  autopilot tasks in both `run_only` and `create_issue` modes, this is
+  copied from the autopilot row when `created_by_type = 'member'`;
+  agents can inspect it with
+  `multica autopilot get <autopilot-id> --output json`
+  (`created_by_type`, `created_by_id`).
 - The token is revoked by `RevokeTaskTokensForTask` on task
   completion, failure, or cancellation.
 - Scope: `ScopeUser` (since the JEH-324 rollback).

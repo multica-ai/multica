@@ -2677,6 +2677,10 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 			"enqueues a new run for that agent",
 			"When NOT to use a mention link",
 			"When a mention IS appropriate",
+			// CEREBRO-PATCH(autopilot-handoff-provenance): assert provenance docs are injected into agent runtime config (JEH-1518).
+			"Agent handoff provenance",
+			"created_by_type",
+			"created_by_id",
 			"end with no mention at all",
 			"Silence ends conversations",
 		} {

@@ -206,7 +206,8 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	s.captureIssueCreatedFromAutopilot(ap, run, issue)
 
 	// Enqueue agent task via the existing flow.
-	task, err := s.TaskSvc.EnqueueTaskForIssue(ctx, issue)
+	// CEREBRO-PATCH(autopilot-handoff-provenance): propagate autopilot human origin so create-issue agent handoffs trigger (JEH-1518).
+	task, err := s.TaskSvc.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, autopilotDelegationContext(ap))
 	if err != nil {
 		return fmt.Errorf("enqueue task for issue: %w", err)
 	}
@@ -236,11 +237,15 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		return fmt.Errorf("agent has no runtime")
 	}
 
+	delegation := autopilotDelegationContext(ap)
 	task, err := s.Queries.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{
 		AgentID:        ap.AssigneeID,
 		RuntimeID:      agent.RuntimeID,
 		Priority:       0,
 		AutopilotRunID: run.ID,
+		// CEREBRO-PATCH(autopilot-handoff-provenance): propagate autopilot human origin so run-only agent handoffs trigger (JEH-1518).
+		OriginalUserID:   delegation.OriginalUserID,
+		DelegationSource: delegation.Source,
 		// Snapshot the autopilot title so task rows self-describe later
 		// without joining back to autopilot. Truncated for the same
 		// transmission-cost reason as comment-driven summaries.
@@ -281,6 +286,16 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		"run_id", util.UUIDToString(run.ID),
 	)
 	return nil
+}
+
+func autopilotDelegationContext(ap db.Autopilot) TaskDelegationContext {
+	return TaskDelegationContext{
+		OriginalUserID: pgtype.UUID{
+			Bytes: ap.CreatedByID.Bytes,
+			Valid: ap.CreatedByType == "member" && ap.CreatedByID.Valid,
+		},
+		Source: pgtype.Text{String: "autopilot", Valid: true},
+	}
 }
 
 // SyncRunFromIssue updates the autopilot run when its linked issue reaches a terminal status.
