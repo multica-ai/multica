@@ -2,6 +2,7 @@ import type {
   Issue,
   CreateIssueRequest,
   UpdateIssueRequest,
+  GroupedIssuesResponse,
   ListIssuesResponse,
   SearchIssuesResponse,
   SearchProjectsResponse,
@@ -9,6 +10,7 @@ import type {
   CreateMemberRequest,
   UpdateMemberRequest,
   ListIssuesParams,
+  ListGroupedIssuesParams,
   Agent,
   CreateAgentRequest,
   AgentTemplate,
@@ -45,6 +47,7 @@ import type {
   DashboardUsageDaily,
   DashboardUsageByAgent,
   DashboardAgentRunTime,
+  DashboardRunTimeDaily,
   RuntimeUpdate,
   RuntimeModelListRequest,
   RuntimeLocalSkillListRequest,
@@ -86,6 +89,8 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  ListWebhookDeliveriesResponse,
+  WebhookDelivery,
   NotificationPreferenceResponse,
   NotificationPreferences,
   GitHubPullRequest,
@@ -125,17 +130,24 @@ import {
   CommentsListSchema,
   CreateAgentFromTemplateResponseSchema,
   DashboardAgentRunTimeListSchema,
+  DashboardRunTimeDailyListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_ATTACHMENT,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
+  EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_TIMELINE_ENTRIES,
+  EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
+  EMPTY_WEBHOOK_DELIVERY,
+  GroupedIssuesResponseSchema,
   ListIssuesResponseSchema,
+  ListWebhookDeliveriesResponseSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
+  WebhookDeliveryResponseSchema,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -515,6 +527,57 @@ export class ApiClient {
       EMPTY_LIST_ISSUES_RESPONSE,
       {
         endpoint: "GET /api/issues",
+      },
+    );
+  }
+
+  async listGroupedIssues(
+    params: ListGroupedIssuesParams,
+  ): Promise<GroupedIssuesResponse> {
+    const search = new URLSearchParams({ group_by: params.group_by });
+    if (params.limit) search.set("limit", String(params.limit));
+    if (params.offset) search.set("offset", String(params.offset));
+    if (params.workspace_id) search.set("workspace_id", params.workspace_id);
+    if (params.statuses?.length)
+      search.set("statuses", params.statuses.join(","));
+    if (params.priorities?.length)
+      search.set("priorities", params.priorities.join(","));
+    if (params.assignee_types?.length)
+      search.set("assignee_types", params.assignee_types.join(","));
+    if (params.assignee_id) search.set("assignee_id", params.assignee_id);
+    if (params.assignee_ids?.length)
+      search.set("assignee_ids", params.assignee_ids.join(","));
+    if (params.creator_id) search.set("creator_id", params.creator_id);
+    if (params.project_id) search.set("project_id", params.project_id);
+    if (params.assignee_filters?.length) {
+      search.set(
+        "assignee_filters",
+        params.assignee_filters.map((f) => `${f.type}:${f.id}`).join(","),
+      );
+    }
+    if (params.include_no_assignee) search.set("include_no_assignee", "true");
+    if (params.creator_filters?.length) {
+      search.set(
+        "creator_filters",
+        params.creator_filters.map((f) => `${f.type}:${f.id}`).join(","),
+      );
+    }
+    if (params.project_ids?.length)
+      search.set("project_ids", params.project_ids.join(","));
+    if (params.include_no_project) search.set("include_no_project", "true");
+    if (params.label_ids?.length)
+      search.set("label_ids", params.label_ids.join(","));
+    if (params.group_assignee_type)
+      search.set("group_assignee_type", params.group_assignee_type);
+    if (params.group_assignee_id)
+      search.set("group_assignee_id", params.group_assignee_id);
+    const raw = await this.fetch<unknown>(`/api/issues/grouped?${search}`);
+    return parseWithFallback(
+      raw,
+      GroupedIssuesResponseSchema,
+      EMPTY_GROUPED_ISSUES_RESPONSE,
+      {
+        endpoint: "GET /api/issues/grouped",
       },
     );
   }
@@ -974,6 +1037,24 @@ export class ApiClient {
       DashboardAgentRunTimeListSchema,
       [],
       { endpoint: "GET /api/dashboard/agent-runtime" },
+    );
+  }
+
+  async getDashboardRunTimeDaily(params: {
+    days?: number;
+    project_id?: string | null;
+  }): Promise<DashboardRunTimeDaily[]> {
+    const search = new URLSearchParams();
+    if (params.days) search.set("days", String(params.days));
+    if (params.project_id) search.set("project_id", params.project_id);
+    const raw = await this.fetch<unknown>(
+      `/api/dashboard/runtime/daily?${search}`,
+    );
+    return parseWithFallback<DashboardRunTimeDaily[]>(
+      raw,
+      DashboardRunTimeDailyListSchema,
+      [],
+      { endpoint: "GET /api/dashboard/runtime/daily" },
     );
   }
 
@@ -1765,6 +1846,16 @@ export class ApiClient {
     return this.fetch(`/api/autopilots/${id}/runs?${search}`);
   }
 
+  // Returns a single run including its full trigger_payload. List responses
+  // omit trigger_payload to keep them small (a webhook envelope can be
+  // up to 256 KiB × limit rows), so the detail view fetches via this route.
+  async getAutopilotRun(
+    autopilotId: string,
+    runId: string,
+  ): Promise<AutopilotRun> {
+    return this.fetch(`/api/autopilots/${autopilotId}/runs/${runId}`);
+  }
+
   async createAutopilotTrigger(
     autopilotId: string,
     data: CreateAutopilotTriggerRequest,
@@ -1793,6 +1884,105 @@ export class ApiClient {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, {
       method: "DELETE",
     });
+  }
+
+  async rotateAutopilotTriggerWebhookToken(
+    autopilotId: string,
+    triggerId: string,
+  ): Promise<AutopilotTrigger> {
+    return this.fetch(
+      `/api/autopilots/${autopilotId}/triggers/${triggerId}/rotate-webhook-token`,
+      { method: "POST" },
+    );
+  }
+
+  // Webhook deliveries — list is slim (no raw_body / selected_headers /
+  // response_body); detail returns the full row. Both responses are parsed
+  // through a lenient schema so an unknown server-side `status` /
+  // `signature_status` value degrades to a generic row instead of dropping
+  // the whole list.
+  async listAutopilotDeliveries(
+    autopilotId: string,
+    params?: { limit?: number; offset?: number },
+  ): Promise<ListWebhookDeliveriesResponse> {
+    const search = new URLSearchParams();
+    if (params?.limit) search.set("limit", params.limit.toString());
+    if (params?.offset) search.set("offset", params.offset.toString());
+    const raw = await this.fetch<unknown>(
+      `/api/autopilots/${autopilotId}/deliveries?${search}`,
+    );
+    return parseWithFallback(
+      raw,
+      ListWebhookDeliveriesResponseSchema,
+      EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
+      { endpoint: "GET /api/autopilots/:id/deliveries" },
+    );
+  }
+
+  async getAutopilotDelivery(
+    autopilotId: string,
+    deliveryId: string,
+  ): Promise<WebhookDelivery> {
+    const raw = await this.fetch<unknown>(
+      `/api/autopilots/${autopilotId}/deliveries/${deliveryId}`,
+    );
+    return parseWithFallback(
+      raw,
+      WebhookDeliveryResponseSchema,
+      { ...EMPTY_WEBHOOK_DELIVERY, id: deliveryId, autopilot_id: autopilotId },
+      { endpoint: "GET /api/autopilots/:id/deliveries/:deliveryId" },
+    );
+  }
+
+  // Replay creates a NEW delivery row referencing the original via
+  // `replayed_from_delivery_id`. Server rejects replays of
+  // signature-invalid / rejected deliveries with 400 — the UI keeps the
+  // button disabled for those rows, but the server is the source of truth.
+  async replayAutopilotDelivery(
+    autopilotId: string,
+    deliveryId: string,
+  ): Promise<WebhookDelivery> {
+    const raw = await this.fetch<unknown>(
+      `/api/autopilots/${autopilotId}/deliveries/${deliveryId}/replay`,
+      { method: "POST" },
+    );
+    return parseWithFallback(
+      raw,
+      WebhookDeliveryResponseSchema,
+      { ...EMPTY_WEBHOOK_DELIVERY, autopilot_id: autopilotId },
+      { endpoint: "POST /api/autopilots/:id/deliveries/:deliveryId/replay" },
+    );
+  }
+
+  // GitHub integration
+  async getGitHubConnectURL(
+    workspaceId: string,
+  ): Promise<GitHubConnectResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/github/connect`);
+  }
+
+  async listGitHubInstallations(
+    workspaceId: string,
+  ): Promise<ListGitHubInstallationsResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/github/installations`);
+  }
+
+  async deleteGitHubInstallation(
+    workspaceId: string,
+    installationId: string,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/workspaces/${workspaceId}/github/installations/${installationId}`,
+      {
+        method: "DELETE",
+      },
+    );
+  }
+
+  async listIssuePullRequests(
+    issueId: string,
+  ): Promise<{ pull_requests: GitHubPullRequest[] }> {
+    return this.fetch(`/api/issues/${issueId}/pull-requests`);
   }
 
   // ---- Workspace integrations ----
@@ -2069,36 +2259,5 @@ export class ApiClient {
     return this.fetch(
       "/api/workspaces/integrations/redmine/external/activities",
     );
-  }
-
-  // GitHub integration
-  async getGitHubConnectURL(
-    workspaceId: string,
-  ): Promise<GitHubConnectResponse> {
-    return this.fetch(`/api/workspaces/${workspaceId}/github/connect`);
-  }
-
-  async listGitHubInstallations(
-    workspaceId: string,
-  ): Promise<ListGitHubInstallationsResponse> {
-    return this.fetch(`/api/workspaces/${workspaceId}/github/installations`);
-  }
-
-  async deleteGitHubInstallation(
-    workspaceId: string,
-    installationId: string,
-  ): Promise<void> {
-    await this.fetch(
-      `/api/workspaces/${workspaceId}/github/installations/${installationId}`,
-      {
-        method: "DELETE",
-      },
-    );
-  }
-
-  async listIssuePullRequests(
-    issueId: string,
-  ): Promise<{ pull_requests: GitHubPullRequest[] }> {
-    return this.fetch(`/api/issues/${issueId}/pull-requests`);
   }
 }

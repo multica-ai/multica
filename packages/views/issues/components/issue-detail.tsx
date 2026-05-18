@@ -15,6 +15,7 @@ import { useNavigation } from "../../navigation";
 import {
   Archive,
   Calendar,
+  CalendarClock,
   CalendarDays,
   ChevronDown,
   ChevronLeft,
@@ -87,6 +88,7 @@ import {
   PriorityIcon,
   StatusPicker,
   PriorityPicker,
+  StartDatePicker,
   DueDatePicker,
   AssigneePicker,
   LabelPicker,
@@ -308,6 +310,14 @@ function formatActivity(
         return t(($) => $.activity.removed_assignee);
       return t(($) => $.activity.changed_assignee);
     }
+    case "start_date_changed": {
+      if (!details.to) return t(($) => $.activity.start_date_removed);
+      const formatted = new Date(details.to).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+      });
+      return t(($) => $.activity.start_date_set, { date: formatted });
+    }
     case "due_date_changed": {
       if (!details.to) return t(($) => $.activity.due_date_removed);
       const formatted = new Date(details.to).toLocaleDateString("en-US", {
@@ -408,10 +418,15 @@ const EMPTY_REPLIES: TimelineEntry[] = [];
 // the Properties block, rendered only when the issue actually has a parent.
 //
 // `OPTIONAL_PROP_KEYS` is the open set — adding a new optional field
-// (e.g. `start_date`) means appending here, wiring its row in the JSX
-// switch below, and adding a locale key. The picker, visibility rules,
-// and add-property menu all flow from this one list.
-const OPTIONAL_PROP_KEYS = ["priority", "due_date", "labels"] as const;
+// means appending here, wiring its row in the JSX switch below, and
+// adding a locale key. The picker, visibility rules, and add-property
+// menu all flow from this one list.
+const OPTIONAL_PROP_KEYS = [
+  "priority",
+  "start_date",
+  "due_date",
+  "labels",
+] as const;
 type OptionalPropKey = (typeof OPTIONAL_PROP_KEYS)[number];
 
 function isOptionalPropSet(
@@ -422,6 +437,8 @@ function isOptionalPropSet(
   switch (key) {
     case "priority":
       return issue.priority !== "none";
+    case "start_date":
+      return !!issue.start_date;
     case "due_date":
       return !!issue.due_date;
     case "labels":
@@ -549,6 +566,7 @@ function ActivityBlock({
         const details = (entry.details ?? {}) as Record<string, string>;
         const isStatusChange = entry.action === "status_changed";
         const isPriorityChange = entry.action === "priority_changed";
+        const isStartDateChange = entry.action === "start_date_changed";
         const isDueDateChange = entry.action === "due_date_changed";
 
         let leadIcon: React.ReactNode;
@@ -565,6 +583,10 @@ function ActivityBlock({
               priority={details.to as IssuePriority}
               className="h-4 w-4 shrink-0"
             />
+          );
+        } else if (isStartDateChange) {
+          leadIcon = (
+            <CalendarClock className="h-4 w-4 shrink-0 text-muted-foreground" />
           );
         } else if (isDueDateChange) {
           leadIcon = (
@@ -640,7 +662,14 @@ function SubIssueRow({ child }: { child: Issue }) {
     (updates: Partial<UpdateIssueRequest>) => {
       updateIssue.mutate(
         { id: child.id, ...updates },
-        { onError: () => toast.error(t(($) => $.detail.update_failed)) },
+        {
+          onError: (err) =>
+            toast.error(
+              err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.detail.update_failed),
+            ),
+        },
       );
     },
     [child.id, updateIssue, t],
@@ -1462,6 +1491,15 @@ export function IssueDetail({
                 />
               </PropRow>
             )}
+            {visibleOptionalProps.has("start_date") && (
+              <PropRow label={t(($) => $.detail.prop_start_date)}>
+                <StartDatePicker
+                  startDate={issue.start_date}
+                  onUpdate={handleUpdateField}
+                  defaultOpen={autoOpenProp === "start_date"}
+                />
+              </PropRow>
+            )}
             {visibleOptionalProps.has("due_date") && (
               <PropRow label={t(($) => $.detail.prop_due_date)}>
                 <DueDatePicker
@@ -1516,6 +1554,9 @@ export function IssueDetail({
                             className="text-muted-foreground"
                           />
                         )}
+                        {k === "start_date" && (
+                          <CalendarClock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        )}
                         {k === "due_date" && (
                           <CalendarDays className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                         )}
@@ -1524,6 +1565,8 @@ export function IssueDetail({
                         )}
                         <span className="truncate">
                           {k === "priority" && t(($) => $.detail.prop_priority)}
+                          {k === "start_date" &&
+                            t(($) => $.detail.prop_start_date)}
                           {k === "due_date" && t(($) => $.detail.prop_due_date)}
                           {k === "labels" && t(($) => $.detail.prop_labels)}
                         </span>

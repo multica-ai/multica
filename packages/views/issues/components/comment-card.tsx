@@ -285,8 +285,12 @@ function CommentRow({
       setEditing(false);
       setPendingAttachments([]);
       clearEditDraft(editDraftKey);
-    } catch {
-      toast.error(t(($) => $.comment.update_failed));
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.comment.update_failed),
+      );
     }
   };
 
@@ -515,8 +519,12 @@ function CommentCardImpl({
       setEditing(false);
       setParentPendingAttachments([]);
       clearParentEditDraft(parentEditDraftKey);
-    } catch {
-      toast.error(t(($) => $.comment.update_failed));
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.comment.update_failed),
+      );
     }
   };
 

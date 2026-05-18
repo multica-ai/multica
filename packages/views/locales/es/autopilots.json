@@ -90,16 +90,56 @@
   "run_status": {
     "issue_created": "Tarea creada",
     "running": "Ejecutando",
+    "skipped": "Omitido",
     "completed": "Completado",
     "failed": "Fallido"
   },
+  "run_source": {
+    "schedule": "Programación",
+    "manual": "Manual",
+    "webhook": "Webhook",
+    "api": "API"
+  },
   "run": {
     "issue_linked": "Tarea vinculada",
-    "view_log": "Ver registro de ejecución"
+    "view_log": "Ver registro de ejecución",
+    "skipped_group": {
+      "label": "Omitido",
+      "summary": "{{count}} ejecuciones omitidas"
+    }
+  },
+  "webhook_payload": {
+    "label": "Evento de webhook:",
+    "unknown_event": "webhook.received",
+    "payload": "Carga útil",
+    "content_type": "Content-Type: {{type}}",
+    "copy": "Copiar",
+    "copied": "Carga útil de webhook copiada",
+    "copied_short": "Copiado",
+    "copy_failed": "Error al copiar",
+    "truncated_marker": "[truncado — haz clic en Copiar para obtener la carga útil completa]"
+  },
+  "trigger_kind": {
+    "schedule": "Programación",
+    "webhook": "Webhook",
+    "api": "API"
   },
   "trigger_row": {
     "disabled_badge": "Desactivado",
+    "deprecated_badge": "Obsoleto",
     "next_label": "Próximo: {{date}}",
+    "webhook_url_label": "URL de webhook",
+    "copy_url": "Copiar URL",
+    "url_copied": "URL de webhook copiada",
+    "url_copy_failed": "Error al copiar",
+    "rotate_url": "Rotar URL",
+    "rotate_confirm_title": "Rotar URL de webhook",
+    "rotate_confirm_description": "La URL actual dejará de funcionar inmediatamente. Cualquier sistema externo que la use debe actualizarse con la nueva URL. ¿Continuar?",
+    "rotate_confirm_cancel": "Cancelar",
+    "rotate_confirm_action": "Rotar URL",
+    "rotate_in_progress": "Rotando...",
+    "toast_rotated": "URL de webhook rotada",
+    "toast_rotate_failed": "Error al rotar la URL",
     "toast_deleted": "Desencadenador eliminado",
     "toast_delete_failed": "Error al eliminar el desencadenador",
     "delete_dialog": {
@@ -110,13 +150,63 @@
       "deleting": "Eliminando..."
     }
   },
+  "deliveries": {
+    "section_title": "Entregas de webhook",
+    "empty": "Aún no hay entregas de webhook. Envía un POST a la URL del webhook para ver entradas aquí.",
+    "row": {
+      "attempts": "{{count}}× intentos",
+      "replay_badge": "Repetición"
+    },
+    "status": {
+      "queued": "En cola",
+      "dispatched": "Despachado",
+      "rejected": "Rechazado",
+      "ignored": "Ignorado",
+      "failed": "Fallido"
+    },
+    "signature": {
+      "not_required": "Sin firma",
+      "valid": "Firma válida",
+      "invalid": "Firma inválida",
+      "missing": "Firma faltante"
+    },
+    "detail": {
+      "title": "Entrega",
+      "received_at": "Recibido",
+      "last_attempt_at": "Último intento",
+      "attempt_count": "Intentos",
+      "response_status": "Respuesta",
+      "dedupe_key": "Clave de deduplicación",
+      "dedupe_source": "Origen de deduplicación",
+      "content_type": "Content-Type",
+      "replayed_from": "Repetido desde",
+      "error_label": "Error",
+      "raw_body": "Cuerpo sin procesar",
+      "selected_headers": "Cabeceras",
+      "response_body": "Cuerpo de respuesta"
+    },
+    "replay": {
+      "action": "Repetir",
+      "in_progress": "Repitiendo...",
+      "toast_success": "Entrega repetida",
+      "toast_failed": "Error al repetir",
+      "disabled_invalid_signature": "No se puede repetir — la firma era inválida",
+      "disabled_rejected": "No se puede repetir una entrega rechazada",
+      "disabled_queued": "Aún en cola — repite cuando se procese"
+    }
+  },
   "add_trigger_dialog": {
     "title": "Añadir desencadenador",
+    "type_label": "Tipo",
+    "type_schedule": "Programación",
+    "type_webhook": "Webhook",
     "label_field": "Etiqueta (opcional)",
     "label_placeholder": "p. ej. Mañana entre semana",
+    "webhook_help": "Multica generará una URL de webhook después de guardar. Envía cualquier JSON a ella para activar este autopiloto.",
     "submit": "Añadir desencadenador",
     "submitting": "Añadiendo...",
-    "toast_added": "Desencadenador añadido",
+    "toast_added_schedule": "Desencadenador de programación añadido",
+    "toast_added_webhook": "Desencadenador de webhook añadido",
     "toast_add_failed": "Error al añadir el desencadenador"
   },
   "dialog": {
@@ -140,14 +230,26 @@
     "saving": "Guardando...",
     "toast_created": "Autopiloto creado",
     "toast_create_partial": "Autopiloto creado, pero la programación no se pudo guardar",
+    "toast_create_partial_with_reason": "Autopiloto creado, pero la programación no se pudo guardar: {{reason}}",
     "toast_create_failed": "Error al crear el autopiloto",
     "toast_updated": "Autopiloto actualizado",
     "toast_update_partial": "Autopiloto actualizado, pero la programación no se pudo guardar",
+    "toast_update_partial_with_reason": "Autopiloto actualizado, pero la programación no se pudo guardar: {{reason}}",
     "toast_update_failed": "Error al actualizar el autopiloto",
     "section_agent": "Agente",
     "select_agent": "Seleccionar agente",
     "section_output_mode": "Modo de salida",
     "section_schedule": "Programación",
+    "section_trigger_kind": "Desencadenador",
+    "trigger_kind_schedule": "Programación",
+    "trigger_kind_webhook": "Webhook",
+    "section_webhook": "Webhook",
+    "webhook_help_create": "Multica generará una URL de webhook después de crear este autopiloto. Envía cualquier JSON a esa URL para activarlo.",
+    "webhook_help_edit": "Este autopiloto se activa por webhook. Gestiona la URL (copiar / rotar) en la página de detalle del autopiloto.",
+    "webhook_created_title": "Autopiloto de webhook listo",
+    "webhook_created_description": "Envía cualquier JSON a la URL de abajo y el autopiloto se activará. Cópiala ahora — también puedes encontrarla y rotarla en la página de detalle del autopiloto.",
+    "webhook_created_warning": "Trata esta URL como una contraseña. Cualquier persona que la tenga puede activar el autopiloto.",
+    "webhook_created_done": "Listo",
     "schedule_disabled_reason": "Este autopiloto tiene múltiples programaciones — edítalas en la página de detalle.",
     "next_run_label": "Próxima ejecución:",
     "output_modes": {

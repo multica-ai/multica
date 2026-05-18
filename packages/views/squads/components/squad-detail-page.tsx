@@ -120,13 +120,15 @@ export function SquadDetailPage() {
         role: input.role?.trim() || undefined,
       }),
     onSuccess: () => { refetchMembers(); toast.success("Member added"); },
-    onError: () => toast.error("Failed to add member"),
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to add member"),
   });
 
   const removeMemberMut = useMutation({
     mutationFn: (m: SquadMember) => api.removeSquadMember(squadId, { member_type: m.member_type, member_id: m.member_id }),
     onSuccess: () => { refetchMembers(); toast.success("Member removed"); },
-    onError: () => toast.error("Failed to remove member"),
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to remove member"),
   });
 
   const updateRoleMut = useMutation({
@@ -137,7 +139,8 @@ export function SquadDetailPage() {
         role: input.role,
       }),
     onSuccess: () => { refetchMembers(); toast.success("Role updated"); },
-    onError: () => toast.error("Failed to update role"),
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to update role"),
   });
 
   const setLeaderMut = useMutation({
@@ -148,13 +151,15 @@ export function SquadDetailPage() {
       queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
       toast.success("Leader updated");
     },
-    onError: () => toast.error("Failed to update leader"),
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to update leader"),
   });
 
   const deleteMut = useMutation({
     mutationFn: () => api.deleteSquad(squadId),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) }); push(p.squads()); toast.success("Squad archived"); },
-    onError: () => toast.error("Failed to archive squad"),
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to archive squad"),
   });
 
   // CreateAgentDialog's onCreate contract: hit POST /api/agents and

@@ -19,8 +19,12 @@
     "no_data": "Sin uso en este período.",
     "title_cost": "Coste diario",
     "title_tokens": "Tokens diarios",
+    "title_time": "Tiempo de ejecución diario",
+    "title_tasks": "Tareas diarias",
     "metric_cost": "Coste",
-    "metric_tokens": "Tokens"
+    "metric_tokens": "Tokens",
+    "metric_time": "Tiempo",
+    "metric_tasks": "Tareas"
   },
   "leaderboard": {
     "title": "Clasificación",

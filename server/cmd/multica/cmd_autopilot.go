@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"net/url"
@@ -68,7 +69,7 @@ var autopilotRunsCmd = &cobra.Command{
 
 var autopilotTriggerAddCmd = &cobra.Command{
 	Use:   "trigger-add <autopilot-id>",
-	Short: "Add a schedule trigger to an autopilot",
+	Short: "Add a schedule or webhook trigger to an autopilot",
 	Args:  exactArgs(1),
 	RunE:  runAutopilotTriggerAdd,
 }
@@ -87,6 +88,13 @@ var autopilotTriggerDeleteCmd = &cobra.Command{
 	RunE:  runAutopilotTriggerDelete,
 }
 
+var autopilotTriggerRotateURLCmd = &cobra.Command{
+	Use:   "trigger-rotate-url <autopilot-id> <trigger-id>",
+	Short: "Rotate the webhook URL of a webhook trigger",
+	Args:  exactArgs(2),
+	RunE:  runAutopilotTriggerRotateURL,
+}
+
 func init() {
 	autopilotCmd.AddCommand(autopilotListCmd)
 	autopilotCmd.AddCommand(autopilotGetCmd)
@@ -98,6 +106,7 @@ func init() {
 	autopilotCmd.AddCommand(autopilotTriggerAddCmd)
 	autopilotCmd.AddCommand(autopilotTriggerUpdateCmd)
 	autopilotCmd.AddCommand(autopilotTriggerDeleteCmd)
+	autopilotCmd.AddCommand(autopilotTriggerRotateURLCmd)
 
 	// list
 	autopilotListCmd.Flags().String("status", "", "Filter by status (active, paused)")
@@ -139,11 +148,16 @@ func init() {
 	autopilotRunsCmd.Flags().Int("offset", 0, "Pagination offset")
 	autopilotRunsCmd.Flags().String("output", "table", "Output format: table or json")
 
-	// trigger-add — only schedule triggers are supported end-to-end today
-	autopilotTriggerAddCmd.Flags().String("cron", "", "Cron expression (required)")
-	autopilotTriggerAddCmd.Flags().String("timezone", "", "IANA timezone (default UTC)")
+	// trigger-add — supports schedule and webhook
+	autopilotTriggerAddCmd.Flags().String("kind", "schedule", "Trigger kind: schedule or webhook")
+	autopilotTriggerAddCmd.Flags().String("cron", "", "Cron expression (required for --kind schedule)")
+	autopilotTriggerAddCmd.Flags().String("timezone", "", "IANA timezone (default UTC; schedule only)")
 	autopilotTriggerAddCmd.Flags().String("label", "", "Optional human-readable label")
 	autopilotTriggerAddCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// trigger-rotate-url — webhook only
+	autopilotTriggerRotateURLCmd.Flags().String("output", "json", "Output format: table or json")
+	autopilotTriggerRotateURLCmd.Flags().BoolP("yes", "y", false, "Skip the interactive confirmation prompt")
 
 	// trigger-update
 	autopilotTriggerUpdateCmd.Flags().Bool("enabled", true, "Enable or disable the trigger")
@@ -502,21 +516,32 @@ func runAutopilotTriggerAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Only schedule triggers are dispatched end-to-end today. The server
-	// schema also defines "webhook" and "api" kinds, but no inbound endpoint
-	// fires them — they'd sit in the DB forever. Re-add kind selection here
-	// when those paths are implemented.
+	kind, _ := cmd.Flags().GetString("kind")
+	if kind == "" {
+		kind = "schedule"
+	}
+	if kind != "schedule" && kind != "webhook" {
+		return fmt.Errorf("--kind must be schedule or webhook")
+	}
 	cron, _ := cmd.Flags().GetString("cron")
-	if cron == "" {
-		return fmt.Errorf("--cron is required")
+	if kind == "schedule" && cron == "" {
+		return fmt.Errorf("--cron is required for --kind schedule")
+	}
+	if kind == "webhook" {
+		if v, _ := cmd.Flags().GetString("timezone"); v != "" {
+			return fmt.Errorf("--timezone is only valid with --kind schedule")
+		}
+		if cron != "" {
+			return fmt.Errorf("--cron is only valid with --kind schedule")
+		}
 	}
 
-	body := map[string]any{
-		"kind":            "schedule",
-		"cron_expression": cron,
-	}
-	if v, _ := cmd.Flags().GetString("timezone"); v != "" {
-		body["timezone"] = v
+	body := map[string]any{"kind": kind}
+	if kind == "schedule" {
+		body["cron_expression"] = cron
+		if v, _ := cmd.Flags().GetString("timezone"); v != "" {
+			body["timezone"] = v
+		}
 	}
 	if v, _ := cmd.Flags().GetString("label"); v != "" {
 		body["label"] = v
@@ -540,6 +565,72 @@ func runAutopilotTriggerAdd(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 	fmt.Printf("Trigger created: %s (kind=%s)\n", strVal(result, "id"), strVal(result, "kind"))
+	if kind == "webhook" {
+		printWebhookURL(client, result)
+	}
+	return nil
+}
+
+// printWebhookURL emits the webhook URL with the priority webhook_url >
+// composed-from-base. Keeps the table-output flow useful — without this the
+// table renderer drops the most important new piece of information.
+func printWebhookURL(client *cli.APIClient, trigger map[string]any) {
+	if u := strVal(trigger, "webhook_url"); u != "" {
+		fmt.Printf("Webhook URL: %s\n", u)
+		return
+	}
+	if path := strVal(trigger, "webhook_path"); path != "" {
+		base := strings.TrimRight(client.BaseURL, "/")
+		fmt.Printf("Webhook URL: %s%s\n", base, path)
+	}
+}
+
+func runAutopilotTriggerRotateURL(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	autopilotRef, err := resolveAutopilotID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve autopilot: %w", err)
+	}
+	triggerRef, err := resolveAutopilotTriggerID(ctx, client, autopilotRef.ID, args[1])
+	if err != nil {
+		return fmt.Errorf("resolve trigger: %w", err)
+	}
+
+	// Confirmation: rotation invalidates the current URL immediately. The UI
+	// version uses an AlertDialog; the CLI mirrors that with a y/N prompt
+	// unless --yes was passed for scripted use. Style matches confirmOverwrite
+	// in cmd_setup.go.
+	yes, _ := cmd.Flags().GetBool("yes")
+	if !yes {
+		fmt.Fprintln(os.Stderr, "This will invalidate the current webhook URL immediately. Continue? [y/N] ")
+		reader := bufio.NewReader(os.Stdin)
+		answer, _ := reader.ReadString('\n')
+		answer = strings.TrimSpace(strings.ToLower(answer))
+		if answer != "y" && answer != "yes" {
+			fmt.Fprintln(os.Stderr, "Aborted.")
+			return nil
+		}
+	}
+
+	var result map[string]any
+	path := "/api/autopilots/" + autopilotRef.ID + "/triggers/" + triggerRef.ID + "/rotate-webhook-token"
+	if err := client.PostJSON(ctx, path, nil, &result); err != nil {
+		return fmt.Errorf("rotate webhook url: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	fmt.Printf("Webhook URL rotated for trigger %s\n", strVal(result, "id"))
+	printWebhookURL(client, result)
 	return nil
 }
 

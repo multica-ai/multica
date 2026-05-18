@@ -60,6 +60,7 @@ const baseIssue: Issue = {
   parent_issue_id: PARENT_ISSUE_ID,
   project_id: null,
   position: 0,
+  start_date: null,
   due_date: null,
   labels: [],
   created_at: "2026-01-01T00:00:00Z",

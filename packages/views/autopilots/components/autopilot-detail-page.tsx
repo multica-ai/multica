@@ -1,16 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil } from "lucide-react";
+import {
+  Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil,
+  Ban, ChevronDown, ChevronRight,
+  Webhook, Copy, Check, RotateCw,
+} from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { autopilotDetailOptions, autopilotRunsOptions } from "@multica/core/autopilots/queries";
+import { autopilotDetailOptions, autopilotRunsOptions, autopilotRunOptions } from "@multica/core/autopilots/queries";
 import {
   useUpdateAutopilot,
   useDeleteAutopilot,
   useTriggerAutopilot,
   useCreateAutopilotTrigger,
   useDeleteAutopilotTrigger,
+  useRotateAutopilotTriggerWebhookToken,
 } from "@multica/core/autopilots/mutations";
+import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
+import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -48,6 +55,8 @@ import type { AgentTask } from "@multica/core/types/agent";
 import { ReadonlyContent } from "../../editor";
 import { TranscriptButton } from "../../common/task-transcript";
 import { AutopilotDialog } from "./autopilot-dialog";
+import { WebhookPayloadPreview } from "./webhook-payload-preview";
+import { WebhookDeliveriesSection } from "./webhook-deliveries-section";
 import { useT } from "../../i18n";
 
 function formatDate(date: string): string {
@@ -59,14 +68,36 @@ function formatDate(date: string): string {
   });
 }
 
-type RunStatus = "issue_created" | "running" | "completed" | "failed";
+type RunStatus = "issue_created" | "running" | "skipped" | "completed" | "failed";
 
 const RUN_VISUAL: Record<RunStatus, { color: string; icon: typeof CheckCircle2; spin?: boolean }> = {
   issue_created: { color: "text-blue-500", icon: Clock },
   running: { color: "text-blue-500", icon: Loader2, spin: true },
+  // `skipped` (admission check found the assignee runtime offline,
+  // MUL-1899) is muted so it doesn't read as a failure-ratio inflator.
+  // The row still shows failure_reason which carries the skip context.
+  skipped: { color: "text-muted-foreground", icon: Ban },
   completed: { color: "text-emerald-500", icon: CheckCircle2 },
   failed: { color: "text-destructive", icon: XCircle },
 };
+
+// WebhookPayloadSlot lazy-fetches the full run (incl. trigger_payload) once
+// the parent dialog actually mounts this slot. The list endpoint omits
+// trigger_payload to keep responses small (worst case 256 KiB × N runs),
+// so the detail-on-demand fetch lives here.
+function WebhookPayloadSlot({ autopilotId, runId }: { autopilotId: string; runId: string }) {
+  const wsId = useWorkspaceId();
+  const { data, isLoading } = useQuery(
+    autopilotRunOptions(wsId, autopilotId, runId),
+  );
+  if (isLoading) {
+    return <Skeleton className="h-9 w-full" />;
+  }
+  if (!data || data.trigger_payload == null) {
+    return null;
+  }
+  return <WebhookPayloadPreview payload={data.trigger_payload} />;
+}
 
 function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: string; agentName: string }) {
   const { t } = useT("autopilots");
@@ -104,7 +135,9 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
       <span className={cn("w-24 shrink-0 text-xs font-medium", visual.color)}>
         {t(($) => $.run_status[status])}
       </span>
-      <span className="w-16 shrink-0 text-xs text-muted-foreground capitalize">{run.source}</span>
+      <span className="w-20 shrink-0 text-xs text-muted-foreground">
+        {t(($) => $.run_source[run.source as "schedule" | "manual" | "webhook" | "api"]) ?? run.source}
+      </span>
       <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate">
         {run.issue_id ? (
           t(($) => $.run.issue_linked)
@@ -121,6 +154,11 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
           agentName={agentName}
           isLive={run.status === "running"}
           title={t(($) => $.run.view_log)}
+          headerSlot={
+            run.source === "webhook" ? (
+              <WebhookPayloadSlot autopilotId={run.autopilot_id} runId={run.id} />
+            ) : undefined
+          }
         />
       )}
     </>
@@ -139,11 +177,85 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
   return <div className={rowClass}>{content}</div>;
 }
 
+function RunHistoryList({
+  runs,
+  agentId,
+  agentName,
+}: {
+  runs: AutopilotRun[];
+  agentId: string;
+  agentName: string;
+}) {
+  const visibleRuns = runs.filter((run) => run.status !== "skipped");
+  const skippedRuns = runs.filter((run) => run.status === "skipped");
+
+  return (
+    <div className="rounded-md border overflow-hidden">
+      {visibleRuns.map((run) => (
+        <RunRow key={run.id} run={run} agentId={agentId} agentName={agentName} />
+      ))}
+      {skippedRuns.length > 0 && (
+        <SkippedRunsGroup runs={skippedRuns} agentId={agentId} agentName={agentName} />
+      )}
+    </div>
+  );
+}
+
+function SkippedRunsGroup({
+  runs,
+  agentId,
+  agentName,
+}: {
+  runs: AutopilotRun[];
+  agentId: string;
+  agentName: string;
+}) {
+  const { t } = useT("autopilots");
+  const [open, setOpen] = useState(false);
+  const latestRun = runs[0];
+  const ToggleIcon = open ? ChevronDown : ChevronRight;
+
+  return (
+    <div className="border-t bg-muted/20">
+      <button
+        type="button"
+        className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-accent/30 transition-colors"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+      >
+        <ToggleIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <Ban className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <span className="w-24 shrink-0 text-xs font-medium text-muted-foreground">
+          {t(($) => $.run.skipped_group.label)}
+        </span>
+        <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate">
+          {t(($) => $.run.skipped_group.summary, { count: runs.length })}
+        </span>
+        {latestRun && (
+          <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+            {formatDate(latestRun.triggered_at || latestRun.created_at)}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="border-t bg-background">
+          {runs.map((run) => (
+            <RunRow key={run.id} run={run} agentId={agentId} agentName={agentName} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autopilotId: string }) {
   const { t } = useT("autopilots");
   const deleteTrigger = useDeleteAutopilotTrigger();
+  const rotateToken = useRotateAutopilotTriggerWebhookToken();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [rotateOpen, setRotateOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const handleDelete = async () => {
     setDeleting(true);
@@ -151,25 +263,75 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
       await deleteTrigger.mutateAsync({ autopilotId, triggerId: trigger.id });
       toast.success(t(($) => $.trigger_row.toast_deleted));
       setConfirmOpen(false);
-    } catch {
-      toast.error(t(($) => $.trigger_row.toast_delete_failed));
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.trigger_row.toast_delete_failed),
+      );
     } finally {
       setDeleting(false);
     }
   };
 
+  const isWebhook = trigger.kind === "webhook";
+  const isApi = trigger.kind === "api";
+  // Resolve the URL from the server's webhook_url first, then compose
+  // from the API base URL (desktop) or window.origin (web). Falls back
+  // to the relative path if neither is available.
+  const webhookUrl = isWebhook
+    ? buildAutopilotWebhookUrl({
+        trigger,
+        apiBaseUrl: api.getBaseUrl(),
+        currentOrigin: typeof window !== "undefined" ? window.location.origin : undefined,
+      })
+    : null;
+
+  const handleCopy = async () => {
+    if (!webhookUrl) return;
+    try {
+      await navigator.clipboard.writeText(webhookUrl);
+      setCopied(true);
+      toast.success(t(($) => $.trigger_row.url_copied));
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error(t(($) => $.trigger_row.url_copy_failed));
+    }
+  };
+
+  const handleRotate = async () => {
+    try {
+      await rotateToken.mutateAsync({ autopilotId, triggerId: trigger.id });
+      toast.success(t(($) => $.trigger_row.toast_rotated));
+      setRotateOpen(false);
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.trigger_row.toast_rotate_failed),
+      );
+    }
+  };
+
+  const Icon = isWebhook ? Webhook : isApi ? Zap : Clock;
+
   return (
-    <div className="flex items-center gap-3 rounded-md border px-3 py-2">
-      <Clock className="h-4 w-4 shrink-0 text-muted-foreground" />
+    <div className="flex items-start gap-3 rounded-md border px-3 py-2">
+      <Icon className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium capitalize">{trigger.kind}</span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-medium">{t(($) => $.trigger_kind[trigger.kind])}</span>
           {trigger.label && (
             <span className="text-xs text-muted-foreground">({trigger.label})</span>
           )}
           {!trigger.enabled && (
             <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
               {t(($) => $.trigger_row.disabled_badge)}
+            </span>
+          )}
+          {isApi && (
+            <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
+              {t(($) => $.trigger_row.deprecated_badge)}
             </span>
           )}
         </div>
@@ -182,6 +344,32 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
         {trigger.next_run_at && (
           <div className="text-xs text-muted-foreground">
             {t(($) => $.trigger_row.next_label, { date: formatDate(trigger.next_run_at) })}
+          </div>
+        )}
+        {isWebhook && webhookUrl && (
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <code className="flex-1 min-w-0 truncate rounded bg-muted px-2 py-1 text-xs font-mono text-foreground">
+              {webhookUrl}
+            </code>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-7 w-7 shrink-0"
+              onClick={handleCopy}
+              title={t(($) => $.trigger_row.copy_url)}
+            >
+              {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5 text-muted-foreground" />}
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-7 w-7 shrink-0"
+              onClick={() => setRotateOpen(true)}
+              title={t(($) => $.trigger_row.rotate_url)}
+              disabled={rotateToken.isPending}
+            >
+              <RotateCw className={cn("h-3.5 w-3.5 text-muted-foreground", rotateToken.isPending && "animate-spin")} />
+            </Button>
           </div>
         )}
       </div>
@@ -217,6 +405,26 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <AlertDialog open={rotateOpen} onOpenChange={(v) => { if (!v && !rotateToken.isPending) setRotateOpen(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t(($) => $.trigger_row.rotate_confirm_title)}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(($) => $.trigger_row.rotate_confirm_description)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={rotateToken.isPending}>
+              {t(($) => $.trigger_row.rotate_confirm_cancel)}
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleRotate} disabled={rotateToken.isPending}>
+              {rotateToken.isPending
+                ? t(($) => $.trigger_row.rotate_in_progress)
+                : t(($) => $.trigger_row.rotate_confirm_action)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -232,29 +440,47 @@ function AddTriggerDialog({
 }) {
   const { t } = useT("autopilots");
   const createTrigger = useCreateAutopilotTrigger();
+  const [kind, setKind] = useState<"schedule" | "webhook">("schedule");
   const [config, setConfig] = useState<TriggerConfig>(getDefaultTriggerConfig);
   const [label, setLabel] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async () => {
     if (submitting) return;
-    const cronExpr = toCronExpression(config);
-    if (!cronExpr.trim()) return;
     setSubmitting(true);
     try {
-      await createTrigger.mutateAsync({
-        autopilotId,
-        kind: "schedule",
-        cron_expression: cronExpr,
-        timezone: config.timezone || undefined,
-        label: label.trim() || undefined,
-      });
+      if (kind === "schedule") {
+        const cronExpr = toCronExpression(config);
+        if (!cronExpr.trim()) {
+          setSubmitting(false);
+          return;
+        }
+        await createTrigger.mutateAsync({
+          autopilotId,
+          kind: "schedule",
+          cron_expression: cronExpr,
+          timezone: config.timezone || undefined,
+          label: label.trim() || undefined,
+        });
+        toast.success(t(($) => $.add_trigger_dialog.toast_added_schedule));
+      } else {
+        await createTrigger.mutateAsync({
+          autopilotId,
+          kind: "webhook",
+          label: label.trim() || undefined,
+        });
+        toast.success(t(($) => $.add_trigger_dialog.toast_added_webhook));
+      }
       onOpenChange(false);
+      setKind("schedule");
       setConfig(getDefaultTriggerConfig());
       setLabel("");
-      toast.success(t(($) => $.add_trigger_dialog.toast_added));
-    } catch {
-      toast.error(t(($) => $.add_trigger_dialog.toast_add_failed));
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.add_trigger_dialog.toast_add_failed),
+      );
     } finally {
       setSubmitting(false);
     }
@@ -265,7 +491,48 @@ function AddTriggerDialog({
       <DialogContent className="max-w-sm">
         <DialogTitle>{t(($) => $.add_trigger_dialog.title)}</DialogTitle>
         <div className="space-y-4 pt-2">
-          <TriggerConfigSection config={config} onChange={setConfig} />
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">
+              {t(($) => $.add_trigger_dialog.type_label)}
+            </label>
+            <div className="mt-1 grid grid-cols-2 gap-1 rounded-md bg-muted p-1">
+              <button
+                type="button"
+                onClick={() => setKind("schedule")}
+                className={cn(
+                  "flex items-center justify-center gap-1.5 rounded px-3 py-1.5 text-sm transition-colors",
+                  kind === "schedule"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Clock className="h-3.5 w-3.5" />
+                {t(($) => $.add_trigger_dialog.type_schedule)}
+              </button>
+              <button
+                type="button"
+                onClick={() => setKind("webhook")}
+                className={cn(
+                  "flex items-center justify-center gap-1.5 rounded px-3 py-1.5 text-sm transition-colors",
+                  kind === "webhook"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Webhook className="h-3.5 w-3.5" />
+                {t(($) => $.add_trigger_dialog.type_webhook)}
+              </button>
+            </div>
+          </div>
+
+          {kind === "schedule" ? (
+            <TriggerConfigSection config={config} onChange={setConfig} />
+          ) : (
+            <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+              {t(($) => $.add_trigger_dialog.webhook_help)}
+            </p>
+          )}
+
           <div>
             <label className="text-xs font-medium text-muted-foreground">
               {t(($) => $.add_trigger_dialog.label_field)}
@@ -373,8 +640,12 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
       await deleteAutopilot.mutateAsync(autopilotId);
       toast.success(t(($) => $.detail.toast_deleted));
       router.push(wsPaths.autopilots());
-    } catch {
-      toast.error(t(($) => $.detail.toast_delete_failed));
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.detail.toast_delete_failed),
+      );
       setDeleting(false);
     }
   };
@@ -485,6 +756,14 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             )}
           </section>
 
+          {/* Webhook deliveries — only renders when at least one webhook
+              trigger is configured. The component does its own fetch so
+              schedule-only autopilots don't pay for an empty list query. */}
+          <WebhookDeliveriesSection
+            autopilotId={autopilotId}
+            hasWebhookTrigger={triggers.some((trig) => trig.kind === "webhook")}
+          />
+
           {/* Run History */}
           <section className="space-y-3">
             <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
@@ -501,11 +780,11 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                 {t(($) => $.detail.no_runs)}
               </div>
             ) : (
-              <div className="rounded-md border overflow-hidden">
-                {runs.map((run) => (
-                  <RunRow key={run.id} run={run} agentId={autopilot.assignee_id} agentName={getActorName("agent", autopilot.assignee_id)} />
-                ))}
-              </div>
+              <RunHistoryList
+                runs={runs}
+                agentId={autopilot.assignee_id}
+                agentName={getActorName("agent", autopilot.assignee_id)}
+              />
             )}
           </section>
 

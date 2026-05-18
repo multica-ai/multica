@@ -27,6 +27,42 @@
       "hint": "Esto suele tardar unos segundos. Tu daemon se está registrando en el espacio de trabajo."
     }
   },
+  "machine": {
+    "search_placeholder": "Buscar máquinas…",
+    "filters": {
+      "all": "Todas",
+      "online": "En línea",
+      "issues": "Con problemas"
+    },
+    "section_local": "Local",
+    "section_remote": "Remoto",
+    "section_cloud": "Nube",
+    "this_machine": "Este equipo",
+    "local_badge": "Local · este equipo",
+    "runtime_count_one": "{{count}} entorno",
+    "runtime_count_other": "{{count}} entornos",
+    "busy_count_one": "{{count}} ocupado",
+    "busy_count_other": "{{count}} ocupados",
+    "no_matches_title": "No hay máquinas",
+    "no_matches_hint": "Ninguna máquina coincide con la búsqueda o el filtro actual.",
+    "select_machine": "Selecciona una máquina para inspeccionar sus entornos.",
+    "metrics": {
+      "runtimes": "Entornos",
+      "runtimes_hint_one": "{{count}} en línea",
+      "runtimes_hint_other": "{{count}} en línea",
+      "health": "Estado",
+      "health_clear": "Sin problemas",
+      "health_issues_one": "{{count}} problema",
+      "health_issues_other": "{{count}} problemas",
+      "workload": "Carga de trabajo",
+      "workload_value_idle": "Inactivo",
+      "workload_idle": "Todos inactivos",
+      "workload_hint": "{{running}} en ejecución · {{queued}} en cola",
+      "cli": "CLI",
+      "cloud_worker": "Trabajador en la nube",
+      "local_daemon": "Daemon local"
+    }
+  },
   "health": {
     "online": {
       "label": "En línea",
@@ -154,7 +190,8 @@
   },
   "charts": {
     "heatmap_less": "Menos",
-    "heatmap_more": "Más"
+    "heatmap_more": "Más",
+    "tooltip_total": "Total"
   },
   "list": {
     "col_runtime": "Entorno",

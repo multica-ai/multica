@@ -611,8 +611,12 @@ function VisibilityEditor({ runtime }: { runtime: AgentRuntime }) {
               visibility: t(($) => $.detail.visibility_label[next]),
             }),
           ),
-        onError: () =>
-          toast.error(t(($) => $.detail.visibility_toast_failed)),
+        onError: (err) =>
+          toast.error(
+            err instanceof Error && err.message
+              ? err.message
+              : t(($) => $.detail.visibility_toast_failed),
+          ),
       },
     );
   };
@@ -709,8 +713,12 @@ function TimezoneEditor({ runtime }: { runtime: AgentRuntime }) {
       {
         onSuccess: () =>
           toast.success(t(($) => $.detail.timezone_toast_updated, { tz: next })),
-        onError: () =>
-          toast.error(t(($) => $.detail.timezone_toast_failed)),
+        onError: (err) =>
+          toast.error(
+            err instanceof Error && err.message
+              ? err.message
+              : t(($) => $.detail.timezone_toast_failed),
+          ),
       },
     );
   };

@@ -178,10 +178,12 @@ func buildOpenclawArgs(prompt, sessionID string, opts ExecOptions, logger *slog.
 	}
 	// OpenClaw binds models to pre-registered agents at `openclaw agents
 	// add/update --model` time; the daemon selects one at runtime by
-	// passing --agent <name>. The model dropdown populates its list from
-	// `openclaw agents list`, so opts.Model here is an agent name. Only
-	// inject when the user hasn't already set --agent via custom_args —
-	// custom_args wins for backward compatibility with existing configs.
+	// passing --agent <id>. The model dropdown populates its list from
+	// `openclaw agents list`, so opts.Model here is an agent id (see
+	// openclawEntriesToModels — the agent's display name lives in the
+	// dropdown label, not in opts.Model). Only inject when the user
+	// hasn't already set --agent via custom_args — custom_args wins for
+	// backward compatibility with existing configs.
 	customArgs := filterCustomArgs(opts.CustomArgs, openclawBlockedArgs, logger)
 	if opts.Model != "" && !customArgsContains(customArgs, "--agent") {
 		args = append(args, "--agent", opts.Model)

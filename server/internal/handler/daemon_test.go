@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -1548,6 +1550,135 @@ func TestClaimTask_ProjectWithoutRepos_FallsBackToWorkspaceRepos(t *testing.T) {
 	}
 }
 
+func TestClaimTaskByRuntime_SurfacesIssueTriggerAndAttachmentSignals(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+
+	runCase := func(t *testing.T, attachTo string) {
+		t.Helper()
+
+		const (
+			issueTitle          = "Claim context signal fixture"
+			issueDescription    = "Issue description used by runtime capability derivation."
+			triggerCommentBody  = "Trigger comment used by daemon context."
+			attachmentURLSuffix = "/claim-context-signal.txt"
+		)
+
+		var issueID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO issue (
+				workspace_id, title, description, status, priority, creator_id, creator_type, number, position
+			) VALUES (
+				$1, $2, $3, 'todo', 'medium', $4, 'member',
+				(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1),
+				0
+			)
+			RETURNING id
+		`, testWorkspaceID, issueTitle, issueDescription, testUserID).Scan(&issueID); err != nil {
+			t.Fatalf("create issue: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+
+		var commentID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content)
+			VALUES ($1, $2, 'member', $3, $4)
+			RETURNING id
+		`, testWorkspaceID, issueID, testUserID, triggerCommentBody).Scan(&commentID); err != nil {
+			t.Fatalf("create trigger comment: %v", err)
+		}
+
+		switch attachTo {
+		case "issue":
+			if _, err := testPool.Exec(ctx, `
+				INSERT INTO attachment (
+					workspace_id, issue_id, uploader_type, uploader_id, filename, url, content_type, size_bytes
+				) VALUES ($1, $2, 'member', $3, 'claim-context-signal.txt', $4, 'text/plain', 12)
+			`, testWorkspaceID, issueID, testUserID, "s3://test"+attachmentURLSuffix); err != nil {
+				t.Fatalf("create issue attachment: %v", err)
+			}
+		case "comment":
+			if _, err := testPool.Exec(ctx, `
+				INSERT INTO attachment (
+					workspace_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes
+				) VALUES ($1, $2, 'member', $3, 'claim-context-signal.txt', $4, 'text/plain', 12)
+			`, testWorkspaceID, commentID, testUserID, "s3://test-comment"+attachmentURLSuffix); err != nil {
+				t.Fatalf("create comment attachment: %v", err)
+			}
+		default:
+			t.Fatalf("unknown attachTo %q", attachTo)
+		}
+
+		var taskID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (
+				agent_id, runtime_id, issue_id, status, priority, trigger_comment_id
+			) VALUES ($1, $2, $3, 'queued', 9999, $4)
+			RETURNING id
+		`, agentID, runtimeID, issueID, commentID).Scan(&taskID); err != nil {
+			t.Fatalf("create task: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+		w := httptest.NewRecorder()
+		req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-context-signals")
+		req = withURLParam(req, "runtimeId", runtimeID)
+		testHandler.ClaimTaskByRuntime(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("ClaimTaskByRuntime: %d %s", w.Code, w.Body.String())
+		}
+
+		var resp struct {
+			Task *struct {
+				ID                           string `json:"id"`
+				IssueTitle                   string `json:"issue_title"`
+				IssueDescription             string `json:"issue_description"`
+				TriggerCommentContent        string `json:"trigger_comment_content"`
+				HasIssueOrCommentAttachments bool   `json:"has_issue_or_comment_attachments"`
+			} `json:"task"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if resp.Task == nil {
+			t.Fatal("expected task in response")
+		}
+		if resp.Task.ID != taskID {
+			t.Fatalf("claimed task id = %q, want %q", resp.Task.ID, taskID)
+		}
+		if resp.Task.IssueTitle != issueTitle {
+			t.Fatalf("issue_title = %q, want %q", resp.Task.IssueTitle, issueTitle)
+		}
+		if resp.Task.IssueDescription != issueDescription {
+			t.Fatalf("issue_description = %q, want %q", resp.Task.IssueDescription, issueDescription)
+		}
+		if resp.Task.TriggerCommentContent != triggerCommentBody {
+			t.Fatalf("trigger_comment_content = %q, want %q", resp.Task.TriggerCommentContent, triggerCommentBody)
+		}
+		if !resp.Task.HasIssueOrCommentAttachments {
+			t.Fatalf("has_issue_or_comment_attachments = false for %s attachment", attachTo)
+		}
+	}
+
+	t.Run("issue attachment", func(t *testing.T) {
+		runCase(t, "issue")
+	})
+	t.Run("comment attachment", func(t *testing.T) {
+		runCase(t, "comment")
+	})
+}
+
 // Regression test for #1276: ClaimTaskByRuntime must populate workspace_id in
 // the response for run_only autopilot tasks. Before the fix, resp.WorkspaceID
 // stayed empty because ClaimTaskByRuntime only handled IssueID and
@@ -2781,5 +2912,264 @@ func TestGetTaskGCCheck(t *testing.T) {
 	}
 	if resp.CompletedAt == "" {
 		t.Fatal("expected completed_at to be set for completed task")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Membership Cache Integration Tests
+//
+// These tests don't just exercise the cache primitive (that's covered in
+// auth/membership_cache_test.go). They prove two things that the unit tests
+// can't:
+//
+//  1. requireDaemonWorkspaceAccess actually short-circuits the DB on a cache
+//     hit (the "ghost user" trick below).
+//  2. Each handler that mutates membership actually calls
+//     h.MembershipCache.Invalidate(...) — so a future refactor that drops
+//     one of those calls will fail CI instead of silently leaking a stale
+//     authorization grant for up to MembershipCacheTTL.
+// ---------------------------------------------------------------------------
+
+// installFreshMembershipCache swaps in a Redis-backed MembershipCache against
+// a freshly-flushed Redis DB for the test, restoring the original on cleanup.
+func installFreshMembershipCache(t *testing.T) {
+	t.Helper()
+	rdb := newRedisTestClient(t)
+	origCache := testHandler.MembershipCache
+	testHandler.MembershipCache = auth.NewMembershipCache(rdb)
+	t.Cleanup(func() { testHandler.MembershipCache = origCache })
+}
+
+// createEphemeralUser inserts a throwaway user with a unique email and
+// deletes it on test cleanup. Returns the user id as a string.
+func createEphemeralUser(t *testing.T, label string) string {
+	t.Helper()
+	email := fmt.Sprintf("membership-cache-%s-%s@multica.ai", label, uuid.NewString())
+	var userID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+	`, "Membership Cache Test "+label, email).Scan(&userID); err != nil {
+		t.Fatalf("create ephemeral user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userID)
+	})
+	return userID
+}
+
+// createEphemeralMember creates a throwaway user AND a member row in the
+// given workspace. Returns (userID, memberID). Both rows are cleaned up on
+// test exit.
+func createEphemeralMember(t *testing.T, workspaceID, label, role string) (string, string) {
+	t.Helper()
+	userID := createEphemeralUser(t, label)
+	var memberID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3) RETURNING id
+	`, workspaceID, userID, role).Scan(&memberID); err != nil {
+		t.Fatalf("create ephemeral member: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM member WHERE id = $1`, memberID)
+	})
+	return userID, memberID
+}
+
+// TestRequireDaemonWorkspaceAccess_CacheHit proves the cache lookup actually
+// short-circuits the DB query. The trick: the request actor is a "ghost"
+// user with NO member row in the workspace. With an empty cache the access
+// check must fail; after priming the cache it must succeed. If a future
+// change ever bypasses the cache and falls through to the DB, the priming
+// step stops mattering and the second assertion catches it.
+func TestRequireDaemonWorkspaceAccess_CacheHit(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	installFreshMembershipCache(t)
+	ctx := context.Background()
+
+	ghostUserID := createEphemeralUser(t, "ghost")
+
+	// Baseline: with an empty cache the ghost has no path to access.
+	req := newRequestAsUser(ghostUserID, "GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil)
+	w := httptest.NewRecorder()
+	if testHandler.requireDaemonWorkspaceAccess(w, req, testWorkspaceID) {
+		t.Fatal("setup: ghost user must not be allowed without cache priming")
+	}
+
+	// Priming the cache is the only thing that changes — the access check
+	// must now succeed via the cache short-circuit.
+	testHandler.MembershipCache.Set(ctx, ghostUserID, testWorkspaceID)
+
+	req = newRequestAsUser(ghostUserID, "GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil)
+	w = httptest.NewRecorder()
+	if !testHandler.requireDaemonWorkspaceAccess(w, req, testWorkspaceID) {
+		t.Fatalf("expected access via cache hit, got denied (status %d)", w.Code)
+	}
+}
+
+func TestRequireDaemonWorkspaceAccess_CacheMissBackfills(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	installFreshMembershipCache(t)
+
+	ctx := context.Background()
+
+	// Cache is empty — verify miss.
+	if testHandler.MembershipCache.Get(ctx, testUserID, testWorkspaceID) {
+		t.Fatal("expected cache miss before request")
+	}
+
+	// Make a request that triggers DB lookup.
+	req := newRequest("GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil)
+	w := httptest.NewRecorder()
+	if !testHandler.requireDaemonWorkspaceAccess(w, req, testWorkspaceID) {
+		t.Fatalf("expected access granted via DB lookup, got denied (status %d)", w.Code)
+	}
+
+	// Cache should now be backfilled.
+	if !testHandler.MembershipCache.Get(ctx, testUserID, testWorkspaceID) {
+		t.Fatal("expected cache to be backfilled after DB hit")
+	}
+}
+
+// TestMembershipCache_InvalidatedOnDeleteMember drives a real DeleteMember
+// HTTP handler call and asserts the cache entry for the removed member is
+// gone afterwards. Guards against future refactors that move or drop the
+// h.MembershipCache.Invalidate(...) line in workspace.go.
+func TestMembershipCache_InvalidatedOnDeleteMember(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	installFreshMembershipCache(t)
+	ctx := context.Background()
+
+	targetUserID, targetMemberID := createEphemeralMember(t, testWorkspaceID, "delete", "admin")
+	testHandler.MembershipCache.Set(ctx, targetUserID, testWorkspaceID)
+	if !testHandler.MembershipCache.Get(ctx, targetUserID, testWorkspaceID) {
+		t.Fatal("setup: expected cache hit after Set")
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/members/"+targetMemberID, nil)
+	req = withURLParams(req, "id", testWorkspaceID, "memberId", targetMemberID)
+	testHandler.DeleteMember(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteMember: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if testHandler.MembershipCache.Get(ctx, targetUserID, testWorkspaceID) {
+		t.Fatal("DeleteMember handler did not invalidate membership cache for removed user")
+	}
+}
+
+// TestMembershipCache_InvalidatedOnUpdateMember drives a real UpdateMember
+// (role change) call and asserts the cache entry is invalidated. The cache
+// stores only the existence of membership, but UpdateMember still flushes
+// the entry so any downstream caller that did add role-aware caching later
+// would not silently see a stale role.
+func TestMembershipCache_InvalidatedOnUpdateMember(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	installFreshMembershipCache(t)
+	ctx := context.Background()
+
+	targetUserID, targetMemberID := createEphemeralMember(t, testWorkspaceID, "update", "admin")
+	testHandler.MembershipCache.Set(ctx, targetUserID, testWorkspaceID)
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/workspaces/"+testWorkspaceID+"/members/"+targetMemberID,
+		map[string]any{"role": "member"})
+	req = withURLParams(req, "id", testWorkspaceID, "memberId", targetMemberID)
+	testHandler.UpdateMember(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateMember: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if testHandler.MembershipCache.Get(ctx, targetUserID, testWorkspaceID) {
+		t.Fatal("UpdateMember handler did not invalidate membership cache for updated user")
+	}
+}
+
+// TestMembershipCache_InvalidatedOnLeaveWorkspace exercises the self-removal
+// path (LeaveWorkspace, not DeleteMember). Both handlers route through
+// revokeAndRemoveMember, but the Invalidate call lives in the handler — a
+// refactor that consolidates them could drop one invalidation without the
+// other test catching it.
+func TestMembershipCache_InvalidatedOnLeaveWorkspace(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	installFreshMembershipCache(t)
+	ctx := context.Background()
+
+	targetUserID, _ := createEphemeralMember(t, testWorkspaceID, "leave", "admin")
+	testHandler.MembershipCache.Set(ctx, targetUserID, testWorkspaceID)
+
+	w := httptest.NewRecorder()
+	req := newRequestAsUser(targetUserID, "DELETE", "/api/workspaces/"+testWorkspaceID+"/leave", nil)
+	req = withURLParam(req, "id", testWorkspaceID)
+	testHandler.LeaveWorkspace(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("LeaveWorkspace: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if testHandler.MembershipCache.Get(ctx, targetUserID, testWorkspaceID) {
+		t.Fatal("LeaveWorkspace handler did not invalidate membership cache for leaver")
+	}
+}
+
+// TestMembershipCache_InvalidatedOnDeleteWorkspace exercises the bulk
+// invalidation path: when the workspace is deleted, every member's cache
+// entry must be flushed. We create an isolated workspace with two members
+// (owner + extra) so the shared testWorkspace stays intact.
+func TestMembershipCache_InvalidatedOnDeleteWorkspace(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	installFreshMembershipCache(t)
+	ctx := context.Background()
+
+	const slug = "membership-cache-delete-ws"
+	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+	var wsID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ($1, $2, $3, $4) RETURNING id
+	`, "Membership Cache Delete WS", slug, "DeleteWorkspace cache invalidation test", "MCD").Scan(&wsID); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+	})
+
+	// testUser must be an owner of the isolated workspace to call
+	// DeleteWorkspace.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
+	`, wsID, testUserID); err != nil {
+		t.Fatalf("add owner: %v", err)
+	}
+
+	extraUserID, _ := createEphemeralMember(t, wsID, "ws-delete-extra", "admin")
+
+	testHandler.MembershipCache.Set(ctx, testUserID, wsID)
+	testHandler.MembershipCache.Set(ctx, extraUserID, wsID)
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+wsID, nil)
+	req = withURLParam(req, "id", wsID)
+	testHandler.DeleteWorkspace(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteWorkspace: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if testHandler.MembershipCache.Get(ctx, testUserID, wsID) {
+		t.Fatal("DeleteWorkspace handler did not invalidate owner cache entry")
+	}
+	if testHandler.MembershipCache.Get(ctx, extraUserID, wsID) {
+		t.Fatal("DeleteWorkspace handler did not invalidate extra-member cache entry")
 	}
 }
