@@ -4,6 +4,8 @@
   "filter": {
     "project_label": "Project",
     "all_projects": "All projects",
+    "squad_label": "Squad",
+    "all_squads": "All squads",
     "period_label": "Period"
   },
   "kpi": {

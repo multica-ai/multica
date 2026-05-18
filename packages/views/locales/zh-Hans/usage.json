@@ -4,6 +4,8 @@
   "filter": {
     "project_label": "项目",
     "all_projects": "全部项目",
+    "squad_label": "小队",
+    "all_squads": "全部小队",
     "period_label": "时间范围"
   },
   "kpi": {

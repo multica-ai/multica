@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BarChart3, FolderKanban } from "lucide-react";
+import { BarChart3, FolderKanban, Users } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
@@ -12,7 +12,10 @@ import {
   SelectValue,
 } from "@multica/ui/components/ui/select";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { agentListOptions } from "@multica/core/workspace/queries";
+import {
+  agentListOptions,
+  squadListOptions,
+} from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import {
   dashboardUsageDailyOptions,
@@ -61,6 +64,9 @@ type TimeRange = (typeof TIME_RANGES)[number]["days"];
 // Sentinel for "no project filter" — kept distinct from the empty string
 // so it survives a refactor that ever lets a project be slug-keyed.
 const ALL_PROJECTS = "__all__";
+
+// Sentinel for "no squad filter" — same pattern as ALL_PROJECTS.
+const ALL_SQUADS = "__all__";
 
 // Stable references — `data ?? []` would create a new empty array on
 // every render while the query is loading, which breaks useMemo's
@@ -124,6 +130,7 @@ export function DashboardPage() {
   const wsId = useWorkspaceId();
   const [days, setDays] = useState<TimeRange>(30);
   const [projectValue, setProjectValue] = useState<string>(ALL_PROJECTS);
+  const [squadValue, setSquadValue] = useState<string>(ALL_SQUADS);
   // Default to the browser's resolved zone so day-boundary buckets match the
   // user's local clock on first render. Pure client-state — the rollup queries
   // are zone-agnostic today; this is the UI affordance the user can pin.
@@ -135,6 +142,7 @@ export function DashboardPage() {
 
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: squads = [] } = useQuery(squadListOptions(wsId));
 
   // Validate the picked project against the current workspace's list. A
   // stale UUID — left over from a project that's been deleted, or from the
@@ -147,11 +155,23 @@ export function DashboardPage() {
     return projects.some((p) => p.id === projectValue) ? projectValue : null;
   }, [projectValue, projects]);
 
-  const dailyQuery = useQuery(dashboardUsageDailyOptions(wsId, days, projectId));
-  const byAgentQuery = useQuery(dashboardUsageByAgentOptions(wsId, days, projectId));
-  const runTimeQuery = useQuery(dashboardAgentRunTimeOptions(wsId, days, projectId));
+  // Same stale-UUID guard as projectId — see comment above.
+  const squadId = useMemo(() => {
+    if (squadValue === ALL_SQUADS) return null;
+    return squads.some((s) => s.id === squadValue) ? squadValue : null;
+  }, [squadValue, squads]);
+
+  const dailyQuery = useQuery(
+    dashboardUsageDailyOptions(wsId, days, projectId, squadId),
+  );
+  const byAgentQuery = useQuery(
+    dashboardUsageByAgentOptions(wsId, days, projectId, squadId),
+  );
+  const runTimeQuery = useQuery(
+    dashboardAgentRunTimeOptions(wsId, days, projectId, squadId),
+  );
   const runTimeDailyQuery = useQuery(
-    dashboardRunTimeDailyOptions(wsId, days, projectId),
+    dashboardRunTimeDailyOptions(wsId, days, projectId, squadId),
   );
 
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
@@ -228,6 +248,11 @@ export function DashboardPage() {
             projects={projects}
             value={projectValue}
             onChange={setProjectValue}
+          />
+          <SquadFilter
+            squads={squads}
+            value={squadValue}
+            onChange={setSquadValue}
           />
           <Segmented
             value={days}
@@ -366,6 +391,68 @@ function ProjectFilter({
           <SelectItem key={p.id} value={p.id}>
             <ProjectIcon project={p} size="sm" />
             <span className="truncate">{p.title}</span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function SquadFilter({
+  squads,
+  value,
+  onChange,
+}: {
+  squads: { id: string; name: string }[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const { t } = useT("usage");
+  const allLabel = t(($) => $.filter.all_squads);
+  const selected = squads.find((s) => s.id === value);
+  const selectedTitle =
+    value === ALL_SQUADS ? allLabel : selected?.name ?? allLabel;
+
+  return (
+    <Select
+      value={value}
+      onValueChange={(v) => onChange(v ?? ALL_SQUADS)}
+    >
+      <SelectTrigger size="sm" className="min-w-[160px]">
+        <SelectValue>
+          {() => (
+            <>
+              {selected ? (
+                <ActorAvatar
+                  actorType="squad"
+                  actorId={selected.id}
+                  size={14}
+                  profileLink={false}
+                />
+              ) : (
+                <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              )}
+              <span className="truncate">{selectedTitle}</span>
+            </>
+          )}
+        </SelectValue>
+      </SelectTrigger>
+      {/* alignItemWithTrigger=false: same viewport-clipping reason as ProjectFilter. */}
+      <SelectContent align="start" alignItemWithTrigger={false} className="max-h-72">
+        <SelectItem value={ALL_SQUADS}>
+          <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate">{allLabel}</span>
+        </SelectItem>
+        {squads.map((s) => (
+          <SelectItem key={s.id} value={s.id}>
+            <ActorAvatar
+              actorType="squad"
+              actorId={s.id}
+              size={14}
+              profileLink={false}
+              className="self-center"
+            />
+            <span className="truncate">{s.name}</span>
           </SelectItem>
         ))}
       </SelectContent>

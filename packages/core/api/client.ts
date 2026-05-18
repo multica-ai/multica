@@ -847,11 +847,12 @@ export class ApiClient {
   // ---------------------------------------------------------------------------
 
   async getDashboardUsageDaily(
-    params: { days?: number; project_id?: string | null },
+    params: { days?: number; project_id?: string | null; squad_id?: string | null },
   ): Promise<DashboardUsageDaily[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
+    if (params.squad_id) search.set("squad_id", params.squad_id);
     const raw = await this.fetch<unknown>(`/api/dashboard/usage/daily?${search}`);
     return parseWithFallback<DashboardUsageDaily[]>(
       raw,
@@ -862,11 +863,12 @@ export class ApiClient {
   }
 
   async getDashboardUsageByAgent(
-    params: { days?: number; project_id?: string | null },
+    params: { days?: number; project_id?: string | null; squad_id?: string | null },
   ): Promise<DashboardUsageByAgent[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
+    if (params.squad_id) search.set("squad_id", params.squad_id);
     const raw = await this.fetch<unknown>(`/api/dashboard/usage/by-agent?${search}`);
     return parseWithFallback<DashboardUsageByAgent[]>(
       raw,
@@ -877,11 +879,12 @@ export class ApiClient {
   }
 
   async getDashboardAgentRunTime(
-    params: { days?: number; project_id?: string | null },
+    params: { days?: number; project_id?: string | null; squad_id?: string | null },
   ): Promise<DashboardAgentRunTime[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
+    if (params.squad_id) search.set("squad_id", params.squad_id);
     const raw = await this.fetch<unknown>(`/api/dashboard/agent-runtime?${search}`);
     return parseWithFallback<DashboardAgentRunTime[]>(
       raw,
@@ -892,11 +895,12 @@ export class ApiClient {
   }
 
   async getDashboardRunTimeDaily(
-    params: { days?: number; project_id?: string | null },
+    params: { days?: number; project_id?: string | null; squad_id?: string | null },
   ): Promise<DashboardRunTimeDaily[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
+    if (params.squad_id) search.set("squad_id", params.squad_id);
     const raw = await this.fetch<unknown>(`/api/dashboard/runtime/daily?${search}`);
     return parseWithFallback<DashboardRunTimeDaily[]>(
       raw,
