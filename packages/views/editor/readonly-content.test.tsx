@@ -20,6 +20,25 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspaceSlug: () => "test",
 }));
 
+vi.mock("@multica/core/hooks", () => ({
+  useWorkspaceId: () => "ws-test",
+}));
+
+vi.mock("@multica/core/workspace/queries", () => ({
+  agentListOptions: (wsId: string) => ({
+    queryKey: ["workspaces", wsId, "agents"],
+    queryFn: async () => [],
+  }),
+  memberListOptions: (wsId: string) => ({
+    queryKey: ["workspaces", wsId, "members"],
+    queryFn: async () => [],
+  }),
+  squadListOptions: (wsId: string) => ({
+    queryKey: ["workspaces", wsId, "squads"],
+    queryFn: async () => [],
+  }),
+}));
+
 vi.mock("../navigation", () => ({
   useNavigation: () => ({ push: vi.fn(), openInNewTab: vi.fn() }),
 }));
@@ -307,5 +326,57 @@ describe("ReadonlyContent file-card → AttachmentBlock HTML routing", () => {
     // AttachmentCard chrome surfaces the filename as visible text in a
     // <p class="truncate"> row. HtmlAttachmentPreview replaces it entirely.
     expect(queryByText("report.html")).toBeNull();
+  });
+});
+
+describe("ReadonlyContent mention rendering", () => {
+  // Pins the display-side defense for the label/UUID mismatch bug: even
+  // when a comment's markdown spells the agent's name wrong, the rendered
+  // text must match the entity the UUID actually resolves to.
+  it("renders the canonical agent name from cache, not the markdown label", () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(["workspaces", "ws-test", "agents"], [
+      { id: "agent-real-uuid", name: "RealAgent" },
+    ]);
+
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <ReadonlyContent content="[@WrongLabel](mention://agent/agent-real-uuid)" />
+      </QueryClientProvider>,
+    );
+
+    const mention = container.querySelector(".mention");
+    expect(mention).not.toBeNull();
+    expect(mention?.textContent).toBe("@RealAgent");
+    expect(container.textContent).not.toContain("WrongLabel");
+  });
+
+  it("falls back to the markdown label when the agent is not in cache", () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <ReadonlyContent content="[@Ghost](mention://agent/missing-uuid)" />
+      </QueryClientProvider>,
+    );
+
+    const mention = container.querySelector(".mention");
+    expect(mention?.textContent).toBe("@Ghost");
+  });
+
+  it("resolves squad mentions through the squad list cache", () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(["workspaces", "ws-test", "squads"], [
+      { id: "squad-uuid", name: "Coordinators" },
+    ]);
+
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <ReadonlyContent content="[@OldSquadName](mention://squad/squad-uuid)" />
+      </QueryClientProvider>,
+    );
+
+    const mention = container.querySelector(".mention");
+    expect(mention?.textContent).toBe("@Coordinators");
   });
 });
