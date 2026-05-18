@@ -21,15 +21,16 @@ const (
 // Only fields the claude-tui backend uses are exposed as typed columns; the
 // full original JSON is preserved in Raw for logging and forward-compat.
 type HookEvent struct {
-	Type                HookEventType
-	SessionID           string
-	Cwd                 string
-	ToolName            string          // PreToolUse, PostToolUse
-	ToolUseID           string          // PreToolUse, PostToolUse
-	ToolInput           json.RawMessage // PreToolUse, PostToolUse
-	ToolResponse        json.RawMessage // PostToolUse
-	LastAssistantText   string          // Stop
-	Raw                 json.RawMessage // entire POST body, for debug
+	Type              HookEventType
+	SessionID         string
+	Cwd               string
+	TranscriptPath    string          // SessionStart, Stop — absolute path to the per-session JSONL claude writes
+	ToolName          string          // PreToolUse, PostToolUse
+	ToolUseID         string          // PreToolUse, PostToolUse
+	ToolInput         json.RawMessage // PreToolUse, PostToolUse
+	ToolResponse      json.RawMessage // PostToolUse
+	LastAssistantText string          // Stop
+	Raw               json.RawMessage // entire POST body, for debug
 }
 
 // HookSubscriber is the interface a backend uses to receive Claude Code hook

@@ -141,6 +141,7 @@ func (s *hookServer) handleHook(w http.ResponseWriter, r *http.Request) {
 		HookEventName     string          `json:"hook_event_name"`
 		SessionID         string          `json:"session_id"`
 		Cwd               string          `json:"cwd"`
+		TranscriptPath    string          `json:"transcript_path"`
 		ToolName          string          `json:"tool_name"`
 		ToolUseID         string          `json:"tool_use_id"`
 		ToolInput         json.RawMessage `json:"tool_input"`
@@ -156,6 +157,7 @@ func (s *hookServer) handleHook(w http.ResponseWriter, r *http.Request) {
 		Type:              agent.HookEventType(raw.HookEventName),
 		SessionID:         raw.SessionID,
 		Cwd:               raw.Cwd,
+		TranscriptPath:    raw.TranscriptPath,
 		ToolName:          raw.ToolName,
 		ToolUseID:         raw.ToolUseID,
 		ToolInput:         raw.ToolInput,
@@ -164,22 +166,31 @@ func (s *hookServer) handleHook(w http.ResponseWriter, r *http.Request) {
 		Raw:               body,
 	}
 
+	// Hold the lock across the send so cancel() cannot close ch between the
+	// lookup and the channel op (which would panic with "send on closed
+	// channel"). Cancel takes the same mutex before close, so any sender
+	// that's already past the lookup completes its non-blocking send first;
+	// any sender that arrives after cancel finds the entry gone.
+	//
+	// Non-blocking send (default branch) preserves the prior "drop if the
+	// subscriber is stuck" semantics without holding the lock for hundreds
+	// of milliseconds.
 	s.mu.Lock()
 	ch, ok := s.subs[token]
-	s.mu.Unlock()
 	if !ok {
+		s.mu.Unlock()
 		// Subscriber gone — common during graceful shutdown after Stop hook
 		// fired. Don't 404 (claude treats non-2xx as hook failure and may
 		// retry); accept silently.
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-
 	select {
 	case ch <- event:
-	case <-time.After(500 * time.Millisecond):
+	default:
 		s.logger.Warn("hook event dropped: subscriber full", "token", token, "event", raw.HookEventName)
 	}
+	s.mu.Unlock()
 
 	w.WriteHeader(http.StatusOK)
 }

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -89,9 +88,9 @@ func (b *claudeTUIBackend) Execute(ctx context.Context, prompt string, opts Exec
 		hookEvents <-chan HookEvent
 		hookCancel func()
 	)
-	settingsRestore, err := installTUIHookSettings(opts.Cwd, b.cfg.Hooks, token)
+	hookSettingsJSON, err := buildTUIHookSettingsJSON(b.cfg.Hooks, token)
 	if err != nil {
-		return nil, fmt.Errorf("claude-tui: install hook settings: %w", err)
+		return nil, fmt.Errorf("claude-tui: build hook settings: %w", err)
 	}
 	if b.cfg.Hooks != nil {
 		hookEvents, hookCancel = b.cfg.Hooks.Subscribe(token)
@@ -105,6 +104,12 @@ func (b *claudeTUIBackend) Execute(ctx context.Context, prompt string, opts Exec
 	args = append(args, opts.CustomArgs...)
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--resume", opts.ResumeSessionID)
+	}
+	// --settings accepts an inline JSON string (verified on claude 2.1.140).
+	// We pass it instead of writing .claude/settings.local.json so we never
+	// touch the user's on-disk config. Empty string means hooks disabled.
+	if hookSettingsJSON != "" {
+		args = append(args, "--settings", hookSettingsJSON)
 	}
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	cmd.Dir = opts.Cwd
@@ -126,7 +131,6 @@ func (b *claudeTUIBackend) Execute(ctx context.Context, prompt string, opts Exec
 		if hookCancel != nil {
 			hookCancel()
 		}
-		settingsRestore()
 		return nil, fmt.Errorf("start claude (tui pty): %w", err)
 	}
 
@@ -242,7 +246,6 @@ func (b *claudeTUIBackend) Execute(ctx context.Context, prompt string, opts Exec
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
-		defer settingsRestore()
 		defer func() { _ = ptmx.Close() }()
 		defer func() {
 			if hookCancel != nil {
@@ -255,6 +258,7 @@ func (b *claudeTUIBackend) Execute(ctx context.Context, prompt string, opts Exec
 		var finalError string
 		var sessionID string
 		var hookFinalText string
+		var transcriptPath string // captured from SessionStart / Stop hooks for post-turn usage extraction
 
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
@@ -283,6 +287,9 @@ func (b *claudeTUIBackend) Execute(ctx context.Context, prompt string, opts Exec
 						sessionID = ev.SessionID
 						trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 					}
+					if ev.TranscriptPath != "" {
+						transcriptPath = ev.TranscriptPath
+					}
 				case HookPreToolUse:
 					var input map[string]any
 					if len(ev.ToolInput) > 0 {
@@ -308,6 +315,9 @@ func (b *claudeTUIBackend) Execute(ctx context.Context, prompt string, opts Exec
 				case HookStop:
 					if ev.SessionID != "" {
 						sessionID = ev.SessionID
+					}
+					if ev.TranscriptPath != "" {
+						transcriptPath = ev.TranscriptPath
 					}
 					hookFinalText = ev.LastAssistantText
 					finalStatus = "completed"
@@ -340,12 +350,20 @@ func (b *claudeTUIBackend) Execute(ctx context.Context, prompt string, opts Exec
 		_ = cmd.Wait()
 
 		duration := time.Since(startTime)
+
+		// Pull token usage from the transcript JSONL claude wrote during the
+		// run. Hooks don't expose usage directly; the transcript does, keyed
+		// per assistant message with input/output/cache tokens. Best-effort
+		// only — Result.Usage stays empty if the file is missing or unreadable.
+		usage := readTranscriptUsage(transcriptPath)
+
 		b.cfg.Logger.Info("claude tui finished",
 			"pid", cmd.Process.Pid,
 			"status", finalStatus,
 			"duration", duration.Round(time.Millisecond).String(),
 			"session_id", sessionID,
 			"via_hook", hookFinalText != "",
+			"transcript_models", len(usage),
 		)
 
 		// Prefer the Stop hook's clean text; fall back to PTY accumulation.
@@ -362,43 +380,24 @@ func (b *claudeTUIBackend) Execute(ctx context.Context, prompt string, opts Exec
 			Error:      finalError,
 			DurationMs: duration.Milliseconds(),
 			SessionID:  sessionID,
-			Usage:      map[string]TokenUsage{},
+			Usage:      usage,
 		}
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
-// installTUIHookSettings writes a per-task .claude/settings.local.json into
-// cwd that routes all four hook events through curl to the daemon's HTTP
-// server. If the file already exists (e.g. checked-out repo carries one),
-// it is moved aside and the returned restore func puts it back when the
-// run ends. When hooks is nil the function is a no-op and restore is a
-// no-op too — the backend will fall back to silence-window completion.
-func installTUIHookSettings(cwd string, hooks HookSubscriber, token string) (func(), error) {
-	noop := func() {}
+// buildTUIHookSettingsJSON returns a JSON blob suitable for `claude --settings`
+// that wires the four hook events we consume through curl to the daemon's HTTP
+// server. Empty string when hooks is nil — the backend will fall back to
+// silence-window completion.
+//
+// Using --settings instead of writing .claude/settings.local.json keeps us
+// off the user's disk entirely: no temp files, no backup/restore dance, no
+// risk of clobbering a checked-out repo's existing settings.
+func buildTUIHookSettingsJSON(hooks HookSubscriber, token string) (string, error) {
 	if hooks == nil {
-		return noop, nil
-	}
-
-	dir := filepath.Join(cwd, ".claude")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return noop, err
-	}
-	settingsPath := filepath.Join(dir, "settings.local.json")
-	backupPath := settingsPath + ".multica-tui.bak"
-
-	// Back up an existing user file. We only restore if WE wrote a fresh
-	// file (i.e. a backup exists at the end) — if backup creation fails
-	// we refuse to clobber and surface the error.
-	var hadExisting bool
-	if _, err := os.Stat(settingsPath); err == nil {
-		hadExisting = true
-		if err := os.Rename(settingsPath, backupPath); err != nil {
-			return noop, fmt.Errorf("backup existing settings.local.json: %w", err)
-		}
-	} else if !os.IsNotExist(err) {
-		return noop, err
+		return "", nil
 	}
 
 	url := hooks.BaseURL() + "?task=" + token
@@ -422,33 +421,16 @@ func installTUIHookSettings(cwd string, hooks HookSubscriber, token string) (fun
 		Hooks map[string][]hookMatcher `json:"hooks"`
 	}
 	one := []hookMatcher{{Matcher: "", Hooks: []hookEntry{{Type: "command", Command: cmd}}}}
-	body, err := json.MarshalIndent(settings{
+	body, err := json.Marshal(settings{
 		Hooks: map[string][]hookMatcher{
 			"SessionStart": one,
 			"PreToolUse":   one,
 			"PostToolUse":  one,
 			"Stop":         one,
 		},
-	}, "", "  ")
+	})
 	if err != nil {
-		if hadExisting {
-			_ = os.Rename(backupPath, settingsPath)
-		}
-		return noop, err
+		return "", err
 	}
-	if err := os.WriteFile(settingsPath, body, 0o644); err != nil {
-		if hadExisting {
-			_ = os.Rename(backupPath, settingsPath)
-		}
-		return noop, err
-	}
-
-	restore := func() {
-		if hadExisting {
-			_ = os.Rename(backupPath, settingsPath)
-			return
-		}
-		_ = os.Remove(settingsPath)
-	}
-	return restore, nil
+	return string(body), nil
 }
