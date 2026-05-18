@@ -15,10 +15,12 @@
  *   - markdown : fetch text via api.getAttachmentTextContent, render via
  *                the existing ReadonlyContent (full mention/mermaid/katex
  *                pipeline included).
- *   - html     : fetch text, hand to <iframe srcdoc={text} sandbox="">.
- *                Empty sandbox attribute = max restriction (no scripts,
- *                no forms, no top-nav, no popups, no same-origin) — the
- *                recommended pattern for previewing untrusted HTML.
+ *   - html     : fetch text, hand to <iframe srcdoc={text}
+ *                sandbox="allow-scripts">. The iframe runs in an opaque
+ *                origin: scripts execute (chart libraries / vanilla SVG
+ *                JS work), but cookie / localStorage / parent access /
+ *                top-navigation / popups / forms stay blocked because
+ *                `allow-same-origin` is intentionally NOT included.
  *   - text     : fetch text, highlight with lowlight if the extension
  *                maps to a known hljs language; otherwise plain <pre>.
  *
@@ -35,17 +37,12 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { useQuery } from "@tanstack/react-query";
-import { Download, FileText, Loader2, X } from "lucide-react";
-import { createLowlight, common } from "lowlight";
-// @ts-expect-error -- hast-util-to-html has no bundled type declarations
-import { toHtml } from "hast-util-to-html";
-import { cn } from "@multica/ui/lib/utils";
+import { Rnd } from "react-rnd";
 import {
-  api,
   PreviewTooLargeError,
   PreviewUnsupportedError,
 } from "@multica/core/api";
+import { Download, FileText, Loader2, Maximize2, Minimize2, X } from "lucide-react";
 import type { Attachment } from "@multica/core/types";
 import { useT } from "../i18n";
 import { openExternal } from "../platform";
@@ -56,6 +53,8 @@ import {
   type PreviewKind,
 } from "./utils/preview";
 import { useDownloadAttachment } from "./use-download-attachment";
+import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
+import { CodeBlockStatic } from "./code-block-static";
 
 // ---------------------------------------------------------------------------
 // Preview source — full attachment, or URL-only (media types only)
@@ -169,8 +168,63 @@ export function useAttachmentPreview(): AttachmentPreviewHandle {
 }
 
 // ---------------------------------------------------------------------------
+// Window sizing — windowed default + fullscreen override
+// ---------------------------------------------------------------------------
+//
+// Defaults match the previous (fixed) modal size (`max-w-6xl` ≈ 1152px,
+// 90vh) so users coming from the old modal don't notice a layout shift.
+// Persisting bounds across opens is intentionally not done — a fresh,
+// centered window per click is the same behavior as ImageLightbox.
+
+const DEFAULT_PREVIEW_WIDTH = 1152;
+const DEFAULT_PREVIEW_HEIGHT = 720;
+const MIN_PREVIEW_WIDTH = 480;
+const MIN_PREVIEW_HEIGHT = 360;
+const PREVIEW_VIEWPORT_MARGIN = 16;
+
+interface PreviewBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function getDefaultPreviewBounds(): PreviewBounds {
+  if (typeof window === "undefined") {
+    return { x: 0, y: 0, width: DEFAULT_PREVIEW_WIDTH, height: DEFAULT_PREVIEW_HEIGHT };
+  }
+  const availableWidth = Math.max(0, window.innerWidth - PREVIEW_VIEWPORT_MARGIN * 2);
+  const availableHeight = Math.max(0, window.innerHeight - PREVIEW_VIEWPORT_MARGIN * 2);
+  const width = Math.min(DEFAULT_PREVIEW_WIDTH, availableWidth);
+  const height = Math.min(DEFAULT_PREVIEW_HEIGHT, availableHeight);
+  return {
+    x: Math.max(PREVIEW_VIEWPORT_MARGIN, (window.innerWidth - width) / 2),
+    y: Math.max(PREVIEW_VIEWPORT_MARGIN, (window.innerHeight - height) / 2),
+    width,
+    height,
+  };
+}
+
+function getWindowedMinSize(): { minWidth: number; minHeight: number } {
+  if (typeof window === "undefined") {
+    return { minWidth: MIN_PREVIEW_WIDTH, minHeight: MIN_PREVIEW_HEIGHT };
+  }
+  return {
+    minWidth: Math.min(MIN_PREVIEW_WIDTH, window.innerWidth),
+    minHeight: Math.min(MIN_PREVIEW_HEIGHT, window.innerHeight),
+  };
+}
+
+function getFullscreenBounds(fallback: PreviewBounds): PreviewBounds {
+  if (typeof window === "undefined") return fallback;
+  return { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
+}
+
+// ---------------------------------------------------------------------------
 // Modal — frame + dispatch
 // ---------------------------------------------------------------------------
+
+const DRAG_HANDLE_CLASS = "attachment-preview-drag-handle";
 
 export function AttachmentPreviewModal({
   source,
@@ -180,6 +234,10 @@ export function AttachmentPreviewModal({
   const { t } = useT("editor");
   const download = useDownloadAttachment();
   const state = normalize(source);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [windowBounds, setWindowBounds] = useState(getDefaultPreviewBounds);
+  const bounds = fullscreen ? getFullscreenBounds(windowBounds) : windowBounds;
+  const minimumSize = getWindowedMinSize();
 
   useEffect(() => {
     if (!open) return;
@@ -203,60 +261,103 @@ export function AttachmentPreviewModal({
     }
   };
 
+  const fullscreenLabel = fullscreen
+    ? t(($) => $.file_card.exit_full_screen)
+    : t(($) => $.file_card.enter_full_screen);
+
   if (!open || typeof document === "undefined") return null;
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+      className="fixed inset-0 z-50 bg-black/80"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-label={state.filename}
     >
-      {/* Larger than the create-issue dialog (max-w-4xl, manualDialogContentClass)
-          because PDF / video previews want more room. Capped to viewport
-          minus the surrounding p-4 (1rem each side) so it never overflows
-          the screen on small displays / split panes. */}
-      <div
-        className="flex h-[min(90vh,calc(100vh-2rem))] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-background shadow-xl"
-        onClick={(e) => e.stopPropagation()}
+      <Rnd
+        // Remount on fullscreen toggle so Rnd picks up the new size/position
+        // without animating from the previous bounds.
+        key={fullscreen ? "fullscreen" : "windowed"}
+        bounds="window"
+        size={{ width: bounds.width, height: bounds.height }}
+        position={{ x: bounds.x, y: bounds.y }}
+        minWidth={minimumSize.minWidth}
+        minHeight={minimumSize.minHeight}
+        disableDragging={fullscreen}
+        enableResizing={!fullscreen}
+        dragHandleClassName={DRAG_HANDLE_CLASS}
+        onDragStop={(_event, data) => {
+          setWindowBounds((current) => ({ ...current, x: data.x, y: data.y }));
+        }}
+        onResizeStop={(_event, _direction, ref, _delta, position) => {
+          setWindowBounds({
+            x: position.x,
+            y: position.y,
+            width: ref.offsetWidth,
+            height: ref.offsetHeight,
+          });
+        }}
+        className="overflow-hidden rounded-lg bg-background shadow-xl ring-1 ring-foreground/10"
       >
-        <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-4 py-2">
-          <FileText className="size-4 shrink-0 text-muted-foreground" />
-          <p className="truncate text-sm font-medium">{state.filename}</p>
-          <span className="ml-1 shrink-0 text-xs text-muted-foreground">
-            {state.contentType || "—"}
-          </span>
-          <div className="ml-auto flex items-center gap-1">
-            <button
-              type="button"
-              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              title={t(($) => $.image.download)}
-              aria-label={t(($) => $.image.download)}
-              onClick={handleDownload}
-            >
-              <Download className="size-4" />
-            </button>
-            <button
-              type="button"
-              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              title={t(($) => $.attachment.close)}
-              aria-label={t(($) => $.attachment.close)}
-              onClick={onClose}
-            >
-              <X className="size-4" />
-            </button>
+        <div
+          className="flex h-full flex-col"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div
+            className={`${DRAG_HANDLE_CLASS} flex items-center gap-2 border-b border-border bg-muted/30 px-4 py-2 ${fullscreen ? "" : "cursor-move"}`}
+          >
+            <FileText className="size-4 shrink-0 text-muted-foreground" />
+            <p className="truncate text-sm font-medium">{state.filename}</p>
+            <span className="ml-1 shrink-0 text-xs text-muted-foreground">
+              {state.contentType || "—"}
+            </span>
+            {/* `[-webkit-app-region:no-drag]` keeps these clickable when the
+                modal goes fullscreen on desktop — without it, the Electron
+                window's top-48px drag region swallows the click. */}
+            <div className="ml-auto flex items-center gap-1 [-webkit-app-region:no-drag]">
+              <button
+                type="button"
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                title={t(($) => $.image.download)}
+                aria-label={t(($) => $.image.download)}
+                onClick={handleDownload}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <Download className="size-4" />
+              </button>
+              <button
+                type="button"
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                title={fullscreenLabel}
+                aria-label={fullscreenLabel}
+                onClick={() => setFullscreen((value) => !value)}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                {fullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+              </button>
+              <button
+                type="button"
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                title={t(($) => $.attachment.close)}
+                aria-label={t(($) => $.attachment.close)}
+                onClick={onClose}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto bg-background">
+            <PreviewContent
+              kind={kind}
+              source={source}
+              state={state}
+              onDownload={handleDownload}
+            />
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto bg-background">
-          <PreviewContent
-            kind={kind}
-            source={source}
-            state={state}
-            onDownload={handleDownload}
-          />
-        </div>
-      </div>
+      </Rnd>
     </div>,
     document.body,
   );
@@ -355,7 +456,12 @@ function PreviewContent({
           render={(text) => (
             <iframe
               srcDoc={text}
-              sandbox=""
+              // `allow-scripts` without `allow-same-origin` — scripts run
+              // in an opaque origin and cannot read cookies / localStorage
+              // / parent state, nor escape via top-nav / popups / forms.
+              // Required so JS-driven charts (echarts / Plotly / vanilla
+              // SVG injection) render instead of showing a blank `<svg>`.
+              sandbox="allow-scripts"
               className="h-full w-full bg-background"
               title={state.filename}
             />
@@ -368,7 +474,11 @@ function PreviewContent({
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
           render={(text) => (
-            <CodeBlock language={extensionToLanguage(state.filename)} body={text} />
+            <CodeBlockStatic
+              language={extensionToLanguage(state.filename)}
+              body={text}
+              className="px-6 py-4"
+            />
           )}
         />
       );
@@ -393,19 +503,7 @@ function TextBackedPreview({
   render: (text: string) => ReactNode;
 }) {
   const { t } = useT("editor");
-  const query = useQuery({
-    queryKey: ["attachment-content", attachmentId] as const,
-    queryFn: () => api.getAttachmentTextContent(attachmentId),
-    // Errors are surfaced as typed fallbacks, not retried — 413 / 415 won't
-    // become 200 on a retry, and a transient failure is easier to recover
-    // from by closing and reopening the modal than waiting on background
-    // retries that have no UI affordance.
-    retry: false,
-    // 413 / 415 bodies are tiny; keep the result around for the session so
-    // the user can flip away and back without refetching.
-    staleTime: 5 * 60_000,
-    gcTime: 30 * 60_000,
-  });
+  const query = useAttachmentHtmlText(attachmentId);
 
   if (query.isLoading) {
     return (
@@ -441,44 +539,6 @@ function TextBackedPreview({
   }
   if (!query.data) return null;
   return <>{render(query.data.text)}</>;
-}
-
-// ---------------------------------------------------------------------------
-// Code block — lowlight, matches readonly-content's hljs CSS
-// ---------------------------------------------------------------------------
-
-const lowlight = createLowlight(common);
-
-function CodeBlock({ language, body }: { language: string | undefined; body: string }) {
-  const html = useMemo(() => {
-    const code = body.replace(/\n$/, "");
-    try {
-      const tree = language
-        ? lowlight.highlight(language, code)
-        : lowlight.highlightAuto(code);
-      return toHtml(tree) as string;
-    } catch {
-      // Fallthrough to a plain escaped <pre> when lowlight rejects the
-      // language tag. Avoids crashing the preview on an unknown extension.
-      return escapeHtml(code);
-    }
-  }, [body, language]);
-
-  return (
-    <pre className="rich-text-editor m-0 overflow-auto px-6 py-4 text-sm">
-      <code
-        className={cn("hljs", language && `language-${language}`)}
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
-    </pre>
-  );
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
 }
 
 // ---------------------------------------------------------------------------

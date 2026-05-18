@@ -27,6 +27,42 @@
       "hint": "This usually takes a few seconds. Your daemon is registering with the workspace."
     }
   },
+  "machine": {
+    "search_placeholder": "Search machines…",
+    "filters": {
+      "all": "All",
+      "online": "Online",
+      "issues": "Issues"
+    },
+    "section_local": "Local",
+    "section_remote": "Remote",
+    "section_cloud": "Cloud",
+    "this_machine": "This Mac",
+    "local_badge": "Local · this machine",
+    "runtime_count_one": "{{count}} runtime",
+    "runtime_count_other": "{{count}} runtimes",
+    "busy_count_one": "{{count}} busy",
+    "busy_count_other": "{{count}} busy",
+    "no_matches_title": "No machines",
+    "no_matches_hint": "No machines match the current search or filter.",
+    "select_machine": "Select a machine to inspect its runtimes.",
+    "metrics": {
+      "runtimes": "Runtimes",
+      "runtimes_hint_one": "{{count}} online",
+      "runtimes_hint_other": "{{count}} online",
+      "health": "Health",
+      "health_clear": "No issues",
+      "health_issues_one": "{{count}} issue",
+      "health_issues_other": "{{count}} issues",
+      "workload": "Workload",
+      "workload_value_idle": "Idle",
+      "workload_idle": "All idle",
+      "workload_hint": "{{running}} running · {{queued}} queued",
+      "cli": "CLI",
+      "cloud_worker": "Cloud worker",
+      "local_daemon": "Local daemon"
+    }
+  },
   "health": {
     "online": {
       "label": "Online",

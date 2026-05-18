@@ -139,7 +139,11 @@ export function StepWorkspace({
             toast.error(t(($) => $.step_workspace.slug_conflict_toast));
             return;
           }
-          toast.error(t(($) => $.step_workspace.create_failed_toast));
+          toast.error(
+            error instanceof Error && error.message
+              ? error.message
+              : t(($) => $.step_workspace.create_failed_toast),
+          );
         },
       },
     );

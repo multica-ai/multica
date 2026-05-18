@@ -1,110 +1,105 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { I18nProvider } from "@multica/core/i18n/react";
-import enCommon from "../../locales/en/common.json";
-import enEditor from "../../locales/en/editor.json";
-import { FileCardView } from "./file-card";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-const TEST_RESOURCES = { en: { common: enCommon, editor: enEditor } };
-const previewAttachmentMarkdown = vi.hoisted(() => vi.fn());
+// Tiptap NodeView primitives can't be instantiated without a full editor.
+// Stub the wrapper so FileCardView renders as a plain React component and
+// the DOM can be inspected directly.
+vi.mock("@tiptap/react", () => ({
+  NodeViewWrapper: ({ children, ...rest }: any) => <div {...rest}>{children}</div>,
+}));
+
+const { getAttachmentTextContentMock, resolveAttachmentMock, openByUrlMock, tryOpenMock } =
+  vi.hoisted(() => ({
+    getAttachmentTextContentMock: vi.fn(),
+    resolveAttachmentMock: vi.fn(),
+    openByUrlMock: vi.fn(),
+    tryOpenMock: vi.fn(),
+  }));
 
 vi.mock("@multica/core/api", () => ({
-  api: {
-    previewAttachmentMarkdown,
-  },
+  api: { getAttachmentTextContent: getAttachmentTextContentMock },
+  PreviewTooLargeError: class extends Error {},
+  PreviewUnsupportedError: class extends Error {},
 }));
 
-vi.mock("@multica/core/paths", () => ({
-  useWorkspaceSlug: () => "test",
+vi.mock("../attachment-download-context", () => ({
+  useAttachmentDownloadResolver: () => ({
+    openByUrl: openByUrlMock,
+    resolveAttachment: resolveAttachmentMock,
+  }),
 }));
 
-vi.mock("@tiptap/react", () => ({
-  NodeViewWrapper: ({ children, ...props }: { children: React.ReactNode }) => (
-    <div {...props}>{children}</div>
-  ),
-  ReactNodeViewRenderer: vi.fn(),
+vi.mock("../attachment-preview-modal", () => ({
+  useAttachmentPreview: () => ({ tryOpen: tryOpenMock, open: vi.fn(), modal: null }),
 }));
 
-vi.mock("../readonly-content", () => ({
-  ReadonlyContent: ({ content }: { content: string }) => (
-    <div data-testid="readonly-content">{content}</div>
-  ),
+vi.mock("../i18n", () => ({
+  useT: () => ({
+    t: (sel: (s: Record<string, Record<string, string>>) => string) =>
+      sel({
+        image: { download: "Download" },
+        attachment: {
+          preview: "Preview",
+          preview_loading: "Loading preview…",
+          preview_failed: "Couldn't load preview",
+        },
+        code_block: { copy_code: "Copy code" },
+        file_card: { uploading: "Uploading {{filename}}" },
+      }),
+  }),
 }));
 
-function renderFileCard(attrs: Record<string, unknown>) {
-  return render(
-    <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <FileCardView
-        node={{ attrs } as never}
-        // The NodeView component only reads node.attrs.
-        editor={{} as never}
-        getPos={() => 0}
-        decorations={[]}
-        selected={false}
-        extension={{} as never}
-        updateAttributes={vi.fn()}
-        deleteNode={vi.fn()}
-        view={{} as never}
-        innerDecorations={{} as never}
-        HTMLAttributes={{}}
-      />
-    </I18nProvider>,
-  );
+import { FileCardView } from "./file-card";
+
+function renderWithQuery(ui: ReactElement) {
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  });
+  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 
-describe("FileCardView", () => {
-  beforeEach(() => {
-    previewAttachmentMarkdown.mockReset();
-  });
+beforeEach(() => vi.clearAllMocks());
+afterEach(() => vi.restoreAllMocks());
 
-  it("previews markdown cards before the download action", async () => {
-    previewAttachmentMarkdown.mockResolvedValue("# Preview title\n\nGenerated markdown body");
-
-    renderFileCard({
-      href: "https://cdn.example.com/permission-config-design.md",
-      filename: "permission-config-design.md",
-      uploading: false,
+describe("FileCardView — HTML attachment routes through AttachmentBlock to iframe", () => {
+  // Regression pin for file-card.tsx:59. The NodeView must render through
+  // <AttachmentBlock>, not the older <AttachmentCard>. If someone reverts that
+  // line, the dispatcher's html+attachmentId branch is bypassed and the user
+  // is left with the file-card chrome — exactly the bug MUL-2330 surfaced.
+  it("renders an iframe (no file-card chrome) when the node resolves to an HTML attachment", async () => {
+    resolveAttachmentMock.mockReturnValue({
+      id: "att-1",
+      content_type: "text/html",
+      url: "/uploads/report.html",
+      filename: "report.html",
+    });
+    getAttachmentTextContentMock.mockResolvedValueOnce({
+      text: "<p>chart</p>",
+      originalContentType: "text/html",
     });
 
-    const previewButton = screen.getByRole("button", {
-      name: "Preview permission-config-design.md",
+    const node = {
+      attrs: {
+        href: "/uploads/report.html",
+        filename: "report.html",
+        uploading: false,
+      },
+    } as any;
+
+    renderWithQuery(<FileCardView node={node} {...({} as any)} />);
+
+    const frame = await waitFor(() => {
+      const f = document.querySelector("iframe") as HTMLIFrameElement | null;
+      expect(f).toBeTruthy();
+      return f!;
     });
-    const downloadButton = screen.getByRole("button", {
-      name: "Download permission-config-design.md",
-    });
-    expect(previewButton.compareDocumentPosition(downloadButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-
-    fireEvent.click(previewButton);
-
-    await waitFor(() =>
-      expect(previewAttachmentMarkdown).toHaveBeenCalledWith("https://cdn.example.com/permission-config-design.md"),
-    );
-    expect(await screen.findByRole("dialog")).toHaveTextContent("Generated markdown body");
-    expect(screen.getByTestId("markdown-preview-shell")).toBeInTheDocument();
-    expect(screen.getByTestId("markdown-preview-drag-handle")).toHaveTextContent(
-      "permission-config-design.md",
-    );
-    expect(
-      screen.getByRole("button", { name: "Enter full screen" }),
-    ).toBeInTheDocument();
-    expect(screen.getByTestId("markdown-preview-scroll")).toHaveClass("overflow-y-auto");
-  });
-
-  it("fetches markdown content once for a mouse click", async () => {
-    previewAttachmentMarkdown.mockResolvedValue("# Preview title");
-
-    renderFileCard({
-      href: "https://cdn.example.com/permission-config-design.md",
-      filename: "permission-config-design.md",
-      uploading: false,
-    });
-
-    const previewButton = screen.getByRole("button", {
-      name: "Preview permission-config-design.md",
-    });
-    fireEvent.mouseDown(previewButton);
-    fireEvent.click(previewButton);
-
-    await waitFor(() => expect(previewAttachmentMarkdown).toHaveBeenCalledTimes(1));
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(frame.getAttribute("srcdoc")).toContain("<p>chart</p>");
+    // The AttachmentCard chrome surfaces the filename as text inside its row.
+    // HtmlAttachmentPreview replaces the chrome entirely, so the filename
+    // must not appear as visible text.
+    expect(screen.queryByText("report.html")).toBeNull();
   });
 });

@@ -45,6 +45,10 @@ Once it's up:
 - **Frontend**: [http://localhost:3000](http://localhost:3000)
 - **Backend**: [http://localhost:8080](http://localhost:8080)
 
+<Callout type="info">
+**Ports listen on `127.0.0.1` only.** `docker-compose.selfhost.yml` binds every published port to loopback — `ss -tlnp` will not show `0.0.0.0:8080`, and the services are unreachable from other machines by design. The default `JWT_SECRET` and Postgres credentials must never sit on the open internet. For cross-machine access, front the stack with a reverse proxy that terminates TLS — see [Step 5b — Cross-machine: front with a reverse proxy](#5b-cross-machine-front-with-a-reverse-proxy).
+</Callout>
+
 ## 2. Important: keep production safety on
 
 <Callout type="warning">
@@ -99,21 +103,53 @@ Open [http://localhost:3000](http://localhost:3000):
 
 ## 5. Point the CLI at your own server
 
-The CLI install is the same as in [Cloud quickstart → 2. Install the CLI](/cloud-quickstart#2-install-the-multica-cli) — Homebrew / script / PowerShell, pick one. Once installed, **use the self-host variant of the setup command**:
+The CLI install is the same as in [Cloud quickstart → 2. Install the CLI](/cloud-quickstart#2-install-the-multica-cli) — Homebrew / script / PowerShell, pick one.
 
-```bash
-multica setup self-host --server-url http://<your-server-address>:8080 --app-url http://<your-server-address>:3000
-```
+### 5a. Same machine
 
-If you're running everything on one local machine:
+If the CLI and the server run on the same host, the defaults already work:
 
 ```bash
 multica setup self-host
 ```
 
-That defaults to `http://localhost:8080` (backend) and `http://localhost:3000` (frontend).
+That points the CLI at `http://localhost:8080` (backend) and `http://localhost:3000` (frontend), takes you through browser login, stores the PAT locally, and **starts the daemon automatically**.
 
-`setup self-host` takes you through browser login, stores the PAT locally, and **starts the daemon automatically**.
+### 5b. Cross-machine: front with a reverse proxy
+
+Because the compose stack only listens on `127.0.0.1`, a daemon on a different machine cannot reach `http://<server-ip>:8080` directly — and you do not want it to, since the default `JWT_SECRET` would otherwise be reachable from the open internet. Put a reverse proxy on the server that terminates TLS and forwards to `127.0.0.1:8080` (backend) and `127.0.0.1:3000` (frontend), then point the CLI at the public HTTPS URL:
+
+```bash
+multica setup self-host \
+  --server-url https://<your-domain> \
+  --app-url https://<your-domain>
+```
+
+A minimal Caddyfile that fronts both the frontend and the backend (with WebSocket support, which the daemon and the web app both need) on a single hostname:
+
+```nginx
+multica.example.com {
+    # WebSocket route — must come before the catch-all
+    @ws path /ws /ws/*
+    handle @ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # Backend API
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # Everything else → frontend
+    reverse_proxy 127.0.0.1:3000
+}
+```
+
+After bringing the proxy up, set `FRONTEND_ORIGIN=https://multica.example.com` in the server's `.env` and restart the backend — otherwise the WebSocket origin check will reject the browser ([Troubleshooting → WebSocket can't connect](/troubleshooting#websocket-cant-connect)).
+
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) is another solid option — it gives you TLS and a public hostname without exposing any port on the host at all. An Nginx equivalent (separate `app.` / `api.` hostnames, `proxy_set_header Upgrade` for WebSockets) works just as well; the key requirements are TLS termination and forwarding the `Upgrade` header on `/ws`.
 
 ## 6. Create an agent + assign your first task
 

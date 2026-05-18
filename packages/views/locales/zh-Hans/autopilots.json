@@ -92,7 +92,14 @@
     "running": "运行中",
     "skipped": "已跳过",
     "completed": "已完成",
-    "failed": "失败"
+    "failed": "失败",
+    "skipped": "已跳过"
+  },
+  "run_source": {
+    "schedule": "时间表",
+    "manual": "手动",
+    "webhook": "Webhook",
+    "api": "API"
   },
   "run": {
     "issue_linked": "已关联 issue",
@@ -102,9 +109,38 @@
       "summary": "{{count}} 条跳过的运行"
     }
   },
+  "webhook_payload": {
+    "label": "Webhook 事件：",
+    "unknown_event": "webhook.received",
+    "payload": "Payload",
+    "content_type": "Content-Type：{{type}}",
+    "copy": "复制",
+    "copied": "已复制 Webhook payload",
+    "copied_short": "已复制",
+    "copy_failed": "复制失败",
+    "truncated_marker": "[已截断 — 点击「复制」获取完整 payload]"
+  },
+  "trigger_kind": {
+    "schedule": "时间表",
+    "webhook": "Webhook",
+    "api": "API"
+  },
   "trigger_row": {
     "disabled_badge": "已禁用",
+    "deprecated_badge": "已弃用",
     "next_label": "下次：{{date}}",
+    "webhook_url_label": "Webhook URL",
+    "copy_url": "复制 URL",
+    "url_copied": "已复制 Webhook URL",
+    "url_copy_failed": "复制失败",
+    "rotate_url": "重新生成 URL",
+    "rotate_confirm_title": "重新生成 Webhook URL",
+    "rotate_confirm_description": "当前 URL 将立即失效。所有调用它的外部系统都需要更新为新 URL。继续吗？",
+    "rotate_confirm_cancel": "取消",
+    "rotate_confirm_action": "重新生成",
+    "rotate_in_progress": "生成中...",
+    "toast_rotated": "Webhook URL 已重新生成",
+    "toast_rotate_failed": "重新生成 URL 失败",
     "toast_deleted": "已删除触发器",
     "toast_delete_failed": "删除触发器失败",
     "delete_dialog": {
@@ -115,13 +151,63 @@
       "deleting": "删除中..."
     }
   },
+  "deliveries": {
+    "section_title": "Webhook 投递",
+    "empty": "暂无 Webhook 投递记录。向 Webhook URL 发送一次 POST 后会显示在这里。",
+    "row": {
+      "attempts": "{{count}} 次尝试",
+      "replay_badge": "重放"
+    },
+    "status": {
+      "queued": "排队中",
+      "dispatched": "已分发",
+      "rejected": "已拒绝",
+      "ignored": "已忽略",
+      "failed": "失败"
+    },
+    "signature": {
+      "not_required": "无需签名",
+      "valid": "签名通过",
+      "invalid": "签名无效",
+      "missing": "缺少签名"
+    },
+    "detail": {
+      "title": "投递详情",
+      "received_at": "接收时间",
+      "last_attempt_at": "最近一次尝试",
+      "attempt_count": "尝试次数",
+      "response_status": "响应状态码",
+      "dedupe_key": "去重 Key",
+      "dedupe_source": "去重来源",
+      "content_type": "Content-Type",
+      "replayed_from": "重放自",
+      "error_label": "错误信息",
+      "raw_body": "原始 Body",
+      "selected_headers": "保留的请求头",
+      "response_body": "响应 Body"
+    },
+    "replay": {
+      "action": "重放",
+      "in_progress": "重放中...",
+      "toast_success": "已重放该投递",
+      "toast_failed": "重放失败",
+      "disabled_invalid_signature": "无法重放 — 签名校验失败",
+      "disabled_rejected": "无法重放已拒绝的投递",
+      "disabled_queued": "投递仍在排队，处理完成后再重放"
+    }
+  },
   "add_trigger_dialog": {
     "title": "添加触发器",
+    "type_label": "类型",
+    "type_schedule": "时间表",
+    "type_webhook": "Webhook",
     "label_field": "标签（可选）",
     "label_placeholder": "例如：工作日早晨",
+    "webhook_help": "保存后 Multica 会生成一个 Webhook URL。向它 POST 任意 JSON 即可触发本自动化。",
     "submit": "添加触发器",
     "submitting": "添加中...",
-    "toast_added": "已添加触发器",
+    "toast_added_schedule": "已添加时间表触发器",
+    "toast_added_webhook": "已添加 Webhook 触发器",
     "toast_add_failed": "添加触发器失败"
   },
   "dialog": {
@@ -145,14 +231,26 @@
     "saving": "保存中...",
     "toast_created": "已创建自动化",
     "toast_create_partial": "自动化已创建，但时间表保存失败",
+    "toast_create_partial_with_reason": "自动化已创建，但时间表保存失败：{{reason}}",
     "toast_create_failed": "创建自动化失败",
     "toast_updated": "已更新自动化",
     "toast_update_partial": "自动化已更新，但时间表保存失败",
+    "toast_update_partial_with_reason": "自动化已更新，但时间表保存失败：{{reason}}",
     "toast_update_failed": "更新自动化失败",
     "section_agent": "智能体",
     "select_agent": "选择智能体",
     "section_output_mode": "输出模式",
     "section_schedule": "时间表",
+    "section_trigger_kind": "触发方式",
+    "trigger_kind_schedule": "时间表",
+    "trigger_kind_webhook": "Webhook",
+    "section_webhook": "Webhook",
+    "webhook_help_create": "Autopilot 创建后 Multica 会生成一个 Webhook URL。向它 POST 任意 JSON 即可触发。",
+    "webhook_help_edit": "该 Autopilot 由 Webhook 触发。请在详情页复制或重新生成 URL。",
+    "webhook_created_title": "Webhook Autopilot 已就绪",
+    "webhook_created_description": "向下方的 URL POST 任意 JSON 即可触发该 Autopilot。请立即复制——之后也能在 Autopilot 详情页查看或重新生成。",
+    "webhook_created_warning": "请把该 URL 当作密码对待，任何拿到它的人都能触发该 Autopilot。",
+    "webhook_created_done": "完成",
     "schedule_disabled_reason": "该自动化有多个时间表——请到详情页编辑。",
     "next_run_label": "下次运行：",
     "output_modes": {

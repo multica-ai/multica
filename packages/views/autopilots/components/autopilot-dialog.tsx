@@ -8,11 +8,13 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Copy,
   FilePlus2,
   Maximize2,
   Minimize2,
   Play,
   Rocket,
+  Webhook,
   X as XIcon,
   Zap,
 } from "lucide-react";
@@ -42,6 +44,8 @@ import {
   useUpdateAutopilot,
   useUpdateAutopilotTrigger,
 } from "@multica/core/autopilots/mutations";
+import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
+import { api } from "@multica/core/api";
 import type {
   AutopilotExecutionMode,
   AutopilotTrigger,
@@ -58,6 +62,7 @@ import {
   type TriggerFrequency,
 } from "./trigger-config";
 import { useT } from "../../i18n";
+import { formatSchedulePartialFailureToast } from "./autopilot-dialog-toast";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -264,6 +269,20 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   })();
   const [triggerConfig, setTriggerConfig] = useState<TriggerConfig>(initialCfg);
 
+  // Trigger kind selector. Only meaningful in create mode — edit mode does
+  // not support converting between kinds inline (PLAN.md calls that
+  // out as "delete old, create new" rather than ambiguous in-place
+  // updates), so the toggle is hidden when editing. The kind is
+  // initialized from the first existing trigger so we render the right
+  // panel without surprising the user.
+  const initialKind: "schedule" | "webhook" = (() => {
+    if (isCreate) return "schedule";
+    const first = props.triggers[0];
+    if (first?.kind === "webhook") return "webhook";
+    return "schedule";
+  })();
+  const [triggerKind, setTriggerKind] = useState<"schedule" | "webhook">(initialKind);
+
   const initialCronRef = useRef(toCronExpression(initialCfg));
   const initialTimezoneRef = useRef(initialCfg.timezone);
   const scheduleDirty =
@@ -288,6 +307,12 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const updateTrigger = useUpdateAutopilotTrigger();
   const [submitting, setSubmitting] = useState(false);
 
+  // After a successful webhook-kind create, we don't close the dialog —
+  // we swap to a confirmation state showing the freshly minted URL with
+  // copy / done affordances. This avoids the "now go find your autopilot
+  // and click into it to grab the URL" friction.
+  const [createdWebhookTrigger, setCreatedWebhookTrigger] = useState<AutopilotTrigger | null>(null);
+
   const canSubmit =
     title.trim().length > 0 && assigneeId.length > 0 && !submitting;
 
@@ -302,20 +327,44 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           assignee_id: assigneeId,
           execution_mode: executionMode,
         });
-        let scheduleOk = true;
+        let triggerOk = true;
+        let triggerErrMessage: string | null = null;
+        let webhookTrigger: AutopilotTrigger | null = null;
         try {
-          await createTrigger.mutateAsync({
-            autopilotId: autopilot.id,
-            kind: "schedule",
-            cron_expression: toCronExpression(triggerConfig),
-            timezone: triggerConfig.timezone,
-          });
-        } catch {
-          scheduleOk = false;
+          if (triggerKind === "webhook") {
+            webhookTrigger = await createTrigger.mutateAsync({
+              autopilotId: autopilot.id,
+              kind: "webhook",
+            });
+          } else {
+            await createTrigger.mutateAsync({
+              autopilotId: autopilot.id,
+              kind: "schedule",
+              cron_expression: toCronExpression(triggerConfig),
+              timezone: triggerConfig.timezone,
+            });
+          }
+        } catch (err) {
+          triggerOk = false;
+          triggerErrMessage =
+            err instanceof Error && err.message ? err.message : null;
+        }
+        if (triggerKind === "webhook" && webhookTrigger) {
+          // Stay in the dialog and surface the URL inline so the user
+          // can copy it without first navigating to the detail page.
+          setCreatedWebhookTrigger(webhookTrigger);
+          toast.success(t(($) => $.dialog.toast_created));
+          return;
         }
         onOpenChange(false);
-        if (scheduleOk) toast.success(t(($) => $.dialog.toast_created));
-        else toast.error(t(($) => $.dialog.toast_create_partial));
+        if (triggerOk) {
+          toast.success(t(($) => $.dialog.toast_created));
+        } else {
+          // Partial success: autopilot saved, schedule failed. Show the
+          // server-provided reason so the user can act on it (cron syntax
+          // error, conflict, etc.) instead of seeing a generic message.
+          toast.error(formatSchedulePartialFailureToast(t, "create", triggerErrMessage));
+        }
       } else {
         await updateAutopilot.mutateAsync({
           id: props.autopilotId,
@@ -325,7 +374,11 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           execution_mode: executionMode,
         });
         let scheduleOk = true;
-        if (scheduleDirty && !schedulePillDisabled) {
+        let scheduleErrMessage: string | null = null;
+        // Skip the schedule sync when the autopilot's first trigger is a
+        // webhook — there's no cron to update there, and the schedule
+        // panel isn't even rendered for webhook autopilots.
+        if (triggerKind === "schedule" && scheduleDirty && !schedulePillDisabled) {
           const snapshottedTriggerId = firstTriggerIdRef.current;
           try {
             if (snapshottedTriggerId) {
@@ -343,19 +396,26 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                 timezone: triggerConfig.timezone,
               });
             }
-          } catch {
+          } catch (err) {
             scheduleOk = false;
+            scheduleErrMessage =
+              err instanceof Error && err.message ? err.message : null;
           }
         }
         onOpenChange(false);
-        if (scheduleOk) toast.success(t(($) => $.dialog.toast_updated));
-        else toast.error(t(($) => $.dialog.toast_update_partial));
+        if (scheduleOk) {
+          toast.success(t(($) => $.dialog.toast_updated));
+        } else {
+          toast.error(formatSchedulePartialFailureToast(t, "update", scheduleErrMessage));
+        }
       }
-    } catch {
+    } catch (err) {
       toast.error(
-        isCreate
-          ? t(($) => $.dialog.toast_create_failed)
-          : t(($) => $.dialog.toast_update_failed),
+        err instanceof Error && err.message
+          ? err.message
+          : isCreate
+            ? t(($) => $.dialog.toast_create_failed)
+            : t(($) => $.dialog.toast_update_failed),
       );
     } finally {
       setSubmitting(false);
@@ -435,6 +495,16 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           </div>
         </div>
 
+        {createdWebhookTrigger ? (
+          <WebhookCreatedPanel
+            trigger={createdWebhookTrigger}
+            onClose={() => {
+              setCreatedWebhookTrigger(null);
+              onOpenChange(false);
+            }}
+          />
+        ) : (
+          <>
         {/* Body: two columns (stacks on narrow screens via flex-wrap at container level) */}
         <div
           key={contentKey}
@@ -486,16 +556,24 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
             <OutputModeSection mode={executionMode} onChange={setExecutionMode} />
 
-            <ScheduleSection
-              config={triggerConfig}
-              onChange={setTriggerConfig}
-              disabled={schedulePillDisabled}
-              disabledReason={
-                schedulePillDisabled
-                  ? t(($) => $.dialog.schedule_disabled_reason)
-                  : undefined
-              }
-            />
+            {isCreate && (
+              <TriggerKindSection kind={triggerKind} onChange={setTriggerKind} />
+            )}
+
+            {triggerKind === "schedule" ? (
+              <ScheduleSection
+                config={triggerConfig}
+                onChange={setTriggerConfig}
+                disabled={schedulePillDisabled}
+                disabledReason={
+                  schedulePillDisabled
+                    ? t(($) => $.dialog.schedule_disabled_reason)
+                    : undefined
+                }
+              />
+            ) : (
+              <WebhookHelpSection isCreate={isCreate} />
+            )}
           </aside>
         </div>
 
@@ -520,6 +598,8 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             </Button>
           </div>
         </div>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -778,5 +858,171 @@ function ScheduleSection({
         </p>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Trigger kind segmented control + webhook help section
+// ---------------------------------------------------------------------------
+
+function TriggerKindSection({
+  kind,
+  onChange,
+}: {
+  kind: "schedule" | "webhook";
+  onChange: (kind: "schedule" | "webhook") => void;
+}) {
+  const { t } = useT("autopilots");
+  return (
+    <div>
+      <SectionLabel>{t(($) => $.dialog.section_trigger_kind)}</SectionLabel>
+      <div className="grid grid-cols-2 gap-1 rounded-md bg-muted p-1">
+        <TriggerKindButton
+          active={kind === "schedule"}
+          onClick={() => onChange("schedule")}
+          icon={<Clock className="h-3.5 w-3.5" />}
+          label={t(($) => $.dialog.trigger_kind_schedule)}
+        />
+        <TriggerKindButton
+          active={kind === "webhook"}
+          onClick={() => onChange("webhook")}
+          icon={<Webhook className="h-3.5 w-3.5" />}
+          label={t(($) => $.dialog.trigger_kind_webhook)}
+        />
+      </div>
+    </div>
+  );
+}
+
+function TriggerKindButton({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex items-center justify-center gap-1.5 rounded px-3 py-1.5 text-sm transition-colors",
+        active
+          ? "bg-background text-foreground shadow-sm"
+          : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function WebhookHelpSection({ isCreate }: { isCreate: boolean }) {
+  const { t } = useT("autopilots");
+  return (
+    <div>
+      <SectionLabel>{t(($) => $.dialog.section_webhook)}</SectionLabel>
+      <p className="rounded-md border bg-background px-3 py-2 text-xs text-muted-foreground leading-relaxed">
+        {isCreate
+          ? t(($) => $.dialog.webhook_help_create)
+          : t(($) => $.dialog.webhook_help_edit)}
+      </p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Post-create state for webhook autopilots: shows the freshly minted URL
+// inline so the user can copy it without leaving the dialog.
+// ---------------------------------------------------------------------------
+
+function WebhookCreatedPanel({
+  trigger,
+  onClose,
+}: {
+  trigger: AutopilotTrigger;
+  onClose: () => void;
+}) {
+  const { t } = useT("autopilots");
+  const [copied, setCopied] = useState(false);
+
+  // Same URL composition the trigger row uses: prefer the server-provided
+  // webhook_url, fall back to apiBaseUrl + webhook_path, then origin + path.
+  const url =
+    buildAutopilotWebhookUrl({
+      trigger,
+      apiBaseUrl: api.getBaseUrl(),
+      currentOrigin: typeof window !== "undefined" ? window.location.origin : undefined,
+    }) ?? "";
+
+  const handleCopy = async () => {
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      toast.success(t(($) => $.trigger_row.url_copied));
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error(t(($) => $.trigger_row.url_copy_failed));
+    }
+  };
+
+  return (
+    <>
+      <div className="flex-1 min-h-0 overflow-y-auto px-8 py-10">
+        <div className="mx-auto max-w-xl space-y-5">
+          <div className="flex items-center gap-3">
+            <span className="inline-flex size-9 items-center justify-center rounded-full bg-primary/15 text-primary">
+              <Webhook className="size-4" />
+            </span>
+            <h2 className="text-lg font-semibold tracking-tight">
+              {t(($) => $.dialog.webhook_created_title)}
+            </h2>
+          </div>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            {t(($) => $.dialog.webhook_created_description)}
+          </p>
+
+          <div>
+            <div className="text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase mb-2">
+              {t(($) => $.trigger_row.webhook_url_label)}
+            </div>
+            <div className="flex items-stretch gap-1.5">
+              <code className="flex-1 min-w-0 truncate rounded-md border bg-muted px-3 py-2 text-xs font-mono text-foreground">
+                {url}
+              </code>
+              <Button
+                size="icon"
+                variant="outline"
+                className="h-9 w-9 shrink-0"
+                onClick={handleCopy}
+                title={t(($) => $.trigger_row.copy_url)}
+              >
+                {copied ? (
+                  <Check className="size-4 text-emerald-500" />
+                ) : (
+                  <Copy className="size-4 text-muted-foreground" />
+                )}
+              </Button>
+            </div>
+          </div>
+
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400 leading-relaxed">
+            {t(($) => $.dialog.webhook_created_warning)}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-end gap-3 px-5 py-3 border-t shrink-0 bg-background">
+        <Button size="sm" onClick={onClose}>
+          {t(($) => $.dialog.webhook_created_done)}
+        </Button>
+      </div>
+    </>
   );
 }

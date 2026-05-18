@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useRef, useState } from "react";
-import { CheckCircle2, ChevronRight, Copy, Download, Eye, FileText, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, Copy, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -30,8 +30,7 @@ import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-pick
 import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { timeAgo } from "@multica/core/utils";
-import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, useDownloadAttachment, useAttachmentPreview, isPreviewable } from "../../editor";
-import { MarkdownFilePreviewButton } from "../../editor/markdown-file-preview";
+import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, useDownloadAttachment, useAttachmentPreview, AttachmentBlock } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -122,73 +121,9 @@ function DeleteCommentDialog({
 // Standalone attachment list — renders attachments not already in the markdown
 // ---------------------------------------------------------------------------
 
-function isMarkdownAttachment(attachment: Attachment): boolean {
-  const contentType = attachment.content_type.toLowerCase();
-  const filename = attachment.filename.toLowerCase();
-
-  return (
-    contentType === "text/markdown" ||
-    contentType === "text/x-markdown" ||
-    filename.endsWith(".md") ||
-    filename.endsWith(".markdown")
-  );
-}
-
-function AttachmentRow({
-  attachment,
-  onDownload,
-}: {
-  attachment: Attachment;
-  onDownload: (attachmentId: string) => void;
-}) {
-  const { t } = useT("editor");
-  const preview = useAttachmentPreview();
-  const canMarkdownPreview =
-    Boolean(attachment.download_url) && isMarkdownAttachment(attachment);
-  const canGenericPreview = isPreviewable(attachment.content_type, attachment.filename);
-
-  return (
-    <div className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">
-      <FileText className="size-4 shrink-0 text-muted-foreground" />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm">{attachment.filename}</p>
-      </div>
-      {canMarkdownPreview && (
-        <MarkdownFilePreviewButton
-          href={attachment.download_url}
-          filename={attachment.filename}
-          renderContent={(content) => <ReadonlyContent content={content} />}
-        />
-      )}
-      {!canMarkdownPreview && canGenericPreview && (
-        <button
-          type="button"
-          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-          title={t(($) => $.attachment.preview)}
-          aria-label={t(($) => $.attachment.preview)}
-          onClick={() => preview.tryOpen({ kind: "full", attachment })}
-        >
-          <Eye className="size-3.5" />
-        </button>
-      )}
-      {attachment.download_url && (
-        <button
-          type="button"
-          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-          title={t(($) => $.image.download)}
-          aria-label={t(($) => $.image.download)}
-          onClick={() => onDownload(attachment.id)}
-        >
-          <Download className="size-3.5" />
-        </button>
-      )}
-      {preview.modal}
-    </div>
-  );
-}
-
-function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
+export function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
   const download = useDownloadAttachment();
+  const preview = useAttachmentPreview();
   if (!attachments?.length) return null;
   // Skip attachments whose URL is already referenced in the markdown content,
   // and duplicates of the same file (same name/type/size) that are referenced.
@@ -214,8 +149,17 @@ function AttachmentList({ attachments, content, className }: { attachments?: Att
   return (
     <div className={cn("flex flex-col gap-1", className)}>
       {standalone.map((a) => (
-        <AttachmentRow key={a.id} attachment={a} onDownload={download} />
+        <AttachmentBlock
+          key={a.id}
+          filename={a.filename}
+          contentType={a.content_type}
+          attachmentId={a.id}
+          href={a.url}
+          onPreview={() => preview.tryOpen({ kind: "full", attachment: a })}
+          onDownload={() => download(a.id)}
+        />
       ))}
+      {preview.modal}
     </div>
   );
 }
@@ -320,8 +264,12 @@ function CommentRow({
       setEditing(false);
       setPendingAttachments([]);
       clearEditDraft(editDraftKey);
-    } catch {
-      toast.error(t(($) => $.comment.update_failed));
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.comment.update_failed),
+      );
     }
   };
 
@@ -550,8 +498,12 @@ function CommentCardImpl({
       setEditing(false);
       setParentPendingAttachments([]);
       clearParentEditDraft(parentEditDraftKey);
-    } catch {
-      toast.error(t(($) => $.comment.update_failed));
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.comment.update_failed),
+      );
     }
   };
 
