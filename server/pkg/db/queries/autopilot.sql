@@ -20,11 +20,11 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_id,
     status, execution_mode, issue_title_template,
-    created_by_type, created_by_id
+    created_by_type, created_by_id, is_private
 ) VALUES (
     $1, $2, sqlc.narg('description'), $3,
     $4, $5, sqlc.narg('issue_title_template'),
-    $6, $7
+    $6, $7, COALESCE(sqlc.narg('is_private')::boolean, FALSE)
 ) RETURNING *;
 
 -- name: UpdateAutopilot :one
@@ -35,6 +35,7 @@ UPDATE autopilot SET
     status = COALESCE(sqlc.narg('status'), status),
     execution_mode = COALESCE(sqlc.narg('execution_mode'), execution_mode),
     issue_title_template = sqlc.narg('issue_title_template'),
+    is_private = COALESCE(sqlc.narg('is_private')::boolean, is_private),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -270,6 +271,7 @@ RETURNING *;
 
 -- =====================
 -- CEREBRO-PATCH(sqlc-autopilot-scope): scoped autopilots (JEH-724).
+-- CEREBRO-PATCH(sqlc-private-autopilot): private autopilots are visible only to their owning member (JEH-1749).
 -- workspace = visible to all; personal = owner only; group = members + admin.
 -- Group membership is resolved by the caller (cerebro_group_member, JEH-721)
 -- and passed in via user_group_ids so this query stays decoupled from that
@@ -281,11 +283,14 @@ SELECT * FROM autopilot
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
   AND (
-        scope = 'workspace'
-     OR (scope = 'personal' AND owner_user_id = sqlc.arg('user_id')::uuid)
-     OR (scope = 'group'    AND (
-            group_id = ANY(sqlc.arg('user_group_ids')::uuid[])
-         OR sqlc.arg('is_admin')::boolean
+        (is_private = TRUE AND created_by_type = 'member' AND created_by_id = sqlc.arg('user_id')::uuid)
+     OR (is_private = FALSE AND (
+            scope = 'workspace'
+         OR (scope = 'personal' AND owner_user_id = sqlc.arg('user_id')::uuid)
+         OR (scope = 'group'    AND (
+                group_id = ANY(sqlc.arg('user_group_ids')::uuid[])
+             OR sqlc.arg('is_admin')::boolean
+            ))
         ))
   )
 ORDER BY created_at DESC;

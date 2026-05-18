@@ -304,6 +304,8 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// agent comments inherit it from X-Task-ID or default-deny the enqueue.
 	commentDelegation, delegationErr := h.TaskService.CommentDelegationContext(r.Context(), authorType, authorID, r.Header.Get("X-Task-ID"), "comment")
 	mentionDelegation, mentionDelegationErr := h.TaskService.CommentDelegationContext(r.Context(), authorType, authorID, r.Header.Get("X-Task-ID"), "mention")
+	// CEREBRO-PATCH(private-autopilot-mention-suppression): comments emitted from private autopilot tasks must not wake non-owner targets (JEH-1749).
+	privateAutopilotComment := h.commentFromPrivateAutopilotTask(r.Context(), issue, r.Header.Get("X-Task-ID"), authorType)
 
 	// If the issue is assigned to an agent with on_comment trigger, enqueue a new task.
 	// Skip when the comment comes from the assigned agent itself to avoid loops.
@@ -330,13 +332,15 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// Skip when the comment author is the leader (prevent internal loops), or
 	// when a member explicitly @mentions anyone (agent/member/squad/all) — that
 	// counts as deliberate routing and the leader stays out.
-	if h.shouldEnqueueSquadLeaderOnComment(r.Context(), issue, comment.Content, authorType, authorID) {
+	if !privateAutopilotComment && h.shouldEnqueueSquadLeaderOnComment(r.Context(), issue, comment.Content, authorType, authorID) {
 		h.enqueueSquadLeaderTask(r.Context(), issue, comment.ID, authorType, authorID, commentTaskDelegation{context: commentDelegation, err: delegationErr})
 	}
 
 	// Trigger @mentioned agents: parse agent mentions and enqueue tasks for each.
 	// Pass parentComment so that replies inherit mentions from the thread root.
-	h.enqueueMentionedAgentTasks(r.Context(), issue, comment, parentComment, authorType, authorID, mentionDelegation, mentionDelegationErr)
+	if !privateAutopilotComment {
+		h.enqueueMentionedAgentTasks(r.Context(), issue, comment, parentComment, authorType, authorID, mentionDelegation, mentionDelegationErr)
+	}
 
 	// CEREBRO-PATCH(channel-listen-mode): trigger non-mentioned, non-assignee
 	// agents subscribed to the channel whose listen_mode is 'always'.
@@ -350,11 +354,41 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// and broadcast channel:updated so the inbox swaps the DM row for the
 	// new channel. Runs after the mention-enqueue so the mentioned agent's
 	// task is already queued against the (about-to-be) channel.
-	if h.ChannelListen != nil {
+	if !privateAutopilotComment && h.ChannelListen != nil {
 		h.ChannelListen.PromoteDMOnMention(r.Context(), issue, comment, parentComment, uuidToString(issue.WorkspaceID), authorType, authorID)
 	}
 
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+func (h *Handler) commentFromPrivateAutopilotTask(ctx context.Context, issue db.Issue, taskIDHeader, authorType string) bool {
+	if authorType != "agent" {
+		return false
+	}
+	if issue.OriginType.Valid && issue.OriginType.String == "autopilot" && issue.OriginID.Valid {
+		autopilot, err := h.Queries.GetAutopilot(ctx, issue.OriginID)
+		return err == nil && autopilot.IsPrivate
+	}
+	if taskIDHeader == "" {
+		return false
+	}
+	taskUUID, err := util.ParseUUID(taskIDHeader)
+	if err != nil {
+		return false
+	}
+	task, err := h.Queries.GetAgentTask(ctx, taskUUID)
+	if err != nil || !task.AutopilotRunID.Valid {
+		return false
+	}
+	run, err := h.Queries.GetAutopilotRun(ctx, task.AutopilotRunID)
+	if err != nil {
+		return false
+	}
+	autopilot, err := h.Queries.GetAutopilot(ctx, run.AutopilotID)
+	if err != nil {
+		return false
+	}
+	return autopilot.IsPrivate
 }
 
 // commentMentionsOthersButNotAssignee returns true if the comment @mentions

@@ -22,6 +22,8 @@ export interface Autopilot {
   last_run_at: string | null;
   created_at: string;
   updated_at: string;
+  // CEREBRO-PATCH(private-autopilot-types): owner-only autopilot visibility flag (JEH-1749).
+  is_private: boolean;
 }
 
 export interface AutopilotTrigger {
@@ -61,6 +63,8 @@ export interface CreateAutopilotRequest {
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
   issue_title_template?: string;
+  // CEREBRO-PATCH(private-autopilot-request-types): allow UI/CLI clients to set privacy (JEH-1749).
+  is_private?: boolean;
 }
 
 export interface UpdateAutopilotRequest {
@@ -70,6 +74,8 @@ export interface UpdateAutopilotRequest {
   status?: AutopilotStatus;
   execution_mode?: AutopilotExecutionMode;
   issue_title_template?: string | null;
+  // CEREBRO-PATCH(private-autopilot-request-types): allow UI/CLI clients to update privacy (JEH-1749).
+  is_private?: boolean;
 }
 
 export interface CreateAutopilotTriggerRequest {

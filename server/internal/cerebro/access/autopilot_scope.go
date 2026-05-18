@@ -77,21 +77,27 @@ func ValidateScope(scope string, ownerUserID, groupID pgtype.UUID) error {
 // It mirrors the columns added by 9015_cerebro_autopilot_scope so the caller
 // can populate it directly from a db.Autopilot row.
 type AutopilotView struct {
-	ID          pgtype.UUID
-	WorkspaceID pgtype.UUID
-	Scope       string
-	OwnerUserID pgtype.UUID // valid when scope == personal
-	GroupID     pgtype.UUID // valid when scope == group
+	ID            pgtype.UUID
+	WorkspaceID   pgtype.UUID
+	IsPrivate     bool
+	CreatedByType string
+	CreatedByID   pgtype.UUID
+	Scope         string
+	OwnerUserID   pgtype.UUID // valid when scope == personal
+	GroupID       pgtype.UUID // valid when scope == group
 }
 
 // ViewOf is a convenience converter from a sqlc-generated row.
 func ViewOf(a db.Autopilot) AutopilotView {
 	return AutopilotView{
-		ID:          a.ID,
-		WorkspaceID: a.WorkspaceID,
-		Scope:       a.Scope,
-		OwnerUserID: a.OwnerUserID,
-		GroupID:     a.GroupID,
+		ID:            a.ID,
+		WorkspaceID:   a.WorkspaceID,
+		IsPrivate:     a.IsPrivate,
+		CreatedByType: a.CreatedByType,
+		CreatedByID:   a.CreatedByID,
+		Scope:         a.Scope,
+		OwnerUserID:   a.OwnerUserID,
+		GroupID:       a.GroupID,
 	}
 }
 
@@ -110,6 +116,9 @@ type Viewer struct {
 //	personal  → owner only (admins do NOT see personal autopilots — see plan note)
 //	group     → group members + workspace admins
 func CanSee(view AutopilotView, viewer Viewer) bool {
+	if view.IsPrivate {
+		return view.CreatedByType == "member" && uuidEqual(view.CreatedByID, viewer.UserID)
+	}
 	switch view.Scope {
 	case ScopeWorkspace, "": // empty == legacy rows where the column hasn't been backfilled
 		return true
@@ -139,6 +148,9 @@ func CanSee(view AutopilotView, viewer Viewer) bool {
 //	group     → group members (until group roles land — JEH-721 follow-up —
 //	            members can edit) + workspace admins.
 func CanEdit(view AutopilotView, viewer Viewer) bool {
+	if view.IsPrivate {
+		return view.CreatedByType == "member" && uuidEqual(view.CreatedByID, viewer.UserID)
+	}
 	switch view.Scope {
 	case ScopeWorkspace, "":
 		return viewer.IsAdmin
@@ -165,6 +177,9 @@ func CanEdit(view AutopilotView, viewer Viewer) bool {
 //	personal  → owner only.
 //	group     → members.
 func CanTrigger(view AutopilotView, viewer Viewer) bool {
+	if view.IsPrivate {
+		return view.CreatedByType == "member" && uuidEqual(view.CreatedByID, viewer.UserID)
+	}
 	switch view.Scope {
 	case ScopeWorkspace, "":
 		return true

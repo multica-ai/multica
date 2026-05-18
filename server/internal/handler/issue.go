@@ -793,6 +793,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	// Get the true total count for pagination awareness.
 	total, err := h.Queries.CountIssues(ctx, db.CountIssuesParams{
 		WorkspaceID: wsUUID,
+		// CEREBRO-PATCH(count-issues-access-filter): count uses the same privacy/project visibility as ListIssues (JEH-1749).
+		IsAdmin:     isWorkspaceAdmin(member),
+		UserID:      member.UserID,
 		Status:      statusFilter,
 		Priority:    priorityFilter,
 		AssigneeID:  assigneeFilter,

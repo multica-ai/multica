@@ -95,21 +95,43 @@ func (q *Queries) CountCreatedIssueAssignees(ctx context.Context, arg CountCreat
 
 const countIssues = `-- name: CountIssues :one
 SELECT count(*) FROM issue
-WHERE workspace_id = $1
-  AND kind = 'issue'
-  AND ($2::text IS NULL OR status = $2)
-  AND ($3::text IS NULL OR priority = $3)
-  AND ($4::uuid IS NULL OR assignee_id = $4)
-  AND ($5::uuid[] IS NULL OR assignee_id = ANY($5::uuid[]))
-  AND ($6::uuid IS NULL OR creator_id = $6)
+LEFT JOIN project p ON p.id = issue.project_id
+WHERE issue.workspace_id = $1
+  AND issue.kind = 'issue'
   AND (
-    $7::uuid[] IS NULL
-    OR project_id = ANY($7::uuid[])
+    $2::boolean
+    OR (
+      issue.project_id IS NULL AND (
+        issue.is_private = FALSE
+        OR (issue.creator_type = 'member' AND issue.creator_id = $3::uuid)
+      )
+    )
+    OR (
+      issue.project_id IS NOT NULL AND (
+        p.access = 'workspace'
+        OR EXISTS (
+          SELECT 1 FROM project_member pm
+          WHERE pm.project_id = p.id AND pm.user_id = $3::uuid
+        )
+        OR EXISTS (SELECT 1 FROM cerebro_project_group_member pgm JOIN cerebro_group_member gm ON gm.group_id = pgm.group_id WHERE pgm.project_id = p.id AND gm.user_id = $3::uuid)
+      )
+    )
+  )
+  AND ($4::text IS NULL OR status = $4)
+  AND ($5::text IS NULL OR priority = $5)
+  AND ($6::uuid IS NULL OR assignee_id = $6)
+  AND ($7::uuid[] IS NULL OR assignee_id = ANY($7::uuid[]))
+  AND ($8::uuid IS NULL OR creator_id = $8)
+  AND (
+    $9::uuid[] IS NULL
+    OR project_id = ANY($9::uuid[])
   )
 `
 
 type CountIssuesParams struct {
 	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	IsAdmin     bool          `json:"is_admin"`
+	UserID      pgtype.UUID   `json:"user_id"`
 	Status      pgtype.Text   `json:"status"`
 	Priority    pgtype.Text   `json:"priority"`
 	AssigneeID  pgtype.UUID   `json:"assignee_id"`
@@ -118,9 +140,12 @@ type CountIssuesParams struct {
 	ProjectIds  []pgtype.UUID `json:"project_ids"`
 }
 
+// CEREBRO-PATCH(count-issues-access-filter): keep list totals aligned with private/project visibility (JEH-1749).
 func (q *Queries) CountIssues(ctx context.Context, arg CountIssuesParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countIssues,
 		arg.WorkspaceID,
+		arg.IsAdmin,
+		arg.UserID,
 		arg.Status,
 		arg.Priority,
 		arg.AssigneeID,
@@ -219,11 +244,12 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    origin_type, origin_id, kind
+    origin_type, origin_id, kind, is_private
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     $16, $17,
-    COALESCE($18::text, 'issue')
+    COALESCE($18::text, 'issue'),
+    COALESCE($19::boolean, FALSE)
 ) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, kind, start_date, is_private, classification
 `
 
@@ -246,8 +272,10 @@ type CreateIssueWithOriginParams struct {
 	OriginType    pgtype.Text        `json:"origin_type"`
 	OriginID      pgtype.UUID        `json:"origin_id"`
 	Kind          pgtype.Text        `json:"kind"`
+	IsPrivate     pgtype.Bool        `json:"is_private"`
 }
 
+// CEREBRO-PATCH(create-issue-origin-private): autopilot-created issues can inherit privacy from the source autopilot (JEH-1749).
 func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWithOriginParams) (Issue, error) {
 	row := q.db.QueryRow(ctx, createIssueWithOrigin,
 		arg.WorkspaceID,
@@ -268,6 +296,7 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 		arg.OriginType,
 		arg.OriginID,
 		arg.Kind,
+		arg.IsPrivate,
 	)
 	var i Issue
 	err := row.Scan(

@@ -46,6 +46,8 @@ type AutopilotResponse struct {
 	GroupID     *string `json:"group_id"`
 	// CEREBRO-PATCH(autopilot-model-response): per-autopilot model override (JEH-1310).
 	Model *string `json:"model"`
+	// CEREBRO-PATCH(private-autopilot-response): owner-only autopilot visibility flag (JEH-1749).
+	IsPrivate bool `json:"is_private"`
 }
 
 type AutopilotTriggerResponse struct {
@@ -102,6 +104,8 @@ func autopilotToResponse(a db.Autopilot) AutopilotResponse {
 		GroupID:     uuidToPtr(a.GroupID),
 		// CEREBRO-PATCH(autopilot-model-response-field): model override from JEH-1310.
 		Model: textToPtr(a.Model),
+		// CEREBRO-PATCH(private-autopilot-response-field): expose privacy flag to API clients (JEH-1749).
+		IsPrivate: a.IsPrivate,
 	}
 }
 
@@ -162,6 +166,8 @@ type CreateAutopilotRequest struct {
 	GroupID     *string `json:"group_id"`
 	// CEREBRO-PATCH(autopilot-model-create-req): optional model override (JEH-1310).
 	Model *string `json:"model"`
+	// CEREBRO-PATCH(private-autopilot-create-req): optional owner-only visibility flag (JEH-1749).
+	IsPrivate *bool `json:"is_private"`
 }
 
 type UpdateAutopilotRequest struct {
@@ -173,6 +179,8 @@ type UpdateAutopilotRequest struct {
 	IssueTitleTemplate *string `json:"issue_title_template"`
 	// CEREBRO-PATCH(autopilot-model-update-req): optional model override (JEH-1310).
 	Model *string `json:"model"`
+	// CEREBRO-PATCH(private-autopilot-update-req): optional owner-only visibility flag (JEH-1749).
+	IsPrivate *bool `json:"is_private"`
 }
 
 type CreateAutopilotTriggerRequest struct {
@@ -327,6 +335,8 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		CreatedByID:        parseUUID(userID),
 		Description:        ptrToText(req.Description),
 		IssueTitleTemplate: ptrToText(req.IssueTitleTemplate),
+		// CEREBRO-PATCH(private-autopilot-create-param): persist requested privacy flag (JEH-1749).
+		IsPrivate: ptrToBool(req.IsPrivate),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create autopilot")
@@ -388,6 +398,10 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		AssigneeID:         prev.AssigneeID,
 		IssueTitleTemplate: prev.IssueTitleTemplate,
 	}
+	// CEREBRO-PATCH(private-autopilot-update-param): nil leaves is_private unchanged (JEH-1749).
+	if req.IsPrivate != nil {
+		params.IsPrivate = pgtype.Bool{Bool: *req.IsPrivate, Valid: true}
+	}
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
 	}
@@ -433,6 +447,8 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := autopilotToResponse(autopilot)
+	// CEREBRO-PATCH(private-autopilot-audit): audit privacy changes for autopilot history (JEH-1749).
+	h.cerebroAuditAutopilotPrivacyChange(r, prev, autopilot, "member", userID)
 	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{"autopilot": resp})
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -696,6 +712,10 @@ func (h *Handler) ListAutopilotRuns(w http.ResponseWriter, r *http.Request) {
 
 	autopilot, ok := h.loadAutopilotInWorkspace(w, r, autopilotID, workspaceID)
 	if !ok {
+		return
+	}
+	// CEREBRO-PATCH(private-autopilot-runs): private autopilot runs are owner-only (JEH-1749).
+	if !h.cerebroAutopilotVisible(w, r, workspaceID, autopilot) {
 		return
 	}
 

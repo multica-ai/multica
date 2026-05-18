@@ -1170,6 +1170,241 @@ func TestAutopilotCreatedIssueCreatorIsAssigneeAgent(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(private-autopilot-tests): JEH-1749 owner-only autopilot visibility, audit, and inherited private issue coverage.
+func TestPrivateAutopilotVisibilityAuditAndCreatedIssuePrivacy(t *testing.T) {
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "Private Autopilot Agent", nil)
+	otherUserID := createWorkspaceMemberUser(t, "member")
+	title := fmt.Sprintf("Private autopilot output %d", time.Now().UnixNano())
+	var autopilotID, runID, issueID string
+	defer func() {
+		if issueID != "" {
+			testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		}
+		if runID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot_run WHERE id = $1`, runID)
+		}
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+	}()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":                "Private autopilot",
+		"assignee_id":          agentID,
+		"execution_mode":       "create_issue",
+		"issue_title_template": title,
+		"is_private":           true,
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode autopilot: %v", err)
+	}
+	autopilotID = created.ID
+	if !created.IsPrivate {
+		t.Fatal("created autopilot is_private = false, want true")
+	}
+
+	ownerGet := httptest.NewRecorder()
+	ownerReq := withURLParam(newRequest("GET", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, nil), "id", autopilotID)
+	testHandler.GetAutopilot(ownerGet, ownerReq)
+	if ownerGet.Code != http.StatusOK {
+		t.Fatalf("owner GetAutopilot: expected 200, got %d: %s", ownerGet.Code, ownerGet.Body.String())
+	}
+
+	otherGet := httptest.NewRecorder()
+	otherReq := withURLParam(newRequest("GET", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, nil), "id", autopilotID)
+	otherReq.Header.Set("X-User-ID", otherUserID)
+	testHandler.GetAutopilot(otherGet, otherReq)
+	if otherGet.Code != http.StatusNotFound {
+		t.Fatalf("other GetAutopilot: expected 404, got %d: %s", otherGet.Code, otherGet.Body.String())
+	}
+
+	otherList := httptest.NewRecorder()
+	otherListReq := newRequest("GET", "/api/autopilots?workspace_id="+testWorkspaceID, nil)
+	otherListReq.Header.Set("X-User-ID", otherUserID)
+	testHandler.ListAutopilots(otherList, otherListReq)
+	if otherList.Code != http.StatusOK {
+		t.Fatalf("other ListAutopilots: expected 200, got %d: %s", otherList.Code, otherList.Body.String())
+	}
+	if strings.Contains(otherList.Body.String(), autopilotID) {
+		t.Fatalf("other ListAutopilots leaked private autopilot %s: %s", autopilotID, otherList.Body.String())
+	}
+
+	ap, err := db.New(testPool).GetAutopilot(ctx, parseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("GetAutopilot: %v", err)
+	}
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	runID = uuidToString(run.ID)
+	issueID = uuidToString(run.IssueID)
+
+	var creatorType, creatorID string
+	var isPrivate bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT creator_type, creator_id::text, is_private
+		FROM issue
+		WHERE id = $1
+	`, issueID).Scan(&creatorType, &creatorID, &isPrivate); err != nil {
+		t.Fatalf("load created issue privacy: %v", err)
+	}
+	if creatorType != "member" || creatorID != testUserID || !isPrivate {
+		t.Fatalf("created issue owner/private = %s/%s/%v, want member/%s/true", creatorType, creatorID, isPrivate, testUserID)
+	}
+
+	otherIssueGet := httptest.NewRecorder()
+	otherIssueReq := withURLParam(newRequest("GET", "/api/issues/"+issueID+"?workspace_id="+testWorkspaceID, nil), "id", issueID)
+	otherIssueReq.Header.Set("X-User-ID", otherUserID)
+	testHandler.GetIssue(otherIssueGet, otherIssueReq)
+	if otherIssueGet.Code != http.StatusNotFound {
+		t.Fatalf("other GetIssue private output: expected 404, got %d: %s", otherIssueGet.Code, otherIssueGet.Body.String())
+	}
+
+	ownerComment := httptest.NewRecorder()
+	ownerCommentReq := withURLParam(newRequest("POST", "/api/issues/"+issueID+"/comments?workspace_id="+testWorkspaceID, map[string]any{
+		"content": "owner-visible private output note",
+	}), "id", issueID)
+	testHandler.CreateComment(ownerComment, ownerCommentReq)
+	if ownerComment.Code != http.StatusCreated {
+		t.Fatalf("owner CreateComment on private output: expected 201, got %d: %s", ownerComment.Code, ownerComment.Body.String())
+	}
+
+	otherComments := httptest.NewRecorder()
+	otherCommentsReq := withURLParam(newRequest("GET", "/api/issues/"+issueID+"/comments?workspace_id="+testWorkspaceID, nil), "id", issueID)
+	otherCommentsReq.Header.Set("X-User-ID", otherUserID)
+	testHandler.ListComments(otherComments, otherCommentsReq)
+	if otherComments.Code != http.StatusNotFound {
+		t.Fatalf("other ListComments private output: expected 404, got %d: %s", otherComments.Code, otherComments.Body.String())
+	}
+
+	otherRuns := httptest.NewRecorder()
+	otherRunsReq := withURLParam(newRequest("GET", "/api/autopilots/"+autopilotID+"/runs?workspace_id="+testWorkspaceID, nil), "id", autopilotID)
+	otherRunsReq.Header.Set("X-User-ID", otherUserID)
+	testHandler.ListAutopilotRuns(otherRuns, otherRunsReq)
+	if otherRuns.Code != http.StatusNotFound {
+		t.Fatalf("other ListAutopilotRuns: expected 404, got %d: %s", otherRuns.Code, otherRuns.Body.String())
+	}
+
+	update := httptest.NewRecorder()
+	updateReq := withURLParam(newRequest("PATCH", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, map[string]any{
+		"is_private": false,
+	}), "id", autopilotID)
+	testHandler.UpdateAutopilot(update, updateReq)
+	if update.Code != http.StatusOK {
+		t.Fatalf("UpdateAutopilot privacy: expected 200, got %d: %s", update.Code, update.Body.String())
+	}
+	var auditCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM activity_log
+		WHERE workspace_id = $1
+		  AND actor_type = 'member'
+		  AND actor_id = $2
+		  AND action = 'autopilot_privacy_changed'
+		  AND details->>'autopilot_id' = $3
+		  AND details->>'old_value' = 'true'
+		  AND details->>'new_value' = 'false'
+	`, testWorkspaceID, testUserID, autopilotID).Scan(&auditCount); err != nil {
+		t.Fatalf("count autopilot privacy audit: %v", err)
+	}
+	if auditCount != 1 {
+		t.Fatalf("autopilot privacy audit rows = %d, want 1", auditCount)
+	}
+}
+
+// CEREBRO-PATCH(private-autopilot-mention-test): JEH-1749 private autopilot comments must not enqueue mentioned non-owner agents.
+func TestPrivateAutopilotCommentSuppressesMentionedAgentTask(t *testing.T) {
+	ctx := context.Background()
+	agentA := createHandlerTestAgent(t, "Private Autopilot Mention Agent A", nil)
+	agentB := createHandlerTestAgent(t, "Private Autopilot Mention Agent B", nil)
+	title := fmt.Sprintf("Private autopilot mention suppression %d", time.Now().UnixNano())
+	var autopilotID, runID, issueID string
+	defer func() {
+		if issueID != "" {
+			testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		}
+		if runID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot_run WHERE id = $1`, runID)
+		}
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+	}()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":                "Private mention suppression autopilot",
+		"assignee_id":          agentA,
+		"execution_mode":       "create_issue",
+		"issue_title_template": title,
+		"is_private":           true,
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var autopilot AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
+		t.Fatalf("decode autopilot: %v", err)
+	}
+	autopilotID = autopilot.ID
+
+	ap, err := db.New(testPool).GetAutopilot(ctx, parseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("GetAutopilot: %v", err)
+	}
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	runID = uuidToString(run.ID)
+	issueID = uuidToString(run.IssueID)
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id::text
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID, agentA).Scan(&taskID); err != nil {
+		t.Fatalf("load private autopilot task: %v", err)
+	}
+
+	comment := httptest.NewRecorder()
+	commentReq := withURLParam(newRequest("POST", "/api/issues/"+issueID+"/comments?workspace_id="+testWorkspaceID, map[string]any{
+		"content": fmt.Sprintf("[@Agent B](mention://agent/%s) should not be triggered from private autopilot output", agentB),
+	}), "id", issueID)
+	commentReq.Header.Set("X-Agent-ID", agentA)
+	commentReq.Header.Set("X-Task-ID", taskID)
+	testHandler.CreateComment(comment, commentReq)
+	if comment.Code != http.StatusCreated {
+		t.Fatalf("private autopilot comment: expected 201, got %d: %s", comment.Code, comment.Body.String())
+	}
+
+	var queued int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+	`, issueID, agentB).Scan(&queued); err != nil {
+		t.Fatalf("count mentioned agent tasks: %v", err)
+	}
+	if queued != 0 {
+		t.Fatalf("private autopilot comment enqueued %d tasks for mentioned agent, want 0", queued)
+	}
+}
+
 // CEREBRO-PATCH(autopilot-handoff-provenance): integration test verifying create-issue autopilot tasks carry human origin to enable agent handoff (JEH-1518).
 func TestCreateIssueAutopilotTaskCarriesHumanOriginForAgentHandoff(t *testing.T) {
 	ctx := context.Background()
