@@ -934,26 +934,9 @@ func (r fakeResolver) Resolve(context.Context, chintent.IntentRequest) (chintent
 
 type fakeAsyncIntentClient struct {
 	taskID string
-	result chintent.IntentResult
 	done   bool
 	err    error
 	reply  string
-}
-
-func (f fakeAsyncIntentClient) StartIntent(context.Context, chintent.IntentRequest) (string, error) {
-	return f.taskID, f.err
-}
-
-func (f fakeAsyncIntentClient) ParseIntentResult(context.Context, string) (chintent.IntentResult, bool, error) {
-	return f.result, f.done, f.err
-}
-
-func (f fakeAsyncIntentClient) StartTurn(ctx context.Context, req chintent.IntentRequest) (string, error) {
-	return f.StartIntent(ctx, req)
-}
-
-func (f fakeAsyncIntentClient) ParseTurnResult(ctx context.Context, taskID string) (chintent.IntentResult, bool, error) {
-	return f.ParseIntentResult(ctx, taskID)
 }
 
 func (f fakeAsyncIntentClient) StartAgentTurn(context.Context, chintent.IntentRequest) (string, error) {

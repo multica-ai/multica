@@ -43,3 +43,26 @@
 
 ### Next
 - Milestone 3: remove the old chat intent planner/task surface and update prompt tests around the agent-turn contract.
+
+## Milestone 3 / 5
+
+### Implemented
+- Removed the old chat-intent resolver/client interfaces, classifier prompt builder, daemon classifier prompt path, and channel-intent task enqueue path.
+- Renamed the task-backed channel client from chat-intent terminology to channel-turn terminology.
+- Stopped daemon runtime capability registration from advertising `channel_intent`; only `channel_turn` remains.
+- Removed `CreateChannelIntentTask` / `GetChannelIntentTaskByInboundEvent` SQL queries and regenerated sqlc output.
+- Removed channel-intent claim response fields and execution-environment special cases, so channel turns receive normal CLI credentials.
+
+### Approach
+- Deleted creation/execution paths for old channel intent tasks while retaining historical SQL list filters that hide existing `context.type = channel_intent` rows from user-facing task lists.
+- Kept command-rule parsing intact for slash/source command input only.
+
+### Plan Delta
+- The database filters still reference `channel_intent` for historical data hygiene. They do not create, resume, or execute old intent tasks.
+
+### Follow-Up
+- Milestone 4 still needs pending clarification/action state so a follow-up like `STA-82` can complete the prior "close it" clarification.
+- Remaining package name `channel/intent` still holds command intent structs and the agent-turn prompt. Renaming/splitting is the next cleanup boundary after pending-state behavior is in place.
+
+### Next
+- Milestone 4: add pending clarification/action state for multi-turn channel repair flows.

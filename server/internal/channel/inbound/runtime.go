@@ -21,7 +21,7 @@ const (
 	defaultInboundWorkers           = 16
 	defaultInboundClaimBatch        = 32
 	defaultInboundPollInterval      = 250 * time.Millisecond
-	defaultInboundIntentTaskTimeout = 15 * time.Minute
+	defaultInboundAgentTaskTimeout = 15 * time.Minute
 	defaultInboundActionTaskTimeout = 30 * time.Minute
 	defaultInboundProcessingLease   = 5 * time.Minute
 	defaultFailureNoticeCooldown    = 5 * time.Minute
@@ -86,7 +86,7 @@ type RuntimeConfig struct {
 	Workers               int
 	ClaimBatch            int
 	PollInterval          time.Duration
-	IntentTaskTimeout     time.Duration
+	AgentTaskTimeout     time.Duration
 	ActionTaskTimeout     time.Duration
 	ProcessingLease       time.Duration
 	FailureNoticeCooldown time.Duration
@@ -109,8 +109,8 @@ func NewRuntime(cfg RuntimeConfig) *Runtime {
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = defaultInboundPollInterval
 	}
-	if cfg.IntentTaskTimeout <= 0 {
-		cfg.IntentTaskTimeout = defaultInboundIntentTaskTimeout
+	if cfg.AgentTaskTimeout <= 0 {
+		cfg.AgentTaskTimeout = defaultInboundAgentTaskTimeout
 	}
 	if cfg.ActionTaskTimeout <= 0 {
 		cfg.ActionTaskTimeout = defaultInboundActionTaskTimeout
@@ -694,7 +694,7 @@ func (r *Runtime) resumeWaitingAgents(ctx context.Context) {
 			r.completeTurnAfterFailure(ctx, &InboundEventRecord{ID: item.ID}, channelconversation.TurnStatusDead, err)
 			continue
 		}
-		timeout := r.cfg.IntentTaskTimeout
+		timeout := r.cfg.AgentTaskTimeout
 		if item.WaitKind == WaitKindAction {
 			timeout = r.cfg.ActionTaskTimeout
 		} else if item.WaitKind == WaitKindChannelTurn {

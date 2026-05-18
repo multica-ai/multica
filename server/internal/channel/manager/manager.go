@@ -55,7 +55,7 @@ type Config struct {
 	GlobalLimit            int
 	Workers                int
 	ClaimBatch             int
-	IntentTaskTimeout      time.Duration
+	AgentTaskTimeout      time.Duration
 	ActionTaskTimeout      time.Duration
 	ProcessingLease        time.Duration
 	OutboundCleanupEnabled bool
@@ -332,7 +332,7 @@ func (m *Manager) startInboundRuntimeLocked(ctx context.Context) {
 		ReplySink:          inbound.NewGatewayReplySink(m.cfg.Gateway, inbound.WithGatewayReplyConversationStore(channelconversation.NewDBStore(m.cfg.Pool))),
 		Workers:            m.cfg.Workers,
 		ClaimBatch:         m.cfg.ClaimBatch,
-		IntentTaskTimeout:  m.cfg.IntentTaskTimeout,
+		AgentTaskTimeout:  m.cfg.AgentTaskTimeout,
 		ActionTaskTimeout:  m.cfg.ActionTaskTimeout,
 		ProcessingLease:    m.cfg.ProcessingLease,
 	})

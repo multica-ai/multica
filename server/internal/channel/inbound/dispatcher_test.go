@@ -714,7 +714,7 @@ func TestDispatchStep_AddComment_ContextReplyBypassesProposal(t *testing.T) {
 	}
 }
 
-func TestDispatchStep_AddComment_ChatIntentWithInternalContextParamStillProposes(t *testing.T) {
+func TestDispatchStep_AddComment_ChannelContextParamStillProposes(t *testing.T) {
 	t.Parallel()
 
 	cfg, _, commentSvc, recCh := buildDispatchConfig()

@@ -57,7 +57,7 @@ func newChannelInboundRuntimeComponents(pool *pgxpool.Pool, opts ...channelPipel
 	}
 	channelTurn := opt.ChannelTurn
 	if channelTurn == nil && opt.TaskService != nil {
-		channelTurn = facadeimpl.NewTaskBackedChatIntentClient(queries, opt.TaskService, bindings)
+		channelTurn = facadeimpl.NewTaskBackedChannelTurnClient(queries, opt.TaskService, bindings)
 	}
 
 	pre := inbound.NewPipeline(

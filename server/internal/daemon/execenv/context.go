@@ -220,9 +220,6 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	if ctx.QuickCreatePrompt != "" {
 		return renderQuickCreateContext(ctx)
 	}
-	if ctx.ChannelIntentPrompt != "" {
-		return renderChannelIntentContext(ctx)
-	}
 	if ctx.ChannelTurnPrompt != "" {
 		return renderChannelTurnContext(ctx)
 	}
@@ -251,20 +248,6 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n")
 	}
 
-	return b.String()
-}
-
-func renderChannelIntentContext(ctx TaskContextForEnv) string {
-	var b strings.Builder
-	b.WriteString("# Channel Intent Classification\n\n")
-	b.WriteString("This is an internal classifier task. Return only the requested JSON intent. Do not perform workspace mutations.\n\n")
-	if len(ctx.AgentSkills) > 0 {
-		b.WriteString("## Agent Skills\n\n")
-		for _, skill := range ctx.AgentSkills {
-			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
-		}
-		b.WriteString("\n")
-	}
 	return b.String()
 }
 

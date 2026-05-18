@@ -66,7 +66,7 @@ func IntentFromTurnPlan(plan ChannelTurnPlan, sourceText string) IntentResult {
 		confidence = 0.9
 	}
 	result := Intent{Kind: kind, Confidence: confidence, Params: params, Source: SourceChat}
-	result = refineChatIntentWithSourceText(result, sourceText)
+	result = refineIssueLookupIntentWithSourceText(result, sourceText)
 	if !intentHasRequiredParams(result) {
 		result = fallbackIntent(IntentASKClarify)
 		if strings.TrimSpace(plan.UserReplyDraft) != "" {

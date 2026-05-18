@@ -24,9 +24,6 @@ func BuildPrompt(task Task, provider string) string {
 	if task.AutopilotRunID != "" {
 		return buildAutopilotPrompt(task)
 	}
-	if task.ChannelIntentPrompt != "" {
-		return buildChannelIntentPrompt(task)
-	}
 	if task.ChannelTurnPrompt != "" {
 		return buildChannelTurnPrompt(task)
 	}
@@ -38,17 +35,6 @@ func BuildPrompt(task Task, provider string) string {
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	fmt.Fprintf(&b, "If you need comment history, `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). Pass `--since <RFC3339>` to fetch only comments newer than a known cursor.\n", task.IssueID)
-	return b.String()
-}
-
-func buildChannelIntentPrompt(task Task) string {
-	if strings.TrimSpace(task.ChannelIntentPrompt) != "" {
-		return task.ChannelIntentPrompt
-	}
-	var b strings.Builder
-	b.WriteString("You are resolving a Multica channel chat message into one safe structured intent.\n")
-	b.WriteString("Return only JSON: {\"intent\":\"Unknown\",\"confidence\":0.0,\"params\":{}}.\n\n")
-	fmt.Fprintf(&b, "User message:\n%s\n", task.ChannelIntentMessage)
 	return b.String()
 }
 
