@@ -102,12 +102,12 @@ const createAutopilot = `-- name: CreateAutopilot :one
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_id,
     status, execution_mode, issue_title_template,
-    created_by_type, created_by_id
+    created_by_type, created_by_id, is_private
 ) VALUES (
     $1, $2, $8, $3,
     $4, $5, $9,
-    $6, $7
-) RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model
+    $6, $7, COALESCE($10::boolean, FALSE)
+) RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model, is_private
 `
 
 type CreateAutopilotParams struct {
@@ -120,6 +120,7 @@ type CreateAutopilotParams struct {
 	CreatedByID        pgtype.UUID `json:"created_by_id"`
 	Description        pgtype.Text `json:"description"`
 	IssueTitleTemplate pgtype.Text `json:"issue_title_template"`
+	IsPrivate          pgtype.Bool `json:"is_private"`
 }
 
 func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams) (Autopilot, error) {
@@ -133,6 +134,7 @@ func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams
 		arg.CreatedByID,
 		arg.Description,
 		arg.IssueTitleTemplate,
+		arg.IsPrivate,
 	)
 	var i Autopilot
 	err := row.Scan(
@@ -153,6 +155,7 @@ func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams
 		&i.OwnerUserID,
 		&i.GroupID,
 		&i.Model,
+		&i.IsPrivate,
 	)
 	return i, err
 }
@@ -361,7 +364,7 @@ func (q *Queries) FailAutopilotRunsByIssue(ctx context.Context, issueID pgtype.U
 }
 
 const getAutopilot = `-- name: GetAutopilot :one
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model, is_private FROM autopilot
 WHERE id = $1
 `
 
@@ -386,12 +389,13 @@ func (q *Queries) GetAutopilot(ctx context.Context, id pgtype.UUID) (Autopilot, 
 		&i.OwnerUserID,
 		&i.GroupID,
 		&i.Model,
+		&i.IsPrivate,
 	)
 	return i, err
 }
 
 const getAutopilotInWorkspace = `-- name: GetAutopilotInWorkspace :one
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model, is_private FROM autopilot
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -421,6 +425,7 @@ func (q *Queries) GetAutopilotInWorkspace(ctx context.Context, arg GetAutopilotI
 		&i.OwnerUserID,
 		&i.GroupID,
 		&i.Model,
+		&i.IsPrivate,
 	)
 	return i, err
 }
@@ -599,7 +604,7 @@ func (q *Queries) ListAutopilotTriggers(ctx context.Context, autopilotID pgtype.
 
 const listAutopilots = `-- name: ListAutopilots :many
 
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model, is_private FROM autopilot
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
 ORDER BY created_at DESC
@@ -640,6 +645,7 @@ func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) 
 			&i.OwnerUserID,
 			&i.GroupID,
 			&i.Model,
+			&i.IsPrivate,
 		); err != nil {
 			return nil, err
 		}
@@ -653,15 +659,18 @@ func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) 
 
 const listAutopilotsForUser = `-- name: ListAutopilotsForUser :many
 
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model, is_private FROM autopilot
 WHERE workspace_id = $1::uuid
   AND ($2::text IS NULL OR status = $2)
   AND (
-        scope = 'workspace'
-     OR (scope = 'personal' AND owner_user_id = $3::uuid)
-     OR (scope = 'group'    AND (
-            group_id = ANY($4::uuid[])
-         OR $5::boolean
+        (is_private = TRUE AND created_by_type = 'member' AND created_by_id = $3::uuid)
+     OR (is_private = FALSE AND (
+            scope = 'workspace'
+         OR (scope = 'personal' AND owner_user_id = $3::uuid)
+         OR (scope = 'group'    AND (
+                group_id = ANY($4::uuid[])
+             OR $5::boolean
+            ))
         ))
   )
 ORDER BY created_at DESC
@@ -677,6 +686,7 @@ type ListAutopilotsForUserParams struct {
 
 // =====================
 // CEREBRO-PATCH(sqlc-autopilot-scope): scoped autopilots (JEH-724).
+// CEREBRO-PATCH(sqlc-private-autopilot): private autopilots are visible only to their owning member (JEH-1749).
 // workspace = visible to all; personal = owner only; group = members + admin.
 // Group membership is resolved by the caller (cerebro_group_member, JEH-721)
 // and passed in via user_group_ids so this query stays decoupled from that
@@ -715,6 +725,7 @@ func (q *Queries) ListAutopilotsForUser(ctx context.Context, arg ListAutopilotsF
 			&i.OwnerUserID,
 			&i.GroupID,
 			&i.Model,
+			&i.IsPrivate,
 		); err != nil {
 			return nil, err
 		}
@@ -952,7 +963,7 @@ const systemPauseAutopilot = `-- name: SystemPauseAutopilot :one
 UPDATE autopilot
 SET status = 'paused', updated_at = now()
 WHERE id = $1 AND status = 'active'
-RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model
+RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model, is_private
 `
 
 // Atomically pauses an autopilot only if it is currently active. Returns no
@@ -980,6 +991,7 @@ func (q *Queries) SystemPauseAutopilot(ctx context.Context, id pgtype.UUID) (Aut
 		&i.OwnerUserID,
 		&i.GroupID,
 		&i.Model,
+		&i.IsPrivate,
 	)
 	return i, err
 }
@@ -992,9 +1004,10 @@ UPDATE autopilot SET
     status = COALESCE($5, status),
     execution_mode = COALESCE($6, execution_mode),
     issue_title_template = $7,
+    is_private = COALESCE($8::boolean, is_private),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model
+RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, scope, owner_user_id, group_id, model, is_private
 `
 
 type UpdateAutopilotParams struct {
@@ -1005,6 +1018,7 @@ type UpdateAutopilotParams struct {
 	Status             pgtype.Text `json:"status"`
 	ExecutionMode      pgtype.Text `json:"execution_mode"`
 	IssueTitleTemplate pgtype.Text `json:"issue_title_template"`
+	IsPrivate          pgtype.Bool `json:"is_private"`
 }
 
 func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams) (Autopilot, error) {
@@ -1016,6 +1030,7 @@ func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams
 		arg.Status,
 		arg.ExecutionMode,
 		arg.IssueTitleTemplate,
+		arg.IsPrivate,
 	)
 	var i Autopilot
 	err := row.Scan(
@@ -1036,6 +1051,7 @@ func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams
 		&i.OwnerUserID,
 		&i.GroupID,
 		&i.Model,
+		&i.IsPrivate,
 	)
 	return i, err
 }

@@ -96,15 +96,17 @@ WHERE id = $1
 RETURNING *;
 
 -- name: CreateIssueWithOrigin :one
+-- CEREBRO-PATCH(create-issue-origin-private): autopilot-created issues can inherit privacy from the source autopilot (JEH-1749).
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    origin_type, origin_id, kind
+    origin_type, origin_id, kind, is_private
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     sqlc.narg('origin_type'), sqlc.narg('origin_id'),
-    COALESCE(sqlc.narg('kind')::text, 'issue')
+    COALESCE(sqlc.narg('kind')::text, 'issue'),
+    COALESCE(sqlc.narg('is_private')::boolean, FALSE)
 ) RETURNING *;
 
 -- name: LockIssueDuplicateKey :exec
@@ -142,9 +144,30 @@ WHERE workspace_id = $1
 ORDER BY position ASC, created_at DESC;
 
 -- name: CountIssues :one
+-- CEREBRO-PATCH(count-issues-access-filter): keep list totals aligned with private/project visibility (JEH-1749).
 SELECT count(*) FROM issue
-WHERE workspace_id = $1
-  AND kind = 'issue'
+LEFT JOIN project p ON p.id = issue.project_id
+WHERE issue.workspace_id = $1
+  AND issue.kind = 'issue'
+  AND (
+    sqlc.arg('is_admin')::boolean
+    OR (
+      issue.project_id IS NULL AND (
+        issue.is_private = FALSE
+        OR (issue.creator_type = 'member' AND issue.creator_id = sqlc.arg('user_id')::uuid)
+      )
+    )
+    OR (
+      issue.project_id IS NOT NULL AND (
+        p.access = 'workspace'
+        OR EXISTS (
+          SELECT 1 FROM project_member pm
+          WHERE pm.project_id = p.id AND pm.user_id = sqlc.arg('user_id')::uuid
+        )
+        OR EXISTS (SELECT 1 FROM cerebro_project_group_member pgm JOIN cerebro_group_member gm ON gm.group_id = pgm.group_id WHERE pgm.project_id = p.id AND gm.user_id = sqlc.arg('user_id')::uuid)
+      )
+    )
+  )
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'))

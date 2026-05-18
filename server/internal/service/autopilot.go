@@ -159,11 +159,9 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		Priority:     "none",
 		AssigneeType: pgtype.Text{String: "agent", Valid: true},
 		AssigneeID:   ap.AssigneeID,
-		// The agent that the autopilot dispatches to is the issue's creator,
-		// not the human who originally configured the autopilot. The latter
-		// is captured separately via origin_type=autopilot + origin_id.
-		CreatorType:   "agent",
-		CreatorID:     ap.AssigneeID,
+		// CEREBRO-PATCH(private-autopilot-issue-owner): private autopilot output is owned by the configuring member (JEH-1749).
+		CreatorType:   autopilotIssueCreatorType(ap),
+		CreatorID:     autopilotIssueCreatorID(ap),
 		ParentIssueID: pgtype.UUID{},
 		Position:      0,
 		StartDate:     pgtype.Timestamptz{},
@@ -172,6 +170,8 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		ProjectID:     pgtype.UUID{},
 		OriginType:    pgtype.Text{String: "autopilot", Valid: true},
 		OriginID:      ap.ID,
+		// CEREBRO-PATCH(private-autopilot-issue-private): inherit private autopilot visibility onto created issues (JEH-1749).
+		IsPrivate: pgtype.Bool{Bool: ap.IsPrivate, Valid: true},
 	})
 	if err != nil {
 		return fmt.Errorf("create issue: %w", err)
@@ -197,8 +197,9 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventIssueCreated,
 		WorkspaceID: util.UUIDToString(ap.WorkspaceID),
-		ActorType:   "agent",
-		ActorID:     util.UUIDToString(ap.AssigneeID),
+		// CEREBRO-PATCH(private-autopilot-issue-event-owner): event actor mirrors created issue owner (JEH-1749).
+		ActorType: autopilotIssueCreatorType(ap),
+		ActorID:   util.UUIDToString(autopilotIssueCreatorID(ap)),
 		Payload: map[string]any{
 			"issue": issueToMap(issue, prefix),
 		},
@@ -296,6 +297,20 @@ func autopilotDelegationContext(ap db.Autopilot) TaskDelegationContext {
 		},
 		Source: pgtype.Text{String: "autopilot", Valid: true},
 	}
+}
+
+func autopilotIssueCreatorType(ap db.Autopilot) string {
+	if ap.IsPrivate && ap.CreatedByType == "member" {
+		return "member"
+	}
+	return "agent"
+}
+
+func autopilotIssueCreatorID(ap db.Autopilot) pgtype.UUID {
+	if ap.IsPrivate && ap.CreatedByType == "member" && ap.CreatedByID.Valid {
+		return ap.CreatedByID
+	}
+	return ap.AssigneeID
 }
 
 // SyncRunFromIssue updates the autopilot run when its linked issue reaches a terminal status.

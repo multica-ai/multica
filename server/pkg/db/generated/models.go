@@ -197,6 +197,7 @@ type Autopilot struct {
 	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
 	GroupID            pgtype.UUID        `json:"group_id"`
 	Model              pgtype.Text        `json:"model"`
+	IsPrivate          bool               `json:"is_private"`
 }
 
 type AutopilotRun struct {
