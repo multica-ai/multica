@@ -1049,13 +1049,13 @@ export function IssueDetail({
 
   // Deep-link target index in the flat items array.
   const targetIdx = useMemo(() => {
-    if (!highlightCommentId) return -1;
-    const direct = items.findIndex((it) => it.id === highlightCommentId);
+    if (!requestedCommentId) return -1;
+    const direct = items.findIndex((it) => it.id === requestedCommentId);
     if (direct >= 0) return direct;
-    const rootId = replyToRoot.get(highlightCommentId);
+    const rootId = replyToRoot.get(requestedCommentId);
     if (!rootId) return -1;
     return items.findIndex((it) => it.id === rootId);
-  }, [items, highlightCommentId, replyToRoot]);
+  }, [items, requestedCommentId, replyToRoot]);
 
   const {
     reactions: issueReactions,
@@ -1132,7 +1132,7 @@ export function IssueDetail({
 
   // Deep-link landing. Semantically equivalent to navigating to
   // `#comment-${id}`: find the element with that id, scrollIntoView it.
-  // When `highlightCommentId` is set the timeline below renders flat (no
+  // When `requestedCommentId` is set the timeline below renders flat (no
   // virtualization), so every comment id is in the DOM by the time this
   // effect runs after commit.
   //
@@ -1145,29 +1145,29 @@ export function IssueDetail({
   // ref populates only on the post-loading render, so it's the signal that
   // the timeline (and the deep-link target id) has actually rendered.
   useEffect(() => {
-    if (!highlightCommentId || items.length === 0) return;
-    if (didHighlightRef.current === highlightCommentId) return;
+    if (!requestedCommentId || items.length === 0) return;
+    if (didHighlightRef.current === requestedCommentId) return;
 
-    const rootId = replyToRoot.get(highlightCommentId);
+    const rootId = replyToRoot.get(requestedCommentId);
     if (
       rootId &&
-      rootId !== highlightCommentId &&
+      rootId !== requestedCommentId &&
       items[targetIdx]?.kind === "resolved-bar"
     ) {
       toggleResolvedExpand(rootId, true);
       return;
     }
 
-    const el = document.getElementById(`comment-${highlightCommentId}`);
+    const el = document.getElementById(`comment-${requestedCommentId}`);
     if (!el) return;
 
-    didHighlightRef.current = highlightCommentId;
+    didHighlightRef.current = requestedCommentId;
     el.scrollIntoView({ block: "center" });
 
-    setHighlightedId(highlightCommentId);
+    setHighlightedId(requestedCommentId);
     const fade = window.setTimeout(() => setHighlightedId(null), 2500);
     return () => clearTimeout(fade);
-  }, [highlightCommentId, items, targetIdx, scrollContainerEl, replyToRoot, toggleResolvedExpand]);
+  }, [requestedCommentId, items, targetIdx, scrollContainerEl, replyToRoot, toggleResolvedExpand]);
 
   // Cmd-F / Ctrl-F on a virtualized timeline only searches what's mounted in
   // the viewport — off-screen comments are invisible to browser find-in-page.
@@ -2092,7 +2092,7 @@ export function IssueDetail({
               <TimelineSkeleton />
             ) : (
               // Two render modes:
-              //   - `highlightCommentId` set (came from inbox deep-link) →
+              //   - `requestedCommentId` set (came from inbox or URL deep-link) →
               //     render flat. Every comment mounts, every height is real,
               //     the target id is in the DOM the instant the useEffect
               //     above runs `scrollIntoView`. No virtualization estimate
@@ -2107,7 +2107,7 @@ export function IssueDetail({
               // on a target" have fundamentally opposed contracts (estimated
               // heights vs real heights). Trying to satisfy both in one
               // path is what produced the bug history this PR closes.
-              !highlightCommentId ? (
+              !requestedCommentId ? (
                 !scrollContainerEl ? (
                   // Skeleton while the callback ref populates so the gap
                   // between IssueDetail mount and Virtuoso mount doesn't

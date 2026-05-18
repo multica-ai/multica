@@ -826,6 +826,31 @@ describe("IssueDetail (shared)", () => {
   });
 
   describe("highlightCommentId scroll-to-comment", () => {
+    it("scrolls to the comment from URL search params", async () => {
+      mockNavigationSearchParams.current = new URLSearchParams({
+        comment: "comment-2",
+      });
+
+      renderIssueDetail();
+
+      await waitFor(() => {
+        expect(mockApiObj.listTimeline).toHaveBeenCalledWith(
+          "issue-1",
+          { mode: "around", id: "comment-2" },
+        );
+      });
+      await waitFor(() => {
+        expect(
+          document.getElementById("comment-comment-2"),
+        ).not.toBeNull();
+      });
+      await waitFor(() => {
+        expect(scrollIntoViewSpy).toHaveBeenCalledWith(
+          expect.objectContaining({ block: "center" }),
+        );
+      });
+    });
+
     it("scrolls to the highlighted comment after both issue and timeline finish loading", async () => {
       renderIssueDetailWithHighlight("comment-2");
 
