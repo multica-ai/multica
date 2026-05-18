@@ -127,7 +127,7 @@ multica setup self-host \
 
 A minimal Caddyfile that fronts both the frontend and the backend (with WebSocket support, which the daemon and the web app both need) on a single hostname:
 
-```caddy
+```nginx
 multica.example.com {
     # WebSocket route — must come before the catch-all
     @ws path /ws /ws/*

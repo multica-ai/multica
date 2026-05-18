@@ -126,7 +126,7 @@ multica setup self-host \
 
 最小可用的 Caddyfile，单域名同时挂前后端（带 WebSocket 转发，daemon 和网页端都依赖）：
 
-```caddy
+```nginx
 multica.example.com {
     # WebSocket 路由——必须在 catch-all 之前
     @ws path /ws /ws/*
