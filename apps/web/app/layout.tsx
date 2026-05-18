@@ -67,6 +67,13 @@ const sourceSerif = Source_Serif_4({
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  // Lock the layout viewport to 1× so iOS does not auto-zoom when the device
+  // is rotated portrait → landscape → portrait (JEH-1735). Without this, the
+  // installed PWA returns from a rotation visibly zoomed in, which breaks the
+  // "behaves like a native app" expectation. iOS system-level accessibility
+  // zoom still works independently of these flags.
+  maximumScale: 1,
+  userScalable: false,
   // Cover the entire device viewport including notch / home indicator on iOS
   // so installed-PWA pages can opt into safe-area-inset-* via CSS.
   viewportFit: "cover",
