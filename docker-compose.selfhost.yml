@@ -44,7 +44,7 @@ services:
     # existing local postgres (homebrew, a leftover dev container
     # from `make db-up`, etc.). Self-hosters who want host access
     # (for backups/psql) can add their own override file with the
-    # ports: block from previous revisions of this file.
+    # 127.0.0.1-bound ports block from upstream.
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
@@ -60,7 +60,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "${PORT:-8080}:8080"
+      - "127.0.0.1:${PORT:-8080}:8080"
     volumes:
       - backend_uploads:/app/data/uploads
     environment:
@@ -101,7 +101,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
     environment:
       HOSTNAME: "0.0.0.0"
     restart: unless-stopped
