@@ -223,7 +223,7 @@ describe("StepRuntimeConnect — onboarding_runtime_detected", () => {
     setPicker({ runtimes: [] });
     renderStep();
     expect(
-      screen.getByText(/Where will your agents run/i),
+      screen.getByText(/connecting this computer/i),
     ).toBeInTheDocument();
   });
 });

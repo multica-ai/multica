@@ -93,9 +93,9 @@ describe("StepPlatformFork", () => {
 
   it("renders the three fork options at rest", () => {
     renderFork();
-    expect(screen.getByText(/download the desktop app/i)).toBeInTheDocument();
-    expect(screen.getByText(/^install the cli$/i)).toBeInTheDocument();
-    expect(screen.getByText(/^cloud runtime$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^use this computer$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^connect from the terminal$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^use a cloud computer$/i)).toBeInTheDocument();
     // Dialogs closed at rest → no CLI instructions, no email field.
     expect(screen.queryByTestId("cli-instructions")).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
@@ -112,7 +112,7 @@ describe("StepPlatformFork", () => {
       screen.queryByRole("button", { name: /^continue$/i }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByText(/pick a path above — or skip and configure/i),
+      screen.getByText(/pick a way to connect — or skip and connect a computer later/i),
     ).toBeInTheDocument();
   });
 
@@ -129,7 +129,7 @@ describe("StepPlatformFork", () => {
     const user = userEvent.setup();
     renderFork();
 
-    await user.click(screen.getByText(/download the desktop app/i));
+    await user.click(screen.getByText(/^use this computer$/i));
 
     // Routes to the new /download page (not GitHub releases) so the
     // user lands on the OS auto-detect surface.
@@ -139,7 +139,7 @@ describe("StepPlatformFork", () => {
       "noopener,noreferrer",
     );
     expect(
-      screen.getByText(/continuing on the download page/i),
+      screen.getByText(/opening the download page/i),
     ).toBeInTheDocument();
   });
 
@@ -152,7 +152,7 @@ describe("StepPlatformFork", () => {
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByTestId("cli-instructions")).toBeInTheDocument();
     expect(
-      within(dialog).getByText(/listening for your daemon/i),
+      within(dialog).getByText(/waiting for your computer/i),
     ).toBeInTheDocument();
     // Connect & continue stays disabled while no runtime is selected.
     expect(
@@ -174,7 +174,7 @@ describe("StepPlatformFork", () => {
     await user.click(screen.getByRole("button", { name: /show steps/i }));
 
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/1 runtime connected/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/1 computer connected/i)).toBeInTheDocument();
     expect(
       within(dialog).getByText(/selected: claude code/i),
     ).toBeInTheDocument();
