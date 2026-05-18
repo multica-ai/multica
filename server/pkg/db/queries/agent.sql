@@ -411,6 +411,11 @@ WHERE issue_id = $1 AND status IN ('queued', 'dispatched');
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched');
 
+-- name: HasTaskForIssueAndAgent :one
+-- Returns true if a specific agent has ever had a task for the given issue.
+SELECT count(*) > 0 AS has_task FROM agent_task_queue
+WHERE issue_id = $1 AND agent_id = $2;
+
 -- name: GetLatestTaskIsLeaderForIssueAndAgent :one
 -- Returns the is_leader_task flag of the agent's most recent task on this
 -- issue, or NULL if the agent has never had a task on this issue. Used by

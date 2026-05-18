@@ -1480,6 +1480,24 @@ func (q *Queries) HasPendingTaskForIssueAndAgent(ctx context.Context, arg HasPen
 	return has_pending, err
 }
 
+const hasTaskForIssueAndAgent = `-- name: HasTaskForIssueAndAgent :one
+SELECT count(*) > 0 AS has_task FROM agent_task_queue
+WHERE issue_id = $1 AND agent_id = $2
+`
+
+type HasTaskForIssueAndAgentParams struct {
+	IssueID pgtype.UUID `json:"issue_id"`
+	AgentID pgtype.UUID `json:"agent_id"`
+}
+
+// Returns true if a specific agent has ever had a task for the given issue.
+func (q *Queries) HasTaskForIssueAndAgent(ctx context.Context, arg HasTaskForIssueAndAgentParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasTaskForIssueAndAgent, arg.IssueID, arg.AgentID)
+	var has_task bool
+	err := row.Scan(&has_task)
+	return has_task, err
+}
+
 const linkTaskToIssue = `-- name: LinkTaskToIssue :exec
 UPDATE agent_task_queue
 SET issue_id = $2

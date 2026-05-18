@@ -329,6 +329,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
 				r.Get("/search", h.SearchIssues)
+				r.Get("/by-feishu-project", h.GetIssueByFeishuProjectWorkItem)
 				r.Get("/child-progress", h.ChildIssueProgress)
 				r.Get("/", h.ListIssues)
 				r.Post("/", h.CreateIssue)

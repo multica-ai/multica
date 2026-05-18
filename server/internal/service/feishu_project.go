@@ -48,10 +48,11 @@ type FeishuProjectTxStarter interface {
 }
 
 type FeishuProjectSyncService struct {
-	Queries *db.Queries
-	Tx      FeishuProjectTxStarter
-	Client  *FeishuProjectClient
-	Storage FeishuProjectStorage
+	Queries     *db.Queries
+	Tx          FeishuProjectTxStarter
+	Client      *FeishuProjectClient
+	Storage     FeishuProjectStorage
+	TaskService *TaskService
 }
 
 type FeishuProjectStorage interface {
@@ -362,10 +363,11 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		nextTitle := externalTitle(item)
 		if issue.Title == nextTitle && issue.Description.String == nextDesc && issue.Status == status &&
 			sameNullableText(issue.AssigneeType, assigneeType) && sameNullableUUID(issue.AssigneeID, assigneeID) {
+			s.reconcileSyncedIssueTasks(ctx, issue, issue)
 			return "skipped", nil
 		}
 		phaseStarted = time.Now()
-		_, err = s.Queries.UpdateIssue(ctx, db.UpdateIssueParams{
+		updatedIssue, err := s.Queries.UpdateIssue(ctx, db.UpdateIssueParams{
 			ID:            issue.ID,
 			Title:         pgtype.Text{String: nextTitle, Valid: true},
 			Description:   pgtype.Text{String: nextDesc, Valid: true},
@@ -384,6 +386,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		phaseStarted = time.Now()
 		_, _ = s.Queries.UpsertFeishuProjectIssueBinding(ctx, bindingParams(cfg, issue.ID, item))
 		timing.bindingUpsert += time.Since(phaseStarted)
+		s.reconcileSyncedIssueTasks(ctx, issue, updatedIssue)
 		return "updated", nil
 	}
 
@@ -435,7 +438,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 	}
 	if attachmentMarkdown != "" {
 		phaseStarted = time.Now()
-		_, err = s.Queries.UpdateIssue(ctx, db.UpdateIssueParams{
+		updatedIssue, err := s.Queries.UpdateIssue(ctx, db.UpdateIssueParams{
 			ID:            issue.ID,
 			Title:         pgtype.Text{String: externalTitle(item), Valid: true},
 			Description:   pgtype.Text{String: externalDescription(item, attachmentMarkdown), Valid: true},
@@ -451,8 +454,49 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		if err != nil {
 			return "created", err
 		}
+		issue = updatedIssue
 	}
+	s.reconcileSyncedIssueTasks(ctx, issue, issue)
 	return "created", nil
+}
+
+func (s *FeishuProjectSyncService) reconcileSyncedIssueTasks(ctx context.Context, prevIssue, issue db.Issue) {
+	if s.TaskService == nil {
+		return
+	}
+	if issue.Status == "cancelled" || issue.Status == "done" {
+		if err := s.TaskService.CancelTasksForIssue(ctx, issue.ID); err != nil {
+			slog.Warn("Feishu Project sync task cancel failed", "issue_id", UUIDString(issue.ID), "status", issue.Status, "error", err)
+		}
+		return
+	}
+	if !sameNullableText(prevIssue.AssigneeType, issue.AssigneeType) || !sameNullableUUID(prevIssue.AssigneeID, issue.AssigneeID) {
+		if err := s.TaskService.CancelTasksForIssue(ctx, issue.ID); err != nil {
+			slog.Warn("Feishu Project sync previous assignee task cancel failed", "issue_id", UUIDString(issue.ID), "error", err)
+			return
+		}
+	}
+	s.enqueueSyncedIssueIfNeeded(ctx, issue)
+}
+
+func (s *FeishuProjectSyncService) enqueueSyncedIssueIfNeeded(ctx context.Context, issue db.Issue) {
+	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
+		return
+	}
+	hasTask, err := s.Queries.HasTaskForIssueAndAgent(ctx, db.HasTaskForIssueAndAgentParams{
+		IssueID: issue.ID,
+		AgentID: issue.AssigneeID,
+	})
+	if err != nil {
+		slog.Warn("Feishu Project sync task dedup check failed", "issue_id", UUIDString(issue.ID), "agent_id", UUIDString(issue.AssigneeID), "error", err)
+		return
+	}
+	if hasTask {
+		return
+	}
+	if _, err := s.TaskService.EnqueueTaskForIssue(ctx, issue); err != nil {
+		slog.Warn("Feishu Project sync task enqueue failed", "issue_id", UUIDString(issue.ID), "agent_id", UUIDString(issue.AssigneeID), "error", err)
+	}
 }
 
 func (s *FeishuProjectSyncService) resolveAssignee(ctx context.Context, cfg db.FeishuProjectIntegration, item FeishuProjectWorkItem, localStatus string, currentType pgtype.Text, currentID pgtype.UUID) (pgtype.Text, pgtype.UUID) {
@@ -501,19 +545,7 @@ func (s *FeishuProjectSyncService) resolveOwnerAgent(ctx context.Context, worksp
 }
 
 func isFeishuProjectOwnerAgentAssignableStatus(externalStatus, localStatus string) bool {
-	if strings.TrimSpace(localStatus) == "todo" {
-		return true
-	}
-	switch strings.ToUpper(strings.TrimSpace(externalStatus)) {
-	case "OPEN", "REOPENED":
-		return true
-	}
-	switch strings.TrimSpace(externalStatus) {
-	case "新建", "重新打开":
-		return true
-	default:
-		return false
-	}
+	return strings.TrimSpace(localStatus) == "todo"
 }
 
 func sameNullableText(a, b pgtype.Text) bool {

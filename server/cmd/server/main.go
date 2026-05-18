@@ -319,7 +319,7 @@ func main() {
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
-	go runFeishuProjectSyncWorker(feishuProjectCtx, queries, pool)
+	go runFeishuProjectSyncWorker(feishuProjectCtx, queries, pool, taskSvc)
 	go runDBStatsLogger(sweepCtx, pool)
 
 	if metricsServer != nil {

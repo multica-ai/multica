@@ -497,13 +497,13 @@ func TestFeishuProjectOwnerAgentAssignableStatus(t *testing.T) {
 		localStatus    string
 		want           bool
 	}{
-		{name: "open key", externalStatus: "OPEN", want: true},
-		{name: "reopened key", externalStatus: "REOPENED", want: true},
-		{name: "new label", externalStatus: "新建", want: true},
-		{name: "reopened label", externalStatus: "重新打开", want: true},
+		{name: "open key without mapping", externalStatus: "OPEN", want: false},
+		{name: "reopened key without mapping", externalStatus: "REOPENED", want: false},
+		{name: "new label without mapping", externalStatus: "新建", want: false},
+		{name: "reopened label without mapping", externalStatus: "重新打开", want: false},
 		{name: "mapped todo custom key", externalStatus: "BVtdwq9Vd", localStatus: "todo", want: true},
 		{name: "in progress", externalStatus: "IN PROGRESS", localStatus: "in_progress", want: false},
-		{name: "unmapped unknown falls back elsewhere", externalStatus: "custom", want: false},
+		{name: "unmapped unknown", externalStatus: "custom", want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

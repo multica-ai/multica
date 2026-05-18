@@ -110,7 +110,7 @@ export function IntegrationsTab() {
   useEffect(() => {
     if (!feishuProject) return;
     setFeishuEnabled(feishuProject.enabled);
-    setProjectKey(feishuProject.project_key);
+    setProjectKey(feishuProject.project_name || feishuProject.project_key);
     setPluginId(feishuProject.plugin_id);
     setPluginSecret("");
     setActorUserKey(feishuProject.actor_user_key ?? "");
@@ -185,7 +185,7 @@ export function IntegrationsTab() {
     try {
       await api.updateFeishuProjectIntegration(wsId, {
         enabled: feishuEnabled,
-        project_key: projectKey.trim(),
+        project_name: projectKey.trim(),
         plugin_id: pluginId.trim(),
         plugin_secret: pluginSecret.trim() || undefined,
         actor_user_key: actorUserKey.trim() || null,
@@ -319,7 +319,7 @@ export function IntegrationsTab() {
                   <div className="grid gap-4 md:grid-cols-2">
                     <label className="space-y-1.5 text-xs font-medium">
                       {t(($) => $.integrations.feishu_project_project_key)}
-                      <Input value={projectKey} onChange={(e) => setProjectKey(e.target.value)} placeholder="69df2c7bc2811d6e895242a0" />
+                      <Input value={projectKey} onChange={(e) => setProjectKey(e.target.value)} placeholder="my_project" />
                     </label>
                     <label className="space-y-1.5 text-xs font-medium">
                       {t(($) => $.integrations.feishu_project_plugin_id)}

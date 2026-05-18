@@ -34,6 +34,17 @@ INSERT INTO issue (
 SELECT * FROM issue
 WHERE workspace_id = $1 AND number = $2;
 
+-- name: GetIssueByFeishuProjectWorkItem :one
+SELECT i.*
+FROM issue i
+JOIN feishu_project_issue_binding b ON b.issue_id = i.id
+WHERE i.workspace_id = $1
+  AND b.workspace_id = $1
+  AND b.work_item_type = $2
+  AND b.work_item_id = $3
+ORDER BY b.updated_at DESC
+LIMIT 1;
+
 -- name: UpdateIssue :one
 UPDATE issue SET
     title = COALESCE(sqlc.narg('title'), title),

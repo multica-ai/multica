@@ -12,29 +12,29 @@ import (
 
 const feishuProjectSyncInterval = 5 * time.Minute
 
-func runFeishuProjectSyncWorker(ctx context.Context, queries *db.Queries, pool *pgxpool.Pool) {
+func runFeishuProjectSyncWorker(ctx context.Context, queries *db.Queries, pool *pgxpool.Pool, taskSvc *service.TaskService) {
 	store := newStorageFromEnv()
 	ticker := time.NewTicker(feishuProjectSyncInterval)
 	defer ticker.Stop()
 
-	runFeishuProjectSyncOnce(ctx, queries, pool, store)
+	runFeishuProjectSyncOnce(ctx, queries, pool, store, taskSvc)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			runFeishuProjectSyncOnce(ctx, queries, pool, store)
+			runFeishuProjectSyncOnce(ctx, queries, pool, store, taskSvc)
 		}
 	}
 }
 
-func runFeishuProjectSyncOnce(ctx context.Context, queries *db.Queries, pool *pgxpool.Pool, store service.FeishuProjectStorage) {
+func runFeishuProjectSyncOnce(ctx context.Context, queries *db.Queries, pool *pgxpool.Pool, store service.FeishuProjectStorage, taskSvc *service.TaskService) {
 	configs, err := queries.ListEnabledFeishuProjectIntegrations(ctx)
 	if err != nil {
 		slog.Warn("Feishu Project sync scan failed", "error", err)
 		return
 	}
-	svc := &service.FeishuProjectSyncService{Queries: queries, Tx: pool, Client: service.NewFeishuProjectClient(), Storage: store}
+	svc := &service.FeishuProjectSyncService{Queries: queries, Tx: pool, Client: service.NewFeishuProjectClient(), Storage: store, TaskService: taskSvc}
 	for _, cfg := range configs {
 		lockKey := "feishu-project-sync:" + service.UUIDString(cfg.ID)
 		locked, unlock, err := tryFeishuProjectSyncLock(ctx, pool, lockKey)

@@ -323,6 +323,54 @@ func (q *Queries) GetIssue(ctx context.Context, id pgtype.UUID) (Issue, error) {
 	return i, err
 }
 
+const getIssueByFeishuProjectWorkItem = `-- name: GetIssueByFeishuProjectWorkItem :one
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at
+FROM issue i
+JOIN feishu_project_issue_binding b ON b.issue_id = i.id
+WHERE i.workspace_id = $1
+  AND b.workspace_id = $1
+  AND b.work_item_type = $2
+  AND b.work_item_id = $3
+ORDER BY b.updated_at DESC
+LIMIT 1
+`
+
+type GetIssueByFeishuProjectWorkItemParams struct {
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	WorkItemType string      `json:"work_item_type"`
+	WorkItemID   string      `json:"work_item_id"`
+}
+
+func (q *Queries) GetIssueByFeishuProjectWorkItem(ctx context.Context, arg GetIssueByFeishuProjectWorkItemParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, getIssueByFeishuProjectWorkItem, arg.WorkspaceID, arg.WorkItemType, arg.WorkItemID)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+	)
+	return i, err
+}
+
 const getIssueByNumber = `-- name: GetIssueByNumber :one
 SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at FROM issue
 WHERE workspace_id = $1 AND number = $2

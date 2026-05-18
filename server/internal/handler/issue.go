@@ -242,19 +242,21 @@ func splitSearchTerms(q string) []string {
 // identifierNumberRe matches patterns like "MUL-123" or "ABC-45".
 var identifierNumberRe = regexp.MustCompile(`(?i)^[a-z]+-(\d+)$`)
 
+const maxIssueSearchNumber = int64(2147483647)
+
 // parseQueryNumber extracts an issue number from the query if it looks like
 // an identifier (e.g. "MUL-123") or a bare number (e.g. "123").
 func parseQueryNumber(q string) (int, bool) {
 	q = strings.TrimSpace(q)
 	// Check for identifier pattern like "MUL-123"
 	if m := identifierNumberRe.FindStringSubmatch(q); m != nil {
-		if n, err := strconv.Atoi(m[1]); err == nil && n > 0 {
-			return n, true
+		if n, err := strconv.ParseInt(m[1], 10, 64); err == nil && n > 0 && n <= maxIssueSearchNumber {
+			return int(n), true
 		}
 	}
 	// Check for bare number
-	if n, err := strconv.Atoi(q); err == nil && n > 0 {
-		return n, true
+	if n, err := strconv.ParseInt(q, 10, 64); err == nil && n > 0 && n <= maxIssueSearchNumber {
+		return int(n), true
 	}
 	return 0, false
 }
@@ -600,6 +602,54 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		"issues": resp,
 		"total":  total,
 	})
+}
+
+func (h *Handler) GetIssueByFeishuProjectWorkItem(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+
+	workItemType := strings.TrimSpace(r.URL.Query().Get("work_item_type"))
+	workItemID := strings.TrimSpace(r.URL.Query().Get("work_item_id"))
+	if workItemType == "" || workItemID == "" {
+		writeError(w, http.StatusBadRequest, "work_item_type and work_item_id are required")
+		return
+	}
+
+	issue, err := h.Queries.GetIssueByFeishuProjectWorkItem(r.Context(), db.GetIssueByFeishuProjectWorkItemParams{
+		WorkspaceID:  wsUUID,
+		WorkItemType: workItemType,
+		WorkItemID:   workItemID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return
+		}
+		slog.Warn("get issue by Feishu Project work item failed", append(logger.RequestAttrs(r),
+			"error", err,
+			"workspace_id", workspaceID,
+			"work_item_type", workItemType,
+			"work_item_id", workItemID,
+		)...)
+		writeError(w, http.StatusInternalServerError, "failed to load issue")
+		return
+	}
+
+	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+	resp := issueToResponse(issue, prefix)
+	detailLabels := h.labelsByIssue(r.Context(), issue.WorkspaceID, []pgtype.UUID{issue.ID})[uuidToString(issue.ID)]
+	if detailLabels == nil {
+		detailLabels = []LabelResponse{}
+	}
+	resp.Labels = &detailLabels
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {

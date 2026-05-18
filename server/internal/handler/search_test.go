@@ -76,6 +76,25 @@ func TestBuildSearchQuery_WithNumber(t *testing.T) {
 	}
 }
 
+func TestParseQueryNumber_IgnoresOutOfRangeExternalID(t *testing.T) {
+	cases := []string{
+		"6994255791",
+		"BUG-6994255791",
+	}
+	for _, q := range cases {
+		if got, ok := parseQueryNumber(q); ok {
+			t.Fatalf("parseQueryNumber(%q) = %d, true; want false", q, got)
+		}
+	}
+}
+
+func TestParseQueryNumber_AcceptsInt32IssueNumber(t *testing.T) {
+	got, ok := parseQueryNumber("MUL-2147483647")
+	if !ok || got != 2147483647 {
+		t.Fatalf("parseQueryNumber = %d, %v; want 2147483647, true", got, ok)
+	}
+}
+
 func TestBuildSearchQuery_IncludeClosed(t *testing.T) {
 	query, _ := buildSearchQuery("test", []string{"test"}, 0, false, true)
 

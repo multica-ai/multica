@@ -1,6 +1,7 @@
 export interface FeishuProjectIntegration {
   id?: string;
   workspace_id?: string;
+  project_name: string;
   project_key: string;
   plugin_id: string;
   has_plugin_secret: boolean;
@@ -19,7 +20,8 @@ export interface FeishuProjectIntegration {
 }
 
 export interface UpdateFeishuProjectIntegrationRequest {
-  project_key: string;
+  project_name: string;
+  project_key?: string;
   plugin_id: string;
   plugin_secret?: string;
   actor_user_key?: string | null;
