@@ -202,6 +202,7 @@ func (h *Handler) cerebroApplyModelOnUpdate(w http.ResponseWriter, r *http.Reque
 	return updated, true
 }
 
+// CEREBRO-PATCH(private-autopilot-audit-helper): audit owner-only privacy flips (JEH-1749).
 // cerebroAuditAutopilotPrivacyChange writes a workspace-scoped activity row
 // when the owner-only privacy flag changes. This keeps privacy flips visible in
 // the existing audit feed without adding a parallel audit table.
