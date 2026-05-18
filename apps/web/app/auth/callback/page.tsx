@@ -102,7 +102,18 @@ function CallbackContent() {
           // 3. Default: hand off to the resolver (onboarding for first-timers,
           //    first workspace for returning users, /workspaces/new for
           //    onboarded users with zero workspaces).
-          router.push(resolvePostAuthDestination(wsList, onboarded));
+          // CEREBRO-PATCH(jeh-1642-start-page): apply mobile start page preference on login
+          const defaultDest = resolvePostAuthDestination(wsList, onboarded);
+          const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+          const firstWs = wsList[0];
+          if (onboarded && firstWs && isMobile) {
+            const VALID = new Set(["issues", "inbox", "my-issues", "projects", "documents", "notifications"]);
+            const pref = loggedInUser.preferences["start_page_mobile"];
+            const page = typeof pref === "string" && VALID.has(pref) ? pref : "issues";
+            router.push(`/${firstWs.slug}/${page}`);
+          } else {
+            router.push(defaultDest);
+          }
         })
         .catch((err) => {
           setError(err instanceof Error ? err.message : "Login failed");

@@ -11,7 +11,8 @@ import {
 import { useLocaleAdapter } from "@multica/core/i18n/react";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
-import { EnterPreferenceSection } from "@multica/cerebro-preferences/views";
+// CEREBRO-PATCH(jeh-1642-start-page): add StartPagePreferenceSection to preferences tab
+import { EnterPreferenceSection, StartPagePreferenceSection } from "@multica/cerebro-preferences/views";
 import { useT } from "../../i18n";
 
 // CEREBRO-PATCH(jeh-1446-preferences-tab): show issue-link behavior settings in Preferences.
@@ -231,6 +232,8 @@ export function PreferencesTab() {
       </section>
 
       <EnterPreferenceSection />
+      {/* CEREBRO-PATCH(jeh-1642-start-page): render start page preference section */}
+      <StartPagePreferenceSection />
     </div>
   );
 }

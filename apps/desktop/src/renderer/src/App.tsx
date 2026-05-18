@@ -69,6 +69,15 @@ function AppContent() {
         // (setCurrentWorkspace, persist namespace) are synced later by
         // WorkspaceRouteLayout when the URL resolves.
         const wsList = await api.listWorkspaces();
+        // CEREBRO-PATCH(jeh-1642-start-page): open preferred start page on login
+        const loginUser = useAuthStore.getState().user;
+        const VALID_PAGES = new Set(["issues", "inbox", "my-issues", "projects", "documents", "notifications"]);
+        const prefVal = loginUser?.preferences?.["start_page_desktop"];
+        const startPage = typeof prefVal === "string" && VALID_PAGES.has(prefVal) ? prefVal : "issues";
+        const firstWs = wsList[0];
+        if (firstWs) {
+          useTabStore.getState().switchWorkspace(firstWs.slug, `/${firstWs.slug}/${startPage}`);
+        }
         qc.setQueryData(workspaceKeys.list(), wsList);
       } catch {
         // Token invalid or expired — user stays on login page
