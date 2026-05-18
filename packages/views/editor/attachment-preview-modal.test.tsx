@@ -159,7 +159,7 @@ describe("AttachmentPreviewModal — dispatch", () => {
     expect(screen.getByTestId("readonly-content").textContent).toContain("# heading");
   });
 
-  it("renders an iframe with srcdoc + sandbox='' for HTML", async () => {
+  it("renders an iframe with srcdoc + sandbox='allow-scripts' for HTML", async () => {
     getAttachmentTextContentMock.mockResolvedValueOnce({
       text: "<p>hi</p>",
       originalContentType: "text/html",
@@ -170,7 +170,10 @@ describe("AttachmentPreviewModal — dispatch", () => {
     await waitFor(() => {
       const frame = document.querySelector("iframe[sandbox]") as HTMLIFrameElement | null;
       expect(frame).toBeTruthy();
-      expect(frame?.getAttribute("sandbox")).toBe("");
+      // `allow-scripts` is required so vanilla-JS chart libraries render
+      // (MUL-2330). The combination with `allow-same-origin` would defeat
+      // the sandbox, so this assertion must stay exact.
+      expect(frame?.getAttribute("sandbox")).toBe("allow-scripts");
       expect(frame?.getAttribute("srcdoc")).toBe("<p>hi</p>");
     });
   });

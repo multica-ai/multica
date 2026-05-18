@@ -17,6 +17,7 @@ import (
 //   GET /api/dashboard/usage/daily       per-(date, model) token rows
 //   GET /api/dashboard/usage/by-agent    per-(agent, model) token rows
 //   GET /api/dashboard/agent-runtime     per-agent run-time + task counts
+//   GET /api/dashboard/runtime/daily     per-date run-time + task counts
 //
 // All three accept ?days=N (defaults to 30, capped at 365) and an optional
 // ?project_id=<uuid> to scope the rollup to a single project. With no
@@ -265,6 +266,54 @@ func (h *Handler) GetDashboardAgentRunTime(w http.ResponseWriter, r *http.Reques
 	for i, row := range rows {
 		resp[i] = DashboardAgentRunTimeResponse{
 			AgentID:      uuidToString(row.AgentID),
+			TotalSeconds: row.TotalSeconds,
+			TaskCount:    row.TaskCount,
+			FailedCount:  row.FailedCount,
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// DashboardRunTimeDailyResponse is one (date) bucket of terminal-task run
+// time and counts. Powers the workspace dashboard's daily Time and Tasks
+// charts — same toggle as Tokens / Cost, different metric.
+type DashboardRunTimeDailyResponse struct {
+	Date         string `json:"date"`
+	TotalSeconds int64  `json:"total_seconds"`
+	TaskCount    int32  `json:"task_count"`
+	FailedCount  int32  `json:"failed_count"`
+}
+
+// GetDashboardRunTimeDaily returns per-date total task run time and task
+// counts for the workspace, optionally scoped to a project. Only terminal
+// tasks (completed or failed) with both started_at and completed_at
+// populated contribute. Bucketed by completed_at so the day boundaries
+// line up with the per-agent run-time card.
+func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+	projectID, ok := parseProjectIDParam(w, r)
+	if !ok {
+		return
+	}
+	since := parseSinceParam(r, 30)
+
+	rows, err := h.Queries.ListDashboardRunTimeDaily(r.Context(), db.ListDashboardRunTimeDailyParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Since:       since,
+		ProjectID:   projectID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list daily runtime")
+		return
+	}
+
+	resp := make([]DashboardRunTimeDailyResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = DashboardRunTimeDailyResponse{
+			Date:         row.Date.Time.Format("2006-01-02"),
 			TotalSeconds: row.TotalSeconds,
 			TaskCount:    row.TaskCount,
 			FailedCount:  row.FailedCount,

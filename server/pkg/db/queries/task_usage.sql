@@ -159,6 +159,34 @@ WHERE workspace_id = $1
 GROUP BY agent_id, model
 ORDER BY agent_id, model;
 
+-- name: ListDashboardRunTimeDaily :many
+-- Daily per-date run time + task counts for the workspace, optionally
+-- scoped to a single project. Powers the workspace dashboard's "Time"
+-- and "Tasks" metrics on the same toggle as Tokens / Cost. Bucketed by
+-- completed_at (terminal time) — same anchor as ListDashboardAgentRunTime
+-- so the day boundaries line up with the per-agent run-time card. Only
+-- terminal tasks (completed or failed) with both started_at and
+-- completed_at populated contribute.
+SELECT
+    DATE(atq.completed_at) AS date,
+    COALESCE(
+        SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at)))::bigint,
+        0
+    )::bigint AS total_seconds,
+    COUNT(*)::int AS task_count,
+    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed')
+  AND atq.started_at IS NOT NULL
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= DATE_TRUNC('day', @since::timestamptz)
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+GROUP BY DATE(atq.completed_at)
+ORDER BY DATE(atq.completed_at) DESC;
+
 -- name: ListDashboardAgentRunTime :many
 -- Per-agent total task run time and task count for the workspace, optionally
 -- scoped to a single project. Counts only terminal runs (completed or failed)

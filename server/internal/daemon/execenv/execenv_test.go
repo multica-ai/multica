@@ -585,30 +585,68 @@ func TestInjectRuntimeConfigClaude(t *testing.T) {
 	}
 }
 
-// Regression test for #2347: the runtime config injected into agent harnesses
-// must advertise both autopilot execution modes on create AND update, so an
-// agent acting as a CLI user is not confined to create_issue.
-func TestInjectRuntimeConfigAutopilotAdvertisesBothModes(t *testing.T) {
+func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	if _, err := InjectRuntimeConfig(dir, "claude", TaskContextForEnv{IssueID: "issue-1"}); err != nil {
+	if _, err := InjectRuntimeConfig(dir, "codex", TaskContextForEnv{IssueID: "issue-1"}); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
-	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
 	if err != nil {
-		t.Fatalf("failed to read CLAUDE.md: %v", err)
+		t.Fatalf("failed to read AGENTS.md: %v", err)
 	}
 
 	s := string(content)
 	for _, want := range []string{
-		"multica autopilot create --title \"...\" --agent <name> --mode create_issue|run_only",
-		"multica autopilot update <id>",
-		"[--mode create_issue|run_only]",
+		"## Available Commands",
+		"core agent loop and common issue create/update tasks",
+		"`multica <command> --help`",
+		"multica issue get <id> --output json",
+		"multica issue comment list <issue-id>",
+		"multica issue create --title",
+		"multica issue update <id>",
+		"--description-file <path>",
+		"--parent \"\"",
+		"multica repo checkout <url>",
+		"multica issue status <id> <status>",
+		"multica issue comment add <issue-id>",
+		"multica issue comment add --help",
 	} {
 		if !strings.Contains(s, want) {
-			t.Errorf("CLAUDE.md missing %q", want)
+			t.Errorf("AGENTS.md missing core command/help text %q\n---\n%s", want, s)
+		}
+	}
+
+	for _, banned := range []string{
+		"multica issue list [--status",
+		"multica issue label list",
+		"multica issue subscriber list",
+		"multica label list",
+		"multica workspace members",
+		"multica agent list",
+		"multica squad list",
+		"multica issue runs",
+		"multica issue run-messages",
+		"multica attachment download",
+		"multica autopilot list",
+		"multica autopilot create",
+		"multica autopilot update",
+		"multica autopilot trigger",
+		"multica autopilot delete",
+		"multica project get",
+		"multica project resource list",
+		"multica issue assign",
+		"multica issue label add",
+		"multica issue label remove",
+		"multica issue subscriber add",
+		"multica issue subscriber remove",
+		"multica issue comment delete",
+		"multica label create",
+	} {
+		if strings.Contains(s, banned) {
+			t.Errorf("AGENTS.md should not inject non-core command %q\n---\n%s", banned, s)
 		}
 	}
 }
@@ -1062,20 +1100,19 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigAvailableCommandsIsNeutral pins that the global
-// Available Commands section lists the three input modes neutrally for
-// every non-Codex provider on every host OS, with no "MUST pipe via stdin"
-// mandate.
+// TestInjectRuntimeConfigAvailableCommandsIsNeutral pins that the core
+// Available Commands section lists comment input modes neutrally for every
+// non-Codex provider on every host OS, with no "MUST pipe via stdin" mandate.
 //
 // Background: #1795 / #1851 introduced "MUST pipe via stdin" /
 // `--description-stdin` directives in the global section to fix Codex's
 // habit of emitting literal `\n` inside `--content "..."` (MUL-1467).
-// That mandate landed in the all-provider section and ended up steering
-// every provider at stdin — which then broke non-ASCII bytes on Windows
-// shells (#2198 / #2236 / #2376). This rollback keeps the strong
-// Codex-specific mandate in the Codex-Specific section (pinned by
-// TestInjectRuntimeConfigCodexLinuxEmphasizesStdin) and leaves the global
-// section neutral.
+// That mandate landed in the all-provider section and ended up steering every
+// provider at stdin — which then broke non-ASCII bytes on Windows shells
+// (#2198 / #2236 / #2376). This rollback keeps the strong Codex-specific
+// mandate in the Codex-Specific section (pinned by
+// TestInjectRuntimeConfigCodexLinuxEmphasizesStdin) and leaves the core global
+// command entry neutral.
 //
 // Not parallel: mutates the package-level runtimeGOOS.
 func TestInjectRuntimeConfigAvailableCommandsIsNeutral(t *testing.T) {
@@ -1106,11 +1143,9 @@ func TestInjectRuntimeConfigAvailableCommandsIsNeutral(t *testing.T) {
 
 				// Available Commands lists all three input modes as fact.
 				for _, want := range []string{
-					"`--content \"...\"`",
-					"`--content-stdin`",
-					"`--content-file <path>`",
-					"`--description-stdin`",
-					"`--description-file <path>`",
+					"--content \"...\"",
+					"--content-stdin",
+					"--content-file <path>",
 				} {
 					if !strings.Contains(s, want) {
 						t.Errorf("%s missing flag mention %q\n---\n%s", configFile, want, s)

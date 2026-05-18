@@ -8,6 +8,7 @@ export const inboxTypeLabels: Record<InboxItemType, string> = {
   status_changed: "Status changed",
   priority_changed: "Priority changed",
   due_date_changed: "Due date changed",
+  start_date_changed: "Start date changed",
   new_comment: "New comment",
   mentioned: "Mentioned",
   review_requested: "Review requested",
@@ -73,6 +74,10 @@ export function formatInboxDetailText(
     case "due_date_changed": {
       if (details.to) return `Set due date to ${formatInboxShortDate(details.to)}`;
       return "Removed due date";
+    }
+    case "start_date_changed": {
+      if (details.to) return `Set start date to ${formatInboxShortDate(details.to)}`;
+      return "Removed start date";
     }
     case "new_comment": {
       if (item.body) return item.body;
