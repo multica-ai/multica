@@ -1167,6 +1167,7 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 		emitDisplayEvent(c.traceCallback, "command_output", "Command output", output, map[string]any{"call_id": itemID})
 
 	case method == "item/started" && itemType == "fileChange":
+		changes, _ := item["changes"].([]any)
 		if c.onMessage != nil {
 			c.onMessage(Message{
 				Type:   MessageToolUse,
@@ -1177,9 +1178,14 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 		if c.traceCallback != nil {
 			c.traceCallback("normalized", "[fileChange] started", "")
 		}
-		emitDisplayEvent(c.traceCallback, "file_change", "File change", "started", map[string]any{"call_id": itemID})
+		meta := map[string]any{"call_id": itemID}
+		if len(changes) > 0 {
+			meta["changes"] = changes
+		}
+		emitDisplayEvent(c.traceCallback, "file_change", "File change", "started", meta)
 
 	case method == "item/completed" && itemType == "fileChange":
+		changes, _ := item["changes"].([]any)
 		if c.onMessage != nil {
 			c.onMessage(Message{
 				Type:   MessageToolResult,
@@ -1190,7 +1196,11 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 		if c.traceCallback != nil {
 			c.traceCallback("normalized", "[fileChange] completed", "")
 		}
-		emitDisplayEvent(c.traceCallback, "file_change", "File change", "completed", map[string]any{"call_id": itemID})
+		meta2 := map[string]any{"call_id": itemID}
+		if len(changes) > 0 {
+			meta2["changes"] = changes
+		}
+		emitDisplayEvent(c.traceCallback, "file_change", "File change", "completed", meta2)
 
 	case method == "item/completed" && itemType == "agentMessage":
 		text, _ := item["text"].(string)

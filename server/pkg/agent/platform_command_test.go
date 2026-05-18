@@ -23,6 +23,10 @@ func TestIsTrustedPlatformCommand(t *testing.T) {
 		{"substitution rejected", "multica issue get $(cat secret)", false},
 		{"backslash n in content is trusted", "multica issue comment add TES-1 --content \"hello \\\\n world\"", true},
 		{"backslash underscore in content is trusted", "multica issue comment add TES-1 --content \"test\\_agent\"", true},
+		{"stderr to devnull is trusted", "multica issue get TES-1 --output json 2>/dev/null", true},
+		{"stderr to devnull with space is trusted", "multica issue get TES-1 --output json 2> /dev/null", true},
+		{"stderr to devnull piped is trusted", "multica issue get TES-1 --output json 2>/dev/null | head -100", true},
+		{"stdout redirect is rejected", "multica issue get TES-1 --output json > /tmp/out", false},
 	}
 
 	for _, tt := range tests {
