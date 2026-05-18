@@ -8,7 +8,7 @@
 // avoids no-default-lib's project-wide side effects.
 import { defaultCache } from "@serwist/next/worker";
 import type { PrecacheEntry, SerwistGlobalConfig } from "serwist";
-import { Serwist } from "serwist";
+import { NetworkOnly, Serwist } from "serwist";
 import { applyAppBadge, resolveBadgeCount, type BadgingNavigator } from "./sw-badge";
 import {
   newDraftToken,
@@ -30,7 +30,17 @@ const serwist = new Serwist({
   skipWaiting: true,
   clientsClaim: true,
   navigationPreload: true,
-  runtimeCaching: defaultCache,
+  // Navigation requests (HTML documents) must never be served from cache —
+  // every page in this app has dynamic content. The NetworkOnly entry runs
+  // before defaultCache so it wins for all `mode === "navigate"` fetches.
+  // Static assets (JS, CSS, fonts, images) still go through defaultCache.
+  runtimeCaching: [
+    {
+      matcher: ({ request }) => request.mode === "navigate",
+      handler: new NetworkOnly(),
+    },
+    ...defaultCache,
+  ],
 });
 
 serwist.addEventListeners();
