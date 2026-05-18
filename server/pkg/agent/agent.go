@@ -95,6 +95,11 @@ type Config struct {
 	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
+	// Hooks lets a backend subscribe to Claude Code hook deliveries routed
+	// through the daemon's HTTP hook server. Only the claude-tui backend
+	// currently uses it; other backends ignore the field. nil means hooks
+	// are unavailable (e.g. in unit tests that don't start a hook server).
+	Hooks HookSubscriber
 }
 
 // New creates a Backend for the given agent type.
