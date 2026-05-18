@@ -1546,7 +1546,7 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 
 	result := make([]AgentSkillData, 0, len(skills))
 	for _, sk := range skills {
-		data := AgentSkillData{Name: sk.Name, Content: sk.Content}
+		data := AgentSkillData{Name: sk.Name, Content: ensureSkillFrontmatter(sk.Name, sk.Description, sk.Content)}
 		files, _ := s.Queries.ListSkillFiles(ctx, sk.ID)
 		for _, f := range files {
 			data.Files = append(data.Files, AgentSkillFileData{Path: f.Path, Content: f.Content})
@@ -1554,6 +1554,33 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 		result = append(result, data)
 	}
 	return result
+}
+
+// ensureSkillFrontmatter guarantees the SKILL.md body sent to the daemon starts
+// with valid YAML frontmatter (`name`, `description`). Without this, Claude
+// Code's skill autoloader silently ignores the file. If the stored content
+// already starts with `---`, we trust the author's frontmatter and return it
+// untouched. Otherwise we synthesize a minimal block from the DB columns —
+// covering the common UI mistake of pasting the body into the description
+// field and leaving content empty.
+func ensureSkillFrontmatter(name, description, content string) string {
+	trimmed := strings.TrimLeft(content, " \t\r\n")
+	if strings.HasPrefix(trimmed, "---") {
+		return content
+	}
+	safeName := strings.ReplaceAll(strings.TrimSpace(name), "\n", " ")
+	if safeName == "" {
+		safeName = "skill"
+	}
+	safeDesc := strings.ReplaceAll(strings.TrimSpace(description), "\n", " ")
+	if safeDesc == "" {
+		safeDesc = safeName
+	}
+	body := content
+	if body != "" && !strings.HasPrefix(body, "\n") {
+		body = "\n" + body
+	}
+	return "---\nname: " + safeName + "\ndescription: " + safeDesc + "\n---\n" + body
 }
 
 // AgentSkillData represents a skill for task execution responses.
