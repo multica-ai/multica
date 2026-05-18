@@ -384,7 +384,7 @@ function DisplayTraceLine({ line, event: parsedEvent, pairedEvent, group, groupK
   if (!event) {
     return (
       <WorkLogBlock title="Event" muted>
-        <pre className="whitespace-pre-wrap break-words font-mono text-muted-foreground">{lineText(line)}</pre>
+        <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-muted-foreground">{lineText(line)}</pre>
       </WorkLogBlock>
     );
   }
@@ -421,7 +421,7 @@ function DisplayTraceLine({ line, event: parsedEvent, pairedEvent, group, groupK
     case "command_output":
       return (
         <WorkLogBlock title="Command output" tone="result" icon={<Terminal className="h-3.5 w-3.5" />}>
-          <pre className="whitespace-pre-wrap break-all font-mono text-[12px] text-foreground">{content || "(no output)"}</pre>
+          <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap break-all font-mono text-[12px] text-foreground">{content || "(no output)"}</pre>
         </WorkLogBlock>
       );
     case "tool_call": {
@@ -532,7 +532,7 @@ function DisplayTraceLine({ line, event: parsedEvent, pairedEvent, group, groupK
       return (
         <WorkLogBlock title={title} muted>
           <div className="font-medium text-foreground">{title}</div>
-          {content && <pre className="mt-1 whitespace-pre-wrap break-all font-mono text-[12px] text-muted-foreground">{content}</pre>}
+          {content && <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-all font-mono text-[12px] text-muted-foreground">{content}</pre>}
         </WorkLogBlock>
       );
   }
