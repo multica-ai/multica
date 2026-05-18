@@ -123,6 +123,7 @@ type feishuProjectSyncTiming struct {
 	attachmentDB            time.Duration
 	attachmentsUploaded     int
 	attachmentsSkippedLarge int
+	attachmentsSkippedError int
 	attachmentsExisting     int
 }
 
@@ -317,6 +318,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 			"attachments_existing", timing.attachmentsExisting,
 			"attachments_uploaded", timing.attachmentsUploaded,
 			"attachments_skipped_large", timing.attachmentsSkippedLarge,
+			"attachments_skipped_error", timing.attachmentsSkippedError,
 		)
 	}()
 	if item.ID == "" || item.Title == "" {
@@ -642,7 +644,19 @@ func (s *FeishuProjectSyncService) syncExternalAttachments(ctx context.Context, 
 			timing.attachmentDownload += time.Since(phaseStarted)
 		}
 		if err != nil {
-			return "", err
+			if timing != nil {
+				timing.attachmentsSkippedError++
+			}
+			slog.Warn("Feishu Project attachment skipped: download failed",
+				"workspace_id", UUIDString(cfg.WorkspaceID),
+				"project_key", cfg.ProjectKey,
+				"work_item_type", item.Type,
+				"work_item_id", item.ID,
+				"filename", ext.Name,
+				"attachment_id", ext.ID,
+				"error", err,
+			)
+			continue
 		}
 		if len(data) == 0 {
 			continue
