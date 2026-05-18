@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useNavigation } from "@multica/views/navigation";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { cn } from "@multica/ui/lib/utils";
@@ -24,6 +26,8 @@ export function TasksTable({
   visibleColumns,
   groupBy,
 }: TasksTableProps) {
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+
   if (isError) {
     return (
       <div className="rounded-md border border-destructive/40 bg-destructive/5 p-6 text-sm text-destructive">
@@ -55,6 +59,18 @@ export function TasksTable({
 
   const groups = bucketize(tasks, groupBy);
 
+  function toggleGroup(key: string) {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }
+
   return (
     <div className="overflow-x-auto rounded-md border">
       <table className="w-full text-xs">
@@ -68,34 +84,44 @@ export function TasksTable({
             {visibleColumns.project && <th className="px-3 py-2 text-left font-medium">Projekt</th>}
             {visibleColumns.status && <th className="px-3 py-2 text-left font-medium">Status</th>}
             {visibleColumns.started && <th className="px-3 py-2 text-left font-medium">Started</th>}
+            {visibleColumns.created_at && <th className="px-3 py-2 text-left font-medium">Oprettet</th>}
             {visibleColumns.duration && <th className="px-3 py-2 text-left font-medium">Varighed</th>}
             {visibleColumns.cost && <th className="px-3 py-2 text-right font-medium">Kost</th>}
             {visibleColumns.triggered_by && <th className="px-3 py-2 text-left font-medium">Startet af</th>}
           </tr>
         </thead>
         <tbody>
-          {groups.map((group) => (
-            <>
-              {groupBy !== "none" && (
-                <tr key={`group-${group.key}`} className="bg-muted/20">
-                  <td
-                    colSpan={countVisibleColumns(visibleColumns)}
-                    className="px-3 py-1.5"
-                  >
-                    <GroupHeader group={group} groupBy={groupBy} />
-                  </td>
-                </tr>
-              )}
-              {group.tasks.map((t) => (
-                <Row
-                  key={t.task_id}
-                  task={t}
-                  workspaceSlug={workspaceSlug}
-                  visibleColumns={visibleColumns}
-                />
-              ))}
-            </>
-          ))}
+          {groups.map((group) => {
+            const isCollapsed = collapsedGroups.has(group.key);
+            return (
+              <>
+                {groupBy !== "none" && (
+                  <tr key={`group-${group.key}`} className="bg-muted/20">
+                    <td
+                      colSpan={countVisibleColumns(visibleColumns)}
+                      className="px-3 py-1.5"
+                    >
+                      <GroupHeader
+                        group={group}
+                        groupBy={groupBy}
+                        isCollapsed={isCollapsed}
+                        onToggle={() => toggleGroup(group.key)}
+                      />
+                    </td>
+                  </tr>
+                )}
+                {!isCollapsed &&
+                  group.tasks.map((t) => (
+                    <Row
+                      key={t.task_id}
+                      task={t}
+                      workspaceSlug={workspaceSlug}
+                      visibleColumns={visibleColumns}
+                    />
+                  ))}
+              </>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -155,9 +181,25 @@ function countVisibleColumns(visibleColumns: Record<ColumnId, boolean>): number 
   return Object.values(visibleColumns).filter(Boolean).length;
 }
 
-function GroupHeader({ group, groupBy }: { group: Group; groupBy: GroupBy }) {
+function GroupHeader({
+  group,
+  groupBy,
+  isCollapsed,
+  onToggle,
+}: {
+  group: Group;
+  groupBy: GroupBy;
+  isCollapsed: boolean;
+  onToggle: () => void;
+}) {
+  const Chevron = isCollapsed ? ChevronRight : ChevronDown;
   return (
-    <div className="flex items-center gap-2">
+    <button
+      type="button"
+      onClick={onToggle}
+      className="flex items-center gap-2 w-full text-left"
+    >
+      <Chevron className="h-3 w-3 shrink-0 text-muted-foreground" />
       <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
         {groupBy === "project" ? "Projekt" : groupBy === "issue" ? "Issue" : "Parent issue"}
       </span>
@@ -171,7 +213,7 @@ function GroupHeader({ group, groupBy }: { group: Group; groupBy: GroupBy }) {
       <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
         {group.tasks.length}
       </span>
-    </div>
+    </button>
   );
 }
 
@@ -292,6 +334,9 @@ function Row({
       )}
       {visibleColumns.started && (
         <td className="px-3 py-2 text-muted-foreground">{formatAbsolute(startedISO)}</td>
+      )}
+      {visibleColumns.created_at && (
+        <td className="px-3 py-2 text-muted-foreground">{formatAbsolute(task.created_at)}</td>
       )}
       {visibleColumns.duration && (
         <td className="px-3 py-2 text-muted-foreground">

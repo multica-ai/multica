@@ -21,6 +21,7 @@ export type ColumnId =
   | "project"
   | "status"
   | "started"
+  | "created_at"
   | "duration"
   | "cost"
   | "triggered_by";
@@ -39,6 +40,7 @@ export const COLUMN_DEFS: ColumnDef[] = [
   { id: "project", label: "Projekt" },
   { id: "status", label: "Status" },
   { id: "started", label: "Started" },
+  { id: "created_at", label: "Oprettet" },
   { id: "duration", label: "Varighed" },
   { id: "cost", label: "Kost" },
   { id: "triggered_by", label: "Startet af" },
@@ -53,6 +55,7 @@ export const DEFAULT_VISIBLE_COLUMNS: Record<ColumnId, boolean> = {
   project: true,
   status: true,
   started: true,
+  created_at: true,
   duration: true,
   cost: true,
   triggered_by: false,
