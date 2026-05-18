@@ -14,3 +14,28 @@ export interface AgentDefaultsWithUser extends AgentDefaults {
   user_name: string;
   user_avatar_url: string;
 }
+
+export type InstructionsHistoryScope = "personal" | "system";
+
+export interface InstructionsHistoryItem {
+  id: string;
+  workspace_id: string;
+  scope: InstructionsHistoryScope;
+  member_id?: string | null;
+  actor_id?: string | null;
+  actor_user_id?: string | null;
+  actor_name?: string | null;
+  actor_avatar_url?: string | null;
+  restored_from?: string | null;
+  created_at: string;
+  content_preview: string;
+}
+
+export interface InstructionsHistoryDetail extends InstructionsHistoryItem {
+  content: string;
+}
+
+export interface ListInstructionsHistoryResponse {
+  items: InstructionsHistoryItem[];
+  total: number;
+}

@@ -257,8 +257,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/tasks/{taskId}/interactions", h.ReportInteraction)
 		r.Get("/tasks/{taskId}/interactions/{interactionId}", h.GetInteractionResult)
 
-
-
 		r.Get("/issues/{issueId}/gc-check", h.GetIssueGCCheck)
 		r.Get("/chat-sessions/{sessionId}/gc-check", h.GetChatSessionGCCheck)
 		r.Get("/autopilot-runs/{runId}/gc-check", h.GetAutopilotRunGCCheck)
@@ -316,6 +314,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/agent-defaults/me", h.UpdatePersonalAgentDefaults)
 					r.Get("/agent-defaults", h.ListAllAgentDefaults)
 					r.Post("/agent-defaults/duplicate/{configId}", h.DuplicateAgentDefaults)
+					r.Get("/instructions-history", h.ListInstructionsHistory)
+					r.Get("/instructions-history/{versionId}", h.GetInstructionsHistory)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {

@@ -214,10 +214,227 @@ func (d *Daemon) traceHandler() http.HandlerFunc {
 	}
 }
 
+func (d *Daemon) previewStartHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		d.applyLocalDaemonCORS(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if d.previews == nil {
+			http.Error(w, "preview manager not initialized", http.StatusServiceUnavailable)
+			return
+		}
+		var req PreviewStartRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp, err := d.previews.Start(r.Context(), req)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}
+}
+
+func (d *Daemon) previewListHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		d.applyLocalDaemonCORS(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if d.previews == nil {
+			http.Error(w, "preview manager not initialized", http.StatusServiceUnavailable)
+			return
+		}
+		previews, err := d.previews.List(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+		issueID := strings.TrimSpace(r.URL.Query().Get("issue_id"))
+		if workspaceID != "" || issueID != "" {
+			filtered := previews[:0]
+			for _, preview := range previews {
+				if workspaceID != "" && preview.WorkspaceID != workspaceID {
+					continue
+				}
+				if issueID != "" && preview.IssueID != issueID {
+					continue
+				}
+				filtered = append(filtered, preview)
+			}
+			previews = filtered
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"previews": previews})
+	}
+}
+
+func (d *Daemon) previewStatusHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		d.applyLocalDaemonCORS(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if d.previews == nil {
+			http.Error(w, "preview manager not initialized", http.StatusServiceUnavailable)
+			return
+		}
+		id := strings.TrimSpace(r.URL.Query().Get("id"))
+		preview, err := d.previews.Status(r.Context(), id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(preview)
+	}
+}
+
+func (d *Daemon) previewStopHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		d.applyLocalDaemonCORS(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if d.previews == nil {
+			http.Error(w, "preview manager not initialized", http.StatusServiceUnavailable)
+			return
+		}
+		var req PreviewActionRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		preview, err := d.previews.Stop(req.ID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(preview)
+	}
+}
+
+func (d *Daemon) previewRestartHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		d.applyLocalDaemonCORS(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if d.previews == nil {
+			http.Error(w, "preview manager not initialized", http.StatusServiceUnavailable)
+			return
+		}
+		var req PreviewActionRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp, err := d.previews.Restart(r.Context(), req.ID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}
+}
+
+func (d *Daemon) previewGCHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		d.applyLocalDaemonCORS(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if d.previews == nil {
+			http.Error(w, "preview manager not initialized", http.StatusServiceUnavailable)
+			return
+		}
+		if err := d.previews.GC(r.Context()); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}
+}
+
+func (d *Daemon) previewLogsHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		d.applyLocalDaemonCORS(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if d.previews == nil {
+			http.Error(w, "preview manager not initialized", http.StatusServiceUnavailable)
+			return
+		}
+		id := strings.TrimSpace(r.URL.Query().Get("id"))
+		logs, err := d.previews.Logs(id, parsePreviewTail(r.URL.Query().Get("tail")))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(logs)
+	}
+}
+
 var defaultTraceOrigins = []string{
 	"http://localhost:3000",
 	"http://localhost:5173",
 	"http://localhost:5174",
+}
+
+func (d *Daemon) applyLocalDaemonCORS(w http.ResponseWriter, r *http.Request) {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" || !d.isAllowedTraceOrigin(origin) {
+		return
+	}
+	w.Header().Set("Access-Control-Allow-Origin", origin)
+	w.Header().Set("Vary", "Origin")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }
 
 func (d *Daemon) applyTraceCORS(w http.ResponseWriter, r *http.Request) {
@@ -428,6 +645,13 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
 	mux.HandleFunc("/shutdown", d.shutdownHandler())
 	mux.HandleFunc("/traces/tasks/", d.traceHandler())
+	mux.HandleFunc("/preview/start", d.previewStartHandler())
+	mux.HandleFunc("/preview/list", d.previewListHandler())
+	mux.HandleFunc("/preview/status", d.previewStatusHandler())
+	mux.HandleFunc("/preview/stop", d.previewStopHandler())
+	mux.HandleFunc("/preview/restart", d.previewRestartHandler())
+	mux.HandleFunc("/preview/gc", d.previewGCHandler())
+	mux.HandleFunc("/preview/logs", d.previewLogsHandler())
 
 	mux.HandleFunc("/repo/checkout", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
