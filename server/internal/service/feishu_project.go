@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,6 +36,7 @@ const (
 	feishuProjectIncrementalReplay = 10 * time.Minute
 	feishuProjectSyncMaxPages      = 1000
 	feishuProjectAttachmentMaxSize = 5 << 20
+	feishuProjectSyncWorkers       = 6
 )
 
 var ErrFeishuProjectSyncScopeRequired = errors.New("Feishu Project sync requires a bounded sync scope before searching work items")
@@ -72,9 +74,13 @@ type FeishuProjectWorkItemPage struct {
 }
 
 type FeishuProjectClient struct {
-	HTTPClient *http.Client
-	BaseURL    string
-	MCPURL     string
+	HTTPClient        *http.Client
+	BaseURL           string
+	MCPURL            string
+	pluginTokenMu     sync.Mutex
+	cachedPluginToken string
+	pluginTokenKey    string
+	pluginTokenTill   time.Time
 }
 
 type FeishuProjectWorkItem struct {
@@ -139,6 +145,7 @@ func (s *FeishuProjectSyncService) SyncWithRunAndOptions(ctx context.Context, cf
 		s.Client = NewFeishuProjectClient()
 	}
 	summary := FeishuProjectSyncSummary{}
+	var summaryMu sync.Mutex
 	var syncErr error
 	fullSync := trigger == "manual"
 	totalCount := 0
@@ -148,25 +155,56 @@ func (s *FeishuProjectSyncService) SyncWithRunAndOptions(ctx context.Context, cf
 				totalCount = page.Total
 			}
 			s.updateRunProgress(ctx, run.ID, summary, totalCount, page.PageNum, typ)
+			workerCount := feishuProjectSyncWorkers
+			if len(page.Items) < workerCount {
+				workerCount = len(page.Items)
+			}
+			if workerCount < 1 {
+				return nil
+			}
+			jobs := make(chan FeishuProjectWorkItem)
+			var wg sync.WaitGroup
+			for range workerCount {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for item := range jobs {
+						if ctx.Err() != nil {
+							continue
+						}
+						result, err := s.syncWorkItem(ctx, cfg, item, fullSync)
+						summaryMu.Lock()
+						if err != nil {
+							summary.Errors++
+							syncErr = err
+						} else {
+							switch result {
+							case "created":
+								summary.Created++
+							case "updated":
+								summary.Updated++
+							default:
+								summary.Skipped++
+							}
+						}
+						currentSummary := summary
+						summaryMu.Unlock()
+						s.updateRunProgress(ctx, run.ID, currentSummary, totalCount, page.PageNum, typ)
+					}
+				}()
+			}
 			for _, item := range page.Items {
 				item.Type = typ
-				result, err := s.syncWorkItem(ctx, cfg, item)
-				if err != nil {
-					summary.Errors++
-					syncErr = err
-					s.updateRunProgress(ctx, run.ID, summary, totalCount, page.PageNum, typ)
-					continue
+				select {
+				case <-ctx.Done():
+					close(jobs)
+					wg.Wait()
+					return ctx.Err()
+				case jobs <- item:
 				}
-				switch result {
-				case "created":
-					summary.Created++
-				case "updated":
-					summary.Updated++
-				default:
-					summary.Skipped++
-				}
-				s.updateRunProgress(ctx, run.ID, summary, totalCount, page.PageNum, typ)
 			}
+			close(jobs)
+			wg.Wait()
 			return nil
 		})
 		if err != nil {
@@ -230,7 +268,7 @@ func enabledFeishuProjectTypes(cfg db.FeishuProjectIntegration) []string {
 	return out
 }
 
-func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.FeishuProjectIntegration, item FeishuProjectWorkItem) (string, error) {
+func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.FeishuProjectIntegration, item FeishuProjectWorkItem, skipExisting bool) (string, error) {
 	if item.ID == "" || item.Title == "" {
 		return "skipped", nil
 	}
@@ -246,6 +284,9 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		WorkItemID:    item.ID,
 	})
 	if err == nil {
+		if skipExisting {
+			return "skipped", nil
+		}
 		issue, err := s.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: binding.IssueID, WorkspaceID: cfg.WorkspaceID})
 		if err != nil {
 			return "skipped", nil
@@ -276,6 +317,17 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		}
 		_, _ = s.Queries.UpsertFeishuProjectIssueBinding(ctx, bindingParams(cfg, issue.ID, item))
 		return "updated", nil
+	}
+
+	if skipExisting {
+		issue, err := s.Queries.GetIssueByFeishuExternalIdentifier(ctx, db.GetIssueByFeishuExternalIdentifierParams{
+			WorkspaceID:        cfg.WorkspaceID,
+			ExternalIdentifier: externalIdentifier(item),
+		})
+		if err == nil {
+			_, _ = s.Queries.UpsertFeishuProjectIssueBinding(ctx, bindingParams(cfg, issue.ID, item))
+			return "skipped", nil
+		}
 	}
 
 	if !cfg.CreatedByID.Valid {
@@ -1119,6 +1171,16 @@ func filenameFromContentDisposition(raw string) string {
 }
 
 func (c *FeishuProjectClient) pluginToken(ctx context.Context, pluginID, pluginSecret string) (string, error) {
+	key := pluginID + "\x00" + pluginSecret
+	now := time.Now()
+	c.pluginTokenMu.Lock()
+	if c.cachedPluginToken != "" && c.pluginTokenKey == key && now.Before(c.pluginTokenTill) {
+		token := c.cachedPluginToken
+		c.pluginTokenMu.Unlock()
+		return token, nil
+	}
+	defer c.pluginTokenMu.Unlock()
+
 	body, _ := json.Marshal(map[string]string{"plugin_id": pluginID, "plugin_secret": pluginSecret})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/open_api/authen/plugin_token", bytes.NewReader(body))
 	if err != nil {
@@ -1152,6 +1214,9 @@ func (c *FeishuProjectClient) pluginToken(ctx context.Context, pluginID, pluginS
 	if parsed.ErrCode != 0 || token == "" {
 		return "", fmt.Errorf("Feishu Project plugin_token err_code=%d msg=%q", parsed.ErrCode, parsed.ErrMsg)
 	}
+	c.cachedPluginToken = token
+	c.pluginTokenKey = key
+	c.pluginTokenTill = now.Add(50 * time.Minute)
 	return token, nil
 }
 

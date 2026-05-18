@@ -323,6 +323,50 @@ func (q *Queries) GetIssue(ctx context.Context, id pgtype.UUID) (Issue, error) {
 	return i, err
 }
 
+const getIssueByFeishuExternalIdentifier = `-- name: GetIssueByFeishuExternalIdentifier :one
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at FROM issue
+WHERE workspace_id = $1
+  AND (title = '[' || $2::text || ']'
+       OR title LIKE '[' || $2::text || '] %')
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type GetIssueByFeishuExternalIdentifierParams struct {
+	WorkspaceID        pgtype.UUID `json:"workspace_id"`
+	ExternalIdentifier string      `json:"external_identifier"`
+}
+
+func (q *Queries) GetIssueByFeishuExternalIdentifier(ctx context.Context, arg GetIssueByFeishuExternalIdentifierParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, getIssueByFeishuExternalIdentifier, arg.WorkspaceID, arg.ExternalIdentifier)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+	)
+	return i, err
+}
+
 const getIssueByNumber = `-- name: GetIssueByNumber :one
 SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at FROM issue
 WHERE workspace_id = $1 AND number = $2
