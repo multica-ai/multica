@@ -80,6 +80,50 @@ func TestParseMentions(t *testing.T) {
 	}
 }
 
+// TestParseMentions_PopulatesLabel pins that the visible markdown label
+// (the text inside the `[ ]`, without the optional leading @) is preserved
+// on the returned Mention. Dispatch-time logging compares this against the
+// resolved entity's canonical name to flag label/UUID mismatch.
+func TestParseMentions_PopulatesLabel(t *testing.T) {
+	tests := []struct {
+		name      string
+		content   string
+		wantLabel string
+	}{
+		{
+			name:      "agent mention without @",
+			content:   "[Bare](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+			wantLabel: "Bare",
+		},
+		{
+			name:      "agent mention with @",
+			content:   "[@Alice](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+			wantLabel: "Alice",
+		},
+		{
+			name:      "issue mention",
+			content:   "[MUL-7](mention://issue/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+			wantLabel: "MUL-7",
+		},
+		{
+			name:      "all mention",
+			content:   "[@all](mention://all/all)",
+			wantLabel: "all",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseMentions(tt.content)
+			if len(got) != 1 {
+				t.Fatalf("expected 1 mention, got %d: %+v", len(got), got)
+			}
+			if got[0].Label != tt.wantLabel {
+				t.Errorf("Label = %q, want %q", got[0].Label, tt.wantLabel)
+			}
+		})
+	}
+}
+
 func TestHasMentionAll(t *testing.T) {
 	tests := []struct {
 		name     string

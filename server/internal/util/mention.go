@@ -6,6 +6,12 @@ import "regexp"
 type Mention struct {
 	Type string // "member", "agent", "issue", or "all"
 	ID   string // user_id, agent_id, issue_id, or "all"
+	// Label is the visible text inside the markdown `[ ]` brackets, with
+	// the optional leading `@` stripped. Routing always uses ID, but the
+	// label is retained for dispatch-time observability — comparing it
+	// against the resolved entity's canonical name surfaces label/UUID
+	// mismatch (the failure mode that motivated mention.CanonicalizeMentions).
+	Label string
 }
 
 // MentionRe matches [@Label](mention://type/id) or [Label](mention://issue/id) in markdown.
@@ -31,7 +37,7 @@ func ParseMentions(content string) []Mention {
 			continue
 		}
 		seen[key] = true
-		result = append(result, Mention{Type: m[2], ID: m[3]})
+		result = append(result, Mention{Type: m[2], ID: m[3], Label: m[1]})
 	}
 	return result
 }
