@@ -1,7 +1,17 @@
 # --- Build stage ---
 FROM golang:1.26-alpine AS builder
 
-RUN apk add --no-cache git
+ARG GOPROXY=https://proxy.golang.org,direct
+ARG HTTP_PROXY=
+ARG HTTPS_PROXY=
+ARG ALL_PROXY=
+ARG NO_PROXY=
+ARG http_proxy=
+ARG https_proxy=
+ARG all_proxy=
+ARG no_proxy=
+
+ENV GOPROXY=$GOPROXY
 
 WORKDIR /src
 
@@ -15,14 +25,12 @@ COPY server/ ./server/
 # Build binaries
 ARG VERSION=dev
 ARG COMMIT=unknown
-RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" -o bin/server ./cmd/server
-RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" -o bin/multica ./cmd/multica
-RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w" -o bin/migrate ./cmd/migrate
+RUN cd server && CGO_ENABLED=0 go build -tags timetzdata -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" -o bin/server ./cmd/server
+RUN cd server && CGO_ENABLED=0 go build -tags timetzdata -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" -o bin/multica ./cmd/multica
+RUN cd server && CGO_ENABLED=0 go build -tags timetzdata -ldflags "-s -w" -o bin/migrate ./cmd/migrate
 
 # --- Runtime stage ---
 FROM alpine:3.21
-
-RUN apk add --no-cache ca-certificates tzdata
 
 WORKDIR /app
 

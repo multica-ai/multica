@@ -118,6 +118,30 @@ export interface AgentTask {
   context_dir?: string;
 }
 
+export interface LocalPreview {
+  id: string;
+  workspace_id: string;
+  issue_id?: string;
+  visibility: "private" | "issue" | "workspace";
+  cwd: string;
+  command: string[];
+  pid: number;
+  port?: number;
+  url?: string;
+  health_url?: string;
+  log_path: string;
+  status: "starting" | "running" | "stopped" | "unhealthy" | "unknown";
+  started_at: string;
+  last_health_at?: string;
+  last_accessed_at?: string;
+}
+
+export interface LocalPreviewLogs {
+  id: string;
+  log_path: string;
+  logs: string;
+}
+
 export interface Agent {
   id: string;
   workspace_id: string;
