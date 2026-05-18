@@ -170,7 +170,9 @@ export function AgentsPage() {
 
   // Workspace role of the current user, used to gate row-level "manage"
   // operations (archive / cancel-tasks). Mirrors the back-end's
-  // canManageAgent rule: workspace owner/admin OR the agent's owner.
+  // OPE-817: canManage is now owner-only (no admin bypass).
+  // The agents list still shows all agents (including private) to all members
+  // for learning/reference, but only the owner can manage them.
   const myRole = useMemo(() => {
     if (!currentUser) return null;
     return members.find((m) => m.user_id === currentUser.id)?.role ?? null;
@@ -355,7 +357,9 @@ export function AgentsPage() {
     return sortedAgents.map((agent) => {
       const isOwner =
         !!currentUser?.id && agent.owner_id === currentUser.id;
-      const canManage = isWorkspaceAdmin || isOwner;
+      // OPE-817: only the agent owner can manage (edit/archive/restore).
+      // Legacy agents (owner_id null) fall back to admin for backward compat.
+      const canManage = isOwner || (agent.owner_id === null && isWorkspaceAdmin);
       const ownerIdToShow =
         scope === "all" &&
         agent.owner_id &&

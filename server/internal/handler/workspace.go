@@ -76,6 +76,44 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 	}
 }
 
+func settingsIncludesAgentDefaults(settings any) bool {
+	settingsMap, ok := settings.(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = settingsMap["agent_defaults"]
+	return ok
+}
+
+func instructionsFromSettingsJSON(raw []byte) (string, bool) {
+	if len(raw) == 0 {
+		return "", false
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		return "", false
+	}
+	return instructionsFromSettingsMap(settings)
+}
+
+func instructionsFromSettingsAny(settings any) (string, bool) {
+	settingsMap, ok := settings.(map[string]any)
+	if !ok {
+		return "", false
+	}
+	return instructionsFromSettingsMap(settingsMap)
+}
+
+func instructionsFromSettingsMap(settings map[string]any) (string, bool) {
+	agentDefaults, ok := settings["agent_defaults"].(map[string]any)
+	if !ok {
+		return "", false
+	}
+	instructions, _ := agentDefaults["instructions"].(string)
+	_, present := agentDefaults["instructions"]
+	return instructions, present
+}
+
 type MemberResponse struct {
 	ID          string `json:"id"`
 	WorkspaceID string `json:"workspace_id"`
@@ -249,14 +287,18 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var agentDefaultsActor db.Member
+	trackAgentDefaultsInstructions := false
+
 	// When settings includes agent_defaults, require owner/admin role.
 	if req.Settings != nil {
-		if settingsMap, ok := req.Settings.(map[string]any); ok {
-			if _, hasAgentDefaults := settingsMap["agent_defaults"]; hasAgentDefaults {
-				if _, ok := h.requireWorkspaceRole(w, r, id, "workspace not found", "owner", "admin"); !ok {
-					return
-				}
+		if settingsIncludesAgentDefaults(req.Settings) {
+			var ok bool
+			agentDefaultsActor, ok = h.requireWorkspaceRole(w, r, id, "workspace not found", "owner", "admin")
+			if !ok {
+				return
 			}
+			_, trackAgentDefaultsInstructions = instructionsFromSettingsAny(req.Settings)
 		}
 	}
 
@@ -295,10 +337,59 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ws, err := h.Queries.UpdateWorkspace(r.Context(), params)
+	q := h.Queries
+	commit := func() error { return nil }
+	if trackAgentDefaultsInstructions && h.TxStarter != nil {
+		tx, err := h.TxStarter.Begin(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update workspace")
+			return
+		}
+		defer tx.Rollback(r.Context())
+		q = h.Queries.WithTx(tx)
+		commit = func() error { return tx.Commit(r.Context()) }
+	}
+
+	previousSystemInstructions := ""
+	nextSystemInstructions := ""
+	if trackAgentDefaultsInstructions {
+		existing, err := q.GetWorkspace(r.Context(), idUUID)
+		if err != nil {
+			if isNotFound(err) {
+				writeError(w, http.StatusNotFound, "workspace not found")
+				return
+			}
+			slog.Warn("get workspace before update failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to update workspace")
+			return
+		}
+		previousSystemInstructions, _ = instructionsFromSettingsJSON(existing.Settings)
+		nextSystemInstructions, _ = instructionsFromSettingsAny(req.Settings)
+	}
+
+	ws, err := q.UpdateWorkspace(r.Context(), params)
 	if err != nil {
 		slog.Warn("update workspace failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to update workspace: "+err.Error())
+		return
+	}
+
+	if trackAgentDefaultsInstructions && nextSystemInstructions != previousSystemInstructions {
+		if _, err := q.InsertInstructionsHistory(r.Context(), db.InsertInstructionsHistoryParams{
+			WorkspaceID: idUUID,
+			Scope:       instructionsHistoryScopeSystem,
+			Content:     nextSystemInstructions,
+			ActorID:     agentDefaultsActor.ID,
+		}); err != nil {
+			slog.Warn("insert system instructions history failed",
+				append(logger.RequestAttrs(r), "error", err, "workspace_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to update workspace")
+			return
+		}
+	}
+
+	if err := commit(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update workspace")
 		return
 	}
 

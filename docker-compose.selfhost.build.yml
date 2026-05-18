@@ -7,6 +7,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        GOPROXY: ${DOCKER_BUILD_GOPROXY:-https://goproxy.cn,direct}
+        HTTP_PROXY: ${DOCKER_BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${DOCKER_BUILD_HTTPS_PROXY:-}
+        ALL_PROXY: ${DOCKER_BUILD_ALL_PROXY:-}
+        NO_PROXY: ${DOCKER_BUILD_NO_PROXY:-localhost,127.0.0.1,host.docker.internal}
+        http_proxy: ${DOCKER_BUILD_HTTP_PROXY:-}
+        https_proxy: ${DOCKER_BUILD_HTTPS_PROXY:-}
+        all_proxy: ${DOCKER_BUILD_ALL_PROXY:-}
+        no_proxy: ${DOCKER_BUILD_NO_PROXY:-localhost,127.0.0.1,host.docker.internal}
 
   frontend:
     image: multica-web:dev
@@ -17,3 +27,11 @@ services:
         REMOTE_API_URL: http://backend:8080
         NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
         NEXT_PUBLIC_APP_VERSION: dev
+        HTTP_PROXY: ${DOCKER_BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${DOCKER_BUILD_HTTPS_PROXY:-}
+        ALL_PROXY: ${DOCKER_BUILD_ALL_PROXY:-}
+        NO_PROXY: ${DOCKER_BUILD_NO_PROXY:-localhost,127.0.0.1,host.docker.internal}
+        http_proxy: ${DOCKER_BUILD_HTTP_PROXY:-}
+        https_proxy: ${DOCKER_BUILD_HTTPS_PROXY:-}
+        all_proxy: ${DOCKER_BUILD_ALL_PROXY:-}
+        no_proxy: ${DOCKER_BUILD_NO_PROXY:-localhost,127.0.0.1,host.docker.internal}
