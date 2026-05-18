@@ -11,8 +11,10 @@
 variable "REGISTRY"   { default = "ghcr.io" }
 variable "REPO"       { default = "g2crowd/devenv-runtime" }
 variable "IMG_SHA"    { default = "dev" }
-variable "BASE_IMAGE" { default = "ghcr.io/g2crowd/agent-runtime-base" }
-variable "BASE_TAG"   { default = "latest" }
+variable "BASE_IMAGE"     { default = "ghcr.io/g2crowd/agent-runtime-base" }
+variable "BASE_TAG"       { default = "latest" }
+// kubectl — bump in lockstep with EKS control-plane minor.
+variable "KUBECTL_MINOR"  { default = "v1.31" }
 
 target "default" {
   context    = "docker/devenv-runtime"
@@ -25,8 +27,9 @@ target "default" {
     "${REGISTRY}/${REPO}:latest",
   ]
   args = {
-    BASE_IMAGE = "${BASE_IMAGE}"
-    BASE_TAG   = "${BASE_TAG}"
+    BASE_IMAGE    = "${BASE_IMAGE}"
+    BASE_TAG      = "${BASE_TAG}"
+    KUBECTL_MINOR = "${KUBECTL_MINOR}"
   }
   labels = {
     "org.opencontainers.image.source"      = "https://github.com/g2crowd/agentfarm"

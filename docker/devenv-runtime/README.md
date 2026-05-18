@@ -26,6 +26,7 @@ on is the entrypoint that boots `opencode serve`.
 | `OPENCODE_HOST`     | `0.0.0.0`   | Bind address. Defaults to `0.0.0.0` (overriding upstream's `127.0.0.1`) so the Kubernetes Service can reach the pod. |
 | `OPENCODE_PORT`     | `4096`      | Matches the upstream `opencode serve` default.                           |
 | `OPENCODE_EXTRA_ARGS` | (empty)    | Appended verbatim, e.g. `--cors https://devenv-jshuff.development.g2.com`. |
+| `KUBECTL_MINOR`       | `v1.31`    | Selects the upstream Kubernetes apt repo. Keep aligned with EKS control-plane minor. |
 
 ## Smoke test
 

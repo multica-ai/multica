@@ -11,7 +11,20 @@ ARG BASE_TAG=latest
 
 FROM ${BASE_IMAGE}:${BASE_TAG}
 
+# kubectl — bump in lockstep with EKS control-plane minor.
+ARG KUBECTL_MINOR=v1.31
+
 USER root
+
+RUN curl -fsSL "https://pkgs.k8s.io/core:/stable:/${KUBECTL_MINOR}/deb/Release.key" \
+      | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg \
+ && chmod go+r /etc/apt/keyrings/kubernetes-apt-keyring.gpg \
+ && echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/${KUBECTL_MINOR}/deb/ /" \
+      > /etc/apt/sources.list.d/kubernetes.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends kubectl \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh \
  && chmod +x /usr/local/bin/entrypoint.sh
