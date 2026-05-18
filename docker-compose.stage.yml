@@ -1,0 +1,107 @@
+# docker-compose.stage.yml
+#
+# Reconstructed 2026-05-18 from the running stage containers' `docker inspect`
+# output after the original /opt/multica-stage/docker-compose.stage.yml was
+# lost during the rename to /opt/multica-staging.
+#
+# Project name: multica-stage (set via `name:` or `-p multica-stage` on CLI)
+# Network: multica-stage_default (172.21.0.0/16, bridge)
+# Volumes: multica-stage_stage_pgdata, multica-stage_stage_backend_uploads
+# Port bindings (loopback only, fronted by nginx → stagemultica.uittai.com):
+#   postgres -> 127.0.0.1:5433
+#   backend  -> 127.0.0.1:8081
+#   frontend -> 127.0.0.1:3001
+
+name: multica-stage
+
+services:
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-multica}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-multica}
+    volumes:
+      - stage_pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U multica -d multica"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    image: multica-backend:stage
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_ENV: development
+      PORT: "8080"
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      MULTICA_APP_URL: https://stagemultica.uittai.com
+      FRONTEND_ORIGIN: https://stagemultica.uittai.com
+      CORS_ALLOWED_ORIGINS: https://stagemultica.uittai.com
+      COOKIE_DOMAIN: stagemultica.uittai.com
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_REDIRECT_URI: https://stagemultica.uittai.com/auth/callback
+      EMAIL_LOGIN_DISABLED: "false"
+      ALLOW_SIGNUP: "true"
+      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
+      ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
+      MULTICA_DEV_VERIFICATION_CODE: "246810"
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-}
+      CLOUDFRONT_DOMAIN: ${CLOUDFRONT_DOMAIN:-}
+      METRICS_ADDR: ${METRICS_ADDR:-}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+      GITHUB_APP_PRIVATE_KEY_PATH: ${GITHUB_APP_PRIVATE_KEY_PATH:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      GITHUB_APP_WEBHOOK_SECRET: ${GITHUB_APP_WEBHOOK_SECRET:-}
+      TEAM_APP_URL: ${TEAM_APP_URL:-}
+      TEAM_APP_SHARED_SECRET: ${TEAM_APP_SHARED_SECRET:-}
+    volumes:
+      - stage_backend_uploads:/app/data/uploads
+    ports:
+      - "127.0.0.1:8081:8080"
+
+  frontend:
+    image: multica-web:stage
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        REMOTE_API_URL: http://backend:8080
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
+        NEXT_PUBLIC_APP_VERSION: stage
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+      REMOTE_API_URL: http://backend:8080
+    ports:
+      - "127.0.0.1:3001:3000"
+
+volumes:
+  stage_pgdata:
+  stage_backend_uploads:
+
+networks:
+  default:
+    name: multica-stage_default
+    external: true
