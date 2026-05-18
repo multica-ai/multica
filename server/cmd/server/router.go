@@ -599,6 +599,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Workspace-wide 30-day run counts per agent for the Agents-list RUNS column.
 			r.Get("/api/agent-run-counts", h.GetWorkspaceAgentRunCounts)
 
+			// Mobile chat list (BUR-990): mobile uses a different URL +
+			// response shape than the web /api/chat/sessions endpoint.
+			// Paginated, enriched with agent_name + last_message per row.
+			r.Get("/api/chats", h.ListChats)
+
 			r.Route("/api/chat/sessions", func(r chi.Router) {
 				r.Post("/", h.CreateChatSession)
 				r.Get("/", h.ListChatSessions)

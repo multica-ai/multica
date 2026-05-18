@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -18,6 +19,35 @@ import (
 // chatSessionTitleMaxLen caps the rename input. Long enough to fit a
 // meaningful summary, short enough to keep the dropdown row scannable.
 const chatSessionTitleMaxLen = 200
+
+// Mobile chat list pagination bounds. defaultChatListLimit matches the page
+// size BUR-989 settled on for the MessagesScreen, max keeps a malicious or
+// buggy client from pulling the entire table in one request.
+const (
+	defaultChatListLimit = 20
+	maxChatListLimit     = 100
+)
+
+// MobileChatSession is the per-row payload returned by ListChats. Distinct
+// from ChatSessionResponse: mobile needs agent_name + last_message for the
+// row preview but does not need workspace_id / creator_id / status (already
+// implied by the request scope or hidden in the mobile UI).
+type MobileChatSession struct {
+	ID            string  `json:"id"`
+	Title         string  `json:"title"`
+	AgentID       string  `json:"agent_id"`
+	AgentName     string  `json:"agent_name"`
+	LastMessage   *string `json:"last_message,omitempty"`
+	LastMessageAt *string `json:"last_message_at,omitempty"`
+	CreatedAt     string  `json:"created_at"`
+}
+
+// ChatListResponse is the GET /api/chats envelope expected by mobile.
+type ChatListResponse struct {
+	Sessions []MobileChatSession `json:"sessions"`
+	Total    int64               `json:"total"`
+	HasMore  bool                `json:"has_more"`
+}
 
 // ---------------------------------------------------------------------------
 // Chat Sessions
@@ -172,6 +202,110 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ListChats is the mobile-facing chat list endpoint mounted at GET /api/chats.
+// It differs from ListChatSessions (web) in three ways:
+//
+//   - Paginated: returns { sessions, total, has_more } so the mobile
+//     MessagesScreen can fetch one page at a time over a slower link.
+//   - Enriched: each row carries agent_name + last_message + last_message_at,
+//     resolved in a single DB round-trip via the LEFT JOIN in
+//     ListChatsForMobile, so the client renders the list without a follow-up
+//     fan-out per session.
+//   - Scoped: results are filtered to the authenticated user's sessions in
+//     the workspace resolved by the workspace middleware (?workspace_slug
+//     from the mobile axios interceptor). A foreign workspace returns 0 rows.
+//
+// Sessions of any status are included (active + archived) — the mobile UI is
+// the read-only history surface and intentionally shows both.
+func (h *Handler) ListChats(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	userUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
+	if !ok {
+		return
+	}
+
+	limit := parseChatListQueryInt(r, "limit", defaultChatListLimit)
+	if limit <= 0 {
+		limit = defaultChatListLimit
+	}
+	if limit > maxChatListLimit {
+		limit = maxChatListLimit
+	}
+	offset := parseChatListQueryInt(r, "offset", 0)
+	if offset < 0 {
+		offset = 0
+	}
+
+	rows, err := h.Queries.ListChatsForMobile(r.Context(), db.ListChatsForMobileParams{
+		WorkspaceID: workspaceUUID,
+		CreatorID:   userUUID,
+		RowOffset:   int32(offset),
+		LimitCount:  int32(limit),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list chats")
+		return
+	}
+
+	total, err := h.Queries.CountChatSessionsByCreator(r.Context(), db.CountChatSessionsByCreatorParams{
+		WorkspaceID: workspaceUUID,
+		CreatorID:   userUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to count chats")
+		return
+	}
+
+	sessions := make([]MobileChatSession, len(rows))
+	for i, row := range rows {
+		s := MobileChatSession{
+			ID:        uuidToString(row.ID),
+			Title:     row.Title,
+			AgentID:   uuidToString(row.AgentID),
+			AgentName: row.AgentName,
+			CreatedAt: timestampToString(row.CreatedAt),
+		}
+		if row.LastMessage.Valid {
+			content := row.LastMessage.String
+			s.LastMessage = &content
+		}
+		if row.LastMessageAt.Valid {
+			ts := timestampToString(row.LastMessageAt)
+			s.LastMessageAt = &ts
+		}
+		sessions[i] = s
+	}
+
+	writeJSON(w, http.StatusOK, ChatListResponse{
+		Sessions: sessions,
+		Total:    total,
+		HasMore:  int64(offset)+int64(len(sessions)) < total,
+	})
+}
+
+// parseChatListQueryInt reads an integer query param, returning the fallback
+// when the param is missing or unparseable. Negative values and overflow are
+// the caller's responsibility to clamp.
+func parseChatListQueryInt(r *http.Request, name string, fallback int) int {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return v
 }
 
 func (h *Handler) loadChatSessionForUser(w http.ResponseWriter, r *http.Request, userID, workspaceID, sessionID string) (db.ChatSession, bool) {

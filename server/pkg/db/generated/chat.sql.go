@@ -11,6 +11,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countChatSessionsByCreator = `-- name: CountChatSessionsByCreator :one
+SELECT COUNT(*) AS total
+FROM chat_session
+WHERE workspace_id = $1 AND creator_id = $2
+`
+
+type CountChatSessionsByCreatorParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	CreatorID   pgtype.UUID `json:"creator_id"`
+}
+
+// Total session count for the same scope as ListChatsForMobile, used to drive
+// the has_more flag on the mobile pagination response.
+func (q *Queries) CountChatSessionsByCreator(ctx context.Context, arg CountChatSessionsByCreatorParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countChatSessionsByCreator, arg.WorkspaceID, arg.CreatorID)
+	var total int64
+	err := row.Scan(&total)
+	return total, err
+}
+
 const createChatMessage = `-- name: CreateChatMessage :one
 INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reason, elapsed_ms)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -435,6 +455,87 @@ func (q *Queries) ListChatSessionsByCreator(ctx context.Context, arg ListChatSes
 			&i.UnreadSince,
 			&i.RuntimeID,
 			&i.HasUnread,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChatsForMobile = `-- name: ListChatsForMobile :many
+SELECT
+  cs.id,
+  cs.title,
+  cs.agent_id,
+  a.name AS agent_name,
+  lm.content AS last_message,
+  lm.created_at AS last_message_at,
+  cs.created_at,
+  cs.updated_at
+FROM chat_session cs
+JOIN agent a ON a.id = cs.agent_id
+LEFT JOIN chat_message lm ON lm.id = (
+  SELECT id FROM chat_message
+  WHERE chat_session_id = cs.id
+  ORDER BY created_at DESC
+  LIMIT 1
+)
+WHERE cs.workspace_id = $1 AND cs.creator_id = $2
+ORDER BY cs.updated_at DESC
+LIMIT $4 OFFSET $3
+`
+
+type ListChatsForMobileParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	CreatorID   pgtype.UUID `json:"creator_id"`
+	RowOffset   int32       `json:"row_offset"`
+	LimitCount  int32       `json:"limit_count"`
+}
+
+type ListChatsForMobileRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	Title         string             `json:"title"`
+	AgentID       pgtype.UUID        `json:"agent_id"`
+	AgentName     string             `json:"agent_name"`
+	LastMessage   pgtype.Text        `json:"last_message"`
+	LastMessageAt pgtype.Timestamptz `json:"last_message_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Paginated chat list for the mobile MessagesScreen. Joins the agent for the
+// display name and pulls the latest chat_message (if any) via a LEFT JOIN on
+// a correlated subquery that resolves the latest message id per session. The
+// direct LEFT JOIN on chat_message (rather than a LATERAL derived row) makes
+// sqlc infer pgtype.Text / pgtype.Timestamptz (nullable) for lm.content /
+// lm.created_at — same pattern as ListInboxItems' LEFT JOIN on issue.
+func (q *Queries) ListChatsForMobile(ctx context.Context, arg ListChatsForMobileParams) ([]ListChatsForMobileRow, error) {
+	rows, err := q.db.Query(ctx, listChatsForMobile,
+		arg.WorkspaceID,
+		arg.CreatorID,
+		arg.RowOffset,
+		arg.LimitCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChatsForMobileRow{}
+	for rows.Next() {
+		var i ListChatsForMobileRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.AgentID,
+			&i.AgentName,
+			&i.LastMessage,
+			&i.LastMessageAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
