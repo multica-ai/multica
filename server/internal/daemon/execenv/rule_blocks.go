@@ -201,27 +201,41 @@ var squadDelegationIntentKeywords = []string{
 func writeAvailableCommands(b *strings.Builder, caps runtimeCapabilities) {
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Use `--output json` for structured data.** Human table output now prints routable issue keys (for example `MUL-123`) and short UUID prefixes for workspace resources; use `--full-id` on list commands when you need canonical UUIDs.\n\n")
+	b.WriteString("The default brief includes the commands needed for the core agent loop and common issue create/update tasks. For everything else, run `multica --help`, `multica <command> --help`, or `multica <command> <subcommand> --help`; prefer `--output json` when the command supports it.\n\n")
 
-	b.WriteString("### Read\n")
-	b.WriteString("- `multica issue get <id> --output json` — Get full issue details (title, description, status, priority, assignee)\n")
-	b.WriteString("- `multica issue list [--status X] [--priority X] [--assignee X | --assignee-id <uuid>] [--limit N] [--offset N] [--full-id] [--output json]` — List issues in workspace (default limit: 50; table output uses routable issue keys; JSON output includes `total`, `has_more` — use offset to paginate when `has_more` is true). Prefer `--assignee-id <uuid>` when scripting from `multica workspace members --output json` / `multica agent list --output json` / `multica squad list --output json`.\n")
-	b.WriteString("- `multica issue comment list <issue-id> [--since <RFC3339>] --output json` — List all comments on an issue (server caps at 2000 rows). Use `--since` for incremental polling.\n")
+	b.WriteString("### Core\n")
+	b.WriteString("- `multica issue get <id> --output json` — Get full issue details.\n")
+	if caps.kind == taskKindChat {
+		b.WriteString("- `multica issue list [--status X] [--priority X] [--assignee X | --assignee-id <uuid>] [--limit N] [--offset N] [--full-id] [--output json]` — List issues in workspace; use offset pagination when JSON output reports `has_more`.\n")
+	}
+	b.WriteString("- `multica issue comment list <issue-id> [--since <RFC3339>] --output json` — List comments on an issue; use `--since` for incremental polling.\n")
+	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated.\n")
+	b.WriteString("- `multica issue update <id> [--title X] [--description X | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update issue fields; use `--parent \"\"` to clear parent.\n")
+	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>]` — Check out a repository into the working directory (creates a git worktree with a dedicated branch; use `--ref` for review/QA on a specific branch, tag, or commit)\n")
+	b.WriteString("- `multica issue status <id> <status>` — Shortcut for `issue update --status` when you only need to flip status (todo, in_progress, in_review, done, blocked, backlog, cancelled)\n")
+	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-stdin | --content-file <path>] [--parent <comment-id>] [--attachment <path>]` — Post a comment. Pick the input mode that preserves your content; run `multica issue comment add --help` for details.\n")
+	b.WriteString("\n")
+
+	if caps.Has(capabilityFullMentions) || caps.Has(capabilityLabelsSubscribers) || caps.Has(capabilityAutopilot) || caps.Has(capabilityProjectResources) || caps.Has(capabilitySquadDelegation) || caps.kind == taskKindChat {
+		b.WriteString("### Additional Read\n")
+	}
+	if caps.kind == taskKindChat {
+		b.WriteString("- `multica workspace get --output json` — Get workspace details and context\n")
+	}
+	if caps.Has(capabilityFullMentions) {
+		b.WriteString("- `multica workspace members [workspace-id] --output json` — List workspace members (user IDs, names, roles)\n")
+		b.WriteString("- `multica agent list --output json` — List agents in workspace\n")
+	}
 	if caps.Has(capabilityLabelsSubscribers) {
 		b.WriteString("- `multica issue label list <issue-id> --output json` — List labels currently attached to an issue\n")
 		b.WriteString("- `multica issue subscriber list <issue-id> --output json` — List members/agents subscribed to an issue\n")
 		b.WriteString("- `multica label list --output json` — List all labels defined in the workspace (returns id + name + color)\n")
 	}
-	b.WriteString("- `multica workspace get --output json` — Get workspace details and context\n")
-	b.WriteString("- `multica workspace members [workspace-id] --output json` — List workspace members (user IDs, names, roles)\n")
-	b.WriteString("- `multica agent list --output json` — List agents in workspace\n")
-	b.WriteString("- `multica squad list --output json` — List squads in workspace (squads are first-class assignees — assigning an issue to a squad routes it to the squad leader, who then delegates)\n")
 	if caps.Has(capabilitySquadDelegation) {
+		b.WriteString("- `multica squad list --output json` — List squads in workspace\n")
 		b.WriteString("- `multica squad get <squad-id> --output json` — Get squad details including leader and instructions\n")
 		b.WriteString("- `multica squad member list <squad-id> --output json` — List members of a squad\n")
 	}
-	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>]` — Check out a repository into the working directory (creates a git worktree with a dedicated branch; use `--ref` for review/QA on a specific branch, tag, or commit)\n")
-	b.WriteString("- `multica issue runs <issue-id> [--full-id] --output json` — List all execution runs for an issue (status, timestamps, errors); table task IDs are short prefixes unless `--full-id` is set\n")
-	b.WriteString("- `multica issue run-messages <task-id> [--issue <issue-id>] [--since <seq>] --output json` — List messages for a specific execution run; full task UUIDs work directly, copied short task prefixes must be scoped with `--issue <issue-id>`\n")
 	if caps.Has(capabilityAttachments) {
 		b.WriteString("- `multica attachment download <id> [-o <dir>]` — Download an attachment file locally by ID\n")
 	}
@@ -234,17 +248,16 @@ func writeAvailableCommands(b *strings.Builder, caps runtimeCapabilities) {
 		b.WriteString("- `multica project get <id> --output json` — Get project details. Includes `resource_count`; the resources themselves live at the sub-collection below.\n")
 		b.WriteString("- `multica project resource list <project-id> --output json` — List resources (e.g. github_repo) attached to a project. Use this when `resource_count > 0` and you need the actual refs.\n")
 	}
-	b.WriteString("\n")
-
-	b.WriteString("### Write\n")
-	if caps.Has(capabilityAttachments) {
-		b.WriteString("- `multica issue create --title \"...\" [--description \"...\"] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue. `--attachment` may be repeated to upload multiple local files.\n")
-	} else {
-		b.WriteString("- `multica issue create --title \"...\" [--description \"...\"] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Create a new issue.\n")
+	if caps.Has(capabilityFullMentions) || caps.Has(capabilityLabelsSubscribers) || caps.Has(capabilityAutopilot) || caps.Has(capabilityProjectResources) || caps.Has(capabilitySquadDelegation) || caps.kind == taskKindChat {
+		b.WriteString("\n")
 	}
-	b.WriteString("- `multica issue update <id> [--title X] [--description X] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update one or more issue fields in a single call. Use `--parent \"\"` to clear the parent.\n")
-	b.WriteString("- `multica issue status <id> <status>` — Shortcut for `issue update --status` when you only need to flip status (todo, in_progress, in_review, done, blocked, backlog, cancelled)\n")
-	b.WriteString("- `multica issue assign <id> --to <name>|--to-id <uuid>` — Assign an issue to a member, agent, or squad. `--to <name>` does fuzzy name matching; pass `--to-id <uuid>` (mutually exclusive with `--to`) to assign by canonical UUID, e.g. when names overlap. Use `--unassign` to clear the assignee.\n")
+
+	if caps.Has(capabilityFullMentions) || caps.Has(capabilityLabelsSubscribers) || caps.Has(capabilityAutopilot) || caps.Has(capabilitySquadDelegation) {
+		b.WriteString("### Additional Write\n")
+	}
+	if caps.Has(capabilityFullMentions) || caps.Has(capabilitySquadDelegation) {
+		b.WriteString("- `multica issue assign <id> --to <name>|--to-id <uuid>` — Assign an issue to a member, agent, or squad. Use `--unassign` to clear the assignee.\n")
+	}
 	if caps.Has(capabilityLabelsSubscribers) {
 		b.WriteString("- Note: `multica issue create` does not accept labels or subscribers directly; attach them after creation with the commands below.\n")
 		b.WriteString("- `multica issue label add <issue-id> <label-id>` — Attach a label to an issue (look up the label id via `multica label list`)\n")
@@ -252,21 +265,6 @@ func writeAvailableCommands(b *strings.Builder, caps runtimeCapabilities) {
 		b.WriteString("- `multica issue subscriber add <issue-id> [--user <name>|--user-id <uuid>]` — Subscribe a member or agent to issue updates (defaults to the caller when neither flag is set; the two flags are mutually exclusive)\n")
 		b.WriteString("- `multica issue subscriber remove <issue-id> [--user <name>|--user-id <uuid>]` — Unsubscribe a member or agent\n")
 	}
-	if caps.Has(capabilityAttachments) {
-		b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-stdin | --content-file <path>] [--parent <comment-id>] [--attachment <path>]` — Post a comment. `--attachment` may be repeated for local files.\n")
-	} else {
-		b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-stdin | --content-file <path>] [--parent <comment-id>]` — Post a comment.\n")
-	}
-	b.WriteString("  - `--content \"...\"` for short single-line text. The CLI decodes `\\n`, `\\r`, `\\t`, `\\\\` so escaped multi-line is OK; do not embed raw newlines in the argument.\n")
-	b.WriteString("  - `--content-stdin` to pipe the body via HEREDOC. Preserves multi-line and special characters verbatim. Cleanest in `bash` / `zsh`.\n")
-	b.WriteString("  - `--content-file <path>` to read a UTF-8 file off disk. Preserves bytes verbatim regardless of the shell — use this on Windows when stdin would re-encode non-ASCII (Chinese, Japanese, Cyrillic, accents, emoji) through the console codepage and drop them as `?`.\n")
-	b.WriteString("  - Use `--parent` to reply to a specific comment")
-	if caps.Has(capabilityAttachments) {
-		b.WriteString("; `--attachment` may be repeated")
-	}
-	b.WriteString(".\n")
-	b.WriteString("- `multica issue create` / `multica issue update` accept the same three modes for `--description`: `--description \"...\"`, `--description-stdin`, or `--description-file <path>`.\n")
-	b.WriteString("- `multica issue comment delete <comment-id>` — Delete a comment\n")
 	if caps.Has(capabilityLabelsSubscribers) {
 		b.WriteString("- `multica label create --name \"...\" --color \"#hex\"` — Define a new workspace label (use this only when the label you need does not exist yet; reuse existing labels via `multica label list` first)\n")
 	}
@@ -279,7 +277,9 @@ func writeAvailableCommands(b *strings.Builder, caps runtimeCapabilities) {
 	if caps.Has(capabilitySquadDelegation) {
 		b.WriteString("- `multica squad activity <issue-id> action|no_action|failed [--reason \"...\"] [--output json]` — Record a squad leader evaluation decision in the issue timeline\n")
 	}
-	b.WriteString("\n")
+	if caps.Has(capabilityFullMentions) || caps.Has(capabilityLabelsSubscribers) || caps.Has(capabilityAutopilot) || caps.Has(capabilitySquadDelegation) {
+		b.WriteString("\n")
+	}
 }
 
 func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv, caps runtimeCapabilities) {
