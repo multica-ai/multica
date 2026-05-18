@@ -110,14 +110,14 @@ describe("canEditAgent", () => {
       true,
     );
   });
-  it("allows workspace owner", () => {
+  it("denies workspace owner who is not agent owner (OPE-817)", () => {
     expect(canEditAgent(agent, { userId: BOB, role: "owner" }).allowed).toBe(
-      true,
+      false,
     );
   });
-  it("allows workspace admin", () => {
+  it("denies workspace admin who is not agent owner (OPE-817)", () => {
     expect(canEditAgent(agent, { userId: BOB, role: "admin" }).allowed).toBe(
-      true,
+      false,
     );
   });
   it("denies non-owner member", () => {
