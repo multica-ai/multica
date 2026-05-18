@@ -45,3 +45,17 @@ make check            # Full verification pipeline
 ```
 
 See CLAUDE.md for the complete command reference.
+
+### Permission Model (critical — fork divergence)
+
+Our fork enforces **stricter** agent permissions than upstream:
+
+- **Agent edit/archive/restore** → owner only (no Admin bypass)
+- **Agent ENV values** → owner only (keys visible to all, values masked)
+- **Agent visibility** → all workspace members can read any agent's config
+- **Agent duplication** → any member can copy any agent (copy owned by them)
+- **Private agent trigger** → owner only
+
+⚠️ When merging upstream code, never re-introduce `isAdminLike` bypass in `canEditAgent` or `canViewAgentEnv`.
+
+Full details and merge guidance: see **CLAUDE.md → Permission Model** section.
