@@ -200,7 +200,7 @@ export function ActorIssuesPanel({
               {t(($) => $.actor_issues.empty[scope].description)}
             </p>
           </div>
-        ) : issues.length === 0 ? (
+        ) : search.trim() !== "" && issues.length === 0 ? (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
             <Search className="h-10 w-10 text-muted-foreground/40" />
             <p className="text-sm">{t(($) => $.actor_issues.search_empty)}</p>
