@@ -115,4 +115,8 @@ export type {
   RemoveSquadMemberRequest,
   UpdateSquadMemberRoleRequest,
   CreateSquadActivityLogRequest,
+  SquadMemberStatusValue,
+  SquadActiveIssueBrief,
+  SquadMemberStatus,
+  SquadMemberStatusListResponse,
 } from "./squad";

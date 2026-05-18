@@ -96,6 +96,7 @@ import type {
   GitHubConnectResponse,
   Squad,
   SquadMember,
+  SquadMemberStatusListResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -119,9 +120,11 @@ import {
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
+  EMPTY_SQUAD_MEMBER_STATUS_LIST,
   EMPTY_TIMELINE_ENTRIES,
   GroupedIssuesResponseSchema,
   ListIssuesResponseSchema,
+  SquadMemberStatusListResponseSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
 } from "./schemas";
@@ -1536,6 +1539,17 @@ export class ApiClient {
 
   async updateSquadMemberRole(squadId: string, data: { member_type: string; member_id: string; role: string }): Promise<SquadMember> {
     return this.fetch(`/api/squads/${squadId}/members/role`, { method: "PATCH", body: JSON.stringify(data) });
+  }
+
+  // Per-squad members status snapshot: one row per member with derived
+  // working/idle/offline/unstable plus the issues each agent is currently
+  // running. Parsed with a lenient schema so a new server-side status
+  // value or extra field can't white-screen the Squad page (#2143).
+  async getSquadMemberStatus(squadId: string): Promise<SquadMemberStatusListResponse> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/members/status`);
+    return parseWithFallback(raw, SquadMemberStatusListResponseSchema, EMPTY_SQUAD_MEMBER_STATUS_LIST, {
+      endpoint: "GET /api/squads/:id/members/status",
+    }) as SquadMemberStatusListResponse;
   }
 
   // Autopilots
