@@ -285,8 +285,6 @@ func main() {
 				PrePipeline:        components.PrePipeline,
 				PostPipeline:       components.PostPipeline,
 				RuleResolvers:      components.RuleResolvers,
-				ChatIntent:         components.ChatIntent,
-				TurnPlanner:        components.TurnPlanner,
 				ChannelTurn:        components.ChannelTurn,
 				DispatchStore:      components.DispatchStore,
 				ConversationStore:  components.ConversationStore,

@@ -375,7 +375,7 @@ func (s *DBInboundEventStore) MarkWaitingAgent(ctx context.Context, id string, e
 		return err
 	}
 	if waitKind == "" {
-		waitKind = WaitKindIntent
+		waitKind = WaitKindChannelTurn
 	}
 	if _, err = s.pool.Exec(ctx, `
 UPDATE channel_inbound_event

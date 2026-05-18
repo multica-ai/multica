@@ -95,7 +95,7 @@ func TestRuntimeProcessRecord_SendsDeferredAckAfterPreContinue(t *testing.T) {
 	rt := NewRuntime(RuntimeConfig{
 		Store:     store,
 		ReplySink: sink,
-		ChatIntent: fakeAsyncIntentClient{
+		ChannelTurn: fakeAsyncIntentClient{
 			taskID: "550e8400-e29b-41d4-a716-446655440000",
 		},
 		PrePipeline: NewPipeline(fnStep{
@@ -333,7 +333,7 @@ func TestRuntimeProcessRecord_NaturalLanguageStartsChannelTurnBeforeRules(t *tes
 				Intent:  chintent.Intent{Kind: chintent.IntentQueryProgress, Params: map[string]string{"scope": "projects"}},
 			},
 		}},
-		ChatIntent: fakeAsyncIntentClient{taskID: "550e8400-e29b-41d4-a716-446655440000"},
+		ChannelTurn: fakeAsyncIntentClient{taskID: "550e8400-e29b-41d4-a716-446655440000"},
 	})
 
 	err := rt.processRecord(context.Background(), &InboundEventRecord{
@@ -573,7 +573,7 @@ func TestRuntimeStartChannelTurnFailureSendsOncePerEvent(t *testing.T) {
 		Store:         store,
 		ReplySink:     sink,
 		DispatchStore: dispatch,
-		ChatIntent:    fakeAsyncIntentClient{err: errors.New("no runtime")},
+		ChannelTurn:   fakeAsyncIntentClient{err: errors.New("no runtime")},
 	})
 	rec := &InboundEventRecord{
 		ID:          "row-1",
@@ -608,7 +608,7 @@ func TestRuntimeStartChannelTurnFailureUsesUserVisibleMessage(t *testing.T) {
 	rt := NewRuntime(RuntimeConfig{
 		Store:     store,
 		ReplySink: sink,
-		ChatIntent: fakeAsyncIntentClient{err: &chintent.ChannelAgentUnavailableError{
+		ChannelTurn: fakeAsyncIntentClient{err: &chintent.ChannelAgentUnavailableError{
 			Message: "指定智能体当前不可用，或对应运行时不支持群聊语义处理。请换一个智能体，或重启/更新运行时后再试。",
 			Reason:  "bound agent runtime does not advertise channel_turn",
 		}},
@@ -646,7 +646,7 @@ func TestRuntimeStartChannelTurnFailureCooldownSuppressesChatSpam(t *testing.T) 
 		Store:         store,
 		ReplySink:     sink,
 		DispatchStore: dispatch,
-		ChatIntent:    fakeAsyncIntentClient{err: errors.New("no runtime")},
+		ChannelTurn:   fakeAsyncIntentClient{err: errors.New("no runtime")},
 	})
 
 	for _, id := range []string{"row-1", "row-2"} {
@@ -712,6 +712,27 @@ func TestRuntimeResumeChannelTurnFailureUsesFailureOnce(t *testing.T) {
 	}
 }
 
+func TestRuntimeResumeWaitingAgents_MarksLegacyIntentDead(t *testing.T) {
+	store := &fakeRuntimeStore{
+		waiting: []WaitingAgentEvent{{
+			ID:         "row-1",
+			WaitKind:   WaitKindIntent,
+			WaitTaskID: "550e8400-e29b-41d4-a716-446655440000",
+			UpdatedAt:  time.Now(),
+		}},
+	}
+	rt := NewRuntime(RuntimeConfig{Store: store})
+
+	rt.resumeWaitingAgents(context.Background())
+
+	if !store.dead {
+		t.Fatal("legacy intent wait should be marked dead")
+	}
+	if got := store.deadErr; got != "legacy channel intent tasks are no longer supported" {
+		t.Fatalf("dead error = %q", got)
+	}
+}
+
 func TestRuntimeWorker_DeadRetryNotifiesUser(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	store := &fakeRuntimeStore{
@@ -750,7 +771,10 @@ type fakeRuntimeStore struct {
 	claimed      bool
 	waitingAgent bool
 	waitKind     string
+	waiting      []WaitingAgentEvent
 	processed    bool
+	dead         bool
+	deadErr      string
 	retry        RetryResult
 	onRetry      func()
 	chatCtx      ChatBindingContext
@@ -805,12 +829,16 @@ func (s *fakeRuntimeStore) MarkRetry(context.Context, string, error) (RetryResul
 	return s.retry, nil
 }
 
-func (s *fakeRuntimeStore) MarkDead(context.Context, string, error) error {
+func (s *fakeRuntimeStore) MarkDead(_ context.Context, _ string, err error) error {
+	s.dead = true
+	if err != nil {
+		s.deadErr = err.Error()
+	}
 	return nil
 }
 
 func (s *fakeRuntimeStore) ListWaitingAgent(context.Context, int) ([]WaitingAgentEvent, error) {
-	return nil, nil
+	return s.waiting, nil
 }
 
 func (s *fakeRuntimeStore) LookupChatContext(context.Context, string, string) (ChatBindingContext, error) {

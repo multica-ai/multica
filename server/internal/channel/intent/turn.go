@@ -1,9 +1,6 @@
 package intent
 
-import (
-	"context"
-	"strings"
-)
+import "strings"
 
 type ChannelTurnMode string
 
@@ -41,11 +38,6 @@ type ChannelTurnPlan struct {
 type ChannelComposeRequest struct {
 	Plan          ChannelTurnPlan `json:"plan"`
 	ExecutionJSON string          `json:"execution_json,omitempty"`
-}
-
-type ChannelTurnPlanner interface {
-	StartTurn(ctx context.Context, req IntentRequest) (string, error)
-	ParseTurnResult(ctx context.Context, taskID string) (IntentResult, bool, error)
 }
 
 func IntentFromTurnPlan(plan ChannelTurnPlan, sourceText string) IntentResult {

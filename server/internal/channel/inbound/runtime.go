@@ -76,8 +76,6 @@ type RuntimeConfig struct {
 	PrePipeline           *Pipeline
 	PostPipeline          *Pipeline
 	RuleResolvers         []chintent.IntentResolver
-	ChatIntent            chintent.AsyncChatIntentClient
-	TurnPlanner           chintent.ChannelTurnPlanner
 	ChannelTurn           chintent.ChannelAgentTurnClient
 	DispatchStore         DispatchCompletionStore
 	FailureLimiter        FailureNoticeLimiter
@@ -131,16 +129,6 @@ func NewRuntime(cfg RuntimeConfig) *Runtime {
 	}
 	if cfg.FailureLimiter == nil {
 		cfg.FailureLimiter = newMemoryFailureNoticeLimiter()
-	}
-	if cfg.TurnPlanner == nil {
-		if planner, ok := cfg.ChatIntent.(chintent.ChannelTurnPlanner); ok {
-			cfg.TurnPlanner = planner
-		}
-	}
-	if cfg.ChannelTurn == nil {
-		if turn, ok := cfg.ChatIntent.(chintent.ChannelAgentTurnClient); ok {
-			cfg.ChannelTurn = turn
-		}
 	}
 	return &Runtime{cfg: cfg, pendingAckByEvent: make(map[string]struct{})}
 }
@@ -728,51 +716,12 @@ func (r *Runtime) resumeWaitingAgents(ctx context.Context) {
 			r.resumeChannelTurn(ctx, item)
 			continue
 		}
-		if item.WaitKind != WaitKindIntent {
-			continue
-		}
-		if r.cfg.TurnPlanner == nil {
-			continue
-		}
-		result, done, err := r.cfg.TurnPlanner.ParseTurnResult(ctx, item.WaitTaskID)
-		if !done {
-			continue
-		}
-		rec, loadErr := r.cfg.Store.Load(ctx, item.ID)
-		if loadErr != nil {
-			slog.Error("channel inbound runtime: load waiting event failed", "event_row_id", item.ID, "error", loadErr)
-			continue
-		}
-		if err != nil {
-			chatCtx := r.lookupChatContext(ctx, rec.Event)
-			if chatCtx.WorkspaceID == "" {
-				chatCtx.WorkspaceID = rec.WorkspaceID
-				chatCtx.DefaultProjectID = rec.DefaultProjectID
+		if item.WaitKind == WaitKindIntent {
+			err := errors.New("legacy channel intent tasks are no longer supported")
+			if markErr := r.cfg.Store.MarkDead(ctx, item.ID, err); markErr != nil {
+				slog.Error("channel inbound runtime: mark legacy channel intent dead failed", "event_row_id", item.ID, "error", markErr)
 			}
-			req := r.buildIntentRequest(ctx, rec, rec.Event, &chatCtx)
-			if result, ok, ruleErr := r.resolveByRules(ctx, req); ruleErr != nil {
-				slog.Error("channel inbound runtime: fallback rule intent failed", "event_row_id", item.ID, "error", ruleErr)
-			} else if ok {
-				result = applyRequestContextToIntentResult(result, req)
-				if _, applyErr := r.applyIntentResult(ctx, rec, result, chatCtx, true); applyErr != nil {
-					slog.Error("channel inbound runtime: apply fallback rule intent failed", "event_row_id", item.ID, "error", applyErr)
-				}
-				continue
-			}
-			if _, applyErr := r.applyIntentResult(ctx, rec, fallbackRuleUnknown(), chatCtx, true); applyErr != nil {
-				slog.Error("channel inbound runtime: apply fallback unknown failed", "event_row_id", item.ID, "error", applyErr)
-			}
-			continue
-		}
-		chatCtx := r.lookupChatContext(ctx, rec.Event)
-		if chatCtx.WorkspaceID == "" {
-			chatCtx.WorkspaceID = rec.WorkspaceID
-			chatCtx.DefaultProjectID = rec.DefaultProjectID
-		}
-		req := r.buildIntentRequest(ctx, rec, rec.Event, &chatCtx)
-		result = applyRequestContextToIntentResult(result, req)
-		if _, err := r.applyIntentResult(ctx, rec, result, chatCtx, true); err != nil {
-			slog.Error("channel inbound runtime: resume intent failed", "event_row_id", item.ID, "error", err)
+			r.completeTurnAfterFailure(ctx, &InboundEventRecord{ID: item.ID}, channelconversation.TurnStatusDead, err)
 		}
 	}
 }

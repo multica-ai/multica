@@ -20,3 +20,26 @@
 
 ### Next
 - Milestone 2: split command/turn/action boundaries and start removing old chat intent planner influence from package/API naming.
+
+## Milestone 2 / 5
+
+### Implemented
+- Runtime config now accepts only `ChannelAgentTurnClient` for natural-language channel turns; `ChatIntent` and `TurnPlanner` are no longer part of inbound runtime wiring.
+- Server/channel manager assembly now builds and passes the channel-turn client directly instead of routing through async chat-intent/planner adapters.
+- Legacy waiting-agent rows with `wait_kind=intent` are marked dead instead of being resumed through the removed planner path.
+- Empty `wait_kind` defaults to `channel_turn`, preventing accidental re-entry into legacy intent semantics.
+- Removed the unused `ChannelTurnPlanner` interface and adapter methods.
+
+### Approach
+- Kept command rule resolution in place for slash/source commands only.
+- Limited this milestone to runtime and assembly boundaries so old task types can be deleted separately with focused daemon/service tests.
+
+### Plan Delta
+- No material delta. The old chat-intent task implementation still exists behind unused methods and is scheduled for the next milestone.
+
+### Follow-Up
+- Delete or quarantine `ChatIntentClient`, `AsyncChatIntentClient`, `BuildChatIntentPrompt`, and channel-intent task enqueue/daemon prompt paths if no non-channel-turn caller remains.
+- Rename the remaining command-rule code so `intent` no longer reads like the primary natural-language abstraction.
+
+### Next
+- Milestone 3: remove the old chat intent planner/task surface and update prompt tests around the agent-turn contract.

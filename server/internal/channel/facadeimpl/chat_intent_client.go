@@ -101,10 +101,6 @@ func (c *TaskBackedChatIntentClient) StartIntent(ctx context.Context, req chinte
 	return util.UUIDToString(task.ID), nil
 }
 
-func (c *TaskBackedChatIntentClient) StartTurn(ctx context.Context, req chintent.IntentRequest) (string, error) {
-	return c.StartIntent(ctx, req)
-}
-
 func (c *TaskBackedChatIntentClient) ParseIntentResult(ctx context.Context, taskID string) (chintent.IntentResult, bool, error) {
 	if c == nil || c.queries == nil {
 		return chintent.IntentResult{}, true, fmt.Errorf("chat intent client is not configured")
@@ -146,10 +142,6 @@ func (c *TaskBackedChatIntentClient) ParseIntentResult(ctx context.Context, task
 	default:
 		return chintent.IntentResult{}, false, nil
 	}
-}
-
-func (c *TaskBackedChatIntentClient) ParseTurnResult(ctx context.Context, taskID string) (chintent.IntentResult, bool, error) {
-	return c.ParseIntentResult(ctx, taskID)
 }
 
 func (c *TaskBackedChatIntentClient) StartAgentTurn(ctx context.Context, req chintent.IntentRequest) (string, error) {
@@ -411,6 +403,5 @@ func channelIntentTaskMessage(task db.AgentTaskQueue) string {
 var (
 	_ chintent.ChatIntentClient       = (*TaskBackedChatIntentClient)(nil)
 	_ chintent.AsyncChatIntentClient  = (*TaskBackedChatIntentClient)(nil)
-	_ chintent.ChannelTurnPlanner     = (*TaskBackedChatIntentClient)(nil)
 	_ chintent.ChannelAgentTurnClient = (*TaskBackedChatIntentClient)(nil)
 )

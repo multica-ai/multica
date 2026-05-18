@@ -34,8 +34,6 @@ type RuntimeComponents struct {
 	PrePipeline        *inbound.Pipeline
 	PostPipeline       *inbound.Pipeline
 	RuleResolvers      []chintent.IntentResolver
-	ChatIntent         chintent.AsyncChatIntentClient
-	TurnPlanner        chintent.ChannelTurnPlanner
 	ChannelTurn        chintent.ChannelAgentTurnClient
 	DispatchStore      inbound.DispatchCompletionStore
 	ConversationStore  channelconversation.Store
@@ -327,8 +325,6 @@ func (m *Manager) startInboundRuntimeLocked(ctx context.Context) {
 		PrePipeline:        components.PrePipeline,
 		PostPipeline:       components.PostPipeline,
 		RuleResolvers:      components.RuleResolvers,
-		ChatIntent:         components.ChatIntent,
-		TurnPlanner:        components.TurnPlanner,
 		ChannelTurn:        components.ChannelTurn,
 		DispatchStore:      components.DispatchStore,
 		ConversationStore:  components.ConversationStore,
