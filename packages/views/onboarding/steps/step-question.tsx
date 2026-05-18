@@ -177,7 +177,7 @@ export function StepQuestion({
               {footerHint}
             </span>
             <div className="flex items-center gap-2">
-              <Button variant="secondary" onClick={onSkip}>
+              <Button size="lg" variant="secondary" onClick={onSkip}>
                 {t(($) => $.common.skip)}
               </Button>
               <Button size="lg" disabled={!canContinue} onClick={confirmAdvance}>

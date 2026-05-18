@@ -281,6 +281,7 @@ function FancyView({
               </span>
               <div className="flex items-center gap-2">
                 <Button
+                  size="lg"
                   variant="secondary"
                   disabled={submitting}
                   onClick={handleSkip}
