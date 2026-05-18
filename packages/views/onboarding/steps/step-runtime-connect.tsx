@@ -280,22 +280,24 @@ function FancyView({
           >
             {footerHint}
           </span>
-          <Button
-            variant="secondary"
-            disabled={submitting}
-            onClick={handleSkip}
-          >
-            {t(($) => $.step_runtime.skip)}
-          </Button>
-          <Button
-            size="lg"
-            disabled={!canContinue || submitting}
-            onClick={handleContinue}
-          >
-            {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-            {t(($) => $.common.continue)}
-            <ArrowRight className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              disabled={submitting}
+              onClick={handleSkip}
+            >
+              {t(($) => $.step_runtime.skip)}
+            </Button>
+            <Button
+              size="lg"
+              disabled={!canContinue || submitting}
+              onClick={handleContinue}
+            >
+              {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+              {t(($) => $.common.continue)}
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </div>
         </footer>
       </div>
 

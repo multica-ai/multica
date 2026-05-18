@@ -178,13 +178,15 @@ export function StepQuestion({
         >
           {footerHint}
         </span>
-        <Button variant="secondary" onClick={onSkip}>
-          {t(($) => $.common.skip)}
-        </Button>
-        <Button size="lg" disabled={!canContinue} onClick={confirmAdvance}>
-          {t(($) => $.common.continue)}
-          <ArrowRight className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={onSkip}>
+            {t(($) => $.common.skip)}
+          </Button>
+          <Button size="lg" disabled={!canContinue} onClick={confirmAdvance}>
+            {t(($) => $.common.continue)}
+            <ArrowRight className="h-4 w-4" />
+          </Button>
+        </div>
       </footer>
     </div>
   );
