@@ -18,6 +18,8 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { TranscriptButton } from "../../common/task-transcript";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
+import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
+import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 
 // ─── Agent group coloring ──────────────────────────────────────────────────
 // 8-color palette; each unique agent_id gets a stable color based on
@@ -324,14 +326,26 @@ function activeTimeText(task: AgentTask): string {
 
 function useTriggerText(task: AgentTask): string {
   const { t } = useT("issues");
+  const { getMemberName } = useActorName();
   const isRetry = !!task.parent_task_id;
+  const retryPrefix = isRetry
+    ? task.attempt && task.attempt > 1
+      ? t(($) => $.execution_log.trigger_retry_attempt_prefix, { attempt: task.attempt })
+      : t(($) => $.execution_log.trigger_retry_prefix)
+    : "";
 
-  // Retry: label prefix + summary
+  if (task.kind === "local_cli") {
+    const cli = task.cli_name || (task.trigger_summary ? stripMentionMarkdown(task.trigger_summary) : "local CLI");
+    const owner = task.owner_id ? getMemberName(task.owner_id) : "";
+    const cwd = task.work_dir ? basename(task.work_dir) : "";
+    return [cli, owner, cwd].filter(Boolean).join(" · ");
+  }
+
+  if (task.trigger_summary) return retryPrefix + stripMentionMarkdown(task.trigger_summary);
   if (isRetry) {
-    const retryLabel = task.attempt && task.attempt > 1
+    return task.attempt && task.attempt > 1
       ? t(($) => $.execution_log.trigger_retry_attempt, { attempt: task.attempt })
       : t(($) => $.execution_log.trigger_retry);
-    return task.trigger_summary ? `${retryLabel} · ${task.trigger_summary}` : retryLabel;
   }
 
   // Semantic label + cleaned context summary
@@ -344,6 +358,10 @@ function useTriggerText(task: AgentTask): string {
     return task.trigger_summary ? `${label} · ${task.trigger_summary}` : label;
   }
   return t(($) => $.execution_log.trigger_initial);
+}
+
+function basename(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
 }
 
 function useStatusLabel(status: AgentTask["status"]): string {
@@ -373,6 +391,7 @@ function ActiveRow({
 }) {
   const { t } = useT("issues");
   const [cancelling, setCancelling] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
@@ -381,6 +400,7 @@ function ActiveRow({
   // Transcript only meaningful once messages exist — pure-queued tasks
   // have nothing to show yet.
   const showTranscript = task.status !== "queued";
+  const showCancel = task.kind !== "local_cli";
 
   const handleCancel = async () => {
     if (cancelling) return;
@@ -397,6 +417,11 @@ function ActiveRow({
     task.trigger_comment_id && onHighlightComment
       ? () => onHighlightComment(task.trigger_comment_id!)
       : undefined;
+
+  const requestCancel = () => {
+    if (cancelling) return;
+    setConfirmOpen(true);
+  };
 
   return (
     <RowShell task={task} runIndex={runIndex} colorClass={colorClass}>
@@ -416,27 +441,37 @@ function ActiveRow({
             title={t(($) => $.execution_log.transcript_tooltip)}
           />
         )}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                onClick={handleCancel}
-                disabled={cancelling}
-                aria-label={t(($) => $.execution_log.cancel_task_aria)}
-              />
-            }
-            className="flex items-center justify-center rounded p-1 text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {cancelling ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Square className="h-3.5 w-3.5" />
-            )}
-          </TooltipTrigger>
-          <TooltipContent>{t(($) => $.execution_log.cancel_task_tooltip)}</TooltipContent>
-        </Tooltip>
+        {showCancel && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={requestCancel}
+                  disabled={cancelling}
+                  aria-label={t(($) => $.execution_log.cancel_task_aria)}
+                />
+              }
+              className="flex items-center justify-center rounded p-1 text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {cancelling ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Square className="h-3.5 w-3.5" />
+              )}
+            </TooltipTrigger>
+            <TooltipContent>{t(($) => $.execution_log.cancel_task_tooltip)}</TooltipContent>
+          </Tooltip>
+        )}
       </RowActions>
+      {showCancel && (
+        <TerminateTaskConfirmDialog
+          open={confirmOpen}
+          onOpenChange={setConfirmOpen}
+          onConfirm={() => void handleCancel()}
+          showRunningNote={task.status === "running" || task.status === "dispatched"}
+        />
+      )}
     </RowShell>
   );
 }
@@ -463,6 +498,10 @@ function PastRow({
     task.status === "failed" && task.failure_reason
       ? failureReasonLabel[task.failure_reason as TaskFailureReason]
       : null;
+  const exitCodeText =
+    task.kind === "local_cli" && task.exit_code != null
+      ? `exit ${task.exit_code}`
+      : null;
 
   const handleTriggerClick =
     task.trigger_comment_id && onHighlightComment
@@ -473,7 +512,7 @@ function PastRow({
     <RowShell task={task} runIndex={runIndex} colorClass={colorClass}>
       <TriggerText text={trigger} fullText={task.trigger_summary} onClick={handleTriggerClick} />
       <span className="shrink-0 whitespace-nowrap text-xs">
-        <span className={tone}>{failureLabel ?? label}</span>
+        <span className={tone}>{exitCodeText ?? failureLabel ?? label}</span>
         <span className="text-muted-foreground"> · {time}</span>
       </span>
       <RowActions>

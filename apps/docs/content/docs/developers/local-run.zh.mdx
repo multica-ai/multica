@@ -1,0 +1,163 @@
+---
+title: Local Run Provider
+description: 为 multica run 接入新的本地 CLI provider 的工程规范。
+---
+
+# Local Run Provider
+
+Local run 是 `multica run <issue> -- <command...>` 背后的本地执行能力。它把一个本地 CLI 会话绑定到 Multica issue，负责创建 local run、启动本地 agent CLI、同步执行日志、同步用户输入和最终回复评论。
+
+这份文档面向 Multica 代码贡献者。它不是 CLI 使用教程，而是未来接入 Copilot、Cursor、OpenCode 等本地 CLI 时必须遵守的工程规范。
+
+## 架构边界
+
+Local run 分成两层：
+
+| 层级 | 负责什么 | 不应该负责什么 |
+| --- | --- | --- |
+| 通用生命周期 | 解析 issue、创建 local run、heartbeat、注入环境变量、最终状态上报、通用 PTY runner、消息 reporter | 任何 provider 特有协议、session 文件规则、日志解析 |
+| Provider | 启动对应 CLI、接入该 CLI 的事件源、把事件映射成 local run message、处理该 CLI 的 session/resume 特性 | 创建 local run、更新最终状态、改前端展示类型 |
+
+通用入口在 `server/cmd/multica/cmd_run.go`。Provider 注册和基础接口在 `server/cmd/multica/cmd_run_provider.go`。新增 provider 时，不要把 CLI 特有逻辑写回 `cmd_run.go`。
+
+## Provider 合约
+
+每个 provider 实现 `localRunProvider`：
+
+```go
+type localRunProvider interface {
+	Name() string
+	Run(args []string, cwd string, env localCLIEnv, initialPrompt string, reporter *localRunReporter) (int, error)
+}
+```
+
+注册 provider 时，把实现加入 `localRunProviders`：
+
+```go
+var localRunProviders = []localRunProvider{
+	codexLocalRunProvider{},
+	claudeLocalRunProvider{},
+	newCLIProvider{},
+}
+```
+
+Provider 的 `Run` 方法必须遵守这些规则：
+
+- `args[0]` 是用户传入的 CLI 可执行文件路径；不要改写为固定命令名。
+- `cwd` 是 local run 的工作目录；子进程、hook server、transcript resolver 都必须以它为准。
+- `env` 必须通过 `localCLIProcessEnv` 注入到子进程，避免泄漏父进程的真实 workspace token。
+- `initialPrompt` 是 bootstrap prompt，用来让 agent 读取当前 issue 上下文。它不能同步成用户评论，也不能触发 `final` 评论。
+- `reporter` 是唯一允许写 local run message 的出口。Provider 不直接调用 HTTP API。
+- Provider 可以使用 `runProviderPTY` 复用通用 PTY 行为；如果 CLI 需要特殊代理、hook 或 websocket，可以自行管理子进程，但仍要复用环境变量和 reporter 约定。
+
+## 执行日志语义
+
+Local run 的执行日志必须对齐对应平台 Agent backend，而不是发明一套前端专用事件。
+
+| Provider | 对齐对象 | 主要事件 |
+| --- | --- | --- |
+| Codex | `server/pkg/agent/codex.go` | `text`、`tool_use`、`tool_result`；工具名使用 `exec_command`、`patch_apply` |
+| Claude | `server/pkg/agent/claude.go` | `text`、`thinking`、`tool_use`、`tool_result`；工具名保留 Claude 原始名称，如 `Bash`、`Read`、`Edit` |
+
+Reporter 消息字段：
+
+```go
+reporter.Post(localCLIMessage{
+	Type:    "tool_use",
+	Tool:    "Bash",
+	Input:   map[string]any{"command": "go test ./cmd/multica"},
+	Source:  "provider-source",
+	SourceKey: "stable-provider-event-id",
+})
+```
+
+通用规则：
+
+- `text`：agent 面向用户的文本输出。
+- `thinking`：只有平台 backend 已经写入该类型的 provider 才能写，例如 Claude。
+- `tool_use`：工具开始执行，`Tool` 必须使用平台 backend 的同名工具语义。
+- `tool_result`：工具执行结果，`Output` 应匹配平台 backend 的字符串化方式。
+- `error`：只有平台 backend 也会把同类错误写成 task message 时才写。否则错误应该进入 local run 最终状态的 `error` 字段。
+- 不新增 `event`、`session`、`thread` 等前端专属类型。生命周期事件通常不进入执行日志。
+
+`Source` 和 `SourceKey` 用于幂等。`SourceKey` 必须稳定、唯一，并来自 provider 的真实事件 ID、session ID、line UUID、tool call ID 等确定性信息。不要用当前时间、随机数或递增内存计数作为唯一依据。
+
+## 评论同步
+
+Local run 额外保留两个不属于平台执行日志的消息类型：
+
+| 类型 | 用途 |
+| --- | --- |
+| `user_input` | 把用户在本地 CLI 里输入的普通消息同步成 Multica 用户评论 |
+| `final` | 把 agent 对该用户输入的最终回复同步成本地 Codex/Claude 回复评论 |
+
+评论同步规则：
+
+- Bootstrap prompt 不写 `user_input`，也不写 `final`。
+- Slash command 不写 `user_input`，也不应该让后续输出写成 `final`。
+- Tool result 不是用户输入，不能写成评论。
+- `final` 只在当前 turn 有可评论的 `user_input` 时写。
+- `text` / `thinking` / tool 日志仍然可以进入执行日志，即使当前 turn 不写评论。
+
+Provider 需要自己识别该 CLI 的用户输入和最终回复边界。如果 CLI 没有明确 final 事件，可以用该 CLI 的完整 assistant message 作为 `final`，但不能把 token delta 或状态文案当最终回复。
+
+## Session 和 Transcript 跟踪
+
+不要通过“扫描 cwd 下最新 session 文件”来追踪本地 CLI。这个策略会被新的终端会话污染：同一个项目目录里，用户在另一个终端开启新会话时，旧 local run 可能误读新 session 文件。
+
+Provider 必须使用可验证的会话来源：
+
+- CLI 提供 remote/app-server/stdout stream：优先直接从协议事件读取。
+- CLI 提供 hook：用 hook 上报的 `session_id` / `transcript_path` 精确追踪。
+- CLI 只提供 transcript 文件：必须有明确的 session ID 或启动时返回的文件路径；不能按“最新文件”猜测。
+
+Claude 当前使用 `SessionStart` hook 获取准确的 JSONL transcript。恢复会话、清空上下文、新开 session 时，都以 hook 上报为准。为了兼容 CLI 继续写旧 session 文件的情况，tracker 可以同时跟踪多个 hook 上报过的 session，但不能跟踪没有被 hook 明确确认过的文件。
+
+## 新 Provider Checklist
+
+接入新的本地 CLI 前，先完成能力调研：
+
+- CLI 是否支持交互式 TUI？
+- 是否支持 stream JSON、app-server、remote proxy、hook、transcript JSONL 或其它结构化事件源？
+- 是否支持启动时传入 bootstrap prompt？
+- 是否支持 resume / clear / new session？这些行为会如何改变 session ID 或 transcript 文件？
+- 是否有用户输入、assistant final、tool use、tool result 的稳定 ID？
+
+实现时按这个顺序做：
+
+1. 新增 provider 文件，例如 `cmd_run_copilot.go`，只放 provider 特有逻辑。
+2. 实现 `localRunProvider`，注册到 `localRunProviders`。
+3. 启动 CLI 时复用 `localCLIProcessEnv`，并明确校验 Multica 必须托管的 CLI flag。
+4. 选择结构化事件源，禁止依赖终端文本解析作为主要日志来源。
+5. 编写 mapper，把事件映射到平台 backend 已使用的消息语义。
+6. 为 bootstrap、slash command、普通 user input、final reply、tool use/result、error/session 切换写测试。
+7. 跑 `go test ./cmd/multica` 和 local run handler 相关测试。
+
+新增 provider 时，前端通常不需要改动。如果需要前端改动，先检查是否是 provider 泄漏了专属事件类型；只有平台已有通用展示能力不足时，才考虑扩展前端。
+
+## 当前 Provider
+
+### Codex
+
+Codex local run 通过 Codex app-server 和本地 websocket proxy 采集结构化事件。执行日志主语义对齐平台 Codex backend：
+
+- command execution → `tool_use/tool_result`，`tool=exec_command`
+- file change → `tool_use/tool_result`，`tool=patch_apply`
+- agent message → `text`
+
+Local run 额外使用 `user_input` 和 `final` 做评论同步。为了兼容 Codex app-server 事件差异，mapper 保留少量 fallback，但用户可见主语义仍按平台 Codex backend。
+
+Codex app-server 和本地 websocket proxy 是 TUI 进程的 sidecar。TUI 退出后，provider 必须关闭 proxy、断开 active websocket，并终止 app-server 进程组来释放端口和子进程资源。不要通过解析 slash command 来判断退出：`/clear` 会启动新的 thread，`/resume` 会切回旧 thread，它们都属于同一个 local run 会话内的 session/thread 切换，不能触发 sidecar 清理。
+
+### Claude
+
+Claude local run 保留原生 TUI，通过临时 `--settings` 注入 `SessionStart` hook。hook 调用隐藏命令 `multica __claude-session-hook`，把 Claude 上报的 session 信息转发给本地 hook server。tracker 只读取 hook 明确上报的 transcript 文件。
+
+执行日志语义对齐平台 Claude backend：
+
+- text block → `text`
+- thinking block → `thinking`
+- tool use block → `tool_use`，保留 Claude 原始工具名
+- tool result block → `tool_result`，通过 `tool_use_id` 回填原始工具名
+
+这个实现避免了按项目目录猜最新 session 文件，也避免了清空上下文、恢复会话或另一个终端新开会话时串线。

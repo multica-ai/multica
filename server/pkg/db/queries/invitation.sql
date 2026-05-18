@@ -109,6 +109,22 @@ RETURNING *;
 DELETE FROM workspace_invitation
 WHERE id = $1 AND workspace_id = $2 AND invite_type = 'link';
 
+-- name: DeleteExpiredInviteLinks :many
+WITH expired AS (
+    SELECT id
+    FROM workspace_invitation
+    WHERE invite_type = 'link'
+      AND status = 'pending'
+      AND revoked_at IS NULL
+      AND expires_at <= now()
+    ORDER BY expires_at ASC
+    LIMIT $1
+)
+DELETE FROM workspace_invitation wi
+USING expired
+WHERE wi.id = expired.id
+RETURNING wi.*;
+
 -- name: ConsumeInviteLink :one
 UPDATE workspace_invitation
 SET used_count = used_count + 1,

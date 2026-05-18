@@ -24,6 +24,7 @@
       "tokens": "API Tokens",
       "general": "General",
       "repositories": "Repositories",
+      "integrations": "Integrations",
       "labs": "Labs",
       "members": "Members"
     }
@@ -154,14 +155,36 @@
     "co_authored_by_description_suffix": "to commits made by agents.",
     "toast_failed": "Failed to update setting"
   },
+  "integrations": {
+    "section_title": "Integrations",
+    "github_title": "GitHub",
+    "github_description_prefix": "Link issues to pull requests automatically. When a PR with",
+    "github_description_suffix": "in its branch, title, or body is merged, the corresponding issue moves to",
+    "github_description_done": "Done",
+    "github_identifier_example": "MUL-123",
+    "connect_github": "Connect GitHub",
+    "connect_opening": "Opening…",
+    "connect_disabled_tooltip": "GitHub App is not configured on this server",
+    "not_configured": "GitHub integration is not configured for this deployment. Operators must set",
+    "not_configured_and": "and",
+    "manage_hint": "Only admins and owners can manage integrations.",
+    "toast_not_configured": "GitHub integration is not configured for this deployment",
+    "toast_open_failed": "Failed to open GitHub install"
+  },
   "repositories": {
     "section_title": "Repositories",
     "description": "Git repositories associated with this workspace. Agents use these to clone and work on code.",
-    "url_placeholder": "https://git.example.com/org/repo.git",
+    "url_placeholder": "https://git.example.com/org/repo.git or git@git.example.com:org/repo.git",
+    "url_empty": "(empty URL)",
     "description_placeholder": "Description (e.g. Go backend + Next.js frontend)",
     "add": "Add repository",
     "save": "Save",
     "saving": "Saving...",
+    "saved_hint": "All changes saved",
+    "empty": "No repositories yet.",
+    "edit_aria": "Edit repository",
+    "cancel_aria": "Cancel edit",
+    "delete_aria": "Delete repository",
     "manage_hint": "Only admins and owners can manage repositories.",
     "toast_saved": "Repositories saved",
     "toast_save_failed": "Failed to save repositories"

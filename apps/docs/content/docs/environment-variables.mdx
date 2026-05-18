@@ -35,14 +35,28 @@ These are the core variables you must think about before deploying — some have
 
 ## Email configuration
 
-Multica uses [Resend](https://resend.com/) to send verification codes and invite emails.
+Multica supports two delivery backends — [Resend](https://resend.com/) for cloud deployments, or an SMTP relay for internal / on-premise networks. `SMTP_HOST` takes priority over `RESEND_API_KEY` when both are set.
+
+### Resend
 
 | Variable | Default | Description |
 |---|---|---|
 | `RESEND_API_KEY` | empty | Resend API key |
-| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | Sender address (must be a domain verified in your Resend account) |
+| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | Sender address (must be a domain verified in your Resend account; also reused as the `From:` header when SMTP is in use) |
 
-**Behavior when `RESEND_API_KEY` is unset**: the server does not error, but every email that should have been sent (verification codes, invite links) **is written to the server's stdout only**. Convenient for local development — copy the code out of the server logs; **in production, forgetting to set this creates a silent black hole**, with users never receiving email and no error surfaced.
+### SMTP relay
+
+| Variable | Default | Description |
+|---|---|---|
+| `SMTP_HOST` | empty | SMTP relay hostname. Setting this activates SMTP mode and overrides Resend |
+| `SMTP_PORT` | `25` | SMTP port. Use `587` for STARTTLS submission; **port 465 (SMTPS / implicit TLS) is not supported** |
+| `SMTP_USERNAME` | empty | SMTP username. Leave empty for unauthenticated relay |
+| `SMTP_PASSWORD` | empty | SMTP password |
+| `SMTP_TLS_INSECURE` | `false` | Set `true` to skip TLS certificate verification (private CA / self-signed only) |
+
+STARTTLS is upgraded automatically when the server advertises it. The dial timeout is 10s and the whole SMTP session has a 30s deadline, so a black-holed relay can't hang the auth handler.
+
+**Behavior when neither is set**: the server does not error, but every email that should have been sent (verification codes, invite links) **is written to the server's stdout only**. Convenient for local development — copy the code out of the server logs; **in production, forgetting to set this creates a silent black hole**, with users never receiving email and no error surfaced.
 
 ## Google OAuth configuration
 
@@ -141,6 +155,28 @@ For a full explanation of how each parameter affects daemon behavior, see [Daemo
 **Leaving `FRONTEND_ORIGIN` unset creates two silent failures**: (1) invite email links point at `https://app.multica.ai` (the hosted domain), and clicking them doesn't bring users back to your self-hosted instance; (2) WebSocket Origin checks fall back to `localhost:3000 / 5173 / 5174`, so every WebSocket connection in a production deployment is rejected and the frontend appears to "lose real-time updates."
 </Callout>
 
+## GitHub integration
+
+The [GitHub PR ↔ issue integration](/github-integration) needs two variables. Set both to enable Connect GitHub in Settings and accept incoming webhooks.
+
+| Variable | Default | Description |
+|---|---|---|
+| `GITHUB_APP_SLUG` | empty | The slug of your GitHub App (the tail of `https://github.com/apps/<slug>`). Drives the Settings → Integrations install button URL |
+| `GITHUB_WEBHOOK_SECRET` | empty | The Webhook secret you set on the GitHub App. Used for HMAC-SHA256 verification of every `pull_request` / `installation` delivery, and as the HMAC key for the setup-callback state token |
+
+**Behavior when either is unset:**
+
+- `Connect GitHub` in Settings → Integrations is **disabled** and shows a "not configured" hint to admins.
+- The `/api/webhooks/github` endpoint returns **`503 github webhooks not configured`** — Multica refuses to process events with no secret rather than treating every signature as valid.
+
+**Note:** `GITHUB_WEBHOOK_SECRET` is reused as the signing key for the install-flow state token, so operators only need to manage one secret. It is **not** the GitHub App's *Client* secret — Client secrets are OAuth-related and not used by this integration. See [GitHub integration → Self-host setup](/github-integration#self-host-setup) for the full walkthrough.
+
+## Gitee Skill Import
+
+| Variable | Default | Description |
+|---|---|---|
+| `GITEE_TOKEN` | empty | Personal access token for the Gitee API. Used by Skill Import to fetch `skill.yaml` / `skill.json` from Gitee repositories. Required for private repos; public repos work without it but are subject to stricter rate-limits |
+
 ## Usage analytics
 
 By default, the server reports to Multica's official PostHog instance. To opt out, set `ANALYTICS_DISABLED=true`.
@@ -154,5 +190,6 @@ By default, the server reports to Multica's official PostHog instance. To opt ou
 ## Next
 
 - [Sign-in and signup configuration](/auth-setup) — how to actually configure the auth-related variables above and where the traps are
+- [GitHub integration](/github-integration) — how to set up the GitHub App that backs `GITHUB_APP_SLUG` / `GITHUB_WEBHOOK_SECRET`
 - [Troubleshooting](/troubleshooting) — symptoms and fixes for common misconfigurations
 - [Daemon and runtimes](/daemon-runtimes) — what the `MULTICA_DAEMON_*` parameters actually do

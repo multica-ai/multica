@@ -2,6 +2,9 @@ package storage
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -211,5 +214,299 @@ func TestLocalStorage_KeyFromURL_Empty(t *testing.T) {
 
 	if got := store.KeyFromURL(""); got != "" {
 		t.Errorf("KeyFromURL(\"\") = %q, want empty string", got)
+	}
+}
+
+// TestLocalStorage_ServeFile_ContentDispositionFromSidecar verifies the fix
+// for issue #2442: downloads served from /uploads/* must carry the original
+// uploaded filename in Content-Disposition, mirroring the S3 Upload path's
+// existing ContentDisposition behavior. Without this, browsers fall back to
+// the storage-key basename (UUID + ext) for the download filename.
+func TestLocalStorage_ServeFile_ContentDispositionFromSidecar(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	cases := []struct {
+		name        string
+		key         string
+		contentType string
+		filename    string
+		wantHeader  string
+	}{
+		{
+			name:        "attachment for non-inline type",
+			key:         "workspaces/ws-1/abc.xlsx",
+			contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			filename:    "Bwave JE_V1.xlsx",
+			wantHeader:  `attachment; filename="Bwave JE_V1.xlsx"`,
+		},
+		{
+			name:        "inline for image",
+			key:         "workspaces/ws-1/def.png",
+			contentType: "image/png",
+			filename:    "screenshot 2026-05-11.png",
+			wantHeader:  `inline; filename="screenshot 2026-05-11.png"`,
+		},
+		{
+			name:        "filename with header-injection characters is sanitized",
+			key:         "workspaces/ws-1/ghi.txt",
+			contentType: "text/plain",
+			filename:    "weird\";name.txt",
+			wantHeader:  `attachment; filename="weird__name.txt"`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			if _, err := store.Upload(ctx, tc.key, []byte("body"), tc.contentType, tc.filename); err != nil {
+				t.Fatalf("Upload failed: %v", err)
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/uploads/"+tc.key, nil)
+			rec := httptest.NewRecorder()
+			store.ServeFile(rec, req, tc.key)
+
+			got := rec.Header().Get("Content-Disposition")
+			if got != tc.wantHeader {
+				t.Errorf("Content-Disposition = %q, want %q", got, tc.wantHeader)
+			}
+		})
+	}
+}
+
+// TestLocalStorage_ServeFile_NoSidecarFallback documents the graceful
+// degradation path: files uploaded before the sidecar landed (or written
+// out-of-band) have no .meta.json on disk and ServeFile must not set
+// Content-Disposition — leaving the existing pre-fix behavior intact.
+func TestLocalStorage_ServeFile_NoSidecarFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	key := "legacy-no-sidecar.txt"
+	if err := os.WriteFile(filepath.Join(tmpDir, key), []byte("body"), 0644); err != nil {
+		t.Fatalf("seed write failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/uploads/"+key, nil)
+	rec := httptest.NewRecorder()
+	store.ServeFile(rec, req, key)
+
+	if got := rec.Header().Get("Content-Disposition"); got != "" {
+		t.Errorf("Content-Disposition = %q, want empty (no sidecar fallback)", got)
+	}
+}
+
+// TestLocalStorage_ServeFile_RejectsSidecarSuffix verifies that the sidecar
+// JSON itself is not addressable via /uploads/*. The sidecar is an
+// implementation detail; exposing it would turn the filename + content-type
+// pair into a stable read API and make any future ACL change leakier than
+// the data file it sits next to.
+func TestLocalStorage_ServeFile_RejectsSidecarSuffix(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	ctx := context.Background()
+	if _, err := store.Upload(ctx, "abc.xlsx", []byte("body"), "text/plain", "real.xlsx"); err != nil {
+		t.Fatalf("Upload failed: %v", err)
+	}
+
+	sidecarKey := "abc.xlsx" + metaSuffix
+	req := httptest.NewRequest(http.MethodGet, "/uploads/"+sidecarKey, nil)
+	rec := httptest.NewRecorder()
+	store.ServeFile(rec, req, sidecarKey)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Disposition"); got != "" {
+		t.Errorf("Content-Disposition = %q, want empty", got)
+	}
+}
+
+// TestLocalStorage_ServeFile_RejectsPathTraversal documents that a key
+// pointing outside uploadDir is rejected before any sidecar read. Without
+// this guard, readLocalMeta would attempt a disk read at <some-path>.meta.json
+// before http.ServeFile's own ".." check fires on r.URL.Path.
+func TestLocalStorage_ServeFile_RejectsPathTraversal(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	// Seed a sidecar OUTSIDE uploadDir so we'd notice if it were read: the
+	// header would carry "leaked.xlsx". Locating the sibling inside the
+	// per-test TempDir keeps the test self-contained — no real /etc reads.
+	parentDir := filepath.Dir(tmpDir)
+	leakedBase := filepath.Join(parentDir, "leaked-target")
+	if err := os.WriteFile(leakedBase+metaSuffix, []byte(`{"filename":"leaked.xlsx","content_type":"text/plain"}`), 0644); err != nil {
+		t.Fatalf("seed leaked sidecar failed: %v", err)
+	}
+	t.Cleanup(func() {
+		os.Remove(leakedBase + metaSuffix)
+	})
+
+	traversal := "../" + filepath.Base(leakedBase)
+	req := httptest.NewRequest(http.MethodGet, "/uploads/"+traversal, nil)
+	rec := httptest.NewRecorder()
+	store.ServeFile(rec, req, traversal)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Disposition"); got != "" {
+		t.Errorf("Content-Disposition = %q, want empty (sidecar must not leak)", got)
+	}
+}
+
+// TestLocalStorage_Upload_SkipsSidecarWhenFilenameEmpty verifies the tighter
+// Upload gate: a write with no filename has nothing useful to preserve, so
+// we shouldn't litter the upload directory with content-type-only sidecars
+// that ServeFile would ignore anyway.
+func TestLocalStorage_Upload_SkipsSidecarWhenFilenameEmpty(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	ctx := context.Background()
+	key := "no-filename.bin"
+	if _, err := store.Upload(ctx, key, []byte("body"), "application/octet-stream", ""); err != nil {
+		t.Fatalf("Upload failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(tmpDir, key+metaSuffix)); !os.IsNotExist(err) {
+		t.Errorf("sidecar should not exist when filename is empty, got err=%v", err)
+	}
+}
+
+// TestLocalStorage_Delete_RemovesSidecar verifies the cleanup half of the
+// fix: when the upload is deleted, its sidecar metadata file disappears too.
+// Otherwise the upload directory grows orphan .meta.json files forever.
+func TestLocalStorage_Delete_RemovesSidecar(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	ctx := context.Background()
+	key := "deleteme.txt"
+	if _, err := store.Upload(ctx, key, []byte("body"), "text/plain", "original.txt"); err != nil {
+		t.Fatalf("Upload failed: %v", err)
+	}
+	sidecar := filepath.Join(tmpDir, key+metaSuffix)
+	if _, err := os.Stat(sidecar); err != nil {
+		t.Fatalf("sidecar should exist after Upload: %v", err)
+	}
+
+	store.Delete(ctx, key)
+
+	if _, err := os.Stat(sidecar); !os.IsNotExist(err) {
+		t.Errorf("sidecar should be removed after Delete, got err=%v", err)
+	}
+}
+
+// GetReader returns the uploaded bytes verbatim — used by the preview proxy.
+func TestLocalStorage_GetReader_RoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	ctx := context.Background()
+	key := "preview.md"
+	body := []byte("# hello\nworld\n")
+	if _, err := store.Upload(ctx, key, body, "text/markdown", "preview.md"); err != nil {
+		t.Fatalf("Upload failed: %v", err)
+	}
+
+	rc, err := store.GetReader(ctx, key)
+	if err != nil {
+		t.Fatalf("GetReader: %v", err)
+	}
+	defer rc.Close()
+	got, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("io.ReadAll: %v", err)
+	}
+	if string(got) != string(body) {
+		t.Errorf("body = %q, want %q", got, body)
+	}
+}
+
+// Refuses path traversal at storage layer so callers don't need to defend it.
+func TestLocalStorage_GetReader_RejectsTraversal(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	if rc, err := store.GetReader(context.Background(), "../../../etc/passwd"); err == nil {
+		rc.Close()
+		t.Fatal("GetReader should refuse traversal keys")
+	}
+}
+
+// The sidecar JSON is an internal detail. Allowing /content to read it via a
+// crafted key would expose the original filename + content-type stored next
+// to every upload.
+func TestLocalStorage_GetReader_RejectsSidecarSuffix(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	if rc, err := store.GetReader(context.Background(), "some-key.txt"+metaSuffix); err == nil {
+		rc.Close()
+		t.Fatal("GetReader should refuse sidecar keys")
+	}
+}
+
+// Missing key surfaces as a plain error — the handler maps it to 404.
+func TestLocalStorage_GetReader_MissingKey(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	if rc, err := store.GetReader(context.Background(), "nonexistent.txt"); err == nil {
+		rc.Close()
+		t.Fatal("GetReader should error on missing key")
 	}
 }

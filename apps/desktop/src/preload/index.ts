@@ -89,6 +89,11 @@ const desktopAPI = {
   },
   /** Open a URL in the default browser */
   openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
+  /** Download a file by URL through Electron's native download system.
+   *  Shows a save dialog and saves to disk. Unlike openExternal, this
+   *  avoids browser rendering of HTML files on Linux.
+   *  On non-desktop platforms this property is undefined. */
+  downloadURL: (url: string) => ipcRenderer.invoke("file:download-url", url),
   /** Toggle immersive mode — hide macOS traffic lights for full-screen modals */
   setImmersiveMode: (immersive: boolean) =>
     ipcRenderer.invoke("window:setImmersive", immersive),
@@ -202,8 +207,11 @@ const updaterAPI = {
     ipcRenderer.on("updater:download-progress", handler);
     return () => ipcRenderer.removeListener("updater:download-progress", handler);
   },
-  onUpdateDownloaded: (callback: () => void) => {
-    const handler = () => callback();
+  onUpdateDownloaded: (
+    callback: (info: { version: string; releaseNotes?: string }) => void,
+  ) => {
+    const handler = (_: unknown, info: { version: string; releaseNotes?: string }) =>
+      callback(info);
     ipcRenderer.on("updater:update-downloaded", handler);
     return () => ipcRenderer.removeListener("updater:update-downloaded", handler);
   },

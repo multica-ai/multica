@@ -5,16 +5,31 @@ import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
-import { openExternalSafely } from "./external-url";
+import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 
-// Bundled icon used for dev-mode dock/taskbar branding. In production the
-// app bundle icon (from electron-builder) wins; this path is only consumed
-// by the `is.dev` branch below.
-const DEV_ICON_PATH = join(__dirname, "../../resources/icon.png");
+// Bundled icon used for dock/taskbar branding. macOS/Windows production
+// builds let the OS pick up the icon from the .app bundle / .exe resources,
+// but Linux production needs an explicit BrowserWindow `icon` — AppImage
+// direct-launch doesn't register the .desktop entry, so GNOME has no path
+// from the running window to the hicolor icon and falls back to the
+// theme default. Consumed in createWindow() (all platforms in dev, Linux
+// in prod) and the macOS dev dock branch.
+//
+// `asarUnpack: resources/**` in electron-builder.yml extracts the icon to
+// `app.asar.unpacked/`, but `__dirname` resolves into `app.asar/`. The
+// Linux native window-icon code path expects a real filesystem path
+// (unlike Electron's nativeImage loader which transparently reads from
+// asar), so swap the segment — same pattern as bundledCliPath() in
+// daemon-manager.ts. In dev `__dirname` has no `app.asar`, so the replace
+// is a no-op.
+const BUNDLED_ICON_PATH = join(__dirname, "../../resources/icon.png").replace(
+  "app.asar",
+  "app.asar.unpacked",
+);
 
 // macOS/Linux GUI launches inherit a minimal PATH from launchd that omits
 // the user's shell config (~/.zshrc, Homebrew, nvm, ~/.local/bin, etc.).
@@ -106,13 +121,39 @@ function createWindow(): void {
     trafficLightPosition: { x: 16, y: 13 },
     show: false,
     autoHideMenuBar: true,
-    // Windows/Linux pick up the window/taskbar icon from this option in
-    // dev — on macOS it's ignored (dock comes from app.dock.setIcon below).
-    ...(is.dev ? { icon: DEV_ICON_PATH } : {}),
+    // Windows/Linux pick up the window/taskbar icon from this option.
+    // On macOS it's ignored (dock comes from app.dock.setIcon below).
+    // Linux production needs this explicitly because AppImage direct-launch
+    // does not install a .desktop entry, so the WM has no other path to
+    // the bundled icon; without it Ubuntu falls back to the theme default.
+    ...(is.dev || process.platform === "linux"
+      ? { icon: BUNDLED_ICON_PATH }
+      : {}),
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
       webSecurity: false,
+      // Required for the Chromium PDF viewer (PDFium) to activate inside
+      // iframes — used by the attachment preview modal for application/pdf
+      // files. Default is false in Electron; without it <iframe src=*.pdf>
+      // renders blank.
+      //
+      // Security trade-off, accepted intentionally:
+      //   1. This window already runs with `webSecurity: false` + `sandbox: false`,
+      //      so `plugins: true` does NOT meaningfully widen the renderer's
+      //      attack surface beyond what is already accepted.
+      //   2. The only PDFs that reach an iframe here are signed CloudFront URLs
+      //      we ourselves issued (see useDownloadAttachment); user-supplied URLs
+      //      are routed through `setWindowOpenHandler` → `openExternalSafely` and
+      //      cannot land in this renderer.
+      //   3. Chromium's PDFium plugin is itself sandboxed inside its own process
+      //      and only handles the `application/pdf` MIME — it does not expose
+      //      Flash, Java, or other historical plugin surfaces.
+      //
+      // If we ever tighten `webSecurity` / `sandbox`, revisit this by hosting
+      // the PDF viewer in a dedicated BrowserView with `plugins: true` scoped
+      // to that view, keeping the main renderer plugin-free.
+      plugins: true,
       additionalArguments: [`--multica-locale=${systemLocale}`],
     },
   });
@@ -192,6 +233,14 @@ const DEV_APP_NAME = process.env.DESKTOP_APP_SUFFIX
 if (is.dev) {
   app.setName(DEV_APP_NAME);
   app.setPath("userData", join(app.getPath("appData"), DEV_APP_NAME));
+} else {
+  // Pin the production app name in code. Electron's Linux WM_CLASS is set
+  // from app.getName() when the first BrowserWindow is realized; the
+  // packaged ASAR's package.json `productName` already steers app.getName()
+  // to "Multica", but anchoring it here makes WM_CLASS ↔ StartupWMClass
+  // (declared in electron-builder.yml) survive a regression in
+  // productName / the build pipeline. Must run before requestSingleInstanceLock().
+  app.setName("Multica");
 }
 
 // --- Protocol registration -----------------------------------------------
@@ -251,7 +300,7 @@ if (!gotTheLock) {
     // so the Canary dev build is visually distinct from a stock Electron
     // run. `app.dock` is macOS-only — guard the call.
     if (is.dev && process.platform === "darwin" && app.dock) {
-      const icon = nativeImage.createFromPath(DEV_ICON_PATH);
+      const icon = nativeImage.createFromPath(BUNDLED_ICON_PATH);
       if (!icon.isEmpty()) app.dock.setIcon(icon);
     }
 
@@ -266,6 +315,14 @@ if (!gotTheLock) {
     // false configuration.
     ipcMain.handle("shell:openExternal", (_event, url: string) => {
       return openExternalSafely(url);
+    });
+
+    ipcMain.handle("file:download-url", (_event, url: string) => {
+      if (!mainWindow) {
+        console.warn("[download] ignored file:download-url — mainWindow torn down");
+        return;
+      }
+      downloadURLSafely(mainWindow, url);
     });
 
     // Sync IPC: app version + normalized OS for preload. Sync (not invoke) so

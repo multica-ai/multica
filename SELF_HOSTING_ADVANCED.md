@@ -25,14 +25,30 @@ These have sensible defaults and only need to be set when tuning a large or cons
 
 ### Email (Required for Authentication)
 
-Multica uses email-based magic link authentication via [Resend](https://resend.com).
+Multica supports two email backends. `SMTP_HOST` takes priority when set; otherwise `RESEND_API_KEY` is used. With neither configured, verification codes are printed to the server log — copy them from there to log in.
+
+#### Option A: Resend (recommended for cloud deployments)
 
 | Variable | Description |
 |----------|-------------|
 | `RESEND_API_KEY` | Your Resend API key |
 | `RESEND_FROM_EMAIL` | Sender email address (default: `noreply@multica.ai`) |
 
-> **Note:** If Resend is not configured, generated verification codes are printed to backend logs. A fixed local testing code is disabled by default; to opt in on a private test instance, set `APP_ENV=development` and `MULTICA_DEV_VERIFICATION_CODE` to a 6-digit value. It is ignored when `APP_ENV=production`.
+#### Option B: SMTP relay (for self-hosted / on-premise deployments)
+
+Use this option when your deployment cannot reach the public internet or you already have an internal mail relay (e.g. Exchange, Postfix, SendGrid on-prem).
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `SMTP_HOST` | SMTP relay hostname (setting this activates SMTP mode) | - |
+| `SMTP_PORT` | SMTP port | `25` |
+| `SMTP_USERNAME` | SMTP username (leave empty for unauthenticated relay) | - |
+| `SMTP_PASSWORD` | SMTP password | - |
+| `SMTP_TLS_INSECURE` | Set `true` to skip TLS certificate verification (self-signed / private CA certs) | `false` |
+
+STARTTLS is used automatically when advertised by the server. Port 465 (SMTPS / implicit TLS) is not currently supported - use ports 25 or 587 with STARTTLS.
+
+> **Note:** If neither Resend nor SMTP is configured, generated verification codes are printed to backend logs — copy them from there to log in. A fixed local testing code (e.g. `888888`) is **opt-in only**: set `MULTICA_DEV_VERIFICATION_CODE=888888` in `.env` and keep `APP_ENV` non-production. The Docker self-host stack pins `APP_ENV=production`, so the shortcut is ignored there. **Never enable a fixed code on a publicly reachable instance.**
 
 ### Google OAuth (Optional)
 
@@ -186,15 +202,46 @@ In production, put a reverse proxy in front of both the backend and frontend to 
 
 ### Caddy (Recommended)
 
+**Single-domain layout** — frontend and backend served on the same hostname (this is what `docker-compose.selfhost.yml` defaults to):
+
+```
+multica.example.com {
+    # WebSocket route — must come before the catch-all
+    @multica_ws path /ws /ws/*
+    handle @multica_ws {
+        reverse_proxy localhost:8080 {
+            flush_interval -1
+        }
+    }
+
+    # Everything else → frontend
+    reverse_proxy localhost:3000
+}
+```
+
+**Separate-domain layout** — frontend and backend on different hostnames:
+
 ```
 app.example.com {
     reverse_proxy localhost:3000
 }
 
 api.example.com {
+    @multica_ws path /ws /ws/*
+    handle @multica_ws {
+        reverse_proxy localhost:8080 {
+            flush_interval -1
+        }
+    }
+
     reverse_proxy localhost:8080
 }
 ```
+
+Two non-obvious bits inside the `/ws` block are worth calling out — both are common reasons real-time updates "stop working" on a Caddy-fronted self-host:
+
+- **`path /ws /ws/*` (not `/ws*`)** — bare `handle /ws` is an exact match, so future path variants under `/ws/` fall through to the frontend block. The obvious shortcut `handle /ws*` overcorrects in the other direction: Caddy's `*` is a glob without a path-segment boundary, so it would also catch unrelated paths like `/ws-foo`, which is a legitimate workspace URL (only the exact slug `ws` is reserved). Listing `/ws` and `/ws/*` explicitly covers both real cases without overreach.
+- **`flush_interval -1`** — disables response buffering so WebSocket frames are forwarded as soon as they arrive. Without it, frames can sit behind Caddy's default flush window, which looks like delayed comments, missing typing indicators, or "comments only appear after a page refresh."
 
 ### Nginx
 

@@ -7,14 +7,18 @@ RETURNING *;
 SELECT * FROM daemon_token
 WHERE token_hash = $1 AND expires_at > now();
 
--- name: DeleteDaemonTokensByWorkspaceAndDaemon :exec
--- Callers MUST also invalidate auth.DaemonTokenCache for each affected
--- token_hash so the deletion takes effect before the cache TTL expires.
--- Today this query has no caller; when a deregister / rotate flow lands,
--- change this to :many RETURNING token_hash and call
--- DaemonTokenCache.Invalidate(hash) for each row.
+-- name: DeleteDaemonTokensByWorkspaceAndDaemons :many
+-- Deletes every daemon_token row matching the (workspace_id, daemon_id)
+-- pairs implied by `daemon_ids`. Used by the member-revocation flow to
+-- nuke tokens for all runtimes a leaving member owned in one shot.
+-- Returns token_hash so the caller can invalidate auth.DaemonTokenCache
+-- before the 10-minute TTL expires — without that invalidate, a daemon
+-- can keep using its stale token until cache eviction even though the
+-- DB row is gone.
 DELETE FROM daemon_token
-WHERE workspace_id = $1 AND daemon_id = $2;
+WHERE workspace_id = @workspace_id
+  AND daemon_id = ANY(@daemon_ids::text[])
+RETURNING token_hash;
 
 -- name: DeleteExpiredDaemonTokens :exec
 DELETE FROM daemon_token

@@ -108,6 +108,8 @@
     "back_to_agents_full": "Back to agents",
     "not_found_title": "Agent not found",
     "not_found_default": "This agent may have been archived or deleted.",
+    "no_access_title": "You don't have access to this agent",
+    "no_access_hint": "Only the agent owner or a workspace admin can view this private agent.",
     "try_again": "Try again",
     "archived_banner": "This agent is archived. It cannot be assigned or mentioned.",
     "restore": "Restore",
@@ -132,9 +134,31 @@
     "prop_model": "Model",
     "prop_visibility": "Visibility",
     "prop_concurrency": "Concurrency",
+    "prop_stream": "Stream",
+    "prop_approval": "Approval",
     "prop_owner": "Owner",
     "prop_created": "Created",
     "prop_updated": "Updated",
+    "stream_tooltip": "Stream · {{value}}",
+    "approval_tooltip": "Approval · {{value}}",
+    "stream_value": {
+      "on": "On",
+      "off": "Off"
+    },
+    "stream_description": {
+      "on": "Capture and show the local agent execution stream.",
+      "off": "Run without showing the local execution stream."
+    },
+    "approval_value": {
+      "auto": "Auto",
+      "prompt": "Ask me",
+      "deny": "Deny"
+    },
+    "approval_description": {
+      "auto": "Approve runtime actions automatically.",
+      "prompt": "Ask before running commands or editing files.",
+      "deny": "Reject runtime actions automatically."
+    },
     "no_description_placeholder": "No description",
     "change_avatar_aria": "Change avatar",
     "avatar_updated_toast": "Avatar updated",
@@ -186,6 +210,7 @@
   },
   "tabs": {
     "activity": "Activity",
+    "tasks": "Tasks",
     "instructions": "Instructions",
     "skills": "Skills",
     "environment": "Environment",
@@ -210,13 +235,42 @@
     "runtime_filter_all": "All",
     "runtime_loading": "Loading runtimes...",
     "runtime_none": "No runtime available",
-    "runtime_register_first": "Register a runtime before creating an agent",
     "runtime_cloud_badge": "Cloud",
+    "runtime_private_badge": "Private",
+    "runtime_private_locked_tooltip": "Private runtime — only its owner or a workspace admin can create agents on it. Ask the owner to switch it to Public to share.",
     "duplicate_copy_suffix": " (Copy)",
     "create": "Create",
     "creating": "Creating...",
     "cancel": "Cancel",
-    "create_failed_toast": "Failed to create agent"
+    "create_failed_toast": "Failed to create agent",
+    "skill_attach_failed_toast": "Agent created, but failed to attach skills: {{error}}",
+    "squad_join_failed_toast": "Agent \"{{name}}\" was created but couldn't join the squad: {{error}}. You can add it manually from Members.",
+    "instructions": {
+      "label": "Instructions",
+      "placeholder_blank": "Click to write instructions…",
+      "placeholder_duplicate": "Click to view or edit the duplicated instructions",
+      "collapse": "Collapse",
+      "editor_placeholder": "Write what this agent should do, what to focus on, what to avoid…"
+    },
+    "skills_section": {
+      "label": "Skills",
+      "placeholder": "Add skills from workspace",
+      "selected_one": "{{count}} selected — click to edit",
+      "selected_other": "{{count}} selected — click to edit",
+      "collapse": "Collapse",
+      "list_empty_multi": "No skills in this workspace yet. Create or import one first.",
+      "list_loading": "Loading…",
+      "list_empty_default": "No skills available.",
+      "list_no_match": "No skills match.",
+      "search_placeholder": "Search skills…"
+    },
+    "avatar": {
+      "change_aria": "Change avatar",
+      "upload_aria": "Upload avatar",
+      "remove_aria": "Remove avatar",
+      "select_image_toast": "Please select an image file.",
+      "upload_failed_toast": "Avatar upload failed"
+    }
   },
   "tab_body": {
     "common": {
@@ -264,6 +318,11 @@
       "add_dialog_search_placeholder": "Search skills",
       "add_dialog_empty": "All workspace skills are already assigned.",
       "add_dialog_no_match": "No skills match your search.",
+      "add_dialog_empty_partial": "No more skills to add — this agent already has all of them.",
+      "add_dialog_saving": "Adding…",
+      "add_dialog_confirm_default": "Add",
+      "add_dialog_confirm_one": "Add {{count}} skill",
+      "add_dialog_confirm_other": "Add {{count}} skills",
       "add_dialog_cancel": "Cancel",
       "add_failed_toast": "Failed to add skill"
     },
@@ -332,6 +391,13 @@
     "skills_label": "Skills",
     "owner_label": "Owner",
     "unknown_runtime": "Unknown runtime"
+  },
+  "live_peek": {
+    "current_issue_label": "Now on",
+    "no_current_issue": "No task",
+    "last_activity_label": "Last seen",
+    "no_recent_activity": "No recent activity",
+    "failed_indicator": "Failed"
   },
   "transcript": {
     "dialog_title": "Agent Execution Transcript",

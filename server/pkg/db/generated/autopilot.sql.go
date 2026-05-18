@@ -218,15 +218,15 @@ INSERT INTO agent_task_queue (
     trigger_summary
 )
 VALUES ($1, $2, NULL, 'queued', $3, $4, $5)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task
 `
 
 type CreateAutopilotTaskParams struct {
-	AgentID          pgtype.UUID `json:"agent_id"`
-	RuntimeID        pgtype.UUID `json:"runtime_id"`
-	Priority         int32       `json:"priority"`
-	AutopilotRunID   pgtype.UUID `json:"autopilot_run_id"`
-	TriggerSummary   pgtype.Text `json:"trigger_summary"`
+	AgentID        pgtype.UUID `json:"agent_id"`
+	RuntimeID      pgtype.UUID `json:"runtime_id"`
+	Priority       int32       `json:"priority"`
+	AutopilotRunID pgtype.UUID `json:"autopilot_run_id"`
+	TriggerSummary pgtype.Text `json:"trigger_summary"`
 }
 
 // =====================
@@ -266,6 +266,7 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		&i.FailureReason,
 		&i.TriggerSummary,
 		&i.ForceFreshSession,
+		&i.IsLeaderTask,
 	)
 	return i, err
 }

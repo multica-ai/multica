@@ -24,6 +24,7 @@
       "tokens": "API Token",
       "general": "通用",
       "repositories": "代码仓库",
+      "integrations": "集成",
       "labs": "实验室",
       "members": "成员"
     }
@@ -154,14 +155,36 @@
     "co_authored_by_description_suffix": "。",
     "toast_failed": "更新设置失败"
   },
+  "integrations": {
+    "section_title": "集成",
+    "github_title": "GitHub",
+    "github_description_prefix": "自动把 issue 关联到 Pull Request。当 PR 的分支、标题或正文中包含",
+    "github_description_suffix": "并被合并时，对应的 issue 会自动转为",
+    "github_description_done": "Done",
+    "github_identifier_example": "MUL-123",
+    "connect_github": "连接 GitHub",
+    "connect_opening": "正在打开…",
+    "connect_disabled_tooltip": "服务端未配置 GitHub App",
+    "not_configured": "当前部署没有配置 GitHub 集成。运维需要设置",
+    "not_configured_and": "和",
+    "manage_hint": "只有管理员和所有者可以管理集成。",
+    "toast_not_configured": "当前部署未配置 GitHub 集成",
+    "toast_open_failed": "打开 GitHub 安装页失败"
+  },
   "repositories": {
     "section_title": "代码仓库",
     "description": "与该工作区关联的 Git 仓库。智能体会从这里 clone 代码并完成工作。",
-    "url_placeholder": "https://git.example.com/org/repo.git",
+    "url_placeholder": "https://git.example.com/org/repo.git 或 git@git.example.com:org/repo.git",
+    "url_empty": "（空 URL）",
     "description_placeholder": "描述（例如：Go 后端 + Next.js 前端）",
     "add": "添加仓库",
     "save": "保存",
     "saving": "保存中...",
+    "saved_hint": "所有改动已保存",
+    "empty": "暂无仓库。",
+    "edit_aria": "编辑仓库",
+    "cancel_aria": "取消编辑",
+    "delete_aria": "删除仓库",
     "manage_hint": "只有管理员和所有者可以管理代码仓库。",
     "toast_saved": "已保存代码仓库",
     "toast_save_failed": "保存代码仓库失败"

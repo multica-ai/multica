@@ -203,6 +203,35 @@ func createHandlerTestAgent(t *testing.T, name string, mcpConfig []byte) string 
 	return agentID
 }
 
+// createHandlerTestTaskForAgent seeds a queued agent_task_queue row for the
+// given agent and returns the task UUID. Used by tests that need to set
+// X-Task-ID alongside X-Agent-ID — resolveActor now requires the pair to be
+// present and consistent before granting "agent" actor identity.
+func createHandlerTestTaskForAgent(t *testing.T, agentID string) string {
+	t.Helper()
+
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
+		VALUES ($1, $2, 'queued', 0)
+		RETURNING id
+	`, agentID, handlerTestRuntimeID(t)).Scan(&taskID); err != nil {
+		t.Fatalf("failed to create handler test task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+	return taskID
+}
+
+func updateHandlerTestAgentRuntimeConfig(t *testing.T, agentID string, raw string) {
+	t.Helper()
+
+	if _, err := testPool.Exec(context.Background(), `UPDATE agent SET runtime_config = $2::jsonb WHERE id = $1`, agentID, raw); err != nil {
+		t.Fatalf("failed to update handler test agent runtime_config: %v", err)
+	}
+}
+
 func fetchAgentMcpConfig(t *testing.T, agentID string) []byte {
 	t.Helper()
 
@@ -1253,8 +1282,8 @@ func TestListCommentsExcludesSoftDeletedRows(t *testing.T) {
 	assertOnlyActiveComment("/api/issues/" + softDelIssue.ID + "/comments")
 
 	w = assertOnlyActiveComment("/api/issues/" + softDelIssue.ID + "/comments?limit=10&offset=0")
-	if total := w.Header().Get("X-Total-Count"); total != "1" {
-		t.Fatalf("paginated ListComments: expected X-Total-Count 1, got %q", total)
+	if total := w.Header().Get("X-Total-Count"); total != "" {
+		t.Fatalf("ListComments should ignore removed pagination headers, got X-Total-Count %q", total)
 	}
 
 	since := time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339)
@@ -1363,7 +1392,6 @@ func TestUpdateAgentMcpConfigObjectUpdatesValue(t *testing.T) {
 	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"preset":"new"}`)
 }
 
-
 // TestRetryAgentComment_SystemCommentFallbackToTask verifies that retrying a
 // system comment (no parent_id) recovers the trigger_comment_id from the most
 // recent task for the same agent+issue.
@@ -1449,8 +1477,6 @@ func TestRetryAgentComment_SystemCommentFallbackToTask(t *testing.T) {
 		t.Fatalf("expected trigger_comment_id %q, got %q", memberCommentID, gotTriggerCommentID)
 	}
 }
-
-
 
 func TestCreateAgentMcpConfigNullStoresSQLNull(t *testing.T) {
 	w := httptest.NewRecorder()
@@ -2099,14 +2125,18 @@ func TestResolveActor(t *testing.T) {
 			wantActorType: "member",
 		},
 		{
-			name:          "valid agent ID returns agent",
+			// X-Agent-ID without X-Task-ID is not trusted — otherwise a
+			// workspace member who guesses an agent's UUID could impersonate
+			// it and bypass the private-agent gate. See resolveActor for the
+			// rationale.
+			name:          "agent ID without task ID returns member",
 			agentIDHeader: agentID,
-			wantActorType: "agent",
-			wantIsAgent:   true,
+			wantActorType: "member",
 		},
 		{
-			name:          "non-existent agent ID returns member",
+			name:          "non-existent agent ID with task returns member",
 			agentIDHeader: "00000000-0000-0000-0000-000000000099",
+			taskIDHeader:  taskID,
 			wantActorType: "member",
 		},
 		{
@@ -2370,10 +2400,13 @@ func TestAgentReplyDoesNotInheritParentMentions(t *testing.T) {
 
 	// 3. Agent A posts a reply in the same thread with NO mentions.
 	// With the fix, this must NOT inherit the parent mention of Agent B.
+	// resolveActor requires X-Task-ID paired with X-Agent-ID to trust the
+	// agent identity, so we seed a task that belongs to agent A.
+	agentATask := createHandlerTestTaskForAgent(t, agentA)
 	w = postComment(issueID, map[string]any{
 		"content":   "No reply needed — just an acknowledgment.",
 		"parent_id": parentComment.ID,
-	}, map[string]string{"X-Agent-ID": agentA})
+	}, map[string]string{"X-Agent-ID": agentA, "X-Task-ID": agentATask})
 	if w.Code != http.StatusCreated {
 		t.Fatalf("agent A reply: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
@@ -2446,12 +2479,16 @@ func TestMemberReplyToAgentRootDoesNotInheritParentMentions(t *testing.T) {
 
 	// 1. Agent J posts a PR-completion comment that @mentions Reviewer for review.
 	// This is a deliberate handoff and must enqueue a task for Reviewer.
+	// X-Task-ID is required alongside X-Agent-ID for resolveActor to grant
+	// the "agent" actor identity (defense against header forgery).
+	jAgentTask := createHandlerTestTaskForAgent(t, jAgent)
 	w = httptest.NewRecorder()
 	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
 		"content": fmt.Sprintf("PR ready. [@Reviewer](mention://agent/%s) please review this.", reviewerAgent),
 	})
 	r = withURLParam(r, "id", issueID)
 	r.Header.Set("X-Agent-ID", jAgent)
+	r.Header.Set("X-Task-ID", jAgentTask)
 	testHandler.CreateComment(w, r)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("J PR completion: expected 201, got %d: %s", w.Code, w.Body.String())
@@ -2537,7 +2574,10 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 
 	// Agent A posts a top-level comment that explicitly @mentions Agent B —
 	// a deliberate handoff. This must enqueue a task for Agent B, and must
-	// not enqueue a self-trigger for Agent A.
+	// not enqueue a self-trigger for Agent A. resolveActor requires
+	// X-Task-ID to grant "agent" identity; without it the self-trigger
+	// suppression (authorType=="agent") would not fire.
+	agentATask := createHandlerTestTaskForAgent(t, agentA)
 	explicitMention := fmt.Sprintf("[@Agent B](mention://agent/%s) please take it from here", agentB)
 	w = httptest.NewRecorder()
 	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
@@ -2545,6 +2585,7 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 	})
 	r = withURLParam(r, "id", issueID)
 	r.Header.Set("X-Agent-ID", agentA)
+	r.Header.Set("X-Task-ID", agentATask)
 	testHandler.CreateComment(w, r)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("agent A handoff: expected 201, got %d: %s", w.Code, w.Body.String())
@@ -2554,5 +2595,119 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 	}
 	if got := countTasks(agentA); got != 0 {
 		t.Fatalf("expected 0 tasks for Agent A (no self-trigger on own mention), got %d", got)
+	}
+}
+
+func TestPlanRequestRejectsMultipleEligibleTargetAgents(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentA := createHandlerTestAgent(t, "Plan Target A", nil)
+	agentB := createHandlerTestAgent(t, "Plan Target B", nil)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         "Plan multi target gate test",
+		"status":        "backlog",
+		"assignee_type": "agent",
+		"assignee_id":   agentA,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	issueID := issue.ID
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	content := fmt.Sprintf("[@Plan Target A](mention://agent/%s) and [@Plan Target B](mention://agent/%s) please propose a plan", agentA, agentB)
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": content,
+		"type":    "plan_request",
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.CreateComment(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("CreateComment(plan multi target): expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "exactly one eligible target agent") {
+		t.Fatalf("expected exact-target error, got %s", w.Body.String())
+	}
+
+	var comments int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM comment WHERE issue_id = $1`, issueID).Scan(&comments); err != nil {
+		t.Fatalf("count comments: %v", err)
+	}
+	if comments != 0 {
+		t.Fatalf("expected no persisted plan_request comment, got %d", comments)
+	}
+	var tasks int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1`, issueID).Scan(&tasks); err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	if tasks != 0 {
+		t.Fatalf("expected no queued tasks for rejected plan_request, got %d", tasks)
+	}
+}
+
+func TestPlanRequestRejectsStreamDisabledTargetAgent(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentA := createHandlerTestAgent(t, "Plan Stream Off Agent", nil)
+	updateHandlerTestAgentRuntimeConfig(t, agentA, `{"trace_enabled":false}`)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         "Plan stream gate test",
+		"status":        "backlog",
+		"assignee_type": "agent",
+		"assignee_id":   agentA,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	issueID := issue.ID
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "Please draft a plan for this issue.",
+		"type":    "plan_request",
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.CreateComment(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("CreateComment(plan stream off): expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "requires Stream to be enabled") {
+		t.Fatalf("expected stream gate error, got %s", w.Body.String())
+	}
+
+	var comments int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM comment WHERE issue_id = $1`, issueID).Scan(&comments); err != nil {
+		t.Fatalf("count comments: %v", err)
+	}
+	if comments != 0 {
+		t.Fatalf("expected no persisted plan_request comment, got %d", comments)
 	}
 }

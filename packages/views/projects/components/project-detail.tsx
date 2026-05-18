@@ -70,6 +70,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { useT } from "../../i18n";
 import { useProjectStatusLabels, useProjectPriorityLabels } from "./labels";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
 // ---------------------------------------------------------------------------
 // Property row — sidebar property display
@@ -123,6 +124,25 @@ export function ProjectIssuesContent({
     () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
     [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
   );
+
+  const hasClientSideFilters =
+    priorityFilters.length > 0 ||
+    assigneeFilters.length > 0 ||
+    includeNoAssignee ||
+    creatorFilters.length > 0 ||
+    labelFilters.length > 0;
+
+  const filteredBoardCounts = useMemo(() => {
+    if (!hasClientSideFilters) return undefined;
+    const counts: Partial<Record<IssueStatus, number>> = {};
+    for (const status of BOARD_STATUSES) counts[status] = 0;
+    for (const issue of issues) {
+      if (BOARD_STATUSES.includes(issue.status)) {
+        counts[issue.status] = (counts[issue.status] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }, [hasClientSideFilters, issues]);
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
 
@@ -183,6 +203,7 @@ export function ProjectIssuesContent({
           myIssuesScope={scope}
           myIssuesFilter={filter}
           projectId={projectId}
+          columnCounts={filteredBoardCounts}
         />
       ) : (
         <ListView
@@ -264,8 +285,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadFilter, setLeadFilter] = useState("");
   const leadQuery = leadFilter.toLowerCase();
-  const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery));
-  const filteredAgents = agents.filter((a) => !a.archived_at && a.name.toLowerCase().includes(leadQuery));
+  const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery) || matchesPinyin(m.name, leadQuery));
+  const filteredAgents = agents.filter((a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)));
 
   const handleUpdateField = useCallback(
     (data: Parameters<typeof updateProject.mutate>[0] extends { id: string } & infer R ? R : never) => {

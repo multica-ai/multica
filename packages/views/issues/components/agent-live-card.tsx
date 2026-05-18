@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Bot, Clock, Loader2, Square } from "lucide-react";
+import { Bot, Clock, Loader2, PauseCircle, Square } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import type { TaskMessagePayload } from "@multica/core/types/events";
 import type { AgentTask } from "@multica/core/types/agent";
+import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -15,6 +16,7 @@ import {
   type TimelineItem,
 } from "../../common/task-transcript";
 import { useT } from "../../i18n";
+import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 
 // AgentLiveCard renders a sticky banner at the top of the issue's main
 // column for every active task. Each banner shows "agent X is working",
@@ -273,7 +275,9 @@ interface SingleAgentLiveCardProps {
 function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiveCardProps) {
   const { t } = useT("issues");
   const [elapsed, setElapsed] = useState("");
+  const [paused, setPaused] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const isQueued = task.status === "queued";
 
@@ -288,6 +292,28 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
     return () => clearInterval(interval);
   }, [task.started_at, task.dispatched_at, task.created_at]);
 
+  const refreshPaused = useCallback(() => {
+    api.listTaskInteractions(task.id, "pending")
+      .then((items) => setPaused(items.length > 0))
+      .catch(() => setPaused(false));
+  }, [task.id]);
+
+  useEffect(() => {
+    refreshPaused();
+    const interval = setInterval(refreshPaused, 3000);
+    return () => clearInterval(interval);
+  }, [refreshPaused]);
+
+  useWSEvent("interaction:created", useCallback((payload: unknown) => {
+    const p = payload as { task_id?: string };
+    if (p.task_id === task.id) refreshPaused();
+  }, [task.id, refreshPaused]));
+
+  useWSEvent("interaction:resolved", useCallback((payload: unknown) => {
+    const p = payload as { task_id?: string };
+    if (p.task_id === task.id) refreshPaused();
+  }, [task.id, refreshPaused]));
+
   const handleCancel = useCallback(async () => {
     if (cancelling) return;
     setCancelling(true);
@@ -299,12 +325,24 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
     }
   }, [task.id, issueId, cancelling, t]);
 
+  const requestCancel = useCallback(() => {
+    if (cancelling) return;
+    setConfirmOpen(true);
+  }, [cancelling]);
+
   const toolCount = items.filter((i) => i.type === "tool_use").length;
 
   // Queued tasks render with a non-spinning Clock and dimmer accent so the
   // banner reads as "waiting" rather than "working" at a glance.
   return (
-    <div className={isQueued ? "rounded-lg border border-border bg-muted/30" : "rounded-lg border border-info/20 bg-info/5"}>
+    <div className={cn(
+      "rounded-lg border",
+      paused
+        ? "border-indigo-300/40 bg-indigo-500/10 dark:border-indigo-800/60 dark:bg-indigo-950/25"
+        : isQueued
+          ? "border-border bg-muted/30"
+          : "border-info/20 bg-info/5",
+    )}>
       <div className="flex items-center gap-2 px-3 py-2 text-muted-foreground">
         {task.agent_id ? (
           <ActorAvatar actorType="agent" actorId={task.agent_id} size={20} enableHoverCard showStatusDot />
@@ -314,21 +352,28 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
           </div>
         )}
         <div className="flex items-center gap-1.5 text-xs min-w-0">
-          {isQueued ? (
+          {paused ? (
+            <PauseCircle className="h-3 w-3 text-indigo-500 shrink-0" />
+          ) : isQueued ? (
             <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
           ) : (
             <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
           )}
           <span className="font-medium text-foreground truncate">
-            {isQueued
+            {paused
+              ? `${agentName} is paused`
+              : isQueued
               ? t(($) => $.agent_live.is_queued, { name: agentName })
               : t(($) => $.agent_live.is_working, { name: agentName })}
           </span>
           <span className="text-muted-foreground tabular-nums shrink-0">
-            {isQueued
+            {paused
+              ? elapsed
+              : isQueued
               ? t(($) => $.agent_live.queued_elapsed_prefix, { elapsed })
               : elapsed}
           </span>
+          {paused && <span className="text-indigo-600 dark:text-indigo-300 shrink-0">waiting for input</span>}
           {!isQueued && toolCount > 0 && (
             <span className="text-muted-foreground shrink-0">{t(($) => $.agent_live.tool_count, { count: toolCount })}</span>
           )}
@@ -344,7 +389,7 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
             />
           )}
           <button
-            onClick={handleCancel}
+            onClick={requestCancel}
             disabled={cancelling}
             className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
             title={t(($) => $.agent_live.stop_tooltip)}
@@ -354,6 +399,12 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
           </button>
         </div>
       </div>
+      <TerminateTaskConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        onConfirm={() => void handleCancel()}
+        showRunningNote={!isQueued}
+      />
     </div>
   );
 }

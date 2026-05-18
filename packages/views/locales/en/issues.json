@@ -45,6 +45,7 @@
     "section_label": "Label",
     "members_group": "Members",
     "agents_group": "Agents",
+    "squads_group": "Squads",
     "issue_count_one": "{{count}} issue",
     "issue_count_other": "{{count}} issues",
     "reset": "Reset all filters"
@@ -75,6 +76,28 @@
     "board": "Board",
     "list": "List"
   },
+  "actor_issues": {
+    "scope": {
+      "assigned": {
+        "label": "Assigned",
+        "description": "Issues assigned to this member or agent"
+      },
+      "created": {
+        "label": "Created",
+        "description": "Issues created by this member or agent"
+      }
+    },
+    "empty": {
+      "assigned": {
+        "title": "No assigned issues",
+        "description": "Issues assigned here will appear in this view."
+      },
+      "created": {
+        "title": "No created issues",
+        "description": "Issues created here will appear in this view."
+      }
+    }
+  },
   "list": {
     "empty_status": "No issues",
     "add_issue_tooltip": "Add issue"
@@ -98,8 +121,15 @@
     "add_sub_issue_aria": "Add sub-issue",
     "section_properties": "Properties",
     "section_parent_issue": "Parent issue",
+    "section_pull_requests": "Pull requests",
     "section_details": "Details",
     "section_token_usage": "Token usage",
+    "pull_requests_loading": "Loading…",
+    "pull_requests_empty": "No linked pull requests yet. Reference this issue's identifier in a PR's branch name, title, or body to auto-link it.",
+    "pull_request_state_open": "Open",
+    "pull_request_state_draft": "Draft",
+    "pull_request_state_merged": "Merged",
+    "pull_request_state_closed": "Closed",
     "prop_status": "Status",
     "prop_priority": "Priority",
     "prop_assignee": "Assignee",
@@ -126,6 +156,8 @@
     "pin_tooltip": "Pin to sidebar",
     "unpin_tooltip": "Unpin from sidebar",
     "sidebar_tooltip": "Toggle sidebar",
+    "cmdf_toast_title": "Find on page only covers what's visible",
+    "cmdf_toast_description": "The timeline is virtualized — ⌘F can't see off-screen comments. Full in-app search is coming.",
     "update_failed": "Failed to update issue",
     "link_copied": "Link copied",
     "link_copy_failed": "Failed to copy link",
@@ -140,6 +172,13 @@
   },
   "timeline": {
     "loading": "Loading..."
+  },
+  "quote": {
+    "add_to_new_comment": "Add to new comment",
+    "add_to_reply": "Add to reply",
+    "no_comments_to_reply": "No comments to reply to.",
+    "reply_input_not_ready": "Reply input is not ready yet. Please try again after the comment finishes loading.",
+    "truncated": "Selected text was truncated to {{count}} characters."
   },
   "activity": {
     "created": "created this issue",
@@ -157,7 +196,16 @@
     "task_completed_other": "completed the task ({{count}} times)",
     "task_failed_one": "task failed",
     "task_failed_other": "task failed ({{count}} times)",
-    "coalesced_badge": "×{{count}}"
+    "squad_leader_evaluated": "evaluated the squad trigger",
+    "squad_leader_action": "evaluated and took action",
+    "squad_leader_action_reason": "evaluated and took action: {{reason}}",
+    "squad_leader_no_action": "evaluated: no action needed",
+    "squad_leader_no_action_reason": "evaluated: no action needed ({{reason}})",
+    "squad_leader_failed": "evaluation failed",
+    "squad_leader_failed_reason": "evaluation failed: {{reason}}",
+    "coalesced_badge": "×{{count}}",
+    "activity_count_one": "{{count}} activity",
+    "activity_count_other": "{{count}} activities"
   },
   "comment": {
     "delete_title": "Delete comment",
@@ -181,6 +229,7 @@
     "reply_count_one": "{{count}} reply",
     "reply_count_other": "{{count}} replies",
     "leave_comment_placeholder": "Leave a comment...",
+    "send_tooltip": "Send",
     "expand_tooltip": "Expand",
     "collapse_tooltip": "Collapse",
     "resolve": {
@@ -238,6 +287,13 @@
     "status_cancelled": "Cancelled",
     "filter_placeholder": "Filter runs..."
   },
+  "terminate_dialog": {
+    "title": "Stop this task?",
+    "body": "The task will be cancelled and cannot be resumed.",
+    "running_note": " Running work may take a few seconds to fully halt.",
+    "keep": "Keep running",
+    "confirm": "Stop task"
+  },
   "batch": {
     "selected": "{{count}} selected",
     "status": "Status",
@@ -287,7 +343,8 @@
       "trigger_unassigned": "Unassigned",
       "search_placeholder": "Assign to...",
       "members_group": "Members",
-      "agents_group": "Agents"
+      "agents_group": "Agents",
+      "squads_group": "Squads"
     },
     "due_date": {
       "trigger_label": "Due date",

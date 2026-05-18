@@ -9,7 +9,7 @@ import remarkMath from 'remark-math'
 import { FileText, Download } from 'lucide-react'
 import { cn } from '@multica/ui/lib/utils'
 import { CodeBlock, InlineCode } from './CodeBlock'
-import { preprocessFileCards } from './file-cards'
+import { isAllowedFileCardHref, preprocessFileCards } from './file-cards'
 import { preprocessLinks } from './linkify'
 import { preprocessMentionShortcodes } from './mentions'
 import 'katex/dist/katex.min.css'
@@ -120,8 +120,7 @@ function createComponents(
       const dataType = node?.properties?.dataType as string | undefined
       if (dataType === 'fileCard') {
         const rawHref = (node?.properties?.dataHref as string) || ''
-        // Only allow http(s) URLs to prevent javascript: and other dangerous schemes.
-        const href = /^https?:\/\//i.test(rawHref) ? rawHref : ''
+        const href = isAllowedFileCardHref(rawHref) ? rawHref : ''
         const filename = (node?.properties?.dataFilename as string) || ''
         return (
           <div className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">

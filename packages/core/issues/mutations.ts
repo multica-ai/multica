@@ -15,10 +15,18 @@ import {
   invalidateIssueDetailQueries,
   patchIssueDetailQueries,
   patchIssueInBuckets,
-  removeIssueFromBuckets,
   restoreIssueDetailCacheSnapshot,
   setBucket,
 } from "./cache-helpers";
+import {
+  cleanupDeletedIssueCaches,
+  collectDeletedIssueCacheMetadata,
+  invalidateDeletedIssueDependentCaches,
+  invalidateDeletedIssueParentCaches,
+  invalidateIssueScopedCaches,
+  pruneDeletedIssueFromListCaches,
+  pruneDeletedIssueFromParentChildrenCaches,
+} from "./delete-cache";
 import { useWorkspaceId } from "../hooks";
 import { useRecentIssuesStore } from "./stores";
 import { workspaceKeys } from "../workspace/queries";
@@ -123,7 +131,7 @@ export function useCreateIssue() {
       );
       // Surface the just-created issue in cmd+k's Recent list without
       // requiring the user to open it first.
-      useRecentIssuesStore.getState().recordVisit(newIssue.id);
+      useRecentIssuesStore.getState().recordVisit(wsId, newIssue.id);
       // Invalidate parent's children query so sub-issues list updates immediately
       if (newIssue.parent_issue_id) {
         qc.invalidateQueries({ queryKey: issueKeys.children(wsId, newIssue.parent_issue_id) });
@@ -154,11 +162,26 @@ export function useUpdateIssue() {
 
       // Resolve parent_issue_id from the freshest source so we can keep the
       // parent's children cache in sync (used by the parent issue's
-      // sub-issues list).
-      const parentId =
+      // sub-issues list). Falls back to scanning loaded children caches —
+      // when the user navigates straight to a parent's detail page, the
+      // child may live only there, not in detail/list.
+      let parentId: string | null =
         prevDetail?.parent_issue_id ??
         (prevList ? findIssueLocation(prevList, id)?.issue.parent_issue_id : null) ??
         null;
+      if (!parentId) {
+        const childrenCaches = qc.getQueriesData<Issue[]>({
+          queryKey: [...issueKeys.all(wsId), "children"],
+        });
+        for (const [key, data] of childrenCaches) {
+          if (!data?.some((c) => c.id === id)) continue;
+          const candidate = key[key.length - 1];
+          if (typeof candidate === "string") {
+            parentId = candidate;
+            break;
+          }
+        }
+      }
       const prevChildren = parentId
         ? qc.getQueryData<Issue[]>(issueKeys.children(wsId, parentId))
         : undefined;
@@ -197,6 +220,13 @@ export function useUpdateIssue() {
       invalidateIssueDetailQueries(qc, wsId, data?.id ?? vars.id);
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+      // Refresh the issue's attachments cache when the description editor
+      // bound new uploads — the description editor reads `issueAttachments`
+      // to resolve text-preview Eye gates, and unlike other mutations this
+      // payload mutates the attachment join table.
+      if (vars.attachment_ids?.length) {
+        qc.invalidateQueries({ queryKey: issueKeys.attachments(vars.id) });
+      }
       // Invalidate old parent's children cache
       if (ctx?.parentId) {
         qc.invalidateQueries({
@@ -222,24 +252,56 @@ export function useDeleteIssue() {
   return useMutation({
     mutationFn: (id: string) => api.deleteIssue(id),
     onMutate: async (id) => {
-      await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
-      const prevList = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
-      const deleted = prevList ? findIssueLocation(prevList, id)?.issue : undefined;
-      qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
-        old ? removeIssueFromBuckets(old, id) : old,
+      await Promise.all([
+        qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
+        qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) }),
+      ]);
+      const metadata = collectDeletedIssueCacheMetadata(qc, wsId, id);
+      await Promise.all(
+        metadata.parentIssueIds.map((parentId) =>
+          qc.cancelQueries({ queryKey: issueKeys.children(wsId, parentId) }),
+        ),
       );
+      const prevList = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
+      const prevMyLists = qc.getQueriesData<ListIssuesCache>({
+        queryKey: issueKeys.myAll(wsId),
+      });
+      const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
+      const prevChildren = new Map<string, Issue[] | undefined>();
+      for (const parentId of metadata.parentIssueIds) {
+        prevChildren.set(
+          parentId,
+          qc.getQueryData<Issue[]>(issueKeys.children(wsId, parentId)),
+        );
+      }
+
+      pruneDeletedIssueFromListCaches(qc, wsId, id);
+      pruneDeletedIssueFromParentChildrenCaches(qc, wsId, id, metadata);
       qc.removeQueries({ queryKey: issueKeys.detail(wsId, id) });
-      return { prevList, parentIssueId: deleted?.parent_issue_id };
+      return { id, metadata, prevList, prevMyLists, prevDetail, prevChildren };
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
+      if (ctx?.prevMyLists) {
+        for (const [key, snapshot] of ctx.prevMyLists) {
+          qc.setQueryData(key, snapshot);
+        }
+      }
+      if (ctx?.prevDetail) {
+        qc.setQueryData(issueKeys.detail(wsId, ctx.id), ctx.prevDetail);
+      }
+      if (ctx?.prevChildren) {
+        for (const [parentId, snapshot] of ctx.prevChildren) {
+          qc.setQueryData(issueKeys.children(wsId, parentId), snapshot);
+        }
+      }
+    },
+    onSuccess: (_data, id, ctx) => {
+      cleanupDeletedIssueCaches(qc, wsId, id, ctx?.metadata);
     },
     onSettled: (_data, _err, _id, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
-      if (ctx?.parentIssueId) {
-        qc.invalidateQueries({ queryKey: issueKeys.children(wsId, ctx.parentIssueId) });
-        qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
-      }
+      if (ctx?.metadata) invalidateDeletedIssueParentCaches(qc, wsId, ctx.metadata);
     },
   });
 }
@@ -264,13 +326,46 @@ export function useBatchUpdateIssues() {
         for (const id of ids) next = patchIssueInBuckets(next, id, updates);
         return next;
       });
-      return { prevList };
+
+      // Mirror the optimistic patch into any loaded children cache so
+      // sub-issue rows on a parent's detail page reflect the change too.
+      const idSet = new Set(ids);
+      const childrenCaches = qc.getQueriesData<Issue[]>({
+        queryKey: [...issueKeys.all(wsId), "children"],
+      });
+      const prevChildren = new Map<string, Issue[] | undefined>();
+      const affectedParentIds = new Set<string>();
+      for (const [key, data] of childrenCaches) {
+        if (!data?.some((c) => idSet.has(c.id))) continue;
+        const parentId = key[key.length - 1];
+        if (typeof parentId !== "string") continue;
+        affectedParentIds.add(parentId);
+        prevChildren.set(parentId, data);
+        qc.setQueryData<Issue[]>(issueKeys.children(wsId, parentId), (old) =>
+          old?.map((c) => (idSet.has(c.id) ? { ...c, ...updates } : c)),
+        );
+      }
+
+      return { prevList, prevChildren, affectedParentIds };
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
+      if (ctx?.prevChildren) {
+        for (const [parentId, snapshot] of ctx.prevChildren) {
+          qc.setQueryData(issueKeys.children(wsId, parentId), snapshot);
+        }
+      }
     },
-    onSettled: () => {
+    onSettled: (_data, _err, _vars, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      if (ctx?.affectedParentIds && ctx.affectedParentIds.size > 0) {
+        for (const parentId of ctx.affectedParentIds) {
+          qc.invalidateQueries({
+            queryKey: issueKeys.children(wsId, parentId),
+          });
+        }
+        qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
+      }
     },
   });
 }
@@ -281,33 +376,92 @@ export function useBatchDeleteIssues() {
   return useMutation({
     mutationFn: (ids: string[]) => api.batchDeleteIssues(ids),
     onMutate: async (ids) => {
-      await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
-      const prevList = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
+      await Promise.all([
+        qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
+        qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) }),
+      ]);
+      const metadataById = new Map(
+        ids.map((id) => [
+          id,
+          collectDeletedIssueCacheMetadata(qc, wsId, id),
+        ]),
+      );
       const parentIssueIds = new Set<string>();
-      if (prevList) {
-        for (const id of ids) {
-          const loc = findIssueLocation(prevList, id);
-          if (loc?.issue.parent_issue_id) parentIssueIds.add(loc.issue.parent_issue_id);
+      for (const metadata of metadataById.values()) {
+        for (const parentId of metadata.parentIssueIds) {
+          parentIssueIds.add(parentId);
         }
       }
-      qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) => {
-        if (!old) return old;
-        let next = old;
-        for (const id of ids) next = removeIssueFromBuckets(next, id);
-        return next;
+      await Promise.all(
+        Array.from(parentIssueIds).map((parentId) =>
+          qc.cancelQueries({ queryKey: issueKeys.children(wsId, parentId) }),
+        ),
+      );
+      const prevList = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
+      const prevMyLists = qc.getQueriesData<ListIssuesCache>({
+        queryKey: issueKeys.myAll(wsId),
       });
-      return { prevList, parentIssueIds };
+      const prevChildren = new Map<string, Issue[] | undefined>();
+      for (const parentId of parentIssueIds) {
+        prevChildren.set(
+          parentId,
+          qc.getQueryData<Issue[]>(issueKeys.children(wsId, parentId)),
+        );
+      }
+
+      for (const id of ids) {
+        const metadata = metadataById.get(id);
+        pruneDeletedIssueFromListCaches(qc, wsId, id);
+        if (metadata) {
+          pruneDeletedIssueFromParentChildrenCaches(qc, wsId, id, metadata);
+        }
+      }
+      return { prevList, prevMyLists, prevChildren, parentIssueIds, metadataById };
     },
     onError: (_err, _ids, ctx) => {
       if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
+      if (ctx?.prevMyLists) {
+        for (const [key, snapshot] of ctx.prevMyLists) {
+          qc.setQueryData(key, snapshot);
+        }
+      }
+      if (ctx?.prevChildren) {
+        for (const [parentId, snapshot] of ctx.prevChildren) {
+          qc.setQueryData(issueKeys.children(wsId, parentId), snapshot);
+        }
+      }
+    },
+    onSuccess: (data, ids, ctx) => {
+      if (data.deleted === ids.length) {
+        for (const id of ids) {
+          cleanupDeletedIssueCaches(qc, wsId, id, ctx?.metadataById.get(id));
+        }
+        return;
+      }
+
+      if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
+      if (ctx?.prevMyLists) {
+        for (const [key, snapshot] of ctx.prevMyLists) {
+          qc.setQueryData(key, snapshot);
+        }
+      }
+      if (ctx?.prevChildren) {
+        for (const [parentId, snapshot] of ctx.prevChildren) {
+          qc.setQueryData(issueKeys.children(wsId, parentId), snapshot);
+        }
+      }
+      for (const id of ids) {
+        invalidateIssueScopedCaches(qc, wsId, id);
+      }
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+      invalidateDeletedIssueDependentCaches(qc, wsId);
     },
     onSettled: (_data, _err, _ids, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       if (ctx?.parentIssueIds && ctx.parentIssueIds.size > 0) {
-        for (const parentId of ctx.parentIssueIds) {
-          qc.invalidateQueries({ queryKey: issueKeys.children(wsId, parentId) });
-        }
-        qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
+        invalidateDeletedIssueParentCaches(qc, wsId, {
+          parentIssueIds: Array.from(ctx.parentIssueIds),
+        });
       }
     },
   });
@@ -371,8 +525,8 @@ export function useCreateComment(issueId: string) {
 export function useUpdateComment(issueId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ commentId, content }: { commentId: string; content: string }) =>
-      api.updateComment(commentId, content),
+    mutationFn: ({ commentId, content, attachmentIds }: { commentId: string; content: string; attachmentIds?: string[] }) =>
+      api.updateComment(commentId, content, attachmentIds),
     onMutate: async ({ commentId, content }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
       const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));

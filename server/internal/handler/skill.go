@@ -19,11 +19,18 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// sanitizeNullBytes removes null bytes (0x00) from strings.
-// PostgreSQL rejects null bytes in text columns with
-// "invalid byte sequence for encoding UTF8: 0x00 (SQLSTATE 22021)".
+// sanitizeNullBytes makes a string safe for a PostgreSQL TEXT column.
+//
+// Two failure modes covered:
+//   - Embedded NUL (0x00) — PG rejects with SQLSTATE 22021. Removed.
+//   - Other invalid-UTF-8 byte sequences (e.g. 0x91 = Windows-1252 smart
+//     quote, which crashed agent-template import of skills containing
+//     Windows-encoded prose). `strings.ToValidUTF8` drops them.
+//
+// Name is kept for compatibility with the many call sites; the behaviour
+// is a strict superset of the original.
 func sanitizeNullBytes(s string) string {
-	return strings.ReplaceAll(s, "\x00", "")
+	return strings.ToValidUTF8(strings.ReplaceAll(s, "\x00", ""), "")
 }
 
 // --- Response structs ---
@@ -481,7 +488,16 @@ func isCapError(err error) bool {
 // addFile appends a supporting file while enforcing the per-bundle caps. It
 // returns an error when either the file count or aggregate byte budget would
 // be exceeded so the caller fails the import instead of silently truncating.
+//
+// Binary files (images, fonts, archives) are silently skipped: their bytes
+// can't survive a PG TEXT column (SQLSTATE 22021), and they're reference
+// assets the agent never reads as text anyway. Logging the skip leaves a
+// breadcrumb if a user expected one of these to import.
 func (s *importedSkill) addFile(path, content string) error {
+	if isLikelyBinaryFilePath(path) {
+		slog.Info("skill import: skipping binary file", "path", path, "size", len(content))
+		return nil
+	}
 	if len(s.files) >= maxImportFileCount {
 		return fmt.Errorf("%w: import bundle exceeds %d file limit", errImportCapExceeded, maxImportFileCount)
 	}
@@ -491,6 +507,34 @@ func (s *importedSkill) addFile(path, content string) error {
 	s.bundleSize += len(content)
 	s.files = append(s.files, importedFile{path: path, content: content})
 	return nil
+}
+
+// isLikelyBinaryFilePath reports whether the file's extension indicates a
+// non-text payload. Conservative blacklist — extensions not on the list
+// are assumed text and pass through. `sanitizeNullBytes` (called at PG
+// insert time) is the second-line defence against any text file that
+// turns out to have stray invalid-UTF-8 bytes.
+func isLikelyBinaryFilePath(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case
+		// images
+		".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".ico", ".heic",
+		// fonts
+		".ttf", ".otf", ".woff", ".woff2", ".eot",
+		// archives
+		".zip", ".gz", ".tar", ".bz2", ".7z", ".rar",
+		// documents (binary office)
+		".pdf", ".docx", ".xlsx", ".pptx", ".doc", ".xls", ".ppt",
+		// media
+		".mp3", ".mp4", ".wav", ".avi", ".mov", ".webm", ".m4a", ".flac",
+		// compiled / executable
+		".exe", ".dll", ".so", ".dylib", ".class", ".jar", ".wasm",
+		// db / cache
+		".db", ".sqlite", ".sqlite3", ".pyc":
+		return true
+	}
+	return false
 }
 
 // --- ClawHub types ---
@@ -579,6 +623,7 @@ const (
 	sourceClawHub importSource = iota
 	sourceSkillsSh
 	sourceGitHub
+	sourceGitee
 )
 
 // detectImportSource determines the source from a URL.
@@ -607,12 +652,14 @@ func detectImportSource(raw string) (importSource, string, error) {
 		return sourceClawHub, normalized, nil
 	case host == "github.com" || host == "www.github.com":
 		return sourceGitHub, normalized, nil
+	case host == "gitee.com" || host == "www.gitee.com":
+		return sourceGitee, normalized, nil
 	default:
 		// If no host (bare slug), default to clawhub
 		if !strings.Contains(raw, "/") || !strings.Contains(raw, ".") {
 			return sourceClawHub, raw, nil
 		}
-		return 0, "", fmt.Errorf("unsupported source: %s (supported: clawhub.ai, skills.sh, github.com)", host)
+		return 0, "", fmt.Errorf("unsupported source: %s (supported: clawhub.ai, skills.sh, github.com, gitee.com)", host)
 	}
 }
 
@@ -1462,6 +1509,283 @@ func fetchFromGitHub(httpClient *http.Client, rawURL string) (*importedSkill, er
 	return result, nil
 }
 
+// --- Gitee import ---
+//
+// Gitee's web URL structure mirrors GitHub's (/tree/{ref}/{path},
+// /blob/{ref}/{path}/SKILL.md), and its V5 API exposes analogous endpoints
+// under https://gitee.com/api/v5/repos/.... The raw file URL is served from
+// the main domain: https://gitee.com/{owner}/{repo}/raw/{ref}/{path}.
+//
+// parseGitHubURL is reused since the path layout is identical; only the API
+// host, raw URL scheme, and auth differ.
+
+// doGiteeAPIGet performs a GET against a gitee.com/api/v5 URL, attaching the
+// GITEE_TOKEN bearer header when the env var is set.
+func doGiteeAPIGet(httpClient *http.Client, apiURL string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	addGiteeAuthHeader(req)
+	return httpClient.Do(req)
+}
+
+func addGiteeAuthHeader(req *http.Request) {
+	if req == nil {
+		return
+	}
+	if token := strings.TrimSpace(os.Getenv("GITEE_TOKEN")); token != "" {
+		req.Header.Set("Authorization", "token " + token)
+	}
+}
+
+// fetchGiteeDefaultBranch returns the default branch of a Gitee repository.
+// Falls back to "master" — Gitee's historical default — if the API call fails.
+func fetchGiteeDefaultBranch(httpClient *http.Client, owner, repo string) string {
+	apiURL := fmt.Sprintf("https://gitee.com/api/v5/repos/%s/%s",
+		url.PathEscape(owner), url.PathEscape(repo))
+	resp, err := doGiteeAPIGet(httpClient, apiURL)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return "master"
+	}
+	defer resp.Body.Close()
+
+	var info githubRepoInfo // same JSON shape
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil || info.DefaultBranch == "" {
+		return "master"
+	}
+	return info.DefaultBranch
+}
+
+// giteeRefExists probes whether ref is a valid branch, tag, or commit in the
+// Gitee repository. Uses the commits endpoint analogous to githubRefExists.
+func giteeRefExists(httpClient *http.Client, owner, repo, ref string) (bool, error) {
+	apiURL := fmt.Sprintf("https://gitee.com/api/v5/repos/%s/%s/commits/%s",
+		url.PathEscape(owner), url.PathEscape(repo), escapeRefPath(ref))
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+	if err != nil {
+		return false, err
+	}
+	addGiteeAuthHeader(req)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusNotFound, http.StatusUnprocessableEntity:
+		return false, nil
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests:
+		return false, errGitHubAPIBlocked
+	default:
+		return false, fmt.Errorf("gitee API returned status %d for ref %q", resp.StatusCode, ref)
+	}
+}
+
+// resolveGiteeRefAndPath mirrors resolveGitHubRefAndPath for Gitee repos.
+func resolveGiteeRefAndPath(httpClient *http.Client, spec *githubSpec) error {
+	if len(spec.refSegments) == 0 {
+		return nil
+	}
+	tried := make([]string, 0, len(spec.refSegments))
+	blocked := false
+	for n := len(spec.refSegments); n >= 1; n-- {
+		candidate := strings.Join(spec.refSegments[:n], "/")
+		tried = append(tried, candidate)
+		ok, err := giteeRefExists(httpClient, spec.owner, spec.repo, candidate)
+		if errors.Is(err, errGitHubAPIBlocked) {
+			blocked = true
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("validating ref %q: %w", candidate, err)
+		}
+		if ok {
+			spec.ref = candidate
+			if n == len(spec.refSegments) {
+				spec.skillDir = ""
+			} else {
+				spec.skillDir = strings.Join(spec.refSegments[n:], "/")
+			}
+			return nil
+		}
+	}
+	if blocked {
+		slog.Warn("gitee import: ref resolution blocked by Gitee API; falling back to optimistic single-segment ref. Set GITEE_TOKEN to enable disambiguation of slash-bearing refs.",
+			"owner", spec.owner, "repo", spec.repo, "tried", tried)
+		return nil
+	}
+	return fmt.Errorf("could not resolve ref in gitee.com/%s/%s URL — tried: %s. Make sure the branch, tag, or commit exists",
+		spec.owner, spec.repo, strings.Join(tried, ", "))
+}
+
+func buildRawGiteeURL(owner, repo, ref, repoPath string) string {
+	base := fmt.Sprintf("https://gitee.com/%s/%s/raw/%s",
+		url.PathEscape(owner), url.PathEscape(repo), escapeRefPath(ref))
+	parts := strings.Split(strings.Trim(repoPath, "/"), "/")
+	escaped := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		escaped = append(escaped, url.PathEscape(part))
+	}
+	if len(escaped) == 0 {
+		return base
+	}
+	return base + "/" + strings.Join(escaped, "/")
+}
+
+func buildGiteeContentsURL(owner, repo, repoPath, ref string) string {
+	base := fmt.Sprintf("https://gitee.com/api/v5/repos/%s/%s/contents",
+		url.PathEscape(owner), url.PathEscape(repo))
+	if repoPath == "" {
+		return base + "?ref=" + url.QueryEscape(ref)
+	}
+	pathParts := strings.Split(strings.Trim(repoPath, "/"), "/")
+	escapedParts := make([]string, 0, len(pathParts))
+	for _, p := range pathParts {
+		if p == "" {
+			continue
+		}
+		escapedParts = append(escapedParts, url.PathEscape(p))
+	}
+	return base + "/" + strings.Join(escapedParts, "/") + "?ref=" + url.QueryEscape(ref)
+}
+
+func fetchFromGitee(httpClient *http.Client, rawURL string) (*importedSkill, error) {
+	// parseGitHubURL works because Gitee uses the identical path layout.
+	spec, err := parseGitHubURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	if len(spec.refSegments) > 0 {
+		if err := resolveGiteeRefAndPath(httpClient, &spec); err != nil {
+			return nil, err
+		}
+	}
+	if spec.ref == "" {
+		spec.ref = fetchGiteeDefaultBranch(httpClient, spec.owner, spec.repo)
+	}
+
+	skillMdPath := "SKILL.md"
+	if spec.skillDir != "" {
+		skillMdPath = spec.skillDir + "/SKILL.md"
+	}
+	skillMdBody, err := fetchRawFile(httpClient, buildRawGiteeURL(spec.owner, spec.repo, spec.ref, skillMdPath))
+	if err != nil {
+		if spec.skillDir == "" {
+			return nil, fmt.Errorf("SKILL.md not found at the root of %s/%s@%s. For multi-skill repositories, point to a specific directory using gitee.com/%s/%s/tree/%s/<skill-dir>",
+				spec.owner, spec.repo, spec.ref, spec.owner, spec.repo, spec.ref)
+		}
+		return nil, fmt.Errorf("SKILL.md not found at %s in %s/%s@%s: %w",
+			skillMdPath, spec.owner, spec.repo, spec.ref, err)
+	}
+
+	name, description := parseSkillFrontmatter(string(skillMdBody))
+	if name == "" {
+		if spec.skillDir != "" {
+			name = filepath.Base(spec.skillDir)
+		} else {
+			name = spec.repo
+		}
+	}
+
+	result := &importedSkill{
+		name:        name,
+		description: description,
+		content:     string(skillMdBody),
+		origin: map[string]any{
+			"type":       "gitee",
+			"source_url": rawURL,
+			"owner":      spec.owner,
+			"repo":       spec.repo,
+			"ref":        spec.ref,
+			"path":       spec.skillDir,
+		},
+	}
+
+	// Fetch directory listing for supporting files.
+	apiURL := buildGiteeContentsURL(spec.owner, spec.repo, spec.skillDir, spec.ref)
+	dirResp, err := doGiteeAPIGet(httpClient, apiURL)
+	if err != nil || dirResp.StatusCode != http.StatusOK {
+		if dirResp != nil {
+			dirResp.Body.Close()
+		}
+		return result, nil
+	}
+	defer dirResp.Body.Close()
+
+	var entries []githubContentEntry // Gitee contents API returns the same shape
+	if err := json.NewDecoder(dirResp.Body).Decode(&entries); err != nil {
+		slog.Warn("gitee import: failed to decode top-level directory listing", "url", apiURL, "error", err)
+		return result, nil
+	}
+
+	var allFiles []githubContentEntry
+	collectGiteeFiles(httpClient, entries, &allFiles, spec.owner, spec.repo, spec.ref)
+
+	basePath := ""
+	if spec.skillDir != "" {
+		basePath = spec.skillDir + "/"
+	}
+	for _, entry := range allFiles {
+		rawFileURL := buildRawGiteeURL(spec.owner, spec.repo, spec.ref, entry.Path)
+		body, err := fetchRawFile(httpClient, rawFileURL)
+		if err != nil {
+			if isCapError(err) {
+				return nil, fmt.Errorf("gitee import: %s: %w", entry.Path, err)
+			}
+			slog.Warn("gitee import: file download failed", "path", entry.Path, "error", err)
+			continue
+		}
+		relPath := strings.TrimPrefix(entry.Path, basePath)
+		if err := result.addFile(relPath, string(body)); err != nil {
+			return nil, err
+		}
+	}
+
+	return result, nil
+}
+
+// collectGiteeFiles recursively collects file entries from a Gitee directory
+// listing. Gitee's contents API has the same shape as GitHub's, but
+// download_url may not always be present for private repos, so we build raw
+// URLs ourselves instead.
+func collectGiteeFiles(httpClient *http.Client, entries []githubContentEntry, out *[]githubContentEntry, owner, repo, ref string) {
+	for _, entry := range entries {
+		switch entry.Type {
+		case "file":
+			if !strings.EqualFold(entry.Name, "SKILL.md") {
+				*out = append(*out, entry)
+			}
+		case "dir":
+			subURL := buildGiteeContentsURL(owner, repo, entry.Path, ref)
+			subResp, err := doGiteeAPIGet(httpClient, subURL)
+			if err != nil || subResp.StatusCode != http.StatusOK {
+				if subResp != nil {
+					subResp.Body.Close()
+				}
+				slog.Warn("gitee import: failed to list subdirectory", "path", entry.Path, "error", err)
+				continue
+			}
+			var subEntries []githubContentEntry
+			if err := json.NewDecoder(subResp.Body).Decode(&subEntries); err != nil {
+				subResp.Body.Close()
+				slog.Warn("gitee import: failed to decode subdirectory listing", "path", entry.Path, "error", err)
+				continue
+			}
+			subResp.Body.Close()
+			collectGiteeFiles(httpClient, subEntries, out, owner, repo, ref)
+		}
+	}
+}
+
 // --- Shared helpers ---
 
 // fetchRawFile downloads a URL and returns the body bytes. Returns an error
@@ -1570,6 +1894,8 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		imported, err = fetchFromSkillsSh(httpClient, normalized)
 	case sourceGitHub:
 		imported, err = fetchFromGitHub(httpClient, normalized)
+	case sourceGitee:
+		imported, err = fetchFromGitee(httpClient, normalized)
 	}
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())

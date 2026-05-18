@@ -16,6 +16,7 @@ export interface Comment {
   issue_id: string;
   author_type: CommentAuthorType;
   author_id: string;
+  author_display_name?: string | null;
   content: string;
   type: CommentType;
   parent_id: string | null;

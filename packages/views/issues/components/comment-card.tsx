@@ -1,7 +1,7 @@
 "use client";
 
-import { memo, useCallback, useRef, useState } from "react";
-import { CheckCircle2, ChevronRight, Copy, Download, FileText, Link2, MoreHorizontal, Pencil, RotateCcw, RotateCw, Trash2 } from "lucide-react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { CheckCircle2, ChevronRight, Copy, Download, Eye, FileText, Link2, MoreHorizontal, Pencil, RotateCcw, RotateCw, Trash2 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -32,16 +32,16 @@ import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-pick
 import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { timeAgo } from "@multica/core/utils";
-import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay } from "../../editor";
+import { ContentEditor, type ContentEditorRef, type SelectionQuoteActions, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, useDownloadAttachment, useAttachmentPreview, isPreviewable } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import type { Agent } from "@multica/core/types/agent";
 import { useNavigation } from "../../navigation";
-import { ReplyInput } from "./reply-input";
+import { ReplyInput, type ReplyInputRef } from "./reply-input";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
-import { useCommentCollapseStore } from "@multica/core/issues/stores";
+import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
 
 // ---------------------------------------------------------------------------
@@ -72,7 +72,7 @@ interface CommentCardProps {
    */
   canModerate?: boolean;
   onReply: (parentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
-  onEdit: (commentId: string, content: string) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   /** Toggle the resolved state on the thread root. Only invoked for root entries. */
@@ -85,6 +85,9 @@ interface CommentCardProps {
   onCollapseResolved?: () => void;
   /** ID of the comment to highlight (flash animation). */
   highlightedCommentId?: string | null;
+  onRegisterReplyController?: (threadRootId: string, controller: ReplyInputRef | null) => void;
+  selectionQuoteActions?: SelectionQuoteActions;
+  onQuoteToReplyInThread?: (threadRootId: string, markdown: string) => void;
 }
 
 function findMemberAncestorComment(
@@ -154,6 +157,9 @@ function DeleteCommentDialog({
 // ---------------------------------------------------------------------------
 
 function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
+  const { t } = useT("editor");
+  const download = useDownloadAttachment();
+  const preview = useAttachmentPreview();
   if (!attachments?.length) return null;
   // Skip attachments whose URL is already referenced in the markdown content,
   // and duplicates of the same file (same name/type/size) that are referenced.
@@ -187,17 +193,29 @@ function AttachmentList({ attachments, content, className }: { attachments?: Att
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm">{a.filename}</p>
           </div>
-          {a.download_url && (
+          {isPreviewable(a.content_type, a.filename) && (
             <button
               type="button"
               className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              onClick={() => window.open(a.download_url, "_blank", "noopener,noreferrer")}
+              title={t(($) => $.attachment.preview)}
+              aria-label={t(($) => $.attachment.preview)}
+              onClick={() => preview.tryOpen({ kind: "full", attachment: a })}
             >
-              <Download className="size-3.5" />
+              <Eye className="size-3.5" />
             </button>
           )}
+          <button
+            type="button"
+            className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            title={t(($) => $.image.download)}
+            aria-label={t(($) => $.image.download)}
+            onClick={() => download(a.id)}
+          >
+            <Download className="size-3.5" />
+          </button>
         </div>
       ))}
+      {preview.modal}
     </div>
   );
 }
@@ -255,6 +273,7 @@ function CommentRow({
   onEdit,
   onDelete,
   onToggleReaction,
+  selectionQuoteActions,
 }: {
   issueId: string;
   entry: TimelineEntry;
@@ -263,9 +282,10 @@ function CommentRow({
   issueOpen: boolean;
   currentUserId?: string;
   canModerate?: boolean;
-  onEdit: (commentId: string, content: string) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
+  selectionQuoteActions?: SelectionQuoteActions;
 }) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
@@ -273,11 +293,41 @@ function CommentRow({
   const [editing, setEditing] = useState(false);
   const editEditorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
-  const { uploadWithToast } = useFileUpload(api, (err) => toast.error(err.message));
+  const { uploadWithToast } = useFileUpload(api);
+  // Pending uploads from this edit pass. Merged with `entry.attachments` so
+  // newly uploaded text/code files get an Eye button in the edit-mode editor;
+  // the active subset is sent as `attachmentIds` on save so the server binds
+  // them to the comment (otherwise they'd remain orphaned at the issue level
+  // and disappear after refresh).
+  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
+  const editorAttachments = pendingAttachments.length > 0
+    ? [...(entry.attachments ?? []), ...pendingAttachments]
+    : entry.attachments;
+  const handleEditUpload = useCallback(async (file: File) => {
+    const result = await uploadWithToast(file, { issueId });
+    if (result) setPendingAttachments((prev) => [...prev, result]);
+    return result;
+  }, [uploadWithToast, issueId]);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editEditorRef.current?.uploadFile(f)),
     enabled: editing,
   });
+
+  // Edit-mode draft: virtualization unmounts the card when it scrolls out
+  // of viewport, taking the in-progress edit with it. Persist via store
+  // so a scroll-away + scroll-back round-trip restores the user's edits.
+  // Key includes issueId so two issues with the same comment id (impossible
+  // but defensive) don't collide; cleared on cancel and on save.
+  const editDraftKey = `edit:${issueId}:${entry.id}` as const;
+  const getEditDraft = useCommentDraftStore.getState().getDraft;
+  const setEditDraft = useCommentDraftStore((s) => s.setDraft);
+  const clearEditDraft = useCommentDraftStore((s) => s.clearDraft);
+  // Read the snapshot once when the edit pass mounts; ContentEditor only
+  // honors `defaultValue` on mount, so a live store subscription here would
+  // cause an extra unmount/remount on every keystroke.
+  const editInitialValue = editing
+    ? (getEditDraft(editDraftKey) ?? entry.content ?? "")
+    : (entry.content ?? "");
 
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
   const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
@@ -309,6 +359,8 @@ function CommentRow({
   const cancelEdit = () => {
     cancelledRef.current = true;
     setEditing(false);
+    setPendingAttachments([]);
+    clearEditDraft(editDraftKey);
   };
 
   const saveEdit = async () => {
@@ -319,11 +371,18 @@ function CommentRow({
       .trim();
     if (!trimmed || trimmed === (entry.content ?? "").trim()) {
       setEditing(false);
+      setPendingAttachments([]);
+      clearEditDraft(editDraftKey);
       return;
     }
+    const activeIds = pendingAttachments
+      .filter((a) => trimmed.includes(a.url))
+      .map((a) => a.id);
     try {
-      await onEdit(entry.id, trimmed);
+      await onEdit(entry.id, trimmed, activeIds.length > 0 ? activeIds : undefined);
       setEditing(false);
+      setPendingAttachments([]);
+      clearEditDraft(editDraftKey);
     } catch {
       toast.error(t(($) => $.comment.update_failed));
     }
@@ -338,7 +397,7 @@ function CommentRow({
       <div className="flex items-center gap-2.5">
         <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
         <span className="cursor-pointer text-sm font-medium">
-          {getActorName(entry.actor_type, entry.actor_id)}
+          {entry.actor_display_name ?? getActorName(entry.actor_type, entry.actor_id)}
         </span>
         <Tooltip>
           <TooltipTrigger
@@ -427,12 +486,18 @@ function CommentRow({
           <div className="text-sm leading-relaxed">
             <ContentEditor
               ref={editEditorRef}
-              defaultValue={entry.content ?? ""}
+              defaultValue={editInitialValue}
               placeholder={t(($) => $.comment.edit_placeholder)}
+              onUpdate={(md) => {
+                if (md.trim().length > 0) setEditDraft(editDraftKey, md);
+                else clearEditDraft(editDraftKey);
+              }}
               onSubmit={saveEdit}
-              onUploadFile={(file) => uploadWithToast(file, { issueId })}
+              onUploadFile={handleEditUpload}
               debounceMs={100}
               currentIssueId={issueId}
+              attachments={editorAttachments}
+              selectionQuoteActions={selectionQuoteActions}
             />
           </div>
           <div className="flex items-center justify-between mt-2">
@@ -450,7 +515,7 @@ function CommentRow({
       ) : (
         <>
           <div className="mt-1.5 pl-8 text-sm leading-relaxed text-foreground/85">
-            <ReadonlyContent content={entry.content ?? ""} />
+            <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8" />
           {!isTemp && (
@@ -489,6 +554,9 @@ function CommentCardImpl({
   onResolveToggle,
   onCollapseResolved,
   highlightedCommentId,
+  onRegisterReplyController,
+  selectionQuoteActions,
+  onQuoteToReplyInThread,
 }: CommentCardProps) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
@@ -501,10 +569,29 @@ function CommentCardImpl({
   const [editing, setEditing] = useState(false);
   const editEditorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
+  // Pending uploads from the root-comment edit pass — same rationale as CommentRow.
+  const [parentPendingAttachments, setParentPendingAttachments] = useState<Attachment[]>([]);
+  const parentEditorAttachments = parentPendingAttachments.length > 0
+    ? [...(entry.attachments ?? []), ...parentPendingAttachments]
+    : entry.attachments;
+  const handleParentEditUpload = useCallback(async (file: File) => {
+    const result = await uploadWithToast(file, { issueId });
+    if (result) setParentPendingAttachments((prev) => [...prev, result]);
+    return result;
+  }, [uploadWithToast, issueId]);
   const { isDragOver: parentDragOver, dropZoneProps: parentDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editEditorRef.current?.uploadFile(f)),
     enabled: editing,
   });
+
+  // Edit-mode draft (root comment). Same rationale as CommentRow's draft.
+  const parentEditDraftKey = `edit:${issueId}:${entry.id}` as const;
+  const getParentEditDraft = useCommentDraftStore.getState().getDraft;
+  const setParentEditDraft = useCommentDraftStore((s) => s.setDraft);
+  const clearParentEditDraft = useCommentDraftStore((s) => s.clearDraft);
+  const parentEditInitialValue = editing
+    ? (getParentEditDraft(parentEditDraftKey) ?? entry.content ?? "")
+    : (entry.content ?? "");
 
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
   // Author-only edit is the same as before; admins additionally get edit
@@ -540,6 +627,8 @@ function CommentCardImpl({
   const cancelEdit = () => {
     cancelledRef.current = true;
     setEditing(false);
+    setParentPendingAttachments([]);
+    clearParentEditDraft(parentEditDraftKey);
   };
 
   const saveEdit = async () => {
@@ -550,11 +639,18 @@ function CommentCardImpl({
       .trim();
     if (!trimmed || trimmed === (entry.content ?? "").trim()) {
       setEditing(false);
+      setParentPendingAttachments([]);
+      clearParentEditDraft(parentEditDraftKey);
       return;
     }
+    const activeIds = parentPendingAttachments
+      .filter((a) => trimmed.includes(a.url))
+      .map((a) => a.id);
     try {
-      await onEdit(entry.id, trimmed);
+      await onEdit(entry.id, trimmed, activeIds.length > 0 ? activeIds : undefined);
       setEditing(false);
+      setParentPendingAttachments([]);
+      clearParentEditDraft(parentEditDraftKey);
     } catch {
       toast.error(t(($) => $.comment.update_failed));
     }
@@ -572,9 +668,40 @@ function CommentCardImpl({
   const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
 
   const isHighlighted = highlightedCommentId === entry.id;
+  const registerReplyInput = useCallback(
+    (controller: ReplyInputRef | null) => {
+      onRegisterReplyController?.(entry.id, controller);
+    },
+    [entry.id, onRegisterReplyController],
+  );
+  const threadSelectionQuoteActions = useMemo<SelectionQuoteActions | undefined>(() => {
+    if (!selectionQuoteActions?.onQuoteToNewComment && !onQuoteToReplyInThread && !selectionQuoteActions?.onQuoteToReplyTarget) {
+      return undefined;
+    }
+    return {
+      onQuoteToNewComment: selectionQuoteActions?.onQuoteToNewComment,
+      onQuoteToReply: selectionQuoteActions?.onQuoteToReplyTarget
+        ? undefined
+        : onQuoteToReplyInThread
+        ? (markdown) => onQuoteToReplyInThread(entry.id, markdown)
+        : undefined,
+      onQuoteToReplyTarget: selectionQuoteActions?.onQuoteToReplyTarget,
+      replyTargets: selectionQuoteActions?.replyTargets,
+    };
+  }, [
+    entry.id,
+    onQuoteToReplyInThread,
+    selectionQuoteActions?.onQuoteToNewComment,
+    selectionQuoteActions?.onQuoteToReplyTarget,
+    selectionQuoteActions?.replyTargets,
+  ]);
 
   return (
-    <Card className={cn("!py-0 !gap-0 overflow-hidden transition-colors duration-700", isTemp && "opacity-60", isHighlighted && "ring-2 ring-brand/50 bg-brand/5")}>
+    <Card
+      data-comment-id={entry.id}
+      data-thread-root-id={entry.id}
+      className={cn("!py-0 !gap-0 overflow-hidden transition-colors duration-700", isTemp && "opacity-60", isHighlighted && "ring-2 ring-brand/50 bg-brand/5")}
+    >
       {onCollapseResolved && (
         <button
           type="button"
@@ -598,7 +725,7 @@ function CommentCardImpl({
             </CollapsibleTrigger>
             <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
             <span className="shrink-0 cursor-pointer text-sm font-medium">
-              {getActorName(entry.actor_type, entry.actor_id)}
+              {entry.actor_display_name ?? getActorName(entry.actor_type, entry.actor_id)}
             </span>
             <Tooltip>
               <TooltipTrigger
@@ -712,7 +839,7 @@ function CommentCardImpl({
         {/* Collapsible body */}
         <CollapsibleContent>
           {/* Parent comment body */}
-          <div className="px-4 pb-3">
+          <div className="px-4 pb-3" data-comment-id={entry.id} data-thread-root-id={entry.id}>
             {editing ? (
               <div
                 {...parentDropZoneProps}
@@ -722,12 +849,18 @@ function CommentCardImpl({
                 <div className="text-sm leading-relaxed">
                   <ContentEditor
                     ref={editEditorRef}
-                    defaultValue={entry.content ?? ""}
+                    defaultValue={parentEditInitialValue}
                     placeholder={t(($) => $.comment.edit_placeholder)}
+                    onUpdate={(md) => {
+                      if (md.trim().length > 0) setParentEditDraft(parentEditDraftKey, md);
+                      else clearParentEditDraft(parentEditDraftKey);
+                    }}
                     onSubmit={saveEdit}
-                    onUploadFile={(file) => uploadWithToast(file, { issueId })}
+                    onUploadFile={handleParentEditUpload}
                     debounceMs={100}
                     currentIssueId={issueId}
+                    attachments={parentEditorAttachments}
+                    selectionQuoteActions={threadSelectionQuoteActions}
                   />
                 </div>
                 <div className="flex items-center justify-between mt-2">
@@ -745,7 +878,7 @@ function CommentCardImpl({
             ) : (
               <>
                 <div className="pl-10 text-sm leading-relaxed text-foreground/85">
-                  <ReadonlyContent content={entry.content ?? ""} />
+                  <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
                 {!isTemp && (
@@ -764,7 +897,13 @@ function CommentCardImpl({
 
           {/* Replies */}
           {allNestedReplies.map((reply) => (
-            <div key={reply.id} id={`comment-${reply.id}`} className={cn("border-t border-border/50 px-4 transition-colors duration-700", highlightedCommentId === reply.id && "bg-brand/5")}>
+            <div
+              key={reply.id}
+              id={`comment-${reply.id}`}
+              data-comment-id={reply.id}
+              data-thread-root-id={entry.id}
+              className={cn("border-t border-border/50 px-4 transition-colors duration-700", highlightedCommentId === reply.id && "bg-brand/5")}
+            >
               <CommentRow
                 issueId={issueId}
                 entry={reply}
@@ -776,6 +915,7 @@ function CommentCardImpl({
                 onEdit={onEdit}
                 onDelete={onDelete}
                 onToggleReaction={onToggleReaction}
+                selectionQuoteActions={threadSelectionQuoteActions}
               />
             </div>
           ))}
@@ -783,12 +923,15 @@ function CommentCardImpl({
           {/* Reply input */}
           <div className="border-t border-border/50 px-4 py-2.5">
             <ReplyInput
+              ref={registerReplyInput}
               issueId={issueId}
               placeholder={t(($) => $.reply.placeholder)}
               size="sm"
               avatarType="member"
               avatarId={currentUserId ?? ""}
+              draftKey={`reply:${issueId}:${entry.id}`}
               onSubmit={(content, attachmentIds) => onReply(entry.id, content, attachmentIds)}
+              selectionQuoteActions={threadSelectionQuoteActions}
             />
           </div>
         </CollapsibleContent>

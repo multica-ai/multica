@@ -28,15 +28,19 @@ export const issueKeys = {
   subscribers: (issueId: string) =>
     ["issues", "subscribers", issueId] as const,
   usage: (issueId: string) => ["issues", "usage", issueId] as const,
+  /** Issue-level attachments — used by the description editor so its
+   *  inline file-card / image NodeViews can re-sign download URLs at
+   *  click time. */
+  attachments: (issueId: string) => ["issues", "attachments", issueId] as const,
   /** Per-issue task list (issue-detail Execution log section). */
   tasks: (issueId: string) => ["issues", "tasks", issueId] as const,
   /** Prefix-match key for invalidating tasks across all issues — used by
    *  the global WS task: prefix path so any task lifecycle event refreshes
    *  every per-issue list, regardless of which issue is currently mounted. */
   tasksAll: () => ["issues", "tasks"] as const,
-  attachments: (issueId: string) => ["issues", "attachments", issueId] as const,
   taskRuns: (issueId: string) => ["issues", "task-runs", issueId] as const,
-  taskMessages: (taskId: string) => ["issues", "task-messages", taskId] as const,
+  /** Per-task execution messages. Shared with chat and realtime WS writes. */
+  taskMessages: (taskId: string) => ["task-messages", taskId] as const,
 };
 
 export type MyIssuesFilter = Pick<
@@ -229,6 +233,10 @@ export function issueUsageOptions(issueId: string) {
   });
 }
 
+// Backs the description editor's fresh-sign download flow: NodeViews resolve
+// an attachment id by matching the markdown URL against this list. The list
+// is workspace-private metadata and lives on the same cache lifetime as the
+// rest of the issue detail surface.
 export function issueAttachmentsOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.attachments(issueId),

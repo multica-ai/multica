@@ -80,6 +80,10 @@ function getEventLabel(item: TimelineItem): string {
   switch (item.type) {
     case "text":
       return "Agent";
+    case "raw":
+      return "Raw";
+    case "final":
+      return "Final";
     case "thinking":
       return "Thinking";
     case "tool_use":
@@ -96,6 +100,8 @@ function getEventLabel(item: TimelineItem): string {
 function getEventSummary(item: TimelineItem): string {
   switch (item.type) {
     case "text":
+    case "raw":
+    case "final":
       return item.content?.split("\n").find((l) => l.trim().length > 0) ?? "";
     case "thinking":
       return item.content?.slice(0, 200) ?? "";

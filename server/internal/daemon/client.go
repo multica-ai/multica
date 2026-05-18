@@ -55,6 +55,26 @@ func isTaskNotFoundError(err error) bool {
 	return strings.Contains(strings.ToLower(reqErr.Body), "task not found")
 }
 
+// isRuntimeNotFoundError returns true if the error is a 404 with "runtime not
+// found" body. The daemon uses this to detect that the runtime row was deleted
+// server-side (UI Delete, 7-day offline GC) while the daemon was still
+// heartbeating against the dead UUID, so it can prune the stale runtime from
+// its local state and re-register instead of looping on the dead ID forever.
+//
+// Server-side, this body is paired with pgx.ErrNoRows specifically (other DB
+// errors return 500), so a transient DB hiccup cannot make the daemon
+// self-cleanup.
+func isRuntimeNotFoundError(err error) bool {
+	var reqErr *requestError
+	if !errors.As(err, &reqErr) {
+		return false
+	}
+	if reqErr.StatusCode != http.StatusNotFound {
+		return false
+	}
+	return strings.Contains(strings.ToLower(reqErr.Body), "runtime not found")
+}
+
 // Client handles HTTP communication with the Multica server daemon API.
 type Client struct {
 	baseURL string
@@ -482,4 +502,26 @@ func (c *Client) getJSON(ctx context.Context, path string, respBody any) error {
 		return nil
 	}
 	return json.NewDecoder(resp.Body).Decode(respBody)
+}
+
+// ReportInteraction creates a pending interaction on the server and returns its ID.
+func (c *Client) ReportInteraction(ctx context.Context, taskID string, req map[string]any) (string, error) {
+	var resp struct {
+		ID string `json:"id"`
+	}
+	if err := c.postJSON(ctx, "/api/daemon/tasks/"+taskID+"/interactions", req, &resp); err != nil {
+		return "", err
+	}
+	return resp.ID, nil
+}
+
+
+
+// GetInteraction polls the server for an interaction's current state.
+func (c *Client) GetInteraction(ctx context.Context, taskID, interactionID string) (map[string]any, error) {
+	var resp map[string]any
+	if err := c.getJSON(ctx, "/api/daemon/tasks/"+taskID+"/interactions/"+interactionID, &resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
