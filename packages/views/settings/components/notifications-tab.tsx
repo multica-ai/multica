@@ -126,14 +126,6 @@ export function NotificationsTab() {
     } finally {
       setSavingKey(null);
     }
-    mutation.mutate(updated, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.notifications.toast_failed),
-        ),
-    });
   };
 
   const handleToggleCustomWebhook = async (enabled: boolean) => {

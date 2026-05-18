@@ -474,7 +474,7 @@ export function BoardView({
         {visibleStatuses.map((status) => (
           <PaginatedBoardColumn
             key={status}
-            status={status}
+            group={{ id: status, title: status, status }}
             issueIds={columns[status] ?? []}
             issueMap={issueMapRef.current}
             childProgressMap={childProgressMap}

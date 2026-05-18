@@ -109,7 +109,7 @@
     "output_summary": "Output",
     "pr_link": "Pull Request",
     "session_id": "Session",
-    "no_output": "No output"
+    "no_output": "No output",
     "skipped_group": {
       "label": "Skipped",
       "summary": "{{count}} skipped runs"

@@ -31,7 +31,6 @@ import {
 import { useWorkspaceId } from "../hooks";
 import { useRecentIssuesStore } from "./stores";
 import { workspaceKeys } from "../workspace/queries";
-import type { Issue, IssueReaction, IssueStatus } from "../types";
 import type { GroupedIssuesResponse, Issue, IssueAssigneeGroup, IssueReaction, IssueStatus } from "../types";
 import type {
   CreateIssueRequest,

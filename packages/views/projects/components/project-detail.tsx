@@ -6,7 +6,7 @@ import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, 
 import { useQuery, type QueryKey } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
-import type { Issue, IssueAssigneeGroup, ProjectStatus, ProjectPriority, UpdateIssueRequest } from "@multica/core/types";
+import type { Issue, IssueAssigneeGroup, IssueStatus, ProjectStatus, ProjectPriority, UpdateIssueRequest } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
@@ -707,7 +707,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 scope={projectScope}
                 filter={projectFilter}
               />
-              <BatchActionToolbar issues={projectIssues} />
             </ViewStoreProvider>
           </div>
         </ResizablePanel>

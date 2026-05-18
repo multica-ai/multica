@@ -764,6 +764,7 @@ type WikiPage struct {
 	UpdatedBy   pgtype.UUID        `json:"updated_by"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
 
 type WebhookDelivery struct {
 	ID                     pgtype.UUID        `json:"id"`

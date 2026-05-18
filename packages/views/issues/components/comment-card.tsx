@@ -1,10 +1,8 @@
 "use client";
 
 import { memo, useCallback, useMemo, useRef, useState } from "react";
-import { CheckCircle2, ChevronRight, Copy, Download, Eye, FileText, Link2, MoreHorizontal, Pencil, RotateCcw, RotateCw, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, Copy, Link2, MoreHorizontal, Pencil, RotateCcw, RotateCw, Trash2 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { memo, useCallback, useRef, useState } from "react";
-import { CheckCircle2, ChevronRight, Copy, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { Card } from "@multica/ui/components/ui/card";
@@ -34,8 +32,7 @@ import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-pick
 import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { timeAgo } from "@multica/core/utils";
-import { ContentEditor, type ContentEditorRef, type SelectionQuoteActions, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, useDownloadAttachment, useAttachmentPreview, isPreviewable } from "../../editor";
-import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, useDownloadAttachment, useAttachmentPreview, AttachmentBlock } from "../../editor";
+import { ContentEditor, type ContentEditorRef, type SelectionQuoteActions, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, useDownloadAttachment, useAttachmentPreview, AttachmentBlock } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";

@@ -390,6 +390,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		InitialDelay:  DefaultRateLimitInitialDelay,
 		MaxRetries:    DefaultRateLimitMaxRetries,
 		BackoffFactor: DefaultRateLimitBackoffFactor,
+	}
+
 	// Auto-update config: default -> env override -> CLI override.
 	//
 	// Default is opt-in on Multica Cloud (api.multica.ai) and opt-out for

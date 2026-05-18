@@ -109,7 +109,7 @@
     "output_summary": "输出",
     "pr_link": "Pull Request",
     "session_id": "会话",
-    "no_output": "无输出"
+    "no_output": "无输出",
     "skipped_group": {
       "label": "已跳过",
       "summary": "{{count}} 条跳过的运行"

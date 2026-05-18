@@ -180,8 +180,6 @@ export function ManualCreatePanel({
       description: "",
       status: "todo",
       priority: "none",
-      assigneeType: undefined,
-      assigneeId: undefined,
       assigneeType,
       assigneeId,
       startDate: null,

@@ -303,6 +303,7 @@ describe("CreateIssueModal", () => {
       priority: "none",
       assigneeType: undefined,
       assigneeId: undefined,
+      startDate: null,
       dueDate: null,
     };
     mockSetKeepOpen.mockImplementation((v: boolean) => {
@@ -385,8 +386,6 @@ describe("CreateIssueModal", () => {
         description: "Description to clear",
         status: "todo",
         priority: "none",
-        assignee_type: "member",
-        assignee_id: "alice",
         assignee_type: undefined,
         assignee_id: undefined,
         start_date: undefined,

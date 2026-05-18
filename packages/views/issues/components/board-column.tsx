@@ -98,11 +98,6 @@ export function BoardColumn({
                   size="icon-sm"
                   className="rounded-full text-muted-foreground"
                   aria-label="Add issue"
-                  onClick={() =>
-                    useModalStore
-                      .getState()
-                      .open("create-issue", { status, ...(projectId ? { project_id: projectId } : {}) })
-                  }
                   onClick={() => {
                     const data = {
                       ...(group.createData ?? {}),

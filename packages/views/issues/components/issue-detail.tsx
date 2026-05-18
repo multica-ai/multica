@@ -71,11 +71,9 @@ import type { Attachment, Issue, IssueStatus, IssuePriority, LocalPreview, Timel
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
-import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
+import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { useIssueActions } from "../actions";
 import { IssueActionsMenuItems, dropdownPrimitives } from "../actions/issue-actions-menu-items";
-import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
-import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
 import { CommentInput, type CommentInputRef } from "./comment-input";
@@ -408,7 +406,6 @@ function flattenGroups(
   return out;
 }
 
-const EMPTY_REPLIES: TimelineEntry[] = [];
 const MAX_SELECTED_QUOTE_CHARS = 4000;
 const SELECTION_BLOCKED_SELECTOR = [
   "input",
@@ -427,19 +424,6 @@ type QuoteSelectionMenuState = {
   y: number;
   threadRootId: string | null;
 };
-
-// Shallow array equality by element identity. Used to reuse the previous
-// render's per-thread reply slice when nothing in *this* thread changed,
-// even if the surrounding `timeline` array was rebuilt by a WS event in
-// some unrelated thread.
-function shallowEqualEntries(a: TimelineEntry[], b: TimelineEntry[]): boolean {
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
-}
 
 function TimelineSkeleton() {
   return (

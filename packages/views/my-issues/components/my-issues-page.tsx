@@ -20,8 +20,7 @@ import { ListView } from "../../issues/components/list-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { myIssueListOptions, myAllIssuesListOptions, childIssueProgressOptions, type MyIssuesFilter } from "@multica/core/issues/queries";
-import { myIssueAssigneeGroupsOptions, myIssueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter, type MyIssuesFilter } from "@multica/core/issues/queries";
+import { myIssueAssigneeGroupsOptions, myIssueListOptions, myAllIssuesListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter, type MyIssuesFilter } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-store";
 import { PageHeader } from "../../layout/page-header";
@@ -74,16 +73,10 @@ export function MyIssuesPage() {
 
   // For the "my" scope, use the combined query that fetches both assigned and
   // created issues. For all other scopes, use the single-filter query.
-  const { data: myIssuesScoped = [], isLoading: loadingScoped } = useQuery({
-    ...myIssueListOptions(wsId, scope, filter),
-    enabled: scope !== "my",
-  });
-  const { data: myIssuesMy = [], isLoading: loadingMy } = useQuery({
+  const { data: myIssuesMy = [] } = useQuery({
     ...myAllIssuesListOptions(wsId, user?.id ?? ""),
     enabled: scope === "my" && !!user,
   });
-  const myIssues = scope === "my" ? myIssuesMy : myIssuesScoped;
-  const loading = scope === "my" ? loadingMy : loadingScoped;
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
     () => ({
       ...filter,
@@ -106,11 +99,15 @@ export function MyIssuesPage() {
     enabled: usesAssigneeBoard,
   });
   const myIssues = useMemo(
-    () =>
-      usesAssigneeBoard
-        ? (assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [])
-        : (statusIssuesQuery.data ?? []),
-    [assigneeGroupsQuery.data, statusIssuesQuery.data, usesAssigneeBoard],
+    () => {
+      if (usesAssigneeBoard) {
+        return assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [];
+      }
+      // For the "my" scope, use combined (assigned+created) issues; otherwise use status query
+      if (scope === "my" && myIssuesMy.length > 0) return myIssuesMy;
+      return statusIssuesQuery.data ?? [];
+    },
+    [assigneeGroupsQuery.data, statusIssuesQuery.data, usesAssigneeBoard, scope, myIssuesMy],
   );
   const loading = usesAssigneeBoard
     ? assigneeGroupsQuery.isLoading

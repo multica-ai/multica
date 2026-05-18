@@ -276,9 +276,6 @@ export function useIssueTimeline(
       try {
         await createComment({ content, type, attachmentIds });
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : t(($) => $.comment.send_failed));
-        await createComment({ content, attachmentIds });
-      } catch (err) {
         toast.error(
           err instanceof Error && err.message
             ? err.message
@@ -306,7 +303,6 @@ export function useIssueTimeline(
           attachmentIds,
         });
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : t(($) => $.comment.send_reply_failed));
         toast.error(
           err instanceof Error && err.message
             ? err.message

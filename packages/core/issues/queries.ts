@@ -191,6 +191,9 @@ export function myAllIssuesListOptions(wsId: string, userId: string) {
     queryKey: [...issueKeys.myAll(wsId), "my", userId],
     queryFn: () => fetchMyIssues(userId),
     select: flattenIssueBuckets,
+  });
+}
+
 export function myIssueAssigneeGroupsOptions(
   wsId: string,
   scope: string,

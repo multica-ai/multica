@@ -2063,6 +2063,7 @@ export class ApiClient {
   ): Promise<InstructionsHistoryDetail> {
     const search = new URLSearchParams({ scope });
     return this.fetch(`/api/workspaces/${workspaceId}/instructions-history/${versionId}?${search}`);
+  }
 
   async rotateAutopilotTriggerWebhookToken(
     autopilotId: string,
