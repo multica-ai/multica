@@ -94,9 +94,6 @@ type AgentTaskQueue struct {
 	MaxAttempts       int32              `json:"max_attempts"`
 	ParentTaskID      pgtype.UUID        `json:"parent_task_id"`
 	FailureReason     pgtype.Text        `json:"failure_reason"`
-	TriggerSource     pgtype.Text        `json:"trigger_source"`
-	TriggerActorType  pgtype.Text        `json:"trigger_actor_type"`
-	TriggerActorID    pgtype.UUID        `json:"trigger_actor_id"`
 	TriggerSummary    pgtype.Text        `json:"trigger_summary"`
 	ForceFreshSession bool               `json:"force_fresh_session"`
 	IsLeaderTask      bool               `json:"is_leader_task"`

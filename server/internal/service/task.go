@@ -48,20 +48,6 @@ type TaskContext struct {
 	RunMode string `json:"run_mode,omitempty"`
 }
 
-type TriggerActor struct {
-	Source    string
-	ActorType string
-	ActorID   pgtype.UUID
-}
-
-func (t TriggerActor) sourceText() pgtype.Text {
-	return pgtype.Text{String: t.Source, Valid: t.Source != ""}
-}
-
-func (t TriggerActor) actorTypeText() pgtype.Text {
-	return pgtype.Text{String: t.ActorType, Valid: t.ActorType != ""}
-}
-
 type TaskWakeupNotifier interface {
 	NotifyTaskAvailable(runtimeID, taskID string)
 }
@@ -440,15 +426,15 @@ func (s *TaskService) willRetryTask(task db.AgentTaskQueue) bool {
 // No context snapshot is stored — the agent fetches all data it needs at
 // runtime via the multica CLI.
 func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.EnqueueTaskForIssueWithContext(ctx, issue, TriggerActor{}, nil, triggerCommentID...)
+	return s.EnqueueTaskForIssueWithContext(ctx, issue, nil, triggerCommentID...)
 }
 
-func (s *TaskService) EnqueueTaskForIssueWithContext(ctx context.Context, issue db.Issue, trigger TriggerActor, taskContext []byte, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
+func (s *TaskService) EnqueueTaskForIssueWithContext(ctx context.Context, issue db.Issue, taskContext []byte, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
 	var commentID pgtype.UUID
 	if len(triggerCommentID) > 0 {
 		commentID = triggerCommentID[0]
 	}
-	return s.enqueueIssueTask(ctx, issue, trigger, commentID, taskContext, false)
+	return s.enqueueIssueTask(ctx, issue, commentID, taskContext, false)
 }
 
 // enqueueIssueTask is the shared implementation behind EnqueueTaskForIssue
@@ -456,7 +442,7 @@ func (s *TaskService) EnqueueTaskForIssueWithContext(ctx context.Context, issue 
 // daemon claim handler skips the (agent_id, issue_id) resume lookup — the
 // user already judged the prior output bad, a fresh agent session is the
 // expected behavior.
-func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trigger TriggerActor, triggerCommentID pgtype.UUID, taskContext []byte, forceFreshSession bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, taskContext []byte, forceFreshSession bool) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -483,9 +469,6 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		Priority:          priorityToInt(issue.Priority),
 		TriggerCommentID:  triggerCommentID,
 		Context:           taskContext,
-		TriggerSource:     trigger.sourceText(),
-		TriggerActorType:  trigger.actorTypeText(),
-		TriggerActorID:    trigger.ActorID,
 		TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 	})
@@ -515,11 +498,11 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
 func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.EnqueueTaskForMentionWithContext(ctx, issue, agentID, TriggerActor{}, triggerCommentID, nil)
+	return s.EnqueueTaskForMentionWithContext(ctx, issue, agentID, triggerCommentID, nil)
 }
 
-func (s *TaskService) EnqueueTaskForMentionWithContext(ctx context.Context, issue db.Issue, agentID pgtype.UUID, trigger TriggerActor, triggerCommentID pgtype.UUID, taskContext []byte) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, agentID, trigger, triggerCommentID, taskContext, false)
+func (s *TaskService) EnqueueTaskForMentionWithContext(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, taskContext []byte) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, taskContext, false)
 }
 
 // EnqueueTaskForSquadLeader is the leader-role variant of EnqueueTaskForMention.
@@ -529,10 +512,10 @@ func (s *TaskService) EnqueueTaskForMentionWithContext(ctx context.Context, issu
 // as a worker (do not skip). This matters for agents that are simultaneously
 // the leader and a worker of the same squad — see migration 090.
 func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, TriggerActor{}, triggerCommentID, nil, true)
+	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, nil, true)
 }
 
-func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, trigger TriggerActor, triggerCommentID pgtype.UUID, taskContext []byte, isLeader bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, taskContext []byte, isLeader bool) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -554,9 +537,6 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 		Priority:         priorityToInt(issue.Priority),
 		TriggerCommentID: triggerCommentID,
 		Context:          taskContext,
-		TriggerSource:    trigger.sourceText(),
-		TriggerActorType: trigger.actorTypeText(),
-		TriggerActorID:   trigger.ActorID,
 		TriggerSummary:   s.buildCommentTriggerSummary(ctx, triggerCommentID),
 		IsLeaderTask:     pgtype.Bool{Bool: isLeader, Valid: isLeader},
 	})
@@ -1486,7 +1466,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, trigg
 // as a leader task so the self-trigger guard treats it correctly.
 func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
 	if issue.AssigneeType.String == "agent" {
-		return s.enqueueIssueTask(ctx, issue, TriggerActor{}, triggerCommentID, nil, true)
+		return s.enqueueIssueTask(ctx, issue, triggerCommentID, nil, true)
 	}
 	return s.EnqueueTaskForSquadLeader(ctx, issue, agentID, triggerCommentID)
 }

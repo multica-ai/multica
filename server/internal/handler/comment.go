@@ -401,7 +401,6 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		if _, err := h.TaskService.EnqueueTaskForIssueWithContext(
 			r.Context(),
 			issue,
-			buildTriggerActor("comment", "member", uuidToString(comment.AuthorID)),
 			taskContext,
 			comment.ID,
 		); err != nil {
@@ -724,7 +723,6 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 			ctx,
 			issue,
 			agentUUID,
-			buildTriggerActor("mention", authorType, uuidToString(comment.AuthorID)),
 			comment.ID,
 			taskContext,
 		); err != nil {

@@ -2107,12 +2107,12 @@ func TestReuseRefreshesCodexWorkspaceSkills(t *testing.T) {
 	}
 	defer env.Cleanup(true)
 
-	reused := Reuse(env.WorkDir, "codex", "", TaskContextForEnv{
+	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
 		IssueID: "refresh-test",
 		AgentSkills: []SkillContextForEnv{
 			{Name: "New Skill", Content: "new"},
 		},
-	}, testLogger())
+	}}, testLogger())
 	if reused == nil {
 		t.Fatal("Reuse returned nil")
 	}
