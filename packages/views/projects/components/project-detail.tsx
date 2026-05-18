@@ -125,6 +125,25 @@ export function ProjectIssuesContent({
     [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
   );
 
+  const hasClientSideFilters =
+    priorityFilters.length > 0 ||
+    assigneeFilters.length > 0 ||
+    includeNoAssignee ||
+    creatorFilters.length > 0 ||
+    labelFilters.length > 0;
+
+  const filteredBoardCounts = useMemo(() => {
+    if (!hasClientSideFilters) return undefined;
+    const counts: Partial<Record<IssueStatus, number>> = {};
+    for (const status of BOARD_STATUSES) counts[status] = 0;
+    for (const issue of issues) {
+      if (BOARD_STATUSES.includes(issue.status)) {
+        counts[issue.status] = (counts[issue.status] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }, [hasClientSideFilters, issues]);
+
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
 
   const visibleStatuses = useMemo(() => {
@@ -184,6 +203,7 @@ export function ProjectIssuesContent({
           myIssuesScope={scope}
           myIssuesFilter={filter}
           projectId={projectId}
+          columnCounts={filteredBoardCounts}
         />
       ) : (
         <ListView

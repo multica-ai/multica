@@ -15,6 +15,7 @@ import {
   ChevronRight,
   CircleCheck,
   Eraser,
+  ExternalLink,
   MoreHorizontal,
   PanelRight,
   Pin,
@@ -22,6 +23,8 @@ import {
   Plus,
   MessageSquare,
   MessageSquareReply,
+  Square,
+  Terminal,
   Users,
 } from "lucide-react";
 import { PageHeader } from "../../layout/page-header";
@@ -61,7 +64,7 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
-import type { Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
+import type { Attachment, Issue, IssueStatus, IssuePriority, LocalPreview, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
@@ -207,6 +210,16 @@ function priorityLabel(priority: string, t: ActivityT): string {
     return t(($) => $.priority[priority as IssuePriority]);
   }
   return priority;
+}
+
+function metadataHealthPort(metadata: Record<string, unknown> | undefined): number | null {
+  const value = metadata?.health_port;
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return null;
 }
 
 function formatActivity(
@@ -415,6 +428,101 @@ function inferThreadRootId(selection: Selection): string | null {
   return null;
 }
 
+// Collapsible wrapper for an activity block. Older blocks default to a single
+// "N activities" summary line so the timeline isn't dominated by status /
+// priority / assignee churn; the trailing block stays expanded because it
+// usually answers "what just happened?". Expansion state is owned by the
+// parent so it survives Virtuoso's mount/unmount on scroll.
+function ActivityBlock({
+  entries,
+  expanded,
+  onToggle,
+  getActorName,
+  t,
+}: {
+  entries: TimelineEntry[];
+  expanded: boolean;
+  onToggle: () => void;
+  getActorName: (type: string, id: string) => string;
+  t: ActivityT;
+}) {
+  if (!expanded) {
+    const count = entries.length;
+    return (
+      <div className="pb-3 px-4">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronRight className="h-3 w-3 shrink-0" />
+          <span>{t(($) => $.activity.activity_count, { count })}</span>
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="pb-3 px-4 flex flex-col gap-3">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ChevronDown className="h-3 w-3 shrink-0" />
+        <span>{t(($) => $.activity.activity_count, { count: entries.length })}</span>
+      </button>
+      {entries.map((entry) => {
+        const details = (entry.details ?? {}) as Record<string, string>;
+        const isStatusChange = entry.action === "status_changed";
+        const isPriorityChange = entry.action === "priority_changed";
+        const isDueDateChange = entry.action === "due_date_changed";
+
+        let leadIcon: React.ReactNode;
+        if (isStatusChange && details.to) {
+          leadIcon = <StatusIcon status={details.to as IssueStatus} className="h-4 w-4 shrink-0" />;
+        } else if (isPriorityChange && details.to) {
+          leadIcon = <PriorityIcon priority={details.to as IssuePriority} className="h-4 w-4 shrink-0" />;
+        } else if (isDueDateChange) {
+          leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
+        } else {
+          leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
+        }
+
+        return (
+          <div key={entry.id} className="flex items-center text-xs text-muted-foreground">
+            <div className="mr-2 flex w-4 shrink-0 justify-center">
+              {leadIcon}
+            </div>
+            <div className="flex min-w-0 flex-1 items-center gap-1">
+              <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
+              <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
+              {(entry.coalesced_count ?? 1) > 1 &&
+                entry.action !== "task_completed" &&
+                entry.action !== "task_failed" && (
+                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+                    {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
+                  </span>
+                )}
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span className="ml-auto shrink-0 cursor-default">
+                      {timeAgo(entry.created_at)}
+                    </span>
+                  }
+                />
+                <TooltipContent side="top">
+                  {new Date(entry.created_at).toLocaleString()}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // SubIssueRow — sub-issue list item with inline status & assignee editing
 // ---------------------------------------------------------------------------
@@ -591,10 +699,12 @@ export function IssueDetail({
   }, [isMobile]);
   const sidebarOpen = isMobile ? mobileSidebarOpen : desktopSidebarOpen;
   const [propertiesOpen, setPropertiesOpen] = useState(true);
+  const [previewOpen, setPreviewOpen] = useState(true);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
+  const [previewLogs, setPreviewLogs] = useState<{ title: string; logs: string } | null>(null);
   // Virtuoso's `customScrollParent` wants the HTMLElement, not a ref. A plain
   // `useRef.current` does not trigger a re-render when it populates, so the
   // Virtuoso prop would never receive the element. Callback ref + state fixes
@@ -644,6 +754,43 @@ export function IssueDetail({
       return next;
     });
   }, []);
+
+  // Per-session activity-block expansion overrides. The default rule is
+  // "only the trailing block is expanded" (computed from timelineView.groups
+  // below); these two sets capture user clicks that diverge from the default.
+  // Two sets are needed because "default" can flip when a new activity block
+  // appends — without an explicit collapse override, a manually-collapsed
+  // older block would re-expand when it stops being the trailing one (or vice
+  // versa). Not persisted, matches the resolved-thread behaviour above.
+  const [expandedActivityIds, setExpandedActivityIds] = useState<Set<string>>(() => new Set());
+  const [collapsedActivityIds, setCollapsedActivityIds] = useState<Set<string>>(() => new Set());
+  const toggleActivityBlock = useCallback((id: string, currentlyExpanded: boolean) => {
+    if (currentlyExpanded) {
+      setCollapsedActivityIds((prev) => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+      setExpandedActivityIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    } else {
+      setExpandedActivityIds((prev) => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+      setCollapsedActivityIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  }, []);
   const didHighlightRef = useRef<string | null>(null);
 
   // Scroll to and briefly highlight a comment — used by ExecutionLogSection
@@ -670,7 +817,6 @@ export function IssueDetail({
       return cached?.description != null ? cached : undefined;
     },
   });
-
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
   useEffect(() => {
@@ -713,6 +859,54 @@ export function IssueDetail({
   // WS events arriving before the issue loads are an acceptable edge case
   // (the refetch-on-mount will pick them up).
   const resolvedId = issue?.id ?? id;
+  const { data: localRuntimes = [] } = useQuery({
+    queryKey: ["local-preview-runtimes", wsId],
+    queryFn: () => api.listRuntimes({ workspace_id: wsId, owner: "me" }),
+    enabled: !!wsId,
+    staleTime: 30_000,
+  });
+  const localPreviewPorts = useMemo(() => {
+    const ports = new Set<number>();
+    for (const runtime of localRuntimes) {
+      if (runtime.runtime_mode !== "local" || runtime.status !== "online") continue;
+      const port = metadataHealthPort(runtime.metadata);
+      if (port) ports.add(port);
+    }
+    return Array.from(ports);
+  }, [localRuntimes]);
+  const { data: localPreviews = [], refetch: refetchLocalPreviews } = useQuery({
+    queryKey: ["local-previews", wsId, resolvedId, localPreviewPorts.join(",")],
+    queryFn: async (): Promise<Array<LocalPreview & { healthPort: number }>> => {
+      const results = await Promise.allSettled(
+        localPreviewPorts.map(async (healthPort) => {
+          const response = await api.listLocalPreviews(healthPort, { workspace_id: wsId, issue_id: resolvedId });
+          return response.previews.map((preview) => ({ ...preview, healthPort }));
+        }),
+      );
+      return results.flatMap((result) => result.status === "fulfilled" ? result.value : []);
+    },
+    enabled: !!resolvedId && localPreviewPorts.length > 0,
+    refetchInterval: 15_000,
+  });
+  const issueLocalPreviews = useMemo(() => (
+    localPreviews.filter((preview) => (
+      preview.workspace_id === wsId &&
+      preview.issue_id === resolvedId &&
+      preview.visibility === "private" &&
+      preview.status !== "stopped"
+    ))
+  ), [localPreviews, resolvedId, wsId]);
+  const handleStopLocalPreview = useCallback(async (preview: LocalPreview & { healthPort: number }) => {
+    await api.stopLocalPreview(preview.healthPort, preview.id);
+    await refetchLocalPreviews();
+  }, [refetchLocalPreviews]);
+  const handleShowLocalPreviewLogs = useCallback(async (preview: LocalPreview & { healthPort: number }) => {
+    const logs = await api.getLocalPreviewLogs(preview.healthPort, preview.id);
+    setPreviewLogs({
+      title: logs.log_path,
+      logs: logs.logs || "No preview logs yet.",
+    });
+  }, []);
   const {
     timeline, loading: timelineLoading,
     submitComment, submitReply,
@@ -831,6 +1025,15 @@ export function IssueDetail({
     () => flattenGroups(timelineView.groups, expandedResolved),
     [timelineView.groups, expandedResolved],
   );
+
+  // ID of the trailing activity block — the only one expanded by default.
+  const lastActivityGroupId = useMemo(() => {
+    for (let i = timelineView.groups.length - 1; i >= 0; i--) {
+      const g = timelineView.groups[i]!;
+      if (g.type === "activities") return g.entries[0]!.id;
+    }
+    return null;
+  }, [timelineView.groups]);
 
   // Map of reply-comment id → root-comment id, so a deep-link to a reply
   // can fall back to scrolling the root thread into view.
@@ -1272,6 +1475,85 @@ export function IssueDetail({
         </div>}
       </div>
 
+      {/* Local Preview */}
+      {issueLocalPreviews.length > 0 && (
+        <div>
+          <button
+            className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${previewOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+            onClick={() => setPreviewOpen(!previewOpen)}
+          >
+            Local Preview
+            <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${previewOpen ? "rotate-90" : ""}`} />
+          </button>
+          {previewOpen && (
+            <div className="space-y-1 pl-2">
+              {issueLocalPreviews.map((preview) => (
+                <div key={preview.id} className="rounded-md border bg-muted/20 px-2 py-1.5">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className={cn(
+                      "h-2 w-2 shrink-0 rounded-full",
+                      preview.status === "running" ? "bg-emerald-500" : preview.status === "starting" ? "bg-amber-500" : "bg-destructive",
+                    )} />
+                    <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                      {preview.status}{preview.port ? ` · :${preview.port}` : ""}
+                    </span>
+                    {preview.url && (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              render={
+                                <a href={preview.url} target="_blank" rel="noreferrer">
+                                <ExternalLink className="h-3.5 w-3.5" />
+                                </a>
+                              }
+                            />
+                          }
+                        />
+                        <TooltipContent>Open preview</TooltipContent>
+                      </Tooltip>
+                    )}
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={() => handleShowLocalPreviewLogs(preview).catch((err) => toast.error(err instanceof Error ? err.message : "Failed to load preview logs"))}
+                          >
+                            <Terminal className="h-3.5 w-3.5" />
+                          </Button>
+                        }
+                      />
+                      <TooltipContent>Show logs</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-destructive hover:text-destructive"
+                            onClick={() => handleStopLocalPreview(preview).catch((err) => toast.error(err instanceof Error ? err.message : "Failed to stop preview"))}
+                          >
+                            <Square className="h-3.5 w-3.5" />
+                          </Button>
+                        }
+                      />
+                      <TooltipContent>Stop preview</TooltipContent>
+                    </Tooltip>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Parent issue */}
       {parentIssue && (
         <div>
@@ -1418,57 +1700,19 @@ export function IssueDetail({
       );
     }
     // activity-group
+    const expanded = expandedActivityIds.has(item.id)
+      ? true
+      : collapsedActivityIds.has(item.id)
+        ? false
+        : item.id === lastActivityGroupId;
     return (
-      <div className="pb-3 px-4 flex flex-col gap-3">
-        {item.entries.map((entry) => {
-          const details = (entry.details ?? {}) as Record<string, string>;
-          const isStatusChange = entry.action === "status_changed";
-          const isPriorityChange = entry.action === "priority_changed";
-          const isDueDateChange = entry.action === "due_date_changed";
-
-          let leadIcon: React.ReactNode;
-          if (isStatusChange && details.to) {
-            leadIcon = <StatusIcon status={details.to as IssueStatus} className="h-4 w-4 shrink-0" />;
-          } else if (isPriorityChange && details.to) {
-            leadIcon = <PriorityIcon priority={details.to as IssuePriority} className="h-4 w-4 shrink-0" />;
-          } else if (isDueDateChange) {
-            leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
-          } else {
-            leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
-          }
-
-          return (
-            <div key={entry.id} className="flex items-center text-xs text-muted-foreground">
-              <div className="mr-2 flex w-4 shrink-0 justify-center">
-                {leadIcon}
-              </div>
-              <div className="flex min-w-0 flex-1 items-center gap-1">
-                <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
-                <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
-                {(entry.coalesced_count ?? 1) > 1 &&
-                  entry.action !== "task_completed" &&
-                  entry.action !== "task_failed" && (
-                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
-                      {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
-                    </span>
-                  )}
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <span className="ml-auto shrink-0 cursor-default">
-                        {timeAgo(entry.created_at)}
-                      </span>
-                    }
-                  />
-                  <TooltipContent side="top">
-                    {new Date(entry.created_at).toLocaleString()}
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      <ActivityBlock
+        entries={item.entries}
+        expanded={expanded}
+        onToggle={() => toggleActivityBlock(item.id, expanded)}
+        getActorName={getActorName}
+        t={t}
+      />
     );
   };
 
@@ -1999,10 +2243,30 @@ export function IssueDetail({
     </AlertDialog>
   );
 
+  const previewLogsDialog = (
+    <AlertDialog open={!!previewLogs} onOpenChange={(open) => !open && setPreviewLogs(null)}>
+      <AlertDialogContent className="max-w-3xl">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Local Preview Logs</AlertDialogTitle>
+          <AlertDialogDescription className="break-all">
+            {previewLogs?.title}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <pre className="max-h-[55vh] overflow-auto rounded-md bg-muted p-3 text-xs text-muted-foreground">
+          {previewLogs?.logs}
+        </pre>
+        <AlertDialogFooter>
+          <AlertDialogAction onClick={() => setPreviewLogs(null)}>Close</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+
   if (isMobile) {
     return (
       <>
       {clearHistoryDialog}
+      {previewLogsDialog}
       <div className="flex flex-1 min-h-0">
         {detailContent}
         <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
@@ -2018,6 +2282,7 @@ export function IssueDetail({
   return (
     <>
     {clearHistoryDialog}
+    {previewLogsDialog}
     <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
       <ResizablePanel id="content" minSize="50%">
         {detailContent}

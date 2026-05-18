@@ -220,44 +220,25 @@ func TestListTimeline_EmptyIssue(t *testing.T) {
 	}
 }
 
-// TestListTimeline_HasMoreBefore_MixedCounts verifies that HasMoreBefore is
-// true when comments AND activities each individually stay below the page
-// limit but their combined count exceeds it. The old code checked
-// len(comments)>=limit || len(activities)>=limit which produced a false
-// negative in this scenario.
-func TestListTimeline_HasMoreBefore_MixedCounts(t *testing.T) {
-	issueID := createIssueForTimeline(t, "Mixed count has_more test")
-	// Use limit=10 so we can trigger the bug with a small dataset.
-	// Seed 7 comments + 7 activities = 14 entries > limit(10).
-	// Neither individual count (7) reaches the limit, but the combined pool
-	// exceeds it — the page must report has_more_before=true.
+func TestListTimeline_LegacyWrappedShape_ReturnsFullTimeline(t *testing.T) {
+	issueID := createIssueForTimeline(t, "Full wrapped timeline test")
 	seedTimelineEntries(t, issueID, 7, 7)
 
 	resp, code := fetchTimelineWrapped(t, issueID, "limit=10")
 	if code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", code)
 	}
-	if len(resp.Entries) != 10 {
-		t.Fatalf("expected 10 entries, got %d", len(resp.Entries))
+	if len(resp.Entries) != 14 {
+		t.Fatalf("expected full 14-entry timeline, got %d", len(resp.Entries))
 	}
-	if !resp.HasMoreBefore {
-		t.Fatalf("has_more_before must be true: 14 total > limit 10, but neither source alone reached 10")
+	if resp.HasMoreBefore || resp.HasMoreAfter {
+		t.Fatalf("legacy wrapper should not expose cursor paging, got before=%v after=%v", resp.HasMoreBefore, resp.HasMoreAfter)
 	}
 }
 
-// TestListTimeline_Around_HasMore_MixedCounts is the inbox-path regression
-// test. It seeds an issue with many comments and activities around a central
-// anchor. Neither the comments nor the activities count alone reaches the
-// half-window limit, but their combined count exceeds it for both the "before"
-// and "after" halves. The old listTimelineAround checked per-source counts
-// independently and returned false negatives, hiding the "show older / newer"
-// buttons and leaving entries unreachable.
-func TestListTimeline_Around_HasMore_MixedCounts(t *testing.T) {
+func TestListTimeline_AroundLegacyWrapper_ReturnsFullTimeline(t *testing.T) {
 	issueID := createIssueForTimeline(t, "Around mixed count test")
 	ctx := context.Background()
-	// Use limit=10 → half = 5. We want 4 comments + 4 activities on each side
-	// of the anchor (8 per side > half 5). Neither source alone hits 5, but
-	// the combined pool does.
 	base := time.Now().UTC().Add(-60 * time.Minute)
 
 	// Plant 4 older comments and 4 older activities (before anchor).
@@ -317,11 +298,11 @@ func TestListTimeline_Around_HasMore_MixedCounts(t *testing.T) {
 	if len(resp.Entries) == 0 || resp.Entries[*resp.TargetIndex].ID != anchorID {
 		t.Fatalf("anchor not at target_index")
 	}
-	if !resp.HasMoreBefore {
-		t.Fatalf("has_more_before must be true: 8 older entries > half-limit 5, but neither source alone hits 5")
+	if len(resp.Entries) != 17 {
+		t.Fatalf("expected full 17-entry timeline, got %d", len(resp.Entries))
 	}
-	if !resp.HasMoreAfter {
-		t.Fatalf("has_more_after must be true: 8 newer entries > half-limit 5, but neither source alone hits 5")
+	if resp.HasMoreBefore || resp.HasMoreAfter {
+		t.Fatalf("legacy wrapper should not expose cursor paging, got before=%v after=%v", resp.HasMoreBefore, resp.HasMoreAfter)
 	}
 }
 
@@ -440,7 +421,8 @@ func TestUpdateCommentPermission_AdminAllowed(t *testing.T) {
 func TestUpdateCommentPermission_AgentOwnerAllowed(t *testing.T) {
 	ctx := context.Background()
 
-	ownerEmail := "update-comment-agent-owner@multica.ai"
+	suffix := time.Now().UnixNano()
+	ownerEmail := fmt.Sprintf("update-comment-agent-owner-%d@multica.ai", suffix)
 	var ownerUserID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO "user" (name, email)
@@ -450,6 +432,7 @@ func TestUpdateCommentPermission_AgentOwnerAllowed(t *testing.T) {
 		t.Fatalf("create agent-owner user: %v", err)
 	}
 	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, ownerUserID)
 		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, ownerUserID)
 	})
 	if _, err := testPool.Exec(ctx, `
@@ -466,7 +449,7 @@ func TestUpdateCommentPermission_AgentOwnerAllowed(t *testing.T) {
 		)
 		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, $5, now())
 		RETURNING id
-	`, testWorkspaceID, "Update Comment Runtime", "update_comment_runtime", "Update comment runtime", ownerUserID).Scan(&runtimeID); err != nil {
+	`, testWorkspaceID, fmt.Sprintf("Update Comment Runtime %d", suffix), "update_comment_runtime", "Update comment runtime", ownerUserID).Scan(&runtimeID); err != nil {
 		t.Fatalf("create runtime: %v", err)
 	}
 
@@ -478,7 +461,7 @@ func TestUpdateCommentPermission_AgentOwnerAllowed(t *testing.T) {
 		)
 		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4)
 		RETURNING id
-	`, testWorkspaceID, "Update Comment Agent", runtimeID, ownerUserID).Scan(&agentID); err != nil {
+	`, testWorkspaceID, fmt.Sprintf("Update Comment Agent %d", suffix), runtimeID, ownerUserID).Scan(&agentID); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
 

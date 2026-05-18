@@ -503,7 +503,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 className="flex items-center gap-1.5 pt-1 border-t"
               >
                 <input
-                  type="url"
+                  type="text"
                   value={customRepoUrl}
                   onChange={(e) => setCustomRepoUrl(e.target.value)}
                   placeholder={t(($) => $.create_project.repos_url_placeholder)}

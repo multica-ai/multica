@@ -8,6 +8,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // setupSweeperTestFixture creates an issue and a task in the given status with
@@ -76,6 +77,96 @@ func cleanupSweeperFixture(t *testing.T, issueID, agentID string) {
 	testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
 	testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
 	testPool.Exec(ctx, `UPDATE agent SET status = 'idle' WHERE id = $1`, agentID)
+}
+
+func setupLocalCLIRunSweeperFixture(t *testing.T, updatedAgo string) (string, string) {
+	t.Helper()
+	ctx := context.Background()
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id)
+		VALUES ($1, 'Local CLI sweeper test issue', 'in_progress', 'none', 'member', $2)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("failed to create local CLI sweeper issue: %v", err)
+	}
+	var runID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO local_cli_run (workspace_id, issue_id, owner_id, cli_name, status, updated_at)
+		VALUES ($1, $2, $3, 'codex', 'running', now() - ($4::interval))
+		RETURNING id
+	`, testWorkspaceID, issueID, testUserID, updatedAgo).Scan(&runID); err != nil {
+		t.Fatalf("failed to create local CLI run: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM local_cli_run WHERE id = $1`, runID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+	return issueID, runID
+}
+
+func TestSweepStaleLocalCLIRunsFailsAndBroadcasts(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	issueID, runID := setupLocalCLIRunSweeperFixture(t, "10 minutes")
+	bus := events.New()
+	var taskEvents []events.Event
+	var mu sync.Mutex
+	bus.Subscribe(protocol.EventTaskFailed, func(e events.Event) {
+		mu.Lock()
+		taskEvents = append(taskEvents, e)
+		mu.Unlock()
+	})
+
+	sweepStaleLocalCLIRuns(context.Background(), testPool, bus)
+
+	var status, errText string
+	var completedAt any
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT status, error, completed_at FROM local_cli_run WHERE id = $1
+	`, runID).Scan(&status, &errText, &completedAt); err != nil {
+		t.Fatalf("read local CLI run: %v", err)
+	}
+	if status != "failed" || errText != "local CLI heartbeat timed out" || completedAt == nil {
+		t.Fatalf("run status/error/completed_at = %q/%q/%v, want failed timeout with completed_at", status, errText, completedAt)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, event := range taskEvents {
+		payload, _ := event.Payload.(map[string]any)
+		if payload["task_id"] != runID {
+			continue
+		}
+		if event.WorkspaceID != testWorkspaceID || event.TaskID != runID {
+			t.Fatalf("task event = %+v, want workspace/task IDs", event)
+		}
+		if payload["status"] != "failed" || payload["issue_id"] != issueID || payload["agent_id"] != "" || payload["runtime_id"] != "" {
+			t.Fatalf("task payload = %+v", payload)
+		}
+		return
+	}
+	t.Fatalf("expected task:failed event for local CLI run %s, got %+v", runID, taskEvents)
+}
+
+func TestSweepStaleLocalCLIRunsKeepsFreshRunningRun(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	_, runID := setupLocalCLIRunSweeperFixture(t, "10 seconds")
+
+	sweepStaleLocalCLIRuns(context.Background(), testPool, events.New())
+
+	var status string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT status FROM local_cli_run WHERE id = $1
+	`, runID).Scan(&status); err != nil {
+		t.Fatalf("read local CLI run: %v", err)
+	}
+	if status != "running" {
+		t.Fatalf("fresh run status = %q, want running", status)
+	}
 }
 
 func TestRefreshAgentStatusFromTasks(t *testing.T) {

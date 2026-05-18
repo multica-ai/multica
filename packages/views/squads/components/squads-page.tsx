@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { agentListOptions, memberListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
+import { useSquadsViewStore } from "@multica/core/squads/stores";
 import { AppLink } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import { Users, Plus, Search, Bot, User } from "lucide-react";
@@ -43,7 +44,8 @@ export function SquadsPage() {
     return m;
   }, [members]);
 
-  const [scope, setScope] = useState<Scope>("mine");
+  const scope = useSquadsViewStore((s) => s.scope);
+  const setScope = useSquadsViewStore((s) => s.setScope);
   const [search, setSearch] = useState("");
 
   const scopeCounts = useMemo(() => {

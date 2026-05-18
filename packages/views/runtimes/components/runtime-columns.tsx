@@ -235,14 +235,14 @@ function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
         <ProviderLogo provider={runtime.provider} className="h-5 w-5" />
       </div>
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
-        <span className="block min-w-0 truncate text-sm font-medium">
+        <span className="block min-w-0 shrink truncate text-sm font-medium">
           {baseName}
         </span>
         {hostname && (
           <Tooltip>
             <TooltipTrigger
               render={
-                <span className="block min-w-0 truncate text-xs text-muted-foreground/70">
+                <span className="block min-w-0 flex-1 basis-0 truncate text-xs text-muted-foreground/70">
                   ({hostname})
                 </span>
               }

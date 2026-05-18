@@ -65,6 +65,7 @@ vi.mock("../../common/task-transcript", async () => {
 
 const mockApi = vi.hoisted(() => ({
   getActiveTasksForIssue: vi.fn(),
+  listTaskInteractions: vi.fn(),
   listTaskMessages: vi.fn(),
   cancelTask: vi.fn(),
 }));
@@ -131,6 +132,8 @@ beforeEach(() => {
   wsHandlers.clear();
   wsReconnectCallbacks.clear();
   mockApi.getActiveTasksForIssue.mockReset();
+  mockApi.listTaskInteractions.mockReset();
+  mockApi.listTaskInteractions.mockResolvedValue([]);
   mockApi.listTaskMessages.mockReset();
   mockApi.listTaskMessages.mockResolvedValue([]);
   mockApi.cancelTask.mockReset();

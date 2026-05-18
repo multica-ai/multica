@@ -5,6 +5,8 @@ export type {
   AgentRuntimeMode,
   AgentVisibility,
   AgentTask,
+  LocalPreview,
+  LocalPreviewLogs,
   TaskInteraction,
   TaskInteractionOption,
   TaskTraceChannel,
