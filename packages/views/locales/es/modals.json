@@ -91,6 +91,8 @@
     "toast_created": "Tarea creada",
     "view_issue": "Ver tarea",
     "toast_failed": "Error al crear la tarea",
+    "toast_duplicate_title": "Tarea duplicada",
+    "toast_duplicate_view": "Ver tarea existente",
     "toast_link_subissues_all_failed": "Error al vincular sub-tareas",
     "toast_link_subissues_partial": "Error al vincular {{failed}} de {{total}} sub-tareas",
     "switch_to_agent": "Cambiar a agente",
