@@ -91,6 +91,50 @@ func TestApplyMessageContext_RecentMessageEntities(t *testing.T) {
 	}
 }
 
+func TestApplyMessageContext_FiltersRecentEntitiesByWorkspacePrefix(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := &fakeConversationStore{
+		byInbound: map[string]channelconversation.Message{
+			"evt-row-1": {ConversationID: "00000000-0000-0000-0000-000000000001"},
+		},
+		recentRefs: []channelconversation.EntityRef{
+			{
+				EntityType: channelconversation.EntityTypeIssue,
+				EntityKey:  "AC-2",
+				Role:       channelconversation.EntityRoleMentioned,
+			},
+			{
+				EntityType: channelconversation.EntityTypeIssue,
+				EntityKey:  "STA-82",
+				Role:       channelconversation.EntityRoleMentioned,
+			},
+			{
+				EntityType: channelconversation.EntityTypeIssue,
+				EntityKey:  "AC-5",
+				Role:       channelconversation.EntityRoleMentioned,
+			},
+		},
+	}
+	rt := NewRuntime(RuntimeConfig{ConversationStore: store})
+	evt := port.InboundEvent{
+		ChannelConnectionID: "conn-1",
+		ChannelName:         "feishu",
+		ChatID:              "chat-1",
+		ChatType:            port.ChatTypeGroup,
+		SenderID:            "ou_1",
+		ThreadID:            "thread-1",
+	}
+	req := chturn.Request{InboundEventID: "evt-row-1", WorkspaceID: "ws-1", IssuePrefix: "STA"}
+	got := rt.applyMessageContext(ctx, req, evt)
+	if len(got.ContextEntities) != 1 || got.ContextEntities[0].EntityKey != "STA-82" {
+		t.Fatalf("ContextEntities = %+v, want only STA-82", got.ContextEntities)
+	}
+	if got.ContextIssueKey != "STA-82" {
+		t.Fatalf("ContextIssueKey = %q, want STA-82", got.ContextIssueKey)
+	}
+}
+
 func TestApplyMessageContext_IncludesPendingActionFromLatestTurn(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

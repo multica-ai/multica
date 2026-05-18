@@ -25,6 +25,13 @@ type PendingAction struct {
 	ExpiresAt  string            `json:"expires_at,omitempty"`
 }
 
+// ContextReset records a user-requested boundary for automatic channel
+// context injection.
+type ContextReset struct {
+	Reason    string `json:"reason,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
+}
+
 // Active reports whether a pending action should still be offered to the next
 // channel turn.
 func (p PendingAction) Active(now time.Time) bool {
@@ -45,11 +52,12 @@ func (p PendingAction) Active(now time.Time) bool {
 // channel_turn.result_payload.
 type StatePayload struct {
 	PendingAction *PendingAction `json:"pending_action,omitempty"`
+	ContextReset  *ContextReset  `json:"context_reset,omitempty"`
 }
 
 // Empty reports whether the payload carries any state worth persisting.
 func (s StatePayload) Empty() bool {
-	return s.PendingAction == nil
+	return s.PendingAction == nil && s.ContextReset == nil
 }
 
 // AgentResult is the parsed agent output after hidden state metadata is
@@ -88,6 +96,9 @@ func ParseAgentOutput(output string) (AgentResult, error) {
 	if state.PendingAction != nil {
 		NormalizePendingAction(state.PendingAction)
 	}
+	if state.ContextReset != nil {
+		NormalizeContextReset(state.ContextReset)
+	}
 	result.State = state
 	return result, nil
 }
@@ -103,6 +114,9 @@ func ParseStatePayload(payload json.RawMessage) (StatePayload, error) {
 	}
 	if state.PendingAction != nil {
 		NormalizePendingAction(state.PendingAction)
+	}
+	if state.ContextReset != nil {
+		NormalizeContextReset(state.ContextReset)
 	}
 	return state, nil
 }
@@ -142,6 +156,15 @@ func NormalizePendingAction(p *PendingAction) {
 	p.Question = strings.TrimSpace(p.Question)
 	p.CreatedAt = strings.TrimSpace(p.CreatedAt)
 	p.ExpiresAt = strings.TrimSpace(p.ExpiresAt)
+}
+
+// NormalizeContextReset makes reset state stable before persistence.
+func NormalizeContextReset(r *ContextReset) {
+	if r == nil {
+		return
+	}
+	r.Reason = strings.TrimSpace(r.Reason)
+	r.CreatedAt = strings.TrimSpace(r.CreatedAt)
 }
 
 func normalizeStringSlice(in []string, upper bool) []string {

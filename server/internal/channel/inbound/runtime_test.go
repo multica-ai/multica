@@ -421,6 +421,144 @@ func TestRuntimeProcessRecord_StartsChannelTurnWithConversationContext(t *testin
 	}
 }
 
+func TestRuntimeProcessRecord_ClearResetsChannelContext(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeRuntimeStore{}
+	conversationStore := &fakeConversationStore{
+		byInbound: map[string]channelconversation.Message{
+			"row-1": {
+				ID:             "msg-1",
+				Provider:       "feishu",
+				ConnectionID:   "conn-1",
+				ConversationID: "00000000-0000-0000-0000-000000000001",
+			},
+		},
+	}
+	sink := &recordingReplySink{}
+	rt := NewRuntime(RuntimeConfig{
+		Store:             store,
+		ConversationStore: conversationStore,
+		ReplySink:         sink,
+	})
+
+	err := rt.processRecord(ctx, &InboundEventRecord{
+		ID:          "row-1",
+		Phase:       InboundPhaseIntent,
+		WorkspaceID: "550e8400-e29b-41d4-a716-446655440001",
+		Event: port.InboundEvent{
+			ChannelName:         "feishu",
+			ChannelConnectionID: "conn-1",
+			EventID:             "evt-1",
+			Type:                port.EventTypeMessageReceived,
+			ChatID:              "oc_1",
+			ChatType:            port.ChatTypeGroup,
+			SenderID:            "ou_1",
+			Text:                "/clear",
+		},
+	})
+	if err != nil {
+		t.Fatalf("processRecord: %v", err)
+	}
+	if got := sink.last(); got != contextResetReply {
+		t.Fatalf("reply = %q, want %q", got, contextResetReply)
+	}
+	if !store.processed {
+		t.Fatal("clear command should mark event processed")
+	}
+	if store.waitingAgent {
+		t.Fatal("clear command should not start channel agent")
+	}
+	if len(conversationStore.upsertedTurns) != 1 {
+		t.Fatalf("upserted turns = %d, want 1", len(conversationStore.upsertedTurns))
+	}
+	if conversationStore.upsertedTurns[0].Status != channelconversation.TurnStatusCompleted {
+		t.Fatalf("turn status = %q, want completed", conversationStore.upsertedTurns[0].Status)
+	}
+	if len(conversationStore.mergedTurnStates) != 1 {
+		t.Fatalf("merged states = %d, want 1", len(conversationStore.mergedTurnStates))
+	}
+	var state chturn.StatePayload
+	if err := json.Unmarshal(conversationStore.mergedTurnStates[0], &state); err != nil {
+		t.Fatalf("unmarshal state: %v", err)
+	}
+	if state.ContextReset == nil || state.ContextReset.Reason != "user_clear_command" {
+		t.Fatalf("context reset = %+v, want user_clear_command", state.ContextReset)
+	}
+}
+
+func TestRuntimeProcessRecord_ClearBoundaryDropsOldContext(t *testing.T) {
+	ctx := context.Background()
+	resetAt := time.Now().Add(-time.Minute).UTC()
+	oldPendingPayload := json.RawMessage(`{"pending_action":{"kind":"SetStatus","params":{"status":"cancelled"},"missing":["issue_key"],"candidates":["STA-12"]}}`)
+	store := &fakeRuntimeStore{}
+	conversationStore := &fakeConversationStore{
+		byInbound: map[string]channelconversation.Message{
+			"row-2": {
+				ID:             "msg-2",
+				Provider:       "feishu",
+				ConnectionID:   "conn-1",
+				ConversationID: "00000000-0000-0000-0000-000000000001",
+			},
+		},
+		recentRefs: []channelconversation.EntityRef{{
+			EntityType: channelconversation.EntityTypeIssue,
+			EntityKey:  "STA-12",
+			Role:       channelconversation.EntityRoleMentioned,
+		}},
+		latestTurn: channelconversation.Turn{
+			ResultPayload: oldPendingPayload,
+			CompletedAt:   resetAt.Add(-time.Minute),
+		},
+		latestTurnOK: true,
+		latestReset: channelconversation.Turn{
+			ResultPayload: json.RawMessage(`{"context_reset":{"reason":"user_clear_command"}}`),
+			CompletedAt:   resetAt,
+		},
+		latestResetOK: true,
+	}
+	channelTurn := &recordingChannelTurnClient{taskID: "550e8400-e29b-41d4-a716-446655440000"}
+	rt := NewRuntime(RuntimeConfig{
+		Store:             store,
+		ConversationStore: conversationStore,
+		ChannelTurn:       channelTurn,
+	})
+
+	err := rt.processRecord(ctx, &InboundEventRecord{
+		ID:          "row-2",
+		Phase:       InboundPhaseIntent,
+		WorkspaceID: "550e8400-e29b-41d4-a716-446655440001",
+		Event: port.InboundEvent{
+			ChannelName:         "feishu",
+			ChannelConnectionID: "conn-1",
+			EventID:             "evt-2",
+			Type:                port.EventTypeMessageReceived,
+			ChatID:              "oc_1",
+			ChatType:            port.ChatTypeGroup,
+			SenderID:            "ou_1",
+			Text:                "继续",
+		},
+	})
+	if err != nil {
+		t.Fatalf("processRecord: %v", err)
+	}
+	if len(channelTurn.startReqs) != 1 {
+		t.Fatalf("StartAgentTurn calls = %d, want 1", len(channelTurn.startReqs))
+	}
+	req := channelTurn.startReqs[0]
+	if req.PendingAction != nil {
+		t.Fatalf("PendingAction = %+v, want nil after clear", req.PendingAction)
+	}
+	if len(req.ContextEntities) != 0 {
+		t.Fatalf("ContextEntities = %+v, want empty after clear", req.ContextEntities)
+	}
+	if !conversationStore.lastContextSince.Equal(resetAt) {
+		t.Fatalf("context since = %s, want reset boundary %s", conversationStore.lastContextSince, resetAt)
+	}
+	if !conversationStore.lastPendingSince.Equal(resetAt) {
+		t.Fatalf("pending since = %s, want reset boundary %s", conversationStore.lastPendingSince, resetAt)
+	}
+}
+
 func TestRuntimeProcessRecord_FillsRuleIntentIssueKeyBeforePostPhase(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeRuntimeStore{}

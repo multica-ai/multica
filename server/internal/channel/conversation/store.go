@@ -190,6 +190,7 @@ type Store interface {
 	ListRecentContextEntityRefs(ctx context.Context, connectionID, conversationID, senderExternalID, threadID string, since time.Time, limit int) ([]EntityRef, error)
 	ListRecentHandoffMessages(ctx context.Context, connectionID, conversationID, senderExternalID, threadID string, since time.Time, limit int) ([]Message, error)
 	FindLatestCompletedTurn(ctx context.Context, connectionID, conversationID, senderExternalID, threadID string, since time.Time) (Turn, bool, error)
+	FindLatestContextReset(ctx context.Context, connectionID, conversationID, senderExternalID, threadID string, since time.Time) (Turn, bool, error)
 	CreateTurn(ctx context.Context, item Turn) (Turn, error)
 	UpsertTurn(ctx context.Context, item Turn) (Turn, error)
 	CompleteTurn(ctx context.Context, id string, outboundMessageID string, status string, resultPayload json.RawMessage, lastError string) error
@@ -228,6 +229,15 @@ COALESCE(outbound_message_id::text, ''), sender_external_id, intent_kind,
 intent_source, intent_payload, authz_status, status, COALESCE(wait_kind, ''),
 COALESCE(wait_task_id::text, ''), result_payload, COALESCE(last_error, ''),
 started_at, COALESCE(completed_at, 'epoch'::timestamptz), created_at, updated_at
+`
+
+const turnSelectColumnsWithTurnAlias = `
+t.id::text, t.provider, t.connection_id, t.conversation_id::text, COALESCE(t.workspace_id::text, ''),
+COALESCE(t.inbound_event_id::text, ''), COALESCE(t.inbound_message_id::text, ''),
+COALESCE(t.outbound_message_id::text, ''), t.sender_external_id, t.intent_kind,
+t.intent_source, t.intent_payload, t.authz_status, t.status, COALESCE(t.wait_kind, ''),
+COALESCE(t.wait_task_id::text, ''), t.result_payload, COALESCE(t.last_error, ''),
+t.started_at, COALESCE(t.completed_at, 'epoch'::timestamptz), t.created_at, t.updated_at
 `
 
 type scanner interface {
@@ -743,7 +753,7 @@ func (s *DBStore) FindLatestCompletedTurn(ctx context.Context, connectionID, con
 	}
 	var item Turn
 	err := scanTurn(s.db.QueryRow(ctx, `
-SELECT `+turnSelectColumns+`
+SELECT `+turnSelectColumnsWithTurnAlias+`
 FROM channel_turn t
 LEFT JOIN channel_message m ON m.id = t.inbound_message_id
 WHERE t.connection_id = $1
@@ -751,6 +761,42 @@ WHERE t.connection_id = $1
   AND t.sender_external_id = $3
   AND t.status = 'completed'
   AND t.completed_at >= $4
+  AND ($5 = '' OR COALESCE(m.thread_id, '') = $5 OR COALESCE(m.thread_id, '') = '')
+ORDER BY t.completed_at DESC, t.updated_at DESC
+LIMIT 1
+`, connectionID, conversationID, senderExternalID, since, strings.TrimSpace(threadID)), &item)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Turn{}, false, nil
+	}
+	if err != nil {
+		return Turn{}, false, err
+	}
+	return item, true, nil
+}
+
+// FindLatestContextReset returns the newest user-requested context boundary in
+// this sender's conversation scope.
+func (s *DBStore) FindLatestContextReset(ctx context.Context, connectionID, conversationID, senderExternalID, threadID string, since time.Time) (Turn, bool, error) {
+	if s == nil || s.db == nil {
+		return Turn{}, false, errors.New("conversation store is not configured")
+	}
+	if strings.TrimSpace(connectionID) == "" || strings.TrimSpace(conversationID) == "" || strings.TrimSpace(senderExternalID) == "" {
+		return Turn{}, false, nil
+	}
+	if since.IsZero() {
+		since = time.Now().Add(-30 * time.Minute)
+	}
+	var item Turn
+	err := scanTurn(s.db.QueryRow(ctx, `
+SELECT `+turnSelectColumnsWithTurnAlias+`
+FROM channel_turn t
+LEFT JOIN channel_message m ON m.id = t.inbound_message_id
+WHERE t.connection_id = $1
+  AND t.conversation_id = $2::uuid
+  AND t.sender_external_id = $3
+  AND t.status = 'completed'
+  AND t.completed_at >= $4
+  AND t.result_payload ? 'context_reset'
   AND ($5 = '' OR COALESCE(m.thread_id, '') = $5 OR COALESCE(m.thread_id, '') = '')
 ORDER BY t.completed_at DESC, t.updated_at DESC
 LIMIT 1

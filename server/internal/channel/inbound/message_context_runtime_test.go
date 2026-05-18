@@ -326,10 +326,14 @@ type fakeConversationStore struct {
 	recent           []channelconversation.Message
 	latestTurn       channelconversation.Turn
 	latestTurnOK     bool
+	latestReset      channelconversation.Turn
+	latestResetOK    bool
 	created          []channelconversation.Message
 	upsertedTurns    []channelconversation.Turn
 	mergedTurnStates []json.RawMessage
 	lastRecentSender string
+	lastContextSince time.Time
+	lastPendingSince time.Time
 }
 
 func (f *fakeConversationStore) EnsureConversation(context.Context, channelconversation.Conversation) (channelconversation.Conversation, error) {
@@ -372,7 +376,11 @@ func (f *fakeConversationStore) ListEntityRefsByMessageID(_ context.Context, mes
 	return append([]channelconversation.EntityRef(nil), f.refs[messageID]...), nil
 }
 
-func (f *fakeConversationStore) ListRecentContextEntityRefs(context.Context, string, string, string, string, time.Time, int) ([]channelconversation.EntityRef, error) {
+func (f *fakeConversationStore) ListRecentContextEntityRefs(_ context.Context, _, _, _, _ string, since time.Time, _ int) ([]channelconversation.EntityRef, error) {
+	f.lastContextSince = since
+	if f.latestResetOK && !f.latestReset.CompletedAt.IsZero() && !since.Before(f.latestReset.CompletedAt) {
+		return nil, nil
+	}
 	return append([]channelconversation.EntityRef(nil), f.recentRefs...), nil
 }
 
@@ -381,8 +389,16 @@ func (f *fakeConversationStore) ListRecentHandoffMessages(_ context.Context, _, 
 	return append([]channelconversation.Message(nil), f.recent...), nil
 }
 
-func (f *fakeConversationStore) FindLatestCompletedTurn(context.Context, string, string, string, string, time.Time) (channelconversation.Turn, bool, error) {
+func (f *fakeConversationStore) FindLatestCompletedTurn(_ context.Context, _, _, _, _ string, since time.Time) (channelconversation.Turn, bool, error) {
+	f.lastPendingSince = since
+	if f.latestTurnOK && !f.latestTurn.CompletedAt.IsZero() && f.latestTurn.CompletedAt.Before(since) {
+		return channelconversation.Turn{}, false, nil
+	}
 	return f.latestTurn, f.latestTurnOK, nil
+}
+
+func (f *fakeConversationStore) FindLatestContextReset(context.Context, string, string, string, string, time.Time) (channelconversation.Turn, bool, error) {
+	return f.latestReset, f.latestResetOK, nil
 }
 
 func (f *fakeConversationStore) CreateTurn(context.Context, channelconversation.Turn) (channelconversation.Turn, error) {

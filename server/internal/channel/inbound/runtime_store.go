@@ -80,6 +80,7 @@ type ChatBindingContext struct {
 	DefaultProjectID string
 	ListenMode       string
 	AgentID          string
+	IssuePrefix      string
 }
 
 type InboundEventStore interface {
@@ -526,6 +527,7 @@ func (s *DBInboundEventStore) LookupChatContext(ctx context.Context, connectionI
 		DefaultProjectID: sqlcOptionalString(row.DefaultProjectID),
 		ListenMode:       listen,
 		AgentID:          sqlcOptionalString(row.AgentID),
+		IssuePrefix:      row.IssuePrefix,
 	}, nil
 }
 
@@ -668,7 +670,7 @@ func updateInboundMessageForEvent(ctx context.Context, store channelconversation
 	if err != nil || !ok {
 		return err
 	}
-	return store.AddEntityRefs(ctx, saved.ID, entityRefsFromInboundEvent(chatCtx.WorkspaceID, evt))
+	return store.AddEntityRefs(ctx, saved.ID, entityRefsFromInboundEvent(chatCtx.WorkspaceID, chatCtx.IssuePrefix, evt))
 }
 
 func lookupPlatformMessageID(ctx context.Context, store channelconversation.Store, connectionID, platformMessageID string) (string, error) {
@@ -721,13 +723,13 @@ func inboundMessageFromEvent(evt port.InboundEvent, conversationID, inboundEvent
 	}, nil
 }
 
-func entityRefsFromInboundEvent(workspaceID string, evt port.InboundEvent) []channelconversation.EntityRef {
+func entityRefsFromInboundEvent(workspaceID, issuePrefix string, evt port.InboundEvent) []channelconversation.EntityRef {
 	refs := channelconversation.ExtractIssueEntityRefs(workspaceID, evt.Text, channelconversation.EntityRoleMentioned)
 	quoted := channelconversation.ExtractIssueEntityRefs(workspaceID, evt.QuotedText, channelconversation.EntityRoleContext)
 	if len(quoted) > 0 {
 		refs = append(refs, quoted...)
 	}
-	return refs
+	return channelconversation.FilterIssueEntityRefsByPrefix(refs, issuePrefix)
 }
 
 func inboundMessageClassification(evt port.InboundEvent) (messageType, senderType, platformMessageID string) {

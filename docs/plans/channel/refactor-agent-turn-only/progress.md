@@ -112,3 +112,21 @@
 - No `BuildChatIntentPrompt`, `ChatIntentClient`, `AsyncChatIntentClient`, `ChannelTurnPlanner`, or `TaskBackedChatIntentClient` references remain in product code.
 - Natural-language routing remains agent-turn-only; deterministic command parsing is still restricted to slash/source-command input.
 - Historical `channel_intent` strings remain only in task-list SQL filters and generated SQL, by design.
+
+## Milestone 6 / 6
+
+### Implemented
+- Added `/clear` as the single deterministic channel control command for resetting short-lived conversation context.
+- Persisted the reset as structured `context_reset` state on a completed channel turn.
+- Applied the latest reset boundary when loading pending clarification state and recent context entities for future agent turns in the same connection/conversation/sender/thread scope.
+
+### Approach
+- Do not delete messages, turns, issues, comments, or audit records.
+- Do not ask the agent to interpret `/clear`; runtime handles it even when the channel agent is unavailable.
+- Treat reset as a prompt/context boundary: old history remains queryable in storage, but it is no longer automatically injected into later turns.
+
+### Plan Delta
+- Removed `/new` from the proposal before implementation. `/clear` is less ambiguous in this product because `/new` can read as creating a new issue, workspace, or session.
+
+### Verification
+- `cd server && go test ./internal/channel/...`

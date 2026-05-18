@@ -28,7 +28,7 @@ func BuildPrompt(req Request) string {
 	b.WriteString("- For comments, if the user named the issue but did not provide comment body, ask what they want to write. Do not invent the comment.\n")
 	b.WriteString("- For comments or mutations on an existing issue, the target must be resolvable from ExplicitEntities/ContextEntities, PendingAction, or an explicit issue key in the message.\n\n")
 	appendStateContract(&b)
-	fmt.Fprintf(&b, "Workspace ID: %s\nDefault project ID: %s\nChannel: %s\nConnection ID: %s\nChat ID: %s\nChat type: %s\nSender: %s (%s)\n", req.WorkspaceID, req.DefaultProjectID, req.Channel, req.ConnectionID, req.ChatID, req.ChatType, req.SenderName, req.SenderID)
+	fmt.Fprintf(&b, "Workspace ID: %s\nWorkspace issue prefix: %s\nDefault project ID: %s\nChannel: %s\nConnection ID: %s\nChat ID: %s\nChat type: %s\nSender: %s (%s)\n", req.WorkspaceID, req.IssuePrefix, req.DefaultProjectID, req.Channel, req.ConnectionID, req.ChatID, req.ChatType, req.SenderName, req.SenderID)
 	appendContextSignals(&b, req)
 	b.WriteString("\nUser message:\n")
 	b.WriteString(req.Text)

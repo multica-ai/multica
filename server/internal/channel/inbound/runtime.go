@@ -39,6 +39,8 @@ const (
 	failureCodeInboundDead        = "inbound_dead"
 )
 
+const contextResetReply = "已清空这段对话的临时上下文。你可以重新开始说。"
+
 type FailureNoticeKey struct {
 	ConnectionID string
 	ChatID       string
@@ -321,6 +323,10 @@ func (r *Runtime) resolveTurnInput(ctx context.Context, rec *InboundEventRecord)
 		return false, nil
 	}
 
+	if isContextResetCommand(evt) {
+		return r.applyContextReset(ctx, rec, evt, chatCtx)
+	}
+
 	req := r.buildTurnRequest(ctx, rec, evt, &chatCtx)
 	if result, ok, err := r.resolveMessageContextReply(ctx, rec, evt); err != nil || ok {
 		if err != nil {
@@ -379,6 +385,31 @@ func isDeterministicChannelInput(evt port.InboundEvent, req chturn.Request) bool
 		return true
 	}
 	return strings.HasPrefix(strings.TrimSpace(evt.Text), "/")
+}
+
+func isContextResetCommand(evt port.InboundEvent) bool {
+	return strings.EqualFold(strings.TrimSpace(evt.Text), "/clear")
+}
+
+func (r *Runtime) applyContextReset(ctx context.Context, rec *InboundEventRecord, evt port.InboundEvent, chatCtx ChatBindingContext) (bool, error) {
+	now := time.Now().UTC()
+	intent := chaction.Intent{
+		Kind:       chaction.KindUnknown,
+		Confidence: 1,
+		Params:     map[string]string{"command": "clear_context"},
+		Source:     chaction.SourceCommand,
+	}
+	r.recordTurn(ctx, rec, evt, intent, chatCtx, channelconversation.TurnStatusCompleted, "", "")
+	state := chturn.StatePayload{
+		ContextReset: &chturn.ContextReset{
+			Reason:    "user_clear_command",
+			CreatedAt: now.Format(time.RFC3339),
+		},
+	}
+	if err := r.persistAndSendTurnReply(ctx, rec, contextResetReply, state); err != nil {
+		return true, err
+	}
+	return true, nil
 }
 
 func (r *Runtime) resolveByRules(ctx context.Context, req chturn.Request) (chaction.Result, bool, error) {
@@ -925,6 +956,7 @@ func (r *Runtime) buildTurnRequest(ctx context.Context, rec *InboundEventRecord,
 	}
 	if chatCtx != nil {
 		req.WorkspaceID = chatCtx.WorkspaceID
+		req.IssuePrefix = chatCtx.IssuePrefix
 		req.DefaultProjectID = chatCtx.DefaultProjectID
 		req.AgentID = strings.TrimSpace(chatCtx.AgentID)
 	}
@@ -938,6 +970,7 @@ func (r *Runtime) applyMessageContext(ctx context.Context, req chturn.Request, e
 	req.ReplyToMessageID = evt.ReplyToMessageID
 	explicitEntities := channelconversation.ExtractIssueEntityRefs(req.WorkspaceID, evt.QuotedText, channelconversation.EntityRoleContext)
 	explicitEntities = mergeContextEntities(explicitEntities, r.explicitMessageEntityRefs(ctx, evt), r.cfg.ContextMaxEntities)
+	explicitEntities = channelconversation.FilterIssueEntityRefsByPrefix(explicitEntities, req.IssuePrefix)
 	req.ExplicitEntities = mergeContextEntities(req.ExplicitEntities, explicitEntities, r.cfg.ContextMaxEntities)
 	if r.cfg.ConversationStore != nil {
 		if inboundMsg, ok, err := r.cfg.ConversationStore.FindMessageByInboundEventID(ctx, req.InboundEventID); err != nil {
@@ -952,6 +985,9 @@ func (r *Runtime) applyMessageContext(ctx context.Context, req chturn.Request, e
 				lookback = defaultContextLookback
 			}
 			since := time.Now().Add(-lookback)
+			if resetAt, ok := r.latestContextResetAt(ctx, evt, inboundMsg.ConversationID, since); ok && resetAt.After(since) {
+				since = resetAt
+			}
 			entities, err := r.cfg.ConversationStore.ListRecentContextEntityRefs(ctx, evt.ConnectionID(), inboundMsg.ConversationID, evt.SenderID, evt.ThreadID, since, r.cfg.ContextMaxEntities)
 			if err != nil {
 				slog.Error("channel inbound runtime: lookup message context entities failed",
@@ -962,6 +998,7 @@ func (r *Runtime) applyMessageContext(ctx context.Context, req chturn.Request, e
 					"error", err,
 				)
 			} else {
+				entities = channelconversation.FilterIssueEntityRefsByPrefix(entities, req.IssuePrefix)
 				req.ContextEntities = mergeContextEntities(req.ContextEntities, entities, r.cfg.ContextMaxEntities)
 			}
 			req.PendingAction = r.latestPendingAction(ctx, evt, inboundMsg.ConversationID, since)
@@ -974,6 +1011,27 @@ func (r *Runtime) applyMessageContext(ctx context.Context, req chturn.Request, e
 		}
 	}
 	return req
+}
+
+func (r *Runtime) latestContextResetAt(ctx context.Context, evt port.InboundEvent, conversationID string, since time.Time) (time.Time, bool) {
+	if r == nil || r.cfg.ConversationStore == nil {
+		return time.Time{}, false
+	}
+	latest, ok, err := r.cfg.ConversationStore.FindLatestContextReset(ctx, evt.ConnectionID(), conversationID, evt.SenderID, evt.ThreadID, since)
+	if err != nil {
+		slog.Error("channel inbound runtime: lookup latest channel context reset failed",
+			"connection_id", evt.ConnectionID(),
+			"conversation_id", conversationID,
+			"sender_id", evt.SenderID,
+			"thread_id", evt.ThreadID,
+			"error", err,
+		)
+		return time.Time{}, false
+	}
+	if !ok || latest.CompletedAt.IsZero() {
+		return time.Time{}, false
+	}
+	return latest.CompletedAt, true
 }
 
 func (r *Runtime) explicitMessageEntityRefs(ctx context.Context, evt port.InboundEvent) []channelconversation.EntityRef {

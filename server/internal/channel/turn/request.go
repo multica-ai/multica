@@ -11,6 +11,7 @@ import (
 // Request is the stable input for channel agent turns.
 type Request struct {
 	WorkspaceID      string
+	IssuePrefix      string
 	DefaultProjectID string
 	// AgentID, when non-empty, forces channel turns to use that agent only.
 	AgentID         string

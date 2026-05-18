@@ -58,3 +58,28 @@ func ExtractIssueEntityRefs(workspaceID, text, role string) []EntityRef {
 	}
 	return out
 }
+
+// FilterIssueEntityRefsByPrefix removes issue references whose identifier does
+// not belong to the current workspace prefix.
+func FilterIssueEntityRefsByPrefix(refs []EntityRef, issuePrefix string) []EntityRef {
+	prefix := strings.ToUpper(strings.TrimSpace(issuePrefix))
+	if prefix == "" || len(refs) == 0 {
+		return refs
+	}
+	out := refs[:0]
+	for _, ref := range refs {
+		if ref.EntityType != "" && ref.EntityType != EntityTypeIssue {
+			out = append(out, ref)
+			continue
+		}
+		key := strings.ToUpper(strings.TrimSpace(ref.EntityKey))
+		if strings.HasPrefix(key, prefix+"-") {
+			ref.EntityKey = key
+			if strings.TrimSpace(ref.Display) == "" {
+				ref.Display = key
+			}
+			out = append(out, ref)
+		}
+	}
+	return out
+}

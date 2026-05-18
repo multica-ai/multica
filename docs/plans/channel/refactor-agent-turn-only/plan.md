@@ -96,6 +96,9 @@
 5. 里程碑五：最终验证与审阅
    - 验收标准：`go test ./internal/channel/...` 通过；输出 What / Why / Impact / Delta；确认未触碰无关用户改动。
 
+6. 里程碑六：会话上下文重置命令
+   - 验收标准：用户发送 `/clear` 后，同一 sender/conversation/thread 后续自然语言 turn 不再携带重置前的 pending action 或 recent context entities；历史消息、turn 审计和 issue 数据不删除。
+
 ## 关键决策
 
 - 决策点：是否完全删除结构化 intent/action？
@@ -113,6 +116,14 @@
 - 决策点：先大删包还是先切运行边界？
 - 选择：先切运行边界，再拆包删除。
 - 原因：边界测试能防止重构中旧路径继续漏进自然语言；直接删包风险大且难定位行为回归。
+
+- 决策点：`/clear` 是删除历史，还是重置短期上下文边界？
+- 选择：只写入 channel turn 的 `context_reset` 状态边界，不删除历史消息、turn、issue 或 comment。
+- 原因：用户想要的是“这轮聊叉了，下一句别再继承刚才的上下文”，不是抹掉审计记录。删除历史会破坏可追踪性，也会影响后续问题追溯；状态边界可以精确控制 prompt 注入范围。
+
+- 决策点：上下文重置由 agent 理解，还是 runtime deterministic command 处理？
+- 选择：作为 `/clear` slash command 在 inbound runtime 内确定性处理。
+- 原因：清空上下文是 channel 会话控制指令，不是 workspace mutation。让 agent 自己理解会把“是否真的清空”变成不稳定行为，也可能在 agent 不可用时无法执行。
 
 ## 设计决策思考（强制书面回答）
 
@@ -140,6 +151,8 @@
 
 如果未来要支持 Slack/Teams，平台只要提供标准化 message/reply/quote/thread 信号，pending action 仍可复用。如果后续新增“改优先级”“指派给某人”等多轮澄清，只扩展 pending action schema 和 resolver，不需要再增加语言 pattern。如果未来完全迁移到 typed agent tool，也可以把 pending action 的执行端替换成 tool call，而不改 slash/turn 路由边界。
 
+补充：`/clear` 作为通用 channel control command，不绑定飞书或某个平台。如果未来需要“只清 pending action，不清 recent entities”或“新建一个长期 thread/session”，可以在 `context_reset` 状态里扩展 scope，而不用改历史消息模型。
+
 ## 影响范围
 
 - 预计修改：
@@ -150,6 +163,11 @@
   - `server/internal/daemon/prompt.go`
   - `server/internal/daemon/execenv/runtime_config.go`
   - channel 相关测试
+- 补充预计修改：
+  - `server/internal/channel/turn/state.go`：新增 `context_reset` 状态 payload。
+  - `server/internal/channel/conversation/store.go`：查询最近一次 context reset 作为上下文 lookback 下界。
+  - `server/internal/channel/inbound/runtime.go`：在 deterministic command 前处理 `/clear`，并在构建 turn request 时应用 reset 边界。
+  - `server/internal/channel/inbound/*_test.go`、`server/internal/channel/conversation/store_test.go`：覆盖 reset 后不注入旧 pending/context。
 - 预计新增：
   - `server/internal/channel/command`
   - `server/internal/channel/turn`
