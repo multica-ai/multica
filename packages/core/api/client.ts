@@ -1395,6 +1395,17 @@ export class ApiClient {
     return this.fetch(`/api/runtimes/${runtimeId}/unpause`, { method: "POST" });
   }
 
+  // CEREBRO-PATCH(api-client-runtime-tools-config): runtime-level MCP defaults (9031).
+  async updateRuntimeToolsConfig(
+    runtimeId: string,
+    toolsConfig: unknown | null,
+  ): Promise<AgentRuntime> {
+    return this.fetch(`/api/runtimes/${runtimeId}/tools-config`, {
+      method: "PATCH",
+      body: JSON.stringify({ tools_config: toolsConfig }),
+    });
+  }
+
   async updateRuntimeSandbox(
     runtimeId: string,
     sandboxEnabled: boolean | null,

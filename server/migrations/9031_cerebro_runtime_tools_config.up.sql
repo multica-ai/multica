@@ -1,0 +1,12 @@
+-- 9031_cerebro_runtime_tools_config: runtime-level MCP servers config.
+--
+-- agent_runtime.tools_config holds a JSON document of the shape:
+--   { "mcpServers": { "<server-name>": { "command": "...", "args": [...], "env": {...} } } }
+-- The shape matches Claude Code's --mcp-config file format so it can be merged
+-- with each task's agent.mcp_config at claim time and passed through verbatim.
+-- A workspace admin can declare an MCP once on a runtime and have every agent
+-- on that runtime pick it up.
+--
+-- NULL means "no runtime-level MCP defaults" — the daemon falls back to
+-- agent.mcp_config alone, matching pre-patch behaviour.
+ALTER TABLE agent_runtime ADD COLUMN tools_config JSONB;

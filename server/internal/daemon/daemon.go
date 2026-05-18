@@ -17,6 +17,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	// CEREBRO-PATCH(daemon-runtime-mcp-merge-import): runtime/agent MCP merge for 9031.
+	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp"
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -2618,6 +2620,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = task.Agent.McpConfig
 	}
+	// CEREBRO-PATCH(daemon-runtime-mcp-merge): merge runtime-level MCP defaults with agent-level mcp_config (9031).
+	mcpConfig = daemonmcp.Merge(task.RuntimeToolsConfig, mcpConfig)
 	execOpts := agent.ExecOptions{
 		Cwd:                       env.WorkDir,
 		Model:                     model,

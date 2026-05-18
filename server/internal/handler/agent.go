@@ -224,6 +224,8 @@ type AgentTaskResponse struct {
 	// an admin's runtime-wide cap can't be bypassed by an agent owner who
 	// picked a more permissive sandbox on their agent.
 	RuntimePersonaSandbox  string               `json:"runtime_persona_sandbox,omitempty"`
+	// CEREBRO-PATCH(runtime-tools-config-claim-resp): runtime-level tools_config surfaced at claim so daemon can merge with agent.mcp_config (9031).
+	RuntimeToolsConfig     json.RawMessage      `json:"runtime_tools_config,omitempty"`
 	ChatMessageAttachments []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"` // attachments on the user message - agent calls `multica attachment download <id>` per entry
 	SquadID                string               `json:"squad_id,omitempty"`                 // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
 	SquadName              string               `json:"squad_name,omitempty"`               // display name for the picker squad

@@ -1400,6 +1400,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	if rt, err := h.Queries.GetAgentRuntime(r.Context(), task.RuntimeID); err == nil {
 		resp.SandboxEnabled = boolToPtr(rt.SandboxEnabled)
 		resp.RuntimePersonaSandbox = rt.PersonaSandbox.String
+		// CEREBRO-PATCH(runtime-tools-config-claim-populate): surface runtime tools_config to daemon (9031).
+		if len(rt.ToolsConfig) > 0 {
+			resp.RuntimeToolsConfig = json.RawMessage(rt.ToolsConfig)
+		}
 	} else {
 		slog.Warn("failed to load runtime for sandbox override", "runtime_id", uuidToString(task.RuntimeID), "error", err)
 	}

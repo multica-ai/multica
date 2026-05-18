@@ -26,6 +26,13 @@ declare module "@multica/core/types/agent" {
      * "konto ukendt — daemon har ikke rapporteret endnu".
      */
     current_account_id?: string | null;
+    /**
+     * 9031 (runtime-level MCP defaults): JSON document of shape
+     * {"mcpServers": {...}} that the daemon merges with each agent's
+     * mcp_config at task-claim time. Null/missing = no runtime-level
+     * defaults (daemon falls back to agent.mcp_config alone).
+     */
+    tools_config?: unknown | null;
   }
 }
 

@@ -80,6 +80,7 @@ type AgentRuntime struct {
 	PersonaSandbox   pgtype.Text        `json:"persona_sandbox"`
 	Capabilities     []byte             `json:"capabilities"`
 	CliVersion       pgtype.Text        `json:"cli_version"`
+	ToolsConfig      []byte             `json:"tools_config"`
 }
 
 type AgentSkill struct {

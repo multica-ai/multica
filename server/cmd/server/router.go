@@ -891,6 +891,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/local-skills/import", h.InitiateImportLocalSkill)
 					r.Get("/local-skills/import/{requestId}", h.GetLocalSkillImportRequest)
 					r.Patch("/persona-sandbox", h.UpdateAgentRuntimePersonaSandbox)
+					// CEREBRO-PATCH(router-runtime-tools-config): runtime-level MCP defaults (9031).
+					r.Patch("/tools-config", h.UpdateAgentRuntimeToolsConfig)
 					r.Delete("/", h.DeleteAgentRuntime)
 				})
 			})

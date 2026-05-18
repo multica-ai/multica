@@ -230,6 +230,7 @@ type CreateAutopilotTaskParams struct {
 // =====================
 // Task Queue (run_only mode)
 // =====================
+// CEREBRO-PATCH(autopilot-handoff-provenance): carry original_user_id + delegation_source on autopilot tasks so agent handoffs receive a human origin (JEH-1518).
 func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createAutopilotTask,
 		arg.AgentID,

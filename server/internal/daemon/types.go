@@ -106,6 +106,8 @@ type Task struct {
 	// from agent_task_queue.model_override (JEH-1310). Empty = fall back to
 	// Agent.Model, then env, then CLI default — see daemon.go model-resolution.
 	ModelOverride string `json:"model_override,omitempty"`
+	// CEREBRO-PATCH(daemon-task-runtime-tools-config): runtime-level MCP defaults JSON (9031). Merged with Agent.McpConfig in runTask.
+	RuntimeToolsConfig json.RawMessage `json:"runtime_tools_config,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon

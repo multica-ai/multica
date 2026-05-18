@@ -345,3 +345,15 @@ WHERE status = 'offline'
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
   AND id NOT IN (SELECT DISTINCT runtime_id FROM agent)
 RETURNING id, workspace_id;
+
+-- CEREBRO-PATCH(runtime-tools-config-query): runtime-level MCP defaults (9031).
+-- name: UpdateAgentRuntimeToolsConfig :one
+-- Sets or clears the runtime-level tools_config JSON document. Pass NULL to
+-- clear. Shape is {"mcpServers": {...}} (Claude Code --mcp-config format); the
+-- daemon merges this with each agent's mcp_config at claim time so runtime-
+-- level MCP defaults apply to every agent on the runtime without per-agent
+-- configuration.
+UPDATE agent_runtime
+SET tools_config = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;

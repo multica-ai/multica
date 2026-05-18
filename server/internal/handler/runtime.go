@@ -58,8 +58,10 @@ type AgentRuntimeResponse struct {
 	Timezone   string `json:"timezone"`
 	// CEREBRO-PATCH(runtime-account-id-response): expose current_account_id so RuntimeAccountsCard can link runtime→account (JEH-1461).
 	CurrentAccountID *string `json:"current_account_id"`
-	CreatedAt        string  `json:"created_at"`
-	UpdatedAt        string  `json:"updated_at"`
+	// CEREBRO-PATCH(runtime-tools-config-response): runtime-level MCP defaults JSON (9031).
+	ToolsConfig any    `json:"tools_config"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
@@ -103,9 +105,23 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		Timezone:   rt.Timezone,
 		// CEREBRO-PATCH(runtime-account-id-response): map current_account_id from DB row to API response (JEH-1461).
 		CurrentAccountID: uuidToPtr(rt.CurrentAccountID),
-		CreatedAt:        timestampToString(rt.CreatedAt),
-		UpdatedAt:        timestampToString(rt.UpdatedAt),
+		// CEREBRO-PATCH(runtime-tools-config-response): unmarshal runtime tools_config jsonb so the UI gets a structured object (9031).
+		ToolsConfig: unmarshalToolsConfig(rt.ToolsConfig),
+		CreatedAt:   timestampToString(rt.CreatedAt),
+		UpdatedAt:   timestampToString(rt.UpdatedAt),
 	}
+}
+
+// CEREBRO-PATCH(runtime-tools-config-unmarshal): decode runtime tools_config jsonb to JSON object (or nil if unset / invalid).
+func unmarshalToolsConfig(raw []byte) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var out any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------
