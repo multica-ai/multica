@@ -26,4 +26,4 @@ images:
   - name: ghcr.io/g2crowd/agentfarm-backend-prod
     newTag: "da0c1981"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
-    newTag: "fa046c7c"
+    newTag: "da0c1981"
