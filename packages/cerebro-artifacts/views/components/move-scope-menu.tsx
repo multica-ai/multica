@@ -39,10 +39,10 @@ export function MoveScopeMenu({ artifact }: { artifact: Artifact }) {
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <Button variant="ghost" size="sm" disabled={move.isPending} />
+          <Button variant="ghost" size="sm" className="max-sm:px-2" disabled={move.isPending} />
         }
       >
-        <Move className="mr-1 size-4" /> Move
+        <Move className="size-4 sm:mr-1" /><span className="hidden sm:inline">Move</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>Move to…</DropdownMenuLabel>

@@ -193,7 +193,7 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
           <div className="mb-3 flex items-center gap-2">
             <MobileSidebarTrigger className="mr-0" />
             <Button variant="ghost" size="sm" onClick={() => router.push(wsPaths.documents())}>
-              <ArrowLeft className="mr-1 size-4" /> Documents
+              <ArrowLeft className="mr-1 size-4" /><span className="hidden sm:inline">Documents</span>
             </Button>
           </div>
           <p className="mt-4 text-sm text-muted-foreground">
@@ -256,42 +256,47 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
         <div className="flex items-center gap-2">
           <MobileSidebarTrigger className="mr-0" />
           <Button variant="ghost" size="sm" onClick={() => router.push(wsPaths.documents())}>
-            <ArrowLeft className="mr-1 size-4" /> Documents
+            <ArrowLeft className="mr-1 size-4" /><span className="hidden sm:inline">Documents</span>
           </Button>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5 sm:gap-1">
           <Button
             variant="ghost"
             size="sm"
+            className="max-sm:px-2"
+            title="Open in new window"
             onClick={() => window.open(window.location.href, "_blank", "noreferrer")}
           >
-            <ExternalLink className="mr-1 size-4" /> Open in new window
+            <ExternalLink className="size-4 sm:mr-1" /><span className="hidden sm:inline">Open in new window</span>
           </Button>
           {canDownload && (
-            <Button variant="ghost" size="sm" onClick={handleDownload}>
-              <Download className="mr-1 size-4" /> Download
+            <Button variant="ghost" size="sm" className="max-sm:px-2" title="Download" onClick={handleDownload}>
+              <Download className="size-4 sm:mr-1" /><span className="hidden sm:inline">Download</span>
             </Button>
           )}
           {canEdit && (
             <>
-              <Button variant="ghost" size="sm" onClick={startRename}>
-                <Pencil className="mr-1 size-4" /> Rename
+              <Button variant="ghost" size="sm" className="max-sm:px-2" title="Rename" onClick={startRename}>
+                <Pencil className="size-4 sm:mr-1" /><span className="hidden sm:inline">Rename</span>
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
+                className="max-sm:px-2"
+                title="Edit body"
                 onClick={() => router.push(wsPaths.documentEdit(artifact.id))}
               >
-                <Pencil className="mr-1 size-4" /> Edit body
+                <Pencil className="size-4 sm:mr-1" /><span className="hidden sm:inline">Edit body</span>
               </Button>
               <MoveScopeMenu artifact={artifact} />
               <Button
                 variant="ghost"
                 size="sm"
+                className="max-sm:px-2 text-destructive hover:text-destructive"
+                title="Delete"
                 onClick={() => setConfirmDelete(true)}
-                className="text-destructive hover:text-destructive"
               >
-                <Trash2 className="mr-1 size-4" /> Delete
+                <Trash2 className="size-4 sm:mr-1" /><span className="hidden sm:inline">Delete</span>
               </Button>
             </>
           )}
