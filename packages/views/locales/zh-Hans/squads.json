@@ -46,6 +46,7 @@
     "status_idle": "空闲",
     "status_offline": "离线",
     "status_unstable": "不稳定",
+    "issue_status_blocked": "已阻塞",
     "active_issue_more": "还有 {{count}} 个",
     "last_active_label": "最近活动 {{time}}"
   },

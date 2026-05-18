@@ -20,23 +20,30 @@ func TestDeriveSquadMemberStatus(t *testing.T) {
 
 	cases := []struct {
 		name          string
+		archived      bool
 		runtimeStatus pgtype.Text
 		lastSeen      pgtype.Timestamptz
 		hasActiveTask bool
 		want          string
 	}{
-		{"active wins over offline runtime", offline, tsAgo(time.Hour), true, "working"},
-		{"active wins over missing runtime", missing, tsNone, true, "working"},
-		{"online runtime, no task", online, tsAgo(2 * time.Second), false, "idle"},
-		{"offline runtime, recent heartbeat", offline, tsAgo(2 * time.Minute), false, "unstable"},
-		{"offline runtime, stale heartbeat", offline, tsAgo(2 * time.Hour), false, "offline"},
-		{"offline runtime, no heartbeat", offline, tsNone, false, "offline"},
-		{"no runtime row", missing, tsNone, false, "offline"},
+		{"active wins over offline runtime", false, offline, tsAgo(time.Hour), true, "working"},
+		{"active wins over missing runtime", false, missing, tsNone, true, "working"},
+		{"online runtime, no task", false, online, tsAgo(2 * time.Second), false, "idle"},
+		{"offline runtime, recent heartbeat", false, offline, tsAgo(2 * time.Minute), false, "unstable"},
+		{"offline runtime, stale heartbeat", false, offline, tsAgo(2 * time.Hour), false, "offline"},
+		{"offline runtime, no heartbeat", false, offline, tsNone, false, "offline"},
+		{"no runtime row", false, missing, tsNone, false, "offline"},
+		// Archived agents always report offline regardless of any leftover
+		// runtime row or task — they should appear in the squad listing
+		// but never look like they're still working.
+		{"archived agent with active task", true, online, tsAgo(time.Second), true, "offline"},
+		{"archived agent with online runtime", true, online, tsAgo(time.Second), false, "offline"},
+		{"archived agent already offline", true, offline, tsAgo(time.Hour), false, "offline"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := deriveSquadMemberStatus(tc.runtimeStatus, tc.lastSeen, tc.hasActiveTask, now)
+			got := deriveSquadMemberStatus(tc.archived, tc.runtimeStatus, tc.lastSeen, tc.hasActiveTask, now)
 			if got != tc.want {
 				t.Fatalf("deriveSquadMemberStatus = %q, want %q", got, tc.want)
 			}

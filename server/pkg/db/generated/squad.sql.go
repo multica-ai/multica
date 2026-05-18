@@ -269,18 +269,19 @@ func (q *Queries) ListAllSquads(ctx context.Context, workspaceID pgtype.UUID) ([
 
 const listSquadMemberStatusRows = `-- name: ListSquadMemberStatusRows :many
 SELECT
-    sm.id            AS squad_member_id,
-    sm.member_type   AS member_type,
-    sm.member_id     AS member_id,
-    ar.status        AS runtime_status,
-    ar.last_seen_at  AS runtime_last_seen_at,
-    atq.id           AS task_id,
-    atq.status       AS task_status,
-    atq.issue_id     AS task_issue_id,
-    atq.dispatched_at AS task_dispatched_at,
-    i.number         AS issue_number,
-    i.title          AS issue_title,
-    i.status         AS issue_status
+    sm.id              AS squad_member_id,
+    sm.member_type     AS member_type,
+    sm.member_id       AS member_id,
+    a.archived_at      AS agent_archived_at,
+    ar.status          AS runtime_status,
+    ar.last_seen_at    AS runtime_last_seen_at,
+    atq.id             AS task_id,
+    atq.status         AS task_status,
+    atq.issue_id       AS task_issue_id,
+    atq.dispatched_at  AS task_dispatched_at,
+    i.number           AS issue_number,
+    i.title            AS issue_title,
+    i.status           AS issue_status
 FROM squad_member sm
 LEFT JOIN agent a
        ON sm.member_type = 'agent' AND a.id = sm.member_id
@@ -300,6 +301,7 @@ type ListSquadMemberStatusRowsRow struct {
 	SquadMemberID     pgtype.UUID        `json:"squad_member_id"`
 	MemberType        string             `json:"member_type"`
 	MemberID          pgtype.UUID        `json:"member_id"`
+	AgentArchivedAt   pgtype.Timestamptz `json:"agent_archived_at"`
 	RuntimeStatus     pgtype.Text        `json:"runtime_status"`
 	RuntimeLastSeenAt pgtype.Timestamptz `json:"runtime_last_seen_at"`
 	TaskID            pgtype.UUID        `json:"task_id"`
@@ -329,6 +331,7 @@ func (q *Queries) ListSquadMemberStatusRows(ctx context.Context, squadID pgtype.
 			&i.SquadMemberID,
 			&i.MemberType,
 			&i.MemberID,
+			&i.AgentArchivedAt,
 			&i.RuntimeStatus,
 			&i.RuntimeLastSeenAt,
 			&i.TaskID,

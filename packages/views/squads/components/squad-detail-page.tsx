@@ -1164,7 +1164,7 @@ function SquadMembersTab({
                       <span className="truncate">{primaryIssue.title}</span>
                       {primaryIssue.issue_status === "blocked" && (
                         <span className="shrink-0 inline-flex items-center text-[10px] uppercase tracking-wide text-warning">
-                          blocked
+                          {t(($) => $.members_tab.issue_status_blocked)}
                         </span>
                       )}
                     </AppLink>

@@ -372,12 +372,22 @@ type SquadMemberStatusListResponse struct {
 // Thresholds match deriveRuntimeHealth: any offline runtime whose
 // last_seen_at is within the last 5 minutes is reported as "unstable" so
 // the squad UI surfaces transient drops the same way the agent dot does.
+//
+// Archived agents always report `offline` regardless of any leftover
+// runtime row or task — they should appear in the list but never look
+// like they're still working. Per the RFC decision (see MUL-2319), we
+// surface archived agents in this endpoint rather than filtering them
+// out in the SQL.
 func deriveSquadMemberStatus(
+	archived bool,
 	runtimeStatus pgtype.Text,
 	lastSeen pgtype.Timestamptz,
 	hasActiveTask bool,
 	now time.Time,
 ) string {
+	if archived {
+		return "offline"
+	}
 	if hasActiveTask {
 		return "working"
 	}
@@ -421,6 +431,7 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 	// more than one active task.
 	type memberAcc struct {
 		response       SquadMemberStatusResponse
+		archived       bool
 		hasActiveTask  bool
 		runtimeStatus  pgtype.Text
 		runtimeSeenAt  pgtype.Timestamptz
@@ -439,6 +450,7 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 					MemberID:     memberID,
 					ActiveIssues: []SquadActiveIssueBrief{},
 				},
+				archived:      row.AgentArchivedAt.Valid,
 				runtimeStatus: row.RuntimeStatus,
 				runtimeSeenAt: row.RuntimeLastSeenAt,
 			}
@@ -450,20 +462,28 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 			continue
 		}
 
-		if row.TaskID.Valid && row.TaskIssueID.Valid {
+		// A dispatched/running task occupies an agent slot even when it
+		// has no associated issue (chat / quick-create tasks set
+		// agent_task_queue.issue_id = NULL). The `working` bucket is
+		// defined by task presence, not by whether we can render an
+		// issue link, so flag the agent here regardless of issue_id.
+		if row.TaskID.Valid {
 			entry.hasActiveTask = true
-			brief := SquadActiveIssueBrief{
-				IssueID:    uuidToString(row.TaskIssueID),
-				Identifier: prefix + "-" + strconv.Itoa(int(row.IssueNumber.Int32)),
-				Title:      row.IssueTitle.String,
-				IssueStatus: func() string {
-					if row.IssueStatus.Valid {
-						return row.IssueStatus.String
-					}
-					return ""
-				}(),
+
+			if row.TaskIssueID.Valid {
+				brief := SquadActiveIssueBrief{
+					IssueID:    uuidToString(row.TaskIssueID),
+					Identifier: prefix + "-" + strconv.Itoa(int(row.IssueNumber.Int32)),
+					Title:      row.IssueTitle.String,
+					IssueStatus: func() string {
+						if row.IssueStatus.Valid {
+							return row.IssueStatus.String
+						}
+						return ""
+					}(),
+				}
+				entry.response.ActiveIssues = append(entry.response.ActiveIssues, brief)
 			}
-			entry.response.ActiveIssues = append(entry.response.ActiveIssues, brief)
 
 			if row.TaskDispatchedAt.Valid && (!entry.latestActiveAt.Valid ||
 				row.TaskDispatchedAt.Time.After(entry.latestActiveAt.Time)) {
@@ -479,6 +499,7 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 		entry := acc[id]
 		if entry.response.MemberType == "agent" {
 			status := deriveSquadMemberStatus(
+				entry.archived,
 				entry.runtimeStatus,
 				entry.runtimeSeenAt,
 				entry.hasActiveTask,
