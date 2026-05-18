@@ -2589,11 +2589,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}()
 		}
 	}
-	// CEREBRO-PATCH(claude-account-alias): CLAUDE_ACCOUNT=<email> → CLAUDE_CONFIG_DIR=$HOME/.claude-accounts/<email>
-	if email := agentEnv["CLAUDE_ACCOUNT"]; email != "" && agentEnv["CLAUDE_CONFIG_DIR"] == "" {
-		agentEnv["CLAUDE_CONFIG_DIR"] = filepath.Join(os.Getenv("HOME"), ".claude-accounts", email)
-	}
-
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
