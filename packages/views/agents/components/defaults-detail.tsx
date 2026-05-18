@@ -40,7 +40,7 @@ import {
   skillListOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
-import type { AgentDefaultsWithUser } from "@multica/core/types";
+import type { AgentDefaults, AgentDefaultsWithUser, Workspace } from "@multica/core/types";
 import { ContentEditor } from "../../editor/content-editor";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
@@ -100,6 +100,16 @@ function entriesToArgs(entries: ArgEntry[]): string[] {
 
 const personalDefaultsKey = (wsId: string) =>
   ["workspaces", wsId, "personal-agent-defaults"] as const;
+
+function updateWorkspaceInList(
+  workspaces: Workspace[] | undefined,
+  updated: Workspace,
+): Workspace[] | undefined {
+  if (!workspaces) return workspaces;
+  return workspaces.map((workspace) =>
+    workspace.id === updated.id ? updated : workspace,
+  );
+}
 
 // ─── Tab definitions ────────────────────────────────────────────────────────
 
@@ -802,33 +812,68 @@ export function PersonalDefaultsDetail() {
     [personalDefaults?.config],
   );
 
-  const saveConfig = useCallback(async (newConfig: AgentDefaultsConfig) => {
+  const getSavedToast = useCallback((field: keyof AgentDefaultsConfig) => {
+    switch (field) {
+      case "instructions":
+        return t(($) => $.tab_body.instructions.saved_toast);
+      case "custom_args":
+        return t(($) => $.tab_body.custom_args.saved_toast);
+      case "skills":
+        return t(($) => $.tab_body.skills.saved_toast);
+      case "custom_env":
+      default:
+        return t(($) => $.tab_body.env.saved_toast);
+    }
+  }, [t]);
+
+  const getSaveFailedToast = useCallback((field: keyof AgentDefaultsConfig) => {
+    switch (field) {
+      case "instructions":
+        return t(($) => $.tab_body.instructions.save_failed_toast);
+      case "custom_args":
+        return t(($) => $.tab_body.custom_args.save_failed_toast);
+      case "skills":
+        return t(($) => $.tab_body.skills.save_failed_toast);
+      case "custom_env":
+      default:
+        return t(($) => $.tab_body.env.save_failed_toast);
+    }
+  }, [t]);
+
+  const saveConfig = useCallback(async (
+    newConfig: AgentDefaultsConfig,
+    field: keyof AgentDefaultsConfig,
+    options?: { showSavedToast?: boolean },
+  ) => {
     setSaving(true);
     try {
-      await api.updatePersonalAgentDefaults(wsId, newConfig as Record<string, unknown>);
+      const updated = await api.updatePersonalAgentDefaults(wsId, newConfig as Record<string, unknown>);
+      qc.setQueryData<AgentDefaults>(personalDefaultsKey(wsId), updated);
       await Promise.all([
         qc.invalidateQueries({ queryKey: personalDefaultsKey(wsId) }),
         qc.invalidateQueries({ queryKey: instructionsHistoryKey(wsId, "personal") }),
       ]);
-      toast.success(t(($) => $.tab_body.env.saved_toast));
+      if (options?.showSavedToast !== false) {
+        toast.success(getSavedToast(field));
+      }
     } catch (e) {
       const msg = e instanceof ApiError ? e.message
         : e instanceof Error ? e.message
-        : t(($) => $.tab_body.env.save_failed_toast);
+        : getSaveFailedToast(field);
       toast.error(msg);
       throw e;
     } finally {
       setSaving(false);
     }
-  }, [wsId, qc, t]);
+  }, [wsId, qc, getSavedToast, getSaveFailedToast]);
 
   const handleSaveField = useCallback(async (field: keyof AgentDefaultsConfig, value: unknown) => {
     const newConfig = { ...config, [field]: value };
-    await saveConfig(newConfig);
+    await saveConfig(newConfig, field);
   }, [config, saveConfig]);
 
   const handleRestoreInstructions = useCallback(async (instructions: string) => {
-    await saveConfig({ ...config, instructions });
+    await saveConfig({ ...config, instructions }, "instructions", { showSavedToast: false });
   }, [config, saveConfig]);
 
   if (isLoading) {
@@ -875,34 +920,71 @@ export function SystemDefaultsDetail({ readOnly = false }: { readOnly?: boolean 
     [workspace?.settings?.agent_defaults],
   );
 
-  const saveDefaults = useCallback(async (newDefaults: AgentDefaultsConfig) => {
+  const getSavedToast = useCallback((field: keyof AgentDefaultsConfig) => {
+    switch (field) {
+      case "instructions":
+        return t(($) => $.tab_body.instructions.saved_toast);
+      case "custom_args":
+        return t(($) => $.tab_body.custom_args.saved_toast);
+      case "skills":
+        return t(($) => $.tab_body.skills.saved_toast);
+      case "custom_env":
+      default:
+        return t(($) => $.tab_body.env.saved_toast);
+    }
+  }, [t]);
+
+  const getSaveFailedToast = useCallback((field: keyof AgentDefaultsConfig) => {
+    switch (field) {
+      case "instructions":
+        return t(($) => $.tab_body.instructions.save_failed_toast);
+      case "custom_args":
+        return t(($) => $.tab_body.custom_args.save_failed_toast);
+      case "skills":
+        return t(($) => $.tab_body.skills.save_failed_toast);
+      case "custom_env":
+      default:
+        return t(($) => $.tab_body.env.save_failed_toast);
+    }
+  }, [t]);
+
+  const saveDefaults = useCallback(async (
+    newDefaults: AgentDefaultsConfig,
+    field: keyof AgentDefaultsConfig,
+    options?: { showSavedToast?: boolean },
+  ) => {
     if (!workspace) return;
     setSaving(true);
     try {
       const newSettings = { ...workspace.settings, agent_defaults: newDefaults };
-      await api.updateWorkspace(workspace.id, { settings: newSettings });
+      const updated = await api.updateWorkspace(workspace.id, { settings: newSettings });
+      qc.setQueryData<Workspace[]>(workspaceKeys.list(), (workspaces) =>
+        updateWorkspaceInList(workspaces, updated),
+      );
       await Promise.all([
         qc.invalidateQueries({ queryKey: workspaceKeys.list() }),
         qc.invalidateQueries({ queryKey: instructionsHistoryKey(workspace.id, "system") }),
       ]);
-      toast.success(t(($) => $.tab_body.env.saved_toast));
+      if (options?.showSavedToast !== false) {
+        toast.success(getSavedToast(field));
+      }
     } catch (e) {
       const msg = e instanceof ApiError ? e.message
         : e instanceof Error ? e.message
-        : t(($) => $.tab_body.env.save_failed_toast);
+        : getSaveFailedToast(field);
       toast.error(msg);
       throw e;
     } finally {
       setSaving(false);
     }
-  }, [workspace, qc, t]);
+  }, [workspace, qc, getSavedToast, getSaveFailedToast]);
 
   const handleSaveField = useCallback(async (field: keyof AgentDefaultsConfig, value: unknown) => {
-    await saveDefaults({ ...agentDefaults, [field]: value });
+    await saveDefaults({ ...agentDefaults, [field]: value }, field);
   }, [agentDefaults, saveDefaults]);
 
   const handleRestoreInstructions = useCallback(async (instructions: string) => {
-    await saveDefaults({ ...agentDefaults, instructions });
+    await saveDefaults({ ...agentDefaults, instructions }, "instructions", { showSavedToast: false });
   }, [agentDefaults, saveDefaults]);
 
   return (
