@@ -119,6 +119,9 @@ import type {
   NotificationPreferences,
   AgentDefaults,
   AgentDefaultsWithUser,
+  InstructionsHistoryScope,
+  InstructionsHistoryDetail,
+  ListInstructionsHistoryResponse,
   WikiPage,
   ListWikiPagesResponse,
   CreateWikiPageRequest,
@@ -1965,6 +1968,23 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults/duplicate/${configId}`, {
       method: "POST",
     });
+  }
+
+  async listInstructionsHistory(
+    workspaceId: string,
+    scope: InstructionsHistoryScope,
+  ): Promise<ListInstructionsHistoryResponse> {
+    const search = new URLSearchParams({ scope });
+    return this.fetch(`/api/workspaces/${workspaceId}/instructions-history?${search}`);
+  }
+
+  async getInstructionsHistory(
+    workspaceId: string,
+    versionId: string,
+    scope: InstructionsHistoryScope,
+  ): Promise<InstructionsHistoryDetail> {
+    const search = new URLSearchParams({ scope });
+    return this.fetch(`/api/workspaces/${workspaceId}/instructions-history/${versionId}?${search}`);
   }
 
   // GitHub integration

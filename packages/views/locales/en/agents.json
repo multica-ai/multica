@@ -280,7 +280,9 @@
     },
     "instructions": {
       "intro": "Define this agent's identity and working style. Injected into the agent's context for every task. Markdown is supported.",
-      "placeholder": "Define this agent's role, expertise, and working style.\n\n# Example\nYou are a frontend engineer specializing in React and TypeScript.\n\n## Working Style\n- Write small, focused PRs — one commit per logical change\n- Prefer composition over inheritance\n- Always add unit tests for new components\n\n## Constraints\n- Do not modify shared/ types without explicit approval\n- Follow the existing component patterns in features/"
+      "placeholder": "Define this agent's role, expertise, and working style.\n\n# Example\nYou are a frontend engineer specializing in React and TypeScript.\n\n## Working Style\n- Write small, focused PRs — one commit per logical change\n- Prefer composition over inheritance\n- Always add unit tests for new components\n\n## Constraints\n- Do not modify shared/ types without explicit approval\n- Follow the existing component patterns in features/",
+      "saved_toast": "Instructions saved",
+      "save_failed_toast": "Failed to save instructions"
     },
     "env": {
       "intro_readonly": "Injected into the agent process at launch. Values are hidden — only the agent owner or workspace admin can view and edit them.",
@@ -324,7 +326,9 @@
       "add_dialog_confirm_one": "Add {{count}} skill",
       "add_dialog_confirm_other": "Add {{count}} skills",
       "add_dialog_cancel": "Cancel",
-      "add_failed_toast": "Failed to add skill"
+      "add_failed_toast": "Failed to add skill",
+      "saved_toast": "Skills saved",
+      "save_failed_toast": "Failed to save skills"
     },
     "activity": {
       "section_now": "Now",
@@ -440,5 +444,33 @@
     "duplicate_action": "Duplicate to Mine",
     "badge_label": "Default",
     "other_user_desc": "This user's default agent config"
+  },
+  "history": {
+    "action": "History",
+    "title": "Instructions history",
+    "personal_description": "Previous personal default instructions.",
+    "system_description": "Previous workspace default instructions.",
+    "load_failed": "Couldn't load instructions history.",
+    "empty": "No history yet.",
+    "current_version": "Current version",
+    "version_label": "Version {{count}}",
+    "unknown_actor": "Unknown actor",
+    "empty_content": "Empty instructions",
+    "view": "View",
+    "restore": "Restore",
+    "version_content": "Version content",
+    "select_version": "Select a version",
+    "loading_content": "Loading content...",
+    "select_hint": "Select a version to view the full instructions.",
+    "restore_dialog_title": "Restore to this version?",
+    "restore_dialog_description": "Current instructions will be replaced with the version saved by {{actor}} {{time}}. Restoring creates a new history version.",
+    "cancel": "Cancel",
+    "restore_confirm": "Restore",
+    "restored_toast": "Instructions restored",
+    "restore_failed_toast": "Failed to restore instructions",
+    "relative_now": "just now",
+    "relative_minutes": "{{count}}m ago",
+    "relative_hours": "{{count}}h ago",
+    "relative_days": "{{count}}d ago"
   }
 }
