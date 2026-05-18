@@ -1119,12 +1119,6 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
     };
   }, [healthPort, streamNonce, task.id]);
 
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [lines.length, showRaw]);
-
   const visibleLines = useMemo(() => {
     if (showRaw) return lines;
     return lines.filter((line) => (
@@ -1135,6 +1129,22 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
   }, [lines, showRaw]);
 
   const workItems = useMemo(() => buildWorkItems(visibleLines, showRaw), [visibleLines, showRaw]);
+
+  useEffect(() => {
+    const scrollToBottom = () => {
+      const el = scrollRef.current;
+      if (el) {
+        el.scrollTop = el.scrollHeight;
+      }
+    };
+    // Scroll immediately for the common case
+    scrollToBottom();
+    // Also schedule after a frame to handle cases where layout hasn't
+    // settled yet (e.g. CollapsibleContent animation, initial mount)
+    const raf = requestAnimationFrame(scrollToBottom);
+    return () => cancelAnimationFrame(raf);
+  }, [workItems.length, showRaw, open]);
+
   const planPhase = useMemo(() => latestPlanPhase(lines), [lines]);
   const planBadge = planPhase
     ? planPhase === "executing" || planPhase === "rejected" || planPhase === "expired" || planPhase === "cancelled"
@@ -1191,12 +1201,12 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
         </div>
         {error && <div className="mt-1 text-[11px] text-muted-foreground">{error}</div>}
       </div>
-      <CollapsibleContent className={cn(fill && "min-h-0 flex-1 overflow-hidden")}>
+      <CollapsibleContent className={cn(fill && "min-h-0 flex-1 flex flex-col overflow-hidden")}>
         <div
           ref={scrollRef}
           className={cn(
             "max-w-full overflow-y-auto overflow-x-hidden border-t border-info/10 bg-background/60 px-3 py-2",
-            fill ? "h-full" : compact ? "max-h-[55vh]" : "max-h-72",
+            fill ? "flex-1 min-h-0" : compact ? "max-h-[55vh]" : "max-h-72",
           )}
         >
           {loading && lines.length === 0 ? (
