@@ -64,6 +64,82 @@ func TestCanUseRuntimeForAgent_Pure(t *testing.T) {
 	}
 }
 
+// TestCanEditRuntime_Pure exercises the pure predicate for updating runtime
+// settings (timezone, visibility). After OPE-954 only the workspace owner
+// and the runtime owner are allowed; workspace admin is explicitly denied
+// for runtimes owned by someone else.
+func TestCanEditRuntime_Pure(t *testing.T) {
+	ownerUserID := "11111111-1111-1111-1111-111111111111"
+	otherUserID := "22222222-2222-2222-2222-222222222222"
+
+	rt := db.AgentRuntime{
+		OwnerID: util.MustParseUUID(ownerUserID),
+	}
+
+	cases := []struct {
+		name   string
+		userID string
+		role   string
+		want   bool
+	}{
+		{"workspace owner can edit any runtime", otherUserID, "owner", true},
+		{"admin CANNOT edit another's runtime", otherUserID, "admin", false},
+		{"admin can edit own runtime", ownerUserID, "admin", true},
+		{"runtime owner can edit own runtime", ownerUserID, "member", true},
+		{"plain member cannot edit another's runtime", otherUserID, "member", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			member := db.Member{
+				UserID: util.MustParseUUID(tc.userID),
+				Role:   tc.role,
+			}
+			got := canEditRuntime(member, rt)
+			if got != tc.want {
+				t.Fatalf("canEditRuntime(role=%s, caller=%s) = %v; want %v",
+					tc.role, tc.userID, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCanDeleteRuntime_Pure exercises the delete permission predicate.
+// Unlike canEditRuntime, admins retain delete capability for cleanup of
+// orphaned runtimes (e.g. departed members).
+func TestCanDeleteRuntime_Pure(t *testing.T) {
+	ownerUserID := "11111111-1111-1111-1111-111111111111"
+	otherUserID := "22222222-2222-2222-2222-222222222222"
+
+	rt := db.AgentRuntime{
+		OwnerID: util.MustParseUUID(ownerUserID),
+	}
+
+	cases := []struct {
+		name   string
+		userID string
+		role   string
+		want   bool
+	}{
+		{"workspace owner can delete any runtime", otherUserID, "owner", true},
+		{"admin CAN delete another's runtime", otherUserID, "admin", true},
+		{"runtime owner can delete own runtime", ownerUserID, "member", true},
+		{"plain member cannot delete another's runtime", otherUserID, "member", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			member := db.Member{
+				UserID: util.MustParseUUID(tc.userID),
+				Role:   tc.role,
+			}
+			got := canDeleteRuntime(member, rt)
+			if got != tc.want {
+				t.Fatalf("canDeleteRuntime(role=%s, caller=%s) = %v; want %v",
+					tc.role, tc.userID, got, tc.want)
+			}
+		})
+	}
+}
+
 // runtimeVisibilityFixture builds the three-actor world the gate needs to
 // exercise: a private runtime owned by a non-admin member, a separate plain
 // member in the same workspace, and the workspace owner (testUserID). The
@@ -393,6 +469,30 @@ func TestUpdateAgentRuntime_VisibilityToggle(t *testing.T) {
 	// Plain member: forbidden, regardless of intent.
 	if w := patch(plainMemberID, "public"); w.Code != http.StatusForbidden {
 		t.Fatalf("UpdateAgentRuntime as plain member: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Workspace admin on another member's runtime: forbidden (OPE-954).
+	ctx := context.Background()
+	var adminMemberID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ('Admin Visibility Member', 'admin-visibility-member@multica.test')
+		RETURNING id
+	`).Scan(&adminMemberID); err != nil {
+		t.Fatalf("create admin user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM "user" WHERE email = 'admin-visibility-member@multica.test'`)
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'admin')
+	`, testWorkspaceID, adminMemberID); err != nil {
+		t.Fatalf("add admin member: %v", err)
+	}
+	if w := patch(adminMemberID, "public"); w.Code != http.StatusForbidden {
+		t.Fatalf("UpdateAgentRuntime as workspace admin on another's runtime: expected 403, got %d: %s", w.Code, w.Body.String())
 	}
 
 	// Bad value from the owner: 400.
