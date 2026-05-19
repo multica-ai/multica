@@ -259,6 +259,47 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("involves_user_id wiring", () => {
+    // The my-issues "My Agents / Squads" tab passes involves_user_id so the
+    // server expands it to "user + agents they own + squads they relate to"
+    // in a single UNION query. These tests pin the client wiring so a typo
+    // can't silently downgrade the tab to fetching everything.
+    it("listIssues forwards involves_user_id into the querystring", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ issues: [], total: 0 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      await client.listIssues({ involves_user_id: "user-1" });
+
+      const [url] = fetchMock.mock.calls[0]!;
+      expect(url).toContain("involves_user_id=user-1");
+    });
+
+    it("listGroupedIssues forwards involves_user_id into the querystring", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ groups: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      await client.listGroupedIssues({
+        group_by: "assignee",
+        involves_user_id: "user-1",
+      });
+
+      const [url] = fetchMock.mock.calls[0]!;
+      expect(url).toContain("involves_user_id=user-1");
+    });
+  });
+
   describe("chat attachment wiring", () => {
     it("uploadFile includes chat_session_id in the FormData body", async () => {
       const fetchMock = vi.fn().mockResolvedValue(

@@ -11,8 +11,8 @@
       "assigned_description": "Issues assigned to me",
       "created_label": "Created",
       "created_description": "Issues I created",
-      "agents_label": "My Agents",
-      "agents_description": "Issues assigned to my agents"
+      "agents_label": "My Agents / Squads",
+      "agents_description": "Issues assigned to me, my agents, or squads I'm part of or lead"
     },
     "filter_button": "Filter",
     "filter_status": "Status",

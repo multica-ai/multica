@@ -46,6 +46,14 @@ export interface ListIssuesParams {
   creator_id?: string;
   project_id?: string;
   open_only?: boolean;
+  /**
+   * Server-side "involves user" expansion: matches issues assigned directly
+   * to this user, to an agent they own, or to a squad where they are a
+   * member, the leader (via canonical squad.leader_id), or the owner of an
+   * agent member. Backed by a single UNION subquery in issue.sql so the
+   * client doesn't have to fan out into multiple requests.
+   */
+  involves_user_id?: string;
 }
 
 export interface IssueActorRef {
@@ -73,6 +81,8 @@ export interface ListGroupedIssuesParams {
   label_ids?: string[];
   group_assignee_type?: IssueAssigneeType | "none";
   group_assignee_id?: string;
+  /** See ListIssuesParams.involves_user_id — same semantics in the grouped path. */
+  involves_user_id?: string;
 }
 
 /** Raw backend response shape for `GET /api/issues`. */
