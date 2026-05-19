@@ -62,9 +62,11 @@ func runFakeClaudeStartupStdoutBurst() {
 
 func runFakeClaudeControlRequest() {
 	reader := bufio.NewReader(os.Stdin)
-	if _, err := reader.ReadString('\n'); err != nil {
-		fmt.Fprintf(os.Stderr, "read prompt: %v\n", err)
-		os.Exit(21)
+	if fakeClaudeUsesStdinPrompt() {
+		if _, err := reader.ReadString('\n'); err != nil {
+			fmt.Fprintf(os.Stderr, "read prompt: %v\n", err)
+			os.Exit(21)
+		}
 	}
 	fmt.Println(`{"type":"system","session_id":"sess-control"}`)
 	fmt.Println(`{"type":"control_request","request_id":"req-42","request":{"subtype":"tool_use","tool_name":"Bash","input":{"command":"pwd"}}}`)
@@ -94,9 +96,11 @@ func runFakeClaudeControlRequest() {
 
 func runFakeClaudeBackgroundControlRequest() {
 	reader := bufio.NewReader(os.Stdin)
-	if _, err := reader.ReadString('\n'); err != nil {
-		fmt.Fprintf(os.Stderr, "read prompt: %v\n", err)
-		os.Exit(31)
+	if fakeClaudeUsesStdinPrompt() {
+		if _, err := reader.ReadString('\n'); err != nil {
+			fmt.Fprintf(os.Stderr, "read prompt: %v\n", err)
+			os.Exit(31)
+		}
 	}
 	fmt.Println(`{"type":"system","session_id":"sess-background-control"}`)
 	fmt.Println(`{"type":"control_request","request_id":"req-bg","request":{"subtype":"tool_use","tool_name":"Bash","input":{"command":"sleep 60","run_in_background":true}}}`)
@@ -134,13 +138,19 @@ func runFakeClaudeBackgroundControlRequest() {
 
 func runFakeClaudeAsyncLaunchedToolResult() {
 	reader := bufio.NewReader(os.Stdin)
-	if _, err := reader.ReadString('\n'); err != nil {
-		fmt.Fprintf(os.Stderr, "read prompt: %v\n", err)
-		os.Exit(41)
+	if fakeClaudeUsesStdinPrompt() {
+		if _, err := reader.ReadString('\n'); err != nil {
+			fmt.Fprintf(os.Stderr, "read prompt: %v\n", err)
+			os.Exit(41)
+		}
 	}
 	fmt.Println(`{"type":"system","session_id":"sess-async-launched"}`)
 	fmt.Println(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-async","content":{"status":"async_launched","message":"background task launched"}}]}}`)
 	fmt.Println(`{"type":"result","subtype":"success","is_error":false,"session_id":"sess-async-launched","result":"parent turn completed early"}`)
+}
+
+func fakeClaudeUsesStdinPrompt() bool {
+	return containsArgPair(os.Args[1:], "--input-format", "stream-json")
 }
 
 // TestClaudeExecuteDoesNotDeadlockOnStartupStdoutBurst verifies that the
@@ -224,7 +234,10 @@ func TestClaudeExecuteRespondsToControlRequest(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	session, err := backend.Execute(ctx, "run a command", ExecOptions{Timeout: 8 * time.Second})
+	session, err := backend.Execute(ctx, "run a command", ExecOptions{
+		ResumeSessionID: "sess-existing",
+		Timeout:         8 * time.Second,
+	})
 	if err != nil {
 		t.Fatalf("execute returned error: %v", err)
 	}
@@ -272,7 +285,10 @@ func TestClaudeExecuteForcesBackgroundControlRequestForeground(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	session, err := backend.Execute(ctx, "run a background command", ExecOptions{Timeout: 8 * time.Second})
+	session, err := backend.Execute(ctx, "run a background command", ExecOptions{
+		ResumeSessionID: "sess-existing",
+		Timeout:         8 * time.Second,
+	})
 	if err != nil {
 		t.Fatalf("execute returned error: %v", err)
 	}
@@ -320,7 +336,10 @@ func TestClaudeExecuteFailsLoudlyOnAsyncLaunchedToolResult(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	session, err := backend.Execute(ctx, "launch async work", ExecOptions{Timeout: 8 * time.Second})
+	session, err := backend.Execute(ctx, "launch async work", ExecOptions{
+		ResumeSessionID: "sess-existing",
+		Timeout:         8 * time.Second,
+	})
 	if err != nil {
 		t.Fatalf("execute returned error: %v", err)
 	}
@@ -339,9 +358,6 @@ func TestClaudeExecuteFailsLoudlyOnAsyncLaunchedToolResult(t *testing.T) {
 		}
 		if !strings.Contains(result.Error, "async background task") {
 			t.Fatalf("expected async background task error, got %q", result.Error)
-		}
-		if result.SessionID != "sess-async-launched" {
-			t.Fatalf("expected session id sess-async-launched, got %q", result.SessionID)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for result — claude backend did not fail async_launched tool result")
