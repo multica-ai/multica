@@ -287,6 +287,8 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 				continue
 			}
 			d.handleWSHeartbeatAck(context.Background(), &ack)
+		case "notification:deliver":
+			go d.handleNotificationDeliver(msg.Payload)
 		}
 	}
 }

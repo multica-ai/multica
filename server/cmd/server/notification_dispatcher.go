@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/daemonws"
 	notifyutil "github.com/multica-ai/multica/server/internal/notify"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -68,7 +69,7 @@ type customWebhookDeliveryPayload struct {
 	NotificationEvent json.RawMessage `json:"notification_event"`
 }
 
-func runNotificationDeliveryDispatcher(ctx context.Context, queries *db.Queries, emailSvc *service.EmailService) {
+func runNotificationDeliveryDispatcher(ctx context.Context, queries *db.Queries, emailSvc *service.EmailService, daemonHub *daemonws.Hub) {
 	ticker := time.NewTicker(notificationDispatchInterval)
 	defer ticker.Stop()
 
@@ -77,12 +78,12 @@ func runNotificationDeliveryDispatcher(ctx context.Context, queries *db.Queries,
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			dispatchPendingNotificationDeliveries(ctx, queries, emailSvc)
+			dispatchPendingNotificationDeliveries(ctx, queries, emailSvc, daemonHub)
 		}
 	}
 }
 
-func dispatchPendingNotificationDeliveries(ctx context.Context, queries *db.Queries, emailSvc *service.EmailService) {
+func dispatchPendingNotificationDeliveries(ctx context.Context, queries *db.Queries, emailSvc *service.EmailService, daemonHub *daemonws.Hub) {
 	cfg, err := notifyutil.LoadDingTalkConfig()
 	dingtalkReady := err == nil
 	if err != nil && !errors.Is(err, notifyutil.ErrDingTalkNotConfigured) {
@@ -121,6 +122,9 @@ func dispatchPendingNotificationDeliveries(ctx context.Context, queries *db.Quer
 		case "custom_webhook":
 			dispatched++
 			processCustomWebhookDelivery(ctx, queries, delivery)
+		case "openclaw_weixin":
+			dispatched++
+			processOpenclawWeixinDelivery(ctx, queries, daemonHub, delivery)
 		}
 	}
 }
@@ -805,4 +809,163 @@ func pgTextToString(value pgtype.Text) string {
 		return ""
 	}
 	return value.String
+}
+
+// --- OpenClaw WeChat notification delivery ---
+
+const openclawWeixinDeliveryMaxAttempts = 3
+
+type openclawWeixinDeliveryPayload struct {
+	BindingID         string          `json:"binding_id"`
+	Provider          string          `json:"provider"`
+	WechatID          string          `json:"wechat_id"`
+	Channel           string          `json:"channel"`
+	NotificationEvent json.RawMessage `json:"notification_event"`
+}
+
+// openclawWeixinDaemonPayload is the WS frame payload sent to the daemon.
+type openclawWeixinDaemonPayload struct {
+	Type     string `json:"type"`
+	WechatID string `json:"wechat_id"`
+	Channel  string `json:"channel"`
+	Content  string `json:"content"`
+	Title    string `json:"title"`
+	Link     string `json:"link"`
+}
+
+func processOpenclawWeixinDelivery(ctx context.Context, queries *db.Queries, daemonHub *daemonws.Hub, delivery db.NotificationDelivery) {
+	claimed, err := queries.ClaimNotificationDelivery(ctx, db.ClaimNotificationDeliveryParams{
+		ID:       delivery.ID,
+		Status:   "pending",
+		Status_2: "pending",
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return
+		}
+		slog.Warn("notification dispatcher: failed to claim openclaw_weixin delivery",
+			"delivery_id", util.UUIDToString(delivery.ID),
+			"error", err,
+		)
+		return
+	}
+
+	var payload openclawWeixinDeliveryPayload
+	if err := json.Unmarshal(claimed.PayloadSnapshot, &payload); err != nil {
+		finalizeFailedOpenclawWeixinDelivery(ctx, queries, claimed, errors.New("invalid openclaw_weixin delivery payload"))
+		return
+	}
+
+	wechatID := strings.TrimSpace(payload.WechatID)
+	if wechatID == "" {
+		finalizeFailedOpenclawWeixinDelivery(ctx, queries, claimed, errors.New("missing wechat_id in openclaw_weixin delivery"))
+		return
+	}
+
+	channel := strings.TrimSpace(payload.Channel)
+	if channel == "" {
+		channel = "openclaw-weixin"
+	}
+
+	// Parse notification event to get body/title/link
+	var eventPayload notificationEventPayload
+	if len(payload.NotificationEvent) > 0 {
+		if err := json.Unmarshal(payload.NotificationEvent, &eventPayload); err != nil {
+			finalizeFailedOpenclawWeixinDelivery(ctx, queries, claimed, errors.New("invalid nested notification payload"))
+			return
+		}
+	}
+	eventPayload = hydrateNotificationActorName(ctx, queries, claimed, eventPayload)
+
+	title := strings.TrimSpace(eventPayload.Title)
+	body := strings.TrimSpace(eventPayload.Body)
+	link := strings.TrimSpace(eventPayload.Link)
+
+	// Build content: combine title and body for the WeChat message
+	content := ""
+	if title != "" && body != "" {
+		content = fmt.Sprintf("[%s] %s\n\n%s", eventPayload.Type, title, body)
+	} else if title != "" {
+		content = fmt.Sprintf("[%s] %s", eventPayload.Type, title)
+	} else if body != "" {
+		content = body
+	} else {
+		content = fmt.Sprintf("[%s] Notification from Multica", eventPayload.Type)
+	}
+	if link != "" {
+		content += "\n\n" + link
+	}
+
+	// Find the recipient user and send via daemon WS
+	event, err := queries.GetNotificationEvent(ctx, claimed.NotificationEventID)
+	if err != nil {
+		finalizeFailedOpenclawWeixinDelivery(ctx, queries, claimed, errors.New("failed to load notification event"))
+		return
+	}
+
+	recipientID := util.UUIDToString(event.RecipientUserID)
+
+	// Build the WS frame to send to the daemon
+	daemonPayload := openclawWeixinDaemonPayload{
+		Type:     "openclaw_weixin",
+		WechatID: wechatID,
+		Channel:  channel,
+		Content:  content,
+		Title:    title,
+		Link:     link,
+	}
+	frame, err := json.Marshal(map[string]any{
+		"type":    "notification:deliver",
+		"payload": daemonPayload,
+	})
+	if err != nil {
+		finalizeFailedOpenclawWeixinDelivery(ctx, queries, claimed, errors.New("failed to marshal daemon frame"))
+		return
+	}
+
+	delivered := daemonHub.SendToUser(recipientID, frame)
+	if !delivered {
+		finalizeFailedOpenclawWeixinDelivery(ctx, queries, claimed, errors.New("no online daemon for user"))
+		return
+	}
+
+	// Mark as sent (fire-and-forget; daemon will execute openclaw message send)
+	if _, err := queries.CompleteNotificationDelivery(ctx, db.CompleteNotificationDeliveryParams{
+		ID:        claimed.ID,
+		Status:    "sent",
+		LastError: pgtype.Text{},
+		SentAt:    pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+	}); err != nil {
+		slog.Warn("notification dispatcher: failed to mark openclaw_weixin delivery sent",
+			"delivery_id", util.UUIDToString(claimed.ID),
+			"error", err,
+		)
+	}
+}
+
+func finalizeFailedOpenclawWeixinDelivery(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery, dispatchErr error) {
+	nextStatus := "pending"
+	if delivery.AttemptCount >= openclawWeixinDeliveryMaxAttempts {
+		nextStatus = "failed"
+	}
+
+	if _, err := queries.CompleteNotificationDelivery(ctx, db.CompleteNotificationDeliveryParams{
+		ID:        delivery.ID,
+		Status:    nextStatus,
+		LastError: util.StrToText(truncateError(dispatchErr)),
+		SentAt:    pgtype.Timestamptz{},
+	}); err != nil {
+		slog.Warn("notification dispatcher: failed to mark openclaw_weixin delivery failure",
+			"delivery_id", util.UUIDToString(delivery.ID),
+			"error", err,
+		)
+		return
+	}
+
+	slog.Warn("notification dispatcher: openclaw_weixin delivery failed",
+		"delivery_id", util.UUIDToString(delivery.ID),
+		"status", nextStatus,
+		"attempt_count", delivery.AttemptCount,
+		"error", dispatchErr,
+	)
 }

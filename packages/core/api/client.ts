@@ -110,6 +110,8 @@ import type {
   StartGoogleBindingRequest,
   StartGoogleBindingResponse,
   CompleteGoogleBindingResponse,
+  BindOpenclawWeixinRequest,
+  BindOpenclawWeixinResponse,
   Autopilot,
   AutopilotTrigger,
   AutopilotRun,
@@ -592,6 +594,15 @@ export class ApiClient {
     return this.fetch("/api/notification-bindings/google/callback", {
       method: "POST",
       body: JSON.stringify({ code, state }),
+    });
+  }
+
+  async bindOpenclawWeixin(
+    payload: BindOpenclawWeixinRequest,
+  ): Promise<BindOpenclawWeixinResponse> {
+    return this.fetch("/api/me/notification-bindings/openclaw-weixin", {
+      method: "PUT",
+      body: JSON.stringify(payload),
     });
   }
 

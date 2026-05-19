@@ -258,6 +258,28 @@ func (h *Hub) RuntimeConnectionCount(runtimeID string) int {
 	return len(h.byRuntime[runtimeID])
 }
 
+// SendToUser sends a raw frame to all daemon connections belonging to the
+// given user. Returns true if at least one connection received the message.
+func (h *Hub) SendToUser(userID string, data []byte) bool {
+	if h == nil || userID == "" {
+		return false
+	}
+	h.mu.RLock()
+	var delivered bool
+	for c := range h.clients {
+		if c.identity.UserID == userID {
+			select {
+			case c.send <- data:
+				delivered = true
+			default:
+				// buffer full, skip
+			}
+		}
+	}
+	h.mu.RUnlock()
+	return delivered
+}
+
 func (h *Hub) register(c *client) {
 	h.mu.Lock()
 	h.clients[c] = true
