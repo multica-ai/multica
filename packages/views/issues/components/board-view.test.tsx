@@ -128,6 +128,7 @@ function issue({
     project_id: "project-1",
     position: 0,
     due_date: null,
+    start_date: null,
     labels: [],
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",

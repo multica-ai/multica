@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -118,27 +120,30 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 
 	qtx := s.Queries.WithTx(tx)
 
-	// Get next issue number.
+	title := s.interpolateTemplate(ap)
+	description := s.buildIssueDescription(ap, *run)
+
 	issueNumber, err := qtx.IncrementIssueCounter(ctx, ap.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("increment issue counter: %w", err)
 	}
 
-	title := s.interpolateTemplate(ap)
-	description := s.buildIssueDescription(ap)
-
 	issue, err := qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
-		WorkspaceID:   ap.WorkspaceID,
-		Title:         title,
-		Description:   description,
-		Status:        "todo",
-		Priority:      "none",
-		AssigneeType:  pgtype.Text{String: "agent", Valid: true},
-		AssigneeID:    ap.AssigneeID,
-		CreatorType:   ap.CreatedByType,
-		CreatorID:     ap.CreatedByID,
+		WorkspaceID:  ap.WorkspaceID,
+		Title:        title,
+		Description:  description,
+		Status:       "todo",
+		Priority:     "none",
+		AssigneeType: pgtype.Text{String: "agent", Valid: true},
+		AssigneeID:   ap.AssigneeID,
+		// The agent that the autopilot dispatches to is the issue's creator,
+		// not the human who originally configured the autopilot. The latter
+		// is captured separately via origin_type=autopilot + origin_id.
+		CreatorType:   "agent",
+		CreatorID:     ap.AssigneeID,
 		ParentIssueID: pgtype.UUID{},
 		Position:      0,
+		StartDate:     pgtype.Timestamptz{},
 		DueDate:       pgtype.Timestamptz{},
 		Number:        issueNumber,
 		ProjectID:     pgtype.UUID{},
@@ -169,8 +174,8 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventIssueCreated,
 		WorkspaceID: util.UUIDToString(ap.WorkspaceID),
-		ActorType:   ap.CreatedByType,
-		ActorID:     util.UUIDToString(ap.CreatedByID),
+		ActorType:   "agent",
+		ActorID:     util.UUIDToString(ap.AssigneeID),
 		Payload: map[string]any{
 			"issue": issueToMap(issue, prefix),
 		},
@@ -580,22 +585,121 @@ func autopilotRunDurationMS(run db.AutopilotRun) int64 {
 
 // buildIssueDescription appends an autopilot system instruction to the
 // user-provided description, asking the agent to rename the issue after
-// it understands the actual work.
-func (s *AutopilotService) buildIssueDescription(ap db.Autopilot) pgtype.Text {
+// it understands the actual work. For webhook-sourced runs, also appends
+// a payload section so the agent has the event context inline (otherwise
+// the agent only sees the issue body, never the run's trigger_payload).
+func (s *AutopilotService) buildIssueDescription(ap db.Autopilot, run db.AutopilotRun) pgtype.Text {
 	now := time.Now().UTC().Format("2006-01-02 15:04 UTC")
-	note := fmt.Sprintf("\n\n---\n*Autopilot run triggered at %s. After starting work, rename this issue to accurately reflect what you are doing.*", now)
-	base := ap.Description.String
-	return pgtype.Text{String: base + note, Valid: true}
+	var b strings.Builder
+	b.WriteString(ap.Description.String)
+	b.WriteString("\n\n---\n*Autopilot run triggered at ")
+	b.WriteString(now)
+	b.WriteString(". After starting work, rename this issue to accurately reflect what you are doing.*")
+
+	if run.Source == "webhook" && len(run.TriggerPayload) > 0 {
+		event := "webhook.received"
+		var payloadJSON []byte
+		var env struct {
+			Event        string          `json:"event"`
+			EventPayload json.RawMessage `json:"eventPayload"`
+		}
+		if err := json.Unmarshal(run.TriggerPayload, &env); err == nil {
+			if env.Event != "" {
+				event = env.Event
+			}
+			if len(env.EventPayload) > 0 {
+				if pretty, err := prettifyJSON(env.EventPayload); err == nil {
+					payloadJSON = pretty
+				}
+			}
+		}
+		if len(payloadJSON) == 0 {
+			if pretty, err := prettifyJSON(run.TriggerPayload); err == nil {
+				payloadJSON = pretty
+			} else {
+				payloadJSON = run.TriggerPayload
+			}
+		}
+		b.WriteString("\n\nWebhook event: ")
+		b.WriteString(event)
+		b.WriteString("\n\nWebhook payload:\n```json\n")
+		b.Write(payloadJSON)
+		b.WriteString("\n```")
+	}
+
+	return pgtype.Text{String: b.String(), Valid: true}
 }
 
-// interpolateTemplate replaces {{date}} in the issue title template.
+func prettifyJSON(raw []byte) ([]byte, error) {
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, err
+	}
+	return json.MarshalIndent(v, "", "  ")
+}
+
+// issueTitleTemplateTokenRE matches any {{...}} token in an issue-title
+// template. We deliberately permit whitespace inside the braces ({{ date }})
+// so users can format templates either way; the canonical token is still
+// {{date}}.
+var issueTitleTemplateTokenRE = regexp.MustCompile(`\{\{\s*([^{}]*?)\s*\}\}`)
+
+// interpolateTemplate substitutes supported {{name}} placeholders in the
+// issue title template. Whitespace inside the braces ({{ date }}) is
+// tolerated so the render layer accepts every form that
+// ValidateIssueTitleTemplate accepts — otherwise users would save templates
+// that pass validation but still emit a literal token at trigger time.
 func (s *AutopilotService) interpolateTemplate(ap db.Autopilot) string {
 	tmpl := ap.Title
 	if ap.IssueTitleTemplate.Valid && ap.IssueTitleTemplate.String != "" {
 		tmpl = ap.IssueTitleTemplate.String
 	}
 	now := time.Now().UTC().Format("2006-01-02")
-	return strings.ReplaceAll(tmpl, "{{date}}", now)
+	return issueTitleTemplateTokenRE.ReplaceAllStringFunc(tmpl, func(match string) string {
+		name := strings.TrimSpace(match[2 : len(match)-2])
+		switch name {
+		case "date":
+			return now
+		default:
+			return match
+		}
+	})
+}
+
+// SupportedIssueTitleTemplateVariables enumerates the placeholders that
+// interpolateTemplate will substitute. Keep this in sync with the
+// substitution logic above and with the docs in autopilots.mdx /
+// autopilots.zh.mdx.
+var SupportedIssueTitleTemplateVariables = []string{"date"}
+
+// ValidateIssueTitleTemplate rejects templates that contain any {{...}} token
+// other than the supported set. An empty template is valid (the autopilot
+// falls back to its own Title). The error message names the first offending
+// token to keep CLI feedback actionable.
+func ValidateIssueTitleTemplate(tmpl string) error {
+	if tmpl == "" {
+		return nil
+	}
+	for _, m := range issueTitleTemplateTokenRE.FindAllStringSubmatch(tmpl, -1) {
+		name := m[1]
+		if !isSupportedIssueTitleVariable(name) {
+			return fmt.Errorf(
+				"unknown template variable %q; supported: {{%s}}",
+				name,
+				strings.Join(SupportedIssueTitleTemplateVariables, "}}, {{"),
+			)
+		}
+	}
+	return nil
+}
+
+func isSupportedIssueTitleVariable(name string) bool {
+	for _, v := range SupportedIssueTitleTemplateVariables {
+		if name == v {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *AutopilotService) getIssuePrefix(workspaceID pgtype.UUID) string {

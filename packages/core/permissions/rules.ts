@@ -5,6 +5,7 @@ import type {
   MemberRole,
   RuntimeDevice,
   Skill,
+  Squad,
 } from "../types";
 import { ALLOW, deny, type Decision, type PermissionContext } from "./types";
 
@@ -45,19 +46,34 @@ export function isAgentSelectable(
 }
 
 /**
- * Update / archive / restore agent fields. The backend gates archive and
- * restore identically to edit (`server/internal/handler/agent.go:519-535`),
- * so callers can use `canEditAgent` for all three.
+ * Squads route work to their leader agent. A squad is selectable only when
+ * the current user could also select that leader directly.
+ */
+export function isSquadSelectable(
+  squad: Squad,
+  agentsById: Map<string, Agent>,
+  userId: string | null,
+): boolean {
+  if (squad.archived_at) return false;
+  const leader = agentsById.get(squad.leader_id);
+  return !!leader && isAgentSelectable(leader, userId);
+}
+
+/**
+ * Update / archive / restore agent fields. OPE-817: only the agent owner
+ * can edit their agent. Admin/owner roles do NOT bypass this gate.
+ * Legacy agents (owner_id null) fall back to admin for backward compat.
  */
 export function canEditAgent(agent: Agent, ctx: PermissionContext): Decision {
   if (ctx.userId === null) {
     return deny("not_authenticated", "Sign in to edit this agent.");
   }
-  if (isAdminLike(ctx.role)) return ALLOW;
   if (agent.owner_id !== null && agent.owner_id === ctx.userId) return ALLOW;
+  // Legacy agents (owner_id null): allow admin for backward compat.
+  if (agent.owner_id === null && isAdminLike(ctx.role)) return ALLOW;
   return deny(
     "not_resource_owner",
-    "Only the agent owner and workspace admins can edit this agent.",
+    "Only the agent owner can edit this agent.",
   );
 }
 

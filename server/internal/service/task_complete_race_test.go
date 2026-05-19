@@ -102,8 +102,7 @@ func (r *mockRow) Scan(dest ...any) error {
 		&t.SessionID, &t.WorkDir, &t.TriggerCommentID,
 		&t.ChatSessionID, &t.AutopilotRunID, &t.Attempt,
 		&t.MaxAttempts, &t.ParentTaskID, &t.FailureReason,
-		&t.TriggerSource, &t.TriggerActorType, &t.TriggerActorID,
-		&t.TriggerSummary, &t.ForceFreshSession,
+		&t.TriggerSummary, &t.ForceFreshSession, &t.IsLeaderTask,
 	}
 	for i, p := range ptrs {
 		if i >= len(dest) {

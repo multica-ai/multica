@@ -128,6 +128,25 @@ Three allowlist layers combine by priority. **If any layer is set to a non-empty
 
 **Invite flows themselves do not check the signup allowlist** — but the invitee must still be able to **sign in** before accepting the invite. If they already have a Multica account (for example from another workspace), they can accept directly, unaffected by the allowlist; **if they have never signed up**, the first step of sign-in (requesting a verification code) still passes through the allowlist check, and an email rejected by `ALLOW_SIGNUP=false` or by `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS` **cannot finish signup, and therefore cannot accept the invite**.
 
+## Rate limiting (optional Redis)
+
+Public auth endpoints — `/auth/send-code`, `/auth/verify-code`, `/auth/google` — have per-IP fixed-window rate limiting in front of them. The limiter is backed by Redis. When `REDIS_URL` is unset the middleware is a **no-op** (fail-open) and the backend logs `rate limiting disabled: REDIS_URL not configured` at startup.
+
+| Variable | Default | Description |
+|---|---|---|
+| `REDIS_URL` | empty | Redis connection URL (for example `redis://localhost:6379/0`). When unset, rate limiting on auth endpoints is disabled. The same Redis is also used by the realtime hub fan-out, the PAT cache, and the daemon-token cache — they all fall back to in-memory / direct-DB mode when unset |
+| `RATE_LIMIT_AUTH` | `5` | Max requests per IP per minute against `/auth/send-code` and `/auth/google` |
+| `RATE_LIMIT_AUTH_VERIFY` | `20` | Max requests per IP per minute against `/auth/verify-code` |
+| `RATE_LIMIT_TRUSTED_PROXIES` | empty | Comma-separated CIDRs whose `X-Forwarded-For` header the limiter is allowed to trust. Empty (the default) means **never trust XFF** — the limiter only uses the direct connection's `RemoteAddr` |
+
+When a request is over the limit, the server replies with `429 Too Many Requests`, `Retry-After: 60`, and body `{"error":"too many requests"}`.
+
+<Callout type="warning">
+**Behind a reverse proxy you must set `RATE_LIMIT_TRUSTED_PROXIES`.** Otherwise every real user shares the proxy's IP from the backend's point of view, the whole deployment ends up in one bucket, and `/auth/send-code` becomes 5 req/min for the entire site. Typical values: `127.0.0.1/32,::1/128` for a same-host Caddy / Nginx; the CDN's published ranges for Cloudflare / ALB / CloudFront. Only IPs whose `RemoteAddr` falls inside one of these CIDRs may use `X-Forwarded-For` to identify the client.
+</Callout>
+
+This separate `RATE_LIMIT_TRUSTED_PROXIES` is **not** the same as `MULTICA_TRUSTED_PROXIES`, which controls the autopilot-webhook limiter (`/api/webhooks/autopilots/{token}`). Each limiter parses its own list, so a deployment behind a proxy should set both.
+
 ## Daemon tuning parameters
 
 The daemon runs on the user's local machine, and its config is read from local environment variables too. The common ones:

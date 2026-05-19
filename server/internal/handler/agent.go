@@ -709,17 +709,13 @@ func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	wsID := uuidToString(sourceAgent.WorkspaceID)
-	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
+	// OPE-817: any workspace member can duplicate any visible agent for
+	// learning/reference purposes. The copy becomes owned by the current user.
+	_, ok = h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
 	if !ok {
 		return
 	}
 	userID := requestUserID(r)
-	isAgentOwner := uuidToString(sourceAgent.OwnerID) == userID
-	isAdmin := roleAllowed(member.Role, "owner", "admin")
-	if !isAgentOwner && !isAdmin {
-		writeError(w, http.StatusForbidden, "only the agent owner or a workspace admin can duplicate this agent")
-		return
-	}
 
 	var req CopyAgentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
@@ -867,13 +863,18 @@ type UpdateAgentRequest struct {
 }
 
 // canViewAgentEnv checks whether the requesting user is allowed to see the
-// agent's custom environment variables. Only the agent owner or workspace
-// owner/admin may view them; for everyone else the field is redacted.
+// agent's custom environment variables. OPE-817: only the agent owner may
+// view them; admin/owner roles do NOT bypass this gate. Legacy agents
+// (owner_id null) fall back to admin for backward compat.
 func canViewAgentEnv(agent db.Agent, userID string, memberRole string) bool {
-	if roleAllowed(memberRole, "owner", "admin") {
+	if uuidToString(agent.OwnerID) == userID {
 		return true
 	}
-	return uuidToString(agent.OwnerID) == userID
+	// Legacy agents (owner_id null): allow admin for backward compat.
+	if !agent.OwnerID.Valid && roleAllowed(memberRole, "owner", "admin") {
+		return true
+	}
+	return false
 }
 
 // redactEnv masks custom_env values in the response when the caller is not
@@ -899,21 +900,25 @@ func redactMcpConfig(resp *AgentResponse) {
 }
 
 // canManageAgent checks whether the current user can update or archive an agent.
-// Only the agent owner or workspace owner/admin can manage any agent,
-// regardless of whether it is public or private.
+// OPE-817: only the agent owner can manage their own agent. Admin/owner roles
+// do NOT bypass this gate. Legacy agents (owner_id null) fall back to admin
+// management for backward compatibility.
 func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent db.Agent) bool {
 	wsID := uuidToString(agent.WorkspaceID)
 	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
 	if !ok {
 		return false
 	}
-	isAdmin := roleAllowed(member.Role, "owner", "admin")
 	isAgentOwner := uuidToString(agent.OwnerID) == requestUserID(r)
-	if !isAdmin && !isAgentOwner {
-		writeError(w, http.StatusForbidden, "only the agent owner can manage this agent")
-		return false
+	if isAgentOwner {
+		return true
 	}
-	return true
+	// Legacy agents (owner_id null): allow admin for backward compat.
+	if !agent.OwnerID.Valid && roleAllowed(member.Role, "owner", "admin") {
+		return true
+	}
+	writeError(w, http.StatusForbidden, "only the agent owner can manage this agent")
+	return false
 }
 
 func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {

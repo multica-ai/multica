@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Agent, Comment, Member, RuntimeDevice, Skill } from "../types";
+import type { Agent, Comment, Member, RuntimeDevice, Skill, Squad } from "../types";
 import {
   canAssignAgentToIssue,
   canChangeMemberRole,
@@ -13,6 +13,7 @@ import {
   canManageMembers,
   canUpdateWorkspaceSettings,
   isAgentSelectable,
+  isSquadSelectable,
 } from "./rules";
 
 const ALICE = "user-alice";
@@ -58,6 +59,24 @@ function makeSkill(createdBy: string | null): Skill {
     created_by: createdBy,
     created_at: "2026-04-01T00:00:00Z",
     updated_at: "2026-04-01T00:00:00Z",
+  };
+}
+
+function makeSquad(overrides: Partial<Squad> = {}): Squad {
+  return {
+    id: "squad-1",
+    workspace_id: "ws_1",
+    name: "squad",
+    description: "",
+    instructions: "",
+    avatar_url: null,
+    leader_id: "agt_1",
+    creator_id: ALICE,
+    created_at: "2026-04-01T00:00:00Z",
+    updated_at: "2026-04-01T00:00:00Z",
+    archived_at: null,
+    archived_by: null,
+    ...overrides,
   };
 }
 
@@ -110,14 +129,14 @@ describe("canEditAgent", () => {
       true,
     );
   });
-  it("allows workspace owner", () => {
+  it("denies workspace owner who is not agent owner (OPE-817)", () => {
     expect(canEditAgent(agent, { userId: BOB, role: "owner" }).allowed).toBe(
-      true,
+      false,
     );
   });
-  it("allows workspace admin", () => {
+  it("denies workspace admin who is not agent owner (OPE-817)", () => {
     expect(canEditAgent(agent, { userId: BOB, role: "admin" }).allowed).toBe(
-      true,
+      false,
     );
   });
   it("denies non-owner member", () => {
@@ -179,6 +198,54 @@ describe("isAgentSelectable", () => {
   it("null userId cannot select private agents", () => {
     const a = makeAgent({ visibility: "private", owner_id: ALICE });
     expect(isAgentSelectable(a, null)).toBe(false);
+  });
+});
+
+describe("isSquadSelectable", () => {
+  it("allows squads whose leader is selectable", () => {
+    const leader = makeAgent({ id: "agent-workspace", visibility: "workspace", owner_id: BOB });
+    const agents = new Map([[leader.id, leader]]);
+    expect(
+      isSquadSelectable(
+        makeSquad({ leader_id: leader.id }),
+        agents,
+        ALICE,
+      ),
+    ).toBe(true);
+  });
+
+  it("hides squads whose leader is another user's private agent", () => {
+    const leader = makeAgent({ id: "agent-private", visibility: "private", owner_id: BOB });
+    const agents = new Map([[leader.id, leader]]);
+    expect(
+      isSquadSelectable(
+        makeSquad({ leader_id: leader.id }),
+        agents,
+        ALICE,
+      ),
+    ).toBe(false);
+  });
+
+  it("hides squads whose leader is missing or archived", () => {
+    const archivedLeader = makeAgent({
+      id: "agent-archived",
+      visibility: "workspace",
+      archived_at: "2026-04-02T00:00:00Z",
+    });
+    expect(
+      isSquadSelectable(
+        makeSquad({ id: "squad-missing", leader_id: "missing" }),
+        new Map([[archivedLeader.id, archivedLeader]]),
+        ALICE,
+      ),
+    ).toBe(false);
+    expect(
+      isSquadSelectable(
+        makeSquad({ id: "squad-archived-leader", leader_id: archivedLeader.id }),
+        new Map([[archivedLeader.id, archivedLeader]]),
+        ALICE,
+      ),
+    ).toBe(false);
   });
 });
 

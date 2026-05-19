@@ -11,6 +11,7 @@ type issueEventIssue struct {
 	Priority     string
 	AssigneeType *string
 	AssigneeID   *string
+	StartDate    *string
 	DueDate      *string
 }
 
@@ -26,6 +27,7 @@ func issueEventIssueFromPayload(v any) (issueEventIssue, bool) {
 			Priority:     issue.Priority,
 			AssigneeType: issue.AssigneeType,
 			AssigneeID:   issue.AssigneeID,
+			StartDate:    issue.StartDate,
 			DueDate:      issue.DueDate,
 		}, true
 	case map[string]any:
@@ -38,6 +40,7 @@ func issueEventIssueFromPayload(v any) (issueEventIssue, bool) {
 			Priority:     stringFromEventMap(issue, "priority"),
 			AssigneeType: stringPtrFromEventMap(issue, "assignee_type"),
 			AssigneeID:   stringPtrFromEventMap(issue, "assignee_id"),
+			StartDate:    stringPtrFromEventMap(issue, "start_date"),
 			DueDate:      stringPtrFromEventMap(issue, "due_date"),
 		}, true
 	default:

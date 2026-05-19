@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo } from "react";
 import { useStore } from "zustand";
 import { toast } from "sonner";
 import { ChevronRight, ListTodo } from "lucide-react";
-import type { IssueStatus } from "@multica/core/types";
+import type { UpdateIssueRequest } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -20,7 +20,7 @@ import { ListView } from "../../issues/components/list-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { myIssueListOptions, myAllIssuesListOptions, childIssueProgressOptions, type MyIssuesFilter } from "@multica/core/issues/queries";
+import { myIssueAssigneeGroupsOptions, myIssueListOptions, myAllIssuesListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter, type MyIssuesFilter } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-store";
 import { PageHeader } from "../../layout/page-header";
@@ -38,6 +38,8 @@ export function MyIssuesPage() {
   const statusFilters = useStore(myIssuesViewStore, (s) => s.statusFilters);
   const priorityFilters = useStore(myIssuesViewStore, (s) => s.priorityFilters);
   const scope = useStore(myIssuesViewStore, (s) => s.scope);
+  const grouping = useStore(myIssuesViewStore, (s) => s.grouping);
+  const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
 
   // Clear filter state when switching between workspaces (URL-driven).
   useClearFiltersOnWorkspaceChange(myIssuesViewStore, wsId);
@@ -71,16 +73,45 @@ export function MyIssuesPage() {
 
   // For the "my" scope, use the combined query that fetches both assigned and
   // created issues. For all other scopes, use the single-filter query.
-  const { data: myIssuesScoped = [], isLoading: loadingScoped } = useQuery({
-    ...myIssueListOptions(wsId, scope, filter),
-    enabled: scope !== "my",
-  });
-  const { data: myIssuesMy = [], isLoading: loadingMy } = useQuery({
+  const { data: myIssuesMy = [] } = useQuery({
     ...myAllIssuesListOptions(wsId, user?.id ?? ""),
     enabled: scope === "my" && !!user,
   });
-  const myIssues = scope === "my" ? myIssuesMy : myIssuesScoped;
-  const loading = scope === "my" ? loadingMy : loadingScoped;
+  const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
+    () => ({
+      ...filter,
+      statuses: statusFilters.length > 0 ? statusFilters : [...BOARD_STATUSES],
+      priorities: priorityFilters,
+    }),
+    [filter, priorityFilters, statusFilters],
+  );
+  const assigneeGroupsOptions = myIssueAssigneeGroupsOptions(
+    wsId,
+    scope,
+    assigneeGroupFilter,
+  );
+  const statusIssuesQuery = useQuery({
+    ...myIssueListOptions(wsId, scope, filter),
+    enabled: !usesAssigneeBoard,
+  });
+  const assigneeGroupsQuery = useQuery({
+    ...assigneeGroupsOptions,
+    enabled: usesAssigneeBoard,
+  });
+  const myIssues = useMemo(
+    () => {
+      if (usesAssigneeBoard) {
+        return assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [];
+      }
+      // For the "my" scope, use combined (assigned+created) issues; otherwise use status query
+      if (scope === "my" && myIssuesMy.length > 0) return myIssuesMy;
+      return statusIssuesQuery.data ?? [];
+    },
+    [assigneeGroupsQuery.data, statusIssuesQuery.data, usesAssigneeBoard, scope, myIssuesMy],
+  );
+  const loading = usesAssigneeBoard
+    ? assigneeGroupsQuery.isLoading
+    : statusIssuesQuery.isLoading;
 
   // Apply status/priority filters from view store
   const issues = useMemo(
@@ -112,15 +143,17 @@ export function MyIssuesPage() {
 
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
-    (issueId: string, newStatus: IssueStatus, newPosition?: number) => {
-      const updates: Partial<{ status: IssueStatus; position: number }> = {
-        status: newStatus,
-      };
-      if (newPosition !== undefined) updates.position = newPosition;
-
+    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position">) => {
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
-        { onError: () => toast.error(t(($) => $.errors.move_failed)) },
+        {
+          onError: (err) =>
+            toast.error(
+              err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.errors.move_failed),
+            ),
+        },
       );
     },
     [updateIssueMutation, t],
@@ -193,7 +226,10 @@ export function MyIssuesPage() {
           <div className="flex flex-col flex-1 min-h-0">
             {viewMode === "board" ? (
               <BoardView
-                issues={issues}
+                issues={usesAssigneeBoard ? myIssues : issues}
+                assigneeGroups={usesAssigneeBoard ? assigneeGroupsQuery.data?.groups : undefined}
+                assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
+                assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
                 visibleStatuses={visibleStatuses}
                 hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}

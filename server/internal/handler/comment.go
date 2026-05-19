@@ -388,7 +388,6 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		if _, err := h.TaskService.EnqueueTaskForIssueWithContext(
 			r.Context(),
 			issue,
-			buildTriggerActor("comment", "member", uuidToString(comment.AuthorID)),
 			taskContext,
 			comment.ID,
 		); err != nil {
@@ -639,7 +638,7 @@ func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util
 // even on done/cancelled issues (the agent can reopen the issue if needed).
 func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string, taskContext []byte) {
 	mentions := util.ParseMentions(comment.Content)
-	enqueueAgent := func(agentUUID pgtype.UUID, triggerSource string) {
+	enqueueAgent := func(agentUUID pgtype.UUID) {
 		agentID := uuidToString(agentUUID)
 		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
 			ID:          agentUUID,
@@ -665,7 +664,6 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 			ctx,
 			issue,
 			agentUUID,
-			buildTriggerActor(triggerSource, authorType, uuidToString(comment.AuthorID)),
 			comment.ID,
 			taskContext,
 		); err != nil {
@@ -674,7 +672,7 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 	}
 
 	if shouldTargetParentAgentReply(parentComment, mentions, authorType) {
-		enqueueAgent(parentComment.AuthorID, "comment")
+		enqueueAgent(parentComment.AuthorID)
 	}
 	if shouldInheritParentMentions(parentComment, mentions, authorType) {
 		mentions = util.ParseMentions(parentComment.Content)
@@ -708,7 +706,8 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 				continue
 			}
 			// Private-agent gate: prevent triggering a private leader via squad mention.
-			if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, uuidToString(issue.WorkspaceID)) {
+			// OPE-817: use trigger gate (owner-only) instead of access gate (now open to all).
+			if !h.canTriggerPrivateAgent(ctx, agent, authorType, authorID) {
 				continue
 			}
 			// Dedup: skip if leader already has a pending task for this issue.
@@ -732,7 +731,7 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 			continue
 		}
 		agentUUID := parseUUID(m.ID)
-		enqueueAgent(agentUUID, "mention")
+		enqueueAgent(agentUUID)
 	}
 }
 

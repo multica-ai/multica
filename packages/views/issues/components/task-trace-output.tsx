@@ -384,7 +384,7 @@ function DisplayTraceLine({ line, event: parsedEvent, pairedEvent, group, groupK
   if (!event) {
     return (
       <WorkLogBlock title="Event" muted>
-        <pre className="whitespace-pre-wrap break-words font-mono text-muted-foreground">{lineText(line)}</pre>
+        <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-muted-foreground">{lineText(line)}</pre>
       </WorkLogBlock>
     );
   }
@@ -421,7 +421,7 @@ function DisplayTraceLine({ line, event: parsedEvent, pairedEvent, group, groupK
     case "command_output":
       return (
         <WorkLogBlock title="Command output" tone="result" icon={<Terminal className="h-3.5 w-3.5" />}>
-          <pre className="whitespace-pre-wrap break-all font-mono text-[12px] text-foreground">{content || "(no output)"}</pre>
+          <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap break-all font-mono text-[12px] text-foreground">{content || "(no output)"}</pre>
         </WorkLogBlock>
       );
     case "tool_call": {
@@ -473,12 +473,31 @@ function DisplayTraceLine({ line, event: parsedEvent, pairedEvent, group, groupK
         </WorkLogBlock>
       );
     }
-    case "file_change":
+    case "file_change": {
+      const changes = extractFileChanges(event.metadata);
+      if (changes.length === 0) {
+        return (
+          <WorkLogBlock title="File change" tone="file" icon={<Code2 className="h-3.5 w-3.5" />}>
+            <div className="break-all font-mono text-[12px] text-amber-800 dark:text-amber-300">{content || title}</div>
+          </WorkLogBlock>
+        );
+      }
+      // Only render diff on "started" (which carries the data); skip "completed" to avoid duplicate.
+      if (content === "completed") return null;
       return (
-        <WorkLogBlock title="File change" tone="file" icon={<Code2 className="h-3.5 w-3.5" />}>
-          <div className="break-all font-mono text-[12px] text-amber-800 dark:text-amber-300">{content || title}</div>
-        </WorkLogBlock>
+        <>
+          {changes.map((ch, i) => {
+            const rows = parseUnifiedDiffRows(ch.diff);
+            return (
+              <WorkLogBlock key={i} title="Edit file" tone="file" icon={<Code2 className="h-3.5 w-3.5" />}>
+                <div className="break-all font-mono text-[12.5px] font-semibold text-amber-950 dark:text-amber-100">{ch.path}</div>
+                {rows.length > 0 && <UnifiedDiffPreview rows={rows} />}
+              </WorkLogBlock>
+            );
+          })}
+        </>
       );
+    }
     case "approval_prompt":
       if (event.metadata?.interaction_type === "plan_approval") {
         return (
@@ -513,7 +532,7 @@ function DisplayTraceLine({ line, event: parsedEvent, pairedEvent, group, groupK
       return (
         <WorkLogBlock title={title} muted>
           <div className="font-medium text-foreground">{title}</div>
-          {content && <pre className="mt-1 whitespace-pre-wrap break-all font-mono text-[12px] text-muted-foreground">{content}</pre>}
+          {content && <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-all font-mono text-[12px] text-muted-foreground">{content}</pre>}
         </WorkLogBlock>
       );
   }
@@ -768,6 +787,79 @@ function diffStats(rows: DiffRow[]): { added: number; removed: number } {
     if (row.kind === "remove") stats.removed += 1;
     return stats;
   }, { added: 0, removed: 0 });
+}
+
+// --- Codex unified diff helpers ---
+
+interface FileChangeEntry {
+  path: string;
+  diff: string;
+}
+
+function extractFileChanges(metadata: Record<string, unknown> | undefined): FileChangeEntry[] {
+  if (!metadata) return [];
+  const changes = metadata.changes;
+  if (!Array.isArray(changes)) return [];
+  return changes
+    .filter((c): c is Record<string, unknown> => c != null && typeof c === "object")
+    .map((c) => ({
+      path: typeof c.path === "string" ? c.path : "",
+      diff: typeof c.diff === "string" ? c.diff : "",
+    }))
+    .filter((c) => c.path || c.diff);
+}
+
+/** Parse a unified diff string into DiffRow[] for rendering. */
+function parseUnifiedDiffRows(diff: string): DiffRow[] {
+  if (!diff) return [];
+  const rows: DiffRow[] = [];
+  let oldLine = 1;
+  let newLine = 1;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("@@")) {
+      // Parse hunk header: @@ -a,b +c,d @@
+      const match = /@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+      if (match) {
+        oldLine = parseInt(match[1]!, 10);
+        newLine = parseInt(match[2]!, 10);
+      }
+      continue;
+    }
+    if (line.startsWith("+")) {
+      rows.push({ kind: "add", text: line.slice(1), newLine: newLine++ });
+    } else if (line.startsWith("-")) {
+      rows.push({ kind: "remove", text: line.slice(1), oldLine: oldLine++ });
+    } else {
+      // context line (starts with space or is plain text)
+      const text = line.startsWith(" ") ? line.slice(1) : line;
+      if (text || rows.length > 0) {
+        rows.push({ kind: "context", text, oldLine: oldLine++, newLine: newLine++ });
+      }
+    }
+  }
+  return rows;
+}
+
+function UnifiedDiffPreview({ rows: allRows }: { rows: DiffRow[] }) {
+  const { rows, truncated } = trimDiffRows(allRows);
+  const stats = diffStats(allRows);
+  return (
+    <div className="mt-2 max-w-full overflow-hidden rounded-lg border border-zinc-300 bg-zinc-50 shadow-sm dark:border-zinc-700 dark:bg-zinc-950/70">
+      <div className="flex items-center gap-2 border-b border-zinc-300 bg-zinc-100 px-2.5 py-1.5 text-xs text-zinc-950 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100">
+        <span className="shrink-0 rounded bg-zinc-200 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">diff</span>
+        <span className="ml-auto shrink-0 font-mono text-[11px] text-emerald-700 dark:text-emerald-300">+{stats.added}</span>
+        <span className="shrink-0 font-mono text-[11px] text-red-700 dark:text-red-300">-{stats.removed}</span>
+      </div>
+      <div className="max-h-96 overflow-y-auto overflow-x-hidden font-mono text-[12.5px] leading-[1.65]">
+        {renderDiffRows(rows)}
+        {truncated && (
+          <div className="border-t border-dashed border-border px-3 py-1.5 text-center text-[11px] text-muted-foreground">
+            … {allRows.length - rows.length} more lines
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function DiffPreview({ hunks }: { hunks: DiffHunk[] }) {
@@ -1027,12 +1119,6 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
     };
   }, [healthPort, streamNonce, task.id]);
 
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [lines.length, showRaw]);
-
   const visibleLines = useMemo(() => {
     if (showRaw) return lines;
     return lines.filter((line) => (
@@ -1043,6 +1129,22 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
   }, [lines, showRaw]);
 
   const workItems = useMemo(() => buildWorkItems(visibleLines, showRaw), [visibleLines, showRaw]);
+
+  useEffect(() => {
+    const scrollToBottom = () => {
+      const el = scrollRef.current;
+      if (el) {
+        el.scrollTop = el.scrollHeight;
+      }
+    };
+    // Scroll immediately for the common case
+    scrollToBottom();
+    // Also schedule after a frame to handle cases where layout hasn't
+    // settled yet (e.g. CollapsibleContent animation, initial mount)
+    const raf = requestAnimationFrame(scrollToBottom);
+    return () => cancelAnimationFrame(raf);
+  }, [workItems.length, showRaw, open]);
+
   const planPhase = useMemo(() => latestPlanPhase(lines), [lines]);
   const planBadge = planPhase
     ? planPhase === "executing" || planPhase === "rejected" || planPhase === "expired" || planPhase === "cancelled"
@@ -1099,12 +1201,12 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
         </div>
         {error && <div className="mt-1 text-[11px] text-muted-foreground">{error}</div>}
       </div>
-      <CollapsibleContent className={cn(fill && "min-h-0 flex-1 overflow-hidden")}>
+      <CollapsibleContent className={cn(fill && "min-h-0 flex-1 flex flex-col overflow-hidden")}>
         <div
           ref={scrollRef}
           className={cn(
             "max-w-full overflow-y-auto overflow-x-hidden border-t border-info/10 bg-background/60 px-3 py-2",
-            fill ? "h-full" : compact ? "max-h-[55vh]" : "max-h-72",
+            fill ? "flex-1 min-h-0" : compact ? "max-h-[55vh]" : "max-h-72",
           )}
         >
           {loading && lines.length === 0 ? (

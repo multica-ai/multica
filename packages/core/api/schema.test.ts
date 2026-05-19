@@ -91,6 +91,15 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("listGroupedIssues", () => {
+    it("falls back to empty groups when the response is malformed", async () => {
+      stubFetchJson({ groups: "not-an-array" });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listGroupedIssues({ group_by: "assignee" });
+      expect(res).toEqual({ groups: [] });
+    });
+  });
+
   describe("listComments", () => {
     it("returns [] when the response is not an array", async () => {
       stubFetchJson({ wrong: "shape" });
@@ -186,6 +195,68 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const detail = await client.getAgentTemplate("code-reviewer");
       expect(detail.instructions).toBe("");
+    });
+  });
+
+  describe("listAutopilotDeliveries", () => {
+    it("falls back to an empty list when the body is null", async () => {
+      stubFetchJson(null);
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listAutopilotDeliveries("ap-1");
+      expect(res).toEqual({ deliveries: [], total: 0 });
+    });
+
+    it("falls back to an empty list when `deliveries` is not an array", async () => {
+      stubFetchJson({ deliveries: "not-an-array", total: 0 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listAutopilotDeliveries("ap-1");
+      expect(res).toEqual({ deliveries: [], total: 0 });
+    });
+
+    it("accepts an unknown future status value rather than dropping the row", async () => {
+      // Server-side enum drift (e.g. new `quarantined` state). The list
+      // must still surface the row; downstream UI code's `default` arm
+      // handles unknown values with a generic visual.
+      stubFetchJson({
+        deliveries: [
+          {
+            id: "d-1",
+            workspace_id: "ws-1",
+            autopilot_id: "ap-1",
+            trigger_id: "t-1",
+            provider: "github",
+            event: "pull_request.opened",
+            dedupe_key: "abc",
+            dedupe_source: "x-github-delivery",
+            signature_status: "valid",
+            status: "quarantined",
+            attempt_count: 1,
+            content_type: "application/json",
+            response_status: 200,
+            autopilot_run_id: null,
+            replayed_from_delivery_id: null,
+            error: null,
+            received_at: "2026-01-01T00:00:00Z",
+            last_attempt_at: "2026-01-01T00:00:00Z",
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listAutopilotDeliveries("ap-1");
+      expect(res.deliveries).toHaveLength(1);
+      expect(res.deliveries[0]?.status).toBe("quarantined");
+    });
+  });
+
+  describe("getAutopilotDelivery", () => {
+    it("falls back to a placeholder carrying the requested id", async () => {
+      stubFetchJson({ wrong: "shape" });
+      const client = new ApiClient("https://api.example.test");
+      const detail = await client.getAutopilotDelivery("ap-1", "d-1");
+      expect(detail.id).toBe("d-1");
+      expect(detail.autopilot_id).toBe("ap-1");
     });
   });
 
