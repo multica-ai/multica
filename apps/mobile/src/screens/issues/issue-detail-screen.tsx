@@ -1273,6 +1273,10 @@ function AssigneePickerSheet({
 }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
+  const keyboardHeight = useKeyboardHeight(open);
+  const { height: windowHeight } = useWindowDimensions();
+  const sheetMaxHeight = Math.max(0, windowHeight - keyboardHeight - spacing.xl);
+  const sheetBottomPadding = keyboardHeight > 0 ? spacing.md : Math.max(bottomInset, spacing.md);
 
   useEffect(() => {
     if (!open) setQuery("");
@@ -1325,7 +1329,11 @@ function AssigneePickerSheet({
         <Pressable style={styles.sheetBackdrop} onPress={onClose} />
         <View style={[
           styles.sheet,
-          { paddingBottom: Math.max(bottomInset, spacing.md) },
+          {
+            marginBottom: keyboardHeight,
+            maxHeight: sheetMaxHeight,
+            paddingBottom: sheetBottomPadding,
+          },
         ]}>
           <View style={styles.sheetHandle} />
           <View style={styles.sheetHeader}>
