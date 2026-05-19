@@ -96,6 +96,18 @@ RETURNING agent_id, tool_name, enabled, updated_by, updated_at;
 DELETE FROM cerebro_agent_runtime_tool_override
 WHERE agent_id = $1 AND tool_name = $2;
 
+-- name: HasCerebroRuntimeToolsForAgent :one
+-- Returns true iff the agent's runtime has at least one cerebro_runtime_tool
+-- row. Used by the executor to distinguish "new grant system is configured"
+-- (apply cascade with default-deny) from "not yet configured" (legacy
+-- agent_tool_grant fallback). Bid 6 migration backfills the new tables for
+-- every runtime, after which this will always return true.
+SELECT EXISTS (
+    SELECT 1 FROM cerebro_runtime_tool rt
+    JOIN agent a ON a.runtime_id = rt.runtime_id
+    WHERE a.id = $1
+)::boolean AS has_rows;
+
 -- name: ResolveCerebroAgentToolAccess :many
 -- Returns the set of (tool_name) callable by the given agent on its runtime
 -- for the given acting user. Implements the default-deny rule from

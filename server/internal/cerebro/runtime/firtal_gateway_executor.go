@@ -293,7 +293,7 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	}
 	var completion GatewayCompletion
 	if cfg.ToolsEnabledForAgent(task.AgentID) {
-		completion, err = e.runToolLoop(runCtx, cfg, agent, messages, meta, task.AgentID, plan.workspaceID)
+		completion, err = e.runToolLoop(runCtx, cfg, agent, messages, meta, task.AgentID, plan.workspaceID, task.OriginalUserID)
 	} else {
 		completion, err = e.completeGateway(runCtx, cfg, agent.Model.String, messages, meta)
 	}
@@ -424,7 +424,7 @@ func (e *FirtalGatewayExecutor) completeGatewayWithTools(ctx context.Context, cf
 // registry or the MCP server, results are appended, and the next round runs.
 // The first round without tool calls becomes the final output. Budget is
 // checked before each tool dispatch. Usage is summed across all rounds.
-func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, agentID, workspaceID pgtype.UUID) (GatewayCompletion, error) {
+func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, agentID, workspaceID, originalUserID pgtype.UUID) (GatewayCompletion, error) {
 	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID}
 
 	// Determine tools: registry-backed when available, else fall back to the
@@ -439,12 +439,13 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 	if e.registry != nil {
 		taskRegistry := NewDefaultRegistry(nil, e.queries, tctx, e.cerebro) // CEREBRO-PATCH(firtal-gateway-cerebro-tools): wire concrete Cerebro-family handlers into per-task registries.
 		taskRegistry.db = e.registry.db
-		// CEREBRO-PATCH(firtal-gateway-runtime-tools-cascade): JEH-1710 — the
-		// new cerebro_runtime_tool grant model needs the invoking user to apply
-		// group/user access rules. Tool resolution still falls back to the
-		// legacy agent_tool_grant path; the user-aware cascade lands in the
-		// follow-up that wires task.IssuerUserID through to the executor.
-		enabledTools = taskRegistry.GetEnabledToolsForAgent(ctx, agentID)
+		// JEH-1710 bid 5: enforce the cerebro_runtime_tool cascade (runtime
+		// enable + user/group grants + agent override) when the new grant
+		// system is configured for this runtime; otherwise fall back to the
+		// legacy agent_tool_grant path. originalUserID carries the user who
+		// triggered the task (chat message, comment, or autopilot manual run)
+		// so the cascade can apply user/group access rules.
+		enabledTools = taskRegistry.GetCascadeEnabledToolsForAgent(ctx, e.cerebro, agentID, originalUserID)
 		if len(enabledTools) > 0 {
 			// Also register the MCP-backed tools (get_issue, list_comments,
 			// add_comment) that the Registry wraps via its Call method.
