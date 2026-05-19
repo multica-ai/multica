@@ -159,6 +159,9 @@ export type {
   CreateWikiPageRequest,
   UpdateWikiPageRequest,
   ReorderWikiPagesRequest,
+  WikiPageActivity,
+  WikiPageActivityAction,
+  ListWikiPageActivitiesResponse,
 } from "./wiki";
 export type {
   Squad,

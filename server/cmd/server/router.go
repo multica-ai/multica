@@ -497,6 +497,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetWikiPage)
 					r.Patch("/", h.UpdateWikiPage)
 					r.Delete("/", h.DeleteWikiPage)
+					r.Get("/activity", h.ListWikiPageActivities)
 				})
 			})
 
