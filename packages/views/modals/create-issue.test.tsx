@@ -185,14 +185,35 @@ vi.mock("@multica/core/api", async () => {
 vi.mock("../editor", () => {
   const ContentEditor = forwardRef(({ defaultValue, onUpdate, onUploadFile, placeholder, attachments }: any, ref: any) => {
     const valueRef = useRef(defaultValue || "");
+    const uploadingRef = useRef(0);
     const [value, setValue] = useState(defaultValue || "");
+    const appendAttachment = (result: any) => {
+      const next = [
+        valueRef.current,
+        `!file[${result.filename}](${result.markdown_url ?? result.url})`,
+      ].filter(Boolean).join("\n");
+      valueRef.current = next;
+      setValue(next);
+      onUpdate?.(next);
+    };
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
       clearContent: () => {
         valueRef.current = "";
         setValue("");
       },
-      uploadFile: (file: File) => onUploadFile?.(file),
+      uploadFile: (file: File) => {
+        if (!onUploadFile) return;
+        uploadingRef.current += 1;
+        void onUploadFile(file)
+          .then((result: any) => {
+            if (result) appendAttachment(result);
+          })
+          .finally(() => {
+            uploadingRef.current = Math.max(0, uploadingRef.current - 1);
+          });
+      },
+      hasActiveUploads: () => uploadingRef.current > 0,
     }));
     return (
       <>
@@ -542,6 +563,44 @@ describe("CreateIssueModal", () => {
     expect(draftAttachmentsCall?.attachments?.[0]?.download_url).not.toContain(
       "Signature=",
     );
+  });
+
+  it("does not submit while a manual-mode upload is still active", async () => {
+    const user = userEvent.setup();
+    let resolveUpload: (value: unknown) => void = () => {};
+    mockUploadWithToast.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveUpload = resolve;
+      }),
+    );
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Attach logs");
+    await user.click(screen.getByRole("button", { name: "Upload file" }));
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    expect(mockCreateIssue).not.toHaveBeenCalled();
+
+    resolveUpload({
+      id: "att-1",
+      workspace_id: "ws-test",
+      issue_id: null,
+      comment_id: null,
+      chat_session_id: null,
+      chat_message_id: null,
+      uploader_type: "member",
+      uploader_id: "user-1",
+      filename: "test.txt",
+      url: "https://cdn.example.test/test.txt",
+      download_url: "https://cdn.example.test/test.txt",
+      markdown_url: "https://cdn.example.test/test.txt",
+      content_type: "text/plain",
+      size_bytes: 4,
+      created_at: "2026-05-19T00:00:00Z",
+      link: "https://cdn.example.test/test.txt",
+    });
+    await waitFor(() => expect(mockUploadWithToast).toHaveBeenCalled());
   });
 
   it("reuses draft attachments after reopening manual create so pasted images can render and bind", async () => {

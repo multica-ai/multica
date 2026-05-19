@@ -283,7 +283,7 @@ export function ManualCreatePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { uploadWithToast } = useFileUpload(api);
+  const { uploadWithToast, uploading } = useFileUpload(api);
   const handleUpload = async (file: File) => {
     const result = await uploadWithToast(file);
     if (result) {
@@ -340,7 +340,14 @@ export function ManualCreatePanel({
   };
 
   const handleSubmit = async () => {
-    if (!title.trim() || submitting) return;
+    if (
+      !title.trim() ||
+      submitting ||
+      uploading ||
+      descEditorRef.current?.hasActiveUploads()
+    ) {
+      return;
+    }
     setSubmitting(true);
     try {
       const description = descEditorRef.current?.getMarkdown()?.trim() || undefined;
@@ -865,6 +872,7 @@ export function ManualCreatePanel({
               <div className="flex min-h-7 items-center gap-2">
                 <FileUploadButton
                   multiple
+                  disabled={uploading}
                   onSelect={(file) => descEditorRef.current?.uploadFile(file)}
                 />
               </div>
@@ -894,8 +902,12 @@ export function ManualCreatePanel({
                     </Tooltip>
                   </TooltipProvider>
                 ) : (
-                  <Button size="sm" onClick={handleSubmit} disabled={submitting}>
-                    {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
+                  <Button size="sm" onClick={handleSubmit} disabled={submitting || uploading}>
+                    {submitting
+                      ? t(($) => $.create_issue.submitting)
+                      : uploading
+                        ? t(($) => $.create_issue.agent.uploading)
+                        : t(($) => $.create_issue.submit)}
                   </Button>
                 )}
               </div>

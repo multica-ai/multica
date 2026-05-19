@@ -12,6 +12,7 @@ const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockSetLastMode = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
 const mockUploadWithToast = vi.hoisted(() => vi.fn());
+const mockFileUploading = vi.hoisted(() => ({ value: false }));
 
 const mockQuickCreateStore = {
   lastActorType: null as "agent" | "squad" | null,
@@ -117,7 +118,10 @@ vi.mock("@multica/core/runtimes", () => ({
 }));
 
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
-  useFileUpload: () => ({ uploadWithToast: mockUploadWithToast, uploading: false }),
+  useFileUpload: () => ({
+    uploadWithToast: mockUploadWithToast,
+    uploading: mockFileUploading.value,
+  }),
 }));
 
 vi.mock("../issues/components/pickers/assignee-picker", () => ({
@@ -300,6 +304,7 @@ describe("AgentCreatePanel", () => {
     mockProjectsQuery.data = [];
     mockProjectsQuery.isSuccess = true;
     mockSquadsData.list = [];
+    mockFileUploading.value = false;
     mockQuickCreateIssue.mockResolvedValue(undefined);
     mockUploadWithToast.mockResolvedValue({
       id: "019ec09d-6222-722b-bdfa-427b105d80be",
@@ -396,6 +401,25 @@ describe("AgentCreatePanel", () => {
         attachment_ids: ["019ec09d-6222-722b-bdfa-427b105d80be"],
       });
     });
+  });
+
+  it("does not submit while quick-create uploads are still active", async () => {
+    mockFileUploading.value = true;
+    const user = userEvent.setup();
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    const editor = screen.getByPlaceholderText(
+      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+    );
+    await user.clear(editor);
+    await user.type(editor, "Create issue after upload");
+
+    const submit = screen.getByRole("button", { name: /Uploading/i });
+    expect(submit).toBeDisabled();
+    await user.click(submit);
+
+    expect(mockQuickCreateIssue).not.toHaveBeenCalled();
   });
 
   // Picking a squad routes the submission through `squad_id` (not
