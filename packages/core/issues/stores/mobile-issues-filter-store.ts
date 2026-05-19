@@ -16,12 +16,14 @@ export interface MobileIssuesFilterState {
   creatorFilters: ActorFilterValue[];
   projectFilters: string[];
   includeNoProject: boolean;
+  labelFilters: string[];
   togglePriorityFilter: (priority: IssuePriority) => void;
   toggleAssigneeFilter: (value: ActorFilterValue) => void;
   toggleNoAssignee: () => void;
   toggleCreatorFilter: (value: ActorFilterValue) => void;
   toggleProjectFilter: (projectId: string) => void;
   toggleNoProject: () => void;
+  toggleLabelFilter: (labelId: string) => void;
   clearFilters: () => void;
 }
 
@@ -32,6 +34,7 @@ const emptyFilters = {
   creatorFilters: [],
   projectFilters: [],
   includeNoProject: false,
+  labelFilters: [],
 };
 
 function currentUserId() {
@@ -105,6 +108,12 @@ export const useMobileIssuesFilterStore = create<MobileIssuesFilterState>()(
         })),
       toggleNoProject: () =>
         set((state) => ({ includeNoProject: !state.includeNoProject })),
+      toggleLabelFilter: (labelId) =>
+        set((state) => ({
+          labelFilters: state.labelFilters.includes(labelId)
+            ? state.labelFilters.filter((id) => id !== labelId)
+            : [...state.labelFilters, labelId],
+        })),
       clearFilters: () => set(emptyFilters),
     }),
     {
@@ -117,6 +126,7 @@ export const useMobileIssuesFilterStore = create<MobileIssuesFilterState>()(
         creatorFilters: state.creatorFilters,
         projectFilters: state.projectFilters,
         includeNoProject: state.includeNoProject,
+        labelFilters: state.labelFilters,
       }),
     },
   ),

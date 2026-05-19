@@ -89,6 +89,17 @@ describe("ApiClient schema fallback", () => {
       const res = await client.listIssues();
       expect(res).toEqual({ issues: [], total: 0 });
     });
+
+    it("passes label filters through to the list endpoint", async () => {
+      stubFetchJson({ issues: [], total: 0 });
+      const client = new ApiClient("https://api.example.test");
+      await client.listIssues({ label_ids: ["lab-bug", "lab-feature"] });
+
+      const fetchMock = vi.mocked(fetch);
+      expect(fetchMock).toHaveBeenCalledOnce();
+      const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
+      expect(url.searchParams.get("label_ids")).toBe("lab-bug,lab-feature");
+    });
   });
 
   describe("listGroupedIssues", () => {

@@ -12,6 +12,7 @@ import { PRIORITY_ORDER } from "@multica/core/issues/config/priority";
 import { ISSUE_PAGE_SIZE } from "@multica/core/issues/queries";
 import { useIssueList } from "@multica/core/issues/hooks";
 import { useLoadMoreByStatusForWorkspace } from "@multica/core/issues/mutations";
+import { labelListOptions } from "@multica/core/labels/queries";
 import {
   useMobileIssuesFilterStore,
   useRehydrateMobileIssuesFilters,
@@ -20,7 +21,7 @@ import { filterIssues, type ActorFilterValue } from "@multica/core/issues/utils/
 import { useAuthStore } from "@multica/core/auth";
 import { useMemberList, useAgentList } from "@multica/core/workspace/hooks";
 import { useProjectList } from "@multica/core/projects/hooks";
-import type { Issue, IssuePriority, IssueStatus, ListIssuesParams, ListIssuesResponse } from "@multica/core/types";
+import type { Issue, IssuePriority, IssueStatus, Label, ListIssuesParams, ListIssuesResponse } from "@multica/core/types";
 import type { RootStackParamList } from "../../navigation/root-navigator";
 import { FloatingActionMenu } from "../../components/ui/floating-action-menu";
 import { EmptyState, LoadingState, Screen } from "../../components/ui/primitives";
@@ -81,6 +82,7 @@ export function IssuesScreen() {
   const { data: members = [] } = useMemberList(workspace.id);
   const { data: agents = [] } = useAgentList(workspace.id);
   const { data: projects = [] } = useProjectList(workspace.id);
+  const { data: labels = [] } = useCoreQuery(labelListOptions(workspace.id));
 
   const priorityFilters = useMobileIssuesFilterStore((s) => s.priorityFilters);
   const assigneeFilters = useMobileIssuesFilterStore((s) => s.assigneeFilters);
@@ -88,6 +90,7 @@ export function IssuesScreen() {
   const creatorFilters = useMobileIssuesFilterStore((s) => s.creatorFilters);
   const projectFilters = useMobileIssuesFilterStore((s) => s.projectFilters);
   const includeNoProject = useMobileIssuesFilterStore((s) => s.includeNoProject);
+  const labelFilters = useMobileIssuesFilterStore((s) => s.labelFilters);
   const clearFilters = useMobileIssuesFilterStore((s) => s.clearFilters);
 
   const activeFilterCount = getActiveFilterCount({
@@ -97,6 +100,7 @@ export function IssuesScreen() {
     creatorFilters,
     projectFilters,
     includeNoProject,
+    labelFilters,
   });
   const filtersActive = activeFilterCount > 0;
   const filteredListParams = useMemo<ListIssuesParams>(
@@ -109,6 +113,7 @@ export function IssuesScreen() {
       creators: creatorFilters,
       project_ids: projectFilters,
       include_no_project: includeNoProject,
+      label_ids: labelFilters,
     }),
     [
       status,
@@ -118,6 +123,7 @@ export function IssuesScreen() {
       creatorFilters,
       projectFilters,
       includeNoProject,
+      labelFilters,
     ],
   );
   const filteredQueryKey = useMemo(
@@ -179,7 +185,7 @@ export function IssuesScreen() {
         creatorFilters,
         projectFilters,
         includeNoProject,
-        labelFilters: [],
+        labelFilters,
       }),
     [
       issues,
@@ -190,6 +196,7 @@ export function IssuesScreen() {
       creatorFilters,
       projectFilters,
       includeNoProject,
+      labelFilters,
     ],
   );
   const listIssues = filtersActive ? filteredPage?.issues ?? [] : filteredIssues;
@@ -324,6 +331,7 @@ export function IssuesScreen() {
         agents={agents}
         includeNoAssignee={includeNoAssignee}
         includeNoProject={includeNoProject}
+        labels={labels}
         members={members}
         onClose={() => setFilterOpen(false)}
         projects={projects}
@@ -340,12 +348,14 @@ function getActiveFilterCount(state: {
   creatorFilters: ActorFilterValue[];
   projectFilters: string[];
   includeNoProject: boolean;
+  labelFilters: string[];
 }) {
   let count = 0;
   if (state.priorityFilters.length > 0) count++;
   if (state.assigneeFilters.length > 0 || state.includeNoAssignee) count++;
   if (state.creatorFilters.length > 0) count++;
   if (state.projectFilters.length > 0 || state.includeNoProject) count++;
+  if (state.labelFilters.length > 0) count++;
   return count;
 }
 
@@ -413,6 +423,7 @@ function IssueFilterSheet({
   agents,
   includeNoAssignee,
   includeNoProject,
+  labels,
   members,
   onClose,
   projects,
@@ -421,6 +432,7 @@ function IssueFilterSheet({
   agents: Array<{ id: string; name: string; archived_at?: string | null }>;
   includeNoAssignee: boolean;
   includeNoProject: boolean;
+  labels: Label[];
   members: Array<{ user_id: string; name: string }>;
   onClose: () => void;
   projects: Array<{ id: string; title: string }>;
@@ -435,12 +447,14 @@ function IssueFilterSheet({
   const assigneeFilters = useMobileIssuesFilterStore((s) => s.assigneeFilters);
   const creatorFilters = useMobileIssuesFilterStore((s) => s.creatorFilters);
   const projectFilters = useMobileIssuesFilterStore((s) => s.projectFilters);
+  const labelFilters = useMobileIssuesFilterStore((s) => s.labelFilters);
   const togglePriorityFilter = useMobileIssuesFilterStore((s) => s.togglePriorityFilter);
   const toggleAssigneeFilter = useMobileIssuesFilterStore((s) => s.toggleAssigneeFilter);
   const toggleNoAssignee = useMobileIssuesFilterStore((s) => s.toggleNoAssignee);
   const toggleCreatorFilter = useMobileIssuesFilterStore((s) => s.toggleCreatorFilter);
   const toggleProjectFilter = useMobileIssuesFilterStore((s) => s.toggleProjectFilter);
   const toggleNoProject = useMobileIssuesFilterStore((s) => s.toggleNoProject);
+  const toggleLabelFilter = useMobileIssuesFilterStore((s) => s.toggleLabelFilter);
   const clearFilters = useMobileIssuesFilterStore((s) => s.clearFilters);
   const activeAgents = agents.filter((agent) => !agent.archived_at);
   const assigneeSelectedKeys = useMemo(
@@ -454,6 +468,10 @@ function IssueFilterSheet({
   const projectSelectedKeys = useMemo(
     () => new Set(projectFilters),
     [projectFilters],
+  );
+  const labelSelectedKeys = useMemo(
+    () => new Set(labelFilters),
+    [labelFilters],
   );
   const assigneeOptions = useMemo(
     () => [
@@ -475,6 +493,14 @@ function IssueFilterSheet({
   const projectOptions = useMemo(
     () => projects.map((project) => ({ id: project.id, label: project.title })),
     [projects],
+  );
+  const labelOptions = useMemo(
+    () => labels.map((label) => ({
+      id: label.id,
+      label: label.name,
+      swatchColor: label.color,
+    })),
+    [labels],
   );
 
   return (
@@ -549,6 +575,16 @@ function IssueFilterSheet({
               toKey={(value) => value.id}
               onToggle={(value) => toggleProjectFilter(value.id)}
             />
+
+            <FilterDroplistSection
+              emptyLabel={t("issues.any_label")}
+              options={labelOptions}
+              placeholder={t("issues.search_labels")}
+              selectedKeys={labelSelectedKeys}
+              title={t("issues.label")}
+              toKey={(value) => value.id}
+              onToggle={(value) => toggleLabelFilter(value.id)}
+            />
           </ScrollView>
           <View style={[styles.sheetFooter, { paddingBottom: sheetBottomPadding }]}>
             <Pressable accessibilityRole="button" onPress={clearFilters} style={styles.resetButton}>
@@ -570,7 +606,7 @@ function FilterSection({ children, title }: { children: ReactNode; title: string
   );
 }
 
-function FilterDroplistSection<T extends { id: string; label: string; meta?: string }>({
+function FilterDroplistSection<T extends { id: string; label: string; meta?: string; swatchColor?: string }>({
   emptyLabel,
   footer,
   options,
@@ -649,6 +685,7 @@ function FilterDroplistSection<T extends { id: string; label: string; meta?: str
                     meta={option.meta}
                     onPress={() => onToggle(option)}
                     selected={selectedKeys.has(key)}
+                    swatchColor={option.swatchColor}
                   />
                 );
               })
@@ -667,11 +704,13 @@ function FilterOption({
   meta,
   onPress,
   selected,
+  swatchColor,
 }: {
   label: string;
   meta?: string;
   onPress: () => void;
   selected: boolean;
+  swatchColor?: string;
 }) {
   return (
     <Pressable
@@ -680,7 +719,12 @@ function FilterOption({
       style={({ pressed }) => [styles.filterOption, pressed && styles.pressed]}
     >
       <View style={styles.optionTextGroup}>
-        <Text numberOfLines={1} style={styles.filterOptionLabel}>{label}</Text>
+        <View style={styles.filterOptionLabelRow}>
+          {swatchColor ? (
+            <View style={[styles.labelSwatch, { backgroundColor: swatchColor }]} />
+          ) : null}
+          <Text numberOfLines={1} style={styles.filterOptionLabel}>{label}</Text>
+        </View>
         {meta ? <Text style={styles.filterOptionMeta}>{meta}</Text> : null}
       </View>
       <View style={[styles.checkbox, selected && styles.checkboxSelected]}>
@@ -983,13 +1027,27 @@ const styles = StyleSheet.create({
   },
   filterOptionLabel: {
     color: colors.foreground,
+    flex: 1,
     fontSize: 15,
     fontWeight: "500",
+  },
+  filterOptionLabelRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    minWidth: 0,
   },
   filterOptionMeta: {
     color: colors.mutedForeground,
     fontSize: 12,
     marginTop: 2,
+  },
+  labelSwatch: {
+    borderColor: colors.border,
+    borderRadius: 5,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 10,
+    width: 10,
   },
   checkbox: {
     alignItems: "center",

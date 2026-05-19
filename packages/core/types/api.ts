@@ -51,6 +51,7 @@ export interface ListIssuesParams {
   project_id?: string;
   project_ids?: string[];
   include_no_project?: boolean;
+  label_ids?: string[];
   open_only?: boolean;
 }
 
