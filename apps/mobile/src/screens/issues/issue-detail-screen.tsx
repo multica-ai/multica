@@ -181,13 +181,20 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const createComment = useCreateComment(issueId);
   const updateComment = useUpdateComment(issueId);
   const deleteComment = useDeleteComment(issueId);
+  const updateIssue = useUpdateIssue();
   const toggleIssueReaction = useToggleIssueReaction(issueId);
   const toggleCommentReaction = useToggleCommentReaction(issueId);
+  const titleInputRef = useRef<TextInput | null>(null);
   const [comment, setComment] = useState("");
   const [commentAttachments, setCommentAttachments] = useState<DraftCommentAttachment[]>([]);
   const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState("");
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [descriptionSheetOpen, setDescriptionSheetOpen] = useState(false);
+  const [descriptionDraft, setDescriptionDraft] = useState("");
+  const [issueEditError, setIssueEditError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [commentError, setCommentError] = useState<string | null>(null);
@@ -202,6 +209,22 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   useEffect(() => () => {
     previewAbortRef.current?.abort();
   }, []);
+
+  useEffect(() => {
+    setEditingTitle(false);
+    setTitleDraft(issue?.title ?? "");
+    setDescriptionSheetOpen(false);
+    setDescriptionDraft(issue?.description ?? "");
+    setIssueEditError(null);
+  }, [issue?.id]);
+
+  useEffect(() => {
+    if (!editingTitle) return;
+    const timer = setTimeout(() => {
+      titleInputRef.current?.focus();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [editingTitle]);
 
   const comments = useMemo(
     () => timeline
@@ -414,6 +437,64 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     }
   }, [t]);
 
+  const startTitleEdit = useCallback(() => {
+    if (!issue || updateIssue.isPending) return;
+    setIssueEditError(null);
+    setTitleDraft(issue.title);
+    setEditingTitle(true);
+  }, [issue, updateIssue.isPending]);
+
+  const saveTitleEdit = useCallback(async () => {
+    if (!issue || updateIssue.isPending || !editingTitle) return;
+    const title = titleDraft.trim();
+    if (!title) {
+      setTitleDraft(issue.title);
+      setEditingTitle(false);
+      return;
+    }
+    if (title === issue.title) {
+      setEditingTitle(false);
+      return;
+    }
+    setIssueEditError(null);
+    try {
+      await updateIssue.mutateAsync({ id: issue.id, title });
+      setEditingTitle(false);
+    } catch (err) {
+      setIssueEditError(err instanceof Error ? err.message : t("issues.unable_to_save_issue"));
+    }
+  }, [editingTitle, issue, t, titleDraft, updateIssue]);
+
+  const openDescriptionEditor = useCallback(() => {
+    if (!issue || updateIssue.isPending) return;
+    setIssueEditError(null);
+    setDescriptionDraft(issue.description ?? "");
+    setDescriptionSheetOpen(true);
+  }, [issue, updateIssue.isPending]);
+
+  const closeDescriptionEditor = useCallback(() => {
+    setDescriptionSheetOpen(false);
+    setDescriptionDraft("");
+    setIssueEditError(null);
+  }, []);
+
+  const saveDescriptionEdit = useCallback(async () => {
+    if (!issue || updateIssue.isPending) return;
+    const description = descriptionDraft.replace(/\s+$/, "");
+    if (description === (issue.description ?? "")) {
+      setDescriptionSheetOpen(false);
+      return;
+    }
+    setIssueEditError(null);
+    try {
+      await updateIssue.mutateAsync({ id: issue.id, description });
+      setDescriptionSheetOpen(false);
+      setDescriptionDraft("");
+    } catch (err) {
+      setIssueEditError(err instanceof Error ? err.message : t("issues.unable_to_save_issue"));
+    }
+  }, [descriptionDraft, issue, t, updateIssue]);
+
   const stopLiveTask = useCallback(async (taskId: string) => {
     setLiveTaskError(null);
     try {
@@ -540,17 +621,60 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       key: "issue-summary",
       node: (
         <View style={styles.section}>
-          <Text style={styles.issueBodyTitle}>{issue.title}</Text>
-          {issue.description ? (
-            <MarkdownText
-              content={issue.description}
-              onIssueMentionPress={(targetIssueId) => {
-                navigation.push("IssueDetail", { issueId: targetIssueId });
-              }}
+          {editingTitle ? (
+            <TextInput
+              ref={titleInputRef}
+              autoCapitalize="sentences"
+              autoCorrect
+              blurOnSubmit
+              editable={!updateIssue.isPending}
+              onBlur={() => void saveTitleEdit()}
+              onChangeText={setTitleDraft}
+              onSubmitEditing={() => void saveTitleEdit()}
+              placeholder={t("issues.title_placeholder")}
+              placeholderTextColor={colors.mutedForeground}
+              returnKeyType="done"
+              style={styles.issueTitleInput}
+              value={titleDraft}
             />
           ) : (
-            <Text style={styles.emptyText}>{t("issues.no_description")}</Text>
+            <Pressable
+              accessibilityHint={t("issues.edit_title_hint")}
+              accessibilityRole="button"
+              onPress={startTitleEdit}
+              style={({ pressed }) => [
+                styles.editableTitle,
+                pressed && styles.buttonPressed,
+              ]}
+            >
+              <Text style={styles.issueBodyTitle}>{issue.title}</Text>
+            </Pressable>
           )}
+          {issueEditError ? <Text style={styles.errorText}>{issueEditError}</Text> : null}
+          <Pressable
+            accessibilityHint={t("issues.edit_description_hint")}
+            accessibilityRole="button"
+            onPress={openDescriptionEditor}
+            style={({ pressed }) => [
+              styles.editableDescription,
+              pressed && styles.buttonPressed,
+            ]}
+          >
+            <View style={styles.descriptionHeader}>
+              <Text style={styles.descriptionLabel}>{t("issues.description")}</Text>
+              <Text style={styles.editHintText}>{t("issues.tap_to_edit")}</Text>
+            </View>
+            {issue.description ? (
+              <MarkdownText
+                content={issue.description}
+                onIssueMentionPress={(targetIssueId) => {
+                  navigation.push("IssueDetail", { issueId: targetIssueId });
+                }}
+              />
+            ) : (
+              <Text style={styles.emptyText}>{t("issues.no_description")}</Text>
+            )}
+          </Pressable>
           <ReactionRow
             onToggle={handleIssueReaction}
             reactions={issueReactions}
@@ -590,15 +714,22 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   }, [
     attachments,
     handleIssueReaction,
+    editingTitle,
     issue,
+    issueEditError,
     issueReactions,
     navigation,
     openAttachmentPreview,
+    openDescriptionEditor,
     pickDocument,
     pickImage,
+    saveTitleEdit,
+    startTitleEdit,
     t,
+    titleDraft,
     uploadError,
     uploading,
+    updateIssue.isPending,
     userId,
   ]);
 
@@ -801,6 +932,18 @@ export function IssueDetailScreen({ navigation, route }: Props) {
         placeholder={replyTargetId ? t("issues.reply_in_thread") : t("issues.add_comment")}
         submitLabel={replyTargetId ? t("issues.send_reply") : t("issues.send")}
         title={replyTargetId ? t("issues.reply_in_thread") : t("issues.add_comment")}
+      />
+      <DescriptionEditSheet
+        bottomInset={insets.bottom}
+        error={issueEditError}
+        issueMentionTargets={issueMentionTargets}
+        mentionTargets={mentionTargets}
+        onChangeDescription={setDescriptionDraft}
+        onClose={closeDescriptionEditor}
+        onSubmit={() => void saveDescriptionEdit()}
+        open={descriptionSheetOpen}
+        saving={updateIssue.isPending}
+        value={descriptionDraft}
       />
       <AttachmentPreviewModal
         onClose={closeAttachmentPreview}
@@ -1090,6 +1233,85 @@ function CommentSheet({
             </View>
             <Button disabled={!canSubmit} onPress={onSubmit}>
               {submitLabel}
+            </Button>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function DescriptionEditSheet({
+  bottomInset,
+  error,
+  issueMentionTargets,
+  mentionTargets,
+  onChangeDescription,
+  onClose,
+  onSubmit,
+  open,
+  saving,
+  value,
+}: {
+  bottomInset: number;
+  error: string | null;
+  issueMentionTargets: WorkspaceMentionTarget[];
+  mentionTargets: WorkspaceMentionTarget[];
+  onChangeDescription: (description: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+  open: boolean;
+  saving: boolean;
+  value: string;
+}) {
+  const { t } = useTranslation();
+  const keyboardHeight = useKeyboardHeight(open);
+  const { height: windowHeight } = useWindowDimensions();
+  const sheetMaxHeight = Math.max(0, windowHeight - keyboardHeight - spacing.xl);
+  const sheetBottomPadding = keyboardHeight > 0 ? spacing.md : Math.max(bottomInset, spacing.md);
+
+  return (
+    <Modal
+      animationType="fade"
+      onRequestClose={onClose}
+      transparent
+      visible={open}
+    >
+      <View style={styles.sheetKeyboardView}>
+        <Pressable style={styles.sheetBackdrop} onPress={onClose} />
+        <View style={[
+          styles.sheet,
+          {
+            marginBottom: keyboardHeight,
+            maxHeight: sheetMaxHeight,
+            paddingBottom: sheetBottomPadding,
+          },
+        ]}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>{t("issues.edit_description")}</Text>
+            <Button disabled={saving} onPress={onClose} variant="ghost">
+              {t("common.cancel")}
+            </Button>
+          </View>
+          <MentionTextInput
+            autoFocus
+            editable={!saving}
+            issueMentionTargets={issueMentionTargets}
+            mentionTargets={mentionTargets}
+            multiline
+            onChangeText={onChangeDescription}
+            placeholder={t("issues.description_placeholder")}
+            placeholderTextColor={colors.mutedForeground}
+            scrollEnabled
+            style={styles.descriptionSheetInput}
+            value={value}
+          />
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          <View style={styles.sheetActions}>
+            <Text style={styles.sheetHelperText}>{t("issues.markdown_supported")}</Text>
+            <Button disabled={saving} onPress={onSubmit}>
+              {saving ? t("issues.saving") : t("common.save")}
             </Button>
           </View>
         </View>
@@ -2413,11 +2635,57 @@ const styles = StyleSheet.create({
   buttonPressed: {
     opacity: 0.8,
   },
+  editableTitle: {
+    borderRadius: radii.sm,
+    marginHorizontal: -spacing.xs,
+    marginBottom: spacing.xs,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: spacing.xs,
+  },
   issueBodyTitle: {
     color: colors.foreground,
-    fontSize: 17,
+    fontSize: 22,
     fontWeight: "700",
-    lineHeight: 24,
+    lineHeight: 29,
+  },
+  issueTitleInput: {
+    backgroundColor: colors.muted,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    color: colors.foreground,
+    fontSize: 22,
+    fontWeight: "700",
+    includeFontPadding: false,
+    lineHeight: 29,
+    marginBottom: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  editableDescription: {
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: spacing.xs,
+    marginHorizontal: -spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  descriptionHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "space-between",
+  },
+  descriptionLabel: {
+    color: colors.mutedForeground,
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  editHintText: {
+    color: colors.mutedForeground,
+    fontSize: 12,
   },
   emptyText: {
     color: colors.mutedForeground,
@@ -3052,10 +3320,28 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     textAlignVertical: "top",
   },
+  descriptionSheetInput: {
+    backgroundColor: colors.muted,
+    borderRadius: radii.md,
+    color: colors.foreground,
+    fontSize: 16,
+    includeFontPadding: false,
+    lineHeight: 22,
+    maxHeight: 280,
+    minHeight: 220,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    textAlignVertical: "top",
+  },
   sheetActions: {
     alignItems: "center",
     flexDirection: "row",
     gap: spacing.md,
     justifyContent: "space-between",
+  },
+  sheetHelperText: {
+    color: colors.mutedForeground,
+    flex: 1,
+    fontSize: 12,
   },
 });
