@@ -43,6 +43,10 @@ import (
 	"strings"
 )
 
+// CEREBRO-PATCH(agent-sandbox-macos): JEH-1774 keychain deny-by-default mode.
+// New type + emitted Seatbelt rules that deny ~/Library/Keychains read+write
+// and com.apple.SecurityServer mach-lookup unless KeychainAccessReadOnly.
+//
 // KeychainAccess controls how the generated profile treats macOS keychain
 // access for the sandboxed process.
 //

@@ -131,6 +131,10 @@ func TestGenerate_WritablePathsEmittedBeforeDenies(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(agent-sandbox-macos-test): JEH-1774 keychain mode unit
+// tests — read-only legacy path, deny-by-default path, and audit-only
+// item-allowlist comment emission.
+//
 // TestGenerate_KeychainReadOnlyMode_PreservesJEH405Behaviour guards the
 // legacy opt-in path used by claude/cursor/gemini/copilot: those CLIs
 // authenticate via the user's macOS Keychain. securityd serves keychain

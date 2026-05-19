@@ -157,6 +157,10 @@ func TestBuildSandboxConfig_PopulatesProviderWritePaths(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(daemon-sandbox-test): JEH-1774 — legacy + new provider
+// keychain-access coverage. Pins the per-provider mapping so a future
+// refactor cannot accidentally re-enable read-only keychain for new agents.
+//
 // TestBuildSandboxConfig_LegacyProviderGetsReadOnlyKeychain guards the
 // JEH-1774 backward-compat path: claude/cursor/gemini/copilot all
 // authenticate via the user's macOS keychain. Until the env-var

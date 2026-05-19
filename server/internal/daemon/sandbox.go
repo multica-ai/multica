@@ -42,6 +42,10 @@ var providersWithOwnSandbox = map[string]bool{
 	"codex": true,
 }
 
+// CEREBRO-PATCH(daemon-sandbox): JEH-1774 — per-provider keychain access mode.
+// Legacy CLIs keep KeychainAccessReadOnly until env-var injection lands; new
+// agents fall through to KeychainAccessDeny so SecurityServer is unreachable.
+//
 // providersWithLegacyKeychain lists the agent CLIs that authenticate via the
 // user's macOS keychain (login.keychain-db) and would exit with
 // "Not logged in" if the sandbox blocked keychain reads. They retain the

@@ -257,6 +257,10 @@ func TestSeatbelt_WritablePathOverlappingSensitiveStillDenied(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(agent-sandbox-macos-seatbelt-test): JEH-1774 kernel-level
+// proofs that KeychainAccessDeny actually blocks reads — not just emits a
+// deny rule in the profile string.
+//
 // TestSeatbelt_KeychainAccessDenied is the JEH-1774 kernel-level proof
 // that the default (KeychainAccessDeny) mode actually blocks reads of
 // the keychain DB. We pretend a sandboxed agent tries to read a file

@@ -35,6 +35,10 @@ type SandboxConfig struct {
 	// Caller is responsible for joining $HOME-relative subpaths to the
 	// real home directory before passing them in.
 	WritablePaths []string
+	// CEREBRO-PATCH(agent-sandbox-cerebro): JEH-1774 keychain access fields.
+	// Plumbing for per-task keychain deny + audit-only item allowlist; the
+	// kernel-level rules live in pkg/agent/sandbox/macos.go.
+	//
 	// KeychainAccess controls how the generated profile treats macOS
 	// keychain access. The zero value (sandbox.KeychainAccessDeny) blocks
 	// both file-read on ~/Library/Keychains and mach-lookup of
