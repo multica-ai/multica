@@ -29,6 +29,7 @@ import { MoreHorizontal } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
+import { useCoreQuery } from "@multica/core/provider";
 import {
   useCreateComment,
   useDeleteComment,
@@ -56,15 +57,26 @@ import {
   type WorkspaceMentionTarget,
 } from "@multica/core/workspace/hooks";
 import {
+  agentListOptions,
+  memberListOptions,
+} from "@multica/core/workspace/queries";
+import {
+  canAssignAgentToIssue,
+  isAgentSelectable,
+} from "@multica/core/permissions";
+import {
   issueToMentionTarget,
   mergeMentionTargets,
 } from "@multica/core/workspace/mentions";
 import type {
+  Agent,
   AgentTask,
   Attachment,
+  IssueAssigneeType,
   IssuePriority,
   IssueReaction,
   IssueStatus,
+  MemberWithUser,
   Reaction,
   TaskMessagePayload,
   TimelineEntry,
@@ -80,8 +92,15 @@ import {
   createDraftCommentAttachment,
   type DraftCommentAttachment,
 } from "./comment-attachment-drafts";
+import {
+  DatePickerModal,
+  dateInputToRfc3339,
+  formatDueDateLabel,
+  normalizeDueDateInput,
+} from "./date-picker-modal";
 import { TaskMessageRow } from "./task-transcript-components";
 import {
+  formatAgentStatus,
   formatAgentTaskStatus,
   formatIssuePriority,
   formatIssueStatus,
@@ -119,6 +138,9 @@ type AttachmentPreviewState = {
   loading?: boolean;
 };
 type Translate = (key: string, options?: Record<string, unknown>) => string;
+type AssigneeOption =
+  | { type: "member"; id: string; label: string; subtitle?: string }
+  | { type: "agent"; id: string; label: string; subtitle?: string };
 
 const DEFAULT_REACTIONS = ["👍", "👀", "🎉", "❤️"];
 const MAX_MENTION_SUGGESTIONS = 20;
@@ -181,13 +203,20 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const createComment = useCreateComment(issueId);
   const updateComment = useUpdateComment(issueId);
   const deleteComment = useDeleteComment(issueId);
+  const updateIssue = useUpdateIssue();
   const toggleIssueReaction = useToggleIssueReaction(issueId);
   const toggleCommentReaction = useToggleCommentReaction(issueId);
+  const titleInputRef = useRef<TextInput | null>(null);
   const [comment, setComment] = useState("");
   const [commentAttachments, setCommentAttachments] = useState<DraftCommentAttachment[]>([]);
   const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState("");
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [descriptionSheetOpen, setDescriptionSheetOpen] = useState(false);
+  const [descriptionDraft, setDescriptionDraft] = useState("");
+  const [issueEditError, setIssueEditError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [commentError, setCommentError] = useState<string | null>(null);
@@ -202,6 +231,22 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   useEffect(() => () => {
     previewAbortRef.current?.abort();
   }, []);
+
+  useEffect(() => {
+    setEditingTitle(false);
+    setTitleDraft(issue?.title ?? "");
+    setDescriptionSheetOpen(false);
+    setDescriptionDraft(issue?.description ?? "");
+    setIssueEditError(null);
+  }, [issue?.id]);
+
+  useEffect(() => {
+    if (!editingTitle) return;
+    const timer = setTimeout(() => {
+      titleInputRef.current?.focus();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [editingTitle]);
 
   const comments = useMemo(
     () => timeline
@@ -414,6 +459,64 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     }
   }, [t]);
 
+  const startTitleEdit = useCallback(() => {
+    if (!issue || updateIssue.isPending) return;
+    setIssueEditError(null);
+    setTitleDraft(issue.title);
+    setEditingTitle(true);
+  }, [issue, updateIssue.isPending]);
+
+  const saveTitleEdit = useCallback(async () => {
+    if (!issue || updateIssue.isPending || !editingTitle) return;
+    const title = titleDraft.trim();
+    if (!title) {
+      setTitleDraft(issue.title);
+      setEditingTitle(false);
+      return;
+    }
+    if (title === issue.title) {
+      setEditingTitle(false);
+      return;
+    }
+    setIssueEditError(null);
+    try {
+      await updateIssue.mutateAsync({ id: issue.id, title });
+      setEditingTitle(false);
+    } catch (err) {
+      setIssueEditError(err instanceof Error ? err.message : t("issues.unable_to_save_issue"));
+    }
+  }, [editingTitle, issue, t, titleDraft, updateIssue]);
+
+  const openDescriptionEditor = useCallback(() => {
+    if (!issue || updateIssue.isPending) return;
+    setIssueEditError(null);
+    setDescriptionDraft(issue.description ?? "");
+    setDescriptionSheetOpen(true);
+  }, [issue, updateIssue.isPending]);
+
+  const closeDescriptionEditor = useCallback(() => {
+    setDescriptionSheetOpen(false);
+    setDescriptionDraft("");
+    setIssueEditError(null);
+  }, []);
+
+  const saveDescriptionEdit = useCallback(async () => {
+    if (!issue || updateIssue.isPending) return;
+    const description = descriptionDraft.replace(/\s+$/, "");
+    if (description === (issue.description ?? "")) {
+      setDescriptionSheetOpen(false);
+      return;
+    }
+    setIssueEditError(null);
+    try {
+      await updateIssue.mutateAsync({ id: issue.id, description });
+      setDescriptionSheetOpen(false);
+      setDescriptionDraft("");
+    } catch (err) {
+      setIssueEditError(err instanceof Error ? err.message : t("issues.unable_to_save_issue"));
+    }
+  }, [descriptionDraft, issue, t, updateIssue]);
+
   const stopLiveTask = useCallback(async (taskId: string) => {
     setLiveTaskError(null);
     try {
@@ -540,17 +643,60 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       key: "issue-summary",
       node: (
         <View style={styles.section}>
-          <Text style={styles.issueBodyTitle}>{issue.title}</Text>
-          {issue.description ? (
-            <MarkdownText
-              content={issue.description}
-              onIssueMentionPress={(targetIssueId) => {
-                navigation.push("IssueDetail", { issueId: targetIssueId });
-              }}
+          {editingTitle ? (
+            <TextInput
+              ref={titleInputRef}
+              autoCapitalize="sentences"
+              autoCorrect
+              blurOnSubmit
+              editable={!updateIssue.isPending}
+              onBlur={() => void saveTitleEdit()}
+              onChangeText={setTitleDraft}
+              onSubmitEditing={() => void saveTitleEdit()}
+              placeholder={t("issues.title_placeholder")}
+              placeholderTextColor={colors.mutedForeground}
+              returnKeyType="done"
+              style={styles.issueTitleInput}
+              value={titleDraft}
             />
           ) : (
-            <Text style={styles.emptyText}>{t("issues.no_description")}</Text>
+            <Pressable
+              accessibilityHint={t("issues.edit_title_hint")}
+              accessibilityRole="button"
+              onPress={startTitleEdit}
+              style={({ pressed }) => [
+                styles.editableTitle,
+                pressed && styles.buttonPressed,
+              ]}
+            >
+              <Text style={styles.issueBodyTitle}>{issue.title}</Text>
+            </Pressable>
           )}
+          {issueEditError ? <Text style={styles.errorText}>{issueEditError}</Text> : null}
+          <Pressable
+            accessibilityHint={t("issues.edit_description_hint")}
+            accessibilityRole="button"
+            onPress={openDescriptionEditor}
+            style={({ pressed }) => [
+              styles.editableDescription,
+              pressed && styles.buttonPressed,
+            ]}
+          >
+            <View style={styles.descriptionHeader}>
+              <Text style={styles.descriptionLabel}>{t("issues.description")}</Text>
+              <Text style={styles.editHintText}>{t("issues.tap_to_edit")}</Text>
+            </View>
+            {issue.description ? (
+              <MarkdownText
+                content={issue.description}
+                onIssueMentionPress={(targetIssueId) => {
+                  navigation.push("IssueDetail", { issueId: targetIssueId });
+                }}
+              />
+            ) : (
+              <Text style={styles.emptyText}>{t("issues.no_description")}</Text>
+            )}
+          </Pressable>
           <ReactionRow
             onToggle={handleIssueReaction}
             reactions={issueReactions}
@@ -590,15 +736,22 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   }, [
     attachments,
     handleIssueReaction,
+    editingTitle,
     issue,
+    issueEditError,
     issueReactions,
     navigation,
     openAttachmentPreview,
+    openDescriptionEditor,
     pickDocument,
     pickImage,
+    saveTitleEdit,
+    startTitleEdit,
     t,
+    titleDraft,
     uploadError,
     uploading,
+    updateIssue.isPending,
     userId,
   ]);
 
@@ -802,6 +955,18 @@ export function IssueDetailScreen({ navigation, route }: Props) {
         submitLabel={replyTargetId ? t("issues.send_reply") : t("issues.send")}
         title={replyTargetId ? t("issues.reply_in_thread") : t("issues.add_comment")}
       />
+      <DescriptionEditSheet
+        bottomInset={insets.bottom}
+        error={issueEditError}
+        issueMentionTargets={issueMentionTargets}
+        mentionTargets={mentionTargets}
+        onChangeDescription={setDescriptionDraft}
+        onClose={closeDescriptionEditor}
+        onSubmit={() => void saveDescriptionEdit()}
+        open={descriptionSheetOpen}
+        saving={updateIssue.isPending}
+        value={descriptionDraft}
+      />
       <AttachmentPreviewModal
         onClose={closeAttachmentPreview}
         open={Boolean(attachmentPreview)}
@@ -815,6 +980,7 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
   const { issueId } = route.params;
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
+  const userId = useAuthStore((state) => state.user?.id);
   const { workspace } = useMobileWorkspace();
   const { getActorName } = useActorName();
   const { data: issue, isError, isLoading } = useIssueDetail(workspace.id, issueId);
@@ -824,7 +990,22 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
   );
   const { data: children = [] } = useChildIssues(workspace.id, issueId);
   const { data: childProgress } = useChildIssueProgress(workspace.id);
+  const { data: members = [] } = useCoreQuery(memberListOptions(workspace.id));
+  const { data: agents = [] } = useCoreQuery(agentListOptions(workspace.id));
   const updateIssue = useUpdateIssue();
+  const [assigneePickerOpen, setAssigneePickerOpen] = useState(false);
+  const [assigneeError, setAssigneeError] = useState<string | null>(null);
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [dueDateError, setDueDateError] = useState<string | null>(null);
+
+  const currentMemberRole = useMemo(
+    () => members.find((member) => member.user_id === userId)?.role ?? null,
+    [members, userId],
+  );
+
+  const assigneeLabel = issue?.assignee_type && issue.assignee_id
+    ? getActorName(issue.assignee_type, issue.assignee_id)
+    : t("issues.unassigned");
 
   const changeStatus = useCallback(async (status: IssueStatus) => {
     if (!issue || status === issue.status) return;
@@ -835,6 +1016,41 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
     if (!issue || priority === issue.priority) return;
     await updateIssue.mutateAsync({ id: issue.id, priority });
   }, [issue, updateIssue]);
+
+  const changeAssignee = useCallback(async (
+    assigneeType: IssueAssigneeType | null,
+    assigneeId: string | null,
+  ) => {
+    if (!issue) return;
+    if (assigneeType === issue.assignee_type && assigneeId === issue.assignee_id) {
+      setAssigneePickerOpen(false);
+      return;
+    }
+    setAssigneeError(null);
+    try {
+      await updateIssue.mutateAsync({
+        id: issue.id,
+        assignee_type: assigneeType,
+        assignee_id: assigneeId,
+      });
+      setAssigneePickerOpen(false);
+    } catch (err) {
+      setAssigneeError(err instanceof Error ? err.message : t("issues.unable_to_save_issue"));
+    }
+  }, [issue, t, updateIssue]);
+
+  const changeDueDate = useCallback(async (dueDate: string | null) => {
+    if (!issue || dueDate === normalizeDueDateInput(issue.due_date)) return;
+    setDueDateError(null);
+    try {
+      await updateIssue.mutateAsync({
+        id: issue.id,
+        due_date: dueDate ? dateInputToRfc3339(dueDate) : null,
+      });
+    } catch (err) {
+      setDueDateError(err instanceof Error ? err.message : t("issues.unable_to_save_issue"));
+    }
+  }, [issue, t, updateIssue]);
 
   if (isLoading) return <LoadingState />;
   if (isError || !issue) return <EmptyState title={t("issues.unable_to_load_properties")} />;
@@ -881,11 +1097,32 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
               </OptionRow>
             </Property>
             <Property label={t("issues.assignee")}>
-              <Text style={styles.value}>
-                {issue.assignee_type && issue.assignee_id
-                  ? getActorName(issue.assignee_type, issue.assignee_id)
-                  : t("issues.unassigned")}
-              </Text>
+              <Pressable
+                accessibilityRole="button"
+                disabled={updateIssue.isPending}
+                onPress={() => {
+                  setAssigneeError(null);
+                  setAssigneePickerOpen(true);
+                }}
+                style={({ pressed }) => [
+                  styles.propertySelectTrigger,
+                  pressed && styles.buttonPressed,
+                  updateIssue.isPending && styles.disabledAction,
+                ]}
+              >
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.propertySelectText,
+                    !issue.assignee_id && styles.propertySelectPlaceholder,
+                  ]}
+                >
+                  {assigneeLabel}
+                </Text>
+                <Text style={styles.propertySelectMeta}>
+                  {updateIssue.isPending ? t("issues.saving") : t("issues.select")}
+                </Text>
+              </Pressable>
             </Property>
             <Property label={t("issues.creator")}>
               <Text style={styles.value}>
@@ -893,7 +1130,30 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
               </Text>
             </Property>
             <Property label={t("issues.due_date")}>
-              <Text style={styles.value}>{formatDate(issue.due_date)}</Text>
+              <Pressable
+                accessibilityRole="button"
+                disabled={updateIssue.isPending}
+                onPress={() => setDatePickerOpen(true)}
+                style={({ pressed }) => [
+                  styles.dueDateTrigger,
+                  pressed && styles.buttonPressed,
+                  updateIssue.isPending && styles.disabledAction,
+                ]}
+              >
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.dueDateTriggerText,
+                    !issue.due_date && styles.dueDatePlaceholder,
+                  ]}
+                >
+                  {issue.due_date ? formatDueDateLabel(issue.due_date) : t("issues.no_due_date")}
+                </Text>
+                <Text style={styles.dueDateTriggerMeta}>
+                  {updateIssue.isPending ? t("issues.saving") : t("issues.select")}
+                </Text>
+              </Pressable>
+              {dueDateError ? <Text style={styles.errorText}>{dueDateError}</Text> : null}
             </Property>
           </View>
         </View>
@@ -957,7 +1217,253 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
           </View>
         ) : null}
       </ScrollView>
+      <DatePickerModal
+        onChange={(dueDate) => void changeDueDate(dueDate)}
+        onClose={() => setDatePickerOpen(false)}
+        open={datePickerOpen}
+        value={issue.due_date}
+      />
+      <AssigneePickerSheet
+        agents={agents}
+        bottomInset={insets.bottom}
+        currentAssigneeId={issue.assignee_id}
+        currentAssigneeType={issue.assignee_type}
+        currentMemberRole={currentMemberRole}
+        error={assigneeError}
+        members={members}
+        onChange={(assigneeType, assigneeId) => void changeAssignee(assigneeType, assigneeId)}
+        onClose={() => {
+          setAssigneePickerOpen(false);
+          setAssigneeError(null);
+        }}
+        open={assigneePickerOpen}
+        saving={updateIssue.isPending}
+        userId={userId ?? null}
+      />
     </Screen>
+  );
+}
+
+function AssigneePickerSheet({
+  agents,
+  bottomInset,
+  currentAssigneeId,
+  currentAssigneeType,
+  currentMemberRole,
+  error,
+  members,
+  onChange,
+  onClose,
+  open,
+  saving,
+  userId,
+}: {
+  agents: Agent[];
+  bottomInset: number;
+  currentAssigneeId: string | null;
+  currentAssigneeType: IssueAssigneeType | null;
+  currentMemberRole: MemberWithUser["role"] | null;
+  error: string | null;
+  members: MemberWithUser[];
+  onChange: (assigneeType: IssueAssigneeType | null, assigneeId: string | null) => void;
+  onClose: () => void;
+  open: boolean;
+  saving: boolean;
+  userId: string | null;
+}) {
+  const { t } = useTranslation();
+  const [query, setQuery] = useState("");
+  const keyboardHeight = useKeyboardHeight(open);
+  const { height: windowHeight } = useWindowDimensions();
+  const sheetMaxHeight = Math.max(0, windowHeight - keyboardHeight - spacing.xl);
+  const sheetBottomPadding = keyboardHeight > 0 ? spacing.md : Math.max(bottomInset, spacing.md);
+
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const memberOptions = useMemo<AssigneeOption[]>(
+    () => members
+      .filter((member) => {
+        const haystack = `${member.name} ${member.email}`.toLowerCase();
+        return !normalizedQuery || haystack.includes(normalizedQuery);
+      })
+      .map((member) => ({
+        type: "member",
+        id: member.user_id,
+        label: member.name,
+        subtitle: member.email,
+      })),
+    [members, normalizedQuery],
+  );
+  const agentOptions = useMemo<AssigneeOption[]>(
+    () => agents
+      .filter((agent) => isAgentSelectable(agent, userId))
+      .filter((agent) => canAssignAgentToIssue(agent, {
+        userId,
+        role: currentMemberRole,
+      }).allowed)
+      .filter((agent) => {
+        const haystack = agent.name.toLowerCase();
+        return !normalizedQuery || haystack.includes(normalizedQuery);
+      })
+      .map((agent) => ({
+        type: "agent",
+        id: agent.id,
+        label: agent.name,
+        subtitle: formatAgentStatus(t, agent.status),
+      })),
+    [agents, currentMemberRole, normalizedQuery, t, userId],
+  );
+  const hasResults = memberOptions.length > 0 || agentOptions.length > 0;
+
+  return (
+    <Modal
+      animationType="fade"
+      onRequestClose={onClose}
+      transparent
+      visible={open}
+    >
+      <View style={styles.sheetKeyboardView}>
+        <Pressable style={styles.sheetBackdrop} onPress={onClose} />
+        <View style={[
+          styles.sheet,
+          {
+            marginBottom: keyboardHeight,
+            maxHeight: sheetMaxHeight,
+            paddingBottom: sheetBottomPadding,
+          },
+        ]}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>{t("issues.assignee")}</Text>
+            <Button disabled={saving} onPress={onClose} variant="ghost">
+              {t("common.close")}
+            </Button>
+          </View>
+          <TextInput
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!saving}
+            onChangeText={setQuery}
+            placeholder={t("issues.search_assignees")}
+            placeholderTextColor={colors.mutedForeground}
+            style={styles.assigneeSearchInput}
+            value={query}
+          />
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            style={styles.assigneePickerList}
+          >
+            <AssigneeOptionRow
+              active={!currentAssigneeType && !currentAssigneeId}
+              disabled={saving}
+              label={t("issues.unassigned")}
+              onPress={() => onChange(null, null)}
+            />
+            {memberOptions.length > 0 ? (
+              <AssigneeOptionSection
+                currentAssigneeId={currentAssigneeId}
+                currentAssigneeType={currentAssigneeType}
+                disabled={saving}
+                label={t("issues.members")}
+                onChange={onChange}
+                options={memberOptions}
+              />
+            ) : null}
+            {agentOptions.length > 0 ? (
+              <AssigneeOptionSection
+                currentAssigneeId={currentAssigneeId}
+                currentAssigneeType={currentAssigneeType}
+                disabled={saving}
+                label={t("issues.agents")}
+                onChange={onChange}
+                options={agentOptions}
+              />
+            ) : null}
+            {!hasResults ? (
+              <Text style={styles.assigneeEmptyText}>{t("common.no_results")}</Text>
+            ) : null}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function AssigneeOptionSection({
+  currentAssigneeId,
+  currentAssigneeType,
+  disabled,
+  label,
+  onChange,
+  options,
+}: {
+  currentAssigneeId: string | null;
+  currentAssigneeType: IssueAssigneeType | null;
+  disabled: boolean;
+  label: string;
+  onChange: (assigneeType: IssueAssigneeType, assigneeId: string) => void;
+  options: AssigneeOption[];
+}) {
+  return (
+    <View style={styles.assigneeSection}>
+      <Text style={styles.assigneeSectionTitle}>{label}</Text>
+      {options.map((option) => (
+        <AssigneeOptionRow
+          active={currentAssigneeType === option.type && currentAssigneeId === option.id}
+          disabled={disabled}
+          key={`${option.type}:${option.id}`}
+          label={option.label}
+          onPress={() => onChange(option.type, option.id)}
+          subtitle={option.subtitle}
+        />
+      ))}
+    </View>
+  );
+}
+
+function AssigneeOptionRow({
+  active,
+  disabled,
+  label,
+  onPress,
+  subtitle,
+}: {
+  active: boolean;
+  disabled: boolean;
+  label: string;
+  onPress: () => void;
+  subtitle?: string;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.assigneeOption,
+        active && styles.assigneeOptionActive,
+        pressed && styles.buttonPressed,
+        disabled && styles.disabledAction,
+      ]}
+    >
+      <View style={styles.assigneeOptionTextGroup}>
+        <Text
+          numberOfLines={1}
+          style={[styles.assigneeOptionLabel, active && styles.assigneeOptionLabelActive]}
+        >
+          {label}
+        </Text>
+        {subtitle ? (
+          <Text numberOfLines={1} style={styles.assigneeOptionSubtitle}>
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
+    </Pressable>
   );
 }
 
@@ -1090,6 +1596,85 @@ function CommentSheet({
             </View>
             <Button disabled={!canSubmit} onPress={onSubmit}>
               {submitLabel}
+            </Button>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function DescriptionEditSheet({
+  bottomInset,
+  error,
+  issueMentionTargets,
+  mentionTargets,
+  onChangeDescription,
+  onClose,
+  onSubmit,
+  open,
+  saving,
+  value,
+}: {
+  bottomInset: number;
+  error: string | null;
+  issueMentionTargets: WorkspaceMentionTarget[];
+  mentionTargets: WorkspaceMentionTarget[];
+  onChangeDescription: (description: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+  open: boolean;
+  saving: boolean;
+  value: string;
+}) {
+  const { t } = useTranslation();
+  const keyboardHeight = useKeyboardHeight(open);
+  const { height: windowHeight } = useWindowDimensions();
+  const sheetMaxHeight = Math.max(0, windowHeight - keyboardHeight - spacing.xl);
+  const sheetBottomPadding = keyboardHeight > 0 ? spacing.md : Math.max(bottomInset, spacing.md);
+
+  return (
+    <Modal
+      animationType="fade"
+      onRequestClose={onClose}
+      transparent
+      visible={open}
+    >
+      <View style={styles.sheetKeyboardView}>
+        <Pressable style={styles.sheetBackdrop} onPress={onClose} />
+        <View style={[
+          styles.sheet,
+          {
+            marginBottom: keyboardHeight,
+            maxHeight: sheetMaxHeight,
+            paddingBottom: sheetBottomPadding,
+          },
+        ]}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>{t("issues.edit_description")}</Text>
+            <Button disabled={saving} onPress={onClose} variant="ghost">
+              {t("common.cancel")}
+            </Button>
+          </View>
+          <MentionTextInput
+            autoFocus
+            editable={!saving}
+            issueMentionTargets={issueMentionTargets}
+            mentionTargets={mentionTargets}
+            multiline
+            onChangeText={onChangeDescription}
+            placeholder={t("issues.description_placeholder")}
+            placeholderTextColor={colors.mutedForeground}
+            scrollEnabled
+            style={styles.descriptionSheetInput}
+            value={value}
+          />
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          <View style={styles.sheetActions}>
+            <Text style={styles.sheetHelperText}>{t("issues.markdown_supported")}</Text>
+            <Button disabled={saving} onPress={onSubmit}>
+              {saving ? t("issues.saving") : t("common.save")}
             </Button>
           </View>
         </View>
@@ -2413,11 +2998,57 @@ const styles = StyleSheet.create({
   buttonPressed: {
     opacity: 0.8,
   },
+  editableTitle: {
+    borderRadius: radii.sm,
+    marginHorizontal: -spacing.xs,
+    marginBottom: spacing.xs,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: spacing.xs,
+  },
   issueBodyTitle: {
     color: colors.foreground,
-    fontSize: 17,
+    fontSize: 22,
     fontWeight: "700",
-    lineHeight: 24,
+    lineHeight: 29,
+  },
+  issueTitleInput: {
+    backgroundColor: colors.muted,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    color: colors.foreground,
+    fontSize: 22,
+    fontWeight: "700",
+    includeFontPadding: false,
+    lineHeight: 29,
+    marginBottom: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  editableDescription: {
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: spacing.xs,
+    marginHorizontal: -spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  descriptionHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "space-between",
+  },
+  descriptionLabel: {
+    color: colors.mutedForeground,
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  editHintText: {
+    color: colors.mutedForeground,
+    fontSize: 12,
   },
   emptyText: {
     color: colors.mutedForeground,
@@ -2499,9 +3130,127 @@ const styles = StyleSheet.create({
   chipTextActive: {
     color: colors.primaryForeground,
   },
+  propertySelectTrigger: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.sm,
+    height: 44,
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.md,
+    width: "100%",
+  },
+  propertySelectText: {
+    color: colors.foreground,
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  propertySelectPlaceholder: {
+    color: colors.mutedForeground,
+  },
+  propertySelectMeta: {
+    color: colors.mutedForeground,
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  dueDateTrigger: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.sm,
+    height: 44,
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.md,
+    width: "100%",
+  },
+  dueDateTriggerText: {
+    color: colors.foreground,
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  dueDatePlaceholder: {
+    color: colors.mutedForeground,
+  },
+  dueDateTriggerMeta: {
+    color: colors.mutedForeground,
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  disabledAction: {
+    opacity: 0.6,
+  },
   value: {
     color: colors.foreground,
     fontSize: 14,
+  },
+  assigneeSearchInput: {
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    color: colors.foreground,
+    fontSize: 14,
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  assigneePickerList: {
+    maxHeight: 380,
+  },
+  assigneeSection: {
+    gap: spacing.xs,
+    marginTop: spacing.md,
+  },
+  assigneeSectionTitle: {
+    color: colors.mutedForeground,
+    fontSize: 12,
+    fontWeight: "600",
+    textTransform: "uppercase",
+  },
+  assigneeOption: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  assigneeOptionActive: {
+    borderColor: colors.primary,
+  },
+  assigneeOptionTextGroup: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  assigneeOptionLabel: {
+    color: colors.foreground,
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  assigneeOptionLabelActive: {
+    color: colors.primary,
+  },
+  assigneeOptionSubtitle: {
+    color: colors.mutedForeground,
+    fontSize: 12,
+  },
+  assigneeEmptyText: {
+    color: colors.mutedForeground,
+    fontSize: 14,
+    paddingVertical: spacing.lg,
+    textAlign: "center",
   },
   sectionTitle: {
     color: colors.foreground,
@@ -3052,10 +3801,28 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     textAlignVertical: "top",
   },
+  descriptionSheetInput: {
+    backgroundColor: colors.muted,
+    borderRadius: radii.md,
+    color: colors.foreground,
+    fontSize: 16,
+    includeFontPadding: false,
+    lineHeight: 22,
+    maxHeight: 280,
+    minHeight: 220,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    textAlignVertical: "top",
+  },
   sheetActions: {
     alignItems: "center",
     flexDirection: "row",
     gap: spacing.md,
     justifyContent: "space-between",
+  },
+  sheetHelperText: {
+    color: colors.mutedForeground,
+    flex: 1,
+    fontSize: 12,
   },
 });

@@ -191,10 +191,10 @@ func assigneeGroupID(assigneeType pgtype.Text, assigneeID pgtype.UUID) string {
 // SearchIssueResponse extends IssueResponse with search metadata.
 type SearchIssueResponse struct {
 	IssueResponse
-	MatchSource                string  `json:"match_source"`
-	MatchedSnippet             *string `json:"matched_snippet,omitempty"`
-	MatchedDescriptionSnippet  *string `json:"matched_description_snippet,omitempty"`
-	MatchedCommentSnippet      *string `json:"matched_comment_snippet,omitempty"`
+	MatchSource               string  `json:"match_source"`
+	MatchedSnippet            *string `json:"matched_snippet,omitempty"`
+	MatchedDescriptionSnippet *string `json:"matched_description_snippet,omitempty"`
+	MatchedCommentSnippet     *string `json:"matched_comment_snippet,omitempty"`
 }
 
 // extractSnippet extracts a snippet of text around the first occurrence of query.
@@ -689,6 +689,55 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func parseUUIDListFilter(w http.ResponseWriter, raw string, fieldName string) ([]pgtype.UUID, bool) {
+	if raw == "" {
+		return nil, true
+	}
+	out := make([]pgtype.UUID, 0)
+	for _, part := range strings.Split(raw, ",") {
+		s := strings.TrimSpace(part)
+		if s == "" {
+			continue
+		}
+		id, ok := parseUUIDOrBadRequest(w, s, fieldName)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, id)
+	}
+	return out, true
+}
+
+func parseActorPairFilters(w http.ResponseWriter, raw string, fieldName string) ([]string, bool) {
+	if raw == "" {
+		return nil, true
+	}
+	out := make([]string, 0)
+	for _, part := range strings.Split(raw, ",") {
+		s := strings.TrimSpace(part)
+		if s == "" {
+			continue
+		}
+		actorType, actorID, ok := strings.Cut(s, ":")
+		if !ok {
+			writeError(w, http.StatusBadRequest, fieldName+" must contain type:id values")
+			return nil, false
+		}
+		switch actorType {
+		case "member", "agent", "squad":
+		default:
+			writeError(w, http.StatusBadRequest, fieldName+" type must be 'member', 'agent', or 'squad'")
+			return nil, false
+		}
+		id, parsed := parseUUIDOrBadRequest(w, actorID, fieldName)
+		if !parsed {
+			return nil, false
+		}
+		out = append(out, actorType+":"+uuidToString(id))
+	}
+	return out, true
+}
+
 func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -704,6 +753,14 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	var priorityFilter pgtype.Text
 	if p := r.URL.Query().Get("priority"); p != "" {
 		priorityFilter = pgtype.Text{String: p, Valid: true}
+	}
+	var priorityFilters []string
+	if priorities := r.URL.Query().Get("priorities"); priorities != "" {
+		for _, raw := range strings.Split(priorities, ",") {
+			if s := strings.TrimSpace(raw); s != "" {
+				priorityFilters = append(priorityFilters, s)
+			}
+		}
 	}
 	var assigneeFilter pgtype.UUID
 	if a := r.URL.Query().Get("assignee_id"); a != "" {
@@ -725,6 +782,14 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	assigneePairs, ok := parseActorPairFilters(w, r.URL.Query().Get("assignees"), "assignees")
+	if !ok {
+		return
+	}
+	var includeNoAssignee pgtype.Bool
+	if r.URL.Query().Get("include_no_assignee") == "true" {
+		includeNoAssignee = pgtype.Bool{Bool: true, Valid: true}
+	}
 	var creatorFilter pgtype.UUID
 	if c := r.URL.Query().Get("creator_id"); c != "" {
 		id, ok := parseUUIDOrBadRequest(w, c, "creator_id")
@@ -732,6 +797,10 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		creatorFilter = id
+	}
+	creatorPairs, ok := parseActorPairFilters(w, r.URL.Query().Get("creators"), "creators")
+	if !ok {
+		return
 	}
 	var projectFilter pgtype.UUID
 	if p := r.URL.Query().Get("project_id"); p != "" {
@@ -741,16 +810,30 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		projectFilter = id
 	}
+	projectIdsFilter, ok := parseUUIDListFilter(w, r.URL.Query().Get("project_ids"), "project_ids")
+	if !ok {
+		return
+	}
+	var includeNoProject pgtype.Bool
+	if r.URL.Query().Get("include_no_project") == "true" {
+		includeNoProject = pgtype.Bool{Bool: true, Valid: true}
+	}
 
 	// open_only=true returns all non-done/cancelled issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
-			WorkspaceID: wsUUID,
-			Priority:    priorityFilter,
-			AssigneeID:  assigneeFilter,
-			AssigneeIds: assigneeIdsFilter,
-			CreatorID:   creatorFilter,
-			ProjectID:   projectFilter,
+			WorkspaceID:       wsUUID,
+			Priority:          priorityFilter,
+			Priorities:        priorityFilters,
+			AssigneeID:        assigneeFilter,
+			AssigneeIds:       assigneeIdsFilter,
+			AssigneePairs:     assigneePairs,
+			IncludeNoAssignee: includeNoAssignee,
+			CreatorID:         creatorFilter,
+			CreatorPairs:      creatorPairs,
+			ProjectID:         projectFilter,
+			ProjectIds:        projectIdsFilter,
+			IncludeNoProject:  includeNoProject,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -799,15 +882,21 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	issues, err := h.Queries.ListIssues(ctx, db.ListIssuesParams{
-		WorkspaceID: wsUUID,
-		Limit:       int32(limit),
-		Offset:      int32(offset),
-		Status:      statusFilter,
-		Priority:    priorityFilter,
-		AssigneeID:  assigneeFilter,
-		AssigneeIds: assigneeIdsFilter,
-		CreatorID:   creatorFilter,
-		ProjectID:   projectFilter,
+		WorkspaceID:       wsUUID,
+		Limit:             int32(limit),
+		Offset:            int32(offset),
+		Status:            statusFilter,
+		Priority:          priorityFilter,
+		Priorities:        priorityFilters,
+		AssigneeID:        assigneeFilter,
+		AssigneeIds:       assigneeIdsFilter,
+		AssigneePairs:     assigneePairs,
+		IncludeNoAssignee: includeNoAssignee,
+		CreatorID:         creatorFilter,
+		CreatorPairs:      creatorPairs,
+		ProjectID:         projectFilter,
+		ProjectIds:        projectIdsFilter,
+		IncludeNoProject:  includeNoProject,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -816,13 +905,19 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	// Get the true total count for pagination awareness.
 	total, err := h.Queries.CountIssues(ctx, db.CountIssuesParams{
-		WorkspaceID: wsUUID,
-		Status:      statusFilter,
-		Priority:    priorityFilter,
-		AssigneeID:  assigneeFilter,
-		AssigneeIds: assigneeIdsFilter,
-		CreatorID:   creatorFilter,
-		ProjectID:   projectFilter,
+		WorkspaceID:       wsUUID,
+		Status:            statusFilter,
+		Priority:          priorityFilter,
+		Priorities:        priorityFilters,
+		AssigneeID:        assigneeFilter,
+		AssigneeIds:       assigneeIdsFilter,
+		AssigneePairs:     assigneePairs,
+		IncludeNoAssignee: includeNoAssignee,
+		CreatorID:         creatorFilter,
+		CreatorPairs:      creatorPairs,
+		ProjectID:         projectFilter,
+		ProjectIds:        projectIdsFilter,
+		IncludeNoProject:  includeNoProject,
 	})
 	if err != nil {
 		total = int64(len(issues))
@@ -1111,7 +1206,7 @@ WITH ranked AS (
 	SELECT
 		i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-		i.parent_issue_id, i.position, i.due_date, i.created_at, i.updated_at,
+		i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at,
 		i.number, i.project_id,
 		COUNT(*) OVER (PARTITION BY i.assignee_type, i.assignee_id) AS group_total,
 		ROW_NUMBER() OVER (
@@ -1124,7 +1219,7 @@ WITH ranked AS (
 SELECT
 	id, workspace_id, title, description, status, priority,
 	assignee_type, assignee_id, creator_type, creator_id,
-	parent_issue_id, position, due_date, created_at, updated_at,
+	parent_issue_id, position, start_date, due_date, created_at, updated_at,
 	number, project_id, group_total
 FROM ranked
 WHERE rn > %s AND rn <= %s + %s
@@ -1163,6 +1258,7 @@ ORDER BY
 			&row.CreatorID,
 			&row.ParentIssueID,
 			&row.Position,
+			&row.StartDate,
 			&row.DueDate,
 			&row.CreatedAt,
 			&row.UpdatedAt,

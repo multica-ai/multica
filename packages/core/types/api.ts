@@ -41,10 +41,16 @@ export interface ListIssuesParams {
   workspace_id?: string;
   status?: IssueStatus;
   priority?: IssuePriority;
+  priorities?: IssuePriority[];
   assignee_id?: string;
   assignee_ids?: string[];
+  assignees?: Array<{ type: IssueAssigneeType; id: string }>;
+  include_no_assignee?: boolean;
   creator_id?: string;
+  creators?: Array<{ type: IssueAssigneeType; id: string }>;
   project_id?: string;
+  project_ids?: string[];
+  include_no_project?: boolean;
   open_only?: boolean;
 }
 

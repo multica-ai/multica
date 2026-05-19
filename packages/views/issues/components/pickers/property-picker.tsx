@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, cloneElement } from "react";
 import { Check } from "lucide-react";
 import {
   Popover,
@@ -12,6 +12,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerTitle,
+} from "@multica/ui/components/ui/drawer";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { isImeComposing } from "@multica/core/utils";
 import { useT } from "../../../i18n";
 
@@ -65,6 +71,7 @@ export function PropertyPicker({
   footer?: React.ReactNode;
 }) {
   const { t } = useT("issues");
+  const isMobile = useIsMobile();
   const placeholder = searchPlaceholder ?? t(($) => $.filters.placeholder);
   const filterAria = t(($) => $.pickers.filter_options_aria);
   const [query, setQuery] = useState("");
@@ -141,9 +148,58 @@ export function PropertyPicker({
     [getItems, highlightedIndex],
   );
 
+  const defaultTriggerClass = "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden";
+
+  const searchInput = searchable ? (
+    <div className="px-2 py-1.5 border-b">
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setHighlightedIndex(0);
+          onSearchChange?.(e.target.value);
+        }}
+        onKeyDown={isMobile ? undefined : handleKeyDown}
+        placeholder={placeholder}
+        aria-label={filterAria}
+        className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+      />
+    </div>
+  ) : null;
+
+  // Mobile: bottom Drawer
+  if (isMobile) {
+    const handleTriggerClick = () => handleOpenChange(!open);
+
+    const mobileTrigger = triggerRender ? (
+      cloneElement(triggerRender, { onClick: handleTriggerClick } as Record<string, unknown>, trigger)
+    ) : (
+      <button type="button" className={defaultTriggerClass} onClick={handleTriggerClick}>
+        {trigger}
+      </button>
+    );
+
+    return (
+      <>
+        {mobileTrigger}
+        <Drawer open={open} onOpenChange={handleOpenChange}>
+          <DrawerContent>
+            <DrawerTitle className="sr-only">{placeholder}</DrawerTitle>
+            {searchInput}
+            {header && <div className="border-b">{header}</div>}
+            <div ref={listRef} className="p-1 overflow-y-auto">{children}</div>
+            {footer && <div className="border-t p-1">{footer}</div>}
+          </DrawerContent>
+        </Drawer>
+      </>
+    );
+  }
+
+  // Desktop: Popover
   const popoverTrigger = (
     <PopoverTrigger
-      className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
+      className={triggerRender ? undefined : defaultTriggerClass}
       render={triggerRender}
     >
       {trigger}
@@ -161,23 +217,7 @@ export function PropertyPicker({
         popoverTrigger
       )}
       <PopoverContent align={align} className={`${width} gap-0 p-0`}>
-        {searchable && (
-          <div className="px-2 py-1.5 border-b">
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setHighlightedIndex(0);
-                onSearchChange?.(e.target.value);
-              }}
-              onKeyDown={handleKeyDown}
-              placeholder={placeholder}
-              aria-label={filterAria}
-              className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
-            />
-          </div>
-        )}
+        {searchInput}
         {header && <div className="border-b">{header}</div>}
         <div ref={listRef} className="p-1 max-h-72 overflow-y-auto">{children}</div>
         {footer && <div className="border-t p-1">{footer}</div>}
@@ -215,7 +255,7 @@ export function PickerItem({
       data-picker-item
       disabled={disabled}
       onClick={onClick}
-      className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-sm ${disabled ? "opacity-50 cursor-not-allowed" : hoverClassName ?? "hover:bg-accent"} transition-colors`}
+      className={`flex w-full items-center gap-3 rounded-md px-2 py-3 md:py-1.5 text-sm ${disabled ? "opacity-50 cursor-not-allowed" : hoverClassName ?? "hover:bg-accent"} transition-colors`}
     >
       {/* min-w-0 lets long children (like truncated label names) shrink
           inside the flex row instead of pushing the selected checkmark off
