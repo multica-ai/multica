@@ -29,7 +29,6 @@ import { MoreHorizontal } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
-import { useCoreQuery } from "@multica/core/provider";
 import {
   useCreateComment,
   useDeleteComment,
@@ -39,44 +38,30 @@ import {
   useUpdateIssue,
 } from "@multica/core/issues/mutations";
 import {
-  useChildIssueProgress,
-  useChildIssues,
   useIssueAttachments,
   useIssueDetail,
   useIssueList,
-  useOptionalIssueDetail,
   useIssueReactions,
+  useIssueSubscribers,
   useIssueTaskRuns,
   useIssueTimelineEntries,
   useLiveIssueTasks,
 } from "@multica/core/issues/hooks";
-import { ALL_STATUSES, PRIORITY_ORDER } from "@multica/core/issues/config";
 import {
   useActorName,
   useWorkspaceMentionTargets,
   type WorkspaceMentionTarget,
 } from "@multica/core/workspace/hooks";
 import {
-  agentListOptions,
-  memberListOptions,
-} from "@multica/core/workspace/queries";
-import {
-  canAssignAgentToIssue,
-  isAgentSelectable,
-} from "@multica/core/permissions";
-import {
   issueToMentionTarget,
   mergeMentionTargets,
 } from "@multica/core/workspace/mentions";
 import type {
-  Agent,
   AgentTask,
   Attachment,
-  IssueAssigneeType,
   IssuePriority,
   IssueReaction,
   IssueStatus,
-  MemberWithUser,
   Reaction,
   TaskMessagePayload,
   TimelineEntry,
@@ -92,22 +77,14 @@ import {
   createDraftCommentAttachment,
   type DraftCommentAttachment,
 } from "./comment-attachment-drafts";
-import {
-  DatePickerModal,
-  dateInputToRfc3339,
-  formatDueDateLabel,
-  normalizeDueDateInput,
-} from "./date-picker-modal";
 import { TaskMessageRow } from "./task-transcript-components";
 import {
-  formatAgentStatus,
   formatAgentTaskStatus,
   formatIssuePriority,
   formatIssueStatus,
 } from "../../i18n/format";
 
 type Props = NativeStackScreenProps<RootStackParamList, "IssueDetail">;
-type IssuePropertiesProps = NativeStackScreenProps<RootStackParamList, "IssueProperties">;
 type ReactionLike = Pick<Reaction | IssueReaction, "actor_id" | "actor_type" | "emoji">;
 type DocumentPickerModule = typeof import("expo-document-picker");
 declare const require: (moduleName: string) => unknown;
@@ -138,10 +115,6 @@ type AttachmentPreviewState = {
   loading?: boolean;
 };
 type Translate = (key: string, options?: Record<string, unknown>) => string;
-type AssigneeOption =
-  | { type: "member"; id: string; label: string; subtitle?: string }
-  | { type: "agent"; id: string; label: string; subtitle?: string };
-
 const DEFAULT_REACTIONS = ["👍", "👀", "🎉", "❤️"];
 const MAX_MENTION_SUGGESTIONS = 20;
 const SERVER_ISSUE_SEARCH_LIMIT = 20;
@@ -192,6 +165,12 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   );
   const { data: attachments = [], refetch: refetchAttachments } = useIssueAttachments(workspace.id, issueId);
   const { data: issueReactions = [] } = useIssueReactions(workspace.id, issueId);
+  const {
+    isSubscribed,
+    isToggling: togglingSubscription,
+    loading: subscribersLoading,
+    toggleSubscribe,
+  } = useIssueSubscribers(workspace.id, issueId, userId);
   const {
     tasks: liveTasks,
     cancellingTaskIds,
@@ -697,11 +676,31 @@ export function IssueDetailScreen({ navigation, route }: Props) {
               <Text style={styles.emptyText}>{t("issues.no_description")}</Text>
             )}
           </Pressable>
-          <ReactionRow
-            onToggle={handleIssueReaction}
-            reactions={issueReactions}
-            userId={userId}
-          />
+          <View style={styles.issueEngagementRow}>
+            <ReactionRow
+              onToggle={handleIssueReaction}
+              reactions={issueReactions}
+              userId={userId}
+            />
+            <Pressable
+              accessibilityRole="button"
+              disabled={!userId || subscribersLoading || togglingSubscription}
+              onPress={toggleSubscribe}
+              style={({ pressed }) => [
+                styles.subscribeButton,
+                isSubscribed && styles.subscribeButtonActive,
+                (!userId || subscribersLoading || togglingSubscription) && styles.subscribeButtonDisabled,
+                pressed && styles.buttonPressed,
+              ]}
+            >
+              <Text style={[
+                styles.subscribeButtonText,
+                isSubscribed && styles.subscribeButtonTextActive,
+              ]}>
+                {isSubscribed ? t("issues.subscribed") : t("issues.subscribe")}
+              </Text>
+            </Pressable>
+          </View>
         </View>
       ),
     },
@@ -740,6 +739,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     issue,
     issueEditError,
     issueReactions,
+    isSubscribed,
     navigation,
     openAttachmentPreview,
     openDescriptionEditor,
@@ -747,8 +747,11 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     pickImage,
     saveTitleEdit,
     startTitleEdit,
+    subscribersLoading,
     t,
     titleDraft,
+    toggleSubscribe,
+    togglingSubscription,
     uploadError,
     uploading,
     updateIssue.isPending,
@@ -976,496 +979,6 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   );
 }
 
-export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProps) {
-  const { issueId } = route.params;
-  const { t } = useTranslation();
-  const insets = useSafeAreaInsets();
-  const userId = useAuthStore((state) => state.user?.id);
-  const { workspace } = useMobileWorkspace();
-  const { getActorName } = useActorName();
-  const { data: issue, isError, isLoading } = useIssueDetail(workspace.id, issueId);
-  const { data: parentIssue, isLoading: parentIssueLoading } = useOptionalIssueDetail(
-    workspace.id,
-    issue?.parent_issue_id,
-  );
-  const { data: children = [] } = useChildIssues(workspace.id, issueId);
-  const { data: childProgress } = useChildIssueProgress(workspace.id);
-  const { data: members = [] } = useCoreQuery(memberListOptions(workspace.id));
-  const { data: agents = [] } = useCoreQuery(agentListOptions(workspace.id));
-  const updateIssue = useUpdateIssue();
-  const [assigneePickerOpen, setAssigneePickerOpen] = useState(false);
-  const [assigneeError, setAssigneeError] = useState<string | null>(null);
-  const [datePickerOpen, setDatePickerOpen] = useState(false);
-  const [dueDateError, setDueDateError] = useState<string | null>(null);
-
-  const currentMemberRole = useMemo(
-    () => members.find((member) => member.user_id === userId)?.role ?? null,
-    [members, userId],
-  );
-
-  const assigneeLabel = issue?.assignee_type && issue.assignee_id
-    ? getActorName(issue.assignee_type, issue.assignee_id)
-    : t("issues.unassigned");
-
-  const changeStatus = useCallback(async (status: IssueStatus) => {
-    if (!issue || status === issue.status) return;
-    await updateIssue.mutateAsync({ id: issue.id, status });
-  }, [issue, updateIssue]);
-
-  const changePriority = useCallback(async (priority: IssuePriority) => {
-    if (!issue || priority === issue.priority) return;
-    await updateIssue.mutateAsync({ id: issue.id, priority });
-  }, [issue, updateIssue]);
-
-  const changeAssignee = useCallback(async (
-    assigneeType: IssueAssigneeType | null,
-    assigneeId: string | null,
-  ) => {
-    if (!issue) return;
-    if (assigneeType === issue.assignee_type && assigneeId === issue.assignee_id) {
-      setAssigneePickerOpen(false);
-      return;
-    }
-    setAssigneeError(null);
-    try {
-      await updateIssue.mutateAsync({
-        id: issue.id,
-        assignee_type: assigneeType,
-        assignee_id: assigneeId,
-      });
-      setAssigneePickerOpen(false);
-    } catch (err) {
-      setAssigneeError(err instanceof Error ? err.message : t("issues.unable_to_save_issue"));
-    }
-  }, [issue, t, updateIssue]);
-
-  const changeDueDate = useCallback(async (dueDate: string | null) => {
-    if (!issue || dueDate === normalizeDueDateInput(issue.due_date)) return;
-    setDueDateError(null);
-    try {
-      await updateIssue.mutateAsync({
-        id: issue.id,
-        due_date: dueDate ? dateInputToRfc3339(dueDate) : null,
-      });
-    } catch (err) {
-      setDueDateError(err instanceof Error ? err.message : t("issues.unable_to_save_issue"));
-    }
-  }, [issue, t, updateIssue]);
-
-  if (isLoading) return <LoadingState />;
-  if (isError || !issue) return <EmptyState title={t("issues.unable_to_load_properties")} />;
-
-  return (
-    <Screen padded={false} safeArea={false}>
-      <ScreenTitleBar onBack={() => navigation.goBack()} title={`${issue.identifier} ${t("issues.properties")}`} />
-      <ScrollView
-        contentContainerStyle={[
-          styles.propertiesContent,
-          { paddingBottom: Math.max(insets.bottom, spacing.lg) },
-        ]}
-      >
-        <View style={styles.propertiesBlock}>
-          <View style={styles.propertiesBlockHeader}>
-            <Text style={styles.propertiesBlockTitle}>{t("issues.properties")}</Text>
-            <Text style={styles.metadataSummary}>
-              {formatIssueStatus(t, issue.status)} / {formatIssuePriority(t, issue.priority)}
-            </Text>
-          </View>
-          <View style={styles.metadataBody}>
-            <Property label={t("issues.status")}>
-              <OptionRow>
-                {ALL_STATUSES.map((status) => (
-                  <Chip
-                    active={issue.status === status}
-                    key={status}
-                    label={formatIssueStatus(t, status)}
-                    onPress={() => void changeStatus(status)}
-                  />
-                ))}
-              </OptionRow>
-            </Property>
-            <Property label={t("issues.priority")}>
-              <OptionRow>
-                {PRIORITY_ORDER.map((priority) => (
-                  <Chip
-                    active={issue.priority === priority}
-                    key={priority}
-                    label={formatIssuePriority(t, priority)}
-                    onPress={() => void changePriority(priority)}
-                  />
-                ))}
-              </OptionRow>
-            </Property>
-            <Property label={t("issues.assignee")}>
-              <Pressable
-                accessibilityRole="button"
-                disabled={updateIssue.isPending}
-                onPress={() => {
-                  setAssigneeError(null);
-                  setAssigneePickerOpen(true);
-                }}
-                style={({ pressed }) => [
-                  styles.propertySelectTrigger,
-                  pressed && styles.buttonPressed,
-                  updateIssue.isPending && styles.disabledAction,
-                ]}
-              >
-                <Text
-                  numberOfLines={1}
-                  style={[
-                    styles.propertySelectText,
-                    !issue.assignee_id && styles.propertySelectPlaceholder,
-                  ]}
-                >
-                  {assigneeLabel}
-                </Text>
-                <Text style={styles.propertySelectMeta}>
-                  {updateIssue.isPending ? t("issues.saving") : t("issues.select")}
-                </Text>
-              </Pressable>
-            </Property>
-            <Property label={t("issues.creator")}>
-              <Text style={styles.value}>
-                {getActorName(issue.creator_type, issue.creator_id)}
-              </Text>
-            </Property>
-            <Property label={t("issues.due_date")}>
-              <Pressable
-                accessibilityRole="button"
-                disabled={updateIssue.isPending}
-                onPress={() => setDatePickerOpen(true)}
-                style={({ pressed }) => [
-                  styles.dueDateTrigger,
-                  pressed && styles.buttonPressed,
-                  updateIssue.isPending && styles.disabledAction,
-                ]}
-              >
-                <Text
-                  numberOfLines={1}
-                  style={[
-                    styles.dueDateTriggerText,
-                    !issue.due_date && styles.dueDatePlaceholder,
-                  ]}
-                >
-                  {issue.due_date ? formatDueDateLabel(issue.due_date) : t("issues.no_due_date")}
-                </Text>
-                <Text style={styles.dueDateTriggerMeta}>
-                  {updateIssue.isPending ? t("issues.saving") : t("issues.select")}
-                </Text>
-              </Pressable>
-              {dueDateError ? <Text style={styles.errorText}>{dueDateError}</Text> : null}
-            </Property>
-          </View>
-        </View>
-
-        {issue.parent_issue_id ? (
-          <View style={styles.propertiesBlock}>
-            <View style={styles.propertiesBlockHeader}>
-              <Text style={styles.propertiesBlockTitle}>{t("issues.parent_issue")}</Text>
-            </View>
-            <Pressable
-              disabled={!parentIssue}
-              onPress={() => navigation.push("IssueDetail", { issueId: issue.parent_issue_id! })}
-              style={({ pressed }) => [
-                styles.childRow,
-                pressed && parentIssue && styles.buttonPressed,
-              ]}
-            >
-              {parentIssue ? (
-                <>
-                  <Text style={styles.childIdentifier}>{parentIssue.identifier}</Text>
-                  <Text style={styles.childTitle}>{parentIssue.title}</Text>
-                </>
-              ) : (
-                <Text style={styles.attachmentMeta}>
-                  {parentIssueLoading ? t("issues.loading_parent_issue") : t("issues.unable_to_load_parent_issue")}
-                </Text>
-              )}
-            </Pressable>
-          </View>
-        ) : null}
-
-        {children.length > 0 ? (
-          <View style={styles.propertiesBlock}>
-            <View style={styles.propertiesBlockHeader}>
-              <Text style={styles.propertiesBlockTitle}>{t("issues.child_issues")}</Text>
-              <Text style={styles.stickySectionCount}>{children.length}</Text>
-            </View>
-            <View style={styles.relationList}>
-              {children.map((child) => (
-                <Pressable
-                  key={child.id}
-                  onPress={() => navigation.push("IssueDetail", { issueId: child.id })}
-                  style={({ pressed }) => [
-                    styles.childRow,
-                    pressed && styles.buttonPressed,
-                  ]}
-                >
-                  <Text style={styles.childIdentifier}>{child.identifier}</Text>
-                  <Text style={styles.childTitle}>{child.title}</Text>
-                  {childProgress?.get(child.id) ? (
-                    <Text style={styles.attachmentMeta}>
-                      {t("issues.child_progress", {
-                        done: childProgress.get(child.id)?.done,
-                        total: childProgress.get(child.id)?.total,
-                      })}
-                    </Text>
-                  ) : null}
-                </Pressable>
-              ))}
-            </View>
-          </View>
-        ) : null}
-      </ScrollView>
-      <DatePickerModal
-        onChange={(dueDate) => void changeDueDate(dueDate)}
-        onClose={() => setDatePickerOpen(false)}
-        open={datePickerOpen}
-        value={issue.due_date}
-      />
-      <AssigneePickerSheet
-        agents={agents}
-        bottomInset={insets.bottom}
-        currentAssigneeId={issue.assignee_id}
-        currentAssigneeType={issue.assignee_type}
-        currentMemberRole={currentMemberRole}
-        error={assigneeError}
-        members={members}
-        onChange={(assigneeType, assigneeId) => void changeAssignee(assigneeType, assigneeId)}
-        onClose={() => {
-          setAssigneePickerOpen(false);
-          setAssigneeError(null);
-        }}
-        open={assigneePickerOpen}
-        saving={updateIssue.isPending}
-        userId={userId ?? null}
-      />
-    </Screen>
-  );
-}
-
-function AssigneePickerSheet({
-  agents,
-  bottomInset,
-  currentAssigneeId,
-  currentAssigneeType,
-  currentMemberRole,
-  error,
-  members,
-  onChange,
-  onClose,
-  open,
-  saving,
-  userId,
-}: {
-  agents: Agent[];
-  bottomInset: number;
-  currentAssigneeId: string | null;
-  currentAssigneeType: IssueAssigneeType | null;
-  currentMemberRole: MemberWithUser["role"] | null;
-  error: string | null;
-  members: MemberWithUser[];
-  onChange: (assigneeType: IssueAssigneeType | null, assigneeId: string | null) => void;
-  onClose: () => void;
-  open: boolean;
-  saving: boolean;
-  userId: string | null;
-}) {
-  const { t } = useTranslation();
-  const [query, setQuery] = useState("");
-  const keyboardHeight = useKeyboardHeight(open);
-  const { height: windowHeight } = useWindowDimensions();
-  const sheetMaxHeight = Math.max(0, windowHeight - keyboardHeight - spacing.xl);
-  const sheetBottomPadding = keyboardHeight > 0 ? spacing.md : Math.max(bottomInset, spacing.md);
-
-  useEffect(() => {
-    if (!open) setQuery("");
-  }, [open]);
-
-  const normalizedQuery = query.trim().toLowerCase();
-  const memberOptions = useMemo<AssigneeOption[]>(
-    () => members
-      .filter((member) => {
-        const haystack = `${member.name} ${member.email}`.toLowerCase();
-        return !normalizedQuery || haystack.includes(normalizedQuery);
-      })
-      .map((member) => ({
-        type: "member",
-        id: member.user_id,
-        label: member.name,
-        subtitle: member.email,
-      })),
-    [members, normalizedQuery],
-  );
-  const agentOptions = useMemo<AssigneeOption[]>(
-    () => agents
-      .filter((agent) => isAgentSelectable(agent, userId))
-      .filter((agent) => canAssignAgentToIssue(agent, {
-        userId,
-        role: currentMemberRole,
-      }).allowed)
-      .filter((agent) => {
-        const haystack = agent.name.toLowerCase();
-        return !normalizedQuery || haystack.includes(normalizedQuery);
-      })
-      .map((agent) => ({
-        type: "agent",
-        id: agent.id,
-        label: agent.name,
-        subtitle: formatAgentStatus(t, agent.status),
-      })),
-    [agents, currentMemberRole, normalizedQuery, t, userId],
-  );
-  const hasResults = memberOptions.length > 0 || agentOptions.length > 0;
-
-  return (
-    <Modal
-      animationType="fade"
-      onRequestClose={onClose}
-      transparent
-      visible={open}
-    >
-      <View style={styles.sheetKeyboardView}>
-        <Pressable style={styles.sheetBackdrop} onPress={onClose} />
-        <View style={[
-          styles.sheet,
-          {
-            marginBottom: keyboardHeight,
-            maxHeight: sheetMaxHeight,
-            paddingBottom: sheetBottomPadding,
-          },
-        ]}>
-          <View style={styles.sheetHandle} />
-          <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>{t("issues.assignee")}</Text>
-            <Button disabled={saving} onPress={onClose} variant="ghost">
-              {t("common.close")}
-            </Button>
-          </View>
-          <TextInput
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={!saving}
-            onChangeText={setQuery}
-            placeholder={t("issues.search_assignees")}
-            placeholderTextColor={colors.mutedForeground}
-            style={styles.assigneeSearchInput}
-            value={query}
-          />
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
-          <ScrollView
-            keyboardShouldPersistTaps="handled"
-            style={styles.assigneePickerList}
-          >
-            <AssigneeOptionRow
-              active={!currentAssigneeType && !currentAssigneeId}
-              disabled={saving}
-              label={t("issues.unassigned")}
-              onPress={() => onChange(null, null)}
-            />
-            {memberOptions.length > 0 ? (
-              <AssigneeOptionSection
-                currentAssigneeId={currentAssigneeId}
-                currentAssigneeType={currentAssigneeType}
-                disabled={saving}
-                label={t("issues.members")}
-                onChange={onChange}
-                options={memberOptions}
-              />
-            ) : null}
-            {agentOptions.length > 0 ? (
-              <AssigneeOptionSection
-                currentAssigneeId={currentAssigneeId}
-                currentAssigneeType={currentAssigneeType}
-                disabled={saving}
-                label={t("issues.agents")}
-                onChange={onChange}
-                options={agentOptions}
-              />
-            ) : null}
-            {!hasResults ? (
-              <Text style={styles.assigneeEmptyText}>{t("common.no_results")}</Text>
-            ) : null}
-          </ScrollView>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-function AssigneeOptionSection({
-  currentAssigneeId,
-  currentAssigneeType,
-  disabled,
-  label,
-  onChange,
-  options,
-}: {
-  currentAssigneeId: string | null;
-  currentAssigneeType: IssueAssigneeType | null;
-  disabled: boolean;
-  label: string;
-  onChange: (assigneeType: IssueAssigneeType, assigneeId: string) => void;
-  options: AssigneeOption[];
-}) {
-  return (
-    <View style={styles.assigneeSection}>
-      <Text style={styles.assigneeSectionTitle}>{label}</Text>
-      {options.map((option) => (
-        <AssigneeOptionRow
-          active={currentAssigneeType === option.type && currentAssigneeId === option.id}
-          disabled={disabled}
-          key={`${option.type}:${option.id}`}
-          label={option.label}
-          onPress={() => onChange(option.type, option.id)}
-          subtitle={option.subtitle}
-        />
-      ))}
-    </View>
-  );
-}
-
-function AssigneeOptionRow({
-  active,
-  disabled,
-  label,
-  onPress,
-  subtitle,
-}: {
-  active: boolean;
-  disabled: boolean;
-  label: string;
-  onPress: () => void;
-  subtitle?: string;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.assigneeOption,
-        active && styles.assigneeOptionActive,
-        pressed && styles.buttonPressed,
-        disabled && styles.disabledAction,
-      ]}
-    >
-      <View style={styles.assigneeOptionTextGroup}>
-        <Text
-          numberOfLines={1}
-          style={[styles.assigneeOptionLabel, active && styles.assigneeOptionLabelActive]}
-        >
-          {label}
-        </Text>
-        {subtitle ? (
-          <Text numberOfLines={1} style={styles.assigneeOptionSubtitle}>
-            {subtitle}
-          </Text>
-        ) : null}
-      </View>
-    </Pressable>
-  );
-}
 
 function IssueActionsMenu({
   onClose,
@@ -2042,43 +1555,6 @@ function buildCommentRows(threads: CommentThread[]): CommentListRow[] {
   ]);
 }
 
-function Property({
-  children,
-  label,
-}: {
-  children: React.ReactNode;
-  label: string;
-}) {
-  return (
-    <View style={styles.property}>
-      <Text style={styles.propertyLabel}>{label}</Text>
-      <View style={styles.propertyValue}>{children}</View>
-    </View>
-  );
-}
-
-function OptionRow({ children }: { children: React.ReactNode }) {
-  return <View style={styles.optionRow}>{children}</View>;
-}
-
-function Chip({
-  active,
-  label,
-  onPress,
-}: {
-  active: boolean;
-  label: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={[styles.chip, active && styles.chipActive]}
-    >
-      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
-    </Pressable>
-  );
-}
 
 function ThreadReplyFooter({
   onReply,
@@ -3054,6 +2530,38 @@ const styles = StyleSheet.create({
     color: colors.mutedForeground,
     fontSize: 14,
   },
+  issueEngagementRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  subscribeButton: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    justifyContent: "center",
+    marginLeft: "auto",
+    minHeight: 36,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  subscribeButtonActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  subscribeButtonDisabled: {
+    opacity: 0.6,
+  },
+  subscribeButtonText: {
+    color: colors.foreground,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  subscribeButtonTextActive: {
+    color: colors.primaryForeground,
+  },
   errorText: {
     color: colors.destructive,
     fontSize: 14,
@@ -3184,6 +2692,50 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "500",
   },
+  labelTrigger: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "space-between",
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    width: "100%",
+  },
+  labelChipList: {
+    flex: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    minWidth: 0,
+  },
+  issueLabelChip: {
+    alignItems: "center",
+    backgroundColor: colors.muted,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.xs,
+    maxWidth: "100%",
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+  },
+  issueLabelChipDot: {
+    borderRadius: 4,
+    height: 8,
+    width: 8,
+  },
+  issueLabelChipText: {
+    color: colors.foreground,
+    flexShrink: 1,
+    fontSize: 12,
+    fontWeight: "500",
+  },
   disabledAction: {
     opacity: 0.6,
   },
@@ -3251,6 +2803,39 @@ const styles = StyleSheet.create({
     fontSize: 14,
     paddingVertical: spacing.lg,
     textAlign: "center",
+  },
+  parentSearchLoading: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "center",
+    paddingVertical: spacing.lg,
+  },
+  parentIssueOptionHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    minWidth: 0,
+  },
+  parentIssueStatusDot: {
+    borderRadius: 4,
+    height: 8,
+    width: 8,
+  },
+  labelOptionSwatch: {
+    borderRadius: 6,
+    height: 12,
+    width: 12,
+  },
+  labelOptionName: {
+    flex: 1,
+    minWidth: 0,
+  },
+  labelOptionSelected: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "600",
+    marginLeft: "auto",
   },
   sectionTitle: {
     color: colors.foreground,
@@ -3686,6 +3271,8 @@ const styles = StyleSheet.create({
     padding: spacing.md,
   },
   reactionRow: {
+    alignItems: "center",
+    flex: 1,
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.sm,

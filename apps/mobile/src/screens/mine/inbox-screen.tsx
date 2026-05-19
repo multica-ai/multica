@@ -1,15 +1,17 @@
-import { useMemo } from "react";
-import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { useMemo, useState } from "react";
+import { Alert, FlatList, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useTranslation } from "react-i18next";
-import { Archive, ChevronLeft, Inbox as InboxIcon } from "lucide-react-native";
+import { Archive, ChevronLeft, Inbox as InboxIcon, MoreHorizontal } from "lucide-react-native";
 import {
   deduplicateInboxItems,
   formatInboxDetailText,
   formatInboxTimeAgo,
+  useArchiveAllInbox,
   useInboxList,
   useArchiveInbox,
+  useMarkAllInboxRead,
   useMarkInboxRead,
 } from "@multica/core/inbox";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -26,6 +28,7 @@ export function InboxScreen() {
   const navigation = useNavigation<InboxNavigation>();
   const { workspace } = useMobileWorkspace();
   const { getActorName, getActorInitials } = useActorName();
+  const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
   const {
     data: rawItems = [],
     isError,
@@ -36,7 +39,10 @@ export function InboxScreen() {
   const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
   const markRead = useMarkInboxRead();
   const archive = useArchiveInbox();
+  const markAllRead = useMarkAllInboxRead();
+  const archiveAll = useArchiveAllInbox();
   const unreadCount = items.filter((item) => !item.read).length;
+  const bulkActionPending = markAllRead.isPending || archiveAll.isPending;
 
   const openItem = (item: InboxItem) => {
     if (!item.read) markRead.mutate(item.id);
@@ -49,6 +55,43 @@ export function InboxScreen() {
 
   const archiveItem = (item: InboxItem) => {
     archive.mutate(item.id);
+  };
+
+  const confirmMarkAllRead = () => {
+    if (markAllRead.isPending) return;
+    setBulkMenuOpen(false);
+    Alert.alert(
+      t("inbox.mark_all_read_confirm_title"),
+      t("inbox.mark_all_read_confirm_description"),
+      [
+        { text: t("common.cancel"), style: "cancel" },
+        {
+          text: t("inbox.mark_all_read_confirm"),
+          onPress: () => {
+            markAllRead.mutate();
+          },
+        },
+      ],
+    );
+  };
+
+  const confirmArchiveAll = () => {
+    if (archiveAll.isPending) return;
+    setBulkMenuOpen(false);
+    Alert.alert(
+      t("inbox.archive_all_confirm_title"),
+      t("inbox.archive_all_confirm_description"),
+      [
+        { text: t("common.cancel"), style: "cancel" },
+        {
+          text: t("inbox.archive_all_confirm"),
+          style: "destructive",
+          onPress: () => {
+            archiveAll.mutate();
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -66,8 +109,22 @@ export function InboxScreen() {
           <Text style={styles.title}>{t("inbox.title")}</Text>
           {unreadCount > 0 ? <Text style={styles.count}>{unreadCount}</Text> : null}
         </View>
-        <View style={styles.iconButton} />
+        <Pressable
+          accessibilityLabel={t("inbox.bulk_actions")}
+          accessibilityRole="button"
+          onPress={() => setBulkMenuOpen(true)}
+          style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+        >
+          <MoreHorizontal color={colors.foreground} size={22} />
+        </Pressable>
       </View>
+      <InboxBulkMenu
+        disabled={bulkActionPending}
+        onArchiveAll={confirmArchiveAll}
+        onClose={() => setBulkMenuOpen(false)}
+        onMarkAllRead={confirmMarkAllRead}
+        open={bulkMenuOpen}
+      />
       {isLoading ? <LoadingState /> : null}
       {isError ? (
         <EmptyState detail={t("common.pull_to_retry")} title={t("inbox.unable_to_load")} />
@@ -94,6 +151,72 @@ export function InboxScreen() {
         />
       ) : null}
     </Screen>
+  );
+}
+
+function InboxBulkMenu({
+  disabled,
+  onArchiveAll,
+  onClose,
+  onMarkAllRead,
+  open,
+}: {
+  disabled: boolean;
+  onArchiveAll: () => void;
+  onClose: () => void;
+  onMarkAllRead: () => void;
+  open: boolean;
+}) {
+  const { t } = useTranslation();
+  if (!open) return null;
+  return (
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible>
+      <View style={styles.menuModalOverlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={styles.bulkDropdown}>
+          <DropdownItem
+            disabled={disabled}
+            label={t("inbox.mark_all_read")}
+            onPress={onMarkAllRead}
+          />
+          <DropdownItem
+            destructive
+            disabled={disabled}
+            label={t("inbox.archive_all")}
+            onPress={onArchiveAll}
+          />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function DropdownItem({
+  destructive,
+  disabled,
+  label,
+  onPress,
+}: {
+  destructive?: boolean;
+  disabled?: boolean;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.dropdownItem,
+        pressed && !disabled && styles.pressed,
+        disabled && styles.dropdownItemDisabled,
+      ]}
+    >
+      <Text style={[styles.dropdownItemText, destructive && styles.dropdownItemTextDestructive]}>
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -201,6 +324,40 @@ const styles = StyleSheet.create({
     color: colors.mutedForeground,
     fontSize: 13,
     fontWeight: "500",
+  },
+  menuModalOverlay: {
+    flex: 1,
+  },
+  bulkDropdown: {
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    minWidth: 168,
+    overflow: "hidden",
+    position: "absolute",
+    right: spacing.md,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.14,
+    shadowRadius: 20,
+    top: 52,
+  },
+  dropdownItem: {
+    minHeight: 44,
+    justifyContent: "center",
+    paddingHorizontal: spacing.md,
+  },
+  dropdownItemDisabled: {
+    opacity: 0.5,
+  },
+  dropdownItemText: {
+    color: colors.foreground,
+    fontSize: 15,
+    fontWeight: "500",
+  },
+  dropdownItemTextDestructive: {
+    color: colors.destructive,
   },
   list: {
     paddingVertical: spacing.sm,

@@ -665,6 +665,7 @@ export class ApiClient {
     if (params?.project_id) search.set("project_id", params.project_id);
     if (params?.project_ids?.length) search.set("project_ids", params.project_ids.join(","));
     if (params?.include_no_project) search.set("include_no_project", "true");
+    if (params?.label_ids?.length) search.set("label_ids", params.label_ids.join(","));
     if (params?.open_only) search.set("open_only", "true");
     const path = `/api/issues?${search}`;
     const raw = await this.fetch<unknown>(path);
