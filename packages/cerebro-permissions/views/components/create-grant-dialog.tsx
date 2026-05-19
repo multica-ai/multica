@@ -115,8 +115,10 @@ export function CreateGrantDialog({ wsId: _wsId, onClose }: CreateGrantDialogPro
       await create.mutateAsync(body);
       toast.success("Grant oprettet");
       onClose();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Kunne ikke oprette grant");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Kunne ikke oprette grant",
+      );
     }
   };
 
@@ -131,6 +133,13 @@ export function CreateGrantDialog({ wsId: _wsId, onClose }: CreateGrantDialogPro
           </DialogDescription>
         </DialogHeader>
 
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void handleSubmit();
+          }}
+          noValidate
+        >
         <div className="grid gap-4 py-2 text-sm">
           <div className="grid grid-cols-3 gap-2">
             <Field label="Subjekt-type">
@@ -274,13 +283,19 @@ export function CreateGrantDialog({ wsId: _wsId, onClose }: CreateGrantDialogPro
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={create.isPending}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onClose}
+            disabled={create.isPending}
+          >
             Annullér
           </Button>
-          <Button onClick={handleSubmit} disabled={!canSubmit}>
+          <Button type="submit" disabled={!canSubmit}>
             {create.isPending ? "Opretter…" : "Opret grant"}
           </Button>
         </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

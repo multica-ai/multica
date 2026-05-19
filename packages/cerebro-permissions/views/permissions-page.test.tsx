@@ -230,6 +230,39 @@ describe("PermissionsPage", () => {
     );
   }, 10_000);
 
+  it("create-grant dialog renders a submit-button form so create fires on submit", async () => {
+    // Regression: JEH-1529 — earlier code wired `onClick={handleSubmit}`
+    // directly on a free-standing button, which silently swallowed the
+    // click in real browsers (Tines QA: dialog closed but no POST hit
+    // the backend). The fix is to mount the inputs in a real `<form>`
+    // with `onSubmit={handleSubmit}` and a `type="submit"` button so
+    // both pointer clicks and the Enter key always trigger the mutation.
+    // This test asserts the structural contract; the actual submission
+    // path is exercised end-to-end by QA because Base UI's Input +
+    // portal + Select internals make jsdom's pointer simulation
+    // unreliable for the click-then-mutate path.
+    const user = userEvent.setup();
+    mockListGrants.mockResolvedValueOnce({
+      items: [],
+      total: 0,
+      limit: 50,
+      offset: 0,
+    });
+    const { ui } = makePage();
+    render(ui);
+
+    await user.click(screen.getByRole("button", { name: /Nyt grant/i }));
+    await screen.findByRole("heading", { name: /Nyt grant/i });
+
+    const submitBtn = screen.getByRole("button", {
+      name: /^Opret grant$/,
+    }) as HTMLButtonElement;
+    expect(submitBtn.type).toBe("submit");
+    const form = submitBtn.closest("form");
+    expect(form).not.toBeNull();
+    expect(form?.tagName).toBe("FORM");
+  }, 10_000);
+
   it("falls back to an empty list when the API returns malformed data", async () => {
     // parseWithFallback should swallow the bad shape and the page should
     // still render — the boundary defense from CLAUDE.md.
