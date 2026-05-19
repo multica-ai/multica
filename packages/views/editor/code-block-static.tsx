@@ -1,5 +1,3 @@
-/// <reference path="./hast-util-to-html.d.ts" />
-
 "use client";
 
 /**
