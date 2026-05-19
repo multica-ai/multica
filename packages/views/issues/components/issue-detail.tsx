@@ -1516,10 +1516,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 {breadcrumbProject ? (
                   <AppLink
                     href={paths.projectDetail(breadcrumbProject.id)}
-                    className="flex items-center gap-1 min-w-0 text-muted-foreground hover:text-foreground transition-colors"
+                    className="flex items-center gap-1 min-w-0 max-w-72 text-muted-foreground hover:text-foreground transition-colors"
                   >
                     <ProjectIcon project={breadcrumbProject} size="sm" />
-                    <span className="truncate">{breadcrumbProject.title}</span>
+                    <span className="min-w-0 truncate">{breadcrumbProject.title}</span>
                   </AppLink>
                 ) : breadcrumbProjectError ? (
                   <span className="italic text-muted-foreground/70 shrink-0">
