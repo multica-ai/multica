@@ -225,6 +225,10 @@ install_cli_binary() {
 
   if mv "$staged_binary" "$CLI_BIN_PATH"; then
     rm -f "$backup_path"
+    # macOS: ad-hoc sign to prevent Gatekeeper from killing the binary
+    if [ "$(uname -s)" = "Darwin" ]; then
+      codesign --force --sign - "$CLI_BIN_PATH" 2>/dev/null || true
+    fi
   else
     if [ "$had_existing_cli" -eq 1 ] && [ -e "$backup_path" ]; then
       mv "$backup_path" "$CLI_BIN_PATH" || true
