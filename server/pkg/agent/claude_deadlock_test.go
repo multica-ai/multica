@@ -62,17 +62,13 @@ func runFakeClaudeStartupStdoutBurst() {
 
 func runFakeClaudeControlRequest() {
 	reader := bufio.NewReader(os.Stdin)
-	if _, err := reader.ReadString('\n'); err != nil {
-		fmt.Fprintf(os.Stderr, "read prompt: %v\n", err)
-		os.Exit(21)
-	}
 	fmt.Println(`{"type":"system","session_id":"sess-control"}`)
 	fmt.Println(`{"type":"control_request","request_id":"req-42","request":{"subtype":"tool_use","tool_name":"Bash","input":{"command":"pwd"}}}`)
 
 	line, err := reader.ReadString('\n')
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "read control response: %v\n", err)
-		os.Exit(22)
+		os.Exit(21)
 	}
 	var resp struct {
 		Type     string `json:"type"`
@@ -82,11 +78,11 @@ func runFakeClaudeControlRequest() {
 	}
 	if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &resp); err != nil {
 		fmt.Fprintf(os.Stderr, "decode control response: %v\n", err)
-		os.Exit(23)
+		os.Exit(22)
 	}
 	if resp.Type != "control_response" || resp.Response.RequestID != "req-42" {
 		fmt.Fprintf(os.Stderr, "unexpected control response: %s\n", line)
-		os.Exit(24)
+		os.Exit(23)
 	}
 	fmt.Println(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"approved"}]}}`)
 	fmt.Println(`{"type":"result","subtype":"success","is_error":false,"session_id":"sess-control","result":"done after control"}`)
@@ -94,17 +90,13 @@ func runFakeClaudeControlRequest() {
 
 func runFakeClaudeBackgroundControlRequest() {
 	reader := bufio.NewReader(os.Stdin)
-	if _, err := reader.ReadString('\n'); err != nil {
-		fmt.Fprintf(os.Stderr, "read prompt: %v\n", err)
-		os.Exit(31)
-	}
 	fmt.Println(`{"type":"system","session_id":"sess-background-control"}`)
 	fmt.Println(`{"type":"control_request","request_id":"req-bg","request":{"subtype":"tool_use","tool_name":"Bash","input":{"command":"sleep 60","run_in_background":true}}}`)
 
 	line, err := reader.ReadString('\n')
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "read control response: %v\n", err)
-		os.Exit(32)
+		os.Exit(31)
 	}
 	var resp struct {
 		Type     string `json:"type"`
@@ -117,15 +109,15 @@ func runFakeClaudeBackgroundControlRequest() {
 	}
 	if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &resp); err != nil {
 		fmt.Fprintf(os.Stderr, "decode control response: %v\n", err)
-		os.Exit(33)
+		os.Exit(32)
 	}
 	if resp.Type != "control_response" || resp.Response.RequestID != "req-bg" {
 		fmt.Fprintf(os.Stderr, "unexpected control response: %s\n", line)
-		os.Exit(34)
+		os.Exit(33)
 	}
 	if runInBackground, ok := resp.Response.Response.UpdatedInput["run_in_background"].(bool); !ok || runInBackground {
 		fmt.Fprintf(os.Stderr, "expected foreground updatedInput, got: %s\n", line)
-		os.Exit(35)
+		os.Exit(34)
 	}
 
 	fmt.Println(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-bg","content":"foreground completed"}]}}`)
@@ -133,11 +125,6 @@ func runFakeClaudeBackgroundControlRequest() {
 }
 
 func runFakeClaudeAsyncLaunchedToolResult() {
-	reader := bufio.NewReader(os.Stdin)
-	if _, err := reader.ReadString('\n'); err != nil {
-		fmt.Fprintf(os.Stderr, "read prompt: %v\n", err)
-		os.Exit(41)
-	}
 	fmt.Println(`{"type":"system","session_id":"sess-async-launched"}`)
 	fmt.Println(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-async","content":{"status":"async_launched","message":"background task launched"}}]}}`)
 	fmt.Println(`{"type":"result","subtype":"success","is_error":false,"session_id":"sess-async-launched","result":"parent turn completed early"}`)

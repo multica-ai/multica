@@ -310,11 +310,14 @@ func TestTrySendDropsWhenFull(t *testing.T) {
 func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
 	t.Parallel()
 
-	args := buildClaudeArgs(ExecOptions{}, slog.Default())
+	args, transport := buildClaudeArgs("say pong", ExecOptions{}, slog.Default())
+	if transport != claudePromptArgv {
+		t.Fatalf("expected argv prompt transport, got %v", transport)
+	}
 	expected := []string{
 		"-p",
+		"say pong",
 		"--output-format", "stream-json",
-		"--input-format", "stream-json",
 		"--verbose",
 		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
@@ -328,6 +331,57 @@ func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
 		if args[i] != want {
 			t.Fatalf("expected args[%d] = %q, got %q", i, want, args[i])
 		}
+	}
+}
+
+func TestBuildClaudeArgsResumeUsesStreamJSONStdin(t *testing.T) {
+	t.Parallel()
+
+	args, transport := buildClaudeArgs("next turn", ExecOptions{ResumeSessionID: "sess-123"}, slog.Default())
+	if transport != claudePromptStdin {
+		t.Fatalf("expected stdin prompt transport, got %v", transport)
+	}
+	joined := strings.Join(args, "\n")
+	if strings.Contains(joined, "next turn") {
+		t.Fatalf("resume prompt must not be passed via argv: %v", args)
+	}
+	if !containsArgPair(args, "--input-format", "stream-json") {
+		t.Fatalf("resume mode should keep stream-json stdin args: %v", args)
+	}
+	if !containsArgPair(args, "--resume", "sess-123") {
+		t.Fatalf("resume mode should pass session id: %v", args)
+	}
+}
+
+func TestBuildClaudeArgsLargeFreshPromptFallsBackToStreamJSONStdin(t *testing.T) {
+	t.Parallel()
+
+	prompt := strings.Repeat("x", claudeArgvPromptMaxBytes+1)
+	args, transport := buildClaudeArgs(prompt, ExecOptions{}, slog.Default())
+	if transport != claudePromptStdin {
+		t.Fatalf("expected large prompt to use stdin transport, got %v", transport)
+	}
+	if containsArg(args, prompt) {
+		t.Fatalf("large prompt must not be passed via argv")
+	}
+	if !containsArgPair(args, "--input-format", "stream-json") {
+		t.Fatalf("stdin fallback should include input-format: %v", args)
+	}
+}
+
+func TestClaudeArgsForLogRedactsArgvPrompt(t *testing.T) {
+	t.Parallel()
+
+	args := []string{"-p", "secret issue context", "--output-format", "stream-json"}
+	logArgs := claudeArgsForLog(args, claudePromptArgv)
+	if containsArg(logArgs, "secret issue context") {
+		t.Fatalf("expected prompt to be redacted from logged args: %v", logArgs)
+	}
+	if logArgs[1] != "<prompt:20 bytes>" {
+		t.Fatalf("unexpected redacted prompt marker: %v", logArgs)
+	}
+	if args[1] != "secret issue context" {
+		t.Fatalf("logging helper must not mutate command args: %v", args)
 	}
 }
 
@@ -432,7 +486,7 @@ func TestFilterCustomArgsStripsShellQuotes(t *testing.T) {
 func TestBuildClaudeArgsPassesThroughCustomArgs(t *testing.T) {
 	t.Parallel()
 
-	args := buildClaudeArgs(ExecOptions{
+	args, _ := buildClaudeArgs("say pong", ExecOptions{
 		CustomArgs: []string{"--max-turns", "50", "--verbose"},
 	}, slog.Default())
 
@@ -451,7 +505,7 @@ func TestBuildClaudeArgsPassesThroughCustomArgs(t *testing.T) {
 func TestBuildClaudeArgsFiltersBlockedCustomArgs(t *testing.T) {
 	t.Parallel()
 
-	args := buildClaudeArgs(ExecOptions{
+	args, _ := buildClaudeArgs("say pong", ExecOptions{
 		CustomArgs: []string{"--output-format", "text", "--model", "o3"},
 	}, slog.Default())
 
@@ -608,7 +662,7 @@ func TestBuildClaudeArgsBlocksMcpConfig(t *testing.T) {
 	t.Parallel()
 
 	// --mcp-config is hardcoded by the daemon — it must not be overridable via custom_args.
-	args := buildClaudeArgs(ExecOptions{
+	args, _ := buildClaudeArgs("say pong", ExecOptions{
 		CustomArgs: []string{"--mcp-config", "/tmp/evil.json", "--model", "o3"},
 	}, slog.Default())
 
@@ -733,15 +787,13 @@ func TestClaudeExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
 
-	// Fake claude binary: reads the initial stdin frame so writeClaudeInput
-	// succeeds, writes a canonical V8-abort line to stderr, then exits
-	// non-zero before emitting any stream-json to stdout. This is the exact
-	// failure mode that motivated PR #1674 — without sampling stderrBuf.Tail()
-	// after cmd.Wait() returns, Result.Error would be a useless
-	// "exit status 3".
+	// Fake claude binary: writes a canonical V8-abort line to stderr, then
+	// exits non-zero before emitting any stream-json to stdout. This is the
+	// exact failure mode that motivated PR #1674 — without sampling
+	// stderrBuf.Tail() after cmd.Wait() returns, Result.Error would be a
+	// useless "exit status 3".
 	fakePath := filepath.Join(t.TempDir(), "claude")
 	script := "#!/bin/sh\n" +
-		"IFS= read -r _\n" +
 		"echo \"FATAL ERROR: V8 abort: assertion failed\" >&2\n" +
 		"exit 3\n"
 	writeTestExecutable(t, fakePath, []byte(script))
@@ -793,7 +845,6 @@ func TestClaudeExecuteRecordsResultModelUsage(t *testing.T) {
 
 	fakePath := filepath.Join(t.TempDir(), "claude")
 	script := "#!/bin/sh\n" +
-		"IFS= read -r _\n" +
 		"printf '%s\\n' '{\"type\":\"system\",\"session_id\":\"sess-result-usage\"}'\n" +
 		"printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"sess-result-usage\",\"result\":\"done\",\"modelUsage\":{\"zhipu/coding-plan\":{\"inputTokens\":123,\"outputTokens\":45,\"cacheReadInputTokens\":7,\"cacheCreationInputTokens\":11,\"costUSD\":0.01}}}'\n"
 	writeTestExecutable(t, fakePath, []byte(script))
@@ -831,6 +882,107 @@ func TestClaudeExecuteRecordsResultModelUsage(t *testing.T) {
 	}
 }
 
+func TestClaudeExecuteFreshPromptPassesPromptAsArgv(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	dir := t.TempDir()
+	argsPath := filepath.Join(dir, "args.txt")
+	fakePath := filepath.Join(dir, "claude")
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$@\" > '" + argsPath + "'\n" +
+		"printf '%s\\n' '{\"type\":\"system\",\"session_id\":\"sess-fresh\"}'\n" +
+		"printf '%s\\n' '{\"type\":\"result\",\"session_id\":\"sess-fresh\",\"result\":\"done\"}'\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("claude", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new claude backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "fresh prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" || result.Output != "done" {
+			t.Fatalf("unexpected result: %+v", result)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	data, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if !containsArg(args, "fresh prompt") {
+		t.Fatalf("expected prompt in argv, got %v", args)
+	}
+	if containsArg(args, "--input-format") {
+		t.Fatalf("fresh argv mode should not pass --input-format: %v", args)
+	}
+}
+
+func TestClaudeExecuteResumeStdinWriteTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	oldTimeout := claudeStdinWriteTimeout
+	claudeStdinWriteTimeout = 50 * time.Millisecond
+	t.Cleanup(func() {
+		claudeStdinWriteTimeout = oldTimeout
+	})
+
+	fakePath := filepath.Join(t.TempDir(), "claude")
+	// Replace the shell with sleep so CommandContext cancellation kills the
+	// process holding the stdio pipes instead of leaving a child sleep behind.
+	script := "#!/bin/sh\nexec sleep 5\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("claude", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new claude backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, strings.Repeat("x", 2*1024*1024), ExecOptions{
+		ResumeSessionID: "sess-existing",
+		Timeout:         2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result := <-session.Result:
+		if result.Status != "failed" {
+			t.Fatalf("expected failed result, got %+v", result)
+		}
+		if !strings.Contains(result.Error, "timed out waiting for claude stdin write") {
+			t.Fatalf("expected stdin write timeout error, got %q", result.Error)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for stdin write failure result")
+	}
+}
+
 func mustMarshal(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	data, err := json.Marshal(v)
@@ -841,7 +993,7 @@ func mustMarshal(t *testing.T, v any) json.RawMessage {
 }
 
 func TestBuildClaudeArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
-	args := buildClaudeArgs(ExecOptions{
+	args, _ := buildClaudeArgs("say pong", ExecOptions{
 		ExtraArgs:  []string{"--output-format", "text", "--max-budget-usd", "1.00"},
 		CustomArgs: []string{"--max-budget-usd", "2.00", "--permission-mode", "plan"},
 	}, slog.Default())
@@ -861,4 +1013,22 @@ func TestBuildClaudeArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
 	if extraIdx == -1 || customIdx == -1 || extraIdx > customIdx {
 		t.Fatalf("expected extra args before custom args, got %v", args)
 	}
+}
+
+func containsArg(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsArgPair(args []string, key, value string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == key && args[i+1] == value {
+			return true
+		}
+	}
+	return false
 }

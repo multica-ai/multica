@@ -638,7 +638,7 @@ func TestApplyCodexReasoningEffort_PreservesPreExistingConfig(t *testing.T) {
 
 func TestBuildClaudeArgs_InjectsEffort(t *testing.T) {
 	t.Parallel()
-	args := buildClaudeArgs(ExecOptions{Model: "claude-opus-4-7", ThinkingLevel: "xhigh"}, slog.Default())
+	args, _ := buildClaudeArgs("say pong", ExecOptions{Model: "claude-opus-4-7", ThinkingLevel: "xhigh"}, slog.Default())
 	if !containsAdjacent(args, "--effort", "xhigh") {
 		t.Errorf("expected --effort xhigh in args: %v", args)
 	}
@@ -652,7 +652,7 @@ func TestBuildClaudeArgs_InjectsEffort(t *testing.T) {
 
 func TestBuildClaudeArgs_OmitsEffortWhenEmpty(t *testing.T) {
 	t.Parallel()
-	args := buildClaudeArgs(ExecOptions{Model: "claude-sonnet-4-6"}, slog.Default())
+	args, _ := buildClaudeArgs("say pong", ExecOptions{Model: "claude-sonnet-4-6"}, slog.Default())
 	if argIndexOf(args, "--effort") >= 0 {
 		t.Errorf("expected no --effort when level empty: %v", args)
 	}
@@ -660,7 +660,7 @@ func TestBuildClaudeArgs_OmitsEffortWhenEmpty(t *testing.T) {
 
 func TestBuildClaudeArgs_BlocksUserEffortOverride(t *testing.T) {
 	t.Parallel()
-	args := buildClaudeArgs(ExecOptions{
+	args, _ := buildClaudeArgs("say pong", ExecOptions{
 		Model:         "claude-opus-4-7",
 		ThinkingLevel: "high",
 		CustomArgs:    []string{"--effort", "max", "--keep-me"},
