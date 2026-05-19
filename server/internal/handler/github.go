@@ -262,7 +262,10 @@ func (h *Handler) GitHubConnect(w http.ResponseWriter, r *http.Request) {
 // sends after a user installs (or re-authorizes) the App. We expect
 // ?installation_id=<id>&state=<signed token>. We persist the installation
 // row (workspace ↔ installation_id mapping), then bounce the user back to
-// the Settings → Integrations page in the web app.
+// the new Settings → GitHub tab in the web app (RFC MUL-2414 §4.1). The
+// previous destination was the catch-all Settings page, which after the
+// GitHub-tab split would land users on the default profile tab instead of
+// the place that shows the connection they just completed.
 func (h *Handler) GitHubSetupCallback(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	installationIDStr := q.Get("installation_id")
@@ -271,25 +274,25 @@ func (h *Handler) GitHubSetupCallback(w http.ResponseWriter, r *http.Request) {
 	if frontend == "" {
 		frontend = "http://localhost:3000"
 	}
-	settingsURL := strings.TrimRight(frontend, "/") + "/settings"
+	settingsURL := strings.TrimRight(frontend, "/") + "/settings?tab=github"
 
 	if installationIDStr == "" || state == "" {
-		http.Redirect(w, r, settingsURL+"?github_error=missing_params", http.StatusFound)
+		http.Redirect(w, r, settingsURL+"&github_error=missing_params", http.StatusFound)
 		return
 	}
 	workspaceID, ok := verifyState(state)
 	if !ok {
-		http.Redirect(w, r, settingsURL+"?github_error=invalid_state", http.StatusFound)
+		http.Redirect(w, r, settingsURL+"&github_error=invalid_state", http.StatusFound)
 		return
 	}
 	installationID, err := strconv.ParseInt(installationIDStr, 10, 64)
 	if err != nil {
-		http.Redirect(w, r, settingsURL+"?github_error=bad_installation_id", http.StatusFound)
+		http.Redirect(w, r, settingsURL+"&github_error=bad_installation_id", http.StatusFound)
 		return
 	}
 	wsUUID, err := parseStrictUUID(workspaceID)
 	if err != nil {
-		http.Redirect(w, r, settingsURL+"?github_error=bad_workspace", http.StatusFound)
+		http.Redirect(w, r, settingsURL+"&github_error=bad_workspace", http.StatusFound)
 		return
 	}
 	// Resolve the installation against GitHub's API to capture display info.
@@ -318,13 +321,13 @@ func (h *Handler) GitHubSetupCallback(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		slog.Error("github: failed to persist installation", "err", err, "installation_id", installationID)
-		http.Redirect(w, r, settingsURL+"?github_error=persist_failed", http.StatusFound)
+		http.Redirect(w, r, settingsURL+"&github_error=persist_failed", http.StatusFound)
 		return
 	}
 	h.publish(protocol.EventGitHubInstallationCreated, workspaceID, "system", "", map[string]any{
 		"installation": githubInstallationToResponse(inst),
 	})
-	http.Redirect(w, r, settingsURL+"?github_connected=1", http.StatusFound)
+	http.Redirect(w, r, settingsURL+"&github_connected=1", http.StatusFound)
 }
 
 // fetchInstallationAccount tries to enrich the installation row with the
