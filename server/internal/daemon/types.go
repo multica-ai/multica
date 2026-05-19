@@ -65,9 +65,10 @@ type Task struct {
 	TriggerAuthorName        string                `json:"trigger_author_name,omitempty"`         // display name of the triggering comment author
 	NewCommentCount          int                   `json:"new_comment_count,omitempty"`           // issue-wide comments since this agent's last run (excludes its own and the injected trigger); 0/omitted for old daemons or cold start
 	NewCommentsSince         string                `json:"new_comments_since,omitempty"`          // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
+	IssueAttachments         []AttachmentMeta      `json:"issue_attachments,omitempty"`           // attachments linked to the issue; Claude embeds image attachments directly when possible
 	ChatSessionID            string                `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
 	ChatMessage              string                `json:"chat_message,omitempty"`                // user message content for chat tasks
-	ChatMessageAttachments   []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`    // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
+	ChatMessageAttachments   []AttachmentMeta      `json:"chat_message_attachments,omitempty"`    // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
 	AutopilotRunID           string                `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot run_only tasks
 	AutopilotID              string                `json:"autopilot_id,omitempty"`                // autopilot that spawned this run
 	AutopilotTitle           string                `json:"autopilot_title,omitempty"`             // autopilot title used as task context
@@ -111,12 +112,11 @@ type Task struct {
 	AuthToken string `json:"auth_token,omitempty"`
 }
 
-// ChatAttachmentMeta is the structured attachment metadata the daemon
-// hands to the agent for chat tasks. We pass id + filename + content_type
-// so the chat prompt can list them explicitly and instruct the agent to
-// run `multica attachment download <id>` instead of guessing from a
-// signed CDN URL (which expires).
-type ChatAttachmentMeta struct {
+// AttachmentMeta is the structured attachment metadata the daemon receives
+// in claim responses. We pass id + filename + content_type so prompts can
+// list attachments explicitly, and Claude can embed image files directly in
+// the initial user message instead of going through the Read tool_result path.
+type AttachmentMeta struct {
 	ID          string `json:"id"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type,omitempty"`

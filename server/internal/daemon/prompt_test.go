@@ -253,7 +253,7 @@ func TestBuildChatPromptAttachmentIDsCanBeBoundToCreatedIssues(t *testing.T) {
 	task := Task{
 		ChatSessionID: "sess-1",
 		ChatMessage:   "please create an issue with this screenshot",
-		ChatMessageAttachments: []ChatAttachmentMeta{
+		ChatMessageAttachments: []AttachmentMeta{
 			{ID: "019ec09d-6222-722b-bdfa-427b105d80be", Filename: "shot.png", ContentType: "image/png"},
 		},
 	}

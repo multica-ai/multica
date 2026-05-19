@@ -1368,6 +1368,20 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
+
+			if atts, attErr := h.Queries.ListAttachmentsByIssue(r.Context(), db.ListAttachmentsByIssueParams{
+				IssueID:     issue.ID,
+				WorkspaceID: issue.WorkspaceID,
+			}); attErr == nil && len(atts) > 0 {
+				resp.IssueAttachments = make([]AttachmentMeta, len(atts))
+				for j, a := range atts {
+					resp.IssueAttachments[j] = AttachmentMeta{
+						ID:          uuidToString(a.ID),
+						Filename:    a.Filename,
+						ContentType: a.ContentType,
+					}
+				}
+			}
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it
@@ -1529,7 +1543,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						WorkspaceID:   parseUUID(resp.WorkspaceID),
 					}); attErr == nil && len(atts) > 0 {
 						for _, a := range atts {
-							resp.ChatMessageAttachments = append(resp.ChatMessageAttachments, ChatAttachmentMeta{
+							resp.ChatMessageAttachments = append(resp.ChatMessageAttachments, AttachmentMeta{
 								ID:          uuidToString(a.ID),
 								Filename:    a.Filename,
 								ContentType: a.ContentType,
