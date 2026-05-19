@@ -258,6 +258,18 @@ export const RuntimeToolGrantsSchema = z.object({
   user_grants: z.array(RuntimeToolUserGrantSchema).default([]),
 }).loose();
 
+// CEREBRO-PATCH(agent-tool-overrides-schema): JEH-1710 bid 4 — per-agent override
+// rows. enabled=true forces the tool on for this agent; enabled=false forces it
+// off; absence of a row means inherit-from-runtime.
+const AgentToolOverrideSchema = z.object({
+  agent_id: z.string().default(""),
+  tool_name: z.string().min(1),
+  enabled: z.boolean().default(false),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const AgentToolOverrideListSchema = z.array(AgentToolOverrideSchema).default([]);
+
 // ---------------------------------------------------------------------------
 // Workspace dashboard schemas
 //

@@ -142,6 +142,7 @@ import {
   AgentToolsListSchema,
   RuntimeToolsListSchema,
   RuntimeToolGrantsSchema,
+  AgentToolOverrideListSchema,
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
   AttachmentResponseSchema,
@@ -1484,6 +1485,40 @@ export class ApiClient {
   ): Promise<void> {
     await this.fetch(
       `/api/runtimes/${runtimeId}/tools/${encodeURIComponent(toolName)}/users/${userId}`,
+      { method: "DELETE" },
+    );
+  }
+
+  // CEREBRO-PATCH(api-client-agent-tool-overrides): JEH-1710 bid 4 — per-agent
+  // override on top of the runtime-level tool grant. Same owner/admin auth as
+  // the runtime endpoints; absence of a row means inherit.
+  async listAgentToolOverrides(
+    agentId: string,
+  ): Promise<import("@multica/cerebro-types").AgentToolOverride[]> {
+    const path = `/api/agents/${agentId}/tool-overrides`;
+    const raw = await this.fetch(path);
+    return parseWithFallback(raw, AgentToolOverrideListSchema, [], {
+      endpoint: path,
+    }) as import("@multica/cerebro-types").AgentToolOverride[];
+  }
+
+  async setAgentToolOverride(
+    agentId: string,
+    toolName: string,
+    enabled: boolean,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/agents/${agentId}/tool-overrides/${encodeURIComponent(toolName)}`,
+      { method: "PUT", body: JSON.stringify({ enabled }) },
+    );
+  }
+
+  async clearAgentToolOverride(
+    agentId: string,
+    toolName: string,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/agents/${agentId}/tool-overrides/${encodeURIComponent(toolName)}`,
       { method: "DELETE" },
     );
   }

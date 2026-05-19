@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
-// CEREBRO-PATCH(agent-tools-tab-test): JEH-1359/1360 — QA regression coverage.
+// CEREBRO-PATCH(agent-tools-tab-test): JEH-1710 bid 4 — wrapper test covers
+// the local-agent branch and the cloud-agent branch's admin-gate handoff to
+// AgentToolsCard. The card itself owns the override-table assertions; this
+// test is intentionally thin.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
@@ -10,35 +14,36 @@ import enAgents from "../../../locales/en/agents.json";
 
 const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 
-const mockGetAgentTools = vi.hoisted(() => vi.fn());
-const mockUpdateAgentTool = vi.hoisted(() => vi.fn());
-const mockUseQuery = vi.hoisted(() => vi.fn());
-const mockInvalidateQueries = vi.hoisted(() => vi.fn());
-
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: (options: unknown) => mockUseQuery(options),
-  useQueryClient: () => ({
-    invalidateQueries: mockInvalidateQueries,
-  }),
-}));
+const mockUseAuthStore = vi.hoisted(() => vi.fn());
+const mockListRuntimes = vi.hoisted(() => vi.fn());
+const mockListMembers = vi.hoisted(() => vi.fn());
+const mockListRuntimeTools = vi.hoisted(() => vi.fn());
+const mockListAgentToolOverrides = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
-vi.mock("@multica/core/api", () => ({
-  api: {
-    getAgentTools: (...args: unknown[]) => mockGetAgentTools(...args),
-    updateAgentTool: (...args: unknown[]) => mockUpdateAgentTool(...args),
-  },
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector: (s: unknown) => unknown) =>
+    mockUseAuthStore(selector),
 }));
 
-vi.mock("sonner", () => ({
-  toast: {
-    error: vi.fn(),
-    success: vi.fn(),
-  },
-}));
+vi.mock("@multica/core/api", async () => {
+  const actual = await vi.importActual<typeof import("@multica/core/api")>(
+    "@multica/core/api",
+  );
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      listRuntimes: mockListRuntimes,
+      listMembers: mockListMembers,
+      listRuntimeTools: mockListRuntimeTools,
+      listAgentToolOverrides: mockListAgentToolOverrides,
+    },
+  };
+});
 
 import { CerebroToolsTab } from "./cerebro-tools-tab";
 
@@ -46,7 +51,7 @@ const baseAgent: Agent = {
   id: "agent-1",
   workspace_id: "ws-1",
   runtime_id: "runtime-1",
-  name: "Agent",
+  name: "Tine",
   description: "",
   instructions: "",
   avatar_url: null,
@@ -69,62 +74,51 @@ const baseAgent: Agent = {
 };
 
 function renderToolsTab(agent: Agent = baseAgent) {
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
-    <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <CerebroToolsTab agent={agent} />
-    </I18nProvider>,
+    <QueryClientProvider client={qc}>
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <CerebroToolsTab agent={agent} />
+      </I18nProvider>
+    </QueryClientProvider>,
   );
 }
 
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockUseAuthStore.mockReturnValue({ id: "user-1", email: "x@example.com" });
+  mockListMembers.mockResolvedValue([
+    { user_id: "user-1", role: "admin", name: "Owner", email: "x@example.com" },
+  ]);
+  mockListRuntimes.mockResolvedValue([
+    { id: "runtime-1", name: "sara-mac-mini", workspace_id: "ws-1" },
+  ]);
+  mockListRuntimeTools.mockResolvedValue([]);
+  mockListAgentToolOverrides.mockResolvedValue([]);
+});
+
 describe("CerebroToolsTab", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockGetAgentTools.mockResolvedValue([
-      {
-        name: "list_issues",
-        description: "List workspace issues.",
-        status: "implemented",
-        enabled: true,
-        config: {},
-      },
-    ]);
-    mockUseQuery.mockReturnValue({
-      data: [
-        {
-          name: "list_issues",
-          description: "List workspace issues.",
-          status: "implemented",
-          enabled: true,
-          config: {},
-        },
-      ],
-      isLoading: false,
-      isError: false,
-    });
-  });
-
-  it("loads cloud-agent tools with workspace context and renders labels", async () => {
-    renderToolsTab();
-
-    expect(screen.getByText("list_issues")).toBeInTheDocument();
-    expect(screen.getByText("List workspace issues.")).toBeInTheDocument();
-    const options = mockUseQuery.mock.calls[0]?.[0] as { queryFn: () => Promise<unknown> };
-    await options.queryFn();
-    expect(mockGetAgentTools).toHaveBeenCalledWith("agent-1", { workspace_id: "ws-1" });
-  });
-
-  it("shows the local-runtime explanation instead of the empty registry state", () => {
+  it("shows the local-runtime explanation for local agents and skips runtime/override fetches", () => {
     renderToolsTab({ ...baseAgent, runtime_mode: "local" });
 
     expect(screen.getByText("Gateway tools are cloud-only")).toBeInTheDocument();
     expect(
       screen.getByText(/These toggles only apply to cloud-runtime agents/i),
     ).toBeInTheDocument();
-    expect(screen.queryByText("No tools available")).not.toBeInTheDocument();
+    expect(mockListRuntimes).not.toHaveBeenCalled();
+    expect(mockListRuntimeTools).not.toHaveBeenCalled();
+  });
+
+  it("renders the AgentToolsCard for cloud agents (empty registry surfaces the heartbeat hint)", async () => {
+    renderToolsTab();
+
+    // The card title is rendered immediately; the empty-state hint follows
+    // once the runtime-tools fetch resolves.
+    expect(await screen.findByText(/Tools på agenten/i)).toBeInTheDocument();
     expect(
-      screen.queryByText(/No tools are registered in the gateway runtime/i),
-    ).not.toBeInTheDocument();
-    expect(mockUseQuery).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
-    expect(mockGetAgentTools).not.toHaveBeenCalled();
+      await screen.findByText(/daemon scanner ved næste heartbeat/i),
+    ).toBeInTheDocument();
   });
 });
