@@ -42,6 +42,7 @@ import {
   useIssueDetail,
   useIssueList,
   useIssueReactions,
+  useIssueSubscribers,
   useIssueTaskRuns,
   useIssueTimelineEntries,
   useLiveIssueTasks,
@@ -164,6 +165,12 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   );
   const { data: attachments = [], refetch: refetchAttachments } = useIssueAttachments(workspace.id, issueId);
   const { data: issueReactions = [] } = useIssueReactions(workspace.id, issueId);
+  const {
+    isSubscribed,
+    isToggling: togglingSubscription,
+    loading: subscribersLoading,
+    toggleSubscribe,
+  } = useIssueSubscribers(workspace.id, issueId, userId);
   const {
     tasks: liveTasks,
     cancellingTaskIds,
@@ -669,11 +676,31 @@ export function IssueDetailScreen({ navigation, route }: Props) {
               <Text style={styles.emptyText}>{t("issues.no_description")}</Text>
             )}
           </Pressable>
-          <ReactionRow
-            onToggle={handleIssueReaction}
-            reactions={issueReactions}
-            userId={userId}
-          />
+          <View style={styles.issueEngagementRow}>
+            <ReactionRow
+              onToggle={handleIssueReaction}
+              reactions={issueReactions}
+              userId={userId}
+            />
+            <Pressable
+              accessibilityRole="button"
+              disabled={!userId || subscribersLoading || togglingSubscription}
+              onPress={toggleSubscribe}
+              style={({ pressed }) => [
+                styles.subscribeButton,
+                isSubscribed && styles.subscribeButtonActive,
+                (!userId || subscribersLoading || togglingSubscription) && styles.subscribeButtonDisabled,
+                pressed && styles.buttonPressed,
+              ]}
+            >
+              <Text style={[
+                styles.subscribeButtonText,
+                isSubscribed && styles.subscribeButtonTextActive,
+              ]}>
+                {isSubscribed ? t("issues.subscribed") : t("issues.subscribe")}
+              </Text>
+            </Pressable>
+          </View>
         </View>
       ),
     },
@@ -712,6 +739,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     issue,
     issueEditError,
     issueReactions,
+    isSubscribed,
     navigation,
     openAttachmentPreview,
     openDescriptionEditor,
@@ -719,8 +747,11 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     pickImage,
     saveTitleEdit,
     startTitleEdit,
+    subscribersLoading,
     t,
     titleDraft,
+    toggleSubscribe,
+    togglingSubscription,
     uploadError,
     uploading,
     updateIssue.isPending,
@@ -2499,6 +2530,38 @@ const styles = StyleSheet.create({
     color: colors.mutedForeground,
     fontSize: 14,
   },
+  issueEngagementRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  subscribeButton: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    justifyContent: "center",
+    marginLeft: "auto",
+    minHeight: 36,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  subscribeButtonActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  subscribeButtonDisabled: {
+    opacity: 0.6,
+  },
+  subscribeButtonText: {
+    color: colors.foreground,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  subscribeButtonTextActive: {
+    color: colors.primaryForeground,
+  },
   errorText: {
     color: colors.destructive,
     fontSize: 14,
@@ -3208,6 +3271,8 @@ const styles = StyleSheet.create({
     padding: spacing.md,
   },
   reactionRow: {
+    alignItems: "center",
+    flex: 1,
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.sm,
