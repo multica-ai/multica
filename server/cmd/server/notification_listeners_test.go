@@ -1642,3 +1642,285 @@ func TestNotification_StatusChange_ReopenSurfacesNewTaskFailed(t *testing.T) {
 		t.Fatalf("expected 1 archived task_failed row preserved from prior cycle, got %d", archived)
 	}
 }
+
+// TestNotification_ReplyNotifiesParentAuthor verifies that replying to a
+// member's comment sends a "mentioned" notification to the parent author,
+// even without an explicit @mention. (OPE-856)
+func TestNotification_ReplyNotifiesParentAuthor(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	parentAuthorEmail := "notif-parent-author@multica.ai"
+	parentAuthorID := createTestUser(t, parentAuthorEmail)
+	t.Cleanup(func() { cleanupTestUser(t, parentAuthorEmail) })
+
+	replierEmail := "notif-replier@multica.ai"
+	replierID := createTestUser(t, replierEmail)
+	t.Cleanup(func() { cleanupTestUser(t, replierEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM notification_event WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	// Create a parent comment by the parent author.
+	parentCommentID := "00000000-0000-0000-0000-ae0100000001"
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, parentCommentID, issueID, testWorkspaceID, "member", parentAuthorID, "parent comment", "comment"); err != nil {
+		t.Fatalf("insert parent comment: %v", err)
+	}
+
+	// Insert the reply comment into DB (needed for notification_event FK).
+	replyCommentID := "00000000-0000-0000-0000-ae0100000002"
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type, parent_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`, replyCommentID, issueID, testWorkspaceID, "member", replierID, "thanks, I will check it", "comment", parentCommentID); err != nil {
+		t.Fatalf("insert reply comment: %v", err)
+	}
+
+	// Publish a reply event (no @mention in content).
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     replierID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         replyCommentID,
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   replierID,
+				Content:    "thanks, I will check it",
+				Type:       "comment",
+				ParentID:   &parentCommentID,
+			},
+			"issue_title":  "reply test issue",
+			"issue_status": "todo",
+			"app_origin":   "http://localhost:3000",
+		},
+	})
+
+	// Parent author should receive a "mentioned" inbox notification.
+	items := inboxItemsForRecipient(t, queries, parentAuthorID)
+	var mentionedItems []db.ListInboxItemsRow
+	for _, item := range items {
+		if item.Type == "mentioned" {
+			mentionedItems = append(mentionedItems, item)
+		}
+	}
+	if len(mentionedItems) != 1 {
+		t.Fatalf("expected 1 'mentioned' inbox item for parent author, got %d (total items: %d)", len(mentionedItems), len(items))
+	}
+
+	// Replier should NOT get a reply notification to themselves.
+	replierItems := inboxItemsForRecipient(t, queries, replierID)
+	for _, item := range replierItems {
+		if item.Type == "mentioned" {
+			t.Fatalf("replier should not get a mentioned notification from their own reply")
+		}
+	}
+}
+
+// TestNotification_ReplyToSelf_NoNotification verifies that replying to your
+// own comment does NOT produce a self-notification. (OPE-856 AC2)
+func TestNotification_ReplyToSelf_NoNotification(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	selfEmail := "notif-self-reply@multica.ai"
+	selfID := createTestUser(t, selfEmail)
+	t.Cleanup(func() { cleanupTestUser(t, selfEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	// Create a parent comment by selfID.
+	parentCommentID := "00000000-0000-0000-0000-5e1f0e010001"
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, parentCommentID, issueID, testWorkspaceID, "member", selfID, "my own comment", "comment"); err != nil {
+		t.Fatalf("insert parent comment: %v", err)
+	}
+
+	// Self-reply.
+	replyCommentID := "00000000-0000-0000-0000-5e1f0e010002"
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     selfID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         replyCommentID,
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   selfID,
+				Content:    "replying to my own comment",
+				Type:       "comment",
+				ParentID:   &parentCommentID,
+			},
+			"issue_title":  "self reply test",
+			"issue_status": "todo",
+		},
+	})
+
+	// Self should NOT get a mentioned notification.
+	items := inboxItemsForRecipient(t, queries, selfID)
+	for _, item := range items {
+		if item.Type == "mentioned" {
+			t.Fatalf("self-reply should not produce a mentioned notification")
+		}
+	}
+}
+
+// TestNotification_ReplyWithMention_NoDuplicate verifies that if the reply
+// already @mentions the parent author, no duplicate notification is sent.
+// (OPE-856 AC3)
+func TestNotification_ReplyWithMention_NoDuplicate(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	parentAuthorEmail := "notif-dedup-parent@multica.ai"
+	parentAuthorID := createTestUser(t, parentAuthorEmail)
+	t.Cleanup(func() { cleanupTestUser(t, parentAuthorEmail) })
+
+	replierEmail := "notif-dedup-replier@multica.ai"
+	replierID := createTestUser(t, replierEmail)
+	t.Cleanup(func() { cleanupTestUser(t, replierEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM notification_event WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	// Create parent comment.
+	parentCommentID := "00000000-0000-0000-0000-ded000000001"
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, parentCommentID, issueID, testWorkspaceID, "member", parentAuthorID, "original comment", "comment"); err != nil {
+		t.Fatalf("insert parent comment: %v", err)
+	}
+
+	// Insert the reply comment into DB (needed for notification_event FK).
+	replyContent := fmt.Sprintf("[@Parent](mention://member/%s) got it!", parentAuthorID)
+	replyCommentID := "00000000-0000-0000-0000-ded000000002"
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type, parent_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`, replyCommentID, issueID, testWorkspaceID, "member", replierID, replyContent, "comment", parentCommentID); err != nil {
+		t.Fatalf("insert reply comment: %v", err)
+	}
+
+	// Reply that also @mentions the parent author explicitly.
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     replierID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         replyCommentID,
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   replierID,
+				Content:    replyContent,
+				Type:       "comment",
+				ParentID:   &parentCommentID,
+			},
+			"issue_title":  "dedup test issue",
+			"issue_status": "todo",
+			"app_origin":   "http://localhost:3000",
+		},
+	})
+
+	// Parent author should receive exactly 1 "mentioned" notification (not 2).
+	items := inboxItemsForRecipient(t, queries, parentAuthorID)
+	mentionedCount := 0
+	for _, item := range items {
+		if item.Type == "mentioned" {
+			mentionedCount++
+		}
+	}
+	if mentionedCount != 1 {
+		t.Fatalf("expected exactly 1 'mentioned' inbox item (dedup), got %d", mentionedCount)
+	}
+}
+
+// TestNotification_ReplyToAgent_NoNotification verifies that replying to an
+// agent's comment does NOT trigger a notification. (OPE-856 AC4)
+func TestNotification_ReplyToAgent_NoNotification(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	replierEmail := "notif-agent-reply@multica.ai"
+	replierID := createTestUser(t, replierEmail)
+	t.Cleanup(func() { cleanupTestUser(t, replierEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	// Create a parent comment authored by an agent.
+	agentID := "00000000-0000-0000-0000-a9e000000001"
+	parentCommentID := "00000000-0000-0000-0000-a9e0000e0101"
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, parentCommentID, issueID, testWorkspaceID, "agent", agentID, "agent said something", "comment"); err != nil {
+		t.Fatalf("insert agent comment: %v", err)
+	}
+
+	// Reply to agent comment.
+	replyCommentID := "00000000-0000-0000-0000-a9e0000e0102"
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     replierID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         replyCommentID,
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   replierID,
+				Content:    "replying to an agent",
+				Type:       "comment",
+				ParentID:   &parentCommentID,
+			},
+			"issue_title":  "agent reply test",
+			"issue_status": "todo",
+		},
+	})
+
+	// No "mentioned" notification should exist for the agent or anyone else
+	// (beyond subscriber notifications which go to issue subscribers).
+	// Specifically check that no mentioned-type inbox was created for the agent.
+	agentItems, _ := queries.ListInboxItems(context.Background(), db.ListInboxItemsParams{
+		WorkspaceID:   util.MustParseUUID(testWorkspaceID),
+		RecipientType: "agent",
+		RecipientID:   util.MustParseUUID(agentID),
+	})
+	for _, item := range agentItems {
+		if item.Type == "mentioned" {
+			t.Fatalf("agent should not receive a mentioned notification from reply")
+		}
+	}
+}
