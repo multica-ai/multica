@@ -25,8 +25,8 @@ import { memberListOptions, agentListOptions } from "@multica/core/workspace/que
 import { useDeleteRuntime, useUpdateRuntimeSandbox } from "@multica/core/runtimes/mutations";
 import { deriveRuntimeHealth } from "@multica/core/runtimes";
 // CEREBRO-PATCH(runtime-detail-pause): pause/resume controls live in cerebro-runtime.
-// CEREBRO-PATCH(runtime-detail-mcp-card-import): runtime-level MCP servers card (9031) + tools card (JEH-1710).
-import { PauseRuntimeButton, PauseBanner, MCPServersCard, RuntimeToolsCard } from "@multica/cerebro-runtime/views";
+// CEREBRO-PATCH(runtime-detail-tools-card-import): runtime-level unified tools card (JEH-1710). Replaces the prior MCP servers JSON card.
+import { PauseRuntimeButton, PauseBanner, RuntimeToolsCard } from "@multica/cerebro-runtime/views";
 import {
   type AgentPresenceDetail,
   useWorkspacePresenceMap,
@@ -226,9 +226,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
               daemonShort={daemonShort}
             />
             <UsageSection runtimeId={runtime.id} />
-            {/* CEREBRO-PATCH(runtime-detail-mcp-card): runtime-level MCP servers section (9031). */}
-            <MCPServersCard runtime={runtime} workspaceId={wsId} canEdit={isAdmin} />
-            {/* CEREBRO-PATCH(runtime-detail-tools-card): unified tools inventory + access (JEH-1710). */}
+            {/* CEREBRO-PATCH(runtime-detail-tools-card): unified tools inventory + access (JEH-1710). Single card; the old MCP-servers JSON box is gone. */}
             <RuntimeToolsCard runtime={runtime} workspaceId={wsId} canEdit={isAdmin} />
           </div>
 

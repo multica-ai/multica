@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
-// CEREBRO-PATCH(agent-tools-tab-test): JEH-1710 bid 4 — wrapper test covers
-// the local-agent branch and the cloud-agent branch's admin-gate handoff to
-// AgentToolsCard. The card itself owns the override-table assertions; this
-// test is intentionally thin.
+// CEREBRO-PATCH(agent-tools-tab-test): JEH-1710 — wrapper test covers both
+// local- and cloud-runtime agents handing off to AgentToolsCard. The card
+// itself owns the override-table assertions; this test is intentionally thin.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -100,15 +99,10 @@ beforeEach(() => {
 });
 
 describe("CerebroToolsTab", () => {
-  it("shows the local-runtime explanation for local agents and skips runtime/override fetches", () => {
+  it("renders the AgentToolsCard for local agents (override flow is no longer blocked)", async () => {
     renderToolsTab({ ...baseAgent, runtime_mode: "local" });
 
-    expect(screen.getByText("Gateway tools are cloud-only")).toBeInTheDocument();
-    expect(
-      screen.getByText(/These toggles only apply to cloud-runtime agents/i),
-    ).toBeInTheDocument();
-    expect(mockListRuntimes).not.toHaveBeenCalled();
-    expect(mockListRuntimeTools).not.toHaveBeenCalled();
+    expect(await screen.findByText(/Tools på agenten/i)).toBeInTheDocument();
   });
 
   it("renders the AgentToolsCard for cloud agents (empty registry surfaces the heartbeat hint)", async () => {
