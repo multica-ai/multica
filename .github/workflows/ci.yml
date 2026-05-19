@@ -77,6 +77,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Test shell installers
+        run: bash scripts/install.test.sh
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:

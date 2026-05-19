@@ -66,16 +66,27 @@ detect_os() {
 install_cli_brew() {
   info "Installing Multica CLI via Homebrew..."
   if ! brew tap multica-ai/tap 2>/dev/null; then
-    fail "Failed to add Homebrew tap. Check your network connection."
+    warn "Failed to add Homebrew tap. Falling back to GitHub Releases binary install."
+    return 1
   fi
   # brew install exits non-zero if already installed on older Homebrew versions
-  if ! brew install "$BREW_PACKAGE" 2>/dev/null; then
+  local brew_log
+  brew_log=$(mktemp)
+  if ! brew install "$BREW_PACKAGE" >"$brew_log" 2>&1; then
     if brew list "$BREW_PACKAGE" >/dev/null 2>&1; then
+      rm -f "$brew_log"
       ok "Multica CLI already installed via Homebrew"
     else
-      fail "Failed to install multica via Homebrew."
+      warn "Failed to install multica via Homebrew. Falling back to GitHub Releases binary install."
+      if [ -s "$brew_log" ]; then
+        warn "Homebrew output (last 80 lines):"
+        tail -n 80 "$brew_log" | sed 's/^/  /' >&2
+      fi
+      rm -f "$brew_log"
+      return 1
     fi
   else
+    rm -f "$brew_log"
     ok "Multica CLI installed via Homebrew"
   fi
 }
@@ -103,8 +114,9 @@ install_cli_binary() {
 
   tar -xzf "$tmp_dir/multica.tar.gz" -C "$tmp_dir" multica
 
-  # Try /usr/local/bin first, fall back to ~/.local/bin
-  local bin_dir="/usr/local/bin"
+  # Try /usr/local/bin first, fall back to ~/.local/bin. Tests and scripted
+  # installs can override the first choice with MULTICA_BIN_DIR.
+  local bin_dir="${MULTICA_BIN_DIR:-/usr/local/bin}"
   if [ -w "$bin_dir" ]; then
     mv "$tmp_dir/multica" "$bin_dir/multica"
   elif command_exists sudo; then
@@ -232,7 +244,7 @@ install_cli() {
   fi
 
   if command_exists brew; then
-    install_cli_brew
+    install_cli_brew || install_cli_binary
   else
     install_cli_binary
   fi
