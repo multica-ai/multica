@@ -12,6 +12,7 @@ import {
   Bell,
   Plug,
 } from "lucide-react";
+import { GitHubMark } from "./github-mark";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useNavigation } from "../../navigation";
@@ -21,6 +22,7 @@ import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
+import { GitHubTab } from "./github-tab";
 import { IntegrationsTab } from "./integrations-tab";
 import { LabsTab } from "./labs-tab";
 import { NotificationsTab } from "./notifications-tab";
@@ -34,10 +36,18 @@ const ACCOUNT_TAB_ICONS = {
   tokens: Key,
 } as const;
 
-const WORKSPACE_TAB_KEYS = ["general", "repositories", "integrations", "labs", "members"] as const;
+const WORKSPACE_TAB_KEYS = [
+  "general",
+  "repositories",
+  "github",
+  "integrations",
+  "labs",
+  "members",
+] as const;
 const WORKSPACE_TAB_VALUES = {
   general: "workspace",
   repositories: "repositories",
+  github: "github",
   integrations: "integrations",
   labs: "labs",
   members: "members",
@@ -45,6 +55,7 @@ const WORKSPACE_TAB_VALUES = {
 const WORKSPACE_TAB_ICONS = {
   general: Settings,
   repositories: FolderGit2,
+  github: GitHubMark,
   integrations: Plug,
   labs: FlaskConical,
   members: Users,
@@ -151,6 +162,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="tokens"><TokensTab /></TabsContent>
           <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
           <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
+          <TabsContent value="github"><GitHubTab /></TabsContent>
           <TabsContent value="integrations"><IntegrationsTab /></TabsContent>
           <TabsContent value="labs"><LabsTab /></TabsContent>
           <TabsContent value="members"><MembersTab /></TabsContent>
