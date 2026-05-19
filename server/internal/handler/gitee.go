@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -150,6 +152,13 @@ func (h *Handler) getBaseURL(r *http.Request) string {
 // Hook events, verifies the secret, normalizes the payload, and processes it
 // through the shared PR pipeline.
 func (h *Handler) HandleGiteeWebhook(w http.ResponseWriter, r *http.Request) {
+	// Handle Gitee ping/test events. Gitee sends X-Gitee-Ping: true with a
+	// dummy payload (oschina/git-osc) that won't match any real config.
+	if r.Header.Get("X-Gitee-Ping") == "true" {
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "pong"})
+		return
+	}
+
 	body, err := io.ReadAll(io.LimitReader(r.Body, 10<<20)) // 10 MiB cap
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "read body failed")
@@ -163,11 +172,16 @@ func (h *Handler) HandleGiteeWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	repoOwner := envelope.Repository.Owner.Login
+	// Gitee URLs are namespace/path (e.g. "wujie-agent/multica").
+	// Prefer namespace over owner.login, and path over name (display name).
+	repoOwner := envelope.Repository.Namespace
 	if repoOwner == "" {
-		repoOwner = envelope.Repository.Namespace
+		repoOwner = envelope.Repository.Owner.Login
 	}
-	repoName := envelope.Repository.Name
+	repoName := envelope.Repository.Path
+	if repoName == "" {
+		repoName = envelope.Repository.Name
+	}
 	if repoOwner == "" || repoName == "" {
 		writeError(w, http.StatusBadRequest, "cannot determine repo owner/name from payload")
 		return
@@ -192,7 +206,8 @@ func (h *Handler) HandleGiteeWebhook(w http.ResponseWriter, r *http.Request) {
 	// the configured password/secret (plain comparison or HMAC depending
 	// on configuration). We support both plain secret match and HMAC-SHA256.
 	tokenHeader := r.Header.Get("X-Gitee-Token")
-	if !verifyGiteeToken(cfg.Secret, tokenHeader, body) {
+	timestamp := r.Header.Get("X-Gitee-Timestamp")
+	if !verifyGiteeToken(cfg.Secret, tokenHeader, timestamp) {
 		writeError(w, http.StatusUnauthorized, "invalid token")
 		return
 	}
@@ -218,18 +233,28 @@ func (h *Handler) HandleGiteeWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 // verifyGiteeToken checks the X-Gitee-Token header against our stored secret.
-// Gitee supports two modes:
-//   - Password mode: X-Gitee-Token == configured secret (constant-time compare)
-//   - Sign mode: X-Gitee-Token == base64(HMAC-SHA256(timestamp+"\n"+secret, body))
+// Gitee supports two webhook authentication modes:
+//   - Password mode (密码): X-Gitee-Token == configured secret
+//   - Sign mode (签名密钥): X-Gitee-Token == Base64(HMAC-SHA256(timestamp+"\n"+secret))
 //
-// For simplicity and security, we use constant-time comparison of the token
-// against the stored secret (Password mode). Users configure the secret as
-// "WebHook 密码" in Gitee webhook settings.
-func verifyGiteeToken(secret, token string, _ []byte) bool {
+// We try both: first constant-time password comparison, then HMAC sign verification.
+func verifyGiteeToken(secret, token, timestamp string) bool {
 	if secret == "" || token == "" {
 		return false
 	}
-	return hmac.Equal([]byte(secret), []byte(token))
+	// Password mode: direct constant-time comparison.
+	if hmac.Equal([]byte(secret), []byte(token)) {
+		return true
+	}
+	// Sign mode: token = Base64(HMAC-SHA256(key=secret, msg=timestamp+"\n"+secret))
+	if timestamp != "" {
+		stringToSign := timestamp + "\n" + secret
+		mac := hmac.New(sha256.New, []byte(secret))
+		mac.Write([]byte(stringToSign))
+		expected := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+		return hmac.Equal([]byte(expected), []byte(token))
+	}
+	return false
 }
 
 // ── Gitee payload structs ───────────────────────────────────────────────────
@@ -237,6 +262,7 @@ func verifyGiteeToken(secret, token string, _ []byte) bool {
 type giteeWebhookEnvelope struct {
 	Repository struct {
 		Name      string `json:"name"`
+		Path      string `json:"path"`
 		FullName  string `json:"full_name"`
 		Namespace string `json:"namespace"`
 		Owner     struct {
@@ -274,6 +300,7 @@ type giteeMergeRequestPayload struct {
 	} `json:"pull_request"`
 	Repository struct {
 		Name      string `json:"name"`
+		Path      string `json:"path"`
 		FullName  string `json:"full_name"`
 		Namespace string `json:"namespace"`
 		Owner     struct {
@@ -305,9 +332,13 @@ func (h *Handler) processGiteeMergeRequest(ctx context.Context, cfg db.GiteeWebh
 		updatedAt = t
 	}
 
-	repoOwner := p.Repository.Owner.Login
+	repoOwner := p.Repository.Namespace
 	if repoOwner == "" {
-		repoOwner = p.Repository.Namespace
+		repoOwner = p.Repository.Owner.Login
+	}
+	repoName := p.Repository.Path
+	if repoName == "" {
+		repoName = p.Repository.Name
 	}
 
 	evt := NormalizedPREvent{
@@ -315,7 +346,7 @@ func (h *Handler) processGiteeMergeRequest(ctx context.Context, cfg db.GiteeWebh
 		WorkspaceID:     cfg.WorkspaceID,
 		InstallationID:  pgtype.Int8{}, // null for Gitee
 		RepoOwner:       repoOwner,
-		RepoName:        p.Repository.Name,
+		RepoName:        repoName,
 		Number:          pr.Number,
 		Title:           pr.Title,
 		Body:            pr.Body,
