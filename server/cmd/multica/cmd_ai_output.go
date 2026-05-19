@@ -15,15 +15,15 @@ func writeStructuredAIResult(raw string) error {
 	if outputPath == "" {
 		return fmt.Errorf("%s is not set; this command is only available inside an AI task", aiTaskOutputPathEnv)
 	}
+	if hasParentDirSegment(outputPath) {
+		return fmt.Errorf("%s must not contain path traversal", aiTaskOutputPathEnv)
+	}
 	clean := filepath.Clean(outputPath)
 	if !filepath.IsAbs(clean) {
 		return fmt.Errorf("%s must be an absolute path", aiTaskOutputPathEnv)
 	}
 	if filepath.Base(clean) != "ai-task-output.json" {
 		return fmt.Errorf("%s must point to ai-task-output.json", aiTaskOutputPathEnv)
-	}
-	if clean != outputPath && strings.Contains(outputPath, "..") {
-		return fmt.Errorf("%s must not contain path traversal", aiTaskOutputPathEnv)
 	}
 	payload := strings.TrimSpace(raw)
 	if payload == "" {
@@ -36,4 +36,13 @@ func writeStructuredAIResult(raw string) error {
 		return fmt.Errorf("write AI task output: %w", err)
 	}
 	return nil
+}
+
+func hasParentDirSegment(path string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
 }
