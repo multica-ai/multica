@@ -38,6 +38,7 @@ import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { openExternal } from "../platform";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
+import { EntityMentionName, type EntityMentionType } from "./mention-name";
 import { ImageLightbox } from "./extensions/image-view";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
@@ -145,17 +146,36 @@ function ReadonlyLink({
   const slug = useWorkspaceSlug();
 
   if (isMentionHref(href)) {
-    const match = href.match(/^mention:\/\/(member|agent|issue|all)\/(.+)$/);
+    const match = href.match(/^mention:\/\/(member|agent|squad|issue|all)\/(.+)$/);
+    const label =
+      typeof children === "string"
+        ? children
+        : Array.isArray(children)
+          ? children.join("")
+          : undefined;
     if (match?.[1] === "issue" && match[2]) {
-      const label =
-        typeof children === "string"
-          ? children
-          : Array.isArray(children)
-            ? children.join("")
-            : undefined;
       return <IssueMentionLink issueId={match[2]} label={label} />;
     }
-    // Member / agent / all mentions
+    // For agent / member / squad, look up the entity by UUID and render its
+    // canonical name. The markdown label is treated as a fallback hint only.
+    // This catches label/UUID mismatch ("[@A](mention://agent/<B-uuid>)") so
+    // the rendered comment always names the entity actually addressed.
+    if (
+      match &&
+      (match[1] === "agent" || match[1] === "member" || match[1] === "squad") &&
+      match[2]
+    ) {
+      return (
+        <span className="mention">
+          <EntityMentionName
+            type={match[1] as EntityMentionType}
+            id={match[2]}
+            fallbackLabel={label ?? ""}
+          />
+        </span>
+      );
+    }
+    // @all and any other shape: keep the literal markdown text.
     return <span className="mention">{children}</span>;
   }
 
