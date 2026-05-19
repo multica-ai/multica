@@ -502,32 +502,34 @@
   margin: 0.5rem 0;
 }
 
-/* Image NodeView — centered block with max-width cap */
-.rich-text-editor .image-node {
-  display: block !important;
-  text-align: center;
-}
+/* Image — shared by the editor NodeView AND standalone surfaces (chat
+ * messages, comment-card AttachmentList). De-scoped from `.rich-text-editor`
+ * during the <Attachment> unification so every call site renders identical
+ * visuals without each component carrying its own Tailwind override. */
 
-.rich-text-editor .image-figure {
+.image-figure {
   position: relative;
   display: inline-block;
-  max-width: min(100%, 640px);
   margin: 0.75rem 0;
 }
 
-.rich-text-editor .image-figure.image-selected .image-content {
+.image-figure[data-clickable="true"] {
+  cursor: zoom-in;
+}
+
+.image-figure.image-selected .image-content {
   outline: 2px solid var(--brand);
   outline-offset: 2px;
 }
 
-.rich-text-editor .image-content {
+.image-content {
   display: block;
   width: 100%;
   height: auto;
   border-radius: var(--radius);
 }
 
-.rich-text-editor .image-uploading {
+.image-uploading {
   opacity: 0.5;
   animation: rte-upload-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
@@ -537,13 +539,7 @@
   50% { opacity: 0.3; }
 }
 
-/* Readonly — zoom cursor on clickable images */
-.rich-text-editor.readonly .image-figure {
-  cursor: zoom-in;
-}
-
-/* Image toolbar — dark pill, top-right corner, appears on hover */
-.rich-text-editor .image-toolbar {
+.image-toolbar {
   position: absolute;
   top: 0.5rem;
   right: 0.5rem;
@@ -562,7 +558,7 @@
   opacity: 1;
 }
 
-.rich-text-editor .image-toolbar button {
+.image-toolbar button {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -573,8 +569,20 @@
   transition: background 0.15s;
 }
 
-.rich-text-editor .image-toolbar button:hover {
+.image-toolbar button:hover {
   background: color-mix(in srgb, white 15%, transparent);
+}
+
+/* Editor-only overrides: center the figure inside the NodeView and cap
+ * width so an oversize paste doesn't blow out the editor column. */
+
+.rich-text-editor .image-node {
+  display: block !important;
+  text-align: center;
+}
+
+.rich-text-editor .image-figure {
+  max-width: min(100%, 640px);
 }
 
 /* Bubble menu — floating toolbar pill */

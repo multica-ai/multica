@@ -17,6 +17,8 @@ import {
   Cloud,
   Cpu,
   Filter,
+  ArrowDownNarrowWide,
+  ArrowUpNarrowWide,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
@@ -31,6 +33,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../actor-avatar";
 import { api } from "@multica/core/api";
+import { useTranscriptViewStore, type TranscriptSortDirection } from "@multica/core/agents/stores";
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
 import { redactSecrets } from "./redact";
 import type { TimelineItem } from "./build-timeline";
@@ -178,6 +181,8 @@ export function AgentTranscriptDialog({
   const [agentInfo, setAgentInfo] = useState<Agent | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
   const [selectedTools, setSelectedTools] = useState<Set<string>>(new Set());
+  const sortDirection = useTranscriptViewStore((s) => s.sortDirection);
+  const setSortDirection = useTranscriptViewStore((s) => s.setSortDirection);
   const eventRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -211,6 +216,26 @@ export function AgentTranscriptDialog({
     if (selectedTools.size === 0) return items;
     return items.filter((item) => selectedTools.has(itemFilterKey(item)));
   }, [items, selectedTools]);
+
+  // Apply user-chosen sort direction. Reverse is a pure presentation concern —
+  // the underlying timeline (and its seq numbers) is untouched, so copy/filter
+  // and segment navigation continue to work against the same data.
+  const displayItems = useMemo(
+    () => (sortDirection === "newest_first" ? [...filteredItems].reverse() : filteredItems),
+    [filteredItems, sortDirection],
+  );
+
+  // Toggling direction is a manual user action; jump the scroll container back
+  // to the top so the newest end of the timeline (per the chosen direction) is
+  // immediately visible. Avoids stranding the user mid-scroll on the wrong end.
+  const handleSortDirectionChange = useCallback(
+    (dir: typeof sortDirection) => {
+      if (dir === sortDirection) return;
+      setSortDirection(dir);
+      scrollContainerRef.current?.scrollTo({ top: 0 });
+    },
+    [sortDirection, setSortDirection],
+  );
 
   // Fetch agent and runtime metadata when dialog opens
   useEffect(() => {
@@ -249,9 +274,10 @@ export function AgentTranscriptDialog({
     eventRefs.current.get(seq)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, []);
 
-  // Copy all events as text (uses filtered items)
+  // Copy all events as text. Use the displayed order so users get the same
+  // sequence they see on screen — matters when sort is set to newest-first.
   const handleCopyAll = useCallback(() => {
-    const text = filteredItems
+    const text = displayItems
       .map((item) => {
         const label = getEventLabel(item);
         const summary = getEventSummary(item);
@@ -262,7 +288,7 @@ export function AgentTranscriptDialog({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
-  }, [filteredItems]);
+  }, [displayItems]);
 
   // Toggle tool filter
   const toggleTool = useCallback((tool: string) => {
@@ -336,6 +362,17 @@ export function AgentTranscriptDialog({
             {statusBadge}
 
             <div className="ml-auto flex items-center gap-1">
+              {items.length > 1 && (
+                <SortDirectionToggle
+                  value={sortDirection}
+                  onChange={handleSortDirectionChange}
+                  labels={{
+                    chronological: t(($) => $.transcript.sort_chronological),
+                    newestFirst: t(($) => $.transcript.sort_newest_first),
+                    ariaLabel: t(($) => $.transcript.sort_label),
+                  }}
+                />
+              )}
               {filterOptions.length > 0 && (
                 <DropdownMenu>
                   <DropdownMenuTrigger
@@ -449,10 +486,10 @@ export function AgentTranscriptDialog({
         </div>
 
         {/* ── Timeline progress bar ─────────────────────────────── */}
-        {filteredItems.length > 0 && (
+        {displayItems.length > 0 && (
           <div className="border-b px-4 py-2.5 shrink-0">
             <TimelineBar
-              items={filteredItems}
+              items={displayItems}
               selectedSeq={selectedSeq}
               onSegmentClick={handleSegmentClick}
             />
@@ -471,7 +508,7 @@ export function AgentTranscriptDialog({
           ref={scrollContainerRef}
           className="flex-1 overflow-y-auto min-h-0"
         >
-          {filteredItems.length === 0 ? (
+          {displayItems.length === 0 ? (
             <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
               {isLive ? (
                 <div className="flex items-center gap-2">
@@ -484,7 +521,7 @@ export function AgentTranscriptDialog({
             </div>
           ) : (
             <div className="divide-y">
-              {filteredItems.map((item) => (
+              {displayItems.map((item) => (
                 <TranscriptEventRow
                   key={item.seq}
                   ref={(el) => {
@@ -500,6 +537,55 @@ export function AgentTranscriptDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ─── Sort direction toggle ──────────────────────────────────────────────────
+
+interface SortDirectionToggleProps {
+  value: TranscriptSortDirection;
+  onChange: (dir: TranscriptSortDirection) => void;
+  labels: { chronological: string; newestFirst: string; ariaLabel: string };
+}
+
+function SortDirectionToggle({ value, onChange, labels }: SortDirectionToggleProps) {
+  return (
+    <div
+      role="group"
+      aria-label={labels.ariaLabel}
+      className="inline-flex items-center rounded border bg-muted/40 p-0.5 text-xs"
+    >
+      <button
+        type="button"
+        aria-pressed={value === "chronological"}
+        title={labels.chronological}
+        onClick={() => onChange("chronological")}
+        className={cn(
+          "flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors",
+          value === "chronological"
+            ? "bg-background text-foreground shadow-sm"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        <ArrowDownNarrowWide className="h-3 w-3" />
+        <span className="hidden sm:inline">{labels.chronological}</span>
+      </button>
+      <button
+        type="button"
+        aria-pressed={value === "newest_first"}
+        title={labels.newestFirst}
+        onClick={() => onChange("newest_first")}
+        className={cn(
+          "flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors",
+          value === "newest_first"
+            ? "bg-background text-foreground shadow-sm"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        <ArrowUpNarrowWide className="h-3 w-3" />
+        <span className="hidden sm:inline">{labels.newestFirst}</span>
+      </button>
+    </div>
   );
 }
 

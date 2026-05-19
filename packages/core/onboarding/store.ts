@@ -4,14 +4,16 @@ import { setPersonProperties } from "../analytics";
 import type { OnboardingCompletionPath, QuestionnaireAnswers } from "./types";
 
 /**
- * Persist Q1/Q2/Q3 answers and sync the refreshed user into the auth
- * store. Source of truth is `user.onboarding_questionnaire` (JSONB on
- * the server). No client-side cache here.
+ * Persist questionnaire answers (one or more slots at a time — each
+ * onboarding step PATCHes its own slot) and sync the refreshed user
+ * into the auth store. Source of truth is
+ * `user.onboarding_questionnaire` (JSONB on the server). No
+ * client-side cache here.
  *
  * Resume-by-step is intentionally not persisted: every onboarding
- * entry starts at Welcome. The questionnaire is the only piece of
- * progress that survives a re-entry — it pre-fills Step 1 so the
- * user doesn't re-answer.
+ * entry starts at Welcome. Answered slots are pre-filled on
+ * re-entry; skipped slots are treated as fresh (the user can answer
+ * this time).
  */
 export async function saveQuestionnaire(
   answers: Partial<QuestionnaireAnswers>,
@@ -19,12 +21,11 @@ export async function saveQuestionnaire(
   const user = await api.patchOnboarding({ questionnaire: answers });
   useAuthStore.getState().setUser(user);
   // Mirror the three cohort signals into person properties so every
-  // PostHog event on this user can be broken down by role / use_case /
-  // team_size without re-joining the DB. Matches the $set block the
-  // server writes alongside `onboarding_questionnaire_submitted`.
-  if (answers.team_size || answers.role || answers.use_case) {
+  // PostHog event on this user can be broken down by source / role /
+  // use_case without re-joining the DB.
+  if (answers.source || answers.role || answers.use_case) {
     setPersonProperties({
-      ...(answers.team_size ? { team_size: answers.team_size } : {}),
+      ...(answers.source ? { source: answers.source } : {}),
       ...(answers.role ? { role: answers.role } : {}),
       ...(answers.use_case ? { use_case: answers.use_case } : {}),
     });
@@ -50,6 +51,38 @@ export async function completeOnboarding(
       : undefined,
   );
   await useAuthStore.getState().refreshMe();
+}
+
+/**
+ * Runtime-connected onboarding path. The server creates or reuses the
+ * default Multica Helper agent and the single onboarding issue, marks
+ * onboarding complete, and suppresses the older starter-content prompt.
+ */
+export async function bootstrapRuntimeOnboarding(
+  workspaceId: string,
+  runtimeId: string,
+): Promise<{ workspace_id: string; agent_id: string; issue_id: string }> {
+  const result = await api.bootstrapOnboardingRuntime({
+    workspace_id: workspaceId,
+    runtime_id: runtimeId,
+  });
+  await useAuthStore.getState().refreshMe();
+  return result;
+}
+
+/**
+ * Runtime-skipped onboarding path. The server creates or reuses one
+ * self-serve onboarding issue, marks onboarding complete, and suppresses
+ * the older starter-content prompt so the user is not flooded with tasks.
+ */
+export async function bootstrapNoRuntimeOnboarding(
+  workspaceId: string,
+): Promise<{ workspace_id: string; issue_id: string }> {
+  const result = await api.bootstrapOnboardingNoRuntime({
+    workspace_id: workspaceId,
+  });
+  await useAuthStore.getState().refreshMe();
+  return result;
 }
 
 /**

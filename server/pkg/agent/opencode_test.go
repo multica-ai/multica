@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewReturnsOpencodeBackend(t *testing.T) {
@@ -828,6 +830,168 @@ func TestOpencodeWindowsPackageCandidatesAmd64(t *testing.T) {
 	want := []string{"opencode-windows-x64", "opencode-windows-x64-baseline", "opencode-windows-arm64"}
 	if !equalStringSlice(got, want) {
 		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// fakeOpencodeScript returns a POSIX-sh script that impersonates `opencode`
+// for argv / env capture. It writes the argv (one per line) to
+// $OPENCODE_ARGS_FILE and the resolved PWD to $OPENCODE_PWD_FILE, emits a
+// minimal completed step on stdout so the daemon's event loop terminates,
+// then exits.
+func fakeOpencodeScript() string {
+	return `#!/bin/sh
+if [ -n "$OPENCODE_ARGS_FILE" ]; then
+  for arg in "$@"; do
+    printf '%s\n' "$arg" >> "$OPENCODE_ARGS_FILE"
+  done
+fi
+if [ -n "$OPENCODE_PWD_FILE" ]; then
+  printf '%s\n' "$PWD" > "$OPENCODE_PWD_FILE"
+fi
+printf '{"type":"step_start","timestamp":1,"sessionID":"ses_fake","part":{"type":"step-start"}}\n'
+printf '{"type":"text","timestamp":2,"sessionID":"ses_fake","part":{"type":"text","text":"ok"}}\n'
+printf '{"type":"step_finish","timestamp":3,"sessionID":"ses_fake","part":{"type":"step-finish"}}\n'
+`
+}
+
+// TestOpencodeBackendAnchorsDirAndPWD pins the discovery-root fix from
+// MUL-2416: OpenCode resolves its AGENTS.md walk-up and .opencode/skills
+// project config scan from `--dir` and PWD. cmd.Dir alone is not enough
+// because OpenCode reads PWD (inherited from the daemon) before falling
+// back to process.cwd(). Without this anchor, skills written into the
+// task workdir are silently invisible and the agent runs against the
+// daemon's shell working directory.
+func TestOpencodeBackendAnchorsDirAndPWD(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	argsFile := filepath.Join(tempDir, "argv.txt")
+	pwdFile := filepath.Join(tempDir, "pwd.txt")
+	fakePath := filepath.Join(tempDir, "opencode")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScript()))
+
+	workDir := t.TempDir()
+
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"OPENCODE_ARGS_FILE": argsFile,
+			"OPENCODE_PWD_FILE":  pwdFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new opencode backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:     workDir,
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	<-session.Result
+
+	// argv should include `--dir <workDir>` immediately after the `run` /
+	// `--format json` prefix and nowhere else.
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(args) < 2 || args[0] != "run" {
+		t.Fatalf("expected first arg to be 'run', got %q", args)
+	}
+	dirIdx := -1
+	for i, a := range args {
+		if a == "--dir" {
+			dirIdx = i
+			break
+		}
+	}
+	if dirIdx == -1 {
+		t.Fatalf("expected --dir flag in argv, got %q", args)
+	}
+	if dirIdx+1 >= len(args) || args[dirIdx+1] != workDir {
+		t.Fatalf("expected --dir %q, got args=%q", workDir, args)
+	}
+
+	// PWD inside the child process must resolve to the task workdir,
+	// otherwise OpenCode's project discovery walk starts in the wrong
+	// directory and silently misses .opencode/skills + AGENTS.md.
+	gotPWD, err := os.ReadFile(pwdFile)
+	if err != nil {
+		t.Fatalf("read PWD file: %v", err)
+	}
+	if got := strings.TrimSpace(string(gotPWD)); got != workDir {
+		t.Errorf("child PWD = %q, want %q", got, workDir)
+	}
+}
+
+// TestOpencodeBackendBlocksDirOverride ensures user-supplied custom args
+// cannot replace the daemon-managed `--dir` anchor. Letting custom args
+// override it would re-introduce the MUL-2416 regression.
+func TestOpencodeBackendBlocksDirOverride(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	argsFile := filepath.Join(tempDir, "argv.txt")
+	fakePath := filepath.Join(tempDir, "opencode")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScript()))
+
+	workDir := t.TempDir()
+	bogusDir := t.TempDir()
+
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"OPENCODE_ARGS_FILE": argsFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new opencode backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:        workDir,
+		Timeout:    5 * time.Second,
+		CustomArgs: []string{"--dir", bogusDir},
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	<-session.Result
+
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	for i, a := range args {
+		if a == "--dir" {
+			if i+1 >= len(args) || args[i+1] != workDir {
+				t.Errorf("--dir was overridden by custom args: got %q", args)
+			}
+		}
+		if a == bogusDir {
+			t.Errorf("custom --dir value %q leaked into argv: %q", bogusDir, args)
+		}
 	}
 }
 
