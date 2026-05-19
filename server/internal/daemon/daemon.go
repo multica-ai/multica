@@ -122,6 +122,22 @@ type Daemon struct {
 	updating      atomic.Bool        // prevents concurrent update attempts
 	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
 
+	// claimMu guards pauseClaims and claimsInFlight. It is held only for the
+	// microseconds it takes to make a decision; ClaimTask itself runs without
+	// the lock so a slow per-runtime claim cannot stall auto-update or any
+	// other poller.
+	//
+	// The pair is the auto-update path's barrier against the issue's
+	// requirement that "升级过程中如果有 task 进来，会延后升级而不是中断 task":
+	// runRuntimePoller refuses to call ClaimTask while pauseClaims is set, and
+	// tryAutoUpdate refuses to flip pauseClaims while any poller is mid-claim
+	// or any task is in handleTask. Together that closes the fetch-then-claim
+	// race where a new task slipping in during the release-metadata fetch
+	// would be cancelled by triggerRestart's root-ctx cancel.
+	claimMu        sync.Mutex
+	pauseClaims    bool // when true, runRuntimePoller skips ClaimTask
+	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
+
 	activeEnvRootsMu sync.Mutex
 	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
 
@@ -134,6 +150,10 @@ type Daemon struct {
 
 	runner             taskRunner    // executes agent tasks; set to d.runTask by New(), overridable in tests
 	cancelPollInterval time.Duration // how often handleTask polls for server-side cancellation; overridable in tests
+	// runUpdateFn executes the brew-or-download upgrade. Set to d.runUpdate by
+	// New() and overridable in tests so the auto-update poller can be exercised
+	// without touching the real network or the brew CLI.
+	runUpdateFn func(targetVersion string) (string, error)
 }
 
 // New creates a new Daemon instance.
@@ -175,6 +195,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		cancelPollInterval:        5 * time.Second,
 	}
 	d.runner = taskRunnerFunc(d.runTask)
+	d.runUpdateFn = d.runUpdate
 	return d
 }
 
@@ -595,6 +616,20 @@ func (d *Daemon) Run(ctx context.Context) error {
 		logFields = append(logFields, "profile", d.cfg.Profile)
 	}
 	d.logger.Info("starting daemon", logFields...)
+	d.logger.Debug("daemon config resolved",
+		"daemon_id", d.cfg.DaemonID,
+		"device_name", d.cfg.DeviceName,
+		"workspaces_root", d.cfg.WorkspacesRoot,
+		"health_port", d.cfg.HealthPort,
+		"poll_interval", d.cfg.PollInterval,
+		"heartbeat_interval", d.cfg.HeartbeatInterval,
+		"agent_timeout", d.cfg.AgentTimeout,
+		"idle_watchdog", d.cfg.AgentIdleWatchdog,
+		"max_concurrent_tasks", d.cfg.MaxConcurrentTasks,
+		"gc_enabled", d.cfg.GCEnabled,
+		"auto_update", d.cfg.AutoUpdateEnabled,
+		"launched_by", d.cfg.LaunchedBy,
+	)
 
 	// Load auth token from CLI config.
 	if err := d.resolveAuth(); err != nil {
@@ -634,8 +669,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 	if d.previews != nil {
 		go d.previews.RunGC(ctx)
 	}
+	go d.autoUpdateLoop(ctx)
 	go d.serveHealth(ctx, healthLn, time.Now())
-	return d.pollLoop(ctx, taskWakeups)
+	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, health)")
+	err = d.pollLoop(ctx, taskWakeups)
+	d.logger.Debug("daemon main loop returning", "error", err)
+	return err
 }
 
 // RestartBinary returns the path to the new binary if the daemon needs to restart
@@ -659,9 +698,11 @@ func (d *Daemon) stopPreviewsOnShutdown() {
 func (d *Daemon) deregisterRuntimes() {
 	runtimeIDs := d.allRuntimeIDs()
 	if len(runtimeIDs) == 0 {
+		d.logger.Debug("deregister: no runtimes to deregister")
 		return
 	}
 
+	d.logger.Debug("deregistering runtimes on shutdown", "count", len(runtimeIDs), "runtime_ids", runtimeIDs)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -688,6 +729,7 @@ func (d *Daemon) resolveAuth() error {
 	}
 	d.client.SetToken(cfg.Token)
 	d.logger.Info("authenticated")
+	d.logger.Debug("auth token loaded", "profile", d.cfg.Profile, "token_len", len(cfg.Token))
 	return nil
 }
 
@@ -713,6 +755,7 @@ func (d *Daemon) findRuntime(id string) *Runtime {
 }
 
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, error) {
+	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
 	var runtimes []map[string]string
 	for name, entry := range d.cfg.Agents {
 		version, err := detectAgentVersion(ctx, entry.Path)
@@ -725,6 +768,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 			continue
 		}
 		d.setAgentVersion(name, version)
+		d.logger.Debug("agent version detected", "name", name, "version", version, "path", entry.Path)
 		displayName := strings.ToUpper(name[:1]) + name[1:]
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
@@ -759,6 +803,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	if len(resp.Runtimes) == 0 {
 		return nil, fmt.Errorf("register runtimes: empty response")
 	}
+	d.logger.Debug("register response", "workspace_id", workspaceID, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos), "repos_version", resp.ReposVersion)
 	return resp, nil
 }
 
@@ -1056,6 +1101,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list workspaces: %w", err)
 	}
+	d.logger.Debug("workspace sync: fetched workspaces", "count", len(workspaces))
 
 	apiIDs := make(map[string]string, len(workspaces)) // id -> name
 	for _, ws := range workspaces {
@@ -1145,6 +1191,9 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 
 	if len(d.allRuntimeIDs()) == 0 && registered == 0 && len(workspaces) > 0 {
 		return fmt.Errorf("failed to register runtimes for any of the %d workspace(s)", len(workspaces))
+	}
+	if registered > 0 || removed > 0 {
+		d.logger.Debug("workspace sync done", "registered", registered, "removed", removed, "tracked", len(apiIDs))
 	}
 	return nil
 }
@@ -1237,8 +1286,10 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 	// automatically on the next tick — that is the fallback the WS path
 	// relies on.
 	if d.wsHeartbeatRecentlyAcked(rid) {
+		d.logger.Debug("heartbeat: skipping HTTP tick, WS recently acked", "runtime_id", rid)
 		return
 	}
+	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
 	resp, err := d.client.SendHeartbeat(ctx, rid)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -1273,6 +1324,15 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
+	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
+		d.logger.Debug("heartbeat: pending actions",
+			"runtime_id", runtimeID,
+			"update", resp.PendingUpdate != nil,
+			"model_list", resp.PendingModelList != nil,
+			"local_skills", resp.PendingLocalSkills != nil,
+			"local_skill_import", resp.PendingLocalSkillImport != nil,
+		)
+	}
 	if resp.PendingUpdate != nil {
 		go d.handleUpdate(ctx, runtimeID, resp.PendingUpdate)
 	}
@@ -1286,7 +1346,14 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 			go d.handleLocalSkillList(ctx, *rt, resp.PendingLocalSkills.ID)
 		}
 	}
-	if resp.PendingLocalSkillImport != nil {
+	// Prefer the batch field (new backend); fall back to singular (old backend).
+	if len(resp.PendingLocalSkillImports) > 0 {
+		if rt := d.findRuntime(runtimeID); rt != nil {
+			for _, imp := range resp.PendingLocalSkillImports {
+				go d.handleLocalSkillImport(ctx, *rt, imp)
+			}
+		}
+	} else if resp.PendingLocalSkillImport != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
 			go d.handleLocalSkillImport(ctx, *rt, *resp.PendingLocalSkillImport)
 		}
@@ -1506,22 +1573,12 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		"status": "running",
 	})
 
-	updateLabel := "configured manifest"
-	updateFn := func() (string, error) {
-		return cli.UpdateViaDownload(update.TargetVersion)
-	}
-	if isBrewInstall() {
-		updateLabel = "Homebrew"
-		updateFn = cli.UpdateViaBrew
-	}
-
-	d.logger.Info("updating CLI...", "strategy", updateLabel, "target_version", update.TargetVersion)
-	output, err := updateFn()
+	output, err := d.runUpdateFn(update.TargetVersion)
 	if err != nil {
-		d.logger.Error("CLI update failed", "error", err)
-		d.client.ReportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+		d.logger.Error("CLI update failed", "error", err, "output", output)
+		d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
 			"status": "failed",
-			"error":  fmt.Sprintf("CLI update failed (%s): %v", updateLabel, err),
+			"error":  err.Error(),
 		})
 		return
 	}
@@ -1534,6 +1591,29 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 
 	// Trigger daemon restart with the new binary.
 	d.triggerRestart()
+}
+
+// runUpdate executes the brew-or-download upgrade against targetVersion and
+// returns the human-readable output (always populated, even on failure when
+// brew gives us a useful diagnostic). The caller is responsible for the
+// `updating` CAS guard and for reporting status back to the server / triggering
+// the restart — extracted so the server-triggered path (handleUpdate) and the
+// auto-update poller (autoUpdateLoop) share the exact same execution body.
+func (d *Daemon) runUpdate(targetVersion string) (string, error) {
+	if cli.IsBrewInstall() {
+		d.logger.Info("updating CLI via Homebrew...")
+		out, err := cli.UpdateViaBrew()
+		if err != nil {
+			return out, fmt.Errorf("brew upgrade failed: %w", err)
+		}
+		return out, nil
+	}
+	d.logger.Info("updating CLI via direct download...", "target_version", targetVersion)
+	out, err := cli.UpdateViaDownload(targetVersion)
+	if err != nil {
+		return out, fmt.Errorf("download update failed: %w", err)
+	}
+	return out, nil
 }
 
 // updateReportBackoffs defines the retry schedule for delivering CLI update
@@ -1590,6 +1670,55 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 	}
 	d.logger.Error("CLI update report exhausted retries",
 		"runtime_id", runtimeID, "update_id", updateID, "error", lastErr)
+}
+
+// tryEnterClaim records the intent to call ClaimTask. Returns true if the
+// caller may proceed, false if the auto-update barrier is in effect. Every
+// successful call MUST be paired with an exitClaim() on every exit path —
+// either right after a failed/empty claim, or via the handleTask goroutine's
+// defer once the task is handed off.
+func (d *Daemon) tryEnterClaim() bool {
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	if d.pauseClaims {
+		return false
+	}
+	d.claimsInFlight++
+	return true
+}
+
+// exitClaim releases the in-flight claim recorded by tryEnterClaim.
+func (d *Daemon) exitClaim() {
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	d.claimsInFlight--
+}
+
+// trySetClaimBarrier atomically pauses new ClaimTask calls if the daemon is
+// fully idle (no claims in flight, no tasks running). Returns true if the
+// caller now holds the barrier and must release it with releaseClaimBarrier
+// on every non-restart exit path; false if the daemon is busy and the caller
+// should defer to the next tick. Used by tryAutoUpdate to close the race
+// where a task slips in between the cheap pre-fetch idle check and the
+// actual upgrade kick-off.
+func (d *Daemon) trySetClaimBarrier() bool {
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	if d.claimsInFlight > 0 || d.activeTasks.Load() > 0 {
+		return false
+	}
+	d.pauseClaims = true
+	return true
+}
+
+// releaseClaimBarrier clears the auto-update claim barrier so pollers may
+// resume claiming. Called on failure paths only — a successful upgrade leaves
+// the barrier set because triggerRestart is about to take the process down
+// and clearing it would open a window for new claims during shutdown.
+func (d *Daemon) releaseClaimBarrier() {
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	d.pauseClaims = false
 }
 
 // triggerRestart initiates a graceful daemon restart after a successful CLI update.
@@ -1715,6 +1844,7 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan struct{}) erro
 			// Fan out to every runtime poller. Any of them might have a queued
 			// task; the per-poller wakeup channel coalesces (cap 1) so a burst
 			// of wake-ups doesn't pile up.
+			d.logger.Debug("task wakeup: fanning out to pollers", "pollers", len(pollers))
 			for _, h := range pollers {
 				select {
 				case h.wakeup <- struct{}{}:
@@ -1776,8 +1906,22 @@ func (d *Daemon) runRuntimePoller(
 			continue
 		}
 
+		// Refuse new claims while an auto-update is preparing to roll the
+		// process. The barrier is paired with a re-check of claimsInFlight +
+		// activeTasks inside tryAutoUpdate, so once we get past tryEnterClaim
+		// the auto-update path is guaranteed to defer until this poller has
+		// handed the task off (or given up).
+		if !d.tryEnterClaim() {
+			sem <- slot
+			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+				return
+			}
+			continue
+		}
+
 		task, err := d.client.ClaimTask(pollerCtx, rid)
 		if err != nil {
+			d.exitClaim()
 			sem <- slot
 			if pollerCtx.Err() == nil {
 				if isRuntimeNotFoundError(err) {
@@ -1797,6 +1941,7 @@ func (d *Daemon) runRuntimePoller(
 		}
 
 		if task == nil {
+			d.exitClaim()
 			sem <- slot
 			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
 				return
@@ -1813,6 +1958,7 @@ func (d *Daemon) runRuntimePoller(
 		d.activeTasks.Add(1)
 		go func(t Task, slot int) {
 			defer taskWG.Done()
+			defer d.exitClaim()
 			defer d.activeTasks.Add(-1)
 			defer func() { sem <- slot }()
 			d.handleTask(parentCtx, t, slot)
@@ -1903,6 +2049,17 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	} else {
 		taskLog.Info("picked task", "issue", task.IssueID, "agent", agentName, "provider", provider)
 	}
+	taskLog.Debug("task context",
+		"workspace_id", task.WorkspaceID,
+		"runtime_id", task.RuntimeID,
+		"agent_id", task.AgentID,
+		"repos", len(task.Repos),
+		"project_id", task.ProjectID,
+		"autopilot_run_id", task.AutopilotRunID,
+		"trigger_comment_id", task.TriggerCommentID,
+		"resume_session", task.PriorSessionID != "",
+		"reuse_workdir", task.PriorWorkDir != "",
+	)
 
 	if err := d.client.StartTask(ctx, task.ID); err != nil {
 		taskLog.Error("start task failed", "error", err)
@@ -2482,6 +2639,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		execOpts.SystemPrompt = runtimeBrief
 	}
 
+	taskLog.Debug("invoking backend",
+		"provider", provider,
+		"model", model,
+		"prompt_bytes", len(prompt),
+		"custom_args", len(customArgs),
+		"extra_args", len(extraArgs),
+		"mcp_config", len(mcpConfig) > 0,
+		"inline_system_prompt", execOpts.SystemPrompt != "",
+		"resume_session", execOpts.ResumeSessionID != "",
+		"timeout", execOpts.Timeout,
+	)
+
 	result, tools, err := d.executeWithRetry(ctx, backend, prompt, execOpts, taskLog, task.ID, task.WorkspaceID, task.ChatSessionID)
 	if err != nil {
 		return TaskResult{}, err
@@ -2509,6 +2678,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"status", result.Status,
 		"duration", elapsed.String(),
 		"tools", tools,
+	)
+	taskLog.Debug("agent result detail",
+		"status", result.Status,
+		"output_bytes", len(result.Output),
+		"session_id", result.SessionID,
+		"models_with_usage", len(result.Usage),
+		"agent_error", result.Error,
 	)
 
 	// Convert agent usage map to task usage entries.
@@ -2591,6 +2767,25 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			FailureReason: "timeout",
 			Usage:         usageEntries,
 		}, nil
+	case "idle_watchdog":
+		// The idle watchdog force-stopped the run because the backend
+		// went silent (e.g. claude blocked on a tool call against a
+		// frozen child process). Route through the blocked path with a
+		// dedicated failure_reason so the run leaves "running" state and
+		// operators can tell idle-stop apart from a real timeout.
+		comment := result.Error
+		if comment == "" {
+			comment = idleWatchdogReason(d.cfg.AgentIdleWatchdog)
+		}
+		return TaskResult{
+			Status:        "blocked",
+			Comment:       comment,
+			SessionID:     result.SessionID,
+			WorkDir:       env.WorkDir,
+			EnvRoot:       env.RootDir,
+			FailureReason: "idle_watchdog",
+			Usage:         usageEntries,
+		}, nil
 	case "cancelled":
 		// Server cancelled the task (e.g. issue reassignment, user cancel).
 		// handleTask's cancelledByPoll branch already discards this result,
@@ -2643,10 +2838,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 // executeAndDrain runs a backend, drains its message stream (forwarding to the
 // server), and waits for the final result.
 func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID string) (agent.Result, int32, error) {
-	session, err := backend.Execute(ctx, prompt, opts)
+	// Wrap the caller's ctx so the idle watchdog (below) can interrupt both
+	// the agent subprocess (via the ctx passed to backend.Execute) AND the
+	// drain loop with a single cancel. Without this layer the backend would
+	// stay tied to the parent ctx and our cancellation could only abort
+	// drain, leaving the subprocess running.
+	agentCtx, agentCancel := context.WithCancel(ctx)
+	defer agentCancel()
+
+	session, err := backend.Execute(agentCtx, prompt, opts)
 	if err != nil {
+		taskLog.Debug("backend execute returned error", "error", err)
 		return agent.Result{}, 0, err
 	}
+	taskLog.Debug("backend started, draining messages")
 
 	// Create an independent drain deadline so we don't block forever if the
 	// backend's internal timeout fails to produce a Result (e.g. scanner
@@ -2656,10 +2861,29 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	if opts.Timeout == 0 {
 		drainTimeout = 21 * time.Minute
 	}
-	drainCtx, drainCancel := context.WithTimeout(ctx, drainTimeout)
+	drainCtx, drainCancel := context.WithTimeout(agentCtx, drainTimeout)
 	defer drainCancel()
 
 	var toolCount atomic.Int32
+	// lastActivityAt records (as unix nanos) when the drain loop most
+	// recently received a message from the backend. The idle watchdog
+	// reads this to decide whether the agent has gone silent for too long.
+	// Initialise to the start so a backend that never emits a single
+	// message also trips the watchdog.
+	var lastActivityAt atomic.Int64
+	lastActivityAt.Store(time.Now().UnixNano())
+	// inFlightTools counts tool_use messages that haven't yet been paired
+	// with a matching tool_result. A non-zero count means the agent is
+	// legitimately waiting on a tool (e.g. `npm install`, `docker build`)
+	// that may run far longer than the idle window without emitting any
+	// message — so the watchdog must not interpret that silence as a hang.
+	var inFlightTools atomic.Int32
+	var idleWatchdogFired atomic.Bool
+	idleWindow := d.cfg.AgentIdleWatchdog
+	if idleWindow > 0 {
+		go d.runIdleWatchdog(agentCtx, idleWindow, &lastActivityAt, &inFlightTools, &idleWatchdogFired, agentCancel, session.Messages, taskLog, taskID)
+	}
+
 	go func() {
 		var seq atomic.Int32
 		var mu sync.Mutex
@@ -2743,6 +2967,12 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				if !ok {
 					goto drainDone
 				}
+				// Stamp activity as soon as a message lands. The idle
+				// watchdog reads this to decide whether the backend has
+				// gone silent — stamping before processing makes sure a
+				// slow downstream call (mu.Lock contention, batch resize)
+				// can't be misattributed to backend silence.
+				lastActivityAt.Store(time.Now().UnixNano())
 				switch msg.Type {
 				case agent.MessageStatus:
 					// Persist the session/work_dir as soon as the backend
@@ -2762,6 +2992,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					}
 				case agent.MessageToolUse:
 					n := toolCount.Add(1)
+					inFlightTools.Add(1)
 					taskLog.Info(fmt.Sprintf("tool #%d: %s", n, msg.Tool))
 					if msg.CallID != "" {
 						mu.Lock()
@@ -2778,6 +3009,20 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					})
 					mu.Unlock()
 				case agent.MessageToolResult:
+					// Decrement only when the count would stay >= 0. A stray
+					// tool_result with no matching tool_use (backend bug or
+					// reconnect mid-stream) shouldn't push the counter
+					// negative — that would re-arm the watchdog one tool_use
+					// too early on the next call.
+					for {
+						cur := inFlightTools.Load()
+						if cur <= 0 {
+							break
+						}
+						if inFlightTools.CompareAndSwap(cur, cur-1) {
+							break
+						}
+					}
 					s := seq.Add(1)
 					output := msg.Output
 					if len(output) > 8192 {
@@ -2835,8 +3080,29 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 
 	select {
 	case result := <-session.Result:
+		if idleWatchdogFired.Load() {
+			// The backend's wait goroutine (e.g. claude.go) translates the
+			// SIGKILL we delivered via agentCancel into Status="aborted".
+			// Re-tag it as "idle_watchdog" so runTask routes the
+			// disposition through a dedicated failure_reason, not the
+			// generic "agent_error" bucket the aborted path falls into.
+			result.Status = "idle_watchdog"
+			if result.Error == "" {
+				result.Error = idleWatchdogReason(idleWindow)
+			}
+		}
 		return result, toolCount.Load(), nil
 	case <-drainCtx.Done():
+		// Idle watchdog cancels via agentCancel(), which propagates here as
+		// context.Canceled. Check this BEFORE the generic cancelled/timeout
+		// classifiers so a watchdog-induced stop isn't misreported as
+		// "task cancelled by server".
+		if idleWatchdogFired.Load() {
+			return agent.Result{
+				Status: "idle_watchdog",
+				Error:  idleWatchdogReason(idleWindow),
+			}, toolCount.Load(), nil
+		}
 		// Distinguish external cancellation (e.g. server-initiated cancel
 		// because the issue was reassigned, or the user invoked CancelTask)
 		// from genuine drain-deadline timeouts. context.Canceled means the
@@ -2852,6 +3118,76 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 			Status: "timeout",
 			Error:  "agent did not produce result within drain timeout",
 		}, toolCount.Load(), nil
+	}
+}
+
+// idleWatchdogReason formats the human-facing explanation surfaced on
+// idle_watchdog dispositions. Centralised so the result-arrival branch and the
+// drain-timeout branch in executeAndDrain emit identical wording.
+func idleWatchdogReason(window time.Duration) string {
+	return fmt.Sprintf("agent produced no new messages for %s and message queue was empty; force-stopped by idle watchdog", window)
+}
+
+// runIdleWatchdog ticks until either agentCtx is cancelled or the backend has
+// been silent for at least window with no in-flight tool call. On firing, it
+// sets fired and calls cancel, which propagates to the agent subprocess (via
+// the ctx passed to backend.Execute) and to drainCtx. The check requires:
+//
+//  1. inFlightTools == 0 — the backend has emitted a tool_use whose
+//     matching tool_result hasn't arrived yet, meaning a real tool (e.g.
+//     `npm install`, `docker build`) is legitimately running. Long tool
+//     calls produce no messages between use and result; killing here would
+//     yank the agent mid-build. AND
+//  2. time since lastActivityAt exceeds window — the drain loop is single
+//     reader, so a stale stamp means no message has actually arrived; AND
+//  3. session.Messages buffer is empty — defensive against a hypothetical
+//     drain stall where unprocessed messages would still imply progress.
+//
+// Tick interval is window/2 (floored at 30 s in production, but the floor only
+// kicks in for windows >= 1 min so tests can pass tiny windows like 50 ms and
+// see the watchdog fire within a few ticks).
+func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window time.Duration, lastActivityAt *atomic.Int64, inFlightTools *atomic.Int32, fired *atomic.Bool, cancel context.CancelFunc, messages <-chan agent.Message, taskLog *slog.Logger, taskID string) {
+	interval := window / 2
+	if window >= time.Minute && interval < 30*time.Second {
+		interval = 30 * time.Second
+	}
+	if interval <= 0 {
+		interval = window
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-agentCtx.Done():
+			return
+		case <-ticker.C:
+			// In-flight tool call: the agent has emitted tool_use and
+			// the corresponding tool_result hasn't landed yet. A long
+			// build/install/test can sit here silently for many minutes
+			// — that is forward progress, not a hang.
+			if inFlightTools.Load() > 0 {
+				continue
+			}
+			last := time.Unix(0, lastActivityAt.Load())
+			idleFor := time.Since(last)
+			if idleFor < window {
+				continue
+			}
+			// A buffered-but-undrained message means the drain loop is
+			// behind, not the backend. Wait one more tick rather than
+			// killing a backend that is still producing output.
+			if len(messages) > 0 {
+				continue
+			}
+			taskLog.Warn("idle watchdog firing: no agent activity, force-stopping run",
+				"task", shortID(taskID),
+				"idle_for", idleFor.Round(time.Second).String(),
+				"threshold", window.String(),
+			)
+			fired.Store(true)
+			cancel()
+			return
+		}
 	}
 }
 

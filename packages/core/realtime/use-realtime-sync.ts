@@ -120,6 +120,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
@@ -178,7 +179,14 @@ export function useRealtimeSync(
       },
       agent: () => {
         const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+          // Squad members status is derived per agent, so any agent
+          // change (status flip, archive, runtime swap) needs to refresh
+          // the per-squad members-status cache. Prefix-matches both the
+          // squad list and every squadMemberStatus query.
+          qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
+        }
       },
       member: () => {
         const wsId = getCurrentWsId();
@@ -225,7 +233,14 @@ export function useRealtimeSync(
       },
       daemon: () => {
         const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+          // Runtime online/offline transitions move the derived status
+          // for every agent that hosts on this runtime, which shifts the
+          // working/idle/offline pill on the squad page. Same prefix
+          // invalidation pattern as the agent handler above.
+          qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
+        }
       },
       autopilot: () => {
         const wsId = getCurrentWsId();
@@ -267,6 +282,14 @@ export function useRealtimeSync(
         // every list-of-tasks query stale" so cache stays fresh even
         // when the relevant component isn't currently mounted.
         qc.invalidateQueries({ queryKey: ["issues", "tasks"] });
+        // Per-issue token usage card (issue-detail right rail). Same
+        // shape as the tasks invalidation above — any task lifecycle
+        // event shifts the aggregated usage numbers.
+        qc.invalidateQueries({ queryKey: ["issues", "usage"] });
+        // Squad members-status reads the same task lifecycle to flip
+        // working ↔ idle for each agent member. Prefix-matches every
+        // mounted squad-page's members-status query in O(1).
+        qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
       },
     };
 

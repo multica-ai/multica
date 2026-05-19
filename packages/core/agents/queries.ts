@@ -16,6 +16,12 @@ export const agentRunCountsKeys = {
   last30d: (wsId: string) => [...agentRunCountsKeys.all(wsId), "30d"] as const,
 };
 
+export const agentAllowedPrincipalKeys = {
+  all: (wsId: string) => ["workspaces", wsId, "agent-allowed-principals"] as const,
+  detail: (wsId: string, agentId: string) =>
+    [...agentAllowedPrincipalKeys.all(wsId), agentId] as const,
+};
+
 // Workspace-scoped agent task snapshot — every active task plus each agent's
 // most recent terminal task. This is the single shared source of truth that
 // powers per-agent presence derivation across the app. One fetch per
@@ -60,6 +66,15 @@ export function agentRunCounts30dOptions(wsId: string) {
     staleTime: 60 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,
+  });
+}
+
+export function agentAllowedPrincipalsOptions(wsId: string, agentId: string) {
+  return queryOptions({
+    queryKey: agentAllowedPrincipalKeys.detail(wsId, agentId),
+    queryFn: () => api.listAgentAllowedPrincipals(agentId),
+    staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000,
   });
 }
 

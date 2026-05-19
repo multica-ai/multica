@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -33,23 +34,25 @@ func (h *Handler) canAccessPrivateAgent(ctx context.Context, agent db.Agent, act
 	return err == nil
 }
 
-// canTriggerPrivateAgent enforces OPE-531 strict policy for mention/assign:
-// only the agent owner (member) or agents sharing the same owner may trigger
-// a private agent. Workspace admins do NOT get bypass.
+// canTriggerPrivateAgent enforces the stricter mention/assign policy:
+// private agents may be triggered by their owner, explicitly allowed members,
+// or same-owner agents. Workspace admins do not bypass this gate unless they
+// are also explicitly allowlisted.
 func (h *Handler) canTriggerPrivateAgent(ctx context.Context, agent db.Agent, actorType, actorID string) bool {
 	if agent.Visibility != "private" {
 		return true
 	}
-	targetOwner := uuidToString(agent.OwnerID)
+
+	ownerID := uuidToString(agent.OwnerID)
 	switch actorType {
 	case "member":
-		return targetOwner == actorID
+		if ownerID == actorID {
+			return true
+		}
+		return h.isAgentAllowedPrincipal(ctx, agent.ID, actorID)
 	case "agent":
 		triggerAgent, err := h.Queries.GetAgent(ctx, parseUUID(actorID))
-		if err != nil {
-			return false
-		}
-		return uuidToString(triggerAgent.OwnerID) == targetOwner
+		return err == nil && uuidToString(triggerAgent.OwnerID) == ownerID
 	default:
 		return false
 	}
@@ -63,6 +66,18 @@ func (h *Handler) canTriggerPrivateAgent(ctx context.Context, agent db.Agent, ac
 // is a workspace member.
 func memberAllowedForPrivateAgent(agent db.Agent, userID, role string) bool {
 	return true
+}
+
+func memberAllowedForPrivateAgentWithAllowlist(agent db.Agent, userID, role string, allowedUserIDs []string) bool {
+	if memberAllowedForPrivateAgent(agent, userID, role) {
+		return true
+	}
+	for _, allowedUserID := range allowedUserIDs {
+		if allowedUserID == userID {
+			return true
+		}
+	}
+	return false
 }
 
 // accessibleAgentIDs returns the set of agent IDs in the workspace the actor
@@ -80,13 +95,25 @@ func (h *Handler) accessibleAgentIDs(ctx context.Context, workspaceID, actorType
 	}
 	allowed := make(map[string]struct{}, len(agents))
 	for _, a := range agents {
+		agentID := uuidToString(a.ID)
 		if a.Visibility == "private" && actorType == "member" {
 			if !memberAllowedForPrivateAgent(a, actorID, role) {
 				continue
 			}
 		}
-		allowed[uuidToString(a.ID)] = struct{}{}
+		allowed[agentID] = struct{}{}
 	}
 	return allowed, true
 }
 
+func (h *Handler) isAgentAllowedPrincipal(ctx context.Context, agentID pgtype.UUID, principalID string) bool {
+	principalUUID, err := util.ParseUUID(principalID)
+	if err != nil {
+		return false
+	}
+	allowed, err := h.Queries.IsAgentAllowedPrincipal(ctx, db.IsAgentAllowedPrincipalParams{
+		AgentID:     agentID,
+		PrincipalID: principalUUID,
+	})
+	return err == nil && allowed
+}

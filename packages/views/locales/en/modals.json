@@ -122,6 +122,8 @@
     "toast_created": "Issue created",
     "view_issue": "View issue",
     "toast_failed": "Failed to create issue",
+    "toast_duplicate_title": "Duplicate issue",
+    "toast_duplicate_view": "View existing issue",
     "toast_link_subissues_all_failed": "Failed to link sub-issues",
     "toast_link_subissues_partial": "Failed to link {{failed}} of {{total}} sub-issues",
     "switch_to_agent": "Switch to Agent",

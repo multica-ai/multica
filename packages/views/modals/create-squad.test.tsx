@@ -285,7 +285,9 @@ function renderModal() {
 
 const myAgent = makeAgent({ id: "agent-mine-1", name: "MineAgentOne", owner_id: ME });
 const myAgent2 = makeAgent({ id: "agent-mine-2", name: "MineAgentTwo", owner_id: ME });
-const otherAgent = makeAgent({ id: "agent-other-1", name: "OtherAgentOne", owner_id: OTHER });
+const otherAgent = makeAgent({ id: "agent-other-1", name: "OtherAgentOne", owner_id: OTHER, visibility: "workspace" });
+const otherPrivateAgent = makeAgent({ id: "agent-other-private-1", name: "OtherPrivateAgentOne", owner_id: OTHER });
+const workspaceAgent = makeAgent({ id: "agent-workspace-1", name: "WorkspaceAgentOne", owner_id: OTHER, visibility: "workspace" });
 const wsMember = makeMember(OTHER, "Workspace Pal");
 
 describe("CreateSquadModal", () => {
@@ -325,6 +327,15 @@ describe("CreateSquadModal", () => {
     const myIdx = all.findIndex((n) => n.textContent === "My Agents");
     const wsIdx = all.findIndex((n) => n.textContent === "Workspace Agents");
     expect(myIdx).toBeLessThan(wsIdx);
+  });
+
+  it("filters other users' private agents from squad agent pickers", () => {
+    mocks.agents = [otherPrivateAgent, workspaceAgent, myAgent];
+    renderModal();
+
+    expect(screen.queryByText("OtherPrivateAgentOne")).toBeNull();
+    expect(screen.getAllByText("MineAgentOne").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("WorkspaceAgentOne").length).toBeGreaterThanOrEqual(1);
   });
 
   it("auto-clears an additional-members entry when the same agent is picked as leader", async () => {

@@ -5,12 +5,14 @@ import { useStore } from "zustand";
 import { toast } from "sonner";
 import { ListTodo } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import type { IssueStatus } from "@multica/core/types";
+import type { UpdateIssueRequest } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
 import {
   childIssueProgressOptions,
+  myIssueAssigneeGroupsOptions,
   myIssueListOptions,
+  type AssigneeGroupedIssuesFilter,
   type MyIssuesFilter,
 } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
@@ -47,6 +49,7 @@ export function ActorIssuesPanel({
   const scope = useStore(actorIssuesViewStore, (s) => s.scope);
   const setScope = useStore(actorIssuesViewStore, (s) => s.setScope);
   const viewMode = useStore(actorIssuesViewStore, (s) => s.viewMode);
+  const grouping = useStore(actorIssuesViewStore, (s) => s.grouping);
   const statusFilters = useStore(actorIssuesViewStore, (s) => s.statusFilters);
   const priorityFilters = useStore(actorIssuesViewStore, (s) => s.priorityFilters);
   const assigneeFilters = useStore(actorIssuesViewStore, (s) => s.assigneeFilters);
@@ -70,19 +73,70 @@ export function ActorIssuesPanel({
     [scope, actorId],
   );
   const queryScope = `${actorType}:${actorId}:${scope}`;
+  const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
 
-  const { data: rawIssues = [], isLoading } = useQuery(
-    myIssueListOptions(wsId, queryScope, queryFilter),
+  const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(() => {
+    const filter: AssigneeGroupedIssuesFilter = {
+      ...queryFilter,
+      statuses: statusFilters.length > 0 ? statusFilters : [...BOARD_STATUSES],
+      priorities: priorityFilters,
+      assignee_filters: assigneeFilters,
+      include_no_assignee: includeNoAssignee,
+      creator_filters: creatorFilters,
+      project_ids: projectFilters,
+      include_no_project: includeNoProject,
+      label_ids: labelFilters,
+    };
+    if (scope === "assigned") {
+      filter.assignee_types = [actorType];
+    }
+    return filter;
+  }, [
+    actorType,
+    assigneeFilters,
+    creatorFilters,
+    includeNoAssignee,
+    includeNoProject,
+    labelFilters,
+    priorityFilters,
+    projectFilters,
+    queryFilter,
+    scope,
+    statusFilters,
+  ]);
+  const assigneeGroupsOptions = myIssueAssigneeGroupsOptions(
+    wsId,
+    queryScope,
+    assigneeGroupFilter,
   );
+  const rawIssuesQuery = useQuery({
+    ...myIssueListOptions(wsId, queryScope, queryFilter),
+    enabled: !usesAssigneeBoard,
+  });
+  const assigneeGroupsQuery = useQuery({
+    ...assigneeGroupsOptions,
+    enabled: usesAssigneeBoard,
+  });
+  const rawIssues = useMemo(
+    () => rawIssuesQuery.data ?? [],
+    [rawIssuesQuery.data],
+  );
+  const groupedIssues = useMemo(
+    () => assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [],
+    [assigneeGroupsQuery.data],
+  );
+  const isLoading = usesAssigneeBoard
+    ? assigneeGroupsQuery.isLoading
+    : rawIssuesQuery.isLoading;
 
   const actorIssues = useMemo(
     () =>
-      rawIssues.filter((issue) =>
+      (usesAssigneeBoard ? groupedIssues : rawIssues).filter((issue) =>
         scope === "assigned"
           ? issue.assignee_type === actorType && issue.assignee_id === actorId
           : issue.creator_type === actorType && issue.creator_id === actorId,
       ),
-    [rawIssues, scope, actorType, actorId],
+    [actorId, actorType, groupedIssues, rawIssues, scope, usesAssigneeBoard],
   );
 
   const issues = useMemo(
@@ -128,15 +182,17 @@ export function ActorIssuesPanel({
 
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
-    (issueId: string, newStatus: IssueStatus, newPosition?: number) => {
-      const updates: Partial<{ status: IssueStatus; position: number }> = {
-        status: newStatus,
-      };
-      if (newPosition !== undefined) updates.position = newPosition;
-
+    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position">) => {
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
-        { onError: () => toast.error(t(($) => $.page.move_failed)) },
+        {
+          onError: (err) =>
+            toast.error(
+              err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.page.move_failed),
+            ),
+        },
       );
     },
     [updateIssueMutation, t],
@@ -192,7 +248,10 @@ export function ActorIssuesPanel({
           <div className="flex flex-1 min-h-0 flex-col">
             {viewMode === "board" ? (
               <BoardView
-                issues={issues}
+                issues={usesAssigneeBoard ? actorIssues : issues}
+                assigneeGroups={usesAssigneeBoard ? assigneeGroupsQuery.data?.groups : undefined}
+                assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
+                assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
                 visibleStatuses={visibleStatuses}
                 hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}

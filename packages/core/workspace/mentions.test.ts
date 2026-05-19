@@ -88,6 +88,25 @@ describe("workspace mention targets", () => {
     expect(agentLabels).toContain("Legacy Bot");
   });
 
+  it("keeps allowlisted private agents visible to the current user", () => {
+    const targets = buildWorkspaceMentionTargets(
+      [member({ user_id: "user-1", name: "Alice" })],
+      [
+        agent({
+          id: "allowed-private-agent",
+          name: "Allowed Bot",
+          visibility: "private",
+          owner_id: "other-user",
+          allowed_user_ids: ["user-1"],
+        }),
+      ],
+      { userId: "user-1", role: "member" },
+    );
+
+    const agentLabels = targets.filter((t) => t.type === "agent").map((t) => t.label);
+    expect(agentLabels).toContain("Allowed Bot");
+  });
+
   it("maps issues to issue mention targets", () => {
     const issue = {
       id: "issue-1",

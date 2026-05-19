@@ -33,7 +33,7 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	latest, err := cli.FetchLatestRelease()
+	latest, err := cli.FetchLatestManifestRelease()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not check latest version: %v\n", err)
 	} else {

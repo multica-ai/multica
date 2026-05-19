@@ -40,7 +40,8 @@ export function buildWorkspaceMentionTargets(
           // Legacy agents (owner_id null) remain visible to everyone.
           (agent.visibility === "workspace" ||
             agent.owner_id === null ||
-            agent.owner_id === ctx.userId),
+            agent.owner_id === ctx.userId ||
+            (!!ctx.userId && agent.allowed_user_ids?.includes(ctx.userId))),
       )
       .map((agent) => ({
         id: agent.id,

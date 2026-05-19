@@ -7,6 +7,7 @@ import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { isAgentSelectable } from "@multica/core/permissions";
 import {
   agentListOptions,
   memberListOptions,
@@ -66,8 +67,14 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
   const { data: wsMembers = [] } = useQuery(memberListOptions(wsId));
 
   const activeAgents = useMemo(
-    () => agents.filter((a: Agent) => !a.archived_at && a.runtime_id),
-    [agents],
+    () =>
+      agents.filter(
+        (a: Agent) =>
+          !a.archived_at &&
+          a.runtime_id &&
+          isAgentSelectable(a, currentUserId),
+      ),
+    [agents, currentUserId],
   );
 
   const [name, setName] = useState("");
@@ -142,7 +149,7 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="p-0 gap-0 flex flex-col overflow-hidden !top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2 !w-full !max-w-5xl !h-[85vh]">
+      <DialogContent className="p-0 gap-0 flex flex-col overflow-hidden !top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2 !w-full !max-w-2xl !h-[85vh]">
         <DialogHeader className="border-b px-5 py-3 space-y-0">
           <DialogTitle className="text-base font-semibold">
             {t(($) => $.create_squad.title)}

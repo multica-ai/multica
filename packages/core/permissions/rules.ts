@@ -5,6 +5,7 @@ import type {
   MemberRole,
   RuntimeDevice,
   Skill,
+  Squad,
 } from "../types";
 import { ALLOW, deny, type Decision, type PermissionContext } from "./types";
 
@@ -27,7 +28,7 @@ const isAdminLike = (role: MemberRole | null) =>
 /**
  * Whether an agent should appear in selection surfaces (dropdowns, @mention,
  * chat picker, assignee filter). Workspace-visibility agents are always
- * selectable; private agents are selectable only by their owner.
+ * selectable; private agents are selectable by their owner and allowed users.
  *
  * Admin/owner roles do NOT bypass this gate — selection surfaces treat all
  * members identically per the uniform agent-selection policy (OPE-531).
@@ -41,7 +42,21 @@ export function isAgentSelectable(
   if (agent.archived_at) return false;
   if (agent.visibility === "workspace") return true;
   if (agent.owner_id === null) return true;
-  return agent.owner_id === userId;
+  return agent.owner_id === userId || (!!userId && agent.allowed_user_ids?.includes(userId));
+}
+
+/**
+ * Squads route work to their leader agent. A squad is selectable only when
+ * the current user could also select that leader directly.
+ */
+export function isSquadSelectable(
+  squad: Squad,
+  agentsById: Map<string, Agent>,
+  userId: string | null,
+): boolean {
+  if (squad.archived_at) return false;
+  const leader = agentsById.get(squad.leader_id);
+  return !!leader && isAgentSelectable(leader, userId);
 }
 
 /**
@@ -64,7 +79,8 @@ export function canEditAgent(agent: Agent, ctx: PermissionContext): Decision {
 
 /**
  * Assign an agent to an issue. Workspace-visibility agents are assignable by
- * any workspace member; private agents are restricted to their owner only.
+ * any workspace member; private agents are restricted to their owner and
+ * allowed users.
  * Admin/owner roles no longer bypass this gate (OPE-531).
  */
 export function canAssignAgentToIssue(
@@ -80,8 +96,9 @@ export function canAssignAgentToIssue(
     }
     return ALLOW;
   }
-  // visibility === "private" — only the owner can assign
+  // visibility === "private" — owner and allowlisted users can assign
   if (agent.owner_id !== null && agent.owner_id === ctx.userId) return ALLOW;
+  if (!!ctx.userId && agent.allowed_user_ids?.includes(ctx.userId)) return ALLOW;
   return deny(
     "private_visibility",
     "Personal agent — only the owner can assign work to this agent.",

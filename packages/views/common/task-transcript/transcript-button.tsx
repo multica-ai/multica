@@ -27,6 +27,11 @@ interface TranscriptButtonProps {
   isLive?: boolean;
   className?: string;
   title?: string;
+  /**
+   * Optional content rendered above the transcript event list. Used to
+   * surface autopilot webhook payloads inline with the run history.
+   */
+  headerSlot?: React.ReactNode;
 }
 
 /**
@@ -42,6 +47,7 @@ export function TranscriptButton({
   isLive = false,
   className,
   title = "View transcript",
+  headerSlot,
 }: TranscriptButtonProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -107,6 +113,7 @@ export function TranscriptButton({
           items={items}
           agentName={agentName}
           isLive={isLive}
+          headerSlot={headerSlot}
         />
       )}
     </>
