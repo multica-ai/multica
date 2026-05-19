@@ -1271,12 +1271,12 @@ func TestOpenclawProcessOutputDeeplyIndentedFixture(t *testing.T) {
 	}
 }
 
-// TestOpenclawProcessOutputEmptyBufferErrorIncludesByteCount tightens the
-// empty-buffer failure path: the canonical "openclaw returned no parseable
-// output" string is preserved (so existing dashboards and log-grep tooling
-// keep working), but operators get zero ambiguity when the buffer is truly
-// empty vs. partially populated.
-func TestOpenclawProcessOutputEmptyBufferErrorIncludesByteCount(t *testing.T) {
+// TestOpenclawProcessOutputEmptyBufferCanonicalError pins the empty-buffer
+// failure path: the canonical "openclaw returned no parseable output"
+// string is preserved verbatim so existing dashboards and log-grep tooling
+// keep matching. Any change to the wording must be coordinated with those
+// consumers (see the openclawNoParseableOutput constant).
+func TestOpenclawProcessOutputEmptyBufferCanonicalError(t *testing.T) {
 	t.Parallel()
 
 	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,12 @@ import (
 	"strings"
 	"time"
 )
+
+// openclawNoParseableOutput is the canonical error string surfaced when the
+// adapter cannot extract any usable JSON from a run's stdout. The exact
+// phrase is depended on by external log-grep / dashboard alerts; do not
+// change it without also updating those consumers.
+const openclawNoParseableOutput = "openclaw returned no parseable output"
 
 // minOpenclawVersion is the lowest openclaw version that emits its
 // --json result on stdout. PR #2101 swapped the adapter from reading
@@ -315,7 +322,15 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 		return b.buildOpenclawEventResult(result, ch, &output)
 	}
 
-	scanner := bufio.NewScanner(strings.NewReader(string(buf)))
+	// Fall-back path: NDJSON line scanner. Note that because we already
+	// drained the full buffer with io.ReadAll above, this path is no longer
+	// truly streaming — events accumulate until the subprocess closes
+	// stdout, then drain all at once. OpenClaw 2026.5.x does not emit
+	// streaming events, so this regression is invisible today; if a future
+	// backend on this code path emits real NDJSON streams and needs live
+	// progress updates, we'll need to split the fast path off a streaming
+	// reader instead of io.ReadAll.
+	scanner := bufio.NewScanner(bytes.NewReader(buf))
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 
 	var output strings.Builder
@@ -422,8 +437,8 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 	// If we got no events at all, fall back to raw output. The whole-buffer
 	// fast path above already tried the structured-result parse — by the time
 	// we reach here the buffer truly is unstructured (just log lines, plain
-	// text, or empty). Surface either the trimmed text as a completed run or
-	// a failure with a buffer preview so debugging isn't blind.
+	// text, or empty). Surface the trimmed text as a completed run when we
+	// have any, otherwise the canonical no-parseable-output failure.
 	if !gotEvents {
 		trimmed := strings.TrimSpace(strings.Join(rawLines, "\n"))
 		if trimmed != "" {
@@ -431,7 +446,7 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 		}
 		return openclawEventResult{
 			status: "failed",
-			errMsg: openclawNoParseableOutputError(buf),
+			errMsg: openclawNoParseableOutput,
 		}
 	}
 
@@ -475,30 +490,6 @@ func parseWholeBufferOpenclawResult(buf []byte) (openclawResult, bool) {
 		}
 	}
 	return openclawResult{}, false
-}
-
-// openclawNoParseableOutputError formats the error message returned when
-// neither the whole-buffer parse nor the NDJSON line scanner extracted any
-// usable content. It includes a short preview of the captured stdout so
-// daemon logs surface enough context to debug parse failures without
-// dumping potentially huge buffers.
-func openclawNoParseableOutputError(buf []byte) string {
-	const previewLimit = 200
-	preview := strings.TrimSpace(string(buf))
-	if preview == "" {
-		return "openclaw returned no parseable output"
-	}
-	truncated := false
-	if len(preview) > previewLimit {
-		preview = preview[:previewLimit]
-		truncated = true
-	}
-	// Collapse newlines so the message stays single-line in logs.
-	preview = strings.ReplaceAll(preview, "\n", "\\n")
-	if truncated {
-		return fmt.Sprintf("openclaw returned no parseable output (got %d bytes; preview: %q...)", len(buf), preview)
-	}
-	return fmt.Sprintf("openclaw returned no parseable output (got %d bytes; preview: %q)", len(buf), preview)
 }
 
 // tryParseOpenclawEvent attempts to parse a line as a streaming NDJSON event.
