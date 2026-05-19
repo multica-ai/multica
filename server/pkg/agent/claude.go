@@ -20,6 +20,17 @@ type claudeBackend struct {
 	cfg Config
 }
 
+const claudeArgvPromptMaxBytes = 24 * 1024
+
+var claudeStdinWriteTimeout = 10 * time.Second
+
+type claudePromptTransport int
+
+const (
+	claudePromptArgv claudePromptTransport = iota
+	claudePromptStdin
+)
+
 func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
@@ -35,7 +46,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	args := buildClaudeArgs(prompt, opts, b.cfg.Logger)
+	args, promptTransport := buildClaudeArgs(prompt, opts, b.cfg.Logger)
 
 	// If the caller provided an MCP config, write it to a temp file and pass
 	// --mcp-config <path> so the agent uses a controlled set of MCP servers
@@ -61,7 +72,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", sanitizeArgsForLog(args, prompt, opts.ResumeSessionID))
+	b.cfg.Logger.Info("agent command", "exec", execPath, "args", claudeArgsForLog(args, promptTransport))
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -73,14 +84,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("claude stdout pipe: %w", err)
 	}
-	// Resume passes the new turn's message as stream-json on stdin; single-shot
-	// passes the prompt as a positional argument (see buildClaudeArgs) and never
-	// touches stdin. Skipping stdin on the single-shot path sidesteps Windows
-	// anonymous-pipe stalls while Claude is still running synchronous startup
-	// hooks, loading V8, or initializing MCP.
 	var stdin io.WriteCloser
 	closeStdin := func() {}
-	if opts.ResumeSessionID != "" {
+	if promptTransport == claudePromptStdin {
 		stdin, err = cmd.StdinPipe()
 		if err != nil {
 			cancel()
@@ -106,8 +112,11 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("start claude: %w", err)
 	}
-	if stdin != nil {
-		if err := writeClaudeInput(stdin, prompt); err != nil {
+	if promptTransport == claudePromptStdin {
+		writeCtx, writeCancel := context.WithTimeout(runCtx, claudeStdinWriteTimeout)
+		err := writeClaudeInputWithContext(writeCtx, stdin, prompt)
+		writeCancel()
+		if err != nil {
 			// claude almost certainly died during startup (broken pipe). The
 			// real reason is sitting in stderrBuf — surface it the same way the
 			// post-handshake error path does, otherwise the daemon log is the
@@ -119,8 +128,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			_ = cmd.Wait()
 			return nil, errors.New(withAgentStderr(fmt.Sprintf("write claude input: %v", err), "claude", stderrBuf.Tail()))
 		}
-		closeStdin()
 	}
+	closeStdin()
 
 	b.cfg.Logger.Info("claude started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
@@ -424,12 +433,13 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 	"--mcp-config":      blockedWithValue,  // set by daemon from agent.mcp_config
 }
 
-func buildClaudeArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
+func buildClaudeArgs(prompt string, opts ExecOptions, logger *slog.Logger) ([]string, claudePromptTransport) {
+	promptTransport := claudePromptTransportFor(prompt, opts)
 	args := []string{"-p"}
-	// Single-shot (no resume): pass the prompt as a positional argument so the
-	// daemon never writes the task prompt to stdin during Claude startup. This
-	// avoids Windows pipe stalls when SessionStart hooks are synchronous.
-	if opts.ResumeSessionID == "" {
+	// Single-shot prompts under the argv budget are passed as a positional
+	// argument so the daemon never writes task prompt bytes to stdin during
+	// Claude startup. Resume and very large prompts use stream-json stdin.
+	if promptTransport == claudePromptArgv {
 		args = append(args, prompt)
 	}
 	args = append(args,
@@ -445,6 +455,9 @@ func buildClaudeArgs(prompt string, opts ExecOptions, logger *slog.Logger) []str
 		// clarification belongs in an issue comment instead.
 		"--disallowedTools", "AskUserQuestion",
 	)
+	if promptTransport == claudePromptStdin {
+		args = append(args, "--input-format", "stream-json")
+	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
@@ -455,29 +468,47 @@ func buildClaudeArgs(prompt string, opts ExecOptions, logger *slog.Logger) []str
 		args = append(args, "--append-system-prompt", opts.SystemPrompt)
 	}
 	if opts.ResumeSessionID != "" {
-		args = append(args, "--input-format", "stream-json", "--resume", opts.ResumeSessionID)
+		args = append(args, "--resume", opts.ResumeSessionID)
 	}
 	args = append(args, filterCustomArgs(opts.ExtraArgs, claudeBlockedArgs, logger)...)
 	args = append(args, filterCustomArgs(opts.CustomArgs, claudeBlockedArgs, logger)...)
-	return args
+	return args, promptTransport
 }
 
-// sanitizeArgsForLog replaces the positional prompt argument with a length
-// placeholder so daemon.log stays scannable. Resume runs do not embed the
-// prompt in argv, so the original args are returned.
-func sanitizeArgsForLog(args []string, prompt, resumeSessionID string) []string {
-	if resumeSessionID != "" || prompt == "" {
+func claudePromptTransportFor(prompt string, opts ExecOptions) claudePromptTransport {
+	if opts.ResumeSessionID != "" {
+		return claudePromptStdin
+	}
+	if len([]byte(prompt)) > claudeArgvPromptMaxBytes {
+		return claudePromptStdin
+	}
+	return claudePromptArgv
+}
+
+// claudeArgsForLog replaces the positional prompt argument with a length
+// placeholder so daemon.log stays scannable. Stdin runs do not embed the prompt
+// in argv, so the original args are returned.
+func claudeArgsForLog(args []string, promptTransport claudePromptTransport) []string {
+	if promptTransport != claudePromptArgv || len(args) < 2 || args[0] != "-p" {
 		return args
 	}
 	out := make([]string, len(args))
 	copy(out, args)
-	for i, a := range out {
-		if a == prompt {
-			out[i] = fmt.Sprintf("<prompt:%d chars>", len(prompt))
-			break
-		}
-	}
+	out[1] = fmt.Sprintf("<prompt:%d bytes>", len([]byte(args[1])))
 	return out
+}
+
+func writeClaudeInputWithContext(ctx context.Context, w io.Writer, prompt string) error {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- writeClaudeInput(w, prompt)
+	}()
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("timed out waiting for claude stdin write: %w", ctx.Err())
+	}
 }
 
 func writeClaudeInput(w io.Writer, prompt string) error {
