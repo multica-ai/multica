@@ -1,15 +1,36 @@
 -- name: ListIssues :many
 SELECT id, workspace_id, title, description, status, priority,
        assignee_type, assignee_id, creator_type, creator_id,
-       parent_issue_id, position, due_date, created_at, updated_at, number, project_id
+       parent_issue_id, position, start_date, due_date, created_at, updated_at, number, project_id
 FROM issue
 WHERE workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
+  AND (COALESCE(cardinality(sqlc.narg('priorities')::text[]), 0) = 0 OR priority = ANY(sqlc.narg('priorities')::text[]))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'))
   AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
+  AND (
+    (
+      COALESCE(cardinality(sqlc.narg('assignee_pairs')::text[]), 0) = 0
+      AND sqlc.narg('include_no_assignee')::boolean IS NOT TRUE
+    )
+    OR (sqlc.narg('include_no_assignee')::boolean IS TRUE AND assignee_id IS NULL)
+    OR (assignee_id IS NOT NULL AND (assignee_type || ':' || assignee_id::text) = ANY(sqlc.narg('assignee_pairs')::text[]))
+  )
   AND (sqlc.narg('creator_id')::uuid IS NULL OR creator_id = sqlc.narg('creator_id'))
+  AND (
+    COALESCE(cardinality(sqlc.narg('creator_pairs')::text[]), 0) = 0
+    OR (creator_type || ':' || creator_id::text) = ANY(sqlc.narg('creator_pairs')::text[])
+  )
   AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+  AND (
+    (
+      COALESCE(cardinality(sqlc.narg('project_ids')::uuid[]), 0) = 0
+      AND sqlc.narg('include_no_project')::boolean IS NOT TRUE
+    )
+    OR (sqlc.narg('include_no_project')::boolean IS TRUE AND project_id IS NULL)
+    OR (project_id = ANY(sqlc.narg('project_ids')::uuid[]))
+  )
 ORDER BY position ASC, created_at DESC
 LIMIT $2 OFFSET $3;
 
@@ -25,9 +46,9 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
-    parent_issue_id, position, due_date, number, project_id
+    parent_issue_id, position, start_date, due_date, number, project_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one
@@ -43,6 +64,7 @@ UPDATE issue SET
     assignee_type = sqlc.narg('assignee_type'),
     assignee_id = sqlc.narg('assignee_id'),
     position = COALESCE(sqlc.narg('position'), position),
+    start_date = sqlc.narg('start_date'),
     due_date = sqlc.narg('due_date'),
     parent_issue_id = sqlc.narg('parent_issue_id'),
     project_id = sqlc.narg('project_id'),
@@ -61,12 +83,25 @@ RETURNING *;
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
-    parent_issue_id, position, due_date, number, project_id,
+    parent_issue_id, position, start_date, due_date, number, project_id,
     origin_type, origin_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     sqlc.narg('origin_type'), sqlc.narg('origin_id')
 ) RETURNING *;
+
+-- name: LockIssueDuplicateKey :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0));
+
+-- name: FindActiveDuplicateIssue :one
+SELECT * FROM issue
+WHERE workspace_id = $1
+  AND status NOT IN ('done', 'cancelled')
+  AND project_id IS NOT DISTINCT FROM $2::uuid
+  AND parent_issue_id IS NOT DISTINCT FROM $3::uuid
+  AND lower(btrim(regexp_replace(title, '[[:space:]]+', ' ', 'g'))) = $4
+ORDER BY created_at ASC
+LIMIT 1;
 
 -- name: DeleteIssue :exec
 DELETE FROM issue WHERE id = $1;
@@ -74,15 +109,36 @@ DELETE FROM issue WHERE id = $1;
 -- name: ListOpenIssues :many
 SELECT id, workspace_id, title, description, status, priority,
        assignee_type, assignee_id, creator_type, creator_id,
-       parent_issue_id, position, due_date, created_at, updated_at, number, project_id
+       parent_issue_id, position, start_date, due_date, created_at, updated_at, number, project_id
 FROM issue
 WHERE workspace_id = $1
   AND status NOT IN ('done', 'cancelled')
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
+  AND (COALESCE(cardinality(sqlc.narg('priorities')::text[]), 0) = 0 OR priority = ANY(sqlc.narg('priorities')::text[]))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'))
   AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
+  AND (
+    (
+      COALESCE(cardinality(sqlc.narg('assignee_pairs')::text[]), 0) = 0
+      AND sqlc.narg('include_no_assignee')::boolean IS NOT TRUE
+    )
+    OR (sqlc.narg('include_no_assignee')::boolean IS TRUE AND assignee_id IS NULL)
+    OR (assignee_id IS NOT NULL AND (assignee_type || ':' || assignee_id::text) = ANY(sqlc.narg('assignee_pairs')::text[]))
+  )
   AND (sqlc.narg('creator_id')::uuid IS NULL OR creator_id = sqlc.narg('creator_id'))
+  AND (
+    COALESCE(cardinality(sqlc.narg('creator_pairs')::text[]), 0) = 0
+    OR (creator_type || ':' || creator_id::text) = ANY(sqlc.narg('creator_pairs')::text[])
+  )
   AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+  AND (
+    (
+      COALESCE(cardinality(sqlc.narg('project_ids')::uuid[]), 0) = 0
+      AND sqlc.narg('include_no_project')::boolean IS NOT TRUE
+    )
+    OR (sqlc.narg('include_no_project')::boolean IS TRUE AND project_id IS NULL)
+    OR (project_id = ANY(sqlc.narg('project_ids')::uuid[]))
+  )
 ORDER BY position ASC, created_at DESC;
 
 -- name: CountIssues :one
@@ -90,10 +146,31 @@ SELECT count(*) FROM issue
 WHERE workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
+  AND (COALESCE(cardinality(sqlc.narg('priorities')::text[]), 0) = 0 OR priority = ANY(sqlc.narg('priorities')::text[]))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'))
   AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
+  AND (
+    (
+      COALESCE(cardinality(sqlc.narg('assignee_pairs')::text[]), 0) = 0
+      AND sqlc.narg('include_no_assignee')::boolean IS NOT TRUE
+    )
+    OR (sqlc.narg('include_no_assignee')::boolean IS TRUE AND assignee_id IS NULL)
+    OR (assignee_id IS NOT NULL AND (assignee_type || ':' || assignee_id::text) = ANY(sqlc.narg('assignee_pairs')::text[]))
+  )
   AND (sqlc.narg('creator_id')::uuid IS NULL OR creator_id = sqlc.narg('creator_id'))
-  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'));
+  AND (
+    COALESCE(cardinality(sqlc.narg('creator_pairs')::text[]), 0) = 0
+    OR (creator_type || ':' || creator_id::text) = ANY(sqlc.narg('creator_pairs')::text[])
+  )
+  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+  AND (
+    (
+      COALESCE(cardinality(sqlc.narg('project_ids')::uuid[]), 0) = 0
+      AND sqlc.narg('include_no_project')::boolean IS NOT TRUE
+    )
+    OR (sqlc.narg('include_no_project')::boolean IS TRUE AND project_id IS NULL)
+    OR (project_id = ANY(sqlc.narg('project_ids')::uuid[]))
+  );
 
 -- name: ListChildIssues :many
 SELECT * FROM issue

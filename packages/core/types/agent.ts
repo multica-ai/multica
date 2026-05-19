@@ -106,12 +106,40 @@ export interface AgentTask {
    * tasks that have no linked issue (so e.g. quick-create tasks render
    * with a meaningful title instead of falling through to "Untracked").
    */
-  kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct";
+  kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct" | "local_cli";
+  owner_id?: string;
+  cli_name?: string;
+  exit_code?: number;
   /**
    * Local working directory pinned for this task by the daemon. Empty until
    * the daemon reports a work_dir (typically once execution starts).
    */
   work_dir?: string;
+  context_dir?: string;
+}
+
+export interface LocalPreview {
+  id: string;
+  workspace_id: string;
+  issue_id?: string;
+  visibility: "private" | "issue" | "workspace";
+  cwd: string;
+  command: string[];
+  pid: number;
+  port?: number;
+  url?: string;
+  health_url?: string;
+  log_path: string;
+  status: "starting" | "running" | "stopped" | "unhealthy" | "unknown";
+  started_at: string;
+  last_health_at?: string;
+  last_accessed_at?: string;
+}
+
+export interface LocalPreviewLogs {
+  id: string;
+  log_path: string;
+  logs: string;
 }
 
 export interface Agent {
@@ -132,6 +160,7 @@ export interface Agent {
   max_concurrent_tasks: number;
   model: string;
   owner_id: string | null;
+  allowed_user_ids?: string[];
   skills: AgentSkillSummary[];
   created_at: string;
   updated_at: string;
@@ -139,6 +168,20 @@ export interface Agent {
   archived_by: string | null;
   /** True when this agent was duplicated and env values were stripped; owner must fill secrets. */
   custom_env_copied_pending?: boolean;
+}
+
+export interface AgentAllowedPrincipal {
+  id: string;
+  agent_id: string;
+  user_id: string;
+  name: string;
+  email: string;
+  avatar_url: string | null;
+  created_at: string;
+}
+
+export interface UpdateAgentAllowedPrincipalsRequest {
+  user_ids: string[];
 }
 
 /** Optional body for POST /api/agents/:id/copy */
@@ -418,6 +461,17 @@ export interface DashboardUsageByAgent {
 // they consumed runtime to fail).
 export interface DashboardAgentRunTime {
   agent_id: string;
+  total_seconds: number;
+  task_count: number;
+  failed_count: number;
+}
+
+// One (date) bucket of terminal-task run-time + counts for the workspace
+// dashboard. Powers the Time and Tasks metrics on the daily-trend toggle
+// — same toggle as Tokens / Cost, anchored on completed_at so day buckets
+// line up with the per-agent run-time card.
+export interface DashboardRunTimeDaily {
+  date: string;
   total_seconds: number;
   task_count: number;
   failed_count: number;

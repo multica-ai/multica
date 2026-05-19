@@ -388,3 +388,73 @@ All queries filter by `workspace_id`. Membership checks gate access. `X-Workspac
 ## Agent Assignees
 
 Assignees are polymorphic — can be a member or an agent. `assignee_type` + `assignee_id` on issues. Agents render with distinct styling (purple background, robot icon).
+
+## Permission Model
+
+> **⚠️ Fork divergence from upstream:** Our permission model is **stricter** than
+> the upstream `multica-ai/multica` repository. When merging upstream changes,
+> **never** re-introduce Admin bypass on agent management. See "Merge Guidance" below.
+
+### Core Principles
+
+1. **Owner-only agent management** — An agent is a high-privilege execution entity. Only its owner can edit, archive, restore, or cancel tasks on it. Admin/Owner workspace roles do **not** bypass this gate.
+2. **Maximum read-only access** — All workspace members can view any agent's details, configuration, instructions, skills, and task history. This enables learning and reference across the team.
+3. **Sensitive data protection** — ENV variable values and MCP server configs are visible only to the agent owner. Keys are visible; values are masked (`****`) for non-owners.
+4. **Duplicate-to-own** — Any workspace member can duplicate (copy) any agent. The copy belongs to the duplicating user, preserving the owner-only principle.
+
+### Permission Matrix
+
+| Resource | Action | Who can do it |
+|----------|--------|--------------|
+| Agent config | Edit / Archive / Restore | Agent owner only |
+| Agent ENV | View values | Agent owner only |
+| Agent ENV | View keys | Any workspace member |
+| Agent details | View (name, instructions, skills, tasks) | Any workspace member |
+| Agent | Duplicate | Any workspace member (copy owned by them) |
+| Agent (private) | Trigger (chat, @mention, assign) | Agent owner only |
+| Agent (workspace) | Trigger / Assign | Any workspace member |
+| Agent (legacy, owner_id=null) | Edit | Admin (backward compat only) |
+| System Agent Defaults | Edit | Admin only |
+| Skill | Edit / Delete | Creator or Admin |
+| Comment (member-authored) | Edit / Delete | Author or Admin |
+| Comment (agent-authored) | Edit / Delete | Nobody (immutable) |
+| Runtime device | Delete | Owner or Admin |
+| Workspace settings | Update | Admin only |
+| Workspace | Delete | Workspace owner only |
+| Member roles | Change | Admin+ (with owner-protection rules) |
+
+### Implementation Locations
+
+- **Frontend rules:** `packages/core/permissions/rules.ts` — pure functions returning `Decision` objects
+- **Frontend hooks:** `packages/core/permissions/use-resource-permissions.ts` — React hooks wrapping rules with auth context
+- **Backend gates:** `server/internal/handler/agent.go`, `workspace.go`, etc. — mirror the same logic
+
+Both frontend and backend must stay in sync. When modifying permissions, update **both** layers and their tests.
+
+### Agent Selection vs. Agent Trigger
+
+Two distinct concepts:
+
+- **Selectable** (`isAgentSelectable`): Whether an agent appears in dropdowns/lists. Private agents only appear for their owner; workspace agents appear for everyone.
+- **Triggerable** (`canTriggerPrivateAgent`): Whether a user can invoke/assign a private agent. Only the owner can trigger private agents.
+
+### Merge Guidance (Upstream Sync)
+
+When merging code from `github:multica-ai/multica`, watch for these patterns that conflict with our permission model:
+
+```typescript
+// ❌ UPSTREAM pattern — Admin can edit any agent
+if (isAdminLike(ctx.role)) return ALLOW;
+if (agent.owner_id !== null && agent.owner_id === ctx.userId) return ALLOW;
+
+// ✅ OUR pattern — Only owner can edit (Admin bypass removed)
+if (agent.owner_id !== null && agent.owner_id === ctx.userId) return ALLOW;
+if (agent.owner_id === null && isAdminLike(ctx.role)) return ALLOW; // legacy only
+```
+
+**Checklist when merging upstream permission-related changes:**
+1. Search for `isAdminLike` additions in `canEditAgent`, `canViewAgentEnv`, `canTriggerPrivateAgent`
+2. Verify `canAssignAgentToIssue` does not add admin bypass for private agents
+3. Ensure `memberAllowedForPrivateAgent` / list filters don't re-hide agents from non-owners (we want max read access)
+4. Run `pnpm test -- --filter permissions` and Go handler tests to catch regressions
+5. Check `agents-page.tsx` and `rules.ts` for `canManage` logic — no admin bypass

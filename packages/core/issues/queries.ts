@@ -1,7 +1,9 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 import type {
+  GroupedIssuesResponse,
   IssueStatus,
+  ListGroupedIssuesParams,
   ListIssuesParams,
   ListIssuesCache,
 } from "../types";
@@ -10,11 +12,22 @@ import { BOARD_STATUSES } from "./config";
 export const issueKeys = {
   all: (wsId: string) => ["issues", wsId] as const,
   list: (wsId: string) => [...issueKeys.all(wsId), "list"] as const,
+  assigneeGroupsAll: (wsId: string) =>
+    [...issueKeys.all(wsId), "assignee-groups"] as const,
+  assigneeGroups: (wsId: string, filter: AssigneeGroupedIssuesFilter) =>
+    [...issueKeys.assigneeGroupsAll(wsId), filter] as const,
   /** All "my issues" queries — use for bulk invalidation. */
   myAll: (wsId: string) => [...issueKeys.all(wsId), "my"] as const,
   /** Per-scope "my issues" list with filter identity baked into the key. */
   myList: (wsId: string, scope: string, filter: MyIssuesFilter) =>
     [...issueKeys.myAll(wsId), scope, filter] as const,
+  myAssigneeGroupsAll: (wsId: string) =>
+    [...issueKeys.myAll(wsId), "assignee-groups"] as const,
+  myAssigneeGroups: (
+    wsId: string,
+    scope: string,
+    filter: AssigneeGroupedIssuesFilter,
+  ) => [...issueKeys.myAssigneeGroupsAll(wsId), scope, filter] as const,
   detail: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "detail", id] as const,
   children: (wsId: string, id: string) =>
@@ -39,12 +52,18 @@ export const issueKeys = {
    *  every per-issue list, regardless of which issue is currently mounted. */
   tasksAll: () => ["issues", "tasks"] as const,
   taskRuns: (issueId: string) => ["issues", "task-runs", issueId] as const,
-  taskMessages: (taskId: string) => ["issues", "task-messages", taskId] as const,
+  /** Per-task execution messages. Shared with chat and realtime WS writes. */
+  taskMessages: (taskId: string) => ["task-messages", taskId] as const,
 };
 
 export type MyIssuesFilter = Pick<
   ListIssuesParams,
   "assignee_id" | "assignee_ids" | "creator_id" | "project_id"
+>;
+
+export type AssigneeGroupedIssuesFilter = Omit<
+  ListGroupedIssuesParams,
+  "group_by" | "limit" | "offset" | "group_assignee_type" | "group_assignee_id"
 >;
 
 /** Page size per status column. */
@@ -130,6 +149,22 @@ export function issueListOptions(wsId: string) {
   });
 }
 
+export function issueAssigneeGroupsOptions(
+  wsId: string,
+  filter: AssigneeGroupedIssuesFilter,
+) {
+  return queryOptions<GroupedIssuesResponse>({
+    queryKey: issueKeys.assigneeGroups(wsId, filter),
+    queryFn: () =>
+      api.listGroupedIssues({
+        group_by: "assignee",
+        limit: ISSUE_PAGE_SIZE,
+        offset: 0,
+        ...filter,
+      }),
+  });
+}
+
 /**
  * Server-filtered issue list for the My Issues page.
  * Each scope gets its own cache entry so switching tabs is instant after first load.
@@ -156,6 +191,23 @@ export function myAllIssuesListOptions(wsId: string, userId: string) {
     queryKey: [...issueKeys.myAll(wsId), "my", userId],
     queryFn: () => fetchMyIssues(userId),
     select: flattenIssueBuckets,
+  });
+}
+
+export function myIssueAssigneeGroupsOptions(
+  wsId: string,
+  scope: string,
+  filter: AssigneeGroupedIssuesFilter,
+) {
+  return queryOptions<GroupedIssuesResponse>({
+    queryKey: issueKeys.myAssigneeGroups(wsId, scope, filter),
+    queryFn: () =>
+      api.listGroupedIssues({
+        group_by: "assignee",
+        limit: ISSUE_PAGE_SIZE,
+        offset: 0,
+        ...filter,
+      }),
   });
 }
 

@@ -45,6 +45,7 @@ function commentToTimelineEntry(c: Comment): TimelineEntry {
     id: c.id,
     actor_type: c.author_type,
     actor_id: c.author_id,
+    actor_display_name: c.author_display_name,
     content: c.content,
     parent_id: c.parent_id,
     created_at: c.created_at,
@@ -275,7 +276,11 @@ export function useIssueTimeline(
       try {
         await createComment({ content, type, attachmentIds });
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : t(($) => $.comment.send_failed));
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.comment.send_failed),
+        );
       } finally {
         setSubmitting(false);
       }
@@ -298,7 +303,11 @@ export function useIssueTimeline(
           attachmentIds,
         });
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : t(($) => $.comment.send_reply_failed));
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.comment.send_reply_failed),
+        );
       }
     },
     [userId, createComment, t],
@@ -308,8 +317,12 @@ export function useIssueTimeline(
     async (commentId: string, content: string, attachmentIds?: string[]) => {
       try {
         await updateComment({ commentId, content, attachmentIds });
-      } catch {
-        toast.error(t(($) => $.comment.update_failed));
+      } catch (err) {
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.comment.update_failed),
+        );
       }
     },
     [updateComment, t],
@@ -319,8 +332,12 @@ export function useIssueTimeline(
     async (commentId: string) => {
       try {
         await deleteCommentAsync(commentId);
-      } catch {
-        toast.error(t(($) => $.comment.delete_failed));
+      } catch (err) {
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.comment.delete_failed),
+        );
       }
     },
     [deleteCommentAsync, t],
@@ -330,11 +347,13 @@ export function useIssueTimeline(
     async (commentId: string, resolved: boolean) => {
       try {
         await resolveCommentAsync({ commentId, resolved });
-      } catch {
+      } catch (err) {
         toast.error(
-          resolved
-            ? t(($) => $.comment.resolve.resolve_failed)
-            : t(($) => $.comment.resolve.unresolve_failed),
+          err instanceof Error && err.message
+            ? err.message
+            : resolved
+              ? t(($) => $.comment.resolve.resolve_failed)
+              : t(($) => $.comment.resolve.unresolve_failed),
         );
       }
     },

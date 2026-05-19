@@ -1,12 +1,15 @@
-import { useMemo, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ActivityIndicator, FlatList, Keyboard, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import type { GestureResponderEvent } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, Filter, Menu, Plus, Search as SearchIcon } from "lucide-react-native";
+import { api } from "@multica/core/api";
+import { useCoreQuery, useCoreQueryClient } from "@multica/core/provider";
 import { BOARD_STATUSES } from "@multica/core/issues/config/status";
 import { PRIORITY_ORDER } from "@multica/core/issues/config/priority";
+import { ISSUE_PAGE_SIZE } from "@multica/core/issues/queries";
 import { useIssueList } from "@multica/core/issues/hooks";
 import { useLoadMoreByStatusForWorkspace } from "@multica/core/issues/mutations";
 import {
@@ -17,7 +20,7 @@ import { filterIssues, type ActorFilterValue } from "@multica/core/issues/utils/
 import { useAuthStore } from "@multica/core/auth";
 import { useMemberList, useAgentList } from "@multica/core/workspace/hooks";
 import { useProjectList } from "@multica/core/projects/hooks";
-import type { Issue, IssuePriority, IssueStatus } from "@multica/core/types";
+import type { Issue, IssuePriority, IssueStatus, ListIssuesParams, ListIssuesResponse } from "@multica/core/types";
 import type { RootStackParamList } from "../../navigation/root-navigator";
 import { FloatingActionMenu } from "../../components/ui/floating-action-menu";
 import { EmptyState, LoadingState, Screen } from "../../components/ui/primitives";
@@ -25,6 +28,34 @@ import { WorkspaceHeader } from "../../components/ui/workspace-header";
 import { formatIssuePriority, formatIssueStatus } from "../../i18n/format";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
 import { colors, radii, spacing } from "../../theme/tokens";
+
+function useKeyboardHeight(enabled: boolean) {
+  const { height: windowHeight } = useWindowDimensions();
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) {
+      setKeyboardHeight(0);
+      return undefined;
+    }
+
+    const showEvent = Platform.OS === "ios" ? "keyboardWillChangeFrame" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSub = Keyboard.addListener(showEvent, (event) => {
+      setKeyboardHeight(Math.max(0, windowHeight - event.endCoordinates.screenY));
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [enabled, windowHeight]);
+
+  return keyboardHeight;
+}
 
 export function IssuesScreen() {
   const { t } = useTranslation();
@@ -67,6 +98,77 @@ export function IssuesScreen() {
     projectFilters,
     includeNoProject,
   });
+  const filtersActive = activeFilterCount > 0;
+  const filteredListParams = useMemo<ListIssuesParams>(
+    () => ({
+      status,
+      limit: ISSUE_PAGE_SIZE,
+      priorities: priorityFilters,
+      assignees: assigneeFilters,
+      include_no_assignee: includeNoAssignee,
+      creators: creatorFilters,
+      project_ids: projectFilters,
+      include_no_project: includeNoProject,
+    }),
+    [
+      status,
+      priorityFilters,
+      assigneeFilters,
+      includeNoAssignee,
+      creatorFilters,
+      projectFilters,
+      includeNoProject,
+    ],
+  );
+  const filteredQueryKey = useMemo(
+    () => ["mobile", "issues", workspace.id, "filtered", filteredListParams] as const,
+    [workspace.id, filteredListParams],
+  );
+  const queryClient = useCoreQueryClient();
+  const {
+    data: filteredPage,
+    isLoading: isLoadingFiltered,
+    isError: isFilteredError,
+    isRefetching: isRefetchingFiltered,
+    refetch: refetchFiltered,
+  } = useCoreQuery({
+    queryKey: filteredQueryKey,
+    queryFn: () => api.listIssues({ ...filteredListParams, offset: 0 }),
+    enabled: filtersActive,
+  });
+  const filteredLoaded = filteredPage?.issues.length ?? 0;
+  const filteredTotal = filteredPage?.total ?? 0;
+  const filteredHasMore = filtersActive && filteredLoaded < filteredTotal;
+  const [isLoadingMoreFiltered, setIsLoadingMoreFiltered] = useState(false);
+  const loadMoreFiltered = useCallback(async () => {
+    if (!filtersActive || !filteredHasMore || isLoadingMoreFiltered) return;
+    setIsLoadingMoreFiltered(true);
+    try {
+      const nextPage = await api.listIssues({
+        ...filteredListParams,
+        offset: filteredLoaded,
+      });
+      queryClient.setQueryData<ListIssuesResponse>(filteredQueryKey, (old) => {
+        if (!old) return nextPage;
+        const existingIds = new Set(old.issues.map((issue) => issue.id));
+        const appended = nextPage.issues.filter((issue) => !existingIds.has(issue.id));
+        return {
+          issues: [...old.issues, ...appended],
+          total: nextPage.total,
+        };
+      });
+    } finally {
+      setIsLoadingMoreFiltered(false);
+    }
+  }, [
+    filteredHasMore,
+    filteredListParams,
+    filteredLoaded,
+    filteredQueryKey,
+    filtersActive,
+    isLoadingMoreFiltered,
+    queryClient,
+  ]);
   const filteredIssues = useMemo(
     () =>
       filterIssues(issues.filter((issue) => issue.status === status), {
@@ -90,6 +192,18 @@ export function IssuesScreen() {
       includeNoProject,
     ],
   );
+  const listIssues = filtersActive ? filteredPage?.issues ?? [] : filteredIssues;
+  const listLoading = filtersActive ? isLoadingFiltered : isLoading;
+  const listError = filtersActive ? isFilteredError : isError;
+  const listRefetching = filtersActive ? isRefetchingFiltered : isRefetching;
+  const listHasMore = filtersActive ? filteredHasMore : hasMore;
+  const listLoadingMore = filtersActive ? isLoadingMoreFiltered : isLoadingMore;
+  const refreshList = filtersActive ? refetchFiltered : refetch;
+  const loadMoreList = filtersActive ? loadMoreFiltered : loadMore;
+
+  useEffect(() => {
+    setIsLoadingMoreFiltered(false);
+  }, [filteredQueryKey]);
 
   return (
     <Screen>
@@ -152,19 +266,19 @@ export function IssuesScreen() {
           ) : null}
         </Pressable>
       </View>
-      {isLoading ? <LoadingState /> : null}
-      {isError ? (
+      {listLoading ? <LoadingState /> : null}
+      {listError ? (
         <EmptyState detail={t("common.pull_to_retry")} title={t("issues.unable_to_load")} />
       ) : null}
-      {!isLoading && !isError ? (
+      {!listLoading && !listError ? (
         <FlatList
           contentContainerStyle={styles.list}
-          data={filteredIssues}
+          data={listIssues}
           keyExtractor={(item) => item.id}
           ListFooterComponent={
             <IssueListFooter
-              hasMore={hasMore}
-              loading={isLoadingMore}
+              hasMore={listHasMore}
+              loading={listLoadingMore}
             />
           }
           ListEmptyComponent={
@@ -174,13 +288,13 @@ export function IssuesScreen() {
             />
           }
           onEndReached={() => {
-            if (hasMore && !isLoadingMore) void loadMore();
+            if (listHasMore && !listLoadingMore) void loadMoreList();
           }}
           onEndReachedThreshold={0.4}
           onRefresh={() => {
-            void refetch();
+            void refreshList();
           }}
-          refreshing={isRefetching && !isLoading}
+          refreshing={listRefetching && !listLoading}
           renderItem={({ item }) => (
             <IssueCard
               issue={item}
@@ -313,6 +427,10 @@ function IssueFilterSheet({
   visible: boolean;
 }) {
   const { t } = useTranslation();
+  const keyboardHeight = useKeyboardHeight(visible);
+  const { height: windowHeight } = useWindowDimensions();
+  const sheetMaxHeight = Math.max(0, windowHeight - keyboardHeight - spacing.xl);
+  const sheetBottomPadding = keyboardHeight > 0 ? spacing.md : spacing.lg;
   const priorityFilters = useMobileIssuesFilterStore((s) => s.priorityFilters);
   const assigneeFilters = useMobileIssuesFilterStore((s) => s.assigneeFilters);
   const creatorFilters = useMobileIssuesFilterStore((s) => s.creatorFilters);
@@ -361,74 +479,82 @@ function IssueFilterSheet({
 
   return (
     <Modal animationType="slide" transparent visible={visible} onRequestClose={onClose}>
-      <Pressable style={styles.sheetBackdrop} onPress={onClose} />
-      <View style={styles.sheet}>
-        <View style={styles.sheetHeader}>
-          <Text style={styles.sheetTitle}>{t("issues.filter")}</Text>
-          <Pressable accessibilityRole="button" onPress={onClose} style={styles.sheetDoneButton}>
-            <Text style={styles.sheetDoneText}>{t("common.done")}</Text>
-          </Pressable>
-        </View>
-        <ScrollView contentContainerStyle={styles.sheetContent}>
-          <FilterSection title={t("issues.priority")}>
-            {PRIORITY_ORDER.map((priority) => (
-              <FilterOption
-                key={priority}
-                label={formatIssuePriority(t, priority)}
-                onPress={() => togglePriorityFilter(priority)}
-                selected={priorityFilters.includes(priority)}
-              />
-            ))}
-          </FilterSection>
+      <View style={styles.sheetKeyboardView}>
+        <Pressable style={styles.sheetBackdrop} onPress={onClose} />
+        <View style={[
+          styles.sheet,
+          {
+            marginBottom: keyboardHeight,
+            maxHeight: sheetMaxHeight,
+          },
+        ]}>
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>{t("issues.filter")}</Text>
+            <Pressable accessibilityRole="button" onPress={onClose} style={styles.sheetDoneButton}>
+              <Text style={styles.sheetDoneText}>{t("common.done")}</Text>
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled">
+            <FilterSection title={t("issues.priority")}>
+              {PRIORITY_ORDER.map((priority) => (
+                <FilterOption
+                  key={priority}
+                  label={formatIssuePriority(t, priority)}
+                  onPress={() => togglePriorityFilter(priority)}
+                  selected={priorityFilters.includes(priority)}
+                />
+              ))}
+            </FilterSection>
 
-          <FilterDroplistSection
-            emptyLabel={t("issues.any_assignee")}
-            footer={
-              <FilterOption
-                label={t("issues.no_assignee")}
-                onPress={toggleNoAssignee}
-                selected={includeNoAssignee}
-              />
-            }
-            options={assigneeOptions}
-            placeholder={t("issues.search_assignees")}
-            selectedKeys={assigneeSelectedKeys}
-            title={t("issues.assignee")}
-            toKey={(value) => actorKey(value)}
-            onToggle={(value) => toggleAssigneeFilter({ type: value.type, id: value.id })}
-          />
+            <FilterDroplistSection
+              emptyLabel={t("issues.any_assignee")}
+              footer={
+                <FilterOption
+                  label={t("issues.no_assignee")}
+                  onPress={toggleNoAssignee}
+                  selected={includeNoAssignee}
+                />
+              }
+              options={assigneeOptions}
+              placeholder={t("issues.search_assignees")}
+              selectedKeys={assigneeSelectedKeys}
+              title={t("issues.assignee")}
+              toKey={(value) => actorKey(value)}
+              onToggle={(value) => toggleAssigneeFilter({ type: value.type, id: value.id })}
+            />
 
-          <FilterDroplistSection
-            emptyLabel={t("issues.any_creator")}
-            options={assigneeOptions}
-            placeholder={t("issues.search_creators")}
-            selectedKeys={creatorSelectedKeys}
-            title={t("issues.creator")}
-            toKey={(value) => actorKey(value)}
-            onToggle={(value) => toggleCreatorFilter({ type: value.type, id: value.id })}
-          />
+            <FilterDroplistSection
+              emptyLabel={t("issues.any_creator")}
+              options={assigneeOptions}
+              placeholder={t("issues.search_creators")}
+              selectedKeys={creatorSelectedKeys}
+              title={t("issues.creator")}
+              toKey={(value) => actorKey(value)}
+              onToggle={(value) => toggleCreatorFilter({ type: value.type, id: value.id })}
+            />
 
-          <FilterDroplistSection
-            emptyLabel={t("issues.any_project")}
-            footer={
-              <FilterOption
-                label={t("issues.no_project")}
-                onPress={toggleNoProject}
-                selected={includeNoProject}
-              />
-            }
-            options={projectOptions}
-            placeholder={t("issues.search_projects")}
-            selectedKeys={projectSelectedKeys}
-            title={t("issues.project")}
-            toKey={(value) => value.id}
-            onToggle={(value) => toggleProjectFilter(value.id)}
-          />
-        </ScrollView>
-        <View style={styles.sheetFooter}>
-          <Pressable accessibilityRole="button" onPress={clearFilters} style={styles.resetButton}>
-            <Text style={styles.resetButtonText}>{t("common.reset")}</Text>
-          </Pressable>
+            <FilterDroplistSection
+              emptyLabel={t("issues.any_project")}
+              footer={
+                <FilterOption
+                  label={t("issues.no_project")}
+                  onPress={toggleNoProject}
+                  selected={includeNoProject}
+                />
+              }
+              options={projectOptions}
+              placeholder={t("issues.search_projects")}
+              selectedKeys={projectSelectedKeys}
+              title={t("issues.project")}
+              toKey={(value) => value.id}
+              onToggle={(value) => toggleProjectFilter(value.id)}
+            />
+          </ScrollView>
+          <View style={[styles.sheetFooter, { paddingBottom: sheetBottomPadding }]}>
+            <Pressable accessibilityRole="button" onPress={clearFilters} style={styles.resetButton}>
+              <Text style={styles.resetButtonText}>{t("common.reset")}</Text>
+            </Pressable>
+          </View>
         </View>
       </View>
     </Modal>
@@ -508,22 +634,28 @@ function FilterDroplistSection<T extends { id: string; label: string; meta?: str
               value={query}
             />
           </View>
-          {visibleOptions.length > 0 ? (
-            visibleOptions.map((option) => {
-              const key = toKey(option);
-              return (
-                <FilterOption
-                  key={key}
-                  label={option.label}
-                  meta={option.meta}
-                  onPress={() => onToggle(option)}
-                  selected={selectedKeys.has(key)}
-                />
-              );
-            })
-          ) : (
-            <Text style={styles.noResultsText}>{t("common.no_results")}</Text>
-          )}
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+            style={styles.droplistOptionList}
+          >
+            {visibleOptions.length > 0 ? (
+              visibleOptions.map((option) => {
+                const key = toKey(option);
+                return (
+                  <FilterOption
+                    key={key}
+                    label={option.label}
+                    meta={option.meta}
+                    onPress={() => onToggle(option)}
+                    selected={selectedKeys.has(key)}
+                  />
+                );
+              })
+            ) : (
+              <Text style={styles.noResultsText}>{t("common.no_results")}</Text>
+            )}
+          </ScrollView>
         </View>
       ) : null}
     </View>
@@ -727,6 +859,10 @@ const styles = StyleSheet.create({
     color: colors.mutedForeground,
     fontSize: 12,
   },
+  sheetKeyboardView: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
   sheetBackdrop: {
     backgroundColor: "#00000033",
     flex: 1,
@@ -799,6 +935,9 @@ const styles = StyleSheet.create({
   },
   droplistChevronOpen: {
     transform: [{ rotate: "180deg" }],
+  },
+  droplistOptionList: {
+    maxHeight: 320,
   },
   filterOptions: {
     backgroundColor: colors.card,

@@ -102,8 +102,7 @@ func (r *mockRow) Scan(dest ...any) error {
 		&t.SessionID, &t.WorkDir, &t.TriggerCommentID,
 		&t.ChatSessionID, &t.AutopilotRunID, &t.Attempt,
 		&t.MaxAttempts, &t.ParentTaskID, &t.FailureReason,
-		&t.TriggerSource, &t.TriggerActorType, &t.TriggerActorID,
-		&t.TriggerSummary, &t.ForceFreshSession,
+		&t.TriggerSummary, &t.ForceFreshSession, &t.IsLeaderTask,
 	}
 	for i, p := range ptrs {
 		if i >= len(dest) {
@@ -200,6 +199,12 @@ func (m *mockDBTX) QueryRow(_ context.Context, sql string, args ...interface{}) 
 	if strings.Contains(sql, "-- name: HasAgentCommentedSince") {
 		return scanFuncRow(func(dest ...any) error {
 			*(dest[0].(*bool)) = m.commentedSince
+			return nil
+		})
+	}
+	if strings.Contains(sql, "-- name: HasSquadLeaderNoActionEvaluationForTask") {
+		return scanFuncRow(func(dest ...any) error {
+			*(dest[0].(*bool)) = false
 			return nil
 		})
 	}
@@ -354,20 +359,32 @@ func TestBlockIssueForFailedTask(t *testing.T) {
 			wantChanged: false,
 			wantPrev:    "cancelled",
 		},
+		{
+			name:        "quick-create produced issue is not polluted",
+			taskIssueID: issueID,
+			issueStatus: "todo",
+			wantChanged: false,
+			wantPrev:    "todo",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			issue := db.Issue{
+				ID:          issueID,
+				WorkspaceID: workspaceID,
+				Status:      tt.issueStatus,
+			}
+			if tt.name == "quick-create produced issue is not polluted" {
+				issue.OriginType = pgtype.Text{String: "quick_create", Valid: true}
+				issue.OriginID = taskID
+			}
 			mock := &mockDBTX{
 				task: db.AgentTaskQueue{
 					ID:      taskID,
 					IssueID: tt.taskIssueID,
 				},
-				issue: db.Issue{
-					ID:          issueID,
-					WorkspaceID: workspaceID,
-					Status:      tt.issueStatus,
-				},
+				issue: issue,
 			}
 			svc := &TaskService{Queries: db.New(mock)}
 
@@ -392,6 +409,52 @@ func TestBlockIssueForFailedTask(t *testing.T) {
 				t.Fatalf("UpdateIssueStatus calls: got %d, want 0", mock.updateIssueStatus)
 			}
 		})
+	}
+}
+
+func TestFailTask_QuickCreateProducedIssueDoesNotWriteIssueFailure(t *testing.T) {
+	issueID := testUUID(11)
+	agentID := testUUID(12)
+	workspaceID := testUUID(14)
+	taskID := testUUID(15)
+	startedAt := pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true}
+	mock := &mockDBTX{
+		task: db.AgentTaskQueue{
+			ID:        taskID,
+			IssueID:   issueID,
+			AgentID:   agentID,
+			Status:    "running",
+			StartedAt: startedAt,
+		},
+		issue: db.Issue{
+			ID:          issueID,
+			WorkspaceID: workspaceID,
+			Title:       "Issue created by quick-create",
+			Status:      "todo",
+			OriginType:  pgtype.Text{String: "quick_create", Valid: true},
+			OriginID:    taskID,
+		},
+	}
+	svc := &TaskService{
+		Queries: db.New(mock),
+		Bus:     events.New(),
+	}
+
+	got, err := svc.FailTask(context.Background(), taskID, "Missing environment variable: `OPENAI_API_KEY`.", "", "", "")
+	if err != nil {
+		t.Fatalf("FailTask returned error: %v", err)
+	}
+	if got == nil || got.Status != "failed" {
+		t.Fatalf("expected failed task, got %#v", got)
+	}
+	if mock.updateIssueStatus != 0 {
+		t.Fatalf("expected no issue status update, got %d", mock.updateIssueStatus)
+	}
+	if len(mock.comments) != 0 {
+		t.Fatalf("expected no issue failure comment, got %d", len(mock.comments))
+	}
+	if mock.issue.Status != "todo" {
+		t.Fatalf("expected issue to remain todo, got %q", mock.issue.Status)
 	}
 }
 
@@ -443,7 +506,7 @@ func TestCompleteTask_FallbackCommentIsTopLevel(t *testing.T) {
 	triggerCommentID := testUUID(3)
 	workspaceID := testUUID(4)
 	startedAt := pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true}
-	result, err := json.Marshal(protocol.TaskCompletedPayload{Output: "done"})
+	result, err := json.Marshal(protocol.TaskCompletedPayload{Output: "completed with a visible summary"})
 	if err != nil {
 		t.Fatalf("marshal result: %v", err)
 	}

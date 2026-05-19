@@ -3,24 +3,24 @@ package handler
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// canAccessPrivateAgent gates the four protected surfaces for private
-// agents: chat / @-mention dispatch, viewing the agent's history, editing
-// configuration, and deletion.
+// canAccessPrivateAgent gates read-only surfaces for private agents: viewing
+// the agent's details, task history, and configuration.
+//
+// OPE-817: all workspace members may VIEW any agent (including private) for
+// learning and reference. Interactive surfaces (chat creation, @-mention
+// dispatch) are gated separately by canTriggerPrivateAgent.
 //
 // Public agents are unrestricted — the predicate returns true unconditionally.
 //
 // Agent-to-agent traffic is always allowed (actorType == "agent"); this is
-// what preserves A2A collaboration even with private agents. The trust
-// boundary is at member↔agent, not agent↔agent.
+// what preserves A2A collaboration even with private agents.
 //
-// For members, the implicit allowed_principals set is computed inline as:
-// {agent.owner_id} ∪ workspace owner/admin members. Manual configuration of
-// allowed_principals is not exposed in v1; future work can extend this set
-// without changing call sites.
+// For members, any workspace member can view a private agent's details.
 func (h *Handler) canAccessPrivateAgent(ctx context.Context, agent db.Agent, actorType, actorID, workspaceID string) bool {
 	if agent.Visibility != "private" {
 		return true
@@ -28,46 +28,56 @@ func (h *Handler) canAccessPrivateAgent(ctx context.Context, agent db.Agent, act
 	if actorType == "agent" {
 		return true
 	}
-	if uuidToString(agent.OwnerID) == actorID {
-		return true
-	}
-	member, err := h.getWorkspaceMember(ctx, actorID, workspaceID)
-	if err != nil {
-		return false
-	}
-	return roleAllowed(member.Role, "owner", "admin")
+	// OPE-817: any workspace member can read private agent details.
+	// Verify actorID is a workspace member (not an outsider).
+	_, err := h.getWorkspaceMember(ctx, actorID, workspaceID)
+	return err == nil
 }
 
-// canTriggerPrivateAgent enforces OPE-531 strict policy for mention/assign:
-// only the agent owner (member) or agents sharing the same owner may trigger
-// a private agent. Workspace admins do NOT get bypass.
+// canTriggerPrivateAgent enforces the stricter mention/assign policy:
+// private agents may be triggered by their owner, explicitly allowed members,
+// or same-owner agents. Workspace admins do not bypass this gate unless they
+// are also explicitly allowlisted.
 func (h *Handler) canTriggerPrivateAgent(ctx context.Context, agent db.Agent, actorType, actorID string) bool {
 	if agent.Visibility != "private" {
 		return true
 	}
-	targetOwner := uuidToString(agent.OwnerID)
+
+	ownerID := uuidToString(agent.OwnerID)
 	switch actorType {
 	case "member":
-		return targetOwner == actorID
+		if ownerID == actorID {
+			return true
+		}
+		return h.isAgentAllowedPrincipal(ctx, agent.ID, actorID)
 	case "agent":
 		triggerAgent, err := h.Queries.GetAgent(ctx, parseUUID(actorID))
-		if err != nil {
-			return false
-		}
-		return uuidToString(triggerAgent.OwnerID) == targetOwner
+		return err == nil && uuidToString(triggerAgent.OwnerID) == ownerID
 	default:
 		return false
 	}
 }
 
-// memberAllowedForPrivateAgent is the pure predicate used by both
-// canAccessPrivateAgent and the ListAgents filter loop. Caller must have
-// already confirmed agent.Visibility == "private".
+// memberAllowedForPrivateAgent is the pure predicate used by the ListAgents
+// filter loop. Caller must have already confirmed agent.Visibility == "private".
+//
+// OPE-817: all workspace members may VIEW any agent for learning/reference.
+// Returns true unconditionally — the caller has already validated the user
+// is a workspace member.
 func memberAllowedForPrivateAgent(agent db.Agent, userID, role string) bool {
-	if roleAllowed(role, "owner", "admin") {
+	return true
+}
+
+func memberAllowedForPrivateAgentWithAllowlist(agent db.Agent, userID, role string, allowedUserIDs []string) bool {
+	if memberAllowedForPrivateAgent(agent, userID, role) {
 		return true
 	}
-	return uuidToString(agent.OwnerID) == userID
+	for _, allowedUserID := range allowedUserIDs {
+		if allowedUserID == userID {
+			return true
+		}
+	}
+	return false
 }
 
 // accessibleAgentIDs returns the set of agent IDs in the workspace the actor
@@ -85,13 +95,25 @@ func (h *Handler) accessibleAgentIDs(ctx context.Context, workspaceID, actorType
 	}
 	allowed := make(map[string]struct{}, len(agents))
 	for _, a := range agents {
+		agentID := uuidToString(a.ID)
 		if a.Visibility == "private" && actorType == "member" {
 			if !memberAllowedForPrivateAgent(a, actorID, role) {
 				continue
 			}
 		}
-		allowed[uuidToString(a.ID)] = struct{}{}
+		allowed[agentID] = struct{}{}
 	}
 	return allowed, true
 }
 
+func (h *Handler) isAgentAllowedPrincipal(ctx context.Context, agentID pgtype.UUID, principalID string) bool {
+	principalUUID, err := util.ParseUUID(principalID)
+	if err != nil {
+		return false
+	}
+	allowed, err := h.Queries.IsAgentAllowedPrincipal(ctx, db.IsAgentAllowedPrincipalParams{
+		AgentID:     agentID,
+		PrincipalID: principalUUID,
+	})
+	return err == nil && allowed
+}

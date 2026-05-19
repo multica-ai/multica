@@ -189,14 +189,6 @@ func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone(t *test
 			want:        true,
 			description: "agent-authored replies always reach leader so it can coordinate next step",
 		},
-		{
-			name:        "leader self-comment does NOT re-trigger leader",
-			content:     "noted",
-			authorType:  "agent",
-			authorID:    fx.LeaderID,
-			want:        false,
-			description: "existing self-trigger guard must still hold",
-		},
 	}
 
 	for _, tc := range cases {
@@ -208,6 +200,76 @@ func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone(t *test
 			}
 		})
 	}
+}
+
+// TestShouldEnqueueSquadLeaderOnComment_LeaderSelfTriggerByRole covers the
+// role-aware self-trigger guard added for MUL-2218. The leader agent itself
+// should be skipped only when its last activity on the issue was a leader
+// task — never just because the comment author equals the leader ID. This
+// matters for dual-role agents (leader + worker of the same squad): a
+// comment posted from the worker task must still wake the leader.
+func TestShouldEnqueueSquadLeaderOnComment_LeaderSelfTriggerByRole(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newSquadCommentTriggerFixture(t)
+	ctx := context.Background()
+	issueID := uuidToString(fx.Issue.ID)
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+	})
+
+	clearTasks := func() {
+		if _, err := testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID); err != nil {
+			t.Fatalf("clear tasks: %v", err)
+		}
+	}
+	insertTask := func(isLeader bool, status string) {
+		t.Helper()
+		var runtimeID string
+		if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&runtimeID); err != nil {
+			t.Fatalf("load runtime: %v", err)
+		}
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task)
+			VALUES ($1, $2, $3, $4, $5)
+		`, fx.LeaderID, runtimeID, issueID, status, isLeader); err != nil {
+			t.Fatalf("insert task: %v", err)
+		}
+	}
+
+	t.Run("no prior task wakes leader (fresh external trigger)", func(t *testing.T) {
+		clearTasks()
+		if got := testHandler.shouldEnqueueSquadLeaderOnComment(ctx, fx.Issue, "noted", "agent", fx.LeaderID); !got {
+			t.Fatalf("no prior task: expected leader to be enqueued, got skip")
+		}
+	})
+
+	t.Run("prior leader task suppresses self-trigger", func(t *testing.T) {
+		clearTasks()
+		insertTask(true, "completed")
+		if got := testHandler.shouldEnqueueSquadLeaderOnComment(ctx, fx.Issue, "noted", "agent", fx.LeaderID); got {
+			t.Fatalf("after leader task: expected skip (anti-loop), got enqueue")
+		}
+	})
+
+	t.Run("prior worker task still wakes leader (dual-role agent)", func(t *testing.T) {
+		clearTasks()
+		insertTask(false, "completed")
+		if got := testHandler.shouldEnqueueSquadLeaderOnComment(ctx, fx.Issue, "result", "agent", fx.LeaderID); !got {
+			t.Fatalf("after worker task: expected leader to be enqueued (MUL-2218), got skip")
+		}
+	})
+
+	t.Run("most recent task is the one that matters", func(t *testing.T) {
+		clearTasks()
+		insertTask(true, "completed")  // older leader task
+		insertTask(false, "completed") // newer worker task
+		if got := testHandler.shouldEnqueueSquadLeaderOnComment(ctx, fx.Issue, "result", "agent", fx.LeaderID); !got {
+			t.Fatalf("latest task is worker: expected leader to be enqueued, got skip")
+		}
+	})
 }
 
 // TestCreateComment_SquadLeaderSkipOnlyInspectsCurrentMention drives the
@@ -284,6 +346,131 @@ func TestCreateComment_SquadLeaderSkipOnlyInspectsCurrentMention(t *testing.T) {
 	})
 	if got := countQueued(fx.LeaderID); got != 1 {
 		t.Fatalf("after plain reply: expected 1 leader task (no parent inheritance), got %d", got)
+	}
+}
+
+// TestCreateComment_DualRoleAgentWorkerCommentWakesLeader is the full-stack
+// regression test for MUL-2218. Scenario:
+//
+//   - Agent L is the leader of squad S and also a worker assigned tasks on
+//     issues belonging to S.
+//   - L is woken in its worker role (is_leader_task=false) and posts a comment.
+//   - The squad-leader self-trigger guard MUST still wake L in its leader role
+//     so it can react to the worker output (e.g. delegate the next step).
+//
+// Before the fix the role-blind authorID == leaderID check skipped the
+// leader, leaving the issue stalled.
+func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSquadCommentTriggerFixture(t)
+	issueID := uuidToString(fx.Issue.ID)
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+	})
+
+	// Seed a worker task for the leader agent on this issue so the guard
+	// infers "agent's last activity was a worker task" — i.e. L is running
+	// in its worker role when it posts the comment. We make it running (not
+	// completed) so we can hand its ID back through X-Task-ID for the
+	// resolveActor agent-identity check.
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&runtimeID); err != nil {
+		t.Fatalf("load runtime: %v", err)
+	}
+	var workerTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task)
+		VALUES ($1, $2, $3, 'running', FALSE)
+		RETURNING id
+	`, fx.LeaderID, runtimeID, issueID).Scan(&workerTaskID); err != nil {
+		t.Fatalf("seed worker task: %v", err)
+	}
+
+	// L posts a comment in its agent identity (X-Agent-ID + X-Task-ID, the
+	// pair required by resolveActor to trust the agent header).
+	w := httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "done — pushed the change",
+	})
+	r.Header.Set("X-Agent-ID", fx.LeaderID)
+	r.Header.Set("X-Task-ID", workerTaskID)
+	r = withURLParam(r, "id", issueID)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// A NEW leader-role task must be enqueued for L on this issue so the
+	// leader role can react to its own worker output.
+	var leaderTasks int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND is_leader_task = TRUE
+	`, issueID, fx.LeaderID).Scan(&leaderTasks); err != nil {
+		t.Fatalf("count leader tasks: %v", err)
+	}
+	if leaderTasks != 1 {
+		t.Fatalf("after worker comment from dual-role agent: expected 1 queued leader task, got %d", leaderTasks)
+	}
+}
+
+// TestCreateRetryTask_InheritsIsLeaderTask locks the retry-clone contract for
+// MUL-2218: auto-retry of a leader-role task must produce a child task that is
+// also is_leader_task=true. Without this, MaybeRetryFailedTask silently
+// demotes a retried leader task to a worker task, and the self-trigger guard
+// in shouldEnqueueSquadLeaderOnComment / comment.go stops recognising the
+// retried leader's own comments — re-opening the bug this issue fixes.
+func TestCreateRetryTask_InheritsIsLeaderTask(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSquadCommentTriggerFixture(t)
+	issueID := uuidToString(fx.Issue.ID)
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+	})
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&runtimeID); err != nil {
+		t.Fatalf("load runtime: %v", err)
+	}
+
+	cases := []struct {
+		name     string
+		isLeader bool
+	}{
+		{name: "leader task retry stays leader", isLeader: true},
+		{name: "worker task retry stays worker", isLeader: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var parentID string
+			if err := testPool.QueryRow(ctx, `
+				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, attempt, max_attempts, is_leader_task)
+				VALUES ($1, $2, $3, 'failed', 1, 3, $4)
+				RETURNING id
+			`, fx.LeaderID, runtimeID, issueID, tc.isLeader).Scan(&parentID); err != nil {
+				t.Fatalf("seed parent task: %v", err)
+			}
+			t.Cleanup(func() {
+				testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1 OR parent_task_id = $1`, parentID)
+			})
+
+			child, err := testHandler.Queries.CreateRetryTask(ctx, util.MustParseUUID(parentID))
+			if err != nil {
+				t.Fatalf("CreateRetryTask: %v", err)
+			}
+			if child.IsLeaderTask != tc.isLeader {
+				t.Fatalf("child.IsLeaderTask = %v, want %v (parent role must be inherited)", child.IsLeaderTask, tc.isLeader)
+			}
+		})
 	}
 }
 

@@ -17,8 +17,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/logger"
-	notifyutil "github.com/multica-ai/multica/server/internal/notify"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	notifyutil "github.com/multica-ai/multica/server/internal/notify"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -125,8 +125,8 @@ func main() {
 	if os.Getenv("JWT_SECRET") == "" {
 		slog.Warn("JWT_SECRET is not set — using insecure default. Set JWT_SECRET for production use.")
 	}
-	if os.Getenv("RESEND_API_KEY") == "" {
-		slog.Warn("RESEND_API_KEY is not set — email verification codes will be printed to the log instead of emailed.")
+	if os.Getenv("RESEND_API_KEY") == "" && strings.TrimSpace(os.Getenv("SMTP_HOST")) == "" {
+		slog.Warn("no email backend configured (RESEND_API_KEY and SMTP_HOST both empty) — verification codes will be printed to the log instead of emailed.")
 	}
 	warnOptionalNotificationConfig()
 	if os.Getenv("MULTICA_DEV_VERIFICATION_CODE") != "" {
@@ -316,7 +316,7 @@ func main() {
 	}
 
 	// Start background sweeper to mark stale runtimes as offline.
-	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)
+	go runRuntimeSweeper(sweepCtx, pool, queries, liveness, taskSvc, bus)
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runNotificationDeliveryDispatcher(sweepCtx, queries, service.NewEmailService())

@@ -12,9 +12,11 @@ Multica 支持两种登录方式：**Email + 验证码**（默认）和 **Google
 
 ## Email + 验证码登录怎么工作
 
-用户在登录页输邮箱 → server 发 6 位验证码 → 用户填回 → server 验证 → 签发 JWT cookie。是标准流程。需要 [Resend](https://resend.com/) 作为邮件发送服务：
+用户在登录页输邮箱 → server 发 6 位验证码 → 用户填回 → server 验证 → 签发 JWT cookie。是标准流程。支持两种邮件发送通道，按部署环境二选一：
 
-1. 在 Resend 建账号、验证你的域名
+### Option A：Resend（公网/云端部署推荐）
+
+1. 在 [Resend](https://resend.com/) 建账号、验证你的域名
 2. 创建 API key
 3. 设环境变量：
 
@@ -25,7 +27,22 @@ Multica 支持两种登录方式：**Email + 验证码**（默认）和 **Google
 
 4. 重启 server
 
-**不配 `RESEND_API_KEY` 的后果**：server 不报错，但**所有本该发出去的邮件只打到 server 的 stdout**。本地开发方便（你从日志抄验证码），生产环境等于黑洞。
+### Option B：SMTP relay（内网/自部署）
+
+适合内网无法访问 `api.resend.com`，或者已经有内部邮件中继（Exchange、Postfix、自部署 SendGrid 等）的场景。同时设置时 `SMTP_HOST` 优先级高于 `RESEND_API_KEY`。
+
+```bash
+SMTP_HOST=smtp.internal.example.com
+SMTP_PORT=587                  # 默认 25；STARTTLS 提交端口用 587
+SMTP_USERNAME=multica          # 留空则使用未认证 relay
+SMTP_PASSWORD=...
+SMTP_TLS_INSECURE=false        # 仅在私有 CA / 自签证书时改成 true
+RESEND_FROM_EMAIL=noreply@yourdomain.com  # 同时作为 SMTP From: 头
+```
+
+服务端 advertise STARTTLS 时会自动升级。**暂不支持** 465（SMTPS / 隐式 TLS），请使用 25 或 587。
+
+**两种都不配**：server 不报错，但所有本该发出去的邮件**只打到 server 的 stdout**。本地开发方便（你从日志抄验证码），生产环境等于黑洞。
 
 ## 固定本地测试验证码
 
@@ -34,7 +51,7 @@ Multica 支持两种登录方式：**Email + 验证码**（默认）和 **Google
 
 旧版「非 production 默认接受 `888888`」的行为已经移除。除非你显式配置，否则输入 `888888` 会和普通错误验证码一样被拒绝。
 
-不配 Resend 的本地开发，应使用 server 日志里打印的随机验证码。如果你需要确定性的本地/私有自动化测试，可以把 `MULTICA_DEV_VERIFICATION_CODE` 设成一个 6 位数字，比如 `888888`，并保持 `APP_ENV` 为非 production：
+没配任何邮件后端（Resend 和 SMTP 都没设）的本地开发，应使用 server 日志里打印的随机验证码。如果你需要确定性的本地/私有自动化测试，可以把 `MULTICA_DEV_VERIFICATION_CODE` 设成一个 6 位数字，比如 `888888`，并保持 `APP_ENV` 为非 production：
 
 ```bash
 APP_ENV=development

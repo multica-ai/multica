@@ -175,6 +175,23 @@ describe("LoginPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("hides Google OAuth from the login page even when configured", async () => {
+    mockGetConfig.mockResolvedValueOnce({
+      cdn_domain: "",
+      google_client_id: "google-client-id",
+      dingtalk_client_id: "ding-client-id",
+    });
+
+    render(<LoginPage />, { wrapper: createWrapper() });
+
+    expect(
+      await screen.findByRole("button", { name: /continue with dingtalk/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /continue with google/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("preserves CLI callback details in DingTalk OAuth state", async () => {
     mockGetConfig.mockResolvedValueOnce({
       cdn_domain: "",

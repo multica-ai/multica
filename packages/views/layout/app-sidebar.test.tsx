@@ -111,6 +111,11 @@ vi.mock("@multica/core/paths", () => ({
 vi.mock("@multica/core/api", async (importOriginal) => ({ ...(await importOriginal<typeof import("@multica/core/api")>()), api: {} }));
 vi.mock("@multica/core/inbox/queries", () => ({ deduplicateInboxItems: (items: unknown[]) => items, inboxKeys: { list: () => ["inbox"] } }));
 vi.mock("@multica/core/issues/queries", () => ({ issueDetailOptions: () => ({ queryKey: ["issue"] }) }));
+vi.mock("@multica/core/issues/stores/create-mode-store", () => ({
+  useCreateModeStore: { getState: () => ({ lastMode: "manual" }) },
+  openCreateIssueWithPreference: (data?: Record<string, unknown> | null) =>
+    openModal("create-issue", data ?? null),
+}));
 vi.mock("@multica/core/issues/stores/draft-store", () => ({ useIssueDraftStore: () => false }));
 vi.mock("@multica/core/modals", () => ({ useModalStore: { getState: () => ({ modal: null, open: openModal }) } }));
 vi.mock("@multica/core/pins/mutations", () => ({ useDeletePin: () => ({ mutate: deletePin }), useReorderPins: () => ({ mutate: vi.fn() }) }));

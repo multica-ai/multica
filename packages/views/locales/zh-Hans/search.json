@@ -1,11 +1,11 @@
 {
   "title": "搜索",
-  "description": "搜索页面、issue 和项目",
+  "description": "搜索页面、issue、项目和成员",
   "placeholder": "输入命令或关键词搜索...",
   "groups": {
     "pages": "页面",
     "commands": "命令",
-    "switch_workspace": "切换工作区",
+    "members": "成员",
     "projects": "项目",
     "issues": "issue",
     "recent": "最近"

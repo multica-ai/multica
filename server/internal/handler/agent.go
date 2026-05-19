@@ -49,12 +49,35 @@ type AgentResponse struct {
 	MaxConcurrentTasks     int32               `json:"max_concurrent_tasks"`
 	Model                  string              `json:"model"`
 	OwnerID                *string             `json:"owner_id"`
+	AllowedUserIDs         []string            `json:"allowed_user_ids"`
 	Skills                 []AgentSkillSummary `json:"skills"`
 	CreatedAt              string              `json:"created_at"`
 	UpdatedAt              string              `json:"updated_at"`
 	ArchivedAt             *string             `json:"archived_at"`
 	ArchivedBy             *string             `json:"archived_by"`
 	CustomEnvCopiedPending bool                `json:"custom_env_copied_pending"`
+}
+
+type AgentAllowedPrincipalResponse struct {
+	ID        string  `json:"id"`
+	AgentID   string  `json:"agent_id"`
+	UserID    string  `json:"user_id"`
+	Name      string  `json:"name"`
+	Email     string  `json:"email"`
+	AvatarURL *string `json:"avatar_url"`
+	CreatedAt string  `json:"created_at"`
+}
+
+func agentAllowedPrincipalToResponse(row db.ListAgentAllowedPrincipalsRow) AgentAllowedPrincipalResponse {
+	return AgentAllowedPrincipalResponse{
+		ID:        uuidToString(row.ID),
+		AgentID:   uuidToString(row.AgentID),
+		UserID:    uuidToString(row.PrincipalID),
+		Name:      row.UserName,
+		Email:     row.UserEmail,
+		AvatarURL: textToPtr(row.UserAvatarUrl),
+		CreatedAt: timestampToString(row.CreatedAt),
+	}
 }
 
 func agentToResponse(a db.Agent) AgentResponse {
@@ -109,6 +132,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		MaxConcurrentTasks:     a.MaxConcurrentTasks,
 		Model:                  a.Model.String,
 		OwnerID:                uuidToPtr(a.OwnerID),
+		AllowedUserIDs:         []string{},
 		Skills:                 []AgentSkillSummary{},
 		CreatedAt:              timestampToString(a.CreatedAt),
 		UpdatedAt:              timestampToString(a.UpdatedAt),
@@ -182,11 +206,11 @@ type AgentTaskResponse struct {
 	ProjectTitle            string                `json:"project_title,omitempty"`     // for surfacing in agent context
 	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"` // resources attached to the project
 	CreatedAt               string                `json:"created_at"`
-	PriorSessionID          string                `json:"prior_session_id,omitempty"`        // session ID from a previous task on same issue
-	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on same issue
-	WorkDir                 string                `json:"work_dir,omitempty"`                // local working directory pinned for this task; populated once the daemon reports it
-	TriggerCommentID        *string               `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
-	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"` // content of the triggering comment
+	PriorSessionID          string                `json:"prior_session_id,omitempty"`          // session ID from a previous task on same issue
+	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on same issue
+	WorkDir                 string                `json:"work_dir,omitempty"`                  // local working directory pinned for this task; populated once the daemon reports it
+	TriggerCommentID        *string               `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
+	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
 	TriggerSummary          *string               `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
 	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
 	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
@@ -220,17 +244,17 @@ type ChatAttachmentMeta struct {
 // TaskAgentData holds agent info included in claim responses so the daemon
 // can set up the execution environment (branch naming, skill files, instructions).
 type TaskAgentData struct {
-	ID           string                   `json:"id"`
-	Name         string                   `json:"name"`
-	Visibility   string                   `json:"visibility"`
-	OwnerID      string                   `json:"owner_id"`
-	Instructions string                   `json:"instructions"`
-	Skills       []service.AgentSkillData `json:"skills,omitempty"`
-	CustomEnv    map[string]string        `json:"custom_env,omitempty"`
-	CustomArgs   []string                 `json:"custom_args,omitempty"`
-	McpConfig    json.RawMessage          `json:"mcp_config,omitempty"`
-	Model        string                   `json:"model,omitempty"`
-	RuntimeConfig json.RawMessage         `json:"runtime_config,omitempty"`
+	ID            string                   `json:"id"`
+	Name          string                   `json:"name"`
+	Visibility    string                   `json:"visibility"`
+	OwnerID       string                   `json:"owner_id"`
+	Instructions  string                   `json:"instructions"`
+	Skills        []service.AgentSkillData `json:"skills,omitempty"`
+	CustomEnv     map[string]string        `json:"custom_env,omitempty"`
+	CustomArgs    []string                 `json:"custom_args,omitempty"`
+	McpConfig     json.RawMessage          `json:"mcp_config,omitempty"`
+	Model         string                   `json:"model,omitempty"`
+	RuntimeConfig json.RawMessage          `json:"runtime_config,omitempty"`
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
@@ -355,20 +379,34 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	allowedRows, err := h.Queries.ListAgentAllowedPrincipalIDsByWorkspace(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load agent allowed users")
+		return
+	}
+	allowedUserMap := map[string][]string{}
+	for _, row := range allowedRows {
+		agentID := uuidToString(row.AgentID)
+		allowedUserMap[agentID] = append(allowedUserMap[agentID], uuidToString(row.PrincipalID))
+	}
+
 	// Resolve the request actor once. Agents bypass the private-agent gate
-	// to preserve A2A collaboration; members must be in allowed_principals
-	// (agent owner or workspace owner/admin) to see private agents.
+	// to preserve A2A collaboration; members must be allowed to see private
+	// agents by ownership, workspace role, or the explicit allowlist.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
 		if a.Visibility == "private" && actorType == "member" {
-			if !memberAllowedForPrivateAgent(a, actorID, member.Role) {
+			if !memberAllowedForPrivateAgentWithAllowlist(a, actorID, member.Role, allowedUserMap[uuidToString(a.ID)]) {
 				continue
 			}
 		}
 		resp := agentToResponse(a)
 		if skills, ok := skillMap[resp.ID]; ok {
 			resp.Skills = skills
+		}
+		if allowedUserIDs, ok := allowedUserMap[resp.ID]; ok {
+			resp.AllowedUserIDs = allowedUserIDs
 		}
 		// Redact sensitive fields for users who are not the agent owner or workspace owner/admin.
 		if !canViewAgentEnv(a, userID, member.Role) {
@@ -416,6 +454,15 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 				Description: s.Description,
 			}
 		}
+	}
+	allowedRows, err := h.Queries.ListAgentAllowedPrincipals(r.Context(), agent.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load agent allowed users")
+		return
+	}
+	resp.AllowedUserIDs = make([]string, 0, len(allowedRows))
+	for _, row := range allowedRows {
+		resp.AllowedUserIDs = append(resp.AllowedUserIDs, uuidToString(row.PrincipalID))
 	}
 
 	// Redact sensitive fields for users who are not the agent owner or workspace owner/admin.
@@ -662,17 +709,13 @@ func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	wsID := uuidToString(sourceAgent.WorkspaceID)
-	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
+	// OPE-817: any workspace member can duplicate any visible agent for
+	// learning/reference purposes. The copy becomes owned by the current user.
+	_, ok = h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
 	if !ok {
 		return
 	}
 	userID := requestUserID(r)
-	isAgentOwner := uuidToString(sourceAgent.OwnerID) == userID
-	isAdmin := roleAllowed(member.Role, "owner", "admin")
-	if !isAgentOwner && !isAdmin {
-		writeError(w, http.StatusForbidden, "only the agent owner or a workspace admin can duplicate this agent")
-		return
-	}
 
 	var req CopyAgentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
@@ -820,13 +863,18 @@ type UpdateAgentRequest struct {
 }
 
 // canViewAgentEnv checks whether the requesting user is allowed to see the
-// agent's custom environment variables. Only the agent owner or workspace
-// owner/admin may view them; for everyone else the field is redacted.
+// agent's custom environment variables. OPE-817: only the agent owner may
+// view them; admin/owner roles do NOT bypass this gate. Legacy agents
+// (owner_id null) fall back to admin for backward compat.
 func canViewAgentEnv(agent db.Agent, userID string, memberRole string) bool {
-	if roleAllowed(memberRole, "owner", "admin") {
+	if uuidToString(agent.OwnerID) == userID {
 		return true
 	}
-	return uuidToString(agent.OwnerID) == userID
+	// Legacy agents (owner_id null): allow admin for backward compat.
+	if !agent.OwnerID.Valid && roleAllowed(memberRole, "owner", "admin") {
+		return true
+	}
+	return false
 }
 
 // redactEnv masks custom_env values in the response when the caller is not
@@ -852,21 +900,25 @@ func redactMcpConfig(resp *AgentResponse) {
 }
 
 // canManageAgent checks whether the current user can update or archive an agent.
-// Only the agent owner or workspace owner/admin can manage any agent,
-// regardless of whether it is public or private.
+// OPE-817: only the agent owner can manage their own agent. Admin/owner roles
+// do NOT bypass this gate. Legacy agents (owner_id null) fall back to admin
+// management for backward compatibility.
 func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent db.Agent) bool {
 	wsID := uuidToString(agent.WorkspaceID)
 	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
 	if !ok {
 		return false
 	}
-	isAdmin := roleAllowed(member.Role, "owner", "admin")
 	isAgentOwner := uuidToString(agent.OwnerID) == requestUserID(r)
-	if !isAdmin && !isAgentOwner {
-		writeError(w, http.StatusForbidden, "only the agent owner can manage this agent")
-		return false
+	if isAgentOwner {
+		return true
 	}
-	return true
+	// Legacy agents (owner_id null): allow admin for backward compat.
+	if !agent.OwnerID.Valid && roleAllowed(member.Role, "owner", "admin") {
+		return true
+	}
+	writeError(w, http.StatusForbidden, "only the agent owner can manage this agent")
+	return false
 }
 
 func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
@@ -998,6 +1050,99 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(agent.WorkspaceID))
 	h.publish(protocol.EventAgentStatus, uuidToString(agent.WorkspaceID), actorType, actorID, map[string]any{"agent": resp})
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) ListAgentAllowedPrincipals(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	agent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+	if !h.canManageAgentAllowedPrincipals(w, r, agent) {
+		return
+	}
+
+	rows, err := h.Queries.ListAgentAllowedPrincipals(r.Context(), agent.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list agent allowed users")
+		return
+	}
+	resp := make([]AgentAllowedPrincipalResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = agentAllowedPrincipalToResponse(row)
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+type UpdateAgentAllowedPrincipalsRequest struct {
+	UserIDs []string `json:"user_ids"`
+}
+
+func (h *Handler) UpdateAgentAllowedPrincipals(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	agent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+	if !h.canManageAgentAllowedPrincipals(w, r, agent) {
+		return
+	}
+
+	var req UpdateAgentAllowedPrincipalsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	workspaceID := uuidToString(agent.WorkspaceID)
+	seen := map[string]struct{}{}
+	userIDs := make([]pgtype.UUID, 0, len(req.UserIDs))
+	for _, rawID := range req.UserIDs {
+		userID, ok := parseUUIDOrBadRequest(w, rawID, "user id")
+		if !ok {
+			return
+		}
+		userIDStr := uuidToString(userID)
+		if _, exists := seen[userIDStr]; exists {
+			continue
+		}
+		seen[userIDStr] = struct{}{}
+		if _, err := h.getWorkspaceMember(r.Context(), userIDStr, workspaceID); err != nil {
+			writeError(w, http.StatusBadRequest, "allowed user must be a workspace member")
+			return
+		}
+		userIDs = append(userIDs, userID)
+	}
+
+	if err := h.Queries.ReplaceAgentAllowedPrincipals(r.Context(), db.ReplaceAgentAllowedPrincipalsParams{
+		WorkspaceID:  agent.WorkspaceID,
+		AgentID:      agent.ID,
+		PrincipalIds: userIDs,
+		CreatedBy:    parseUUID(requestUserID(r)),
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update agent allowed users")
+		return
+	}
+
+	rows, err := h.Queries.ListAgentAllowedPrincipals(r.Context(), agent.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list agent allowed users")
+		return
+	}
+	resp := make([]AgentAllowedPrincipalResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = agentAllowedPrincipalToResponse(row)
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) canManageAgentAllowedPrincipals(w http.ResponseWriter, r *http.Request, agent db.Agent) bool {
+	userID := requestUserID(r)
+	if uuidToString(agent.OwnerID) != userID {
+		writeError(w, http.StatusForbidden, "only the agent owner can manage allowed users")
+		return false
+	}
+	return true
 }
 
 func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {

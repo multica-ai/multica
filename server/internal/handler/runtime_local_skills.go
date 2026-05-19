@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -25,9 +26,21 @@ const (
 )
 
 const (
-	runtimeLocalSkillPendingTimeout = 30 * time.Second
+	// runtimeLocalSkillPendingTimeout bounds how long a request can sit in
+	// pending before the server marks it timed out. The value must accommodate
+	// old daemons that don't support batch import: they pop only one import
+	// per heartbeat cycle (~15s). With maxLocalSkillImportBatch=10, the 10th
+	// queued import waits up to 10×15s = 150s before being claimed. 3 minutes
+	// gives a comfortable margin.
+	//
+	// Timeout invariant: IMPORT_CONCURRENCY (views/.../runtime-local-skill-import-panel.tsx)
+	// × heartbeat period (~15s) ≤ runtimeLocalSkillPendingTimeout, and
+	// IMPORT_POLL_TIMEOUT_MS (core/runtimes/local-skills.ts) must exceed
+	// runtimeLocalSkillPendingTimeout + runtimeLocalSkillRunningTimeout.
+	// See also maxLocalSkillImportBatch in daemon.go.
+	runtimeLocalSkillPendingTimeout = 3 * time.Minute
 	runtimeLocalSkillRunningTimeout = 60 * time.Second
-	runtimeLocalSkillStoreRetention = 2 * time.Minute
+	runtimeLocalSkillStoreRetention = 5 * time.Minute
 )
 
 // LocalSkillListStore tracks pending / running / completed runtime-local-skill
@@ -56,6 +69,10 @@ type LocalSkillImportStore interface {
 	Get(ctx context.Context, id string) (*RuntimeLocalSkillImportRequest, error)
 	HasPending(ctx context.Context, runtimeID string) (bool, error)
 	PopPending(ctx context.Context, runtimeID string) (*RuntimeLocalSkillImportRequest, error)
+	// PopPendingBatch claims up to limit pending requests atomically and
+	// transitions them to running. Used by the heartbeat handler to deliver
+	// multiple imports per heartbeat cycle.
+	PopPendingBatch(ctx context.Context, runtimeID string, limit int) ([]*RuntimeLocalSkillImportRequest, error)
 	Complete(ctx context.Context, id string, skill SkillResponse) error
 	Fail(ctx context.Context, id string, errMsg string) error
 }
@@ -68,7 +85,7 @@ func applyLocalSkillListTimeout(req *RuntimeLocalSkillListRequest, now time.Time
 	case RuntimeLocalSkillPending:
 		if now.Sub(req.CreatedAt) > runtimeLocalSkillPendingTimeout {
 			req.Status = RuntimeLocalSkillTimeout
-			req.Error = "daemon did not respond within 30 seconds"
+			req.Error = "daemon did not respond within 3 minutes"
 			req.UpdatedAt = now
 			return true
 		}
@@ -88,7 +105,7 @@ func applyLocalSkillImportTimeout(req *RuntimeLocalSkillImportRequest, now time.
 	case RuntimeLocalSkillPending:
 		if now.Sub(req.CreatedAt) > runtimeLocalSkillPendingTimeout {
 			req.Status = RuntimeLocalSkillTimeout
-			req.Error = "daemon did not respond within 30 seconds"
+			req.Error = "daemon did not respond within 3 minutes"
 			req.UpdatedAt = now
 			return true
 		}
@@ -331,6 +348,39 @@ func (s *InMemoryLocalSkillImportStore) PopPending(_ context.Context, runtimeID 
 		oldest.UpdatedAt = now
 	}
 	return oldest, nil
+}
+
+func (s *InMemoryLocalSkillImportStore) PopPendingBatch(_ context.Context, runtimeID string, limit int) ([]*RuntimeLocalSkillImportRequest, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+
+	// Collect all pending requests for this runtime, sorted by creation time.
+	var pending []*RuntimeLocalSkillImportRequest
+	for _, req := range s.requests {
+		applyLocalSkillImportTimeout(req, now)
+		if req.RuntimeID == runtimeID && req.Status == RuntimeLocalSkillPending {
+			pending = append(pending, req)
+		}
+	}
+	sort.Slice(pending, func(i, j int) bool {
+		return pending[i].CreatedAt.Before(pending[j].CreatedAt)
+	})
+
+	if limit > len(pending) {
+		limit = len(pending)
+	}
+
+	result := make([]*RuntimeLocalSkillImportRequest, 0, limit)
+	for _, req := range pending[:limit] {
+		req.Status = RuntimeLocalSkillRunning
+		startedAt := now
+		req.RunStartedAt = &startedAt
+		req.UpdatedAt = now
+		result = append(result, req)
+	}
+	return result, nil
 }
 
 func (s *InMemoryLocalSkillImportStore) Complete(_ context.Context, id string, skill SkillResponse) error {

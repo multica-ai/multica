@@ -1,7 +1,7 @@
 "use client";
 
-import { memo, useCallback, useMemo, useRef, useState } from "react";
-import { CheckCircle2, ChevronRight, Copy, Download, Eye, FileText, Link2, MoreHorizontal, Pencil, RotateCcw, RotateCw, Trash2 } from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CheckCircle2, ChevronRight, Copy, Link2, MoreHorizontal, Pencil, RotateCcw, RotateCw, Trash2 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -32,7 +32,7 @@ import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-pick
 import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { timeAgo } from "@multica/core/utils";
-import { ContentEditor, type ContentEditorRef, type SelectionQuoteActions, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, useDownloadAttachment, useAttachmentPreview, isPreviewable } from "../../editor";
+import { ContentEditor, type ContentEditorRef, type SelectionQuoteActions, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, useDownloadAttachment, useAttachmentPreview, AttachmentBlock } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -156,8 +156,90 @@ function DeleteCommentDialog({
 // Standalone attachment list — renders attachments not already in the markdown
 // ---------------------------------------------------------------------------
 
-function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
-  const { t } = useT("editor");
+const COLLAPSED_COMMENT_BODY_MAX_HEIGHT = 320;
+const LONG_COMMENT_CHAR_THRESHOLD = 500;
+const LONG_COMMENT_LINE_THRESHOLD = 8;
+
+function isLongCommentContent(content: string): boolean {
+  return content.length > LONG_COMMENT_CHAR_THRESHOLD || content.split("\n").length > LONG_COMMENT_LINE_THRESHOLD;
+}
+
+function ExpandableCommentBody({
+  content,
+  attachments,
+  className,
+}: {
+  content: string;
+  attachments?: Attachment[];
+  className?: string;
+}) {
+  const { t } = useT("issues");
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [hasMeasuredOverflow, setHasMeasuredOverflow] = useState(false);
+  const isTextLong = isLongCommentContent(content);
+  const canCollapse = isTextLong || hasMeasuredOverflow;
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [content]);
+
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+
+    const measure = () => {
+      setHasMeasuredOverflow(el.scrollHeight > COLLAPSED_COMMENT_BODY_MAX_HEIGHT + 1);
+    };
+
+    measure();
+
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [content, attachments]);
+
+  return (
+    <div className={cn(className, "relative")}>
+      <div
+        ref={contentRef}
+        className={cn(
+          "text-sm leading-relaxed text-foreground/85",
+          canCollapse && !expanded && "max-h-80 overflow-hidden",
+        )}
+      >
+        <ReadonlyContent content={content} attachments={attachments} />
+      </div>
+      {canCollapse && !expanded && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-t from-card via-card/95 to-transparent pt-14">
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="pointer-events-auto h-7 px-2.5 text-xs shadow-sm"
+            onClick={() => setExpanded(true)}
+          >
+            {t(($) => $.comment.expand_content)}
+          </Button>
+        </div>
+      )}
+      {canCollapse && expanded && (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="mt-1.5 h-7 px-2.5 text-xs text-muted-foreground"
+          onClick={() => setExpanded(false)}
+        >
+          {t(($) => $.comment.collapse_content)}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+export function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
   const download = useDownloadAttachment();
   const preview = useAttachmentPreview();
   if (!attachments?.length) return null;
@@ -185,35 +267,15 @@ function AttachmentList({ attachments, content, className }: { attachments?: Att
   return (
     <div className={cn("flex flex-col gap-1", className)}>
       {standalone.map((a) => (
-        <div
+        <AttachmentBlock
           key={a.id}
-          className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted"
-        >
-          <FileText className="size-4 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm">{a.filename}</p>
-          </div>
-          {isPreviewable(a.content_type, a.filename) && (
-            <button
-              type="button"
-              className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              title={t(($) => $.attachment.preview)}
-              aria-label={t(($) => $.attachment.preview)}
-              onClick={() => preview.tryOpen({ kind: "full", attachment: a })}
-            >
-              <Eye className="size-3.5" />
-            </button>
-          )}
-          <button
-            type="button"
-            className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-            title={t(($) => $.image.download)}
-            aria-label={t(($) => $.image.download)}
-            onClick={() => download(a.id)}
-          >
-            <Download className="size-3.5" />
-          </button>
-        </div>
+          filename={a.filename}
+          contentType={a.content_type}
+          attachmentId={a.id}
+          href={a.url}
+          onPreview={() => preview.tryOpen({ kind: "full", attachment: a })}
+          onDownload={() => download(a.id)}
+        />
       ))}
       {preview.modal}
     </div>
@@ -383,21 +445,25 @@ function CommentRow({
       setEditing(false);
       setPendingAttachments([]);
       clearEditDraft(editDraftKey);
-    } catch {
-      toast.error(t(($) => $.comment.update_failed));
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.comment.update_failed),
+      );
     }
   };
 
   const reactions = entry.reactions ?? [];
   const contentText = entry.content ?? "";
-  const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
+  const isLongContent = isLongCommentContent(contentText);
 
   return (
     <div className={`py-3${isTemp ? " opacity-60" : ""}`}>
       <div className="flex items-center gap-2.5">
         <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
         <span className="cursor-pointer text-sm font-medium">
-          {getActorName(entry.actor_type, entry.actor_id)}
+          {entry.actor_display_name ?? getActorName(entry.actor_type, entry.actor_id)}
         </span>
         <Tooltip>
           <TooltipTrigger
@@ -514,9 +580,11 @@ function CommentRow({
         </div>
       ) : (
         <>
-          <div className="mt-1.5 pl-8 text-sm leading-relaxed text-foreground/85">
-            <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
-          </div>
+          <ExpandableCommentBody
+            content={entry.content ?? ""}
+            attachments={entry.attachments}
+            className="mt-1.5 pl-8"
+          />
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8" />
           {!isTemp && (
             <ReactionBar
@@ -651,8 +719,12 @@ function CommentCardImpl({
       setEditing(false);
       setParentPendingAttachments([]);
       clearParentEditDraft(parentEditDraftKey);
-    } catch {
-      toast.error(t(($) => $.comment.update_failed));
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.comment.update_failed),
+      );
     }
   };
 
@@ -665,7 +737,7 @@ function CommentCardImpl({
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
   const reactions = entry.reactions ?? [];
   const contentText = entry.content ?? "";
-  const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
+  const isLongContent = isLongCommentContent(contentText);
 
   const isHighlighted = highlightedCommentId === entry.id;
   const registerReplyInput = useCallback(
@@ -725,7 +797,7 @@ function CommentCardImpl({
             </CollapsibleTrigger>
             <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
             <span className="shrink-0 cursor-pointer text-sm font-medium">
-              {getActorName(entry.actor_type, entry.actor_id)}
+              {entry.actor_display_name ?? getActorName(entry.actor_type, entry.actor_id)}
             </span>
             <Tooltip>
               <TooltipTrigger
@@ -877,9 +949,11 @@ function CommentCardImpl({
               </div>
             ) : (
               <>
-                <div className="pl-10 text-sm leading-relaxed text-foreground/85">
-                  <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
-                </div>
+                <ExpandableCommentBody
+                  content={entry.content ?? ""}
+                  attachments={entry.attachments}
+                  className="pl-10"
+                />
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
                 {!isTemp && (
                   <ReactionBar

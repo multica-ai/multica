@@ -12,6 +12,7 @@ export interface CreateIssueRequest {
   assignee_id?: string;
   parent_issue_id?: string;
   project_id?: string;
+  start_date?: string;
   due_date?: string;
   attachment_ids?: string[];
 }
@@ -24,6 +25,7 @@ export interface UpdateIssueRequest {
   assignee_type?: IssueAssigneeType | null;
   assignee_id?: string | null;
   position?: number;
+  start_date?: string | null;
   due_date?: string | null;
   parent_issue_id?: string | null;
   project_id?: string | null;
@@ -39,17 +41,63 @@ export interface ListIssuesParams {
   workspace_id?: string;
   status?: IssueStatus;
   priority?: IssuePriority;
+  priorities?: IssuePriority[];
+  assignee_id?: string;
+  assignee_ids?: string[];
+  assignees?: Array<{ type: IssueAssigneeType; id: string }>;
+  include_no_assignee?: boolean;
+  creator_id?: string;
+  creators?: Array<{ type: IssueAssigneeType; id: string }>;
+  project_id?: string;
+  project_ids?: string[];
+  include_no_project?: boolean;
+  open_only?: boolean;
+}
+
+export interface IssueActorRef {
+  type: IssueAssigneeType;
+  id: string;
+}
+
+export interface ListGroupedIssuesParams {
+  group_by: "assignee";
+  limit?: number;
+  offset?: number;
+  workspace_id?: string;
+  statuses?: IssueStatus[];
+  priorities?: IssuePriority[];
+  assignee_types?: IssueAssigneeType[];
   assignee_id?: string;
   assignee_ids?: string[];
   creator_id?: string;
   project_id?: string;
-  open_only?: boolean;
+  assignee_filters?: IssueActorRef[];
+  include_no_assignee?: boolean;
+  creator_filters?: IssueActorRef[];
+  project_ids?: string[];
+  include_no_project?: boolean;
+  label_ids?: string[];
+  group_assignee_type?: IssueAssigneeType | "none";
+  group_assignee_id?: string;
 }
 
 /** Raw backend response shape for `GET /api/issues`. */
 export interface ListIssuesResponse {
   issues: Issue[];
   total: number;
+}
+
+export interface IssueAssigneeGroup {
+  id: string;
+  assignee_type: IssueAssigneeType | null;
+  assignee_id: string | null;
+  issues: Issue[];
+  total: number;
+}
+
+/** Raw backend response shape for `GET /api/issues/grouped?group_by=assignee`. */
+export interface GroupedIssuesResponse {
+  groups: IssueAssigneeGroup[];
 }
 
 /** Per-status bucket in the paginated issue cache. `total` is the server count (all pages), not the length of `issues`. */
@@ -70,6 +118,8 @@ export interface ListIssuesCache {
 export interface SearchIssueResult extends Issue {
   match_source: "title" | "description" | "comment";
   matched_snippet?: string;
+  matched_description_snippet?: string;
+  matched_comment_snippet?: string;
 }
 
 export interface SearchIssuesResponse {

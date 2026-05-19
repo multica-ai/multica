@@ -146,6 +146,12 @@ spec:
                   name: multica-bot-secrets
                   key: GOOGLE_OAUTH_PROXY
                   optional: true
+            - name: GITEE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: GITEE_TOKEN
+                  optional: true
             - name: COOKIE_DOMAIN
               value: .wujieai.com
             - name: LOCAL_UPLOAD_DIR

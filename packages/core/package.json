@@ -15,6 +15,7 @@
     "./api": "./api/index.ts",
     "./api/client": "./api/client.ts",
     "./api/schema": "./api/schema.ts",
+    "./api/schemas": "./api/schemas.ts",
     "./api/ws-client": "./api/ws-client.ts",
     "./config": "./config/index.ts",
     "./auth": "./auth/index.ts",
@@ -60,6 +61,9 @@
     "./agents/derive-presence": "./agents/derive-presence.ts",
     "./agents/use-agent-presence": "./agents/use-agent-presence.ts",
     "./agents/visibility-label": "./agents/visibility-label.ts",
+    "./agents/stores": "./agents/stores/index.ts",
+    "./squads": "./squads/index.ts",
+    "./squads/stores": "./squads/stores/index.ts",
     "./permissions": "./permissions/index.ts",
     "./projects": "./projects/index.ts",
     "./projects/queries": "./projects/queries.ts",
@@ -114,8 +118,11 @@
   },
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",
+    "@testing-library/react": "catalog:",
     "@types/react": "catalog:",
     "jsdom": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

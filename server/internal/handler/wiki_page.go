@@ -222,6 +222,7 @@ func (h *Handler) CreateWikiPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := wikiPageToResponse(page)
+	h.recordWikiActivity(r, wsUUID, page.ID, member.UserID, "created", map[string]any{"title": title})
 	h.publish(protocol.EventWikiPageCreated, workspaceID, "member", requestUserID(r), map[string]any{"page": resp})
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -301,6 +302,20 @@ func (h *Handler) UpdateWikiPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := wikiPageToResponse(page)
+	activityAction := "updated"
+	details := map[string]any{}
+	if req.Title != nil {
+		activityAction = "title_updated"
+		details["title"] = *req.Title
+	}
+	if req.Content != nil {
+		activityAction = "content_updated"
+	}
+	if req.Title != nil && req.Content != nil {
+		activityAction = "updated"
+		details["title"] = *req.Title
+	}
+	h.recordWikiActivity(r, wsUUID, page.ID, member.UserID, activityAction, details)
 	h.publish(protocol.EventWikiPageUpdated, workspaceID, "member", requestUserID(r), map[string]any{"page": resp})
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -311,7 +326,8 @@ func (h *Handler) DeleteWikiPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := h.requireWikiAdmin(w, r, workspaceID); !ok {
+	member, ok := h.requireWikiAdmin(w, r, workspaceID)
+	if !ok {
 		return
 	}
 	idUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "wiki page id")
@@ -331,6 +347,9 @@ func (h *Handler) DeleteWikiPage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete wiki page")
 		return
 	}
+	// Record activity before deletion (cascade will remove the activity record too,
+	// but parent page activity could still be useful for logging)
+	h.recordWikiActivity(r, wsUUID, page.ID, member.UserID, "deleted", map[string]any{"title": page.Title})
 	if err := h.Queries.DeleteWikiPage(r.Context(), db.DeleteWikiPageParams{ID: idUUID, WorkspaceID: wsUUID}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete wiki page")
 		return

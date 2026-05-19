@@ -369,6 +369,107 @@ func TestRuntimeLocalSkillImportFlow_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestBatchImportViaHeartbeat(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+
+	// Create 5 import requests.
+	skillKeys := []string{"skill-a", "skill-b", "skill-c", "skill-d", "skill-e"}
+	importIDs := make([]string, 0, len(skillKeys))
+	for _, key := range skillKeys {
+		w := httptest.NewRecorder()
+		req := withURLParams(
+			newRequestAsUser(testUserID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills/import", map[string]any{
+				"skill_key": key,
+			}),
+			"runtimeId", runtimeID,
+		)
+		testHandler.InitiateImportLocalSkill(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("InitiateImportLocalSkill(%s): expected 200, got %d: %s", key, w.Code, w.Body.String())
+		}
+		var importReq RuntimeLocalSkillImportRequest
+		if err := json.NewDecoder(w.Body).Decode(&importReq); err != nil {
+			t.Fatalf("decode import request: %v", err)
+		}
+		importIDs = append(importIDs, importReq.ID)
+	}
+
+	// Single heartbeat should return all 5 via the plural field.
+	w := httptest.NewRecorder()
+	heartbeatReq := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
+		"runtime_id":            runtimeID,
+		"supports_batch_import": true,
+	}, testWorkspaceID, "runtime-local-skills-daemon")
+	testHandler.DaemonHeartbeat(w, heartbeatReq)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonHeartbeat: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var heartbeatResp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&heartbeatResp); err != nil {
+		t.Fatalf("decode heartbeat response: %v", err)
+	}
+
+	// Singular field (backwards compat) should contain the first item.
+	singular, ok := heartbeatResp["pending_local_skill_import"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected pending_local_skill_import, got %v", heartbeatResp)
+	}
+	if singular["id"] != importIDs[0] {
+		t.Fatalf("singular id = %v, want %s", singular["id"], importIDs[0])
+	}
+
+	// Plural field should contain all 5.
+	pluralRaw, ok := heartbeatResp["pending_local_skill_imports"].([]any)
+	if !ok {
+		t.Fatalf("expected pending_local_skill_imports array, got %T", heartbeatResp["pending_local_skill_imports"])
+	}
+	if len(pluralRaw) != len(skillKeys) {
+		t.Fatalf("expected %d pending imports, got %d", len(skillKeys), len(pluralRaw))
+	}
+
+	// Verify IDs match.
+	gotIDs := make(map[string]bool)
+	for _, item := range pluralRaw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			t.Fatalf("expected map, got %T", item)
+		}
+		gotIDs[m["id"].(string)] = true
+	}
+	for _, id := range importIDs {
+		if !gotIDs[id] {
+			t.Fatalf("missing import ID %s in plural field", id)
+		}
+	}
+
+	// Second heartbeat should return nothing (all were claimed).
+	w = httptest.NewRecorder()
+	heartbeatReq2 := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
+		"runtime_id":            runtimeID,
+		"supports_batch_import": true,
+	}, testWorkspaceID, "runtime-local-skills-daemon")
+	testHandler.DaemonHeartbeat(w, heartbeatReq2)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonHeartbeat: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var heartbeatResp2 map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&heartbeatResp2); err != nil {
+		t.Fatalf("decode heartbeat response: %v", err)
+	}
+	if _, ok := heartbeatResp2["pending_local_skill_import"]; ok {
+		t.Fatalf("second heartbeat should have no pending imports, got %v", heartbeatResp2)
+	}
+	if _, ok := heartbeatResp2["pending_local_skill_imports"]; ok {
+		t.Fatalf("second heartbeat should have no pending imports plural, got %v", heartbeatResp2)
+	}
+}
+
 func TestReportLocalSkillImportResult_IgnoresTimedOutRequests(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

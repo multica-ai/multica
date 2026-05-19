@@ -41,17 +41,13 @@ type Task struct {
 	Agent                   *AgentData            `json:"agent,omitempty"`
 	Context                 json.RawMessage       `json:"context,omitempty"`
 	Repos                   []RepoData            `json:"repos,omitempty"`
-	ProjectID               string                `json:"project_id,omitempty"`              // issue's project, when present
-	ProjectTitle            string                `json:"project_title,omitempty"`           // human-readable project title for context injection
-	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"`       // project-scoped resources to expose to the agent
-	PriorSessionID          string                `json:"prior_session_id,omitempty"`        // Claude session ID from a previous task on this issue
-	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on this issue
-	TriggerCommentID        string                `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
-	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"` // content of the triggering comment
-	TriggerSource           string                `json:"trigger_source,omitempty"`
-	TriggerActorType        string                `json:"trigger_actor_type,omitempty"`
-	TriggerActorID          string                `json:"trigger_actor_id,omitempty"`
-	TriggerActorOwnerID     string                `json:"trigger_actor_owner_id,omitempty"`
+	ProjectID               string                `json:"project_id,omitempty"`                // issue's project, when present
+	ProjectTitle            string                `json:"project_title,omitempty"`             // human-readable project title for context injection
+	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"`         // project-scoped resources to expose to the agent
+	PriorSessionID          string                `json:"prior_session_id,omitempty"`          // Claude session ID from a previous task on this issue
+	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on this issue
+	TriggerCommentID        string                `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
+	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
 	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind for the triggering comment
 	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
 	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks

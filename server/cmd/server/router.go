@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
+	"net/netip"
 	"os"
 	"strings"
 	"time"
@@ -57,6 +59,33 @@ func allowedOrigins() []string {
 	return origins
 }
 
+// parseTrustedProxies parses a comma-separated list of CIDR prefixes from the
+// MULTICA_TRUSTED_PROXIES env var. Invalid entries are dropped with a single
+// warn-line per entry rather than crashing the server — a typo in one CIDR
+// shouldn't take the whole API down. Returns nil for empty input, which the
+// rate limiter treats as "trust no proxy headers, use RemoteAddr only".
+func parseTrustedProxies(raw string) []netip.Prefix {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var out []netip.Prefix
+	for _, part := range strings.Split(raw, ",") {
+		s := strings.TrimSpace(part)
+		if s == "" {
+			continue
+		}
+		p, err := netip.ParsePrefix(s)
+		if err != nil {
+			slog.Warn("MULTICA_TRUSTED_PROXIES: ignoring invalid CIDR",
+				"value", s, "error", err)
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
 // NewRouter creates the fully-configured Chi router with all middleware and routes.
 // rdb is optional: when non-nil the runtime local-skill request stores are
 // swapped for Redis-backed implementations so multiple API nodes share the
@@ -107,6 +136,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		AllowedEmailDomains:           splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
 		UseDailyRollupForRuntimeUsage: os.Getenv("USAGE_DAILY_ROLLUP_ENABLED") == "true",
 		UseDailyRollupForDashboard:    os.Getenv("USAGE_DASHBOARD_ROLLUP_ENABLED") == "true",
+		PublicURL:                     strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
+		TrustedProxies:                parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	if opts.DaemonWakeup != nil {
@@ -118,6 +149,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.LocalSkillListStore = handler.NewRedisLocalSkillListStore(rdb)
 		h.LocalSkillImportStore = handler.NewRedisLocalSkillImportStore(rdb)
 		h.LivenessStore = handler.NewRedisLivenessStore(rdb)
+		h.WebhookRateLimiter = handler.NewRedisWebhookRateLimiter(rdb, handler.DefaultWebhookRateLimit())
+		h.WebhookIPRateLimiter = handler.NewRedisWebhookIPRateLimiter(rdb, handler.DefaultWebhookIPRateLimit())
 	}
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
@@ -131,6 +164,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	daemonTokenCache := auth.NewDaemonTokenCache(rdb)
 	h.PATCache = patCache
 	h.DaemonTokenCache = daemonTokenCache
+	h.MembershipCache = auth.NewMembershipCache(rdb)
 
 	// Empty-claim cache: lets the daemon poll path skip a Postgres
 	// scan when a recent check confirmed the runtime had no queued
@@ -205,13 +239,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		})
 	}
 
-	// Auth (public)
-	r.Get("/api/config", h.GetConfig)
-	r.Post("/auth/send-code", h.SendCode)
-	r.Post("/auth/verify-code", h.VerifyCode)
-	r.Post("/auth/google", h.GoogleLogin)
-	r.Post("/auth/google/mobile", h.GoogleMobileLogin)
-	r.Post("/auth/dingtalk", h.DingTalkLogin)
+	// Auth (public) — per-IP rate limiting.
+	if rdb == nil {
+		slog.Warn("rate limiting disabled: REDIS_URL not configured")
+	}
+	trustedProxies := middleware.ParseTrustedProxies(os.Getenv("RATE_LIMIT_TRUSTED_PROXIES"))
+	authRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH", 5), time.Minute, trustedProxies)
+	authVerifyRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH_VERIFY", 20), time.Minute, trustedProxies)
+	r.With(authRL).Post("/auth/send-code", h.SendCode)
+	r.With(authVerifyRL).Post("/auth/verify-code", h.VerifyCode)
+	r.With(authRL).Post("/auth/google", h.GoogleLogin)
+	r.With(authRL).Post("/auth/google/mobile", h.GoogleMobileLogin)
+	r.With(authRL).Post("/auth/dingtalk", h.DingTalkLogin)
 	r.Post("/auth/logout", h.Logout)
 	r.Post("/api/notification-bindings/google/callback", h.CompleteGoogleBindingByState)
 	r.Get("/api/invite-links/{token}", h.ValidateInviteLink)
@@ -219,10 +258,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Public API
 	r.Get("/api/config", h.GetConfig)
 
+	// CLI install endpoints (public, no auth required)
+	r.Get("/install.sh", h.ServeInstallSH)
+	r.Get("/install.ps1", h.ServeInstallPS1)
+	r.Get("/install/latest-cli-version", h.ServeLatestCLIVersion)
+
+	// Webhook ingress for autopilots. Outside the authenticated group on
+	// purpose: the bearer token in the URL path IS the credential. Workspace
+	// context is derived from the trigger row, never from request headers.
+	r.Post("/api/webhooks/autopilots/{token}", h.HandleAutopilotWebhook)
 	// GitHub App webhook (no Multica auth — requests are authenticated via
 	// HMAC-SHA256 signature in the handler) and post-install setup callback.
 	r.Post("/api/webhooks/github", h.HandleGitHubWebhook)
 	r.Get("/api/github/setup", h.GitHubSetupCallback)
+	// Gitee webhook (authenticated via X-Gitee-Token in the handler).
+	r.Post("/api/webhooks/gitee", h.HandleGiteeWebhook)
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
@@ -256,8 +306,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// Interaction endpoints — daemon side (report + poll result)
 		r.Post("/tasks/{taskId}/interactions", h.ReportInteraction)
 		r.Get("/tasks/{taskId}/interactions/{interactionId}", h.GetInteractionResult)
-
-
 
 		r.Get("/issues/{issueId}/gc-check", h.GetIssueGCCheck)
 		r.Get("/chat-sessions/{sessionId}/gc-check", h.GetChatSessionGCCheck)
@@ -316,6 +364,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/agent-defaults/me", h.UpdatePersonalAgentDefaults)
 					r.Get("/agent-defaults", h.ListAllAgentDefaults)
 					r.Post("/agent-defaults/duplicate/{configId}", h.DuplicateAgentDefaults)
+					r.Get("/instructions-history", h.ListInstructionsHistory)
+					r.Get("/instructions-history/{versionId}", h.GetInstructionsHistory)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -344,6 +394,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/github/connect", h.GitHubConnect)
 					r.Get("/github/installations", h.ListGitHubInstallations)
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
+					// Gitee webhook config
+					r.Post("/gitee/webhook-configs", h.CreateGiteeWebhookConfig)
+					r.Get("/gitee/webhook-configs", h.ListGiteeWebhookConfigs)
+					r.Delete("/gitee/webhook-configs/{configId}", h.DeleteGiteeWebhookConfig)
 				})
 			})
 		})
@@ -373,6 +427,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/issues", func(r chi.Router) {
 				r.Get("/search", h.SearchIssues)
 				r.Get("/child-progress", h.ChildIssueProgress)
+				r.Get("/grouped", h.ListGroupedIssues)
 				r.Get("/", h.ListIssues)
 				r.Post("/", h.CreateIssue)
 				r.Post("/quick-create", h.QuickCreateIssue)
@@ -392,6 +447,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
 					r.Post("/rerun", h.RerunIssue)
 					r.Get("/task-runs", h.ListTasksByIssue)
+					r.Post("/local-runs", h.CreateLocalCLIRun)
 					r.Get("/usage", h.GetIssueUsage)
 					r.Post("/reactions", h.AddIssueReaction)
 					r.Delete("/reactions", h.RemoveIssueReaction)
@@ -407,6 +463,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Task messages (user-facing, not daemon auth)
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
+			r.Route("/api/local-runs/{runId}", func(r chi.Router) {
+				r.Patch("/", h.UpdateLocalCLIRun)
+				r.Get("/messages", h.ListLocalCLIMessages)
+				r.Post("/messages", h.CreateLocalCLIMessage)
+			})
 
 			// Interaction endpoints — user side (list + respond)
 			r.Get("/api/tasks/{taskId}/interactions", h.ListTaskInteractions)
@@ -447,6 +508,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetWikiPage)
 					r.Patch("/", h.UpdateWikiPage)
 					r.Delete("/", h.DeleteWikiPage)
+					r.Get("/activity", h.ListWikiPageActivities)
 				})
 			})
 
@@ -459,6 +521,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/", h.UpdateSquad)
 					r.Delete("/", h.DeleteSquad)
 					r.Get("/members", h.ListSquadMembers)
+					r.Get("/members/status", h.ListSquadMemberStatus)
 					r.Post("/members", h.AddSquadMember)
 					r.Delete("/members", h.RemoveSquadMember)
 					r.Patch("/members/role", h.UpdateSquadMemberRole)
@@ -478,10 +541,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.DeleteAutopilot)
 					r.Post("/trigger", h.TriggerAutopilot)
 					r.Get("/runs", h.ListAutopilotRuns)
+					r.Get("/runs/{runId}", h.GetAutopilotRun)
+					r.Get("/deliveries", h.ListAutopilotDeliveries)
+					r.Get("/deliveries/{deliveryId}", h.GetAutopilotDelivery)
+					r.Post("/deliveries/{deliveryId}/replay", h.ReplayAutopilotDelivery)
 					r.Post("/triggers", h.CreateAutopilotTrigger)
 					r.Route("/triggers/{triggerId}", func(r chi.Router) {
 						r.Patch("/", h.UpdateAutopilotTrigger)
 						r.Delete("/", h.DeleteAutopilotTrigger)
+						r.Post("/rotate-webhook-token", h.RotateAutopilotTriggerWebhookToken)
+						r.Put("/signing-secret", h.SetAutopilotTriggerSigningSecret)
 					})
 				})
 			})
@@ -499,16 +568,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/attachments/{id}/content", h.GetAttachmentContent)
 			r.Delete("/api/attachments/{id}", h.DeleteAttachment)
 
-				// Comments
-				r.Route("/api/comments/{commentId}", func(r chi.Router) {
-					r.Put("/", h.UpdateComment)
-					r.Delete("/", h.DeleteComment)
-					r.Post("/retry-agent", h.RetryAgentComment)
-					r.Post("/resolve", h.ResolveComment)
-					r.Delete("/resolve", h.UnresolveComment)
-					r.Post("/reactions", h.AddReaction)
-					r.Delete("/reactions", h.RemoveReaction)
-				})
+			// Comments
+			r.Route("/api/comments/{commentId}", func(r chi.Router) {
+				r.Put("/", h.UpdateComment)
+				r.Delete("/", h.DeleteComment)
+				r.Post("/retry-agent", h.RetryAgentComment)
+				r.Post("/resolve", h.ResolveComment)
+				r.Delete("/resolve", h.UnresolveComment)
+				r.Post("/reactions", h.AddReaction)
+				r.Delete("/reactions", h.RemoveReaction)
+			})
 
 			// Agents
 			r.Route("/api/agents", func(r chi.Router) {
@@ -529,6 +598,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/tasks", h.ListAgentTasks)
 					r.Get("/skills", h.ListAgentSkills)
 					r.Put("/skills", h.SetAgentSkills)
+					r.Get("/allowed-principals", h.ListAgentAllowedPrincipals)
+					r.Put("/allowed-principals", h.UpdateAgentAllowedPrincipals)
 				})
 			})
 
@@ -569,6 +640,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/usage/daily", h.GetDashboardUsageDaily)
 				r.Get("/usage/by-agent", h.GetDashboardUsageByAgent)
 				r.Get("/agent-runtime", h.GetDashboardAgentRunTime)
+				r.Get("/runtime/daily", h.GetDashboardRunTimeDaily)
 			})
 
 			// Runtimes

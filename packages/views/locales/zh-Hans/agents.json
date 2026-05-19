@@ -129,6 +129,7 @@
     "prop_runtime": "运行时",
     "prop_model": "模型",
     "prop_visibility": "可见性",
+    "prop_allowed_users": "白名单用户",
     "prop_concurrency": "并发",
     "prop_stream": "流输出",
     "prop_approval": "审批",
@@ -164,6 +165,11 @@
     "rename_required": "名称必填",
     "edit_description_title": "编辑描述",
     "description_placeholder": "这个智能体做什么？",
+    "allowed_users_title": "白名单用户",
+    "allowed_users_none": "暂无用户",
+    "allowed_users_count": "{{count}} 个用户",
+    "allowed_users_empty": "没有其他用户",
+    "allowed_users_loading": "加载中",
     "save": "保存",
     "cancel": "取消"
   },
@@ -206,6 +212,7 @@
   },
   "tabs": {
     "activity": "动态",
+    "tasks": "task",
     "instructions": "指令",
     "skills": "skill",
     "environment": "环境变量",
@@ -274,7 +281,9 @@
     },
     "instructions": {
       "intro": "定义这个智能体的身份和工作风格。会注入到每个 task 的上下文。支持 Markdown。",
-      "placeholder": "定义这个智能体的角色、专长和工作风格。\n\n# 示例\n你是一名专注 React 和 TypeScript 的前端工程师。\n\n## 工作风格\n- 写小而聚焦的 PR —— 每个逻辑变更一个 commit\n- 优先组合而不是继承\n- 新组件总是配单元测试\n\n## 约束\n- 未经明确批准不要修改 shared/ 下的 type\n- 遵循 features/ 中现有的组件模式"
+      "placeholder": "定义这个智能体的角色、专长和工作风格。\n\n# 示例\n你是一名专注 React 和 TypeScript 的前端工程师。\n\n## 工作风格\n- 写小而聚焦的 PR —— 每个逻辑变更一个 commit\n- 优先组合而不是继承\n- 新组件总是配单元测试\n\n## 约束\n- 未经明确批准不要修改 shared/ 下的 type\n- 遵循 features/ 中现有的组件模式",
+      "saved_toast": "已保存 Instructions",
+      "save_failed_toast": "保存 Instructions 失败"
     },
     "env": {
       "intro_readonly": "在智能体进程启动时注入。值已隐藏 —— 只有智能体所有者或工作区管理员可以查看和编辑。",
@@ -317,7 +326,9 @@
       "add_dialog_confirm_default": "添加",
       "add_dialog_confirm_other": "添加 {{count}} 个 skill",
       "add_dialog_cancel": "取消",
-      "add_failed_toast": "添加 skill 失败"
+      "add_failed_toast": "添加 skill 失败",
+      "saved_toast": "已保存 skill",
+      "save_failed_toast": "保存 skill 失败"
     },
     "activity": {
       "section_now": "当前",
@@ -429,5 +440,33 @@
     "duplicate_action": "复制为我的",
     "badge_label": "默认",
     "other_user_desc": "该用户的默认Agent配置"
+  },
+  "history": {
+    "action": "历史版本",
+    "title": "Instructions 历史版本",
+    "personal_description": "个人默认 instructions 的历史版本。",
+    "system_description": "工作区默认 instructions 的历史版本。",
+    "load_failed": "无法加载 instructions 历史。",
+    "empty": "暂无历史版本。",
+    "current_version": "当前版本",
+    "version_label": "版本 {{count}}",
+    "unknown_actor": "未知修改人",
+    "empty_content": "空 instructions",
+    "view": "查看",
+    "restore": "恢复",
+    "version_content": "版本全文",
+    "select_version": "选择版本",
+    "loading_content": "正在加载全文...",
+    "select_hint": "选择一个版本查看完整 instructions。",
+    "restore_dialog_title": "恢复到这个版本？",
+    "restore_dialog_description": "当前 instructions 会被替换为 {{actor}} 于 {{time}} 保存的版本。恢复操作会生成一条新的历史版本。",
+    "cancel": "取消",
+    "restore_confirm": "恢复",
+    "restored_toast": "已恢复 instructions",
+    "restore_failed_toast": "恢复 instructions 失败",
+    "relative_now": "刚刚",
+    "relative_minutes": "{{count}} 分钟前",
+    "relative_hours": "{{count}} 小时前",
+    "relative_days": "{{count}} 天前"
   }
 }

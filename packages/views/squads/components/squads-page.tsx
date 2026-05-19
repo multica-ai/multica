@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { agentListOptions, memberListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
+import { useSquadsViewStore } from "@multica/core/squads/stores";
 import { AppLink } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import { Users, Plus, Search, Bot, User } from "lucide-react";
@@ -43,7 +44,8 @@ export function SquadsPage() {
     return m;
   }, [members]);
 
-  const [scope, setScope] = useState<Scope>("mine");
+  const scope = useSquadsViewStore((s) => s.scope);
+  const setScope = useSquadsViewStore((s) => s.setScope);
   const [search, setSearch] = useState("");
 
   const scopeCounts = useMemo(() => {
@@ -64,7 +66,7 @@ export function SquadsPage() {
   }, [squads, scope, currentUser, search]);
 
   return (
-    <div className="flex flex-1 flex-col">
+    <div className="flex flex-1 min-h-0 flex-col">
       <PageHeader className="justify-between px-5">
         <div className="flex items-center gap-2">
           <Users className="h-4 w-4 text-muted-foreground" />
@@ -79,7 +81,7 @@ export function SquadsPage() {
         </Button>
       </PageHeader>
 
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
         {isLoading ? (
           <div className="p-6 text-muted-foreground text-sm">Loading...</div>
         ) : squads.length === 0 ? (

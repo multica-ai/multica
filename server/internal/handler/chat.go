@@ -66,11 +66,11 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "agent is archived")
 		return
 	}
-	// Private-agent gate: members must be in allowed_principals to start
-	// a chat with a private agent. Agent-to-agent chat sessions bypass
-	// the gate so A2A collaboration still works.
+	// Private-agent gate: OPE-817: starting a chat IS triggering the agent.
+	// Use canTriggerPrivateAgent (owner-only for private agents) instead of
+	// canAccessPrivateAgent (which is now read-only and open to all members).
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+	if !h.canTriggerPrivateAgent(r.Context(), agent, actorType, actorID) {
 		writeError(w, http.StatusForbidden, "you do not have access to this agent")
 		return
 	}

@@ -129,7 +129,7 @@ describe("project issue create prefill", () => {
   it("passes the current project to the board column create button", async () => {
     render(
       <BoardColumn
-        status="todo"
+        group={{ id: "todo", title: "todo", status: "todo" as any }}
         issueIds={[]}
         issueMap={new Map()}
         projectId="project-1"

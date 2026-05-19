@@ -45,6 +45,10 @@ Once it's up:
 - **Frontend**: [http://localhost:3000](http://localhost:3000)
 - **Backend**: [http://localhost:8080](http://localhost:8080)
 
+<Callout type="info">
+**Ports listen on `127.0.0.1` only.** `docker-compose.selfhost.yml` binds every published port to loopback — `ss -tlnp` will not show `0.0.0.0:8080`, and the services are unreachable from other machines by design. The default `JWT_SECRET` and Postgres credentials must never sit on the open internet. For cross-machine access, front the stack with a reverse proxy that terminates TLS — see [Step 5b — Cross-machine: front with a reverse proxy](#5b-cross-machine-front-with-a-reverse-proxy).
+</Callout>
+
 ## 2. Important: keep production safety on
 
 <Callout type="warning">
@@ -59,7 +63,9 @@ Before any public deployment, make sure `.env` has `APP_ENV=production` and `MUL
 
 Without email configured, your users can't receive verification codes by email; the server prints generated codes to stdout instead.
 
-To actually send verification emails:
+Two delivery backends are supported — pick whichever fits your network:
+
+**Option A — Resend (cloud / public-internet deployments):**
 
 1. Sign up at [Resend](https://resend.com/) and get an API key
 2. Verify a sending domain you control
@@ -70,36 +76,80 @@ To actually send verification emails:
     RESEND_FROM_EMAIL=noreply@yourdomain.com
     ```
 
-4. Restart: `docker compose -f docker-compose.selfhost.yml restart backend`
+**Option B — SMTP relay (internal networks / on-premise):**
 
-For more auth configuration (OAuth, signup allowlist), see [Auth setup](/auth-setup).
+Use this when the deployment can't reach `api.resend.com`, or you already have an internal mail relay (Exchange, Postfix, on-prem SendGrid, etc.). `SMTP_HOST` takes priority over Resend when both are set.
+
+```bash
+SMTP_HOST=smtp.internal.example.com
+SMTP_PORT=587                  # default 25; use 587 for STARTTLS submission
+SMTP_USERNAME=multica          # leave empty for unauthenticated relay
+SMTP_PASSWORD=...
+RESEND_FROM_EMAIL=noreply@yourdomain.com  # reused as the From: header
+```
+
+Then restart: `docker compose -f docker-compose.selfhost.yml restart backend`.
+
+For more auth configuration (OAuth, signup allowlist) and the full SMTP variable reference, see [Auth setup](/auth-setup) and [Environment variables → Email](/environment-variables#email-configuration).
 
 ## 4. First login + create a workspace
 
 Open [http://localhost:3000](http://localhost:3000):
 
 - Enter your email
-- Grab the verification code from the Resend email (or, if you haven't configured Resend, from the server container stdout — look for the `[DEV] Verification code` line)
+- Grab the verification code from your configured email backend (Resend or SMTP relay); if neither is configured, copy it from the server container stdout — look for the `[DEV] Verification code` line
 - Do not use `888888` unless you explicitly set `MULTICA_DEV_VERIFICATION_CODE=888888` on a non-production private instance
 - Log in and create your first workspace
 
 ## 5. Point the CLI at your own server
 
-The CLI install is the same as in [Cloud quickstart → 2. Install the CLI](/cloud-quickstart#2-install-the-multica-cli) — Homebrew / script / PowerShell, pick one. Once installed, **use the self-host variant of the setup command**:
+The CLI install is the same as in [Cloud quickstart → 2. Install the CLI](/cloud-quickstart#2-install-the-multica-cli) — Homebrew / script / PowerShell, pick one.
 
-```bash
-multica setup self-host --server-url http://<your-server-address>:8080 --app-url http://<your-server-address>:3000
-```
+### 5a. Same machine
 
-If you're running everything on one local machine:
+If the CLI and the server run on the same host, the defaults already work:
 
 ```bash
 multica setup self-host
 ```
 
-That defaults to `http://localhost:8080` (backend) and `http://localhost:3000` (frontend).
+That points the CLI at `http://localhost:8080` (backend) and `http://localhost:3000` (frontend), takes you through browser login, stores the PAT locally, and **starts the daemon automatically**.
 
-`setup self-host` takes you through browser login, stores the PAT locally, and **starts the daemon automatically**.
+### 5b. Cross-machine: front with a reverse proxy
+
+Because the compose stack only listens on `127.0.0.1`, a daemon on a different machine cannot reach `http://<server-ip>:8080` directly — and you do not want it to, since the default `JWT_SECRET` would otherwise be reachable from the open internet. Put a reverse proxy on the server that terminates TLS and forwards to `127.0.0.1:8080` (backend) and `127.0.0.1:3000` (frontend), then point the CLI at the public HTTPS URL:
+
+```bash
+multica setup self-host \
+  --server-url https://<your-domain> \
+  --app-url https://<your-domain>
+```
+
+A minimal Caddyfile that fronts both the frontend and the backend (with WebSocket support, which the daemon and the web app both need) on a single hostname:
+
+```nginx
+multica.example.com {
+    # WebSocket route — must come before the catch-all
+    @ws path /ws /ws/*
+    handle @ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # Backend API
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # Everything else → frontend
+    reverse_proxy 127.0.0.1:3000
+}
+```
+
+After bringing the proxy up, set `FRONTEND_ORIGIN=https://multica.example.com` in the server's `.env` and restart the backend — otherwise the WebSocket origin check will reject the browser ([Troubleshooting → WebSocket can't connect](/troubleshooting#websocket-cant-connect)).
+
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) is another solid option — it gives you TLS and a public hostname without exposing any port on the host at all. An Nginx equivalent (separate `app.` / `api.` hostnames, `proxy_set_header Upgrade` for WebSockets) works just as well; the key requirements are TLS termination and forwarding the `Upgrade` header on `/ws`.
 
 ## 6. Create an agent + assign your first task
 
@@ -108,7 +158,7 @@ Same flow as Cloud — see [Cloud quickstart → Steps 5-6](/cloud-quickstart#5-
 ## Common issues
 
 - **Backend won't start**: check container logs with `docker compose -f docker-compose.selfhost.yml logs backend`; usually it's a bad `DATABASE_URL` or `JWT_SECRET` in `.env`
-- **Verification code not received**: Resend isn't configured → look for `[DEV] Verification code` in `docker compose logs backend`
+- **Verification code not received**: no email backend is configured (neither Resend nor SMTP) → look for `[DEV] Verification code` in `docker compose logs backend`
 - **WebSocket won't connect**: for public deployments you must set `FRONTEND_ORIGIN` to your real frontend domain; see [Troubleshooting → WebSocket won't connect](/troubleshooting#websocket-wont-connect)
 
 ## Next steps

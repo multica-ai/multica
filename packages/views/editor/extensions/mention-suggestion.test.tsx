@@ -194,6 +194,29 @@ describe("createMentionSuggestion", () => {
     expect(agentIds).not.toContain("other-private");
   });
 
+  it("keeps allowlisted private agents visible", () => {
+    const qc = fakeQc({
+      members: [{ user_id: "u-current", name: "CurrentUser", role: "member" }],
+      agents: [
+        {
+          id: "allowed-private",
+          name: "Allowed Private",
+          archived_at: null,
+          visibility: "private",
+          owner_id: "u-other",
+          allowed_user_ids: ["u-current"],
+        },
+      ],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
+    const result = config.items!({ query: "", editor: {} as never }) as MentionItem[];
+    const agentIds = result.filter((i) => i.type === "agent").map((i) => i.id);
+
+    expect(agentIds).toContain("allowed-private");
+  });
+
   it("calls searchIssues with include_closed=true so done issues are findable", async () => {
     searchIssuesMock.mockResolvedValue({ issues: [], total: 0 });
 
@@ -420,7 +443,10 @@ describe("createMentionSuggestion", () => {
 
   it("matches Chinese agent names by pinyin", () => {
     const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      members: [
+        { user_id: "u-current", name: "Current User", role: "member" },
+        { user_id: "u1", name: "Alice", role: "member" },
+      ],
       agents: [
         { id: "a1", name: "魏和尚", archived_at: null, visibility: "workspace", owner_id: null },
       ],

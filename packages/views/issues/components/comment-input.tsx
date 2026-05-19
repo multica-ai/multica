@@ -2,6 +2,7 @@
 
 import { forwardRef, useRef, useState, useCallback, useEffect, useImperativeHandle } from "react";
 import { ClipboardList, Maximize2, Minimize2 } from "lucide-react";
+import { toast } from "sonner";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
 import { ContentEditor, type ContentEditorRef, type SelectionQuoteActions, useFileDropZone, FileDropOverlay } from "../../editor";
@@ -93,6 +94,8 @@ const CommentInput = forwardRef<CommentInputRef, CommentInputProps>(function Com
       setIsEmpty(true);
       setPendingAttachments([]);
       clearDraft(draftKey);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(($) => $.comment.send_failed));
     } finally {
       setSubmitting(false);
     }

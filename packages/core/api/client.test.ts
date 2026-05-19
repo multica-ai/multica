@@ -132,6 +132,7 @@ describe("ApiClient", () => {
     });
     await client.updateAutopilotTrigger("ap-1", "tr-1", { enabled: false });
     await client.deleteAutopilotTrigger("ap-1", "tr-1");
+    await client.rotateAutopilotTriggerWebhookToken("ap-1", "tr-1");
 
     const calls = fetchMock.mock.calls.map(([url, init]) => ({
       url,
@@ -174,6 +175,10 @@ describe("ApiClient", () => {
         body: JSON.stringify({ enabled: false }),
       },
       { url: "https://api.example.test/api/autopilots/ap-1/triggers/tr-1", method: "DELETE" },
+      {
+        url: "https://api.example.test/api/autopilots/ap-1/triggers/tr-1/rotate-webhook-token",
+        method: "POST",
+      },
     ]);
   });
 

@@ -41,7 +41,14 @@
     "leader_chip": "负责人",
     "view_agent_tooltip": "打开智能体详情",
     "make_leader_tooltip": "设为小队负责人",
-    "remove_member_tooltip": "从小队移除"
+    "remove_member_tooltip": "从小队移除",
+    "status_working": "工作中",
+    "status_idle": "空闲",
+    "status_offline": "离线",
+    "status_unstable": "不稳定",
+    "issue_status_blocked": "已阻塞",
+    "active_issue_more": "还有 {{count}} 个",
+    "last_active_label": "最近活动 {{time}}"
   },
   "instructions_tab": {
     "description": "小队指引会在 Leader 智能体处理分配给该小队的 issue 时注入到它的 prompt 中。可用来给 Leader 提供贯穿全队的指导、协作规范，或每次任务都应遵循的上下文。",

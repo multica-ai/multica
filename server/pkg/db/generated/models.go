@@ -45,6 +45,16 @@ type Agent struct {
 	CustomEnvCopiedPending bool `json:"custom_env_copied_pending"`
 }
 
+type AgentAllowedPrincipal struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	AgentID       pgtype.UUID        `json:"agent_id"`
+	PrincipalType string             `json:"principal_type"`
+	PrincipalID   pgtype.UUID        `json:"principal_id"`
+	CreatedBy     pgtype.UUID        `json:"created_by"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type AgentRuntime struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -94,11 +104,9 @@ type AgentTaskQueue struct {
 	MaxAttempts       int32              `json:"max_attempts"`
 	ParentTaskID      pgtype.UUID        `json:"parent_task_id"`
 	FailureReason     pgtype.Text        `json:"failure_reason"`
-	TriggerSource     pgtype.Text        `json:"trigger_source"`
-	TriggerActorType  pgtype.Text        `json:"trigger_actor_type"`
-	TriggerActorID    pgtype.UUID        `json:"trigger_actor_id"`
 	TriggerSummary    pgtype.Text        `json:"trigger_summary"`
 	ForceFreshSession bool               `json:"force_fresh_session"`
+	IsLeaderTask      bool               `json:"is_leader_task"`
 }
 
 type Attachment struct {
@@ -162,6 +170,8 @@ type AutopilotTrigger struct {
 	LastFiredAt    pgtype.Timestamptz `json:"last_fired_at"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	Provider       string             `json:"provider"`
+	SigningSecret  pgtype.Text        `json:"signing_secret"`
 }
 
 type ChatMessage struct {
@@ -267,6 +277,16 @@ type FixedVerificationCode struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type GiteeWebhookConfig struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	RepoOwner   string             `json:"repo_owner"`
+	RepoName    string             `json:"repo_name"`
+	Secret      string             `json:"secret"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type GithubInstallation struct {
 	ID               pgtype.UUID        `json:"id"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
@@ -282,7 +302,7 @@ type GithubInstallation struct {
 type GithubPullRequest struct {
 	ID              pgtype.UUID        `json:"id"`
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
-	InstallationID  int64              `json:"installation_id"`
+	InstallationID  pgtype.Int8        `json:"installation_id"`
 	RepoOwner       string             `json:"repo_owner"`
 	RepoName        string             `json:"repo_name"`
 	PrNumber        int32              `json:"pr_number"`
@@ -298,6 +318,22 @@ type GithubPullRequest struct {
 	PrUpdatedAt     pgtype.Timestamptz `json:"pr_updated_at"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	HeadSha         string             `json:"head_sha"`
+	MergeableState  pgtype.Text        `json:"mergeable_state"`
+	Additions       int32              `json:"additions"`
+	Deletions       int32              `json:"deletions"`
+	ChangedFiles    int32              `json:"changed_files"`
+	Provider        string             `json:"provider"`
+}
+
+type GithubPullRequestCheckSuite struct {
+	PrID       pgtype.UUID        `json:"pr_id"`
+	SuiteID    int64              `json:"suite_id"`
+	HeadSha    string             `json:"head_sha"`
+	AppID      int64              `json:"app_id"`
+	Conclusion pgtype.Text        `json:"conclusion"`
+	Status     string             `json:"status"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
 type InboxItem struct {
@@ -316,6 +352,17 @@ type InboxItem struct {
 	ActorType     pgtype.Text        `json:"actor_type"`
 	ActorID       pgtype.UUID        `json:"actor_id"`
 	Details       []byte             `json:"details"`
+}
+
+type InstructionsHistory struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Scope        string             `json:"scope"`
+	MemberID     pgtype.UUID        `json:"member_id"`
+	Content      string             `json:"content"`
+	ActorID      pgtype.UUID        `json:"actor_id"`
+	RestoredFrom pgtype.UUID        `json:"restored_from"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
 type Issue struct {
@@ -341,6 +388,7 @@ type Issue struct {
 	OriginType         pgtype.Text        `json:"origin_type"`
 	OriginID           pgtype.UUID        `json:"origin_id"`
 	FirstExecutedAt    pgtype.Timestamptz `json:"first_executed_at"`
+	StartDate          pgtype.Timestamptz `json:"start_date"`
 }
 
 type IssueDependency struct {
@@ -388,6 +436,40 @@ type IssueSubscriber struct {
 type IssueToLabel struct {
 	IssueID pgtype.UUID `json:"issue_id"`
 	LabelID pgtype.UUID `json:"label_id"`
+}
+
+type LocalCliMessage struct {
+	ID        pgtype.UUID        `json:"id"`
+	RunID     pgtype.UUID        `json:"run_id"`
+	CommentID pgtype.UUID        `json:"comment_id"`
+	Seq       int32              `json:"seq"`
+	Type      string             `json:"type"`
+	Tool      pgtype.Text        `json:"tool"`
+	Content   pgtype.Text        `json:"content"`
+	Input     []byte             `json:"input"`
+	Output    pgtype.Text        `json:"output"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	Source    pgtype.Text        `json:"source"`
+	SourceKey pgtype.Text        `json:"source_key"`
+}
+
+type LocalCliRun struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	IssueID      pgtype.UUID        `json:"issue_id"`
+	OwnerID      pgtype.UUID        `json:"owner_id"`
+	CliName      string             `json:"cli_name"`
+	Status       string             `json:"status"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
+	ExitCode     pgtype.Int4        `json:"exit_code"`
+	WorkDir      pgtype.Text        `json:"work_dir"`
+	ContextDir   pgtype.Text        `json:"context_dir"`
+	CommentsMode string             `json:"comments_mode"`
+	TopCommentID pgtype.UUID        `json:"top_comment_id"`
+	Error        pgtype.Text        `json:"error"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Member struct {
@@ -691,19 +773,29 @@ type VerificationCode struct {
 	Attempts  int32              `json:"attempts"`
 }
 
-type Workspace struct {
-	ID           pgtype.UUID        `json:"id"`
-	Name         string             `json:"name"`
-	Slug         string             `json:"slug"`
-	Description  pgtype.Text        `json:"description"`
-	Settings     []byte             `json:"settings"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	Context      pgtype.Text        `json:"context"`
-	Repos        []byte             `json:"repos"`
-	IssuePrefix  string             `json:"issue_prefix"`
-	IssueCounter int32              `json:"issue_counter"`
-	WikiContent  pgtype.Text        `json:"wiki_content"`
+type WebhookDelivery struct {
+	ID                     pgtype.UUID        `json:"id"`
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	AutopilotID            pgtype.UUID        `json:"autopilot_id"`
+	TriggerID              pgtype.UUID        `json:"trigger_id"`
+	Provider               string             `json:"provider"`
+	Event                  string             `json:"event"`
+	DedupeKey              pgtype.Text        `json:"dedupe_key"`
+	DedupeSource           pgtype.Text        `json:"dedupe_source"`
+	SignatureStatus        string             `json:"signature_status"`
+	Status                 string             `json:"status"`
+	AttemptCount           int32              `json:"attempt_count"`
+	SelectedHeaders        []byte             `json:"selected_headers"`
+	ContentType            pgtype.Text        `json:"content_type"`
+	RawBody                []byte             `json:"raw_body"`
+	ResponseStatus         pgtype.Int4        `json:"response_status"`
+	ResponseBody           pgtype.Text        `json:"response_body"`
+	AutopilotRunID         pgtype.UUID        `json:"autopilot_run_id"`
+	ReplayedFromDeliveryID pgtype.UUID        `json:"replayed_from_delivery_id"`
+	Error                  pgtype.Text        `json:"error"`
+	ReceivedAt             pgtype.Timestamptz `json:"received_at"`
+	LastAttemptAt          pgtype.Timestamptz `json:"last_attempt_at"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 }
 
 type WikiPage struct {
@@ -718,6 +810,31 @@ type WikiPage struct {
 	UpdatedBy   pgtype.UUID        `json:"updated_by"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WikiPageActivity struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	PageID      pgtype.UUID        `json:"page_id"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
+	Action      string             `json:"action"`
+	Details     []byte             `json:"details"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type Workspace struct {
+	ID           pgtype.UUID        `json:"id"`
+	Name         string             `json:"name"`
+	Slug         string             `json:"slug"`
+	Description  pgtype.Text        `json:"description"`
+	Settings     []byte             `json:"settings"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	Context      pgtype.Text        `json:"context"`
+	Repos        []byte             `json:"repos"`
+	IssuePrefix  string             `json:"issue_prefix"`
+	IssueCounter int32              `json:"issue_counter"`
+	WikiContent  pgtype.Text        `json:"wiki_content"`
 }
 
 type WorkspaceInvitation struct {

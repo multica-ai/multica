@@ -5,6 +5,8 @@ export type {
   AgentRuntimeMode,
   AgentVisibility,
   AgentTask,
+  LocalPreview,
+  LocalPreviewLogs,
   TaskInteraction,
   TaskInteractionOption,
   TaskTraceChannel,
@@ -12,6 +14,7 @@ export type {
   TaskTraceResponse,
   AgentActivityBucket,
   AgentRunCount,
+  AgentAllowedPrincipal,
   TaskFailureReason,
   AgentRuntime,
   RuntimeDevice,
@@ -24,6 +27,7 @@ export type {
   CreateAgentFromTemplateResponse,
   CreateAgentFromTemplateFailure,
   UpdateAgentRequest,
+  UpdateAgentAllowedPrincipalsRequest,
   Skill,
   SkillSummary,
   AgentSkillSummary,
@@ -39,6 +43,7 @@ export type {
   DashboardUsageDaily,
   DashboardUsageByAgent,
   DashboardAgentRunTime,
+  DashboardRunTimeDaily,
   RuntimeUpdate,
   RuntimeUpdateStatus,
   CLIUpdateManifest,
@@ -111,10 +116,13 @@ export type {
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
 export type {
   GitHubInstallation,
+  GitHubMergeableState,
   GitHubPullRequest,
+  GitHubPullRequestChecksConclusion,
   GitHubPullRequestState,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
+  GiteeWebhookConfig,
 } from "./github";
 export type {
   Autopilot,
@@ -132,8 +140,19 @@ export type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  WebhookDelivery,
+  WebhookDeliveryStatus,
+  WebhookSignatureStatus,
+  ListWebhookDeliveriesResponse,
 } from "./autopilot";
-export type { AgentDefaults, AgentDefaultsWithUser } from "./agent-defaults";
+export type {
+  AgentDefaults,
+  AgentDefaultsWithUser,
+  InstructionsHistoryScope,
+  InstructionsHistoryItem,
+  InstructionsHistoryDetail,
+  ListInstructionsHistoryResponse,
+} from "./agent-defaults";
 export type {
   WikiPage,
   WikiPageSummary,
@@ -141,6 +160,9 @@ export type {
   CreateWikiPageRequest,
   UpdateWikiPageRequest,
   ReorderWikiPagesRequest,
+  WikiPageActivity,
+  WikiPageActivityAction,
+  ListWikiPageActivitiesResponse,
 } from "./wiki";
 export type {
   Squad,
@@ -154,4 +176,8 @@ export type {
   RemoveSquadMemberRequest,
   UpdateSquadMemberRoleRequest,
   CreateSquadActivityLogRequest,
+  SquadMemberStatusValue,
+  SquadActiveIssueBrief,
+  SquadMemberStatus,
+  SquadMemberStatusListResponse,
 } from "./squad";

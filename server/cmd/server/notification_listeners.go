@@ -469,6 +469,7 @@ var notifTypeToGroup = map[string]string{
 	"new_comment":      "comments",
 	"mentioned":        "comments",
 	"priority_changed": "updates",
+	"start_date_changed": "updates",
 	"due_date_changed": "updates",
 	"task_completed":   "agent_activity",
 	"task_failed":      "agent_activity",
@@ -1186,6 +1187,25 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				priorityDetails)
 		}
 
+		if startDateChanged, _ := payload["start_date_changed"].(bool); startDateChanged {
+			prevStartDateStr := ""
+			if prevStartDate, ok := payload["prev_start_date"].(*string); ok && prevStartDate != nil {
+				prevStartDateStr = *prevStartDate
+			}
+			newStartDateStr := ""
+			if issue.StartDate != nil {
+				newStartDateStr = *issue.StartDate
+			}
+			startDateDetails, _ := json.Marshal(map[string]string{
+				"from": prevStartDateStr,
+				"to":   newStartDateStr,
+			})
+			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
+				nil, "start_date_changed", "info",
+				issue.Title, "",
+				startDateDetails)
+		}
+
 		if dueDateChanged, _ := payload["due_date_changed"].(bool); dueDateChanged {
 			prevDueDateStr := ""
 			if prevDueDate, ok := payload["prev_due_date"].(*string); ok && prevDueDate != nil {
@@ -1239,15 +1259,22 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		// HTTP handler, or as map[string]any from the agent comment path in
 		// task.go. Handle both.
 		var issueID, commentID, commentContent string
+		var parentID string
 		switch c := payload["comment"].(type) {
 		case handler.CommentResponse:
 			issueID = c.IssueID
 			commentID = c.ID
 			commentContent = c.Content
+			if c.ParentID != nil {
+				parentID = *c.ParentID
+			}
 		case map[string]any:
 			issueID, _ = c["issue_id"].(string)
 			commentID, _ = c["id"].(string)
 			commentContent, _ = c["content"].(string)
+			if pid, ok := c["parent_id"].(string); ok {
+				parentID = pid
+			}
 		default:
 			return
 		}
@@ -1270,10 +1297,67 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 
 		// Notify @mentions in comment content.
 		mentions := parseMentions(commentContent)
+		mentionedIDs := map[string]bool{}
 		if len(mentions) > 0 {
+			for _, m := range mentions {
+				if m.Type == "member" {
+					mentionedIDs[m.ID] = true
+				}
+			}
 			skip := map[string]bool{e.ActorID: true}
 			notifyMentionedMembers(bus, queries, e, mentions, issueID, issueStatus,
 				issueTitle, commentContent, commentID, appOrigin, skip, commentDetails)
+		}
+
+		// Notify parent comment author on reply (OPE-856).
+		// When a comment has a parent_id, notify the parent's author if:
+		// - parent author is a member (not agent)
+		// - parent author is not the current actor (no self-notification)
+		// - parent author was not already @mentioned (dedup)
+		if parentID != "" {
+			parentComment, err := queries.GetComment(ctx, parseUUID(parentID))
+			if err == nil &&
+				parentComment.AuthorType == "member" &&
+				util.UUIDToString(parentComment.AuthorID) != e.ActorID &&
+				!mentionedIDs[util.UUIDToString(parentComment.AuthorID)] {
+
+				recipientID := util.UUIDToString(parentComment.AuthorID)
+				prefs := loadUserPrefs(ctx, queries, e.WorkspaceID, []string{recipientID})
+				if p, ok := prefs[recipientID]; !ok || !isNotifMuted(p, "mentioned") {
+					item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+						WorkspaceID:   parseUUID(e.WorkspaceID),
+						RecipientType: "member",
+						RecipientID:   parentComment.AuthorID,
+						Type:          "mentioned",
+						Severity:      "info",
+						IssueID:       parseUUID(issueID),
+						Title:         issueTitle,
+						Body:          util.StrToText(commentContent),
+						ActorType:     util.StrToText(e.ActorType),
+						ActorID:       optionalUUID(e.ActorID),
+						Details:       commentDetails,
+					})
+					if err != nil {
+						slog.Error("reply notification inbox creation failed",
+							"recipient_id", recipientID, "parent_comment_id", parentID, "error", err)
+					} else {
+						resp := inboxItemToResponse(item)
+						resp["issue_status"] = issueStatus
+						bus.Publish(events.Event{
+							Type:        protocol.EventInboxNew,
+							WorkspaceID: e.WorkspaceID,
+							ActorType:   e.ActorType,
+							ActorID:     e.ActorID,
+							Payload:     map[string]any{"item": resp},
+						})
+
+						notificationCtx := buildNotificationContext(ctx, queries, e.WorkspaceID, issueID, commentID, appOrigin)
+						actorName := resolveNotificationActorName(ctx, queries, e.ActorType, e.ActorID)
+						recordMentionNotification(ctx, queries, e, recipientID, issueID, commentID,
+							issueTitle, commentContent, notificationCtx.Link, notificationCtx.IssueIdentifier, actorName, commentDetails)
+					}
+				}
+			}
 		}
 	})
 

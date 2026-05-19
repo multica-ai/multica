@@ -19,23 +19,28 @@ import (
 )
 
 type CommentResponse struct {
-	ID             string               `json:"id"`
-	IssueID        string               `json:"issue_id"`
-	AuthorType     string               `json:"author_type"`
-	AuthorID       string               `json:"author_id"`
-	Content        string               `json:"content"`
-	Type           string               `json:"type"`
-	ParentID       *string              `json:"parent_id"`
-	CreatedAt      string               `json:"created_at"`
-	UpdatedAt      string               `json:"updated_at"`
-	ResolvedAt     *string              `json:"resolved_at"`
-	ResolvedByType *string              `json:"resolved_by_type"`
-	ResolvedByID   *string              `json:"resolved_by_id"`
-	Reactions      []ReactionResponse   `json:"reactions"`
-	Attachments    []AttachmentResponse `json:"attachments"`
+	ID                string               `json:"id"`
+	IssueID           string               `json:"issue_id"`
+	AuthorType        string               `json:"author_type"`
+	AuthorID          string               `json:"author_id"`
+	AuthorDisplayName *string              `json:"author_display_name,omitempty"`
+	Content           string               `json:"content"`
+	Type              string               `json:"type"`
+	ParentID          *string              `json:"parent_id"`
+	CreatedAt         string               `json:"created_at"`
+	UpdatedAt         string               `json:"updated_at"`
+	ResolvedAt        *string              `json:"resolved_at"`
+	ResolvedByType    *string              `json:"resolved_by_type"`
+	ResolvedByID      *string              `json:"resolved_by_id"`
+	Reactions         []ReactionResponse   `json:"reactions"`
+	Attachments       []AttachmentResponse `json:"attachments"`
 }
 
 func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments []AttachmentResponse) CommentResponse {
+	return commentToResponseWithDisplay(c, reactions, attachments, nil)
+}
+
+func commentToResponseWithDisplay(c db.Comment, reactions []ReactionResponse, attachments []AttachmentResponse, displayName *string) CommentResponse {
 	if reactions == nil {
 		reactions = []ReactionResponse{}
 	}
@@ -43,20 +48,21 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 		attachments = []AttachmentResponse{}
 	}
 	return CommentResponse{
-		ID:             uuidToString(c.ID),
-		IssueID:        uuidToString(c.IssueID),
-		AuthorType:     c.AuthorType,
-		AuthorID:       uuidToString(c.AuthorID),
-		Content:        c.Content,
-		Type:           c.Type,
-		ParentID:       uuidToPtr(c.ParentID),
-		CreatedAt:      timestampToString(c.CreatedAt),
-		UpdatedAt:      timestampToString(c.UpdatedAt),
-		ResolvedAt:     timestampToPtr(c.ResolvedAt),
-		ResolvedByType: textToPtr(c.ResolvedByType),
-		ResolvedByID:   uuidToPtr(c.ResolvedByID),
-		Reactions:      reactions,
-		Attachments:    attachments,
+		ID:                uuidToString(c.ID),
+		IssueID:           uuidToString(c.IssueID),
+		AuthorType:        c.AuthorType,
+		AuthorID:          uuidToString(c.AuthorID),
+		AuthorDisplayName: displayName,
+		Content:           c.Content,
+		Type:              c.Type,
+		ParentID:          uuidToPtr(c.ParentID),
+		CreatedAt:         timestampToString(c.CreatedAt),
+		UpdatedAt:         timestampToString(c.UpdatedAt),
+		ResolvedAt:        timestampToPtr(c.ResolvedAt),
+		ResolvedByType:    textToPtr(c.ResolvedByType),
+		ResolvedByID:      uuidToPtr(c.ResolvedByID),
+		Reactions:         reactions,
+		Attachments:       attachments,
 	}
 }
 
@@ -115,11 +121,12 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	}
 	grouped := h.groupReactions(r, commentIDs)
 	groupedAtt := h.groupAttachments(r, commentIDs)
+	displayNames := h.localCLICommentDisplayNames(r.Context(), commentIDs)
 
 	resp := make([]CommentResponse, len(comments))
 	for i, c := range comments {
 		cid := uuidToString(c.ID)
-		resp[i] = commentToResponse(c, grouped[cid], groupedAtt[cid])
+		resp[i] = commentToResponseWithDisplay(c, grouped[cid], groupedAtt[cid], displayNames[cid])
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -179,21 +186,8 @@ func (h *Handler) resolveCommentTargetAgentIDs(ctx context.Context, issue db.Iss
 		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 			continue
 		}
-		if agent.Visibility == "private" {
-			targetOwner := uuidToString(agent.OwnerID)
-			switch authorType {
-			case "member":
-				if targetOwner != authorID {
-					continue
-				}
-			case "agent":
-				triggerAgent, err := h.Queries.GetAgent(ctx, parseUUID(authorID))
-				if err != nil || uuidToString(triggerAgent.OwnerID) != targetOwner {
-					continue
-				}
-			default:
-				continue
-			}
+		if !h.canTriggerPrivateAgent(ctx, agent, authorType, authorID) {
+			continue
 		}
 		hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
 			IssueID: issue.ID,
@@ -394,7 +388,6 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		if _, err := h.TaskService.EnqueueTaskForIssueWithContext(
 			r.Context(),
 			issue,
-			buildTriggerActor("comment", "member", uuidToString(comment.AuthorID)),
 			taskContext,
 			comment.ID,
 		); err != nil {
@@ -581,6 +574,24 @@ func (h *Handler) isReplyToMemberThread(ctx context.Context, parent *db.Comment,
 	return true // Reply to member thread without agent participation — suppress
 }
 
+// shouldTargetParentAgentReply decides whether a member reply with no explicit
+// mentions should continue the conversation with the agent that authored the
+// parent comment. This is intentionally narrow: explicit mentions in the reply
+// are treated as the user's routing choice, and agent-authored replies must
+// never trigger another task.
+func shouldTargetParentAgentReply(parentComment *db.Comment, replyMentions []util.Mention, replyAuthorType string) bool {
+	if parentComment == nil {
+		return false
+	}
+	if len(replyMentions) > 0 {
+		return false
+	}
+	if replyAuthorType != "member" {
+		return false
+	}
+	return parentComment.AuthorType == "agent"
+}
+
 // shouldInheritParentMentions decides whether a reply with no explicit
 // mentions should inherit the parent (thread root) comment's mentions.
 //
@@ -622,12 +633,47 @@ func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util
 // explicitly @mentions only non-agent entities (members, issues), which
 // signals the user is talking to other people and not the agent.
 // Skips self-mentions, agents with on_mention trigger disabled, and private
-// agents mentioned by non-owner members (only the agent owner can trigger
-// a private agent via @mention).
+// agents mentioned by members who cannot trigger that private agent.
 // Note: no status gate here — @mention is an explicit action and should work
 // even on done/cancelled issues (the agent can reopen the issue if needed).
 func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string, taskContext []byte) {
 	mentions := util.ParseMentions(comment.Content)
+	enqueueAgent := func(agentUUID pgtype.UUID) {
+		agentID := uuidToString(agentUUID)
+		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID:          agentUUID,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+			return
+		}
+		if !h.canTriggerPrivateAgent(ctx, agent, authorType, authorID) {
+			return
+		}
+		// Dedup: skip if this agent already has a pending task for this issue.
+		hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
+			IssueID: issue.ID,
+			AgentID: agentUUID,
+		})
+		if err != nil || hasPending {
+			return
+		}
+		// Always use the current comment as the trigger so the agent reads the
+		// actual reply that mentioned or targeted it, not the thread root.
+		if _, err := h.TaskService.EnqueueTaskForMentionWithContext(
+			ctx,
+			issue,
+			agentUUID,
+			comment.ID,
+			taskContext,
+		); err != nil {
+			slog.Warn("enqueue mention agent task failed", "issue_id", uuidToString(issue.ID), "agent_id", agentID, "error", err)
+		}
+	}
+
+	if shouldTargetParentAgentReply(parentComment, mentions, authorType) {
+		enqueueAgent(parentComment.AuthorID)
+	}
 	if shouldInheritParentMentions(parentComment, mentions, authorType) {
 		mentions = util.ParseMentions(parentComment.Content)
 	}
@@ -643,8 +689,12 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 				continue
 			}
 			leaderID := squad.LeaderID
-			// Prevent self-trigger: skip if the comment author is the leader.
-			if authorType == "agent" && authorID == uuidToString(leaderID) {
+			// Prevent self-trigger only when the agent's last activity on this
+			// issue was itself a leader task. An agent that holds both the
+			// leader and a worker role in the squad must still wake its
+			// leader role after posting a comment from its worker task.
+			if authorType == "agent" && authorID == uuidToString(leaderID) &&
+				h.lastTaskWasLeader(ctx, issue.ID, leaderID) {
 				continue
 			}
 			// Verify leader agent is ready (has runtime, not archived).
@@ -656,7 +706,8 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 				continue
 			}
 			// Private-agent gate: prevent triggering a private leader via squad mention.
-			if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, uuidToString(issue.WorkspaceID)) {
+			// OPE-817: use trigger gate (owner-only) instead of access gate (now open to all).
+			if !h.canTriggerPrivateAgent(ctx, agent, authorType, authorID) {
 				continue
 			}
 			// Dedup: skip if leader already has a pending task for this issue.
@@ -667,7 +718,7 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 			if err != nil || hasPending {
 				continue
 			}
-			if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, leaderID, comment.ID); err != nil {
+			if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, leaderID, comment.ID); err != nil {
 				slog.Warn("enqueue squad leader mention task failed", "issue_id", uuidToString(issue.ID), "squad_id", m.ID, "error", err)
 			}
 			continue
@@ -680,44 +731,7 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 			continue
 		}
 		agentUUID := parseUUID(m.ID)
-		// Load the agent scoped to the current issue's workspace. Using the
-		// bare GetAgent here would let a mention resolve to an agent in a
-		// different workspace, and the visibility check below would then be
-		// applied against the wrong workspace's roles (a workspace owner in
-		// THIS workspace would pass the gate for a private agent that lives
-		// in someone else's workspace).
-		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
-			ID:          agentUUID,
-			WorkspaceID: issue.WorkspaceID,
-		})
-		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
-			continue
-		}
-		// OPE-531: strict trigger gate for private agents — only agent owner
-		// or same-owner agents can trigger via mention.
-		if !h.canTriggerPrivateAgent(ctx, agent, authorType, authorID) {
-			continue
-		}
-		// Dedup: skip if this agent already has a pending task for this issue.
-		hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
-			IssueID: issue.ID,
-			AgentID: agentUUID,
-		})
-		if err != nil || hasPending {
-			continue
-		}
-		// Always use the current comment as the trigger so the agent reads the
-		// actual reply that mentioned it, not the thread root.
-		if _, err := h.TaskService.EnqueueTaskForMentionWithContext(
-			ctx,
-			issue,
-			agentUUID,
-			buildTriggerActor("mention", authorType, uuidToString(comment.AuthorID)),
-			comment.ID,
-			taskContext,
-		); err != nil {
-			slog.Warn("enqueue mention agent task failed", "issue_id", uuidToString(issue.ID), "agent_id", m.ID, "error", err)
-		}
+		enqueueAgent(agentUUID)
 	}
 }
 

@@ -223,7 +223,6 @@ func TestInjectRuntimeConfigWindowsCommentTriggerHasNoStdin(t *testing.T) {
 			for _, want := range []string{
 				"multica issue comment add " + issueID + " --parent " + triggerID + " --content-file",
 				"--content-file",
-				"--description-file",
 				"On Windows, write the reply body to a UTF-8 file",
 			} {
 				if !strings.Contains(s, want) {
