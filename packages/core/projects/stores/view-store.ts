@@ -2,8 +2,8 @@
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../platform/workspace-storage";
-import { defaultStorage } from "../platform/storage";
+import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
+import { defaultStorage } from "../../platform/storage";
 
 export type ProjectViewMode = "compact" | "comfortable";
 
