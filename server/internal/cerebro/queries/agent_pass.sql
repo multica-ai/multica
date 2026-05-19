@@ -98,6 +98,27 @@ WHERE workspace_id = $1
   AND status       = 'active'
 ORDER BY issued_at DESC;
 
+-- name: ListCerebroAgentPassesForWorkspace :many
+-- Admin UI listing: returns passes in all lifecycle states so the operator
+-- can see active, revoked, expired and exhausted side-by-side. Active rows
+-- surface first; terminal-state rows trail by most recently updated.
+SELECT
+    id, workspace_id,
+    issuer_type, issuer_id,
+    agent_id, issue_id, parent_pass_id,
+    scope,
+    spend_ceiling_micros,
+    status,
+    issued_at, expires_at,
+    revoked_by_type, revoked_by_id, revoked_at, revoke_reason,
+    created_at, updated_at
+FROM cerebro_agent_pass
+WHERE workspace_id = $1
+ORDER BY
+    CASE status WHEN 'active' THEN 0 ELSE 1 END,
+    issued_at DESC,
+    updated_at DESC;
+
 -- name: MarkAgentPassStatus :one
 -- Used by the gate to transition active → expired/exhausted when it
 -- detects a terminal condition during a claim. Idempotent — only flips

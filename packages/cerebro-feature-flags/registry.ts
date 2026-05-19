@@ -28,7 +28,8 @@ export type CerebroFlagKey =
   | "cerebro_persona_permissions"
   | "cerebro_skill_mention"
   | "cerebro_grants"
-  | "cerebro_move_comment_to_subissue";
+  | "cerebro_move_comment_to_subissue"
+  | "cerebro_agent_passes";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -61,6 +62,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_skill_mention: true,
   cerebro_grants: false,
   cerebro_move_comment_to_subissue: true,
+  cerebro_agent_passes: true,
 };
 
 export interface CerebroFlagDefinition {
@@ -205,5 +207,11 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Move comment thread to sub-issue",
     description:
       "Show a 'Move to sub-issue' action on root comments. Lifts the thread (root + replies) into a new sub-issue and leaves a 'Moved to MUL-NN' breadcrumb on the original comment. JEH-1309.",
+  },
+  {
+    key: "cerebro_agent_passes",
+    label: "Agent passes admin",
+    description:
+      "Enable the workspace agent-pass admin page at /:workspace/agent-passes — issue, list, and revoke agent passes (machine-readable mandates that scope what an agent may do on an issue). Owner/admin only. JEH-1731.",
   },
 ];

@@ -18,6 +18,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 account handler import
 	cerebroaccount "github.com/multica-ai/multica/server/internal/cerebro/account"
+	// CEREBRO-PATCH(cerebro-agent-passes-routes): JEH-1731 agent-pass admin handler import
+	cerebroagentpass "github.com/multica-ai/multica/server/internal/cerebro/agentpass"
 	cerebrochannels "github.com/multica-ai/multica/server/internal/cerebro/channels"
 	// CEREBRO-PATCH(comments-move-to-subissue): JEH-1309 move-comment-to-sub-issue handler import.
 	cerebrocomments "github.com/multica-ai/multica/server/internal/cerebro/comments"
@@ -265,6 +267,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.SetRuntimeToolsScan(newRuntimeToolsScanAdapter(runtimeToolsSvc))
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler instance
 	cerebroTasksHandler := cerebrotasks.New(cerebroQueries)
+	// CEREBRO-PATCH(cerebro-agent-passes-routes): JEH-1731 agent-pass admin handler.
+	// Uses a dedicated agentpass.Service instance for ValidateChildScope — the gate
+	// instance in main.go and this admin instance share the same Postgres-backed
+	// queries, so there is no in-memory state to coordinate.
+	cerebroAgentPassSvc, cerebroAgentPassErr := cerebroagentpass.New(cerebroQueries, nil)
+	if cerebroAgentPassErr != nil {
+		panic("agent-pass admin service construction failed: " + cerebroAgentPassErr.Error())
+	}
+	cerebroAgentPassHandler := cerebroagentpass.NewHandler(cerebroQueries, cerebroAgentPassSvc)
 	// CEREBRO-PATCH(sharetoken-routes): JEH-1076 public-link share-token handler
 	cerebroShareTokenHandler := cerebrosharetoken.NewHandler(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow handler instance; JEH-1108 PR3 wires the engine Service so the test-only /_test/cron-sweep endpoint can fire the sweeper synchronously.
@@ -1046,6 +1057,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Delete("/api/cerebro/share-tokens/{tokenId}", cerebroShareTokenHandler.Revoke)
 			// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 cross-agent tasks list endpoint
 			r.Get("/api/cerebro/tasks", cerebroTasksHandler.List)
+			// CEREBRO-PATCH(cerebro-agent-passes-routes): JEH-1731 agent-pass admin API.
+			r.Route("/api/cerebro/agent-passes", func(r chi.Router) {
+				r.Get("/", cerebroAgentPassHandler.List)
+				r.Post("/", cerebroAgentPassHandler.Create)
+				r.Delete("/{passId}", cerebroAgentPassHandler.Revoke)
+			})
 			// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow engine REST surface (PR 2/3).
 			r.Route("/api/cerebro/workflows", func(r chi.Router) {
 				r.Get("/", cerebroWorkflowsHandler.List)

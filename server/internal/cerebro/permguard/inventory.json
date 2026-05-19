@@ -25,6 +25,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "DELETE /api/cerebro/agent-passes/{passId}",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "DELETE /api/cerebro/references/{refId}",
       "gate": "workspace_member"
     },
@@ -310,6 +314,10 @@
     },
     {
       "id": "POST /api/autopilots/{id}/triggers",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/cerebro/agent-passes/",
       "gate": "workspace_admin"
     },
     {

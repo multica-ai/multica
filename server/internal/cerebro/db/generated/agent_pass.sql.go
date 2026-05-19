@@ -291,6 +291,67 @@ func (q *Queries) ListActiveAgentPassesForWorkspace(ctx context.Context, workspa
 	return items, nil
 }
 
+const listCerebroAgentPassesForWorkspace = `-- name: ListCerebroAgentPassesForWorkspace :many
+SELECT
+    id, workspace_id,
+    issuer_type, issuer_id,
+    agent_id, issue_id, parent_pass_id,
+    scope,
+    spend_ceiling_micros,
+    status,
+    issued_at, expires_at,
+    revoked_by_type, revoked_by_id, revoked_at, revoke_reason,
+    created_at, updated_at
+FROM cerebro_agent_pass
+WHERE workspace_id = $1
+ORDER BY
+    CASE status WHEN 'active' THEN 0 ELSE 1 END,
+    issued_at DESC,
+    updated_at DESC
+`
+
+// Admin UI listing: returns passes in all lifecycle states so the operator
+// can see active, revoked, expired and exhausted side-by-side. Active rows
+// surface first; terminal-state rows trail by most recently updated.
+func (q *Queries) ListCerebroAgentPassesForWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]CerebroAgentPass, error) {
+	rows, err := q.db.Query(ctx, listCerebroAgentPassesForWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CerebroAgentPass{}
+	for rows.Next() {
+		var i CerebroAgentPass
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.IssuerType,
+			&i.IssuerID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.ParentPassID,
+			&i.Scope,
+			&i.SpendCeilingMicros,
+			&i.Status,
+			&i.IssuedAt,
+			&i.ExpiresAt,
+			&i.RevokedByType,
+			&i.RevokedByID,
+			&i.RevokedAt,
+			&i.RevokeReason,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markAgentPassStatus = `-- name: MarkAgentPassStatus :one
 UPDATE cerebro_agent_pass
 SET status     = $2,
