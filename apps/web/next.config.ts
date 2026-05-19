@@ -63,6 +63,18 @@ const nextConfig: NextConfig = {
           source: "/uploads/:path*",
           destination: `${remoteApiUrl}/uploads/:path*`,
         },
+        {
+          source: "/install.sh",
+          destination: `${remoteApiUrl}/install.sh`,
+        },
+        {
+          source: "/install.ps1",
+          destination: `${remoteApiUrl}/install.ps1`,
+        },
+        {
+          source: "/install/:path*",
+          destination: `${remoteApiUrl}/install/:path*`,
+        },
       ],
       fallback: [],
     };

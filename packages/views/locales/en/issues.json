@@ -246,6 +246,8 @@
     "cancel_edit": "Cancel",
     "copy_action": "Copy",
     "copied_toast": "Copied",
+    "expand_content": "Show more",
+    "collapse_content": "Show less",
     "retry_action": "Retry",
     "retry_success": "Agent run queued",
     "retry_failed": "Failed to retry agent",

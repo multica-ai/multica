@@ -51,6 +51,8 @@ export interface GitHubPullRequest {
   additions?: number;
   deletions?: number;
   changed_files?: number;
+  /** SCM provider. Defaults to "github" for backward compat. */
+  provider?: "github" | "gitee";
 }
 
 export interface ListGitHubInstallationsResponse {
@@ -63,4 +65,14 @@ export interface GitHubConnectResponse {
   /** The GitHub App install URL the browser should open. Empty when `configured` is false. */
   url?: string;
   configured: boolean;
+}
+
+export interface GiteeWebhookConfig {
+  id: string;
+  workspace_id: string;
+  repo_owner: string;
+  repo_name: string;
+  secret: string;
+  webhook_url: string;
+  created_at: string;
 }

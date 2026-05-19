@@ -38,6 +38,7 @@ function agent(overrides: Partial<Agent>): Agent {
     max_concurrent_tasks: overrides.max_concurrent_tasks ?? 1,
     model: overrides.model ?? "test-model",
     owner_id: overrides.owner_id ?? null,
+    allowed_user_ids: overrides.allowed_user_ids,
     skills: overrides.skills ?? [],
     created_at: overrides.created_at ?? "2026-01-01T00:00:00Z",
     updated_at: overrides.updated_at ?? "2026-01-01T00:00:00Z",

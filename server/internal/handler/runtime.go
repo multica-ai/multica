@@ -591,6 +591,17 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 }
 
 func canEditRuntime(member db.Member, rt db.AgentRuntime) bool {
+	if roleAllowed(member.Role, "owner") {
+		return true
+	}
+	return rt.OwnerID.Valid && uuidToString(rt.OwnerID) == uuidToString(member.UserID)
+}
+
+// canDeleteRuntime reports whether a member can delete the given runtime.
+// Deletion is an administrative cleanup action (e.g. removing runtimes left
+// by departed members), so workspace admins retain the override unlike the
+// stricter canEditRuntime which only allows the workspace owner.
+func canDeleteRuntime(member db.Member, rt db.AgentRuntime) bool {
 	if roleAllowed(member.Role, "owner", "admin") {
 		return true
 	}
@@ -667,7 +678,7 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Permission: owner/admin can delete any runtime; members can only delete their own.
-	if !canEditRuntime(member, rt) {
+	if !canDeleteRuntime(member, rt) {
 		writeError(w, http.StatusForbidden, "you can only delete your own runtimes")
 		return
 	}

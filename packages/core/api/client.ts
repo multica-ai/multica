@@ -131,12 +131,14 @@ import type {
   ListInstructionsHistoryResponse,
   WikiPage,
   ListWikiPagesResponse,
+  ListWikiPageActivitiesResponse,
   CreateWikiPageRequest,
   UpdateWikiPageRequest,
   ReorderWikiPagesRequest,
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
+  GiteeWebhookConfig,
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
@@ -1492,6 +1494,10 @@ export class ApiClient {
     });
   }
 
+  async listWikiPageActivities(pageId: string, limit = 50): Promise<ListWikiPageActivitiesResponse> {
+    return this.fetch(`/api/wiki-pages/${pageId}/activity?limit=${limit}`);
+  }
+
   // Members
   async listMembers(workspaceId: string): Promise<MemberWithUser[]> {
     return this.fetch(`/api/workspaces/${workspaceId}/members`);
@@ -2177,5 +2183,29 @@ export class ApiClient {
 
   async listIssuePullRequests(issueId: string): Promise<{ pull_requests: GitHubPullRequest[] }> {
     return this.fetch(`/api/issues/${issueId}/pull-requests`);
+  }
+
+  // ── Gitee Integration ───────────────────────────────────────────────────
+
+  async listGiteeWebhookConfigs(workspaceId: string): Promise<{ configs: GiteeWebhookConfig[] }> {
+    return this.fetch(`/api/workspaces/${workspaceId}/gitee/webhook-configs`);
+  }
+
+  async createGiteeWebhookConfig(
+    workspaceId: string,
+    repoOwner: string,
+    repoName: string,
+  ): Promise<GiteeWebhookConfig> {
+    return this.fetch(`/api/workspaces/${workspaceId}/gitee/webhook-configs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo_owner: repoOwner, repo_name: repoName }),
+    });
+  }
+
+  async deleteGiteeWebhookConfig(workspaceId: string, configId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/gitee/webhook-configs/${configId}`, {
+      method: "DELETE",
+    });
   }
 }

@@ -60,6 +60,49 @@ func (q *Queries) CreateGitHubInstallation(ctx context.Context, arg CreateGitHub
 	return i, err
 }
 
+const createGiteeWebhookConfig = `-- name: CreateGiteeWebhookConfig :one
+
+INSERT INTO gitee_webhook_config (
+    workspace_id, repo_owner, repo_name, secret
+) VALUES (
+    $1, $2, $3, $4
+)
+ON CONFLICT (workspace_id, repo_owner, repo_name) DO UPDATE SET
+    secret = EXCLUDED.secret,
+    updated_at = now()
+RETURNING id, workspace_id, repo_owner, repo_name, secret, created_at, updated_at
+`
+
+type CreateGiteeWebhookConfigParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RepoOwner   string      `json:"repo_owner"`
+	RepoName    string      `json:"repo_name"`
+	Secret      string      `json:"secret"`
+}
+
+// =====================
+// Gitee Webhook Config
+// =====================
+func (q *Queries) CreateGiteeWebhookConfig(ctx context.Context, arg CreateGiteeWebhookConfigParams) (GiteeWebhookConfig, error) {
+	row := q.db.QueryRow(ctx, createGiteeWebhookConfig,
+		arg.WorkspaceID,
+		arg.RepoOwner,
+		arg.RepoName,
+		arg.Secret,
+	)
+	var i GiteeWebhookConfig
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RepoOwner,
+		&i.RepoName,
+		&i.Secret,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const deleteGitHubInstallation = `-- name: DeleteGitHubInstallation :exec
 DELETE FROM github_installation WHERE id = $1 AND workspace_id = $2
 `
@@ -89,6 +132,21 @@ func (q *Queries) DeleteGitHubInstallationByInstallationID(ctx context.Context, 
 	var i DeleteGitHubInstallationByInstallationIDRow
 	err := row.Scan(&i.ID, &i.WorkspaceID)
 	return i, err
+}
+
+const deleteGiteeWebhookConfig = `-- name: DeleteGiteeWebhookConfig :exec
+DELETE FROM gitee_webhook_config
+WHERE id = $1 AND workspace_id = $2
+`
+
+type DeleteGiteeWebhookConfigParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) DeleteGiteeWebhookConfig(ctx context.Context, arg DeleteGiteeWebhookConfigParams) error {
+	_, err := q.db.Exec(ctx, deleteGiteeWebhookConfig, arg.ID, arg.WorkspaceID)
+	return err
 }
 
 const getGitHubInstallationByID = `-- name: GetGitHubInstallationByID :one
@@ -136,7 +194,7 @@ func (q *Queries) GetGitHubInstallationByInstallationID(ctx context.Context, ins
 }
 
 const getGitHubPullRequest = `-- name: GetGitHubPullRequest :one
-SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files FROM github_pull_request
+SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, provider FROM github_pull_request
 WHERE workspace_id = $1 AND repo_owner = $2 AND repo_name = $3 AND pr_number = $4
 `
 
@@ -179,6 +237,33 @@ func (q *Queries) GetGitHubPullRequest(ctx context.Context, arg GetGitHubPullReq
 		&i.Additions,
 		&i.Deletions,
 		&i.ChangedFiles,
+		&i.Provider,
+	)
+	return i, err
+}
+
+const getGiteeWebhookConfigByRepo = `-- name: GetGiteeWebhookConfigByRepo :one
+SELECT id, workspace_id, repo_owner, repo_name, secret, created_at, updated_at FROM gitee_webhook_config
+WHERE repo_owner = $1 AND repo_name = $2
+LIMIT 1
+`
+
+type GetGiteeWebhookConfigByRepoParams struct {
+	RepoOwner string `json:"repo_owner"`
+	RepoName  string `json:"repo_name"`
+}
+
+func (q *Queries) GetGiteeWebhookConfigByRepo(ctx context.Context, arg GetGiteeWebhookConfigByRepoParams) (GiteeWebhookConfig, error) {
+	row := q.db.QueryRow(ctx, getGiteeWebhookConfigByRepo, arg.RepoOwner, arg.RepoName)
+	var i GiteeWebhookConfig
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RepoOwner,
+		&i.RepoName,
+		&i.Secret,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -286,6 +371,40 @@ func (q *Queries) ListGitHubInstallationsByWorkspace(ctx context.Context, worksp
 	return items, nil
 }
 
+const listGiteeWebhookConfigsByWorkspace = `-- name: ListGiteeWebhookConfigsByWorkspace :many
+SELECT id, workspace_id, repo_owner, repo_name, secret, created_at, updated_at FROM gitee_webhook_config
+WHERE workspace_id = $1
+ORDER BY created_at ASC
+`
+
+func (q *Queries) ListGiteeWebhookConfigsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]GiteeWebhookConfig, error) {
+	rows, err := q.db.Query(ctx, listGiteeWebhookConfigsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GiteeWebhookConfig{}
+	for rows.Next() {
+		var i GiteeWebhookConfig
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.RepoOwner,
+			&i.RepoName,
+			&i.Secret,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIssueIDsForPullRequest = `-- name: ListIssueIDsForPullRequest :many
 SELECT issue_id FROM issue_pull_request
 WHERE pull_request_id = $1
@@ -347,6 +466,7 @@ SELECT
     pr.author_avatar_url, pr.merged_at, pr.closed_at, pr.pr_created_at,
     pr.pr_updated_at, pr.head_sha, pr.mergeable_state,
     pr.additions, pr.deletions, pr.changed_files,
+    pr.provider,
     pr.created_at, pr.updated_at,
     COALESCE(c.total, 0)::bigint   AS checks_total,
     COALESCE(c.passed, 0)::bigint  AS checks_passed,
@@ -362,7 +482,7 @@ ORDER BY pr.pr_created_at DESC
 type ListPullRequestsByIssueRow struct {
 	ID              pgtype.UUID        `json:"id"`
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
-	InstallationID  int64              `json:"installation_id"`
+	InstallationID  pgtype.Int8        `json:"installation_id"`
 	RepoOwner       string             `json:"repo_owner"`
 	RepoName        string             `json:"repo_name"`
 	PrNumber        int32              `json:"pr_number"`
@@ -381,6 +501,7 @@ type ListPullRequestsByIssueRow struct {
 	Additions       int32              `json:"additions"`
 	Deletions       int32              `json:"deletions"`
 	ChangedFiles    int32              `json:"changed_files"`
+	Provider        string             `json:"provider"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	ChecksTotal     int64              `json:"checks_total"`
@@ -429,6 +550,7 @@ func (q *Queries) ListPullRequestsByIssue(ctx context.Context, issueID pgtype.UU
 			&i.Additions,
 			&i.Deletions,
 			&i.ChangedFiles,
+			&i.Provider,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ChecksTotal,
@@ -468,15 +590,17 @@ INSERT INTO github_pull_request (
     title, state, html_url, branch, author_login, author_avatar_url,
     merged_at, closed_at, pr_created_at, pr_updated_at,
     head_sha, mergeable_state,
-    additions, deletions, changed_files
+    additions, deletions, changed_files,
+    provider
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $15, $16, $17,
     $18, $19, $9, $10,
     $11, $20,
-    $12, $13, $14
+    $12, $13, $14,
+    $21
 )
-ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number) DO UPDATE SET
+ON CONFLICT (provider, workspace_id, repo_owner, repo_name, pr_number) DO UPDATE SET
     installation_id = EXCLUDED.installation_id,
     title = EXCLUDED.title,
     state = EXCLUDED.state,
@@ -489,7 +613,7 @@ ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number) DO UPDATE SET
     pr_updated_at = EXCLUDED.pr_updated_at,
     head_sha = EXCLUDED.head_sha,
     mergeable_state = CASE
-        WHEN COALESCE($21::boolean, FALSE) THEN NULL
+        WHEN COALESCE($22::boolean, FALSE) THEN NULL
         WHEN EXCLUDED.mergeable_state IS NOT NULL THEN EXCLUDED.mergeable_state
         ELSE github_pull_request.mergeable_state
     END,
@@ -497,12 +621,12 @@ ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number) DO UPDATE SET
     deletions     = EXCLUDED.deletions,
     changed_files = EXCLUDED.changed_files,
     updated_at = now()
-RETURNING id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files
+RETURNING id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, provider
 `
 
 type UpsertGitHubPullRequestParams struct {
 	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
-	InstallationID      int64              `json:"installation_id"`
+	InstallationID      pgtype.Int8        `json:"installation_id"`
 	RepoOwner           string             `json:"repo_owner"`
 	RepoName            string             `json:"repo_name"`
 	PrNumber            int32              `json:"pr_number"`
@@ -521,6 +645,7 @@ type UpsertGitHubPullRequestParams struct {
 	MergedAt            pgtype.Timestamptz `json:"merged_at"`
 	ClosedAt            pgtype.Timestamptz `json:"closed_at"`
 	MergeableState      pgtype.Text        `json:"mergeable_state"`
+	Provider            string             `json:"provider"`
 	ClearMergeableState pgtype.Bool        `json:"clear_mergeable_state"`
 }
 
@@ -559,6 +684,7 @@ func (q *Queries) UpsertGitHubPullRequest(ctx context.Context, arg UpsertGitHubP
 		arg.MergedAt,
 		arg.ClosedAt,
 		arg.MergeableState,
+		arg.Provider,
 		arg.ClearMergeableState,
 	)
 	var i GithubPullRequest
@@ -586,6 +712,7 @@ func (q *Queries) UpsertGitHubPullRequest(ctx context.Context, arg UpsertGitHubP
 		&i.Additions,
 		&i.Deletions,
 		&i.ChangedFiles,
+		&i.Provider,
 	)
 	return i, err
 }

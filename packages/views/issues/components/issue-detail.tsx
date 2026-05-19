@@ -2401,6 +2401,16 @@ export function IssueDetail({
             </div>
           </div>
         )}
+        {isMobile && (
+          <div className="fixed bottom-20 right-3 z-40 flex flex-col gap-1.5 rounded-lg border border-border/60 bg-background/80 p-1 shadow-md backdrop-blur supports-[backdrop-filter]:bg-background/60">
+            <Button type="button" variant="ghost" size="icon-sm" className="h-8 w-8 text-muted-foreground active:bg-muted active:text-foreground" onClick={scrollToTop} aria-label="Scroll to top">
+              <ArrowUpToLine className="h-4 w-4" />
+            </Button>
+            <Button type="button" variant="ghost" size="icon-sm" className="h-8 w-8 text-muted-foreground active:bg-muted active:text-foreground" onClick={scrollToBottom} aria-label="Scroll to bottom">
+              <ArrowDownToLine className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
         </div>
         {quoteMenu && (
           <div

@@ -333,7 +333,7 @@ function AllowedUsersPicker({
     selectedMembers.length === 0
       ? t(($) => $.inspector.allowed_users_none)
       : selectedMembers.length === 1
-        ? selectedMembers[0].name
+        ? selectedMembers[0]!.name
         : t(($) => $.inspector.allowed_users_count, { count: selectedMembers.length });
   const dirty = !sameStringSet(allowedUserIds, draft);
 

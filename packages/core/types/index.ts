@@ -122,6 +122,7 @@ export type {
   GitHubPullRequestState,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
+  GiteeWebhookConfig,
 } from "./github";
 export type {
   Autopilot,
@@ -159,6 +160,9 @@ export type {
   CreateWikiPageRequest,
   UpdateWikiPageRequest,
   ReorderWikiPagesRequest,
+  WikiPageActivity,
+  WikiPageActivityAction,
+  ListWikiPageActivitiesResponse,
 } from "./wiki";
 export type {
   Squad,
