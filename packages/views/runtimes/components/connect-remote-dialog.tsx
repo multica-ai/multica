@@ -234,13 +234,13 @@ function TroubleshootingDetails() {
           <li className="flex items-center gap-1.5">
             <span>{t(($) => $.connect.trouble_check_status)}</span>
             <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">
-              multica daemon status
+              {"multica daemon status"}
             </code>
           </li>
           <li className="flex items-center gap-1.5">
             <span>{t(($) => $.connect.trouble_view_logs)}</span>
             <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">
-              multica daemon logs -f
+              {"multica daemon logs -f"}
             </code>
           </li>
         </ul>
