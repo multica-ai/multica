@@ -122,6 +122,7 @@ export type {
   GitHubPullRequestState,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
+  GiteeWebhookConfig,
 } from "./github";
 export type {
   Autopilot,

@@ -147,7 +147,7 @@ function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
           {pr.title}
         </p>
         <p className="text-[11px] text-muted-foreground truncate">
-          {pr.repo_owner}/{pr.repo_name}#{pr.number} · {stateLabel}
+          {pr.repo_owner}/{pr.repo_name}{pr.provider === "gitee" ? "!" : "#"}{pr.number} · {stateLabel}
           {pr.author_login ? ` · @${pr.author_login}` : null}
         </p>
         <PullRequestRowDetails

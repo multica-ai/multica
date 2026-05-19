@@ -56,15 +56,17 @@ INSERT INTO github_pull_request (
     title, state, html_url, branch, author_login, author_avatar_url,
     merged_at, closed_at, pr_created_at, pr_updated_at,
     head_sha, mergeable_state,
-    additions, deletions, changed_files
+    additions, deletions, changed_files,
+    provider
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, sqlc.narg('branch'), sqlc.narg('author_login'), sqlc.narg('author_avatar_url'),
     sqlc.narg('merged_at'), sqlc.narg('closed_at'), $9, $10,
     $11, sqlc.narg('mergeable_state'),
-    $12, $13, $14
+    $12, $13, $14,
+    sqlc.arg('provider')
 )
-ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number) DO UPDATE SET
+ON CONFLICT (provider, workspace_id, repo_owner, repo_name, pr_number) DO UPDATE SET
     installation_id = EXCLUDED.installation_id,
     title = EXCLUDED.title,
     state = EXCLUDED.state,
@@ -136,6 +138,7 @@ SELECT
     pr.author_avatar_url, pr.merged_at, pr.closed_at, pr.pr_created_at,
     pr.pr_updated_at, pr.head_sha, pr.mergeable_state,
     pr.additions, pr.deletions, pr.changed_files,
+    pr.provider,
     pr.created_at, pr.updated_at,
     COALESCE(c.total, 0)::bigint   AS checks_total,
     COALESCE(c.passed, 0)::bigint  AS checks_passed,
@@ -205,3 +208,32 @@ ON CONFLICT (issue_id, pull_request_id) DO NOTHING;
 -- name: UnlinkIssueFromPullRequest :exec
 DELETE FROM issue_pull_request
 WHERE issue_id = $1 AND pull_request_id = $2;
+
+-- =====================
+-- Gitee Webhook Config
+-- =====================
+
+-- name: CreateGiteeWebhookConfig :one
+INSERT INTO gitee_webhook_config (
+    workspace_id, repo_owner, repo_name, secret
+) VALUES (
+    $1, $2, $3, $4
+)
+ON CONFLICT (workspace_id, repo_owner, repo_name) DO UPDATE SET
+    secret = EXCLUDED.secret,
+    updated_at = now()
+RETURNING *;
+
+-- name: ListGiteeWebhookConfigsByWorkspace :many
+SELECT * FROM gitee_webhook_config
+WHERE workspace_id = $1
+ORDER BY created_at ASC;
+
+-- name: DeleteGiteeWebhookConfig :exec
+DELETE FROM gitee_webhook_config
+WHERE id = $1 AND workspace_id = $2;
+
+-- name: GetGiteeWebhookConfigByRepo :one
+SELECT * FROM gitee_webhook_config
+WHERE repo_owner = $1 AND repo_name = $2
+LIMIT 1;

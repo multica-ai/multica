@@ -258,6 +258,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Public API
 	r.Get("/api/config", h.GetConfig)
 
+	// CLI install endpoints (public, no auth required)
+	r.Get("/install.sh", h.ServeInstallSH)
+	r.Get("/install.ps1", h.ServeInstallPS1)
+	r.Get("/install/latest-cli-version", h.ServeLatestCLIVersion)
+
 	// Webhook ingress for autopilots. Outside the authenticated group on
 	// purpose: the bearer token in the URL path IS the credential. Workspace
 	// context is derived from the trigger row, never from request headers.
@@ -266,6 +271,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// HMAC-SHA256 signature in the handler) and post-install setup callback.
 	r.Post("/api/webhooks/github", h.HandleGitHubWebhook)
 	r.Get("/api/github/setup", h.GitHubSetupCallback)
+	// Gitee webhook (authenticated via X-Gitee-Token in the handler).
+	r.Post("/api/webhooks/gitee", h.HandleGiteeWebhook)
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
@@ -387,6 +394,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/github/connect", h.GitHubConnect)
 					r.Get("/github/installations", h.ListGitHubInstallations)
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
+					// Gitee webhook config
+					r.Post("/gitee/webhook-configs", h.CreateGiteeWebhookConfig)
+					r.Get("/gitee/webhook-configs", h.ListGiteeWebhookConfigs)
+					r.Delete("/gitee/webhook-configs/{configId}", h.DeleteGiteeWebhookConfig)
 				})
 			})
 		})

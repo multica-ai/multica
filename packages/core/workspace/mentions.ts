@@ -41,7 +41,7 @@ export function buildWorkspaceMentionTargets(
           (agent.visibility === "workspace" ||
             agent.owner_id === null ||
             agent.owner_id === ctx.userId ||
-            (!!ctx.userId && agent.allowed_user_ids?.includes(ctx.userId))),
+            (!!ctx.userId && (agent.allowed_user_ids?.includes(ctx.userId) ?? false))),
       )
       .map((agent) => ({
         id: agent.id,
