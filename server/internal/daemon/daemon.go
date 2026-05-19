@@ -96,6 +96,10 @@ type Daemon struct {
 	wsHBMu      sync.RWMutex         // guards wsHBLastAck
 	wsHBLastAck map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
 
+	// issueLocks serializes issue-mode tasks that share a workdir and branch.
+	// Keyed by "<workspaceID>/<issueIdentifier>".
+	issueLocks sync.Map
+
 	// runtimeGoneMu guards runtimeGoneInflight, reregisterNextAttempt, and
 	// reregisterLastCompletedAt. The state lets heartbeat / poller / WS-ack
 	// handlers converge on a single recovery path when they each detect that a
@@ -144,6 +148,19 @@ type Daemon struct {
 	// New() and overridable in tests so the auto-update poller can be exercised
 	// without touching the real network or the brew CLI.
 	runUpdateFn func(targetVersion string) (string, error)
+}
+
+func (d *Daemon) lockForIssue(workspaceID, issueIdentifier string) *sync.Mutex {
+	if d.cfg.WorkdirSharing != WorkdirSharingIssue || workspaceID == "" || issueIdentifier == "" {
+		return nil
+	}
+	key := workspaceID + "/" + issueIdentifier
+	if l, ok := d.issueLocks.Load(key); ok {
+		return l.(*sync.Mutex)
+	}
+	newLock := &sync.Mutex{}
+	actual, _ := d.issueLocks.LoadOrStore(key, newLock)
+	return actual.(*sync.Mutex)
 }
 
 // New creates a new Daemon instance.
@@ -1971,6 +1988,11 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	d.mu.Unlock()
 	provider := rt.Provider
 
+	if lock := d.lockForIssue(task.WorkspaceID, task.IssueIdentifier); lock != nil {
+		lock.Lock()
+		defer lock.Unlock()
+	}
+
 	// Task-scoped logger with short ID for readable concurrent logs.
 	taskLog := d.logger.With("task", shortID(task.ID))
 	agentName := "agent"
@@ -2230,7 +2252,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// can't reclaim artifacts inside them mid-execution. We mark both the
 	// predicted root for a fresh Prepare and the prior root for Reuse — they
 	// usually differ (Reuse keeps the original task's directory).
-	predictedRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
+	predictedRoot := execenv.PredictRootDirWithSharing(
+		d.cfg.WorkspacesRoot,
+		task.WorkspaceID,
+		task.ID,
+		task.IssueIdentifier,
+		d.cfg.WorkdirSharing,
+	)
 	d.markActiveEnvRoot(predictedRoot)
 	defer d.unmarkActiveEnvRoot(predictedRoot)
 	if task.PriorWorkDir != "" {
@@ -2241,16 +2269,22 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 	}
 
-	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
+	priorWorkDir := task.PriorWorkDir
+	useIssueLayout := d.cfg.WorkdirSharing == WorkdirSharingIssue && task.IssueIdentifier != ""
+	if useIssueLayout && priorWorkDir == "" {
+		priorWorkDir = execenv.IssueWorkDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.IssueIdentifier)
+	}
+
+	// Try to reuse the workdir from a previous task on the same issue.
 	var env *execenv.Environment
 	codexVersion := d.agentVersion("codex")
 	openclawBin := ""
 	if provider == "openclaw" {
 		openclawBin = entry.Path
 	}
-	if task.PriorWorkDir != "" {
+	if priorWorkDir != "" {
 		env = execenv.Reuse(execenv.ReuseParams{
-			WorkDir:      task.PriorWorkDir,
+			WorkDir:      priorWorkDir,
 			Provider:     provider,
 			CodexVersion: codexVersion,
 			OpenclawBin:  openclawBin,
@@ -2260,14 +2294,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env == nil {
 		var err error
 		env, err = execenv.Prepare(execenv.PrepareParams{
-			WorkspacesRoot: d.cfg.WorkspacesRoot,
-			WorkspaceID:    task.WorkspaceID,
-			TaskID:         task.ID,
-			AgentName:      agentName,
-			Provider:       provider,
-			CodexVersion:   codexVersion,
-			OpenclawBin:    openclawBin,
-			Task:           taskCtx,
+			WorkspacesRoot:  d.cfg.WorkspacesRoot,
+			WorkspaceID:     task.WorkspaceID,
+			TaskID:          task.ID,
+			IssueIdentifier: task.IssueIdentifier,
+			Sharing:         d.cfg.WorkdirSharing,
+			AgentName:       agentName,
+			Provider:        provider,
+			CodexVersion:    codexVersion,
+			OpenclawBin:     openclawBin,
+			Task:            taskCtx,
 		}, d.logger)
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
@@ -2305,6 +2341,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"MULTICA_AGENT_ID":     task.AgentID,
 		"MULTICA_TASK_ID":      task.ID,
 		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
+	}
+	if task.IssueIdentifier != "" {
+		agentEnv["MULTICA_ISSUE_IDENTIFIER"] = task.IssueIdentifier
+	}
+	if d.cfg.WorkdirSharing != "" {
+		agentEnv["MULTICA_WORKDIR_SHARING"] = d.cfg.WorkdirSharing
 	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
@@ -2371,7 +2413,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
 	}
 
-	reused := task.PriorWorkDir != "" && env.WorkDir == task.PriorWorkDir
+	reused := priorWorkDir != "" && env.WorkDir == priorWorkDir
 	taskLog.Info("starting agent",
 		"provider", provider,
 		"workdir", env.WorkDir,

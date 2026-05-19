@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
 )
 
 // gitEnv returns an environment for git subprocesses that contact remotes.
@@ -369,6 +368,8 @@ type WorktreeParams struct {
 	Ref                 string // optional branch, tag, or commit to base the worktree on
 	AgentName           string // for branch naming
 	TaskID              string // for branch naming uniqueness
+	IssueIdentifier     string // workspace issue prefix + number; only used when Sharing == "issue"
+	Sharing             string // "task" (default) or "issue"
 	CoAuthoredByEnabled bool   // install prepare-commit-msg hook for Co-authored-by trailer
 }
 
@@ -431,8 +432,13 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 		return nil, fmt.Errorf("cannot resolve default branch for %s: bare cache at %s has no usable refs (origin/* is empty or ambiguous and bare HEAD has no match). The cache may be corrupted; delete it and retry", params.RepoURL, barePath)
 	}
 
-	// Build branch name: agent/{sanitized-name}/{short-task-id}
-	branchName := fmt.Sprintf("agent/%s/%s", sanitizeName(params.AgentName), shortID(params.TaskID))
+	issueMode := params.Sharing == "issue" && params.IssueIdentifier != ""
+	var branchName string
+	if issueMode {
+		branchName = "multica/" + sanitizeName(params.IssueIdentifier)
+	} else {
+		branchName = fmt.Sprintf("agent/%s/%s", sanitizeName(params.AgentName), shortID(params.TaskID))
+	}
 
 	// Derive directory name from repo URL.
 	dirName := repoNameFromURL(params.RepoURL)
@@ -441,7 +447,13 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 	// If worktree already exists (reused environment from a prior task),
 	// update it to the latest remote code instead of creating a new one.
 	if isGitWorktree(worktreePath) {
-		actualBranch, err := updateExistingWorktree(worktreePath, branchName, baseRef)
+		var actualBranch string
+		var err error
+		if issueMode {
+			actualBranch, err = reuseIssueWorktree(worktreePath, branchName, baseRef)
+		} else {
+			actualBranch, err = updateExistingWorktree(worktreePath, branchName, baseRef)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("update existing worktree: %w", err)
 		}
@@ -470,6 +482,7 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 			"path", worktreePath,
 			"branch", actualBranch,
 			"base", baseRef,
+			"issue_mode", issueMode,
 		)
 
 		return &WorktreeResult{
@@ -478,9 +491,14 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 		}, nil
 	}
 
-	// Create a new worktree. createWorktree may rename the branch to avoid
-	// collisions with stale per-task refs left over from previous runs.
-	actualBranch, err := createWorktree(barePath, worktreePath, branchName, baseRef)
+	var actualBranch string
+	if issueMode {
+		actualBranch, err = createIssueWorktree(barePath, worktreePath, branchName, baseRef)
+	} else {
+		// createWorktree may rename the branch to avoid collisions with stale
+		// per-task refs left over from previous runs.
+		actualBranch, err = createWorktree(barePath, worktreePath, branchName, baseRef)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
@@ -508,6 +526,7 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 		"path", worktreePath,
 		"branch", actualBranch,
 		"base", baseRef,
+		"issue_mode", issueMode,
 	)
 
 	return &WorktreeResult{
@@ -575,6 +594,67 @@ func runWorktreeAdd(gitRoot, worktreePath, branchName, baseRef string) error {
 		return fmt.Errorf("git worktree add: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
+}
+
+func createIssueWorktree(gitRoot, worktreePath, branchName, baseRef string) (string, error) {
+	if _, err := os.Stat(worktreePath); err == nil {
+		return "", fmt.Errorf("worktree path already exists and is not a valid git worktree: %s", worktreePath)
+	}
+
+	localRef := "refs/heads/" + branchName
+	originRef := "refs/remotes/origin/" + branchName
+
+	if gitRefExists(gitRoot, localRef) {
+		cmd := exec.Command("git", "-C", gitRoot, "worktree", "add", worktreePath, branchName)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return "", fmt.Errorf("git worktree add (reuse local): %s: %w", strings.TrimSpace(string(out)), err)
+		}
+		return branchName, nil
+	}
+
+	if gitRefExists(gitRoot, originRef) {
+		cmd := exec.Command("git", "-C", gitRoot, "worktree", "add", "-b", branchName, worktreePath, originRef)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return "", fmt.Errorf("git worktree add (track origin): %s: %w", strings.TrimSpace(string(out)), err)
+		}
+		return branchName, nil
+	}
+
+	if err := runWorktreeAdd(gitRoot, worktreePath, branchName, baseRef); err != nil {
+		return "", err
+	}
+	return branchName, nil
+}
+
+func reuseIssueWorktree(worktreePath, branchName, baseRef string) (string, error) {
+	currentBranch := strings.TrimSpace(runGitOut(worktreePath, "rev-parse", "--abbrev-ref", "HEAD"))
+	if currentBranch == branchName {
+		return branchName, nil
+	}
+
+	if out, err := exec.Command("git", "-C", worktreePath, "checkout", branchName).CombinedOutput(); err == nil {
+		_ = out
+		return branchName, nil
+	}
+
+	originRef := "refs/remotes/origin/" + branchName
+	startPoint := baseRef
+	if gitRefExists(worktreePath, originRef) {
+		startPoint = originRef
+	}
+	if out, err := exec.Command("git", "-C", worktreePath, "checkout", "-b", branchName, startPoint).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("git checkout -b (issue mode): %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return branchName, nil
+}
+
+func runGitOut(dir string, args ...string) string {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return string(out)
 }
 
 // isBranchCollisionError returns true if err is specifically about a branch
@@ -683,7 +763,7 @@ func getRemoteDefaultBranch(barePath string) string {
 	// 2) Common default branch names under the origin namespace.
 	for _, candidate := range []string{"refs/remotes/origin/main", "refs/remotes/origin/master"} {
 		cmd := exec.Command("git", "-C", barePath, "rev-parse", "--verify", candidate)
-	
+
 		if err := cmd.Run(); err == nil {
 			return candidate
 		}
@@ -698,7 +778,7 @@ func getRemoteDefaultBranch(barePath string) string {
 	if bareRef != "" {
 		originRef := "refs/remotes/origin/" + strings.TrimPrefix(bareRef, "refs/heads/")
 		cmd := exec.Command("git", "-C", barePath, "rev-parse", "--verify", originRef)
-	
+
 		if err := cmd.Run(); err == nil {
 			return originRef
 		}
