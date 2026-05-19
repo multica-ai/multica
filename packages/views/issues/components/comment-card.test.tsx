@@ -118,7 +118,7 @@ vi.mock("@multica/ui/components/common/file-upload-button", () => ({
 
 vi.mock("../../editor", () => ({
   copyMarkdown: mockCopyMarkdown,
-  ReadonlyContent: ({ content }: { content: string }) => <div>{content}</div>,
+  ReadonlyContent: ({ content }: { content: string }) => <div data-testid="readonly-content">{content}</div>,
   ContentEditor: () => null,
   useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
   FileDropOverlay: () => null,
@@ -203,16 +203,20 @@ const entry: TimelineEntry = {
 
 function renderCommentCard({
   cardEntry = entry,
+  replies = [],
   commentById = new Map<string, TimelineEntry>([[cardEntry.id, cardEntry]]),
   agents = [],
   issueOpen = true,
   currentUserId = "user-1",
+  onEdit = async () => {},
 }: {
   cardEntry?: TimelineEntry;
+  replies?: TimelineEntry[];
   commentById?: Map<string, TimelineEntry>;
   agents?: Array<{ id: string; owner_id?: string | null }>;
   issueOpen?: boolean;
   currentUserId?: string;
+  onEdit?: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
 } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -227,13 +231,13 @@ function renderCommentCard({
         <CommentCard
           issueId="issue-1"
           entry={cardEntry}
-          replies={[]}
+          replies={replies}
           commentById={commentById}
           agents={agents as never[]}
           issueOpen={issueOpen}
           currentUserId={currentUserId}
           onReply={async () => {}}
-          onEdit={async () => {}}
+          onEdit={onEdit}
           onDelete={() => {}}
           onToggleReaction={() => {}}
         />
@@ -346,5 +350,64 @@ describe("CommentCard", () => {
     });
 
     expect(screen.getByText("Retry")).toBeTruthy();
+  });
+
+  it("collapses a long root comment by default and can expand it", async () => {
+    const longContent = Array.from({ length: 9 }, (_, index) => `Line ${index + 1}`).join("\n");
+    renderCommentCard({
+      cardEntry: {
+        ...entry,
+        content: longContent,
+      },
+    });
+
+    expect(screen.getByText("Show more")).toBeTruthy();
+
+    await userEvent.click(screen.getByText("Show more"));
+
+    expect(screen.queryByText("Show more")).toBeNull();
+    expect(screen.getByText("Show less")).toBeTruthy();
+  });
+
+  it("collapses a long reply comment by default", () => {
+    const reply: TimelineEntry = {
+      ...entry,
+      id: "reply-1",
+      parent_id: entry.id,
+      content: "x".repeat(501),
+    };
+
+    renderCommentCard({
+      replies: [reply],
+      commentById: new Map([
+        [entry.id, entry],
+        [reply.id, reply],
+      ]),
+    });
+
+    expect(screen.getByText("Show more")).toBeTruthy();
+  });
+
+  it("does not show expand controls for short comments", () => {
+    renderCommentCard();
+
+    expect(screen.queryByText("Show more")).toBeNull();
+    expect(screen.queryByText("Show less")).toBeNull();
+  });
+
+  it("does not collapse the comment body while editing", async () => {
+    renderCommentCard({
+      cardEntry: {
+        ...entry,
+        content: "x".repeat(501),
+      },
+    });
+
+    expect(screen.getByText("Show more")).toBeTruthy();
+
+    await userEvent.click(screen.getByText("Edit"));
+
+    expect(screen.queryByText("Show more")).toBeNull();
+    expect(screen.queryByText("Show less")).toBeNull();
   });
 });

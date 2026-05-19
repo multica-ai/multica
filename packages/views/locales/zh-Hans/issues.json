@@ -245,6 +245,8 @@
     "cancel_edit": "取消",
     "copy_action": "复制",
     "copied_toast": "已复制",
+    "expand_content": "展开",
+    "collapse_content": "收起",
     "retry_action": "重试",
     "retry_success": "已加入 Agent 重试队列",
     "retry_failed": "重试 Agent 失败",
