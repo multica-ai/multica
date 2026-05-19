@@ -36,6 +36,8 @@ function workspaceScoped(slug: string) {
     attachmentView: (id: string) => `${ws}/attachments/${encode(id)}`,
     autopilots: () => `${ws}/autopilots`,
     autopilotDetail: (id: string) => `${ws}/autopilots/${encode(id)}`,
+    autopilotNew: () => `${ws}/autopilots/new`, // CEREBRO-PATCH(autopilot-new-path): full-page create route (JEH-1766)
+    autopilotEdit: (id: string) => `${ws}/autopilots/${encode(id)}/edit`, // CEREBRO-PATCH(autopilot-edit-path): full-page edit route (JEH-1766)
     agents: () => `${ws}/agents`,
     agentDetail: (id: string) => `${ws}/agents/${encode(id)}`,
     memberDetail: (id: string) => `${ws}/members/${encode(id)}`,

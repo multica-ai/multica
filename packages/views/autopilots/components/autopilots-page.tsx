@@ -1,19 +1,19 @@
 "use client";
 
-import { useState } from "react";
+// CEREBRO-PATCH(autopilot-list-nav-no-usestate): useState unused after dialog removal (JEH-1766)
 import { Plus, Zap, Play, Pause, AlertCircle, Newspaper, GitPullRequest, Bug, BarChart3, Shield, FileSearch } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { AppLink } from "../../navigation";
+import { AppLink, useNavigation } from "../../navigation"; // CEREBRO-PATCH(autopilot-list-nav-hook): navigation for full-page create (JEH-1766)
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PageHeader } from "../../layout/page-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
-import { AutopilotDialog } from "./autopilot-dialog";
+// CEREBRO-PATCH(autopilot-list-nav-dialog-removed): dialog removed, navigates to full page (JEH-1766)
 // CEREBRO-PATCH(autopilot-private-badge-list-import): owner-only autopilot badge (JEH-1750).
 import { PrivateBadge } from "@multica/cerebro-access/views";
 import type { Autopilot, AutopilotStatus, AutopilotExecutionMode } from "@multica/core/types";
@@ -182,13 +182,9 @@ export function AutopilotsPage() {
   const { t } = useT("autopilots");
   const wsId = useWorkspaceId();
   const { data: autopilots = [], isLoading } = useQuery(autopilotListOptions(wsId));
-  const [createOpen, setCreateOpen] = useState(false);
-  const [selectedTemplate, setSelectedTemplate] = useState<AutopilotTemplate | null>(null);
-
-  const openCreate = (template?: AutopilotTemplate) => {
-    setSelectedTemplate(template ?? null);
-    setCreateOpen(true);
-  };
+  // CEREBRO-PATCH(autopilot-list-nav-state): navigate to full-page create instead of dialog (JEH-1766)
+  const router = useNavigation();
+  const wsPaths = useWorkspacePaths();
 
   return (
     <div className="flex h-full flex-col">
@@ -201,7 +197,7 @@ export function AutopilotsPage() {
             <span className="text-xs text-muted-foreground tabular-nums">{autopilots.length}</span>
           )}
         </div>
-        <Button size="sm" variant="outline" onClick={() => openCreate()}>
+        <Button size="sm" variant="outline" onClick={() => router.push(wsPaths.autopilotNew())}> {/* CEREBRO-PATCH(autopilot-list-nav-button): JEH-1766 */}
           <Plus className="h-3.5 w-3.5 mr-1" />
           {t(($) => $.page.new_autopilot)}
         </Button>
@@ -240,7 +236,7 @@ export function AutopilotsPage() {
                     key={tpl.id}
                     type="button"
                     className="flex items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-accent/40"
-                    onClick={() => openCreate(tpl)}
+                    onClick={() => router.push(`${wsPaths.autopilotNew()}?template=${tpl.id}`)} // CEREBRO-PATCH(autopilot-list-nav-template): JEH-1766
                   >
                     <Icon className="h-5 w-5 shrink-0 text-muted-foreground mt-0.5" />
                     <div className="min-w-0">
@@ -255,7 +251,7 @@ export function AutopilotsPage() {
                 );
               })}
             </div>
-            <Button size="sm" variant="outline" className="mt-4" onClick={() => openCreate()}>
+            <Button size="sm" variant="outline" className="mt-4" onClick={() => router.push(wsPaths.autopilotNew())}> {/* CEREBRO-PATCH(autopilot-list-nav-blank): JEH-1766 */}
               <Plus className="h-3.5 w-3.5 mr-1" />
               {t(($) => $.page.start_blank)}
             </Button>
@@ -278,29 +274,7 @@ export function AutopilotsPage() {
         )}
       </div>
 
-      {createOpen && (
-        <AutopilotDialog
-          mode="create"
-          open={createOpen}
-          onOpenChange={setCreateOpen}
-          initial={
-            selectedTemplate
-              ? {
-                  // Template title pulls from i18n so the user-visible default
-                  // matches their locale, while the prompt body stays raw EN
-                  // since it's injected directly into the agent task.
-                  title: t(($) => $.templates[selectedTemplate.id].title),
-                  description: selectedTemplate.prompt,
-                }
-              : undefined
-          }
-          initialTriggerConfig={
-            selectedTemplate
-              ? { frequency: selectedTemplate.frequency, time: selectedTemplate.time }
-              : undefined
-          }
-        />
-      )}
+      {/* CEREBRO-PATCH(autopilot-list-nav-no-dialog): create dialog removed, uses /autopilots/new page (JEH-1766) */}
     </div>
   );
 }

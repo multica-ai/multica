@@ -49,7 +49,7 @@ import type { AutopilotExecutionMode, AutopilotRun, AutopilotTrigger } from "@mu
 import type { AgentTask } from "@multica/core/types/agent";
 import { ReadonlyContent } from "../../editor";
 import { TranscriptButton } from "../../common/task-transcript";
-import { AutopilotDialog } from "./autopilot-dialog";
+// CEREBRO-PATCH(autopilot-detail-nav-import): edit dialog removed, uses navigation to /edit page (JEH-1766)
 // CEREBRO-PATCH(autopilot-private-badge-import): owner-only autopilot badge (JEH-1750).
 import { PrivateBadge } from "@multica/cerebro-access/views";
 import { useT } from "../../i18n";
@@ -381,7 +381,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   const triggerAutopilot = useTriggerAutopilot();
 
   const [triggerDialogOpen, setTriggerDialogOpen] = useState(false);
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  // CEREBRO-PATCH(autopilot-detail-nav-state): editDialogOpen removed, edit navigates to full page (JEH-1766)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -495,7 +495,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)}>
+          <Button size="sm" variant="outline" onClick={() => router.push(wsPaths.autopilotEdit(autopilotId))}> {/* CEREBRO-PATCH(autopilot-detail-nav-edit-button): navigates to full-page edit (JEH-1766) */}
             <Pencil className="h-3.5 w-3.5 mr-1" />
             {t(($) => $.detail.edit)}
           </Button>
@@ -606,25 +606,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
         onOpenChange={setTriggerDialogOpen}
         autopilotId={autopilotId}
       />
-      {editDialogOpen && (
-        <AutopilotDialog
-          mode="edit"
-          open={editDialogOpen}
-          onOpenChange={setEditDialogOpen}
-          autopilotId={autopilot.id}
-          initial={{
-            title: autopilot.title,
-            description: autopilot.description ?? "",
-            assignee_id: autopilot.assignee_id,
-            execution_mode: autopilot.execution_mode as AutopilotExecutionMode,
-            // CEREBRO-PATCH(autopilot-model-edit-seed): seed model picker on edit (JEH-1310).
-            model: autopilot.model ?? null,
-            // CEREBRO-PATCH(autopilot-privacy-edit-seed): seed privacy toggle on edit (JEH-1750).
-            is_private: autopilot.is_private,
-          }}
-          triggers={triggers}
-        />
-      )}
+      {/* CEREBRO-PATCH(autopilot-detail-nav-no-dialog): edit dialog removed, navigates to /autopilots/:id/edit (JEH-1766) */}
       <AlertDialog
         open={deleteConfirmOpen}
         onOpenChange={(v) => { if (!v && !deleting) setDeleteConfirmOpen(false); }}

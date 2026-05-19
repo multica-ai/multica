@@ -11,6 +11,7 @@ import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
+import { AutopilotCreatePage, AutopilotEditPage } from "@multica/cerebro-autopilot-pages";
 import { SkillDetailPage } from "./pages/skill-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
 import { RuntimeDetailPage } from "./pages/runtime-detail-page";
@@ -190,9 +191,19 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Autopilot" },
           },
           {
+            path: "autopilots/new",
+            element: <DesktopAutopilotCreatePage />,
+            handle: { title: "New Autopilot" },
+          },
+          {
             path: "autopilots/:id",
             element: <AutopilotDetailPage />,
             handle: { title: "Autopilot" },
+          },
+          {
+            path: "autopilots/:id/edit",
+            element: <DesktopAutopilotEditPage />,
+            handle: { title: "Edit Autopilot" },
           },
           {
             path: "my-issues",
@@ -298,6 +309,17 @@ function DocumentEditRoute() {
 function AttachmentViewRoute() {
   const params = useParams<{ id: string }>();
   return <AttachmentViewPage attachmentId={params.id ?? ""} />;
+}
+
+function DesktopAutopilotCreatePage() {
+  const [search] = useSearchParams();
+  const templateId = search.get("template") ?? undefined;
+  return <AutopilotCreatePage templateId={templateId} />;
+}
+
+function DesktopAutopilotEditPage() {
+  const params = useParams<{ id: string }>();
+  return <AutopilotEditPage autopilotId={params.id ?? ""} />;
 }
 
 function MemberDetailRoute() {

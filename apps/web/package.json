@@ -20,6 +20,7 @@
     "@emoji-mart/data": "^1.2.1",
     "@floating-ui/dom": "^1.7.6",
     "@multica/cerebro-access": "workspace:*",
+    "@multica/cerebro-autopilot-pages": "workspace:*",
     "@multica/cerebro-artifacts": "workspace:*",
     "@multica/cerebro-attachments": "workspace:*",
     "@multica/cerebro-budgets": "workspace:*",
