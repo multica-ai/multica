@@ -362,6 +362,45 @@ func (c *Client) ReportLocalSkillImportResult(ctx context.Context, runtimeID, re
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/local-skills/import/%s/result", runtimeID, requestID), result, nil)
 }
 
+// RuntimeToolScanServer is the wire shape for one server's tools/list result
+// in the daemon scan report. Empty Tools with non-empty Error signals an
+// unreachable MCP server; the server records the error but keeps prior rows.
+// CEREBRO-PATCH(daemon-client-runtime-tool-scan): JEH-1710 daemon→server scan
+// wire types. Mirrors handler.RuntimeToolScanServer / RuntimeToolScanTool.
+type RuntimeToolScanServer struct {
+	Name  string                  `json:"name"`
+	Tools []RuntimeToolScanTool   `json:"tools"`
+	Error string                  `json:"error,omitempty"`
+}
+
+// RuntimeToolScanTool is one entry inside a server's tools/list response.
+type RuntimeToolScanTool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	InputSchema json.RawMessage `json:"input_schema,omitempty"`
+}
+
+// GetRuntimeMcpConfig fetches the runtime's tools_config blob so the daemon
+// can iterate the declared MCP servers without claiming a task first.
+// Returns an empty {"mcpServers":{}} document when nothing is configured.
+func (c *Client) GetRuntimeMcpConfig(ctx context.Context, runtimeID string) (json.RawMessage, error) {
+	var raw json.RawMessage
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/mcp-config", runtimeID), &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+// ReportRuntimeToolScan POSTs the per-server tools/list result back to the
+// server, which upserts the (runtime, server, tool) registry rows.
+func (c *Client) ReportRuntimeToolScan(ctx context.Context, runtimeID string, scannedAt time.Time, servers []RuntimeToolScanServer) error {
+	body := map[string]any{
+		"scanned_at": scannedAt.UTC().Format(time.RFC3339Nano),
+		"servers":    servers,
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/tool-scan", runtimeID), body, nil)
+}
+
 // WorkspaceInfo holds minimal workspace metadata returned by the API.
 type WorkspaceInfo struct {
 	ID   string `json:"id"`

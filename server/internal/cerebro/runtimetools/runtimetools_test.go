@@ -87,3 +87,33 @@ func TestUpsertMCPToolRequiresServerName(t *testing.T) {
 		t.Errorf("expected ErrMCPNeedsServer, got %v", err)
 	}
 }
+
+// TestRecordScanSkipsServerErrors documents that a failing server (Error
+// set) does not zero out the previously-known inventory: RecordScan iterates
+// good servers only and returns nil so the daemon ack succeeds. We verify
+// this behaviourally by feeding an Error-only payload through a service that
+// has no DB pool — if it tried to call the DB the test would panic.
+func TestRecordScanSkipsServerErrors(t *testing.T) {
+	svc := New(nil) // intentionally nil pool: any DB call below would panic
+	err := svc.RecordScan(context.Background(), pgtype.UUID{}, pgtype.Timestamptz{}, []ScannedServer{
+		{Name: "broken", Error: "exec: command not found"},
+	})
+	if err != nil {
+		t.Errorf("RecordScan with only error servers should be no-op, got %v", err)
+	}
+}
+
+// TestRecordScanRejectsBlankServerName guards against a daemon bug where an
+// MCP server name is empty: the registry's unique index allows a NULL
+// mcp_server_name only for cloud tools, so feeding "" for an mcp source
+// would explode in production. Catch it at the service edge with a clear
+// error.
+func TestRecordScanRejectsBlankServerName(t *testing.T) {
+	svc := New(nil)
+	err := svc.RecordScan(context.Background(), pgtype.UUID{}, pgtype.Timestamptz{}, []ScannedServer{
+		{Name: "", Tools: []ScannedTool{{Name: "x"}}},
+	})
+	if err == nil {
+		t.Fatal("expected error for blank server name, got nil")
+	}
+}

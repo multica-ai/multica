@@ -425,6 +425,10 @@
       "gate": "daemon_auth"
     },
     {
+      "id": "POST /api/daemon/runtimes/{runtimeId}/tool-scan",
+      "gate": "daemon_auth"
+    },
+    {
       "id": "POST /api/daemon/runtimes/{runtimeId}/update/{updateId}/result",
       "gate": "daemon_auth"
     },

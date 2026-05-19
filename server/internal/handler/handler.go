@@ -130,7 +130,10 @@ type Handler struct {
 	// tool inventory + access-control admin service. Wired by router after
 	// handler.New().
 	runtimeToolsAdmin RuntimeToolsAdminService
-	cfg               Config
+	// CEREBRO-PATCH(handler-runtime-tools-scan): JEH-1710 daemon-side ingest
+	// for the periodic MCP tools/list scan. Wired by router after handler.New().
+	runtimeToolsScan RuntimeToolsScanService
+	cfg              Config
 }
 
 // RuntimePauseInvoker is the upstream-side seam that the cerebro runtime

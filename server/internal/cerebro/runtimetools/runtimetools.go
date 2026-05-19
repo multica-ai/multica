@@ -183,6 +183,60 @@ func (s *Service) UpsertTool(ctx context.Context, in UpsertToolInput) (Tool, err
 	return toolFromRow(row), nil
 }
 
+// ScannedServer is the tool inventory the daemon discovered for a single MCP
+// server during a tools/list sweep. Empty Tools with a non-empty Error means
+// the daemon could not reach the server (binary missing, crashed, timed out);
+// the server-side ingest records the error against the (runtime, server)
+// pair but does not delete previously scanned rows.
+type ScannedServer struct {
+	Name  string
+	Tools []ScannedTool
+	Error string
+}
+
+// ScannedTool is one entry from a server's tools/list response.
+type ScannedTool struct {
+	Name        string
+	Description string
+	SchemaJSON  []byte
+}
+
+// RecordScan upserts the tools discovered in a daemon-side MCP scan for one
+// runtime. Each (server, tool) pair is upserted with source=mcp and the same
+// last_scanned_at marker so the admin UI can show how fresh the inventory
+// is. The enabled flag is preserved on conflict: a workspace admin who
+// disabled a tool yesterday keeps that decision after the next scan.
+//
+// Servers with a non-empty Error are skipped — we never silently zero out a
+// previously-known inventory because the daemon hit a transient issue.
+func (s *Service) RecordScan(ctx context.Context, runtimeID pgtype.UUID, scannedAt pgtype.Timestamptz, servers []ScannedServer) error {
+	for _, srv := range servers {
+		if srv.Error != "" {
+			continue
+		}
+		if srv.Name == "" {
+			return fmt.Errorf("record scan: server name is empty")
+		}
+		for _, t := range srv.Tools {
+			if t.Name == "" {
+				continue
+			}
+			if _, err := s.UpsertTool(ctx, UpsertToolInput{
+				RuntimeID:     runtimeID,
+				ToolName:      t.Name,
+				Source:        SourceMCP,
+				MCPServerName: srv.Name,
+				Description:   t.Description,
+				SchemaJSON:    t.SchemaJSON,
+				LastScannedAt: scannedAt,
+			}); err != nil {
+				return fmt.Errorf("record scan: upsert %s/%s: %w", srv.Name, t.Name, err)
+			}
+		}
+	}
+	return nil
+}
+
 // SetEnabled flips the enabled flag for a (runtime, tool) row.
 func (s *Service) SetEnabled(ctx context.Context, runtimeID pgtype.UUID, toolName string, enabled bool) (Tool, error) {
 	row, err := s.q.SetCerebroRuntimeToolEnabled(ctx, cerebrodb.SetCerebroRuntimeToolEnabledParams{

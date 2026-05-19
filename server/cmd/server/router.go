@@ -259,8 +259,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	}
 	// CEREBRO-PATCH(router-runtime-tools-admin): JEH-1710 wire the unified
 	// runtime tool admin service (per-runtime tool inventory + group/user
-	// grants + per-agent overrides).
-	h.SetRuntimeToolsAdmin(newRuntimeToolsAdminAdapter(runtimetools.New(pool)))
+	// grants + per-agent overrides) and the daemon-side scan ingest seam.
+	runtimeToolsSvc := runtimetools.New(pool)
+	h.SetRuntimeToolsAdmin(newRuntimeToolsAdminAdapter(runtimeToolsSvc))
+	h.SetRuntimeToolsScan(newRuntimeToolsScanAdapter(runtimeToolsSvc))
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler instance
 	cerebroTasksHandler := cerebrotasks.New(cerebroQueries)
 	// CEREBRO-PATCH(sharetoken-routes): JEH-1076 public-link share-token handler
@@ -407,6 +409,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 		// CEREBRO-PATCH(cerebro-account-routes): JEH-998 daemon-only usage telemetry endpoint.
 		r.Post("/accounts/{id}/usage", cerebroAccountHandler.UpdateUsage)
+		// CEREBRO-PATCH(runtime-tools-scan-routes): JEH-1710 daemon MCP scan
+		// — fetch the runtime's mcp-config and ingest a tools/list result.
+		r.Get("/runtimes/{runtimeId}/mcp-config", h.GetRuntimeMcpConfig)
+		r.Post("/runtimes/{runtimeId}/tool-scan", h.IngestRuntimeToolScan)
 	})
 
 	// === Task-scoped allowlist ===

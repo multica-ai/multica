@@ -143,7 +143,10 @@ type Daemon struct {
 	bgSyncs sync.WaitGroup
 
 	// CEREBRO-PATCH(daemon-account-identity-cache): JEH-997 identity-probe cache.
-	accountIdentities  *accountIdentityCache
+	accountIdentities *accountIdentityCache
+	// CEREBRO-PATCH(daemon-runtime-tool-scan-state): JEH-1710 per-runtime
+	// debounce for the periodic MCP tools/list scan. Process-local only.
+	toolScanState      *runtimeToolScanState
 	runner             taskRunner    // executes agent tasks; set to d.runTask by New(), overridable in tests
 	cancelPollInterval time.Duration // how often handleTask polls for server-side cancellation; overridable in tests
 	// runUpdateFn executes the brew-or-download upgrade. Set to d.runUpdate by
@@ -174,6 +177,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
 		accountIdentities:         newAccountIdentityCache(),
+		toolScanState:             newRuntimeToolScanState(),
 		cancelPollInterval:        5 * time.Second,
 	}
 	d.runner = taskRunnerFunc(d.runTask)
@@ -1474,6 +1478,10 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 			go d.handleLocalSkillImport(ctx, *rt, *resp.PendingLocalSkillImport)
 		}
 	}
+	// CEREBRO-PATCH(daemon-heartbeat-runtime-tool-scan): JEH-1710 piggyback the
+	// MCP tools/list scan on the heartbeat tick. maybeScanRuntimeTools is
+	// debounced internally so it only does real work every runtimeToolScanInterval.
+	d.maybeScanRuntimeTools(ctx, runtimeID)
 }
 
 // handleModelList resolves the provider's supported models (via static
