@@ -830,10 +830,14 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 }
 
 // openclawAgentEntry is the shape parseOpenclawAgentsJSON expects
-// from `openclaw agents list --json`. Both `name` and `id` are
-// accepted as the identifier (different openclaw versions ship
-// different field names); `model` is optional and only used to
-// enrich the dropdown label.
+// from `openclaw agents list --json`. `id` is the routing key
+// passed to `openclaw agent --agent <id>`; `name` is the human
+// display label set via `openclaw agents set-identity --name` and
+// is only used to enrich the dropdown label. The two are not
+// interchangeable — see openclawEntriesToModels for the mapping.
+// Older openclaw versions may emit only `name`; in that case we
+// fall back to using it as the id for backward compatibility.
+// `model` is optional and only used to enrich the dropdown label.
 type openclawAgentEntry struct {
 	Name  string `json:"name"`
 	ID    string `json:"id"`
@@ -869,19 +873,28 @@ func openclawEntriesToModels(entries []openclawAgentEntry) []Model {
 	models := make([]Model, 0, len(entries))
 	seen := map[string]bool{}
 	for _, e := range entries {
-		name := e.Name
-		if name == "" {
-			name = e.ID
+		// Use ID as the model identifier because openclaw resolves
+		// --agent by id, not by display name. Names may contain spaces
+		// (e.g. "Sub2API OPS") which openclaw's normalizeAgentId would
+		// mangle into a different string ("sub2api-ops"), causing a
+		// lookup miss and "no parseable output" errors.
+		id := e.ID
+		if id == "" {
+			id = e.Name
 		}
-		if name == "" || seen[name] {
+		if id == "" || seen[id] {
 			continue
 		}
-		seen[name] = true
-		label := name
-		if e.Model != "" {
-			label = name + " (" + e.Model + ")"
+		seen[id] = true
+		displayName := e.Name
+		if displayName == "" {
+			displayName = id
 		}
-		models = append(models, Model{ID: name, Label: label, Provider: "openclaw"})
+		label := displayName
+		if e.Model != "" {
+			label = displayName + " (" + e.Model + ")"
+		}
+		models = append(models, Model{ID: id, Label: label, Provider: "openclaw"})
 	}
 	return models
 }

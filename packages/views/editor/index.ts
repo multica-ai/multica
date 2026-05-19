@@ -20,3 +20,7 @@ export {
   isPreviewable,
 } from "./attachment-preview-modal";
 export type { AttachmentPreviewHandle } from "./attachment-preview-modal";
+export { AttachmentCard } from "./attachment-card";
+export type { AttachmentCardProps } from "./attachment-card";
+export { AttachmentBlock } from "./attachment-block";
+export type { AttachmentBlockProps } from "./attachment-block";

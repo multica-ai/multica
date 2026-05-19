@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -13,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -76,14 +75,6 @@ func (s *AutopilotService) DispatchAutopilot(
 	switch autopilot.ExecutionMode {
 	case "create_issue":
 		if err := s.dispatchCreateIssue(ctx, autopilot, &run); err != nil {
-			var duplicate *issueguard.ActiveDuplicateError
-			if errors.As(err, &duplicate) {
-				updatedRun := s.skipDuplicateRun(ctx, autopilot, run, source, duplicate)
-				if source == "manual" {
-					return &updatedRun, fmt.Errorf("dispatch create_issue: %w", err)
-				}
-				return &updatedRun, nil
-			}
 			s.failRun(ctx, run.ID, err.Error())
 			s.captureAutopilotRunFailed(autopilot, run, source, err.Error())
 			return &run, fmt.Errorf("dispatch create_issue: %w", err)
@@ -130,15 +121,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	qtx := s.Queries.WithTx(tx)
 
 	title := s.interpolateTemplate(ap)
-	description := s.buildIssueDescription(ap)
-
-	duplicate, foundDuplicate, err := issueguard.LockAndFindActiveDuplicate(ctx, qtx, ap.WorkspaceID, pgtype.UUID{}, pgtype.UUID{}, title, false)
-	if err != nil {
-		return fmt.Errorf("check duplicate issue: %w", err)
-	}
-	if foundDuplicate {
-		return issueguard.NewActiveDuplicateError(duplicate, s.getIssuePrefix(ap.WorkspaceID))
-	}
+	description := s.buildIssueDescription(ap, *run)
 
 	issueNumber, err := qtx.IncrementIssueCounter(ctx, ap.WorkspaceID)
 	if err != nil {
@@ -146,13 +129,13 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	}
 
 	issue, err := qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
-		WorkspaceID:   ap.WorkspaceID,
-		Title:         title,
-		Description:   description,
-		Status:        "todo",
-		Priority:      "none",
-		AssigneeType:  pgtype.Text{String: "agent", Valid: true},
-		AssigneeID:    ap.AssigneeID,
+		WorkspaceID:  ap.WorkspaceID,
+		Title:        title,
+		Description:  description,
+		Status:       "todo",
+		Priority:     "none",
+		AssigneeType: pgtype.Text{String: "agent", Valid: true},
+		AssigneeID:   ap.AssigneeID,
 		// The agent that the autopilot dispatches to is the issue's creator,
 		// not the human who originally configured the autopilot. The latter
 		// is captured separately via origin_type=autopilot + origin_id.
@@ -160,6 +143,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		CreatorID:     ap.AssigneeID,
 		ParentIssueID: pgtype.UUID{},
 		Position:      0,
+		StartDate:     pgtype.Timestamptz{},
 		DueDate:       pgtype.Timestamptz{},
 		Number:        issueNumber,
 		ProjectID:     pgtype.UUID{},
@@ -364,55 +348,6 @@ func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reaso
 	}); err != nil {
 		slog.Warn("failed to mark autopilot run as failed", "run_id", util.UUIDToString(runID), "error", err)
 	}
-}
-
-func (s *AutopilotService) skipDuplicateRun(
-	ctx context.Context,
-	autopilot db.Autopilot,
-	run db.AutopilotRun,
-	source string,
-	duplicate *issueguard.ActiveDuplicateError,
-) db.AutopilotRun {
-	reason := duplicate.Error()
-	result, err := json.Marshal(map[string]any{
-		"code": "active_duplicate_issue",
-		"issue": map[string]any{
-			"id":         duplicate.ID,
-			"identifier": duplicate.Identifier,
-			"title":      duplicate.Title,
-			"status":     duplicate.Status,
-		},
-	})
-	if err != nil {
-		slog.Warn("failed to marshal duplicate autopilot result",
-			"run_id", util.UUIDToString(run.ID),
-			"error", err,
-		)
-	}
-
-	updatedRun, err := s.Queries.UpdateAutopilotRunSkippedWithResult(ctx, db.UpdateAutopilotRunSkippedWithResultParams{
-		ID:            run.ID,
-		FailureReason: pgtype.Text{String: reason, Valid: true},
-		Result:        result,
-	})
-	if err != nil {
-		slog.Warn("failed to mark duplicate autopilot run as skipped",
-			"run_id", util.UUIDToString(run.ID),
-			"error", err,
-		)
-		return run
-	}
-
-	slog.Info("autopilot duplicate issue skipped",
-		"autopilot_id", util.UUIDToString(autopilot.ID),
-		"run_id", util.UUIDToString(run.ID),
-		"source", source,
-		"existing_issue_id", duplicate.ID,
-	)
-
-	s.Queries.UpdateAutopilotLastRunAt(ctx, autopilot.ID)
-	s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), updatedRun, "skipped")
-	return updatedRun
 }
 
 // shouldSkipDispatch is the pre-flight admission check from MUL-1899.
@@ -650,22 +585,121 @@ func autopilotRunDurationMS(run db.AutopilotRun) int64 {
 
 // buildIssueDescription appends an autopilot system instruction to the
 // user-provided description, asking the agent to rename the issue after
-// it understands the actual work.
-func (s *AutopilotService) buildIssueDescription(ap db.Autopilot) pgtype.Text {
+// it understands the actual work. For webhook-sourced runs, also appends
+// a payload section so the agent has the event context inline (otherwise
+// the agent only sees the issue body, never the run's trigger_payload).
+func (s *AutopilotService) buildIssueDescription(ap db.Autopilot, run db.AutopilotRun) pgtype.Text {
 	now := time.Now().UTC().Format("2006-01-02 15:04 UTC")
-	note := fmt.Sprintf("\n\n---\n*Autopilot run triggered at %s. After starting work, rename this issue to accurately reflect what you are doing.*", now)
-	base := ap.Description.String
-	return pgtype.Text{String: base + note, Valid: true}
+	var b strings.Builder
+	b.WriteString(ap.Description.String)
+	b.WriteString("\n\n---\n*Autopilot run triggered at ")
+	b.WriteString(now)
+	b.WriteString(". After starting work, rename this issue to accurately reflect what you are doing.*")
+
+	if run.Source == "webhook" && len(run.TriggerPayload) > 0 {
+		event := "webhook.received"
+		var payloadJSON []byte
+		var env struct {
+			Event        string          `json:"event"`
+			EventPayload json.RawMessage `json:"eventPayload"`
+		}
+		if err := json.Unmarshal(run.TriggerPayload, &env); err == nil {
+			if env.Event != "" {
+				event = env.Event
+			}
+			if len(env.EventPayload) > 0 {
+				if pretty, err := prettifyJSON(env.EventPayload); err == nil {
+					payloadJSON = pretty
+				}
+			}
+		}
+		if len(payloadJSON) == 0 {
+			if pretty, err := prettifyJSON(run.TriggerPayload); err == nil {
+				payloadJSON = pretty
+			} else {
+				payloadJSON = run.TriggerPayload
+			}
+		}
+		b.WriteString("\n\nWebhook event: ")
+		b.WriteString(event)
+		b.WriteString("\n\nWebhook payload:\n```json\n")
+		b.Write(payloadJSON)
+		b.WriteString("\n```")
+	}
+
+	return pgtype.Text{String: b.String(), Valid: true}
 }
 
-// interpolateTemplate replaces {{date}} in the issue title template.
+func prettifyJSON(raw []byte) ([]byte, error) {
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, err
+	}
+	return json.MarshalIndent(v, "", "  ")
+}
+
+// issueTitleTemplateTokenRE matches any {{...}} token in an issue-title
+// template. We deliberately permit whitespace inside the braces ({{ date }})
+// so users can format templates either way; the canonical token is still
+// {{date}}.
+var issueTitleTemplateTokenRE = regexp.MustCompile(`\{\{\s*([^{}]*?)\s*\}\}`)
+
+// interpolateTemplate substitutes supported {{name}} placeholders in the
+// issue title template. Whitespace inside the braces ({{ date }}) is
+// tolerated so the render layer accepts every form that
+// ValidateIssueTitleTemplate accepts — otherwise users would save templates
+// that pass validation but still emit a literal token at trigger time.
 func (s *AutopilotService) interpolateTemplate(ap db.Autopilot) string {
 	tmpl := ap.Title
 	if ap.IssueTitleTemplate.Valid && ap.IssueTitleTemplate.String != "" {
 		tmpl = ap.IssueTitleTemplate.String
 	}
 	now := time.Now().UTC().Format("2006-01-02")
-	return strings.ReplaceAll(tmpl, "{{date}}", now)
+	return issueTitleTemplateTokenRE.ReplaceAllStringFunc(tmpl, func(match string) string {
+		name := strings.TrimSpace(match[2 : len(match)-2])
+		switch name {
+		case "date":
+			return now
+		default:
+			return match
+		}
+	})
+}
+
+// SupportedIssueTitleTemplateVariables enumerates the placeholders that
+// interpolateTemplate will substitute. Keep this in sync with the
+// substitution logic above and with the docs in autopilots.mdx /
+// autopilots.zh.mdx.
+var SupportedIssueTitleTemplateVariables = []string{"date"}
+
+// ValidateIssueTitleTemplate rejects templates that contain any {{...}} token
+// other than the supported set. An empty template is valid (the autopilot
+// falls back to its own Title). The error message names the first offending
+// token to keep CLI feedback actionable.
+func ValidateIssueTitleTemplate(tmpl string) error {
+	if tmpl == "" {
+		return nil
+	}
+	for _, m := range issueTitleTemplateTokenRE.FindAllStringSubmatch(tmpl, -1) {
+		name := m[1]
+		if !isSupportedIssueTitleVariable(name) {
+			return fmt.Errorf(
+				"unknown template variable %q; supported: {{%s}}",
+				name,
+				strings.Join(SupportedIssueTitleTemplateVariables, "}}, {{"),
+			)
+		}
+	}
+	return nil
+}
+
+func isSupportedIssueTitleVariable(name string) bool {
+	for _, v := range SupportedIssueTitleTemplateVariables {
+		if name == v {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *AutopilotService) getIssuePrefix(workspaceID pgtype.UUID) string {

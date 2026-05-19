@@ -448,6 +448,15 @@ function EmptyView({
         />
       </div>
 
+      <a
+        href="https://multica.ai/docs/install-agent-runtime"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-5 inline-block self-start text-[13px] text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
+      >
+        {t(($) => $.step_runtime.empty_install_link)}
+      </a>
+
       <Dialog
         open={waitlistOpen}
         onOpenChange={(o) => (o ? null : setWaitlistOpen(false))}

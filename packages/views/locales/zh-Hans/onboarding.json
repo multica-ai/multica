@@ -253,6 +253,7 @@
     "empty_waitlist_subtitle": "由 Multica 托管运行时 —— 无需本地安装，无需配置。尚未上线，点击留下邮箱。",
     "empty_waitlist_action": "加入候补",
     "empty_waitlist_done": "已在候补",
+    "empty_install_link": "安装一个 Agent 运行时 →",
     "dialog_title": "加入云运行时候补名单",
     "dialog_description": "云运行时尚未上线。留下邮箱，上线时通过邮件通知你。",
     "dialog_close": "关闭",

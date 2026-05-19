@@ -276,6 +276,7 @@ func init() {
 	issueCreateCmd.Flags().String("assignee-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueCreateCmd.Flags().String("parent", "", "Parent issue ID")
 	issueCreateCmd.Flags().String("project", "", "Project ID")
+	issueCreateCmd.Flags().String("start-date", "", "Start date (RFC3339 format)")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (RFC3339 format)")
 	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -291,6 +292,7 @@ func init() {
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member, agent, or squad; fuzzy match)")
 	issueUpdateCmd.Flags().String("assignee-id", "", "New assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueUpdateCmd.Flags().String("project", "", "Project ID")
+	issueUpdateCmd.Flags().String("start-date", "", "New start date (RFC3339 format; pass empty string to clear)")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (RFC3339 format)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -307,6 +309,10 @@ func init() {
 	// issue comment list
 	issueCommentListCmd.Flags().String("output", "table", "Output format: table or json")
 	issueCommentListCmd.Flags().String("since", "", "Only return comments created after this timestamp (RFC3339)")
+	issueCommentListCmd.Flags().String("thread", "", "Comment UUID — return the thread containing this comment (root + every descendant). May be a root or a reply id.")
+	issueCommentListCmd.Flags().Int("recent", 0, "Return the N most recently active threads (root + descendants per thread). Use --before/--before-id from the previous response to scroll to older threads.")
+	issueCommentListCmd.Flags().String("before", "", "Thread cursor: last_activity_at (RFC3339Nano). Read from the X-Multica-Next-Before response header; must be paired with --before-id.")
+	issueCommentListCmd.Flags().String("before-id", "", "Thread cursor: root comment UUID. Read from the X-Multica-Next-Before-Id response header; must be paired with --before.")
 
 	// issue runs
 	issueRunsCmd.Flags().String("output", "table", "Output format: table or json")
@@ -426,9 +432,9 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	}
 
 	fullID, _ := cmd.Flags().GetBool("full-id")
-	headers := []string{"KEY", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "DUE DATE"}
+	headers := []string{"KEY", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "START DATE", "DUE DATE"}
 	if fullID {
-		headers = []string{"KEY", "ID", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "DUE DATE"}
+		headers = []string{"KEY", "ID", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "START DATE", "DUE DATE"}
 	}
 	actors := loadActorDisplayLookup(ctx, client)
 	rows := make([][]string, 0, len(issuesRaw))
@@ -438,6 +444,10 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 			continue
 		}
 		assignee := formatAssignee(issue, actors)
+		startDate := strVal(issue, "start_date")
+		if startDate != "" && len(startDate) >= 10 {
+			startDate = startDate[:10]
+		}
 		dueDate := strVal(issue, "due_date")
 		if dueDate != "" && len(dueDate) >= 10 {
 			dueDate = dueDate[:10]
@@ -448,6 +458,7 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 			strVal(issue, "status"),
 			strVal(issue, "priority"),
 			assignee,
+			startDate,
 			dueDate,
 		}
 		if fullID {
@@ -458,6 +469,7 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 				strVal(issue, "status"),
 				strVal(issue, "priority"),
 				assignee,
+				startDate,
 				dueDate,
 			}
 		}
@@ -490,17 +502,22 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 	if output == "table" {
 		actors := loadActorDisplayLookup(ctx, client)
 		assignee := formatAssignee(issue, actors)
+		startDate := strVal(issue, "start_date")
+		if startDate != "" && len(startDate) >= 10 {
+			startDate = startDate[:10]
+		}
 		dueDate := strVal(issue, "due_date")
 		if dueDate != "" && len(dueDate) >= 10 {
 			dueDate = dueDate[:10]
 		}
-		headers := []string{"KEY", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "DUE DATE", "DESCRIPTION"}
+		headers := []string{"KEY", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "START DATE", "DUE DATE", "DESCRIPTION"}
 		rows := [][]string{{
 			issueDisplayKey(issue),
 			strVal(issue, "title"),
 			strVal(issue, "status"),
 			strVal(issue, "priority"),
 			assignee,
+			startDate,
 			dueDate,
 			strVal(issue, "description"),
 		}}
@@ -567,6 +584,9 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("resolve project: %w", err)
 		}
 		body["project_id"] = project.ID
+	}
+	if v, _ := cmd.Flags().GetString("start-date"); v != "" {
+		body["start_date"] = v
 	}
 	if v, _ := cmd.Flags().GetString("due-date"); v != "" {
 		body["due_date"] = v
@@ -726,6 +746,10 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 			}
 			body["project_id"] = project.ID
 		}
+	}
+	if cmd.Flags().Changed("start-date") {
+		v, _ := cmd.Flags().GetString("start-date")
+		body["start_date"] = v
 	}
 	if cmd.Flags().Changed("due-date") {
 		v, _ := cmd.Flags().GetString("due-date")
@@ -901,9 +925,51 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve issue: %w", err)
 	}
 
+	since, _ := cmd.Flags().GetString("since")
+	thread, _ := cmd.Flags().GetString("thread")
+	recent, _ := cmd.Flags().GetInt("recent")
+	// Flags().Changed distinguishes "user did not pass --recent" from
+	// "user explicitly passed --recent 0" (or a negative value). The
+	// GetInt zero-value collapses both cases, which would otherwise
+	// cause us to silently drop an invalid value and fall back to the
+	// default unparameterized list — exactly the drift Elon flagged in
+	// the PR #2787 second review.
+	recentSet := cmd.Flags().Changed("recent")
+	before, _ := cmd.Flags().GetString("before")
+	beforeID, _ := cmd.Flags().GetString("before-id")
+
+	// Mirror the server-side combination rules client-side so the user gets
+	// a clear local error instead of a 400 round-trip. These match the
+	// validation in handler.ListComments (server/internal/handler/comment.go).
+	if recentSet && recent <= 0 {
+		return fmt.Errorf("--recent must be a positive integer")
+	}
+	if thread != "" && recentSet {
+		return fmt.Errorf("--thread and --recent are mutually exclusive")
+	}
+	if thread != "" && (before != "" || beforeID != "") {
+		return fmt.Errorf("--thread cannot be combined with --before / --before-id")
+	}
+	if (before == "") != (beforeID == "") {
+		return fmt.Errorf("--before and --before-id must be set together (composite cursor for stable pagination)")
+	}
+	if before != "" && !recentSet {
+		return fmt.Errorf("--before / --before-id require --recent (cursor scrolls within a recent window)")
+	}
+
 	params := url.Values{}
-	if v, _ := cmd.Flags().GetString("since"); v != "" {
-		params.Set("since", v)
+	if since != "" {
+		params.Set("since", since)
+	}
+	if thread != "" {
+		params.Set("thread", thread)
+	}
+	if recentSet {
+		params.Set("recent", fmt.Sprintf("%d", recent))
+	}
+	if before != "" {
+		params.Set("before", before)
+		params.Set("before_id", beforeID)
 	}
 
 	path := "/api/issues/" + issueRef.ID + "/comments"
@@ -912,10 +978,20 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	}
 
 	var comments []map[string]any
-	if err := client.GetJSON(ctx, path, &comments); err != nil {
+	respHeaders, err := client.GetJSONWithHeaders(ctx, path, &comments)
+	if err != nil {
 		return fmt.Errorf("list comments: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "Showing %d comments.\n", len(comments))
+	// Under --recent the server emits a thread cursor in headers when there
+	// is likely an older page. Surface it on stderr so an operator (and the
+	// agent prompt update that follows this PR) can scroll deeper without
+	// having to dig into the raw HTTP response.
+	if nb := respHeaders.Get("X-Multica-Next-Before"); nb != "" {
+		if nbid := respHeaders.Get("X-Multica-Next-Before-Id"); nbid != "" {
+			fmt.Fprintf(os.Stderr, "Next thread cursor: --before %s --before-id %s\n", nb, nbid)
+		}
+	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {

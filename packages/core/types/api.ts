@@ -12,6 +12,7 @@ export interface CreateIssueRequest {
   assignee_id?: string;
   parent_issue_id?: string;
   project_id?: string;
+  start_date?: string;
   due_date?: string;
   attachment_ids?: string[];
 }
@@ -24,6 +25,7 @@ export interface UpdateIssueRequest {
   assignee_type?: IssueAssigneeType | null;
   assignee_id?: string | null;
   position?: number;
+  start_date?: string | null;
   due_date?: string | null;
   parent_issue_id?: string | null;
   project_id?: string | null;
@@ -110,6 +112,8 @@ export interface ListIssuesCache {
 export interface SearchIssueResult extends Issue {
   match_source: "title" | "description" | "comment";
   matched_snippet?: string;
+  matched_description_snippet?: string;
+  matched_comment_snippet?: string;
 }
 
 export interface SearchIssuesResponse {

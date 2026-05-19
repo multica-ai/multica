@@ -254,6 +254,7 @@
     "empty_waitlist_subtitle": "We'll host the runtime for you — no local install, no setup. Not live yet; click to leave your email and get notified.",
     "empty_waitlist_action": "Join waitlist",
     "empty_waitlist_done": "On the waitlist",
+    "empty_install_link": "Install an agent runtime →",
     "dialog_title": "Join the cloud runtime waitlist",
     "dialog_description": "Cloud runtimes aren't live yet. Leave your email and we'll email you when they are.",
     "dialog_close": "Close",

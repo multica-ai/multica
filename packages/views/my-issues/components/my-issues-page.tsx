@@ -136,7 +136,14 @@ export function MyIssuesPage() {
     (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position">) => {
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
-        { onError: () => toast.error(t(($) => $.errors.move_failed)) },
+        {
+          onError: (err) =>
+            toast.error(
+              err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.errors.move_failed),
+            ),
+        },
       );
     },
     [updateIssueMutation, t],

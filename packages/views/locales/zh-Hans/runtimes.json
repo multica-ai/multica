@@ -27,6 +27,38 @@
       "hint": "通常需要几秒钟。守护进程正在向工作区注册。"
     }
   },
+  "machine": {
+    "search_placeholder": "搜索机器...",
+    "filters": {
+      "all": "全部",
+      "online": "在线",
+      "issues": "异常"
+    },
+    "section_local": "本机",
+    "section_remote": "远程",
+    "section_cloud": "云端",
+    "this_machine": "本机",
+    "local_badge": "本地 · 这台机器",
+    "runtime_count_other": "{{count}} 个运行时",
+    "busy_count_other": "{{count}} 个忙碌",
+    "no_matches_title": "没有机器",
+    "no_matches_hint": "没有机器匹配当前搜索或筛选。",
+    "select_machine": "选择一台机器查看它的运行时。",
+    "metrics": {
+      "runtimes": "运行时",
+      "runtimes_hint_other": "{{count}} 个在线",
+      "health": "健康度",
+      "health_clear": "无异常",
+      "health_issues_other": "{{count}} 个异常",
+      "workload": "工作负载",
+      "workload_value_idle": "空闲",
+      "workload_idle": "全部空闲",
+      "workload_hint": "{{running}} 个运行中 · {{queued}} 个排队中",
+      "cli": "CLI",
+      "cloud_worker": "云端 worker",
+      "local_daemon": "本地守护进程"
+    }
+  },
   "health": {
     "online": {
       "label": "在线",

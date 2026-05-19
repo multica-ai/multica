@@ -537,7 +537,13 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
   );
 }
 
-export function IssueDisplayControls({ scopedIssues }: { scopedIssues: Issue[] }) {
+export function IssueDisplayControls({
+  scopedIssues,
+  hideViewToggle = false,
+}: {
+  scopedIssues: Issue[];
+  hideViewToggle?: boolean;
+}) {
   const { t } = useT("issues");
   const viewMode = useViewStore((s) => s.viewMode);
   const statusFilters = useViewStore((s) => s.statusFilters);
@@ -568,9 +574,10 @@ export function IssueDisplayControls({ scopedIssues }: { scopedIssues: Issue[] }
       labelFilters,
     }) > 0;
 
-  const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_priority" | "sort_due_date" | "sort_created" | "sort_title"> = {
+  const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_priority" | "sort_start_date" | "sort_due_date" | "sort_created" | "sort_title"> = {
     position: "sort_manual",
     priority: "sort_priority",
+    start_date: "sort_start_date",
     due_date: "sort_due_date",
     created_at: "sort_created",
     title: "sort_title",
@@ -579,10 +586,11 @@ export function IssueDisplayControls({ scopedIssues }: { scopedIssues: Issue[] }
     status: "group_status",
     assignee: "group_assignee",
   };
-  const CARD_PROPERTY_LABEL_KEY: Record<typeof CARD_PROPERTY_OPTIONS[number]["key"], "card_priority" | "card_description" | "card_assignee" | "card_due_date" | "card_project" | "card_labels" | "card_child_progress"> = {
+  const CARD_PROPERTY_LABEL_KEY: Record<typeof CARD_PROPERTY_OPTIONS[number]["key"], "card_priority" | "card_description" | "card_assignee" | "card_start_date" | "card_due_date" | "card_project" | "card_labels" | "card_child_progress"> = {
     priority: "card_priority",
     description: "card_description",
     assignee: "card_assignee",
+    startDate: "card_start_date",
     dueDate: "card_due_date",
     project: "card_project",
     labels: "card_labels",
@@ -906,41 +914,43 @@ export function IssueDisplayControls({ scopedIssues }: { scopedIssues: Issue[] }
         </Popover>
 
         {/* View toggle */}
-        <DropdownMenu>
-          <Tooltip>
-            <DropdownMenuTrigger
-              render={
-                <TooltipTrigger
-                  render={
-                    <Button variant="outline" size="icon-sm" className="text-muted-foreground">
-                      {viewMode === "board" ? (
-                        <Columns3 className="size-4" />
-                      ) : (
-                        <List className="size-4" />
-                      )}
-                    </Button>
-                  }
-                />
-              }
-            />
-            <TooltipContent side="bottom">
-              {viewMode === "board" ? t(($) => $.view.tooltip_board) : t(($) => $.view.tooltip_list)}
-            </TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="end" className="w-auto">
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>{t(($) => $.view.section)}</DropdownMenuLabel>
-              <DropdownMenuItem onClick={() => act.setViewMode("board")}>
-                <Columns3 />
-                {t(($) => $.view.board)}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => act.setViewMode("list")}>
-                <List />
-                {t(($) => $.view.list)}
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {!hideViewToggle && (
+          <DropdownMenu>
+            <Tooltip>
+              <DropdownMenuTrigger
+                render={
+                  <TooltipTrigger
+                    render={
+                      <Button variant="outline" size="icon-sm" className="text-muted-foreground">
+                        {viewMode === "board" ? (
+                          <Columns3 className="size-4" />
+                        ) : (
+                          <List className="size-4" />
+                        )}
+                      </Button>
+                    }
+                  />
+                }
+              />
+              <TooltipContent side="bottom">
+                {viewMode === "board" ? t(($) => $.view.tooltip_board) : t(($) => $.view.tooltip_list)}
+              </TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end" className="w-auto">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>{t(($) => $.view.section)}</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => act.setViewMode("board")}>
+                  <Columns3 />
+                  {t(($) => $.view.board)}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => act.setViewMode("list")}>
+                  <List />
+                  {t(($) => $.view.list)}
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
     </div>
   );
 }

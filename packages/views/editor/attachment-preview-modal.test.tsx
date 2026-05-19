@@ -50,6 +50,37 @@ vi.mock("./use-download-attachment", () => ({
   useDownloadAttachment: () => downloadMock,
 }));
 
+// Module-level flags toggled per-test: simulate desktop (openInNewTab
+// adapter present) vs web (omitted), and the no-slug case where the
+// modal sits outside a workspace route.
+const { openInNewTabMock, getShareableUrlMock, navState, slugState } =
+  vi.hoisted(() => ({
+    openInNewTabMock: vi.fn(),
+    getShareableUrlMock: vi.fn((p: string) => `https://app.example${p}`),
+    navState: { hasOpenInNewTab: true },
+    slugState: { value: "acme" as string | null },
+  }));
+
+vi.mock("../navigation", () => ({
+  useNavigation: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    pathname: "/acme/issues",
+    searchParams: new URLSearchParams(),
+    ...(navState.hasOpenInNewTab ? { openInNewTab: openInNewTabMock } : {}),
+    getShareableUrl: getShareableUrlMock,
+  }),
+}));
+
+vi.mock("@multica/core/paths", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/paths")>();
+  return {
+    ...actual,
+    useWorkspaceSlug: () => slugState.value,
+  };
+});
+
 // ReadonlyContent has a heavy import surface (lowlight + KaTeX + Mermaid).
 // Stub it so the markdown dispatch test only verifies wiring.
 vi.mock("./readonly-content", () => ({
@@ -71,6 +102,7 @@ vi.mock("../i18n", () => ({
           preview_unsupported: "This file type can't be previewed.",
           close: "Close",
           download_failed: "",
+          open_in_new_tab: "Open in new tab",
         },
       }),
   }),
@@ -113,6 +145,8 @@ function makeAttachment(overrides: Partial<Attachment> = {}): Attachment {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  navState.hasOpenInNewTab = true;
+  slugState.value = "acme";
 });
 
 afterEach(() => {
@@ -159,7 +193,7 @@ describe("AttachmentPreviewModal — dispatch", () => {
     expect(screen.getByTestId("readonly-content").textContent).toContain("# heading");
   });
 
-  it("renders an iframe with srcdoc + sandbox='' for HTML", async () => {
+  it("renders an iframe with srcdoc + sandbox='allow-scripts' for HTML", async () => {
     getAttachmentTextContentMock.mockResolvedValueOnce({
       text: "<p>hi</p>",
       originalContentType: "text/html",
@@ -170,7 +204,10 @@ describe("AttachmentPreviewModal — dispatch", () => {
     await waitFor(() => {
       const frame = document.querySelector("iframe[sandbox]") as HTMLIFrameElement | null;
       expect(frame).toBeTruthy();
-      expect(frame?.getAttribute("sandbox")).toBe("");
+      // `allow-scripts` is required so vanilla-JS chart libraries render
+      // (MUL-2330). The combination with `allow-same-origin` would defeat
+      // the sandbox, so this assertion must stay exact.
+      expect(frame?.getAttribute("sandbox")).toBe("allow-scripts");
       expect(frame?.getAttribute("srcdoc")).toBe("<p>hi</p>");
     });
   });
@@ -312,6 +349,114 @@ describe("AttachmentPreviewModal — URL-only source", () => {
     fireEvent.click(button);
     expect(openExternalMock).toHaveBeenCalledWith(url);
     expect(downloadMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("AttachmentPreviewModal — open-in-new-tab (HTML only)", () => {
+  it("renders the open-in-new-tab button in the header for HTML attachments", async () => {
+    getAttachmentTextContentMock.mockResolvedValueOnce({
+      text: "<p>hi</p>",
+      originalContentType: "text/html",
+    });
+    const att = makeAttachment({
+      filename: "report.html",
+      content_type: "text/html",
+    });
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByTitle("Open in new tab")).toBeTruthy();
+  });
+
+  it("invokes navigation.openInNewTab with the preview path when available (desktop)", async () => {
+    getAttachmentTextContentMock.mockResolvedValueOnce({
+      text: "<p>hi</p>",
+      originalContentType: "text/html",
+    });
+    const att = makeAttachment({
+      filename: "report.html",
+      content_type: "text/html",
+    });
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByTitle("Open in new tab"));
+    expect(openInNewTabMock).toHaveBeenCalledWith(
+      "/acme/attachments/att-1/preview?name=report.html",
+      "report.html",
+    );
+  });
+
+  it("falls back to window.open against the shareable URL on web", async () => {
+    navState.hasOpenInNewTab = false;
+    getAttachmentTextContentMock.mockResolvedValueOnce({
+      text: "<p>hi</p>",
+      originalContentType: "text/html",
+    });
+    const windowOpenSpy = vi
+      .spyOn(window, "open")
+      .mockImplementation(() => null);
+    const att = makeAttachment({
+      filename: "report.html",
+      content_type: "text/html",
+    });
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByTitle("Open in new tab"));
+    expect(openInNewTabMock).not.toHaveBeenCalled();
+    expect(windowOpenSpy).toHaveBeenCalledWith(
+      "https://app.example/acme/attachments/att-1/preview?name=report.html",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  });
+
+  it("does not render the new-tab button for non-HTML kinds", () => {
+    const att = makeAttachment({
+      filename: "manual.pdf",
+      content_type: "application/pdf",
+    });
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.queryByTitle("Open in new tab")).toBeNull();
+  });
+
+  it("does not render the new-tab button when there is no workspace slug", async () => {
+    slugState.value = null;
+    getAttachmentTextContentMock.mockResolvedValueOnce({
+      text: "<p>hi</p>",
+      originalContentType: "text/html",
+    });
+    const att = makeAttachment({
+      filename: "report.html",
+      content_type: "text/html",
+    });
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.queryByTitle("Open in new tab")).toBeNull();
   });
 });
 
