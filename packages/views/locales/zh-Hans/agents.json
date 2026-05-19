@@ -310,6 +310,9 @@
       "empty_30d": "近 30 天没有任何完成记录。",
       "empty_recent": "这个智能体还没有完成过任何 task。",
       "show_more": "查看更多 →",
+      "sort_recent_aria": "排序最近工作",
+      "sort_newest_first": "最新优先",
+      "sort_oldest_first": "最旧优先",
       "runs_other": "次运行",
       "success_pct": "{{percent}}% 成功",
       "avg_duration": "平均 {{value}}",
@@ -383,7 +386,7 @@
     "waiting_events": "等待事件中...",
     "no_data": "未记录执行数据。",
     "sort_label": "排序",
-    "sort_chronological": "时间顺序",
+    "sort_chronological": "最旧优先",
     "sort_newest_first": "最新在前"
   },
   "task_failure": {

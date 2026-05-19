@@ -3,6 +3,7 @@ import type { AgentTask } from "@multica/core/types";
 import {
   deriveAvgDurationLast30d,
   formatDurationMs,
+  getRecentWorkflowTasks,
 } from "./activity-tab";
 
 const NOW = new Date("2026-04-28T12:00:00Z").getTime();
@@ -82,6 +83,58 @@ describe("deriveAvgDurationLast30d", () => {
       }), // 4s
     ];
     expect(deriveAvgDurationLast30d(tasks, NOW)).toBe(4000);
+  });
+});
+
+describe("getRecentWorkflowTasks", () => {
+  it("returns only terminal workflow tasks newest first", () => {
+    const tasks = [
+      task({
+        id: "old",
+        completed_at: "2026-04-28T10:00:00Z",
+      }),
+      task({
+        id: "new",
+        completed_at: "2026-04-28T11:00:00Z",
+      }),
+      task({
+        id: "running",
+        status: "running",
+        completed_at: null,
+      }),
+      task({
+        id: "chat",
+        chat_session_id: "chat-1",
+        completed_at: "2026-04-28T12:00:00Z",
+      }),
+    ];
+
+    expect(
+      getRecentWorkflowTasks(tasks, "newest_first").map((t) => t.id),
+    ).toEqual(["new", "old"]);
+  });
+
+  it("can return terminal workflow tasks oldest first", () => {
+    const tasks = [
+      task({
+        id: "new",
+        completed_at: "2026-04-28T11:00:00Z",
+      }),
+      task({
+        id: "cancelled",
+        status: "cancelled",
+        completed_at: "2026-04-28T10:30:00Z",
+      }),
+      task({
+        id: "old",
+        status: "failed",
+        completed_at: "2026-04-28T10:00:00Z",
+      }),
+    ];
+
+    expect(
+      getRecentWorkflowTasks(tasks, "oldest_first").map((t) => t.id),
+    ).toEqual(["old", "cancelled", "new"]);
   });
 });
 

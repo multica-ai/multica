@@ -50,6 +50,8 @@ const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const RECENT_INITIAL = 5;
 const RECENT_PAGE = 20;
 
+type RecentWorkSortDirection = "newest_first" | "oldest_first";
+
 interface ActivityTabProps {
   agent: Agent;
 }
@@ -76,13 +78,13 @@ export function ActivityTab({ agent }: ActivityTabProps) {
   const activity = activityMap.get(agent.id);
 
   const [recentDisplayLimit, setRecentDisplayLimit] = useState(RECENT_INITIAL);
+  const [recentSortDirection, setRecentSortDirection] =
+    useState<RecentWorkSortDirection>("newest_first");
 
   // Chat tasks are intentionally hidden across every Agent-scoped surface
   // (list / detail / activity). They have their own UI in the chat
   // experience; mixing them in here muddies "what is this agent doing
   // for the team" with "what is this agent doing in private chat".
-  const isWorkflowTask = (t: AgentTask) => !t.chat_session_id;
-
   const activeTasks = useMemo(() => {
     return snapshot.filter(
       (t) =>
@@ -98,21 +100,8 @@ export function ActivityTab({ agent }: ActivityTabProps) {
   // "what just happened" want to see cancellations alongside completions
   // and failures. Chat sessions filtered out for the same reason as above.
   const recentTasksAll = useMemo(() => {
-    return [...agentTasks]
-      .filter(
-        (t) =>
-          isWorkflowTask(t) &&
-          !!t.completed_at &&
-          (t.status === "completed" ||
-            t.status === "failed" ||
-            t.status === "cancelled"),
-      )
-      .sort(
-        (a, b) =>
-          new Date(b.completed_at!).getTime() -
-          new Date(a.completed_at!).getTime(),
-      );
-  }, [agentTasks]);
+    return getRecentWorkflowTasks(agentTasks, recentSortDirection);
+  }, [agentTasks, recentSortDirection]);
 
   const recentTasks = useMemo(
     () => recentTasksAll.slice(0, recentDisplayLimit),
@@ -162,6 +151,8 @@ export function ActivityTab({ agent }: ActivityTabProps) {
         onShowMore={() =>
           setRecentDisplayLimit((n) => n + RECENT_PAGE)
         }
+        sortDirection={recentSortDirection}
+        onSortDirectionChange={setRecentSortDirection}
         issueMap={issueMap}
         agent={agent}
       />
@@ -271,6 +262,8 @@ function RecentWorkSection({
   totalCount,
   hasMore,
   onShowMore,
+  sortDirection,
+  onSortDirectionChange,
   issueMap,
   agent,
 }: {
@@ -278,6 +271,8 @@ function RecentWorkSection({
   totalCount: number;
   hasMore: boolean;
   onShowMore: () => void;
+  sortDirection: RecentWorkSortDirection;
+  onSortDirectionChange: (direction: RecentWorkSortDirection) => void;
   issueMap: Map<string, Issue>;
   agent: Agent;
 }) {
@@ -289,7 +284,18 @@ function RecentWorkSection({
         ? t(($) => $.tab_body.activity.subtitle_recent_progress, { shown: tasks.length, total: totalCount })
         : t(($) => $.tab_body.activity.subtitle_recent_latest, { count: tasks.length });
   return (
-    <Section title={t(($) => $.tab_body.activity.section_recent)} subtitle={subtitle}>
+    <Section
+      title={t(($) => $.tab_body.activity.section_recent)}
+      subtitle={subtitle}
+      actions={
+        totalCount > 0 ? (
+          <RecentWorkSortToggle
+            value={sortDirection}
+            onChange={onSortDirectionChange}
+          />
+        ) : null
+      }
+    >
       {tasks.length === 0 ? (
         <EmptyText>{t(($) => $.tab_body.activity.empty_recent)}</EmptyText>
       ) : (
@@ -312,6 +318,56 @@ function RecentWorkSection({
         </>
       )}
     </Section>
+  );
+}
+
+function RecentWorkSortToggle({
+  value,
+  onChange,
+}: {
+  value: RecentWorkSortDirection;
+  onChange: (direction: RecentWorkSortDirection) => void;
+}) {
+  const { t } = useT("agents");
+  const options: Array<{
+    value: RecentWorkSortDirection;
+    label: string;
+  }> = [
+    {
+      value: "newest_first",
+      label: t(($) => $.tab_body.activity.sort_newest_first),
+    },
+    {
+      value: "oldest_first",
+      label: t(($) => $.tab_body.activity.sort_oldest_first),
+    },
+  ];
+
+  return (
+    <div
+      role="group"
+      aria-label={t(($) => $.tab_body.activity.sort_recent_aria)}
+      className="inline-flex shrink-0 rounded-md border bg-muted/30 p-0.5"
+    >
+      {options.map((option) => {
+        const selected = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => onChange(option.value)}
+            className={`rounded-sm px-2 py-1 text-[11px] font-medium transition-colors ${
+              selected
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -569,19 +625,26 @@ function TaskRow({
 function Section({
   title,
   subtitle,
+  actions,
   children,
 }: {
   title: string;
   subtitle: string;
+  actions?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section className="flex flex-col gap-3 rounded-lg border bg-background p-5">
-      <div className="flex items-baseline gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          {title}
-        </h3>
-        <span className="text-[11px] text-muted-foreground/70">{subtitle}</span>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {title}
+          </h3>
+          <span className="text-[11px] text-muted-foreground/70">
+            {subtitle}
+          </span>
+        </div>
+        {actions}
       </div>
       {children}
     </section>
@@ -600,6 +663,31 @@ function Sep() {
 }
 
 type AgentsT = ReturnType<typeof useT<"agents">>["t"];
+
+function isWorkflowTask(task: AgentTask): boolean {
+  return !task.chat_session_id;
+}
+
+export function getRecentWorkflowTasks(
+  tasks: readonly AgentTask[],
+  sortDirection: RecentWorkSortDirection,
+): AgentTask[] {
+  const direction = sortDirection === "oldest_first" ? 1 : -1;
+  return [...tasks]
+    .filter(
+      (task) =>
+        isWorkflowTask(task) &&
+        !!task.completed_at &&
+        (task.status === "completed" ||
+          task.status === "failed" ||
+          task.status === "cancelled"),
+    )
+    .sort((a, b) => {
+      const aTime = new Date(a.completed_at!).getTime();
+      const bTime = new Date(b.completed_at!).getTime();
+      return (aTime - bTime) * direction;
+    });
+}
 
 function activeTaskTimeText(task: AgentTask, t: AgentsT): string {
   if (task.status === "running" && task.started_at) {

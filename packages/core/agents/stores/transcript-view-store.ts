@@ -14,7 +14,7 @@ interface TranscriptViewState {
 export const useTranscriptViewStore = create<TranscriptViewState>()(
   persist(
     (set) => ({
-      sortDirection: "chronological",
+      sortDirection: "newest_first",
       setSortDirection: (sortDirection) => set({ sortDirection }),
     }),
     {

@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { useTranscriptViewStore } from "./transcript-view-store";
 
 beforeEach(() => {
-  useTranscriptViewStore.setState({ sortDirection: "chronological" });
+  useTranscriptViewStore.setState(useTranscriptViewStore.getInitialState(), true);
 });
 
 describe("useTranscriptViewStore", () => {
-  it("defaults to chronological so existing readers see no behavior change", () => {
-    expect(useTranscriptViewStore.getState().sortDirection).toBe("chronological");
+  it("defaults to newest first so the latest execution events are visible", () => {
+    expect(useTranscriptViewStore.getState().sortDirection).toBe("newest_first");
   });
 
   it("setSortDirection switches between the two known directions", () => {
