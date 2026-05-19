@@ -121,12 +121,14 @@ import {
   EMPTY_ATTACHMENT,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
+  EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_SQUAD_MEMBER_STATUS_LIST,
   EMPTY_TIMELINE_ENTRIES,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
   GroupedIssuesResponseSchema,
+  ListGitHubInstallationsResponseSchema,
   ListIssuesResponseSchema,
   ListWebhookDeliveriesResponseSchema,
   OnboardingNoRuntimeBootstrapResponseSchema,
@@ -1763,7 +1765,13 @@ export class ApiClient {
   }
 
   async listGitHubInstallations(workspaceId: string): Promise<ListGitHubInstallationsResponse> {
-    return this.fetch(`/api/workspaces/${workspaceId}/github/installations`);
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/github/installations`);
+    return parseWithFallback(
+      raw,
+      ListGitHubInstallationsResponseSchema,
+      EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/github/installations" },
+    );
   }
 
   async deleteGitHubInstallation(workspaceId: string, installationId: string): Promise<void> {

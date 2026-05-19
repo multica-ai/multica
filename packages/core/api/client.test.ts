@@ -259,6 +259,70 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("listGitHubInstallations", () => {
+    it("returns parsed installations for a well-formed response", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              configured: true,
+              installations: [
+                {
+                  id: "gh-inst-1",
+                  workspace_id: "workspace-1",
+                  installation_id: 123456,
+                  account_login: "multica-ai",
+                  account_type: "Organization",
+                  account_avatar_url: "https://example.test/avatar.png",
+                  created_at: "2026-05-19T00:00:00Z",
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const response = await client.listGitHubInstallations("workspace-1");
+
+      expect(response.configured).toBe(true);
+      expect(response.installations).toHaveLength(1);
+      expect(response.installations[0]?.account_login).toBe("multica-ai");
+      expect(response.installations[0]?.account_avatar_url).toBe(
+        "https://example.test/avatar.png",
+      );
+    });
+
+    it("falls back to an empty response when the installation shape drifts", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              configured: true,
+              installations: [
+                {
+                  id: "gh-inst-1",
+                  installation_id: "123456",
+                  account_login: "multica-ai",
+                  account_type: "Organization",
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const response = await client.listGitHubInstallations("workspace-1");
+
+      expect(response).toEqual({ configured: false, installations: [] });
+    });
+  });
+
   describe("chat attachment wiring", () => {
     it("uploadFile includes chat_session_id in the FormData body", async () => {
       const fetchMock = vi.fn().mockResolvedValue(

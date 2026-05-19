@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Building2, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
@@ -32,14 +33,22 @@ export function IntegrationsTab() {
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManage = currentMember?.role === "owner" || currentMember?.role === "admin";
 
-  // Only used to gate the Connect button + show a "not configured" hint;
-  // we no longer render the installation list here — admins manage existing
-  // installations on GitHub directly via the Connect flow.
   const { data } = useQuery({
     ...githubInstallationsOptions(wsId),
     enabled: !!wsId && canManage,
   });
   const configured = data?.configured ?? false;
+  const installations = data?.installations ?? [];
+
+  function getAccountTypeLabel(accountType: string): string {
+    if (accountType === "Organization") {
+      return t(($) => $.integrations.account_type_organization);
+    }
+    if (accountType === "User") {
+      return t(($) => $.integrations.account_type_user);
+    }
+    return accountType || t(($) => $.integrations.account_type_unknown);
+  }
 
   async function handleConnect() {
     setConnecting(true);
@@ -100,6 +109,67 @@ export function IntegrationsTab() {
                 {t(($) => $.integrations.not_configured_and)}{" "}
                 <code className="rounded bg-muted px-1 py-0.5 text-[10px]">GITHUB_WEBHOOK_SECRET</code>.
               </p>
+            )}
+
+            {canManage && configured && (
+              <div className="border-t pt-4">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {t(($) => $.integrations.installations_title)}
+                  </p>
+                  <span className="text-xs tabular-nums text-muted-foreground">
+                    {installations.length}
+                  </span>
+                </div>
+
+                {installations.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    {t(($) => $.integrations.installations_empty)}
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {installations.map((installation) => {
+                      const isOrganization = installation.account_type === "Organization";
+                      const AccountIcon = isOrganization ? Building2 : UserRound;
+                      const accountTypeLabel = getAccountTypeLabel(installation.account_type);
+
+                      return (
+                        <div
+                          key={installation.id}
+                          className="flex items-center gap-3 rounded-md border bg-muted/30 px-3 py-2"
+                        >
+                          {installation.account_avatar_url ? (
+                            <img
+                              src={installation.account_avatar_url}
+                              alt=""
+                              className="h-8 w-8 rounded-full bg-muted"
+                            />
+                          ) : (
+                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                              <AccountIcon className="h-4 w-4" />
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <p className="truncate text-sm font-medium">
+                                {installation.account_login}
+                              </p>
+                              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                {accountTypeLabel}
+                              </span>
+                            </div>
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              {t(($) => $.integrations.installation_id, {
+                                id: installation.installation_id,
+                              })}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             )}
 
             {!canManage && (

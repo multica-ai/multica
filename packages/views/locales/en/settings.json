@@ -171,6 +171,12 @@
     "connect_disabled_tooltip": "GitHub App is not configured on this server",
     "not_configured": "GitHub integration is not configured for this deployment. Operators must set",
     "not_configured_and": "and",
+    "installations_title": "Connected GitHub accounts",
+    "installations_empty": "No GitHub accounts connected yet.",
+    "installation_id": "Installation #{{id}}",
+    "account_type_user": "User",
+    "account_type_organization": "Organization",
+    "account_type_unknown": "Account",
     "manage_hint": "Only admins and owners can manage integrations.",
     "toast_not_configured": "GitHub integration is not configured for this deployment",
     "toast_open_failed": "Failed to open GitHub install"

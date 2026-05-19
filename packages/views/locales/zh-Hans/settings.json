@@ -171,6 +171,12 @@
     "connect_disabled_tooltip": "服务端未配置 GitHub App",
     "not_configured": "当前部署没有配置 GitHub 集成。运维需要设置",
     "not_configured_and": "和",
+    "installations_title": "已连接的 GitHub 账号",
+    "installations_empty": "暂无已连接的 GitHub 账号。",
+    "installation_id": "安装 ID：{{id}}",
+    "account_type_user": "用户",
+    "account_type_organization": "组织",
+    "account_type_unknown": "账号",
     "manage_hint": "只有管理员和所有者可以管理集成。",
     "toast_not_configured": "当前部署未配置 GitHub 集成",
     "toast_open_failed": "打开 GitHub 安装页失败"

@@ -6,6 +6,7 @@ import type {
   Attachment,
   CreateAgentFromTemplateResponse,
   GroupedIssuesResponse,
+  ListGitHubInstallationsResponse,
   ListIssuesResponse,
   ListWebhookDeliveriesResponse,
   TimelineEntry,
@@ -413,6 +414,29 @@ export interface DuplicateIssueErrorBody {
     title: string;
   };
 }
+
+// GitHub installations: backs Settings > Integrations. This is an installed
+// desktop boundary, so the response is parsed defensively before the UI reads
+// the installation list.
+const GitHubInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  installation_id: z.number(),
+  account_login: z.string(),
+  account_type: z.string(),
+  account_avatar_url: z.string().nullable().optional().transform((v) => v ?? null),
+  created_at: z.string(),
+}).loose();
+
+export const ListGitHubInstallationsResponseSchema = z.object({
+  installations: z.array(GitHubInstallationSchema).default([]),
+  configured: z.boolean().default(false),
+}).loose();
+
+export const EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE: ListGitHubInstallationsResponse = {
+  installations: [],
+  configured: false,
+};
 
 // ---------------------------------------------------------------------------
 // Webhook delivery schemas — backing the Autopilot Deliveries section. Enums
