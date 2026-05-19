@@ -87,7 +87,8 @@ import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker
 import { useMoveCommentToSubIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
-import { PrivacyToggle } from "@multica/cerebro-access/views";
+// CEREBRO-PATCH(issue-private-badge-import): inherited-privacy badge in issue header (JEH-1750).
+import { PrivacyToggle, PrivateBadge } from "@multica/cerebro-access/views";
 import { RestrictedRef } from "@multica/cerebro-access/views";
 // CEREBRO-PATCH(mention-access-prefetch): JEH-1250 — warm the project-members
 // cache when viewing an issue in a restricted project so the @mention picker
@@ -1571,6 +1572,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 )}
               </>
             )}
+            {/* CEREBRO-PATCH(issue-private-badge-header): inherited-privacy badge in issue header (JEH-1750). */}
+            {issue.is_private && <PrivateBadge size="sm" className="ml-1 shrink-0" />}
           </div>
           <div className="flex items-center gap-1 shrink-0">
             {/* CEREBRO-PATCH(issue-detail-unarchive-toolbar): JEH-1321 — render unarchive icon when host (archived inbox view) supplies handler. */}

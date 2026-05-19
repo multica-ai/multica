@@ -50,6 +50,8 @@ import type { AgentTask } from "@multica/core/types/agent";
 import { ReadonlyContent } from "../../editor";
 import { TranscriptButton } from "../../common/task-transcript";
 import { AutopilotDialog } from "./autopilot-dialog";
+// CEREBRO-PATCH(autopilot-private-badge-import): owner-only autopilot badge (JEH-1750).
+import { PrivateBadge } from "@multica/cerebro-access/views";
 import { useT } from "../../i18n";
 
 function formatDate(date: string): string {
@@ -468,6 +470,8 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           </AppLink>
           <span className="text-muted-foreground shrink-0">/</span>
           <h1 className="text-sm font-medium truncate">{autopilot.title}</h1>
+          {/* CEREBRO-PATCH(autopilot-private-badge-header): owner-only autopilot badge (JEH-1750). */}
+          {autopilot.is_private && <PrivateBadge className="ml-1 shrink-0" />}
           <div className="ml-1 flex items-center gap-1.5 shrink-0">
             <Switch
               size="sm"
@@ -615,6 +619,8 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             execution_mode: autopilot.execution_mode as AutopilotExecutionMode,
             // CEREBRO-PATCH(autopilot-model-edit-seed): seed model picker on edit (JEH-1310).
             model: autopilot.model ?? null,
+            // CEREBRO-PATCH(autopilot-privacy-edit-seed): seed privacy toggle on edit (JEH-1750).
+            is_private: autopilot.is_private,
           }}
           triggers={triggers}
         />

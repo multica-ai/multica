@@ -51,6 +51,8 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { AgentPicker } from "./pickers/agent-picker";
 // CEREBRO-PATCH(autopilot-model-section-import): per-autopilot model override (JEH-1310).
 import { CerebroAutopilotModelSection } from "./cerebro-autopilot-model-section";
+// CEREBRO-PATCH(autopilot-privacy-section-import): owner-only autopilot toggle (JEH-1750).
+import { AutopilotPrivacySection } from "@multica/cerebro-access/views";
 import {
   getDefaultTriggerConfig,
   getLocalTimezone,
@@ -72,6 +74,8 @@ export interface AutopilotInitial {
   execution_mode: AutopilotExecutionMode;
   // CEREBRO-PATCH(autopilot-model-initial): seed model picker on edit (JEH-1310).
   model?: string | null;
+  // CEREBRO-PATCH(autopilot-privacy-initial): seed privacy toggle on edit (JEH-1750).
+  is_private?: boolean;
 }
 
 export type AutopilotDialogProps =
@@ -256,6 +260,9 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   );
   // CEREBRO-PATCH(autopilot-model-state): per-autopilot model override (JEH-1310).
   const [modelOverride, setModelOverride] = useState<string | null>(initial.model ?? null);
+  // CEREBRO-PATCH(autopilot-privacy-state): owner-only autopilot toggle (JEH-1750).
+  const initialIsPrivate = initial.is_private ?? false;
+  const [isPrivate, setIsPrivate] = useState<boolean>(initialIsPrivate);
 
   const initialCfg: TriggerConfig = (() => {
     if (isCreate) {
@@ -309,6 +316,8 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           execution_mode: executionMode,
           // CEREBRO-PATCH(autopilot-model-create-submit): include model override (JEH-1310).
           ...(modelOverride ? { model: modelOverride } : {}),
+          // CEREBRO-PATCH(autopilot-privacy-create-submit): include privacy flag (JEH-1750).
+          is_private: isPrivate,
         });
         let scheduleOk = true;
         try {
@@ -333,6 +342,8 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           execution_mode: executionMode,
           // CEREBRO-PATCH(autopilot-model-update-submit): include model override; null clears (JEH-1310).
           model: modelOverride,
+          // CEREBRO-PATCH(autopilot-privacy-update-submit): include privacy flag (JEH-1750).
+          is_private: isPrivate,
         });
         let scheduleOk = true;
         if (scheduleDirty && !schedulePillDisabled) {
@@ -498,6 +509,9 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
             {/* CEREBRO-PATCH(autopilot-model-section-render): model override picker (JEH-1310). */}
             <CerebroAutopilotModelSection value={modelOverride} onChange={setModelOverride} />
+
+            {/* CEREBRO-PATCH(autopilot-privacy-section-render): owner-only autopilot toggle (JEH-1750). */}
+            <AutopilotPrivacySection value={isPrivate} onChange={setIsPrivate} initialIsPrivate={initialIsPrivate} />
 
             <ScheduleSection
               config={triggerConfig}

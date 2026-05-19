@@ -14,6 +14,8 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { AutopilotDialog } from "./autopilot-dialog";
+// CEREBRO-PATCH(autopilot-private-badge-list-import): owner-only autopilot badge (JEH-1750).
+import { PrivateBadge } from "@multica/cerebro-access/views";
 import type { Autopilot, AutopilotStatus, AutopilotExecutionMode } from "@multica/core/types";
 import type { TriggerFrequency } from "./trigger-config";
 import { useT } from "../../i18n";
@@ -143,6 +145,8 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
       >
         <Zap className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate font-medium">{autopilot.title}</span>
+        {/* CEREBRO-PATCH(autopilot-private-badge-list-row): owner-only autopilot badge (JEH-1750). */}
+        {autopilot.is_private && <PrivateBadge size="sm" className="shrink-0" />}
       </AppLink>
 
       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pl-6 text-xs sm:contents sm:pl-0">
