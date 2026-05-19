@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"html"
+	"log/slog"
 	"mime"
 	"mime/quotedprintable"
 	"net"
@@ -22,6 +23,39 @@ import (
 // a full phishing pitch into a workspace name that gets sent from our domain.
 const maxSubjectFieldRunes = 60
 
+// EmailSender is the interface that all email providers implement.
+type EmailSender interface {
+	SendVerificationCode(to, code string) error
+	SendInvitationEmail(to, inviterName, workspaceName, invitationID string) error
+}
+
+// NewEmailSender creates an EmailSender based on the EMAIL_PROVIDER env var.
+// Supported values: "" or "resend" (default), "ses", "smtp".
+// When EMAIL_PROVIDER is unset, the legacy auto-detection applies:
+// SMTP_HOST set → SMTP, else RESEND_API_KEY set → Resend, else DEV mode.
+func NewEmailSender() EmailSender {
+	provider := strings.ToLower(strings.TrimSpace(os.Getenv("EMAIL_PROVIDER")))
+	switch provider {
+	case "ses":
+		slog.Info("email provider configured", "provider", "ses")
+		return newSESSender()
+	case "smtp":
+		slog.Info("email provider configured", "provider", "smtp")
+		return newEmailService()
+	case "resend":
+		slog.Info("email provider configured", "provider", "resend")
+		return newEmailService()
+	default:
+		return newEmailService()
+	}
+}
+
+// NewEmailService creates the legacy SMTP+Resend email service (backward compat).
+func NewEmailService() *EmailService {
+	return newEmailService()
+}
+
+// EmailService implements EmailSender using SMTP relay or Resend API.
 type EmailService struct {
 	client          *resend.Client
 	fromEmail       string
@@ -32,7 +66,7 @@ type EmailService struct {
 	smtpTLSInsecure bool
 }
 
-func NewEmailService() *EmailService {
+func newEmailService() *EmailService {
 	apiKey := os.Getenv("RESEND_API_KEY")
 	from := strings.TrimSpace(os.Getenv("RESEND_FROM_EMAIL"))
 	if from == "" {
@@ -262,4 +296,63 @@ func sanitizeSubjectField(s string) string {
 	}
 	runes := []rune(cleaned)
 	return string(runes[:maxSubjectFieldRunes-1]) + "…"
+}
+
+// ---------- shared templates (used by all providers) ----------
+
+func verificationHTML(code string) string {
+	return fmt.Sprintf(
+		`<div style="font-family: sans-serif; max-width: 400px; margin: 0 auto;">
+			<h2>Your verification code</h2>
+			<p style="font-size: 32px; font-weight: bold; letter-spacing: 8px; margin: 24px 0;">%s</p>
+			<p>This code expires in 10 minutes.</p>
+			<p style="color: #666; font-size: 14px;">If you didn't request this code, you can safely ignore this email.</p>
+		</div>`, code)
+}
+
+func verificationText(code string) string {
+	return fmt.Sprintf("Your Multica verification code is: %s\n\nThis code expires in 10 minutes.\nIf you didn't request this code, you can safely ignore this email.", code)
+}
+
+func invitationHTML(inviterName, workspaceName, link string) string {
+	safeWorkspace := html.EscapeString(workspaceName)
+	safeInviter := html.EscapeString(inviterName)
+	return fmt.Sprintf(
+		`<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+			<h2>You're invited to join %s</h2>
+			<p><strong>%s</strong> invited you to collaborate in the <strong>%s</strong> workspace on Multica.</p>
+			<p style="margin: 24px 0;">
+				<a href="%s" style="display: inline-block; padding: 12px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 500;">Accept invitation</a>
+			</p>
+			<p style="color: #666; font-size: 14px;">You'll need to log in to accept or decline the invitation.</p>
+		</div>`, safeWorkspace, safeInviter, safeWorkspace, link)
+}
+
+func invitationText(inviterName, workspaceName, link string) string {
+	return fmt.Sprintf("%s invited you to collaborate in the %s workspace on Multica.\n\nAccept the invitation: %s", inviterName, workspaceName, link)
+}
+
+func invitationSubject(inviterName, workspaceName string) string {
+	return fmt.Sprintf("%s invited you to %s on Multica",
+		sanitizeSubjectField(inviterName),
+		sanitizeSubjectField(workspaceName))
+}
+
+func buildInviteURL(invitationID string) string {
+	appURL := strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN"))
+	if appURL == "" {
+		appURL = "https://app.multica.ai"
+	}
+	return fmt.Sprintf("%s/invite/%s", appURL, invitationID)
+}
+
+func fromEmailWithFallback(envKey string) string {
+	from := strings.TrimSpace(os.Getenv(envKey))
+	if from == "" {
+		from = strings.TrimSpace(os.Getenv("RESEND_FROM_EMAIL"))
+	}
+	if from == "" {
+		from = "noreply@multica.ai"
+	}
+	return from
 }

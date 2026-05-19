@@ -179,3 +179,49 @@ func TestBuildInvitationParams_ToAndFromPassedThrough(t *testing.T) {
 		t.Errorf("body missing invite URL: %s", p.Html)
 	}
 }
+
+func TestNewEmailSender_ReturnsInterface(t *testing.T) {
+	sender := NewEmailSender()
+	if sender == nil {
+		t.Fatal("NewEmailSender returned nil")
+	}
+	var _ EmailSender = sender
+}
+
+func TestNewEmailSender_SES_DevMode(t *testing.T) {
+	t.Setenv("EMAIL_PROVIDER", "ses")
+	sender := NewEmailSender()
+	if sender == nil {
+		t.Fatal("NewEmailSender(ses) returned nil")
+	}
+	ses, ok := sender.(*sesSender)
+	if !ok {
+		t.Fatal("expected *sesSender")
+	}
+	if ses.fromEmail == "" {
+		t.Error("fromEmail should not be empty")
+	}
+}
+
+func TestVerificationHTML_ContainsCode(t *testing.T) {
+	html := verificationHTML("123456")
+	if !strings.Contains(html, "123456") {
+		t.Error("verification HTML should contain the code")
+	}
+}
+
+func TestInvitationHTML_EscapesHTML(t *testing.T) {
+	html := invitationHTML("<script>alert(1)</script>", "Acme", "https://example.com")
+	if strings.Contains(html, "<script>") {
+		t.Error("invitationHTML should escape HTML in inviter name")
+	}
+}
+
+func TestFromEmailWithFallback(t *testing.T) {
+	t.Setenv("SES_FROM_EMAIL", "")
+	t.Setenv("RESEND_FROM_EMAIL", "custom@example.com")
+	got := fromEmailWithFallback("SES_FROM_EMAIL")
+	if got != "custom@example.com" {
+		t.Errorf("expected fallback to RESEND_FROM_EMAIL, got %q", got)
+	}
+}

@@ -25,21 +25,33 @@ These have sensible defaults and only need to be set when tuning a large or cons
 
 ### Email (Required for Authentication)
 
-Multica supports two email backends. `SMTP_HOST` takes priority when set; otherwise `RESEND_API_KEY` is used. With neither configured, verification codes are printed to the server log — copy them from there to log in.
+Multica supports three email providers. Set `EMAIL_PROVIDER` to choose one explicitly, or leave it unset for legacy auto-detection (`SMTP_HOST` → SMTP, else `RESEND_API_KEY` → Resend, else DEV mode). With no email backend configured, verification codes are printed to the server log — copy them from there to log in.
 
-#### Option A: Resend (recommended for cloud deployments)
+#### Option A: Resend (default, recommended for cloud deployments)
 
 | Variable | Description |
 |----------|-------------|
-| `RESEND_API_KEY` | Your Resend API key |
+| `EMAIL_PROVIDER` | Leave empty or set to `resend` |
+| `RESEND_API_KEY` | Your [Resend](https://resend.com) API key |
 | `RESEND_FROM_EMAIL` | Sender email address (default: `noreply@multica.ai`) |
 
-#### Option B: SMTP relay (for self-hosted / on-premise deployments)
+#### Option B: AWS SES
 
-Use this option when your deployment cannot reach the public internet or you already have an internal mail relay (e.g. Exchange, Postfix, SendGrid on-prem).
+| Variable | Description |
+|----------|-------------|
+| `EMAIL_PROVIDER` | `ses` |
+| `SES_REGION` | AWS region for SES (defaults to `AWS_DEFAULT_REGION`, then `us-east-1`) |
+| `SES_FROM_EMAIL` | Sender email address (falls back to `RESEND_FROM_EMAIL`, then `noreply@multica.ai`) |
+
+SES uses the default AWS credentials chain — IAM role on EC2/ECS, environment variables (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`), or `~/.aws/credentials`. The sender address must be verified in your SES account (or you must be out of the SES sandbox).
+
+#### Option C: SMTP relay (for self-hosted / on-premise deployments)
+
+Use this option when your deployment cannot reach the public internet or you already have an internal mail relay (e.g. Exchange, Postfix, SendGrid on-prem, or AWS SES SMTP interface).
 
 | Variable | Description | Default |
 |----------|-------------|----------|
+| `EMAIL_PROVIDER` | `smtp` (or just set `SMTP_HOST` — auto-detected) | - |
 | `SMTP_HOST` | SMTP relay hostname (setting this activates SMTP mode) | - |
 | `SMTP_PORT` | SMTP port | `25` |
 | `SMTP_USERNAME` | SMTP username (leave empty for unauthenticated relay) | - |
@@ -48,7 +60,7 @@ Use this option when your deployment cannot reach the public internet or you alr
 
 STARTTLS is used automatically when advertised by the server. Port 465 (SMTPS / implicit TLS) is not currently supported - use ports 25 or 587 with STARTTLS.
 
-> **Note:** If neither Resend nor SMTP is configured, generated verification codes are printed to backend logs — copy them from there to log in. A fixed local testing code (e.g. `888888`) is **opt-in only**: set `MULTICA_DEV_VERIFICATION_CODE=888888` in `.env` and keep `APP_ENV` non-production. The Docker self-host stack pins `APP_ENV=production`, so the shortcut is ignored there. **Never enable a fixed code on a publicly reachable instance.**
+> **Note:** If no email backend is configured, generated verification codes are printed to backend logs — copy them from there to log in. A fixed local testing code (e.g. `888888`) is **opt-in only**: set `MULTICA_DEV_VERIFICATION_CODE=888888` in `.env` and keep `APP_ENV` non-production. The Docker self-host stack pins `APP_ENV=production`, so the shortcut is ignored there. **Never enable a fixed code on a publicly reachable instance.**
 
 ### Google OAuth (Optional)
 

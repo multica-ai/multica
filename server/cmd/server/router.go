@@ -110,7 +110,7 @@ type RouterOptions struct {
 
 func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client, opts RouterOptions) chi.Router {
 	queries := db.New(pool)
-	emailSvc := service.NewEmailService()
+	emailSvc := service.NewEmailSender()
 	daemonHub := opts.DaemonHub
 	if daemonHub == nil {
 		daemonHub = daemonws.NewHub()
