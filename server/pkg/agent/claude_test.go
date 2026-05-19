@@ -199,14 +199,14 @@ func TestTrySendDropsWhenFull(t *testing.T) {
 	}
 }
 
-func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
+func TestBuildClaudeArgsSingleShotPutsPromptAsPositional(t *testing.T) {
 	t.Parallel()
 
-	args := buildClaudeArgs(ExecOptions{}, slog.Default())
+	args := buildClaudeArgs("hello world", ExecOptions{}, slog.Default())
 	expected := []string{
 		"-p",
+		"hello world",
 		"--output-format", "stream-json",
-		"--input-format", "stream-json",
 		"--verbose",
 		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
@@ -220,6 +220,63 @@ func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
 		if args[i] != want {
 			t.Fatalf("expected args[%d] = %q, got %q", i, want, args[i])
 		}
+	}
+}
+
+func TestBuildClaudeArgsResumeUsesStreamJSONStdin(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs("ignored on stdin", ExecOptions{ResumeSessionID: "sess-123"}, slog.Default())
+
+	for _, a := range args {
+		if a == "ignored on stdin" {
+			t.Fatalf("resume should send prompt via stdin, not argv: %v", args)
+		}
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--input-format stream-json") {
+		t.Fatalf("resume should set --input-format stream-json: %v", args)
+	}
+	if !strings.Contains(joined, "--resume sess-123") {
+		t.Fatalf("resume should set --resume <id>: %v", args)
+	}
+}
+
+func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs("p", ExecOptions{}, slog.Default())
+	for _, want := range []string{"--strict-mcp-config", "--permission-mode", "bypassPermissions", "--output-format", "stream-json"} {
+		found := false
+		for _, a := range args {
+			if a == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected %q in args: %v", want, args)
+		}
+	}
+}
+
+func TestSanitizeArgsForLogRedactsPrompt(t *testing.T) {
+	t.Parallel()
+
+	prompt := strings.Repeat("x", 1234)
+	args := []string{"-p", prompt, "--output-format", "stream-json"}
+	got := sanitizeArgsForLog(args, prompt, "")
+	if got[1] == prompt {
+		t.Fatalf("prompt should be redacted: %v", got)
+	}
+	if !strings.Contains(got[1], "1234") {
+		t.Fatalf("redaction should include char count, got %q", got[1])
+	}
+
+	args2 := []string{"-p", "--resume", "abc"}
+	got2 := sanitizeArgsForLog(args2, "anything", "abc")
+	if len(got2) != len(args2) {
+		t.Fatalf("resume sanitize should be a no-op: %v", got2)
 	}
 }
 
@@ -273,7 +330,7 @@ func TestFilterCustomArgsBlocksProtocolFlags(t *testing.T) {
 func TestBuildClaudeArgsPassesThroughCustomArgs(t *testing.T) {
 	t.Parallel()
 
-	args := buildClaudeArgs(ExecOptions{
+	args := buildClaudeArgs("p", ExecOptions{
 		CustomArgs: []string{"--max-turns", "50", "--verbose"},
 	}, slog.Default())
 
@@ -292,7 +349,7 @@ func TestBuildClaudeArgsPassesThroughCustomArgs(t *testing.T) {
 func TestBuildClaudeArgsFiltersBlockedCustomArgs(t *testing.T) {
 	t.Parallel()
 
-	args := buildClaudeArgs(ExecOptions{
+	args := buildClaudeArgs("p", ExecOptions{
 		CustomArgs: []string{"--output-format", "text", "--model", "o3"},
 	}, slog.Default())
 
@@ -419,7 +476,7 @@ func TestBuildClaudeArgsBlocksMcpConfig(t *testing.T) {
 	t.Parallel()
 
 	// --mcp-config is hardcoded by the daemon — it must not be overridable via custom_args.
-	args := buildClaudeArgs(ExecOptions{
+	args := buildClaudeArgs("p", ExecOptions{
 		CustomArgs: []string{"--mcp-config", "/tmp/evil.json", "--model", "o3"},
 	}, slog.Default())
 
@@ -605,7 +662,7 @@ func mustMarshal(t *testing.T, v any) json.RawMessage {
 }
 
 func TestBuildClaudeArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
-	args := buildClaudeArgs(ExecOptions{
+	args := buildClaudeArgs("p", ExecOptions{
 		ExtraArgs:  []string{"--output-format", "text", "--max-budget-usd", "1.00"},
 		CustomArgs: []string{"--max-budget-usd", "2.00", "--permission-mode", "plan"},
 	}, slog.Default())

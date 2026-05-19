@@ -35,7 +35,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	args := buildClaudeArgs(opts, b.cfg.Logger)
+	args := buildClaudeArgs(prompt, opts, b.cfg.Logger)
 
 	// If the caller provided an MCP config, write it to a temp file and pass
 	// --mcp-config <path> so the agent uses a controlled set of MCP servers
@@ -61,7 +61,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
+	b.cfg.Logger.Info("agent command", "exec", execPath, "args", sanitizeArgsForLog(args, prompt, opts.ResumeSessionID))
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -73,15 +73,24 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("claude stdout pipe: %w", err)
 	}
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("claude stdin pipe: %w", err)
-	}
-	closeStdin := func() {
-		if stdin != nil {
-			_ = stdin.Close()
-			stdin = nil
+	// Resume passes the new turn's message as stream-json on stdin; single-shot
+	// passes the prompt as a positional argument (see buildClaudeArgs) and never
+	// touches stdin. Skipping stdin on the single-shot path sidesteps Windows
+	// anonymous-pipe stalls while Claude is still running synchronous startup
+	// hooks, loading V8, or initializing MCP.
+	var stdin io.WriteCloser
+	closeStdin := func() {}
+	if opts.ResumeSessionID != "" {
+		stdin, err = cmd.StdinPipe()
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("claude stdin pipe: %w", err)
+		}
+		closeStdin = func() {
+			if stdin != nil {
+				_ = stdin.Close()
+				stdin = nil
+			}
 		}
 	}
 	// Capture stderr into both the daemon log (as before) and a bounded tail
@@ -97,19 +106,21 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("start claude: %w", err)
 	}
-	if err := writeClaudeInput(stdin, prompt); err != nil {
-		// claude almost certainly died during startup (broken pipe). The
-		// real reason is sitting in stderrBuf — surface it the same way the
-		// post-handshake error path does, otherwise the daemon log is the
-		// only place that knows whether it was a V8 abort, a missing native
-		// module, or anything else. cmd.Wait() flushes os/exec's stderr
-		// copy goroutine, so stderrBuf.Tail() is safe to read.
+	if stdin != nil {
+		if err := writeClaudeInput(stdin, prompt); err != nil {
+			// claude almost certainly died during startup (broken pipe). The
+			// real reason is sitting in stderrBuf — surface it the same way the
+			// post-handshake error path does, otherwise the daemon log is the
+			// only place that knows whether it was a V8 abort, a missing native
+			// module, or anything else. cmd.Wait() flushes os/exec's stderr
+			// copy goroutine, so stderrBuf.Tail() is safe to read.
+			closeStdin()
+			cancel()
+			_ = cmd.Wait()
+			return nil, errors.New(withAgentStderr(fmt.Sprintf("write claude input: %v", err), "claude", stderrBuf.Tail()))
+		}
 		closeStdin()
-		cancel()
-		_ = cmd.Wait()
-		return nil, errors.New(withAgentStderr(fmt.Sprintf("write claude input: %v", err), "claude", stderrBuf.Tail()))
 	}
-	closeStdin()
 
 	b.cfg.Logger.Info("claude started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
@@ -413,11 +424,16 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 	"--mcp-config":      blockedWithValue,  // set by daemon from agent.mcp_config
 }
 
-func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
-	args := []string{
-		"-p",
+func buildClaudeArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
+	args := []string{"-p"}
+	// Single-shot (no resume): pass the prompt as a positional argument so the
+	// daemon never writes the task prompt to stdin during Claude startup. This
+	// avoids Windows pipe stalls when SessionStart hooks are synchronous.
+	if opts.ResumeSessionID == "" {
+		args = append(args, prompt)
+	}
+	args = append(args,
 		"--output-format", "stream-json",
-		"--input-format", "stream-json",
 		"--verbose",
 		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
@@ -428,7 +444,7 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		// never sees the question (see GitHub #2588). User-facing
 		// clarification belongs in an issue comment instead.
 		"--disallowedTools", "AskUserQuestion",
-	}
+	)
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
@@ -439,11 +455,29 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		args = append(args, "--append-system-prompt", opts.SystemPrompt)
 	}
 	if opts.ResumeSessionID != "" {
-		args = append(args, "--resume", opts.ResumeSessionID)
+		args = append(args, "--input-format", "stream-json", "--resume", opts.ResumeSessionID)
 	}
 	args = append(args, filterCustomArgs(opts.ExtraArgs, claudeBlockedArgs, logger)...)
 	args = append(args, filterCustomArgs(opts.CustomArgs, claudeBlockedArgs, logger)...)
 	return args
+}
+
+// sanitizeArgsForLog replaces the positional prompt argument with a length
+// placeholder so daemon.log stays scannable. Resume runs do not embed the
+// prompt in argv, so the original args are returned.
+func sanitizeArgsForLog(args []string, prompt, resumeSessionID string) []string {
+	if resumeSessionID != "" || prompt == "" {
+		return args
+	}
+	out := make([]string, len(args))
+	copy(out, args)
+	for i, a := range out {
+		if a == prompt {
+			out[i] = fmt.Sprintf("<prompt:%d chars>", len(prompt))
+			break
+		}
+	}
+	return out
 }
 
 func writeClaudeInput(w io.Writer, prompt string) error {
