@@ -25,7 +25,7 @@ export function recommendTemplate(
   const role: Role | null = answers.role;
   const useCase: UseCase | null = answers.use_case;
 
-  if (role === null) return useCaseFallback(useCase);
+  if (role === null) return fallbackFromUseCase(useCase);
 
   switch (role) {
     case "engineer":
@@ -54,7 +54,7 @@ export function recommendTemplate(
   }
 }
 
-function useCaseFallback(useCase: UseCase | null): AgentTemplateId {
+function fallbackFromUseCase(useCase: UseCase | null): AgentTemplateId {
   switch (useCase) {
     case "ship_code":
       return "coding";
