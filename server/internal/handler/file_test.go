@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/ledongthuc/pdf"
 )
 
 // createHandlerTestChatSession seeds a chat_session row owned by testUserID
@@ -405,18 +406,69 @@ func TestGetAttachmentContent_AcceptsByExtensionWhenContentTypeIsGeneric(t *test
 	}
 }
 
-func TestGetAttachmentContent_Unsupported_PDF(t *testing.T) {
+func TestGetAttachmentContent_PDFText(t *testing.T) { // CEREBRO-PATCH(pdf-attachment-text): regression coverage for PDF text extraction.
 	store := &mockStorage{}
 	origStorage := testHandler.Storage
 	testHandler.Storage = store
 	defer func() { testHandler.Storage = origStorage }()
 
-	id := seedPreviewAttachment(t, store, "pdf-key.pdf", "manual.pdf", "application/pdf", []byte("%PDF-1.4\n"))
+	id := seedPreviewAttachment(t, store, "pdf-key.pdf", "manual.pdf", "application/pdf", tinyTextPDF("Hello PDF text"))
+
+	req, w := newPreviewRequest(t, id, testWorkspaceID)
+	testHandler.GetAttachmentContent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Body.String(); !strings.Contains(got, "Hello PDF text") {
+		t.Fatalf("body = %q, want extracted PDF text", got)
+	}
+	if got := w.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want text/plain; charset=utf-8", got)
+	}
+	if got := w.Header().Get("X-Original-Content-Type"); got != "application/pdf" {
+		t.Errorf("X-Original-Content-Type = %q, want application/pdf", got)
+	}
+}
+
+func TestGetAttachmentContent_PDFWithoutText(t *testing.T) {
+	store := &mockStorage{}
+	origStorage := testHandler.Storage
+	testHandler.Storage = store
+	defer func() { testHandler.Storage = origStorage }()
+
+	id := seedPreviewAttachment(t, store, "blank-pdf-key.pdf", "scan.pdf", "application/pdf", tinyBlankPDF())
 
 	req, w := newPreviewRequest(t, id, testWorkspaceID)
 	testHandler.GetAttachmentContent(w, req)
 	if w.Code != http.StatusUnsupportedMediaType {
 		t.Fatalf("status = %d, want 415; body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "PDF contains no extractable text") {
+		t.Fatalf("body = %q, want no-text explanation", w.Body.String())
+	}
+}
+
+func TestGetAttachmentContent_PDFParserPanic(t *testing.T) {
+	store := &mockStorage{}
+	origStorage := testHandler.Storage
+	testHandler.Storage = store
+	defer func() { testHandler.Storage = origStorage }()
+
+	origPDFNewReader := pdfNewReader
+	pdfNewReader = func(io.ReaderAt, int64) (*pdf.Reader, error) {
+		panic("malformed xref")
+	}
+	defer func() { pdfNewReader = origPDFNewReader }()
+
+	id := seedPreviewAttachment(t, store, "broken-pdf-key.pdf", "broken.pdf", "application/pdf", []byte("%PDF-broken"))
+
+	req, w := newPreviewRequest(t, id, testWorkspaceID)
+	testHandler.GetAttachmentContent(w, req)
+	if w.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415; body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "PDF could not be parsed") {
+		t.Fatalf("body = %q, want parser explanation", w.Body.String())
 	}
 }
 
@@ -488,7 +540,7 @@ func TestIsTextPreviewable(t *testing.T) {
 		{"html", "text/html", "page.html", true},
 		{"dockerfile no ext", "application/octet-stream", "Dockerfile", true},
 
-		{"pdf rejected", "application/pdf", "doc.pdf", false},
+		{"pdf accepted", "application/pdf", "doc.pdf", true},
 		{"png rejected", "image/png", "shot.png", false},
 		{"video rejected", "video/mp4", "clip.mp4", false},
 		{"binary fallthrough", "application/octet-stream", "blob.bin", false},
@@ -503,3 +555,35 @@ func TestIsTextPreviewable(t *testing.T) {
 	}
 }
 
+func tinyTextPDF(text string) []byte {
+	return buildTinyPDF(fmt.Sprintf("BT /F1 24 Tf 100 700 Td (%s) Tj ET", text))
+}
+
+func tinyBlankPDF() []byte {
+	return buildTinyPDF("")
+}
+
+func buildTinyPDF(stream string) []byte {
+	objects := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream)+1, stream),
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+	}
+	var b strings.Builder
+	b.WriteString("%PDF-1.4\n")
+	offsets := make([]int, 0, len(objects)+1)
+	offsets = append(offsets, 0)
+	for i, obj := range objects {
+		offsets = append(offsets, b.Len())
+		fmt.Fprintf(&b, "%d 0 obj\n%s\nendobj\n", i+1, obj)
+	}
+	xref := b.Len()
+	fmt.Fprintf(&b, "xref\n0 %d\n0000000000 65535 f \n", len(objects)+1)
+	for _, off := range offsets[1:] {
+		fmt.Fprintf(&b, "%010d 00000 n \n", off)
+	}
+	fmt.Fprintf(&b, "trailer\n<< /Root 1 0 R /Size %d >>\nstartxref\n%d\n%%%%EOF\n", len(objects)+1, xref)
+	return []byte(b.String())
+}

@@ -20,6 +20,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/hvejsel/firtal-persona/sdk/go v0.0.0-00010101000000-000000000000
 	github.com/jackc/pgx/v5 v5.9.2
+	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728 // CEREBRO-PATCH(pdf-attachment-text): pure-Go PDF text extraction for attachment content.
 	github.com/lmittmann/tint v1.1.3
 	github.com/mattn/go-shellwords v1.0.13
 	github.com/oklog/ulid/v2 v2.1.1

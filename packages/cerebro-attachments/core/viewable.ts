@@ -3,7 +3,7 @@
  *
  * An attachment is "viewable" when it makes sense to render it inline in the
  * artifact viewer rather than triggering a download. The viewer handles
- * HTML, Markdown, plain text and JSON; everything else (images, PDF, binary)
+ * HTML, Markdown, plain text, JSON, and text-based PDFs; everything else
  * keeps the existing browser-handled behavior on the original CDN URL.
  *
  * Detection prefers `content_type` (set when the file was uploaded) and
@@ -16,6 +16,7 @@ const VIEWABLE_CONTENT_TYPES = new Set([
   "text/markdown",
   "text/plain",
   "application/json",
+  "application/pdf",
 ]);
 
 const VIEWABLE_EXTENSIONS = new Set([
@@ -26,6 +27,7 @@ const VIEWABLE_EXTENSIONS = new Set([
   "txt",
   "text",
   "json",
+  "pdf",
 ]);
 
 function extensionOf(filename: string): string {
@@ -34,7 +36,7 @@ function extensionOf(filename: string): string {
   return filename.slice(dot + 1).toLowerCase();
 }
 
-export type ViewableKind = "html" | "markdown" | "text" | "json";
+export type ViewableKind = "html" | "markdown" | "text" | "json" | "pdf";
 
 export function viewableKind(
   contentType: string,
@@ -44,12 +46,14 @@ export function viewableKind(
   if (ct === "text/html") return "html";
   if (ct === "text/markdown") return "markdown";
   if (ct === "application/json") return "json";
+  if (ct === "application/pdf") return "pdf";
   if (ct === "text/plain") return "text";
 
   const ext = extensionOf(filename);
   if (ext === "html" || ext === "htm") return "html";
   if (ext === "md" || ext === "markdown") return "markdown";
   if (ext === "json") return "json";
+  if (ext === "pdf") return "pdf";
   if (ext === "txt" || ext === "text") return "text";
 
   return null;

@@ -107,6 +107,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `artifact-cli-cmd-artifact` | server/cmd/multica/cmd_artifact.go | 445 | Artifact (documents/files) system |
 | `artifact-handler` | server/internal/handler/artifact_upload.go<br>server/internal/handler/artifact.go<br>server/internal/handler/artifact_test.go<br>...+1 more | 1572 | Artifact (documents/files) system |
 | `attachment-cli` | server/cmd/multica/cmd_attachment.go | 89 | Attachment CLI subcommand |
+| `attachment-cli-text` | server/cmd/multica/cmd_attachment.go | 25 | JEH-1816 — adds `multica attachment text <id>` so agents and CLI users can print extracted attachment text directly, including text-based PDFs through `/api/attachments/{id}/content`. |
+| `cli-attachment-text` | server/internal/cli/client.go | 25 | JEH-1816 — shared authenticated `GetText` helper for CLI commands that need plain-text API responses instead of JSON. |
 | `attachment-list-cerebro` | packages/views/issues/components/attachment-list.tsx | 119 | Attachment list view |
 | `auth-handler-auth` | server/internal/handler/auth.go | 19 | Auth additions (master-code, JWT) |
 | `auth-jwt` | server/internal/auth/jwt.go | 45 | Auth additions (master-code, JWT) |
@@ -206,6 +208,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `claude-oauth-strips-api-key` | server/pkg/agent/claude.go | ~12 | Cerebro Claude-agenter kører altid OAuth via `CLAUDE_CONFIG_DIR` (`~/.claude-accounts/<email>/`). `mergeEnv` stripper `ANTHROPIC_API_KEY` + `ANTHROPIC_AUTH_TOKEN` både fra host `os.Environ()` og fra CustomEnv — så en evt. global API-key i shellen eller en manuelt sat key i agent-UI'et kan ikke shadow OAuth-credentials. Ingen escape hatch: hvis du vil have API-key tilbage, reverse'r du denne patch. |
 | `claude-stderr-tail-tests` | server/pkg/agent/claude_test.go | 0 | Claude stderr-tail diagnostic tests |
 | `cli-attachments` | server/internal/cli/client.go | 0 | Cerebro modification (see file for details) |
+| `pdf-attachment-text` | server/internal/handler/file.go<br>server/go.mod | 45 | JEH-1816 — extends the existing attachment `/content` flow to extract embedded text from PDF files with a pure-Go parser. Keeps the 2 MB cap and returns a clear OCR-not-supported 415 for scanned/textless PDFs. |
 | `comment-card-cerebro` | packages/views/issues/components/comment-card.tsx | 42 | Comment cerebro additions (replies, attachments, reactions) |
 | `comment-handler` | server/internal/handler/comment.go | 7 | Comment cerebro additions (replies, attachments, reactions) |
 | `comment-content-nullable` | server/internal/handler/comment.go<br>server/cmd/server/notification_listeners.go | ~10 | JEH-1215 — `CommentResponse.Content` is `*string` so a persona-redacted row serialises as `"content": null` rather than `""`. The `string` overload couldn't distinguish a redacted comment from a legitimately empty body and leaked the fact that a real value once existed. Notification listener derefs the new pointer. |

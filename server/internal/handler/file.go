@@ -3,6 +3,7 @@ package handler
 // CEREBRO-PATCH(file-handler-file): cerebro modification of upstream file
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/ledongthuc/pdf"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -536,6 +538,23 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusRequestEntityTooLarge, "file too large for inline preview")
 		return
 	}
+	// CEREBRO-PATCH(pdf-attachment-text): expose text-based PDFs through the existing content flow.
+	if isPDFPreviewable(att.ContentType, att.Filename) {
+		body, err = extractPDFText(body)
+		if err != nil {
+			slog.Error("failed to extract PDF attachment text", "id", attachmentID, "error", err)
+			writeError(w, http.StatusUnsupportedMediaType, "PDF could not be parsed")
+			return
+		}
+		if strings.TrimSpace(string(body)) == "" {
+			writeError(w, http.StatusUnsupportedMediaType, "PDF contains no extractable text; OCR is not supported in this version")
+			return
+		}
+		if len(body) > maxPreviewTextSize {
+			writeError(w, http.StatusRequestEntityTooLarge, "extracted PDF text too large for inline preview")
+			return
+		}
+	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("X-Original-Content-Type", att.ContentType)
@@ -553,6 +572,9 @@ func isTextPreviewable(contentType, filename string) bool {
 		ct = strings.TrimSpace(ct[:idx])
 	}
 	if strings.HasPrefix(ct, "text/") {
+		return true
+	}
+	if isPDFPreviewable(ct, filename) {
 		return true
 	}
 	switch ct {
@@ -592,6 +614,36 @@ func isTextPreviewable(contentType, filename string) bool {
 		return true
 	}
 	return false
+}
+
+func isPDFPreviewable(contentType, filename string) bool {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	if idx := strings.Index(ct, ";"); idx >= 0 {
+		ct = strings.TrimSpace(ct[:idx])
+	}
+	return ct == "application/pdf" || strings.ToLower(path.Ext(filename)) == ".pdf"
+}
+
+var pdfNewReader = pdf.NewReader
+
+func extractPDFText(body []byte) (text []byte, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("PDF parser panic: %v", recovered)
+			text = nil
+		}
+	}()
+
+	// CEREBRO-PATCH(pdf-attachment-text): keep malformed PDFs from crashing attachment workers.
+	reader, err := pdfNewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		return nil, err
+	}
+	textReader, err := reader.GetPlainText()
+	if err != nil {
+		return nil, err
+	}
+	return io.ReadAll(io.LimitReader(textReader, maxPreviewTextSize+1))
 }
 
 // ---------------------------------------------------------------------------

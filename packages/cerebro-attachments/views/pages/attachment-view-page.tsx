@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Download, Link as LinkIcon, FileText } from "lucide-react";
+import { ArrowLeft, Clipboard, Download, Link as LinkIcon, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
@@ -14,18 +14,6 @@ import { useNavigation } from "@multica/views/navigation";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { ArtifactBody } from "@multica/cerebro-artifacts/views/components";
 
-/**
- * Attachment URLs may be relative (local-storage backend in dev) or absolute
- * (S3/CDN in production). Resolve relative ones against the API base URL so
- * the browser hits the backend, not the frontend origin.
- */
-function resolveAttachmentUrl(url: string): string {
-  if (!url) return url;
-  if (/^https?:\/\//i.test(url)) return url;
-  const base = api.getBaseUrl().replace(/\/$/, "");
-  return url.startsWith("/") ? `${base}${url}` : `${base}/${url}`;
-}
-
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -33,18 +21,14 @@ function formatBytes(n: number): string {
 }
 
 /**
- * Fetches viewable text bodies (markdown / plain / json) from the attachment's
- * CDN URL. Returns null on error so the page can show a fallback.
+ * Fetches viewable text bodies through the API content endpoint. This avoids
+ * CDN CORS/content-disposition issues and lets PDFs return extracted text.
  */
-function useFetchedText(url: string, enabled: boolean) {
+function useFetchedText(attachmentId: string, enabled: boolean) {
   return useQuery({
-    queryKey: ["attachment-body", url],
+    queryKey: ["attachment-body", attachmentId],
     enabled,
-    queryFn: async () => {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Failed to load: ${res.status}`);
-      return res.text();
-    },
+    queryFn: async () => (await api.getAttachmentTextContent(attachmentId)).text,
   });
 }
 
@@ -62,9 +46,8 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
   // For HTML we render the body via `srcDoc` rather than pointing the iframe
   // at the file URL — backends can serve attachments with `frame-ancestors
   // 'none'` (the dev server does this), which would block direct framing.
-  const needsBody = kind === "html" || kind === "markdown" || kind === "text" || kind === "json";
-  const fetchUrl = attachment ? resolveAttachmentUrl(attachment.url) : "";
-  const body = useFetchedText(fetchUrl, Boolean(attachment && needsBody));
+  const needsBody = kind === "html" || kind === "markdown" || kind === "text" || kind === "json" || kind === "pdf";
+  const body = useFetchedText(attachment?.id ?? "", Boolean(attachment && needsBody));
 
   if (isLoading) {
     return (
@@ -112,6 +95,15 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
       toast.error("Failed to copy link");
     }
   };
+  const handleCopyText = async () => {
+    if (!body.data) return;
+    try {
+      await navigator.clipboard.writeText(body.data);
+      toast.success("Text copied");
+    } catch {
+      toast.error("Failed to copy text");
+    }
+  };
 
   // Issue context — when an attachment is bound to an issue, allow back-navigation
   // to it. Comment-bound attachments inherit the issue context via comment_id →
@@ -138,6 +130,11 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
             <Button variant="ghost" size="sm" onClick={handleCopyLink}>
               <LinkIcon className="mr-1 size-4" /> Copy link
             </Button>
+            {kind === "pdf" && body.data && (
+              <Button variant="ghost" size="sm" onClick={handleCopyText}>
+                <Clipboard className="mr-1 size-4" /> Copy text
+              </Button>
+            )}
             {attachment.download_url && (
               <Button variant="ghost" size="sm" onClick={handleDownload}>
                 <Download className="mr-1 size-4" /> Download
@@ -184,11 +181,11 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
                 <ArtifactBody body={body.data} />
               </div>
             )
-          ) : kind === "json" || kind === "text" ? (
+          ) : kind === "json" || kind === "text" || kind === "pdf" ? (
             body.isLoading ? (
               <p className="text-sm text-muted-foreground">Loading…</p>
             ) : body.isError || !body.data ? (
-              <FallbackUnavailable downloadUrl={attachment.download_url} />
+              <FallbackUnavailable downloadUrl={attachment.download_url} isPdf={kind === "pdf"} />
             ) : (
               <pre className="overflow-x-auto rounded border border-border bg-muted/40 p-3 text-xs">
                 <code>{body.data}</code>
@@ -205,10 +202,14 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
   );
 }
 
-function FallbackUnavailable({ downloadUrl }: { downloadUrl: string }) {
+function FallbackUnavailable({ downloadUrl, isPdf = false }: { downloadUrl: string; isPdf?: boolean }) {
   return (
     <div className="rounded border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
-      <p>This file can&apos;t be previewed inline.</p>
+      <p>
+        {isPdf
+          ? "This PDF has no extractable text. OCR is not supported in this version."
+          : "This file can't be previewed inline."}
+      </p>
       {downloadUrl && (
         <a
           href={downloadUrl}

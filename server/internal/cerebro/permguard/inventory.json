@@ -1257,6 +1257,10 @@
       "exempt": "read-only \u2014 wraps GET /uploads/*"
     },
     {
+      "id": "attachment text",
+      "exempt": "read-only \u2014 wraps GET /api/attachments/{id}/content"
+    },
+    {
       "id": "attachment upload",
       "gate": "via:POST /api/upload-file"
     },

@@ -28,8 +28,8 @@ var attachmentDownloadCmd = &cobra.Command{
 
   # Download to a specific directory
   $ multica attachment download abc123 -o /tmp/images`,
-	Args:  exactArgs(1),
-	RunE:  runAttachmentDownload,
+	Args: exactArgs(1),
+	RunE: runAttachmentDownload,
 }
 
 var attachmentUploadCmd = &cobra.Command{
@@ -51,9 +51,20 @@ var attachmentUploadCmd = &cobra.Command{
 	RunE: runAttachmentUpload,
 }
 
+var attachmentTextCmd = &cobra.Command{
+	Use:   "text <attachment-id>",
+	Short: "Print extracted text from a text or PDF attachment",
+	Long:  "Print extracted text from an attachment using the same safe text-content flow as previews. PDFs without embedded text return a clear OCR-not-supported error.",
+	Example: `  # Print text from a PDF attachment
+  $ multica attachment text abc123`,
+	Args: exactArgs(1),
+	RunE: runAttachmentText,
+}
+
 func init() {
 	attachmentCmd.AddCommand(attachmentDownloadCmd)
 	attachmentCmd.AddCommand(attachmentUploadCmd)
+	attachmentCmd.AddCommand(attachmentTextCmd)
 
 	attachmentDownloadCmd.Flags().StringP("output-dir", "o", ".", "Directory to save the downloaded file")
 
@@ -180,4 +191,25 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 		"path":     abs,
 		"size":     strVal(att, "size_bytes"),
 	})
+}
+
+func runAttachmentText(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// CEREBRO-PATCH(attachment-cli-text): expose /content directly for agent workflows.
+	text, _, err := client.GetText(ctx, "/api/attachments/"+args[0]+"/content")
+	if err != nil {
+		return fmt.Errorf("get attachment text: %w", err)
+	}
+	fmt.Fprint(os.Stdout, text)
+	if text == "" || text[len(text)-1] != '\n' {
+		fmt.Fprintln(os.Stdout)
+	}
+	return nil
 }

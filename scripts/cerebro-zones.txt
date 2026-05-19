@@ -38,5 +38,7 @@ server/**
 !server/pkg/db/generated/**
 # Test fixtures: golden files match generated output bit-for-bit; markers would break tests.
 !**/testdata/**
+# Go module checksums cannot carry comments.
+!server/go.sum
 !**/*.test.*
 !**/*.spec.*
