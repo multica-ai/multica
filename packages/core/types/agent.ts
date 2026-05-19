@@ -130,6 +130,15 @@ export interface Agent {
   status: AgentStatus;
   max_concurrent_tasks: number;
   model: string;
+  /**
+   * Runtime-native reasoning/effort token (e.g. Claude's
+   * `low|medium|high|xhigh|max`, Codex's
+   * `none|minimal|low|medium|high|xhigh`). Empty string means "use the
+   * runtime/model default". The picker is per-runtime per-model — the
+   * API never normalises across providers. Older backends omit this
+   * field entirely; treat undefined as "" (MUL-2339).
+   */
+  thinking_level?: string;
   owner_id: string | null;
   skills: AgentSkillSummary[];
   created_at: string;
@@ -163,6 +172,8 @@ export interface CreateAgentRequest {
   visibility?: AgentVisibility;
   max_concurrent_tasks?: number;
   model?: string;
+  /** Optional runtime-native reasoning/effort token. See `Agent.thinking_level`. */
+  thinking_level?: string;
   /** Optional template slug used by the onboarding agent picker. Surfaced
    *  as the `template` property on the `agent_created` PostHog event. */
   template?: string;
@@ -251,6 +262,14 @@ export interface UpdateAgentRequest {
   status?: AgentStatus;
   max_concurrent_tasks?: number;
   model?: string;
+  /**
+   * Runtime-native reasoning/effort token. Tri-state semantics (MUL-2339):
+   *   - field omitted → no change
+   *   - "" → explicit clear (use runtime default)
+   *   - non-empty → set; validated server-side against the target
+   *     runtime's provider enum, rejected with 400 if not recognised
+   */
+  thinking_level?: string;
 }
 
 // Skills
@@ -431,6 +450,31 @@ export interface RuntimeModel {
   label: string;
   provider?: string;
   default?: boolean;
+  /**
+   * Per-model reasoning/effort catalog discovered by the daemon. Currently
+   * populated for claude and codex runtimes only; omitted (or undefined)
+   * for every other provider, which the UI treats as "no thinking-level
+   * picker for this model". See MUL-2339.
+   */
+  thinking?: RuntimeModelThinking;
+}
+
+export interface RuntimeModelThinking {
+  /** Levels the user is allowed to pick for this model. */
+  supported_levels: RuntimeModelThinkingLevel[];
+  /** The level the runtime defaults to when no override is sent. The UI
+   *  uses this to badge the default and prefill new agents. */
+  default_level?: string;
+}
+
+export interface RuntimeModelThinkingLevel {
+  /** Runtime-native token passed to the CLI; never normalised. */
+  value: string;
+  /** Display label matching each CLI's own UI (`Low`, `Extra high`, …). */
+  label: string;
+  /** Optional helper copy lifted from upstream catalog
+   *  (`codex debug models` emits one per level). */
+  description?: string;
 }
 
 export type RuntimeModelListStatus =
