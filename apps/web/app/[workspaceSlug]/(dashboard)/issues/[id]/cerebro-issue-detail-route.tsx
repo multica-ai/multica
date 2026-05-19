@@ -28,14 +28,19 @@ export function CerebroIssueDetailRoute({ id }: { id: string }) {
   const router = useNavigation();
   const paths = useWorkspacePaths();
 
+  // Defensive options so the gate fires the parent issue request exactly
+  // once per page visit. Defaults from createQueryClient already give us
+  // staleTime: Infinity / refetchOnWindowFocus: false / retry: 1, but we
+  // restate them here so a future change to those defaults can't
+  // accidentally turn the gate into a retry storm.
   const { isLoading, error, data } = useQuery({
     ...issueDetailOptions(wsId, id),
-    retry: (failureCount, err) => {
-      if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
-        return false;
-      }
-      return failureCount < 3;
-    },
+    retry: false,
+    retryOnMount: false,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    staleTime: Infinity,
   });
 
   if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
