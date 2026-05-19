@@ -94,14 +94,16 @@ func TestBuildIssueDescription_NonWebhookSourceWithPayloadIgnored(t *testing.T) 
 	}
 }
 
-// TestInterpolateTemplate covers the three behaviours that real autopilot
-// runs depend on: {{date}} substitution, falling back to Title when the
-// template is unset/empty, and leaving any non-{{date}} text alone (the
+// TestInterpolateTemplate covers the behaviours that real autopilot runs
+// depend on: {{date}} substitution, {{trigger_time}} substitution pinned to
+// the run's triggered_at (P0 — TUB-191), falling back to Title when the
+// template is unset/empty, and leaving any unknown {{...}} text alone (the
 // handler is the layer that prevents unknown tokens from being stored in
 // the first place — service-layer interpolation stays substitute-or-leave).
 func TestInterpolateTemplate(t *testing.T) {
 	s := &AutopilotService{}
-	today := time.Now().UTC().Format("2006-01-02")
+	triggeredAt := time.Date(2026, 4, 30, 6, 41, 0, 0, time.UTC)
+	run := db.AutopilotRun{TriggeredAt: pgtype.Timestamptz{Time: triggeredAt, Valid: true}}
 
 	cases := []struct {
 		name   string
@@ -111,12 +113,27 @@ func TestInterpolateTemplate(t *testing.T) {
 		{
 			name:   "date placeholder substituted",
 			ap:     db.Autopilot{Title: "fallback", IssueTitleTemplate: pgtype.Text{String: "probe — {{date}}", Valid: true}},
-			expect: "probe — " + today,
+			expect: "probe — 2026-04-30",
 		},
 		{
 			name:   "date placeholder with whitespace substituted",
 			ap:     db.Autopilot{Title: "fallback", IssueTitleTemplate: pgtype.Text{String: "probe — {{ date }}", Valid: true}},
-			expect: "probe — " + today,
+			expect: "probe — 2026-04-30",
+		},
+		{
+			name:   "trigger_time placeholder substituted with UTC timestamp",
+			ap:     db.Autopilot{Title: "fallback", IssueTitleTemplate: pgtype.Text{String: "Production Health Check — {{trigger_time}}", Valid: true}},
+			expect: "Production Health Check — 2026-04-30 06:41 UTC",
+		},
+		{
+			name:   "trigger_time placeholder tolerates whitespace inside braces",
+			ap:     db.Autopilot{Title: "fallback", IssueTitleTemplate: pgtype.Text{String: "probe — {{ trigger_time }}", Valid: true}},
+			expect: "probe — 2026-04-30 06:41 UTC",
+		},
+		{
+			name:   "date and trigger_time in same template both render",
+			ap:     db.Autopilot{Title: "fallback", IssueTitleTemplate: pgtype.Text{String: "{{date}} — {{trigger_time}}", Valid: true}},
+			expect: "2026-04-30 — 2026-04-30 06:41 UTC",
 		},
 		{
 			name:   "empty template falls back to autopilot title",
@@ -128,13 +145,47 @@ func TestInterpolateTemplate(t *testing.T) {
 			ap:     db.Autopilot{Title: "fallback", IssueTitleTemplate: pgtype.Text{String: "static title", Valid: true}},
 			expect: "static title",
 		},
+		{
+			name:   "trigger_time renders against fallback Title too",
+			ap:     db.Autopilot{Title: "fallback — {{trigger_time}}", IssueTitleTemplate: pgtype.Text{Valid: false}},
+			expect: "fallback — 2026-04-30 06:41 UTC",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := s.interpolateTemplate(tc.ap); got != tc.expect {
+			if got := s.interpolateTemplate(tc.ap, run); got != tc.expect {
 				t.Fatalf("interpolateTemplate = %q, want %q", got, tc.expect)
 			}
 		})
+	}
+}
+
+// TestInterpolateTemplate_TriggerTimeMatchesDescriptionFooter pins the P0
+// regression: when an autopilot puts {{trigger_time}} in its title and the
+// description footer renders a timestamp from the same run, the two strings
+// must agree. A future refactor that drifts the two renderers will fail here.
+func TestInterpolateTemplate_TriggerTimeMatchesDescriptionFooter(t *testing.T) {
+	s := &AutopilotService{}
+	triggeredAt := time.Date(2026, 4, 30, 6, 41, 0, 0, time.UTC)
+	run := db.AutopilotRun{
+		Source:      "schedule",
+		TriggeredAt: pgtype.Timestamptz{Time: triggeredAt, Valid: true},
+	}
+	ap := db.Autopilot{
+		Title:              "Production Health Check",
+		IssueTitleTemplate: pgtype.Text{String: "Production Health Check — {{trigger_time}}", Valid: true},
+		Description:        pgtype.Text{String: "probe", Valid: true},
+	}
+
+	title := s.interpolateTemplate(ap, run)
+	desc := s.buildIssueDescription(ap, run).String
+
+	const want = "2026-04-30 06:41 UTC"
+	if !strings.Contains(title, want) {
+		t.Fatalf("title should contain %q, got %q", want, title)
+	}
+	if !strings.Contains(desc, want) {
+		t.Fatalf("description footer should contain %q, got %q", want, desc)
 	}
 }
 
@@ -161,6 +212,21 @@ func TestValidateIssueTitleTemplate(t *testing.T) {
 	t.Run("accepts {{ date }} with whitespace", func(t *testing.T) {
 		if err := ValidateIssueTitleTemplate("probe — {{ date }}"); err != nil {
 			t.Fatalf("{{ date }} must be valid: %v", err)
+		}
+	})
+	t.Run("accepts {{trigger_time}}", func(t *testing.T) {
+		if err := ValidateIssueTitleTemplate("probe — {{trigger_time}}"); err != nil {
+			t.Fatalf("{{trigger_time}} must be valid: %v", err)
+		}
+	})
+	t.Run("accepts {{ trigger_time }} with whitespace", func(t *testing.T) {
+		if err := ValidateIssueTitleTemplate("probe — {{ trigger_time }}"); err != nil {
+			t.Fatalf("{{ trigger_time }} must be valid: %v", err)
+		}
+	})
+	t.Run("accepts {{date}} and {{trigger_time}} together", func(t *testing.T) {
+		if err := ValidateIssueTitleTemplate("{{date}} — {{trigger_time}}"); err != nil {
+			t.Fatalf("combined template must be valid: %v", err)
 		}
 	})
 

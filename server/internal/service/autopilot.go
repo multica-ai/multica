@@ -120,7 +120,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 
 	qtx := s.Queries.WithTx(tx)
 
-	title := s.interpolateTemplate(ap)
+	title := s.interpolateTemplate(ap, *run)
 	description := s.buildIssueDescription(ap, *run)
 
 	issueNumber, err := qtx.IncrementIssueCounter(ctx, ap.WorkspaceID)
@@ -589,11 +589,11 @@ func autopilotRunDurationMS(run db.AutopilotRun) int64 {
 // a payload section so the agent has the event context inline (otherwise
 // the agent only sees the issue body, never the run's trigger_payload).
 func (s *AutopilotService) buildIssueDescription(ap db.Autopilot, run db.AutopilotRun) pgtype.Text {
-	now := time.Now().UTC().Format("2006-01-02 15:04 UTC")
+	triggerTime := runTriggeredAt(run).Format(triggerTimestampFormat)
 	var b strings.Builder
 	b.WriteString(ap.Description.String)
 	b.WriteString("\n\n---\n*Autopilot run triggered at ")
-	b.WriteString(now)
+	b.WriteString(triggerTime)
 	b.WriteString(". After starting work, rename this issue to accurately reflect what you are doing.*")
 
 	if run.Source == "webhook" && len(run.TriggerPayload) > 0 {
@@ -649,28 +649,55 @@ var issueTitleTemplateTokenRE = regexp.MustCompile(`\{\{\s*([^{}]*?)\s*\}\}`)
 // tolerated so the render layer accepts every form that
 // ValidateIssueTitleTemplate accepts — otherwise users would save templates
 // that pass validation but still emit a literal token at trigger time.
-func (s *AutopilotService) interpolateTemplate(ap db.Autopilot) string {
+//
+// The run argument anchors time-based variables to the run's triggered_at so
+// the rendered title agrees exactly with the timestamp baked into the
+// description footer for the same run.
+func (s *AutopilotService) interpolateTemplate(ap db.Autopilot, run db.AutopilotRun) string {
 	tmpl := ap.Title
 	if ap.IssueTitleTemplate.Valid && ap.IssueTitleTemplate.String != "" {
 		tmpl = ap.IssueTitleTemplate.String
 	}
-	now := time.Now().UTC().Format("2006-01-02")
+	t := runTriggeredAt(run)
+	date := t.Format(triggerDateFormat)
+	triggerTime := t.Format(triggerTimestampFormat)
 	return issueTitleTemplateTokenRE.ReplaceAllStringFunc(tmpl, func(match string) string {
 		name := strings.TrimSpace(match[2 : len(match)-2])
 		switch name {
 		case "date":
-			return now
+			return date
+		case "trigger_time":
+			return triggerTime
 		default:
 			return match
 		}
 	})
 }
 
+// Time formats used by issue-title interpolation and the description footer.
+// Kept as package-level constants so both code paths render the same instant
+// identically — drift here is what produced the P0 regression (TUB-191).
+const (
+	triggerDateFormat      = "2006-01-02"
+	triggerTimestampFormat = "2006-01-02 15:04 UTC"
+)
+
+// runTriggeredAt returns the UTC instant a run was triggered. Schedule and
+// webhook-driven runs always have triggered_at populated by CreateAutopilotRun,
+// but the helper falls back to wall-clock now() so tests and any future caller
+// that constructs an AutopilotRun by hand still get a sensible value.
+func runTriggeredAt(run db.AutopilotRun) time.Time {
+	if run.TriggeredAt.Valid {
+		return run.TriggeredAt.Time.UTC()
+	}
+	return time.Now().UTC()
+}
+
 // SupportedIssueTitleTemplateVariables enumerates the placeholders that
 // interpolateTemplate will substitute. Keep this in sync with the
 // substitution logic above and with the docs in autopilots.mdx /
 // autopilots.zh.mdx.
-var SupportedIssueTitleTemplateVariables = []string{"date"}
+var SupportedIssueTitleTemplateVariables = []string{"date", "trigger_time"}
 
 // ValidateIssueTitleTemplate rejects templates that contain any {{...}} token
 // other than the supported set. An empty template is valid (the autopilot
