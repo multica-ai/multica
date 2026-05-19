@@ -7,7 +7,19 @@ export type IssueStatus =
   | "in_review"
   | "done"
   | "blocked"
-  | "cancelled";
+  | "cancelled"
+  // BMAD overlay (sidecar-managed, see multica-bmad).
+  // The DB CHECK is a strict subset: `in_review` is not accepted by the
+  // database. The TS union deliberately keeps it for routing/UI reasons; do
+  // not align the two sides without re-opening the locked input.
+  | "planning"
+  | "ready_for_dev"
+  | "code_review"
+  | "fixing"
+  | "testing"
+  | "coderabbit"
+  | "resolving"
+  | "staged";
 
 export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 

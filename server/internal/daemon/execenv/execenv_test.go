@@ -54,6 +54,70 @@ func TestPredictRootDir(t *testing.T) {
 	}
 }
 
+func TestIssueWorkDirAndPredictRootDirWithSharing(t *testing.T) {
+	t.Parallel()
+
+	got := IssueWorkDir("/root", "ws-uuid", " TIM/42 ")
+	want := filepath.Join("/root", "ws-uuid", "issues", "TIM-42", "workdir")
+	if got != want {
+		t.Fatalf("IssueWorkDir = %q, want %q", got, want)
+	}
+
+	got = PredictRootDirWithSharing("/root", "ws-uuid", "a1b2c3d4-e5f6", "TIM-42", "issue")
+	want = filepath.Join("/root", "ws-uuid", "issues", "TIM-42")
+	if got != want {
+		t.Fatalf("PredictRootDirWithSharing(issue) = %q, want %q", got, want)
+	}
+
+	got = PredictRootDirWithSharing("/root", "ws-uuid", "a1b2c3d4-e5f6", "", "issue")
+	want = filepath.Join("/root", "ws-uuid", "a1b2c3d4")
+	if got != want {
+		t.Fatalf("PredictRootDirWithSharing(no issue) = %q, want %q", got, want)
+	}
+}
+
+func TestPrepareIssueSharingReusesExistingDirectory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	params := PrepareParams{
+		WorkspacesRoot:  root,
+		WorkspaceID:     "ws-uuid",
+		TaskID:          "a1b2c3d4-e5f6",
+		IssueIdentifier: "TIM-42",
+		Sharing:         "issue",
+		Provider:        "claude",
+		Task:            TaskContextForEnv{IssueID: "issue-id"},
+	}
+	env, err := Prepare(params, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare first: %v", err)
+	}
+	marker := filepath.Join(env.WorkDir, "preserve.txt")
+	if err := os.WriteFile(marker, []byte("keep"), 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	env2, err := Prepare(PrepareParams{
+		WorkspacesRoot:  root,
+		WorkspaceID:     "ws-uuid",
+		TaskID:          "ffffeeee-dddd",
+		IssueIdentifier: "TIM-42",
+		Sharing:         "issue",
+		Provider:        "claude",
+		Task:            TaskContextForEnv{IssueID: "issue-id"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare second: %v", err)
+	}
+	if env2.WorkDir != env.WorkDir {
+		t.Fatalf("issue shared WorkDir = %q, want %q", env2.WorkDir, env.WorkDir)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("issue shared Prepare removed existing workdir marker: %v", err)
+	}
+}
+
 func TestSanitizeName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

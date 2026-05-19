@@ -31,16 +31,24 @@ const (
 	// daemon-visible activity — see MUL-2300. 30 min keeps the safety net for
 	// truly stuck runs (dockerd hang) while leaving headroom for long writes.
 	// Set MULTICA_AGENT_IDLE_WATCHDOG=0 to disable.
-	DefaultAgentIdleWatchdog = 30 * time.Minute
-	DefaultRuntimeName                    = "Local Agent"
-	DefaultWorkspaceSyncInterval          = 30 * time.Second
-	DefaultHealthPort                     = 19514
-	DefaultMaxConcurrentTasks             = 20
-	DefaultGCInterval                     = 1 * time.Hour
-	DefaultGCTTL                          = 24 * time.Hour // 1 day — AI-coding issues rarely stay open long
-	DefaultGCOrphanTTL                    = 72 * time.Hour // 3 days — orphans with no meta (crashes, pre-GC leftovers)
-	DefaultGCArtifactTTL                  = 12 * time.Hour // 12h — drop regenerable artifacts on completed but still-open issues
-	DefaultAutoUpdateCheckInterval        = 6 * time.Hour  // how often the daemon polls GitHub for a newer CLI release
+	DefaultAgentIdleWatchdog       = 30 * time.Minute
+	DefaultRuntimeName             = "Local Agent"
+	DefaultWorkspaceSyncInterval   = 30 * time.Second
+	DefaultHealthPort              = 19514
+	DefaultMaxConcurrentTasks      = 20
+	DefaultGCInterval              = 1 * time.Hour
+	DefaultGCTTL                   = 24 * time.Hour // 1 day — AI-coding issues rarely stay open long
+	DefaultGCOrphanTTL             = 72 * time.Hour // 3 days — orphans with no meta (crashes, pre-GC leftovers)
+	DefaultGCArtifactTTL           = 12 * time.Hour // 12h — drop regenerable artifacts on completed but still-open issues
+	DefaultAutoUpdateCheckInterval = 6 * time.Hour  // how often the daemon polls GitHub for a newer CLI release
+
+	// WorkdirSharingTask is the historical default: every task gets its own
+	// {workspacesRoot}/{workspaceID}/{shortTaskID}/workdir/.
+	WorkdirSharingTask = "task"
+	// WorkdirSharingIssue opts in to one shared workdir per issue. All tasks
+	// on the same issue land in
+	// {workspacesRoot}/{workspaceID}/issues/{issueIdentifier}/workdir/.
+	WorkdirSharingIssue = "issue"
 )
 
 // DefaultGCArtifactPatterns lists basename matches that the GC loop treats as
@@ -63,6 +71,7 @@ type Config struct {
 	Profile                        string                // profile name (empty = default)
 	Agents                         map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
+	WorkdirSharing                 string                // "task" (default) or "issue" — see WorkdirSharingTask / WorkdirSharingIssue
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
 	MaxConcurrentTasks             int                   // max tasks running in parallel (default: 20)
@@ -332,6 +341,13 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// Keep env after task: env > default (false)
 	keepEnv := os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "true" || os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "1"
 
+	// Workdir sharing mode: env > default (task). Only "issue" opts in;
+	// unset and unknown values preserve task-scoped behavior.
+	workdirSharing := strings.ToLower(strings.TrimSpace(os.Getenv("MULTICA_WORKDIR_SHARING")))
+	if workdirSharing != WorkdirSharingIssue {
+		workdirSharing = WorkdirSharingTask
+	}
+
 	// GC config: env > defaults
 	gcEnabled := true
 	if v := os.Getenv("MULTICA_GC_ENABLED"); v == "false" || v == "0" {
@@ -393,6 +409,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		Profile:                        profile,
 		Agents:                         agents,
 		WorkspacesRoot:                 workspacesRoot,
+		WorkdirSharing:                 workdirSharing,
 		KeepEnvAfterTask:               keepEnv,
 		GCEnabled:                      gcEnabled,
 		GCInterval:                     gcInterval,

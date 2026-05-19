@@ -13,7 +13,15 @@
     "in_review": "审核中",
     "done": "已完成",
     "blocked": "已阻塞",
-    "cancelled": "已取消"
+    "cancelled": "已取消",
+    "planning": "规划中",
+    "ready_for_dev": "待开发",
+    "code_review": "代码评审",
+    "fixing": "修复中",
+    "testing": "测试中",
+    "coderabbit": "CodeRabbit",
+    "resolving": "解决评审",
+    "staged": "已暂存"
   },
   "priority": {
     "urgent": "紧急",

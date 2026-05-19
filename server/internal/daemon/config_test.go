@@ -499,3 +499,41 @@ func TestLoadConfig_SkipsLoginShellWhenLookPathSucceeds(t *testing.T) {
 		t.Fatalf("unexpected error stat-ing marker file: %v", err)
 	}
 }
+
+func TestLoadConfigWorkdirSharing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+
+	pathDir := t.TempDir()
+	fakeClaude := filepath.Join(pathDir, "claude")
+	if err := os.WriteFile(fakeClaude, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+	t.Setenv("PATH", pathDir)
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+
+	for _, tc := range []struct {
+		env  string
+		want string
+	}{
+		{"", WorkdirSharingTask},
+		{"task", WorkdirSharingTask},
+		{"typo", WorkdirSharingTask},
+		{" issue ", WorkdirSharingIssue},
+	} {
+		t.Run(tc.env, func(t *testing.T) {
+			t.Setenv("MULTICA_WORKDIR_SHARING", tc.env)
+			cfg, err := LoadConfig(Overrides{
+				ServerURL:      "http://localhost:0",
+				WorkspacesRoot: t.TempDir(),
+			})
+			if err != nil {
+				t.Fatalf("LoadConfig: %v", err)
+			}
+			if cfg.WorkdirSharing != tc.want {
+				t.Fatalf("WorkdirSharing = %q, want %q", cfg.WorkdirSharing, tc.want)
+			}
+		})
+	}
+}
