@@ -28,6 +28,17 @@ export const issueKeys = {
     scope: string,
     filter: AssigneeGroupedIssuesFilter,
   ) => [...issueKeys.myAssigneeGroupsAll(wsId), scope, filter] as const,
+  /** All Project Gantt queries — prefix-match key for cross-project invalidation. */
+  projectGanttAll: (wsId: string) =>
+    [...issueKeys.all(wsId), "project-gantt"] as const,
+  /**
+   * Per-project Gantt issue list (scheduled-only). Uses its own cache key
+   * rather than reusing the bucketed `myList` cache so WS handlers and
+   * cache helpers don't have to special-case a non-bucketed shape under
+   * the `my` prefix.
+   */
+  projectGantt: (wsId: string, projectId: string) =>
+    [...issueKeys.projectGanttAll(wsId), projectId] as const,
   detail: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "detail", id] as const,
   children: (wsId: string, id: string) =>
@@ -58,7 +69,7 @@ export const issueKeys = {
 
 export type MyIssuesFilter = Pick<
   ListIssuesParams,
-  "assignee_id" | "assignee_ids" | "creator_id" | "project_id"
+  "assignee_id" | "assignee_ids" | "creator_id" | "project_id" | "involves_user_id"
 >;
 
 export type AssigneeGroupedIssuesFilter = Omit<
@@ -191,6 +202,23 @@ export function myAllIssuesListOptions(wsId: string, userId: string) {
     queryKey: [...issueKeys.myAll(wsId), "my", userId],
     queryFn: () => fetchMyIssues(userId),
     select: flattenIssueBuckets,
+  });
+}
+
+/**
+ * Page size for the scheduled-issue fetch. The Gantt view always pulls every
+ * scheduled issue (no client pagination), so this is just the chunk size we
+ * use to walk the server's `(limit, offset)` window until we hit `total`.
+ */
+export const PROJECT_GANTT_PAGE_LIMIT = 500;
+
+/**
+ * Paranoia cap on the loop in {@link fetchProjectGanttIssues}. Real projects
+ * shouldn't come close to this — a single project carrying 50k scheduled
+ * issues is already a product problem, not a Gantt-rendering one — but the
+ * guard prevents a buggy server `total` from spinning the loop forever.
+ */
+export const PROJECT_GANTT_MAX_ISSUES = 10_000;
   });
 }
 

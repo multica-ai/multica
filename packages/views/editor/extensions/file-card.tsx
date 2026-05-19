@@ -18,9 +18,7 @@ import { Node, mergeAttributes } from "@tiptap/core";
 import { ReactNodeViewRenderer, NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { FILE_CARD_URL_PATTERN } from "@multica/ui/markdown";
-import { useAttachmentDownloadResolver } from "../attachment-download-context";
-import { useAttachmentPreview } from "../attachment-preview-modal";
-import { AttachmentBlock } from "../attachment-block";
+import { Attachment } from "../attachment";
 
 const FILE_CARD_MARKDOWN_RE = new RegExp(
   `^!file\\[([^\\]]*)\\]\\((${FILE_CARD_URL_PATTERN.source})\\)`,
@@ -28,45 +26,21 @@ const FILE_CARD_MARKDOWN_RE = new RegExp(
 
 
 // ---------------------------------------------------------------------------
-// React NodeView
+// React NodeView — thin wrapper, all rendering lives in <Attachment>
 // ---------------------------------------------------------------------------
 
 export function FileCardView({ node }: NodeViewProps) {
   const href = (node.attrs.href as string) || "";
   const filename = (node.attrs.filename as string) || "";
   const uploading = node.attrs.uploading as boolean;
-  const { openByUrl, resolveAttachment } = useAttachmentDownloadResolver();
-  const preview = useAttachmentPreview();
-
-  // Preview gate widens to "anything that can be downloaded AND whose
-  // filename is a previewable type". Media kinds remain previewable when the
-  // attachment record isn't reachable (e.g. URL was copy-pasted across
-  // comments). Text kinds (markdown / html / text) need the id because the
-  // preview proxy is ID-keyed.
-  const attachment = href ? resolveAttachment(href) : undefined;
-
-  const openPreview = () => {
-    if (attachment) {
-      preview.tryOpen({ kind: "full", attachment });
-    } else if (href) {
-      preview.tryOpen({ kind: "url", url: href, filename });
-    }
-  };
 
   return (
     <NodeViewWrapper as="div" className="file-card-node" data-type="fileCard">
       <div contentEditable={false}>
-        <AttachmentBlock
-          filename={filename}
-          contentType={attachment?.content_type ?? ""}
-          attachmentId={attachment?.id}
-          href={href}
-          uploading={uploading}
-          onPreview={openPreview}
-          onDownload={() => openByUrl(href)}
+        <Attachment
+          attachment={{ kind: "url", url: href, filename, uploading }}
         />
       </div>
-      {preview.modal}
     </NodeViewWrapper>
   );
 }

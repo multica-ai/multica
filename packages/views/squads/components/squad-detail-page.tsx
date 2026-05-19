@@ -240,7 +240,7 @@ export function SquadDetailPage() {
       {/* Two-column grid mirrors agent-detail-page: left inspector (identity +
           properties + leader), right pane with tabs (Members | Instructions).
           Mobile collapses to stacked single column. */}
-      <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[320px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6">
+      <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[280px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6 lg:grid-cols-[320px_minmax(0,1fr)]">
         <SquadDetailInspector
           squad={squad}
           memberCount={members.length}
