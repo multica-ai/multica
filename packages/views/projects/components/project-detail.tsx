@@ -12,8 +12,15 @@ import { projectDetailOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
-import { myIssueAssigneeGroupsOptions, myIssueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter, type MyIssuesFilter } from "@multica/core/issues/queries";
-import { useUpdateIssue } from "@multica/core/issues/mutations";
+import {
+  myIssueAssigneeGroupsOptions,
+  myIssueListOptions,
+  myIssueListPaginationOptions,
+  childIssueProgressOptions,
+  type AssigneeGroupedIssuesFilter,
+  type MyIssuesFilter,
+} from "@multica/core/issues/queries";
+import { useLoadAllRemaining, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useModalStore } from "@multica/core/modals";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -33,6 +40,7 @@ import { ProjectResourcesSection } from "./project-resources-section";
 import { IssuesHeader } from "../../issues/components/issues-header";
 import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
+import { GanttView, type GanttPaginationProps } from "../../issues/components/gantt-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -107,6 +115,7 @@ function ProjectIssuesContent({
   assigneeGroupFilter,
   scope,
   filter,
+  ganttPagination,
 }: {
   projectId: string;
   projectIssues: Issue[];
@@ -115,6 +124,7 @@ function ProjectIssuesContent({
   assigneeGroupFilter?: AssigneeGroupedIssuesFilter;
   scope: string;
   filter: MyIssuesFilter;
+  ganttPagination: GanttPaginationProps | undefined;
 }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
@@ -185,7 +195,7 @@ function ProjectIssuesContent({
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      {viewMode === "board" ? (
+      {viewMode === "board" && (
         <BoardView
           issues={assigneeGroups ? projectIssues : issues}
           assigneeGroups={assigneeGroups}
@@ -199,7 +209,8 @@ function ProjectIssuesContent({
           myIssuesFilter={filter}
           projectId={projectId}
         />
-      ) : (
+      )}
+      {viewMode === "list" && (
         <ListView
           issues={issues}
           visibleStatuses={visibleStatuses}
@@ -208,6 +219,9 @@ function ProjectIssuesContent({
           myIssuesFilter={filter}
           projectId={projectId}
         />
+      )}
+      {viewMode === "gantt" && (
+        <GanttView issues={issues} pagination={ganttPagination} />
       )}
     </div>
   );
@@ -257,13 +271,36 @@ function ProjectIssuesSurface({
     ...assigneeGroupsOptions,
     enabled: usesAssigneeBoard,
   });
+  // Subscribes to the same cache as statusIssuesQuery and just selects a
+  // pagination summary instead of the flat issue array — used by Gantt to
+  // warn when issues are hidden behind unfetched pages (Board/List have
+  // per-column load-more affordances; Gantt does not).
+  const paginationQuery = useQuery({
+    ...myIssueListPaginationOptions(wsId, scope, filter),
+    enabled: !usesAssigneeBoard,
+  });
+  const { loadAll, isLoading: isLoadingMore } = useLoadAllRemaining({ scope, filter });
   const projectIssues = usesAssigneeBoard
     ? (assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [])
     : (statusIssuesQuery.data ?? []);
 
+  // Gantt can't paginate per-column, so we surface a banner + Load-all
+  // affordance when the cache is missing pages. Skip when the surface is
+  // using the assignee-grouped query — that uses a different cache shape.
+  const ganttPagination: GanttPaginationProps | undefined =
+    !usesAssigneeBoard && paginationQuery.data
+      ? {
+          loaded: paginationQuery.data.loaded,
+          total: paginationQuery.data.total,
+          hasMore: paginationQuery.data.hasMore,
+          isLoadingMore,
+          onLoadAll: loadAll,
+        }
+      : undefined;
+
   return (
     <>
-      <IssuesHeader scopedIssues={projectIssues} />
+      <IssuesHeader scopedIssues={projectIssues} allowGantt />
       <ProjectIssuesContent
         projectId={projectId}
         projectIssues={projectIssues}
@@ -272,6 +309,7 @@ function ProjectIssuesSurface({
         assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
         scope={scope}
         filter={filter}
+        ganttPagination={ganttPagination}
       />
       <BatchActionToolbar />
     </>

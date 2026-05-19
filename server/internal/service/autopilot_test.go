@@ -3,6 +3,7 @@ package service
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -90,5 +91,104 @@ func TestBuildIssueDescription_NonWebhookSourceWithPayloadIgnored(t *testing.T) 
 	got := s.buildIssueDescription(ap, run)
 	if strings.Contains(got.String, "Webhook event") {
 		t.Fatalf("non-webhook source should not include webhook block: %q", got.String)
+	}
+}
+
+// TestInterpolateTemplate covers the three behaviours that real autopilot
+// runs depend on: {{date}} substitution, falling back to Title when the
+// template is unset/empty, and leaving any non-{{date}} text alone (the
+// handler is the layer that prevents unknown tokens from being stored in
+// the first place — service-layer interpolation stays substitute-or-leave).
+func TestInterpolateTemplate(t *testing.T) {
+	s := &AutopilotService{}
+	today := time.Now().UTC().Format("2006-01-02")
+
+	cases := []struct {
+		name   string
+		ap     db.Autopilot
+		expect string
+	}{
+		{
+			name:   "date placeholder substituted",
+			ap:     db.Autopilot{Title: "fallback", IssueTitleTemplate: pgtype.Text{String: "probe — {{date}}", Valid: true}},
+			expect: "probe — " + today,
+		},
+		{
+			name:   "date placeholder with whitespace substituted",
+			ap:     db.Autopilot{Title: "fallback", IssueTitleTemplate: pgtype.Text{String: "probe — {{ date }}", Valid: true}},
+			expect: "probe — " + today,
+		},
+		{
+			name:   "empty template falls back to autopilot title",
+			ap:     db.Autopilot{Title: "fallback title", IssueTitleTemplate: pgtype.Text{Valid: false}},
+			expect: "fallback title",
+		},
+		{
+			name:   "template without placeholder is returned verbatim",
+			ap:     db.Autopilot{Title: "fallback", IssueTitleTemplate: pgtype.Text{String: "static title", Valid: true}},
+			expect: "static title",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := s.interpolateTemplate(tc.ap); got != tc.expect {
+				t.Fatalf("interpolateTemplate = %q, want %q", got, tc.expect)
+			}
+		})
+	}
+}
+
+// TestValidateIssueTitleTemplate locks down what create/update accept.
+// Reject path: anything inside {{...}} that is not in the supported set.
+// Accept path: empty, plain text, and the canonical {{date}} placeholder
+// in both compact and whitespace-padded forms.
+func TestValidateIssueTitleTemplate(t *testing.T) {
+	t.Run("accepts empty template", func(t *testing.T) {
+		if err := ValidateIssueTitleTemplate(""); err != nil {
+			t.Fatalf("empty template must be valid: %v", err)
+		}
+	})
+	t.Run("accepts plain text", func(t *testing.T) {
+		if err := ValidateIssueTitleTemplate("daily report"); err != nil {
+			t.Fatalf("plain text must be valid: %v", err)
+		}
+	})
+	t.Run("accepts {{date}}", func(t *testing.T) {
+		if err := ValidateIssueTitleTemplate("probe — {{date}}"); err != nil {
+			t.Fatalf("{{date}} must be valid: %v", err)
+		}
+	})
+	t.Run("accepts {{ date }} with whitespace", func(t *testing.T) {
+		if err := ValidateIssueTitleTemplate("probe — {{ date }}"); err != nil {
+			t.Fatalf("{{ date }} must be valid: %v", err)
+		}
+	})
+
+	rejections := []struct {
+		name string
+		tmpl string
+		// nameInError is the offending variable name that must appear in the
+		// returned error so CLI users see which token was rejected.
+		nameInError string
+	}{
+		{"go template style", "probe — {{.TriggeredAt}}", ".TriggeredAt"},
+		{"mustache style unknown variable", "probe — {{trigger_id}}", "trigger_id"},
+		{"datetime not yet supported", "probe — {{datetime}}", "datetime"},
+		{"empty placeholder", "probe — {{}}", ""},
+		{"mixed valid + invalid still fails", "probe — {{date}} {{trigger_source}}", "trigger_source"},
+	}
+	for _, tc := range rejections {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateIssueTitleTemplate(tc.tmpl)
+			if err == nil {
+				t.Fatalf("expected rejection for %q", tc.tmpl)
+			}
+			if !strings.Contains(err.Error(), "unknown template variable") {
+				t.Fatalf("error should mention unknown template variable: %v", err)
+			}
+			if tc.nameInError != "" && !strings.Contains(err.Error(), tc.nameInError) {
+				t.Fatalf("error should name the offending token %q: %v", tc.nameInError, err)
+			}
+		})
 	}
 }

@@ -76,9 +76,24 @@
   "view": {
     "tooltip_board": "看板视图",
     "tooltip_list": "列表视图",
+    "tooltip_gantt": "甘特图",
     "section": "视图",
     "board": "看板",
-    "list": "列表"
+    "list": "列表",
+    "gantt": "甘特图"
+  },
+  "gantt": {
+    "header_issue": "Issue",
+    "zoom_day": "日",
+    "zoom_week": "周",
+    "zoom_month": "月",
+    "show_completed": "显示已完成",
+    "empty": "暂无可展示的 issue。",
+    "no_scheduled": "暂无 issue 设置了开始或截止日期 — 设置后会显示在时间轴上。",
+    "unscheduled_section": "未排期 · {{count}}",
+    "pagination_warning": "还有 {{hidden}} 个 issue 未加载 — 排期可能不完整。",
+    "load_all": "加载全部",
+    "inverted_dates_warning": "开始日期晚于截止日期 — 已按区间最小/最大端绘制。"
   },
   "actor_issues": {
     "scope": {
@@ -100,7 +115,9 @@
         "title": "没有已创建的 issue",
         "description": "由这里创建的 issue 会显示在此视图中。"
       }
-    }
+    },
+    "search_placeholder": "搜索 issue...",
+    "search_empty": "没有匹配的 issue。"
   },
   "list": {
     "empty_status": "无 issue",

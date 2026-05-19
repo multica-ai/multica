@@ -386,37 +386,42 @@ func TeamInviteAccepted(inviteeID, workspaceID string, daysSinceInvite int64) Ev
 }
 
 // OnboardingQuestionnaireSubmitted fires the first time a user's
-// `user.onboarding_questionnaire` transitions from empty (or partial) to
-// all three answers present. The handler drives this transition — we
-// emit from PatchOnboarding so the single emission site stays honest
-// even if the frontend retries.
+// `user.onboarding_questionnaire` transitions from "at least one slot
+// unresolved" to "every slot has either an answer or a skip marker".
+// The handler drives this transition — we emit from PatchOnboarding so
+// the single emission site stays honest even if the frontend retries.
 //
 // The three answers are also mirrored into person properties via $set
-// so cohorting by role / use_case / team_size works across every event
+// so cohorting by source / role / use_case works across every event
 // on the same user without re-joining back to the DB.
 //
-// teamSizeOther / roleOther / useCaseOther are presence booleans only —
-// the free-text content is kept in the DB for product research but not
-// broadcast via analytics (PII risk + low cardinality ask).
-func OnboardingQuestionnaireSubmitted(userID, teamSize, role, useCase string, teamSizeOther, roleOther, useCaseOther bool) Event {
+// `*Skipped` booleans capture per-question skip intent (the new v2
+// signal). `*HasOther` are presence booleans for the free-text "other"
+// override; the free-text content is kept in the DB for product
+// research but not broadcast via analytics (PII risk + low cardinality
+// ask).
+func OnboardingQuestionnaireSubmitted(userID, source, role, useCase string, sourceSkipped, roleSkipped, useCaseSkipped, sourceHasOther, roleHasOther, useCaseHasOther bool) Event {
 	return Event{
 		Name:       EventOnboardingQuestionnaireSubmit,
 		DistinctID: userID,
 		Properties: withCoreProperties(map[string]any{
-			"team_size":           teamSize,
-			"role":                role,
-			"use_case":            useCase,
-			"team_size_has_other": teamSizeOther,
-			"role_has_other":      roleOther,
-			"use_case_has_other":  useCaseOther,
+			"source":             source,
+			"role":               role,
+			"use_case":           useCase,
+			"source_skipped":     sourceSkipped,
+			"role_skipped":       roleSkipped,
+			"use_case_skipped":   useCaseSkipped,
+			"source_has_other":   sourceHasOther,
+			"role_has_other":     roleHasOther,
+			"use_case_has_other": useCaseHasOther,
 		}, CoreProperties{
 			UserID: userID,
 			Source: SourceOnboarding,
 		}),
 		Set: map[string]any{
-			"team_size": teamSize,
-			"role":      role,
-			"use_case":  useCase,
+			"source":   source,
+			"role":     role,
+			"use_case": useCase,
 		},
 	}
 }

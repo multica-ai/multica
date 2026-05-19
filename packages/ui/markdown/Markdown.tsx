@@ -60,6 +60,20 @@ export interface MarkdownProps {
    * When provided, enables file card preprocessing and rendering.
    */
   cdnDomain?: string
+  /**
+   * Optional override for the image renderer. When provided, replaces the
+   * default `<img>` with constrained sizing. The views-package wrapper uses
+   * this to inject the unified `<Attachment>` component so chat messages get
+   * the same hover toolbar / lightbox / preview-modal treatment as comments.
+   */
+  renderImage?: (props: { src: string; alt: string }) => React.ReactNode
+  /**
+   * Optional override for the file-card renderer. When provided, replaces
+   * the simplified card chrome (filename + download button) with whatever
+   * the caller supplies. Used the same way as `renderImage` to bridge into
+   * the views-package `<Attachment>` component.
+   */
+  renderFileCard?: (props: { href: string; filename: string }) => React.ReactNode
 }
 
 // Sanitization schema — extends GitHub defaults to allow code highlighting classes
@@ -113,6 +127,8 @@ function createComponents(
   onUrlClick?: (url: string) => void,
   onFileClick?: (path: string) => void,
   renderMention?: (props: { type: string; id: string }) => React.ReactNode,
+  renderImage?: (props: { src: string; alt: string }) => React.ReactNode,
+  renderFileCard?: (props: { href: string; filename: string }) => React.ReactNode,
 ): Partial<Components> {
   const baseComponents: Partial<Components> = {
     // FileCard: intercept <div data-type="fileCard"> from preprocessFileCards
@@ -122,6 +138,9 @@ function createComponents(
         const rawHref = (node?.properties?.dataHref as string) || ''
         const href = isAllowedFileCardHref(rawHref) ? rawHref : ''
         const filename = (node?.properties?.dataFilename as string) || ''
+        if (renderFileCard) {
+          return <>{renderFileCard({ href, filename })}</>
+        }
         return (
           <div className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">
             <FileText className="size-4 shrink-0 text-muted-foreground" />
@@ -143,14 +162,19 @@ function createComponents(
       return <div {...props}>{children}</div>
     },
     // Images: render uploaded images with constrained sizing
-    img: ({ src, alt }) => (
-      <img
-        src={src}
-        alt={alt ?? ""}
-        className="max-w-full h-auto rounded-md my-2"
-        loading="lazy"
-      />
-    ),
+    img: ({ src, alt }) => {
+      if (renderImage) {
+        return <>{renderImage({ src: typeof src === 'string' ? src : '', alt: alt ?? '' })}</>
+      }
+      return (
+        <img
+          src={src}
+          alt={alt ?? ""}
+          className="max-w-full h-auto rounded-md my-2"
+          loading="lazy"
+        />
+      )
+    },
     // Links: Make clickable with callbacks, or render as mention
     a: ({ href, children }) => {
       // Mention links: mention://member/id, mention://agent/id, mention://issue/id, mention://all/all
@@ -384,11 +408,13 @@ export function Markdown({
   onUrlClick,
   onFileClick,
   renderMention,
+  renderImage,
+  renderFileCard,
   cdnDomain
 }: MarkdownProps): React.JSX.Element {
   const components = React.useMemo(
-    () => createComponents(mode, onUrlClick, onFileClick, renderMention),
-    [mode, onUrlClick, onFileClick, renderMention]
+    () => createComponents(mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard),
+    [mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard]
   )
 
   // Preprocess: convert mention shortcodes, raw URLs, and file cards to renderable content

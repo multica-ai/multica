@@ -349,6 +349,11 @@ export function ManualCreatePanel({
   const switchToAgent = () => {
     const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
     const prompt = [title.trim(), desc].filter(Boolean).join("\n\n");
+    // Title + description have been packed into the agent prompt — clear them
+    // from the shared draft so a later agent→manual switch doesn't surface
+    // stale manual state on top of the prompt-as-description, which would
+    // duplicate content on every round-trip.
+    setDraft({ title: "", description: "" });
     setLastMode("agent");
     onSwitchMode?.({
       prompt,

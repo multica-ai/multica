@@ -391,7 +391,10 @@
     "copy_filtered": "Copy filtered",
     "copied": "Copied",
     "waiting_events": "Waiting for events...",
-    "no_data": "No execution data recorded."
+    "no_data": "No execution data recorded.",
+    "sort_label": "Sort",
+    "sort_chronological": "Oldest first",
+    "sort_newest_first": "Newest first"
   },
   "task_failure": {
     "agent_error": "Agent execution error",

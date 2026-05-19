@@ -55,7 +55,7 @@ export const issueKeys = {
 
 export type MyIssuesFilter = Pick<
   ListIssuesParams,
-  "assignee_id" | "assignee_ids" | "creator_id" | "project_id"
+  "assignee_id" | "assignee_ids" | "creator_id" | "project_id" | "involves_user_id"
 >;
 
 export type AssigneeGroupedIssuesFilter = Omit<
@@ -77,6 +77,34 @@ export function flattenIssueBuckets(data: ListIssuesCache) {
     if (bucket) out.push(...bucket.issues);
   }
   return out;
+}
+
+export interface IssueListPagination {
+  loaded: number;
+  total: number;
+  hasMore: boolean;
+}
+
+/**
+ * Aggregate the bucketed cache totals so non-paginated consumers (e.g. the
+ * Gantt view, which doesn't have a per-status load-more affordance) can tell
+ * whether the cache is missing pages and warn the user instead of silently
+ * rendering an incomplete schedule.
+ */
+export function summarizeIssueListPagination(
+  data: ListIssuesCache | undefined,
+): IssueListPagination {
+  if (!data) return { loaded: 0, total: 0, hasMore: false };
+  let loaded = 0;
+  let total = 0;
+  for (const status of PAGINATED_STATUSES) {
+    const bucket = data.byStatus[status];
+    if (bucket) {
+      loaded += bucket.issues.length;
+      total += bucket.total;
+    }
+  }
+  return { loaded, total, hasMore: loaded < total };
 }
 
 async function fetchFirstPages(filter: MyIssuesFilter = {}): Promise<ListIssuesCache> {
@@ -139,6 +167,24 @@ export function myIssueListOptions(
     queryKey: issueKeys.myList(wsId, scope, filter),
     queryFn: () => fetchFirstPages(filter),
     select: flattenIssueBuckets,
+  });
+}
+
+/**
+ * Same cache entry as {@link myIssueListOptions} (shared queryKey + queryFn —
+ * TanStack Query dedupes), but `select` derives a pagination summary instead
+ * of the flat issue list. Use this alongside the list query when a consumer
+ * needs to know how many issues live behind unfetched pages.
+ */
+export function myIssueListPaginationOptions(
+  wsId: string,
+  scope: string,
+  filter: MyIssuesFilter,
+) {
+  return queryOptions({
+    queryKey: issueKeys.myList(wsId, scope, filter),
+    queryFn: () => fetchFirstPages(filter),
+    select: summarizeIssueListPagination,
   });
 }
 

@@ -18,6 +18,7 @@ import (
 // overridden by user-configured custom_args.
 var opencodeBlockedArgs = map[string]blockedArgMode{
 	"--format": blockedWithValue, // json output format for daemon communication
+	"--dir":    blockedWithValue, // task workdir anchor for skill / AGENTS.md discovery
 }
 
 // opencodeBackend implements Backend by spawning `opencode run --format json`
@@ -50,6 +51,18 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
 	args := []string{"run", "--format", "json"}
+	// Anchor OpenCode's project discovery (AGENTS.md walk-up + .opencode/skills/
+	// project config scan) at the task workdir. Without this, OpenCode falls
+	// back to PWD (inherited from the daemon process) or process.cwd(), which
+	// in self-host deployments can resolve to the user's shell working
+	// directory and silently bypass the per-task workdir — agents lose
+	// visibility into their assigned skills and AGENTS.md instructions.
+	// PWD is also overridden below because OpenCode prefers PWD over cwd when
+	// `--dir` is absent and uses it as the starting point for any further
+	// path resolution.
+	if opts.Cwd != "" {
+		args = append(args, "--dir", opts.Cwd)
+	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
@@ -76,6 +89,14 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	env := buildEnv(b.cfg.Env)
 	// Auto-approve all tool use in daemon mode.
 	env = append(env, `OPENCODE_PERMISSION={"*":"allow"}`)
+	// Override PWD so the child OpenCode process resolves its discovery root
+	// to the task workdir. cmd.Dir alone is not enough: OpenCode reads PWD
+	// (inherited from the parent daemon) before falling back to process.cwd()
+	// when computing the directory it walks for AGENTS.md / .opencode/skills.
+	// See packages/opencode/src/cli/cmd/run.ts in the upstream source.
+	if opts.Cwd != "" {
+		env = append(env, "PWD="+opts.Cwd)
+	}
 	cmd.Env = env
 
 	stdout, err := cmd.StdoutPipe()

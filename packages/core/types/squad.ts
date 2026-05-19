@@ -76,3 +76,32 @@ export interface CreateSquadActivityLogRequest {
   outcome: SquadActivityOutcome;
   details?: unknown;
 }
+
+// SquadMemberStatus mirrors the four-way bucket the back-end derives in
+// handler/squad.go::deriveSquadMemberStatus. Kept as a string union here
+// (rather than re-derived from snapshot data) so the squad page can render
+// the freshest server-side judgement without re-fetching the agent
+// snapshot / runtime list.
+export type SquadMemberStatusValue = "working" | "idle" | "offline" | "unstable";
+
+export interface SquadActiveIssueBrief {
+  issue_id: string;
+  identifier: string;
+  title: string;
+  issue_status: string;
+}
+
+export interface SquadMemberStatus {
+  member_type: SquadMemberType;
+  member_id: string;
+  // Human members are returned with status === null so the UI can render
+  // them in the same list without showing a status pill (v1 has no
+  // presence signal for humans).
+  status: SquadMemberStatusValue | null;
+  active_issues: SquadActiveIssueBrief[];
+  last_active_at: string | null;
+}
+
+export interface SquadMemberStatusListResponse {
+  members: SquadMemberStatus[];
+}

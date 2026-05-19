@@ -7,11 +7,10 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions } from "@multica/core/workspace/queries";
-import type { RuntimeUsage } from "@multica/core/types";
+import type { RuntimeUsage, AgentRuntime } from "@multica/core/types";
 import {
   runtimeUsageOptions,
   runtimeUsageByAgentOptions,
-  runtimeUsageByHourOptions,
 } from "@multica/core/runtimes/queries";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import {
@@ -19,11 +18,12 @@ import {
   estimateCost,
   estimateCacheSavings,
   aggregateByDate,
+  aggregateByWeek,
   aggregateCostByAgent,
   aggregateCostByModel,
-  aggregateCostByHour,
   collectUnmappedModels,
   pctChange,
+  sliceWindow,
   type CostByKey,
 } from "../utils";
 import { KpiCard } from "./shared";
@@ -31,7 +31,8 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import {
   DailyCostChart,
   DailyTokensChart,
-  HourlyActivityChart,
+  WeeklyCostChart,
+  WeeklyTokensChart,
   ActivityHeatmap,
 } from "./charts";
 import { CustomPricingDialog } from "./custom-pricing-dialog";
@@ -40,13 +41,32 @@ import { useT } from "../../i18n";
 // Single source of truth for the period selector. KPIs, the When-chart, the
 // Cost-by tabs, and the CSV export all read from the same `days` value so
 // the labels ("· 30D") and the data slice never disagree.
+//
+// `dims` declares which dimensions each range is allowed in. 7 days at the
+// weekly grain is one bar, so 7d is daily-only; 180d is weekly-only because
+// 180 daily bars are visually unreadable.
 const TIME_RANGES = [
-  { label: "7d", days: 7 },
-  { label: "30d", days: 30 },
-  { label: "90d", days: 90 },
+  { label: "7d", days: 7, dims: ["daily"] as const },
+  { label: "30d", days: 30, dims: ["daily", "weekly"] as const },
+  { label: "90d", days: 90, dims: ["daily", "weekly"] as const },
+  { label: "180d", days: 180, dims: ["weekly"] as const },
 ] as const;
 
 type TimeRange = (typeof TIME_RANGES)[number]["days"];
+type WhenTab = "daily" | "weekly" | "heatmap";
+
+// Default time range per dimension. Switching dimensions resets the period
+// to its default rather than keeping a now-invalid value.
+const DEFAULT_DAYS_BY_DIM: Record<Exclude<WhenTab, "heatmap">, TimeRange> = {
+  daily: 30,
+  weekly: 90,
+};
+
+function rangesForDim(dim: Exclude<WhenTab, "heatmap">) {
+  return TIME_RANGES.filter((r) =>
+    (r.dims as readonly string[]).includes(dim),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Local segmented control. shadcn's Tabs is wired for full tab pages with
@@ -106,11 +126,17 @@ function fmtMoney(n: number): string {
 // KPI also benefits from having extra history available.
 // ---------------------------------------------------------------------------
 
-export function UsageSection({ runtimeId }: { runtimeId: string }) {
+export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");
+  const runtimeId = runtime.id;
+  // Tz comes from the runtime itself — the backend already buckets daily
+  // rows on `start-of-day in runtime tz`, so we use the same axis for every
+  // frontend window calculation. No "user timezone" option here on purpose.
+  const tz = runtime.timezone;
   const { data: usage = [], isLoading: loading } = useQuery(
     runtimeUsageOptions(runtimeId, 180),
   );
+  const [dim, setDim] = useState<Exclude<WhenTab, "heatmap">>("daily");
   const [days, setDays] = useState<TimeRange>(30);
   // Subscribe so the KPI cards (which call estimateCost at render-time, not
   // through a memo) re-evaluate when the user saves a custom rate. The
@@ -121,11 +147,23 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
   if (loading) return <UsageSkeleton />;
   if (usage.length === 0) return <UsageEmpty />;
 
-  // Slice the cached 90-day window into the user's selected sub-window AND
+  // Slice the cached 180-day window into the user's selected sub-window AND
   // the immediately prior window of equal length. The KPI delta ("+18% vs
   // prev") then compares like-for-like ranges instead of "this period vs
-  // all of history".
-  const { filtered, prevFiltered } = sliceWindow(usage, days);
+  // all of history". Tz-aware so the cutoff lands on the same calendar
+  // boundary the backend used when bucketing rows.
+  const { filtered, prevFiltered } = sliceWindow(usage, days, tz);
+
+  const allowedRanges = rangesForDim(dim);
+  const handleDimChange = (next: Exclude<WhenTab, "heatmap">) => {
+    setDim(next);
+    const stillAllowed = (rangesForDim(next) as readonly { days: number }[]).some(
+      (r) => r.days === days,
+    );
+    if (!stillAllowed) {
+      setDays(DEFAULT_DAYS_BY_DIM[next]);
+    }
+  };
   const totals = computeTotals(filtered);
   const prevTotals = computeTotals(prevFiltered);
 
@@ -140,22 +178,39 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
   return (
     <div className="space-y-5">
       {/* Page-wide period selector. Lives at the top because it controls
-          basically everything below: the KPI numbers and labels, the daily
-          / hourly chart windows, and the cost-by aggregations. The Heatmap
-          tab is the only sub-view that ignores it (always shows 90d), and
-          its tab disables this control to telegraph that. */}
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-xs uppercase tracking-wider text-muted-foreground">
-          {t(($) => $.usage.period_label)}
-        </span>
-        <Segmented
-          value={days}
-          onChange={setDays}
-          options={TIME_RANGES.map((r) => ({
-            label: r.label,
-            value: r.days,
-          }))}
-        />
+          basically everything below: the KPI numbers and labels, the
+          daily / weekly chart window, and the cost-by aggregations. The
+          Heatmap tab is the only sub-view that ignores it (always shows
+          26 weeks), and its tab disables this control to telegraph that. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="text-xs uppercase tracking-wider text-muted-foreground">
+            {t(($) => $.usage.dimension_label)}
+          </span>
+          <Segmented
+            value={dim}
+            onChange={handleDimChange}
+            options={
+              [
+                { label: t(($) => $.usage.when_tab_daily), value: "daily" },
+                { label: t(($) => $.usage.when_tab_weekly), value: "weekly" },
+              ] as const
+            }
+          />
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-xs uppercase tracking-wider text-muted-foreground">
+            {t(($) => $.usage.period_label)}
+          </span>
+          <Segmented
+            value={days}
+            onChange={setDays}
+            options={allowedRanges.map((r) => ({
+              label: r.label,
+              value: r.days,
+            }))}
+          />
+        </div>
       </div>
 
       {/* Pricing-gap banner. Sits above the KPI grid so a *partial* unmapping
@@ -215,23 +270,23 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
         />
       </div>
 
-      {/* Layer 2 — WHEN chart. Three tabs for three independent time
-          dimensions: by-date (Daily), by-hour-of-day (Hourly), by-calendar
-          (Heatmap). The period selector lives at the page top — this card
-          only owns the tab switch and chart legend. */}
+      {/* Layer 2 — WHEN chart. Dimension (Daily / Weekly) is owned by the
+          parent so the period selector at the top can react to it. The
+          Heatmap is an independent toggle inside this card — it ignores
+          the period selector by design (it's a fixed 26-week long-view). */}
       <WhenChart
-        runtimeId={runtimeId}
         usage={usage}
         filtered={filtered}
         days={days}
+        dim={dim}
+        tz={tz}
       />
 
-      {/* Layer 3 — WHO/WHAT burned the spend. By-hour was dropped — that
-          dimension lives in the WHEN chart now. */}
+      {/* Layer 3 — WHO/WHAT burned the spend. */}
       <CostByBlock runtimeId={runtimeId} days={days} usage={filtered} />
 
-      {/* Layer 4 — Folded raw view. Hourly and Heatmap used to live here;
-          they were promoted into the WHEN chart's tabs, leaving only the
+      {/* Layer 4 — Folded raw view. The Heatmap used to live here too; it
+          was promoted into the WHEN chart's toggle, leaving only the
           breakdown table behind. */}
       <FoldedRow usage={filtered} />
     </div>
@@ -239,81 +294,69 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// WhenChart — answers "WHEN was this runtime spending money?" along three
-// independent time dimensions. Owning the tab state here (rather than
-// downstream) means the period selector and chart legend can live in the
-// same header row and stay in sync with whichever tab is active.
+// WhenChart — answers "WHEN was this runtime spending money?".
+// Dimension (Daily / Weekly) is owned by the parent so the page-level
+// period selector can react to it. Heatmap is an independent view toggled
+// inside this card; it ignores both the dimension and the period selector,
+// always showing the long 26-week view.
 // ---------------------------------------------------------------------------
 
-type WhenTab = "daily" | "hourly" | "heatmap";
+type Dim = Exclude<WhenTab, "heatmap">;
 type DailyMetric = "cost" | "tokens";
 
 function WhenChart({
-  runtimeId,
   usage,
   filtered,
   days,
+  dim,
+  tz,
 }: {
-  runtimeId: string;
   usage: RuntimeUsage[];
   filtered: RuntimeUsage[];
   days: TimeRange;
+  dim: Dim;
+  tz: string;
 }) {
   const { t } = useT("runtimes");
-  const [tab, setTab] = useState<WhenTab>("daily");
-  // Daily-tab metric toggle (Cost vs Tokens). Stored here rather than in
-  // DailyTab so the legend in the card header can react to the active
-  // metric without prop-drilling.
-  const [dailyMetric, setDailyMetric] = useState<DailyMetric>("cost");
+  // Heatmap is the "independent" sibling — toggled here, not part of the
+  // page-level dimension segmented (per the RFC).
+  const [showHeatmap, setShowHeatmap] = useState(false);
+  // Daily and Weekly share a Cost-vs-Tokens metric toggle.
+  const [chartMetric, setChartMetric] = useState<DailyMetric>("cost");
   // Memo dep — the aggregates below run `estimateCost`, which now consults
   // the user override store. Without listing pricings here the memos cache
   // pre-override totals when query data hasn't changed.
   const pricings = useCustomPricingStore((s) => s.pricings);
 
-  // Lazy-fetch hourly cost — only needed when its tab is active. Daily and
-  // heatmap derive from the already-cached 90d usage prop.
-  const { data: byHourRows = [] } = useQuery({
-    ...runtimeUsageByHourOptions(runtimeId, days),
-    enabled: tab === "hourly",
-  });
-
   const { dailyCostStack, dailyTokens } = useMemo(
     () => aggregateByDate(filtered),
     [filtered, pricings],
   );
-  const hourlyCost = useMemo(
-    () =>
-      aggregateCostByHour(byHourRows).map((row) => ({
-        hour: Number(row.key),
-        cost: row.cost,
-      })),
-    [byHourRows, pricings],
+  // Weekly aggregation builds exactly N trailing calendar weeks anchored at
+  // today (in the runtime tz). Buckets are pre-zeroed inside aggregateByWeek
+  // so weeks with no usage render as empty bars; rows outside the window are
+  // dropped. This avoids the earlier bug where slicing on a sparse 180-day
+  // aggregate surfaced old populated weeks instead of in-range empty ones.
+  const weekCount = Math.max(1, Math.ceil(days / 7));
+  const { weeklyTokens, weeklyCostStack } = useMemo(
+    () => aggregateByWeek(usage, tz, weekCount),
+    [usage, tz, weekCount, pricings],
   );
+
+  const metricToggleVisible = !showHeatmap;
+  const legendIncludesCacheRead = !showHeatmap && chartMetric === "tokens";
 
   return (
     <div className="rounded-lg border bg-card p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <h4 className="text-sm font-semibold">{t(($) => $.usage.when_title)}</h4>
-          <Segmented
-            value={tab}
-            onChange={setTab}
-            options={
-              [
-                { label: t(($) => $.usage.when_tab_daily), value: "daily" },
-                { label: t(($) => $.usage.when_tab_hourly), value: "hourly" },
-                { label: t(($) => $.usage.when_tab_heatmap), value: "heatmap" },
-              ] as const
-            }
-          />
-          {/* Cost/Tokens toggle lives next to the main tab control so all
-              chart-axis switches are in one place. Only meaningful on the
-              Daily tab — Hourly always renders cost; Heatmap has its own
-              caption. */}
-          {tab === "daily" && (
+          {/* Cost / Tokens metric toggle — only meaningful when the chart
+              actually has two series-types to switch between. */}
+          {metricToggleVisible && (
             <Segmented
-              value={dailyMetric}
-              onChange={setDailyMetric}
+              value={chartMetric}
+              onChange={setChartMetric}
               options={
                 [
                   { label: t(($) => $.usage.daily_metric_cost), value: "cost" },
@@ -322,35 +365,51 @@ function WhenChart({
               }
             />
           )}
+          {/* Heatmap toggle — independent of the page-level dim segmented.
+              "On" puts the card into a fixed 26-week long-view that ignores
+              the period selector. */}
+          <button
+            type="button"
+            onClick={() => setShowHeatmap((v) => !v)}
+            className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
+              showHeatmap
+                ? "border-foreground bg-foreground text-background"
+                : "border-border text-muted-foreground hover:text-foreground"
+            }`}
+            aria-pressed={showHeatmap}
+          >
+            {t(($) => $.usage.when_tab_heatmap)}
+          </button>
         </div>
-        {tab !== "heatmap" && (
-          <ChartLegend includeCacheRead={tab === "daily" && dailyMetric === "tokens"} />
+        {!showHeatmap && (
+          <ChartLegend includeCacheRead={legendIncludesCacheRead} />
         )}
       </div>
 
-      {/* Heatmap intentionally ignores the page period selector and always
-          shows the full 13-week window (a 7-day heatmap is just a row of
-          squares; the long view is the whole point). */}
-      {tab === "heatmap" && (
+      {showHeatmap && (
         <p className="mb-2 text-center text-xs text-muted-foreground">
           {t(($) => $.usage.heatmap_caption)}
         </p>
       )}
 
-      {/* Stable canvas — every tab fits inside the same min-height so
-          switching never collapses or stretches the card vertically (and
-          the right-rail / lower sections never reflow as a side effect). */}
       <div className="min-h-[260px]">
-        {tab === "daily" && (
+        {showHeatmap ? (
+          <ActivityHeatmap usage={usage} tz={tz} />
+        ) : dim === "daily" ? (
           <DailyTab
-            metric={dailyMetric}
+            metric={chartMetric}
             costData={dailyCostStack}
             tokensData={dailyTokens}
             usage={filtered}
           />
+        ) : (
+          <WeeklyTab
+            metric={chartMetric}
+            costData={weeklyCostStack}
+            tokensData={weeklyTokens}
+            usage={filtered}
+          />
         )}
-        {tab === "hourly" && <HourlyTab data={hourlyCost} usage={filtered} />}
-        {tab === "heatmap" && <ActivityHeatmap usage={usage} />}
       </div>
     </div>
   );
@@ -383,16 +442,28 @@ function DailyTab({
   return <DailyCostChart data={costData} />;
 }
 
-function HourlyTab({
-  data,
+function WeeklyTab({
+  metric,
+  costData,
+  tokensData,
   usage,
 }: {
-  data: { hour: number; cost: number }[];
+  metric: DailyMetric;
+  costData: Parameters<typeof WeeklyCostChart>[0]["data"];
+  tokensData: Parameters<typeof WeeklyTokensChart>[0]["data"];
   usage: RuntimeUsage[];
 }) {
-  const totalCost = data.reduce((s, d) => s + d.cost, 0);
+  if (metric === "tokens") {
+    const totalTokens = tokensData.reduce(
+      (s, d) => s + d.input + d.output + d.cacheRead + d.cacheWrite,
+      0,
+    );
+    if (totalTokens === 0) return <EmptyChartState usage={usage} />;
+    return <WeeklyTokensChart data={tokensData} />;
+  }
+  const totalCost = costData.reduce((s, d) => s + d.total, 0);
   if (totalCost === 0) return <EmptyChartState usage={usage} />;
-  return <HourlyActivityChart data={data} />;
+  return <WeeklyCostChart data={costData} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -521,9 +592,7 @@ function ChartLegend({ includeCacheRead = false }: { includeCacheRead?: boolean 
 }
 
 // ---------------------------------------------------------------------------
-// Cost-by block: two-tab attribution view. By-hour was removed — that
-// dimension lives in the WhenChart's "Hourly" tab, which is more legible
-// as a 24-bucket bar than as a sorted list.
+// Cost-by block: two-tab attribution view (by agent / by model).
 // ---------------------------------------------------------------------------
 
 function CostByBlock({
@@ -671,8 +740,8 @@ function CostByList({
 
 // ---------------------------------------------------------------------------
 // Folded row — single chevron-toggle link revealing the raw breakdown
-// table. Hourly distribution and Activity heatmap used to live here; both
-// were promoted to WhenChart tabs, leaving only the table behind.
+// table. The Activity heatmap used to live here too; it was promoted to a
+// WhenChart toggle, leaving only the breakdown table behind.
 // ---------------------------------------------------------------------------
 
 function FoldedRow({ usage }: { usage: RuntimeUsage[] }) {
@@ -775,23 +844,6 @@ function UsageEmpty() {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function sliceWindow(usage: RuntimeUsage[], days: number) {
-  const now = new Date();
-  const cutoffCurrent = new Date(now);
-  cutoffCurrent.setDate(cutoffCurrent.getDate() - days);
-  const cutoffPrev = new Date(now);
-  cutoffPrev.setDate(cutoffPrev.getDate() - days * 2);
-  const isoCurrent = cutoffCurrent.toISOString().slice(0, 10);
-  const isoPrev = cutoffPrev.toISOString().slice(0, 10);
-
-  return {
-    filtered: usage.filter((u) => u.date >= isoCurrent),
-    prevFiltered: usage.filter(
-      (u) => u.date >= isoPrev && u.date < isoCurrent,
-    ),
-  };
-}
 
 interface UsageTotals {
   input: number;

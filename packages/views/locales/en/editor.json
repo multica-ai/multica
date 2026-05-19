@@ -40,7 +40,8 @@
     "preview_failed": "Couldn't load preview",
     "preview_too_large": "File is too large to preview. Please download.",
     "preview_unsupported": "This file type can't be previewed.",
-    "close": "Close"
+    "close": "Close",
+    "open_in_new_tab": "Open in new tab"
   },
   "link_hover": {
     "copy_link": "Copy link",
@@ -56,7 +57,9 @@
     "no_results": "No results"
   },
   "code_block": {
-    "copy_code": "Copy code"
+    "copy_code": "Copy code",
+    "show_preview": "Show preview",
+    "show_source": "Show source"
   },
   "file_card": {
     "uploading": "Uploading {{filename}}"

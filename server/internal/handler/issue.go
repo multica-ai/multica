@@ -741,16 +741,30 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		projectFilter = id
 	}
+	// involves_user_id widens the assignee filter to surface issues where the
+	// user is the indirect assignee (their owned agent, or a squad they belong
+	// to / lead / have an agent inside). Direct member-assignment is excluded
+	// by design — that is the meaning of `assignee_id` (tab 1), and tab 3 must
+	// be disjoint from tab 1.
+	var involvesUserFilter pgtype.UUID
+	if u := r.URL.Query().Get("involves_user_id"); u != "" {
+		id, ok := parseUUIDOrBadRequest(w, u, "involves_user_id")
+		if !ok {
+			return
+		}
+		involvesUserFilter = id
+	}
 
 	// open_only=true returns all non-done/cancelled issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
-			WorkspaceID: wsUUID,
-			Priority:    priorityFilter,
-			AssigneeID:  assigneeFilter,
-			AssigneeIds: assigneeIdsFilter,
-			CreatorID:   creatorFilter,
-			ProjectID:   projectFilter,
+			WorkspaceID:    wsUUID,
+			Priority:       priorityFilter,
+			AssigneeID:     assigneeFilter,
+			AssigneeIds:    assigneeIdsFilter,
+			CreatorID:      creatorFilter,
+			ProjectID:      projectFilter,
+			InvolvesUserID: involvesUserFilter,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -799,15 +813,16 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	issues, err := h.Queries.ListIssues(ctx, db.ListIssuesParams{
-		WorkspaceID: wsUUID,
-		Limit:       int32(limit),
-		Offset:      int32(offset),
-		Status:      statusFilter,
-		Priority:    priorityFilter,
-		AssigneeID:  assigneeFilter,
-		AssigneeIds: assigneeIdsFilter,
-		CreatorID:   creatorFilter,
-		ProjectID:   projectFilter,
+		WorkspaceID:    wsUUID,
+		Limit:          int32(limit),
+		Offset:         int32(offset),
+		Status:         statusFilter,
+		Priority:       priorityFilter,
+		AssigneeID:     assigneeFilter,
+		AssigneeIds:    assigneeIdsFilter,
+		CreatorID:      creatorFilter,
+		ProjectID:      projectFilter,
+		InvolvesUserID: involvesUserFilter,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -816,13 +831,14 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	// Get the true total count for pagination awareness.
 	total, err := h.Queries.CountIssues(ctx, db.CountIssuesParams{
-		WorkspaceID: wsUUID,
-		Status:      statusFilter,
-		Priority:    priorityFilter,
-		AssigneeID:  assigneeFilter,
-		AssigneeIds: assigneeIdsFilter,
-		CreatorID:   creatorFilter,
-		ProjectID:   projectFilter,
+		WorkspaceID:    wsUUID,
+		Status:         statusFilter,
+		Priority:       priorityFilter,
+		AssigneeID:     assigneeFilter,
+		AssigneeIds:    assigneeIdsFilter,
+		CreatorID:      creatorFilter,
+		ProjectID:      projectFilter,
+		InvolvesUserID: involvesUserFilter,
 	})
 	if err != nil {
 		total = int64(len(issues))
@@ -1014,6 +1030,50 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(id)))
+	}
+	// Mirror the involves_user_id 4-branch UNION from sqlc's ListIssues /
+	// ListOpenIssues / CountIssues. ListGroupedIssues is a hand-written dynamic
+	// SQL builder that does not share parameters with sqlc, so the fragment is
+	// re-implemented here in lock-step. Member-direct assignment is excluded by
+	// design: that semantics belongs to tab 1 (`assignee_id`), and tab 3 must
+	// stay disjoint from tab 1.
+	if raw := r.URL.Query().Get("involves_user_id"); raw != "" {
+		id, ok := parseUUIDOrBadRequest(w, raw, "involves_user_id")
+		if !ok {
+			return
+		}
+		ref := addArg(id)
+		where = append(where, fmt.Sprintf(`(
+    (i.assignee_type = 'agent' AND i.assignee_id IN (
+       SELECT a.id FROM agent a
+        WHERE a.workspace_id = $1
+          AND a.owner_id     = %[1]s::uuid
+    ))
+    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
+       SELECT sm.squad_id
+         FROM squad_member sm
+         JOIN squad s ON s.id = sm.squad_id
+        WHERE s.workspace_id = $1
+          AND sm.member_type = 'member'
+          AND sm.member_id   = %[1]s::uuid
+       UNION
+       SELECT s.id
+         FROM squad s
+         JOIN agent a ON a.id = s.leader_id
+        WHERE s.workspace_id = $1
+          AND a.workspace_id = $1
+          AND a.owner_id     = %[1]s::uuid
+       UNION
+       SELECT sm.squad_id
+         FROM squad_member sm
+         JOIN squad s ON s.id = sm.squad_id
+         JOIN agent a ON a.id = sm.member_id
+        WHERE s.workspace_id = $1
+          AND sm.member_type = 'agent'
+          AND a.workspace_id = $1
+          AND a.owner_id     = %[1]s::uuid
+    ))
+)`, ref))
 	}
 
 	assigneeFilters, ok := parseActorFilterList(w, r.URL.Query().Get("assignee_filters"), "assignee_filters")
