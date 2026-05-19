@@ -1004,14 +1004,26 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return fmt.Errorf("workspace is not watched by this daemon: %s", workspaceID)
 	}
 
-	if d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
-		return nil
-	}
+	// Record whether the cache already had this repo before we took the
+	// per-workspace mutex. The two states behave differently below:
+	//
+	//   - cacheHitOnEntry=true: the repo is already cloned; we still must
+	//     refresh `workspaceState.settings` because the /repo/checkout
+	//     handler reads workspaceCoAuthoredByEnabled right after this and
+	//     the 30s workspaceSyncLoop tick is too slow for a freshly-flipped
+	//     GitHub master switch / `co_authored_by_enabled` toggle to feel
+	//     live (RFC MUL-2414 §4.8; PR #2847 review by Emacs).
+	//
+	//   - cacheHitOnEntry=false but cache hit *after* we acquire the mutex:
+	//     a sibling goroutine on a concurrent cold-miss already refreshed
+	//     and populated the cache. We can skip the duplicate refresh — the
+	//     sibling's refresh is fresh enough for our gate read.
+	cacheHitOnEntry := d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != ""
 
 	ws.repoRefreshMu.Lock()
 	defer ws.repoRefreshMu.Unlock()
 
-	if d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
+	if !cacheHitOnEntry && d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
 		return nil
 	}
 
@@ -1022,6 +1034,10 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 
 	if !d.workspaceRepoAllowed(workspaceID, repoURL) {
 		return ErrRepoNotConfigured
+	}
+
+	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
+		return nil
 	}
 
 	d.syncWorkspaceRepos(workspaceID, resp.Repos)
