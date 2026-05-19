@@ -518,6 +518,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `runtime-detail-tools-card` | packages/views/runtimes/components/runtime-detail.tsx | 2 | JEH-1710 — `<RuntimeToolsCard />` rendered alongside MCPServersCard. Card lives in `@multica/cerebro-runtime/views`. |
 | `agent-tools-overrides-schema` | packages/core/api/schemas.ts | 9 | JEH-1710 bid 4 — `AgentToolOverrideListSchema` for the per-agent override response. Lenient zod parse so unknown fields don't crash the UI. |
 | `api-client-agent-tool-overrides` | packages/core/api/client.ts | 24 | JEH-1710 bid 4 — list/set/clear per-agent override methods (`/api/agents/{id}/tool-overrides`). |
+| `main-runtime-tool-backfill` | server/cmd/server/main.go | 2 | JEH-1710 bid 6 — import + startup hook that backfills `cerebro_runtime_tool` cloud rows for every existing runtime so the cascade can drop the legacy `agent_tool_grant` fallback. Real seeder lives in `server/internal/cerebro/runtimetools/backfill.go`. |
 | `runtime-list-cerebro` | packages/views/runtimes/components/runtime-list.tsx | 8 | Runtime view cerebro additions |
 | `runtime-setup-handler` | server/internal/handler/runtime_setup.go | 224 | Runtime-setup token + install script (cerebro feature) |
 | `runtime-setup-page` | packages/views/docs/runtime-setup-page.tsx | 182 | Runtime-setup token + install script (cerebro feature) |

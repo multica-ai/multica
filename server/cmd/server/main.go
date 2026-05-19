@@ -19,6 +19,8 @@ import (
 	cerebroagentpass "github.com/multica-ai/multica/server/internal/cerebro/agentpass"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
+	// CEREBRO-PATCH(main-runtime-tool-backfill): JEH-1710 bid 6 cloud-tool registry backfill import
+	cerebroruntimetools "github.com/multica-ai/multica/server/internal/cerebro/runtimetools"
 	// CEREBRO-PATCH(main-workflows-engine): JEH-1047 cerebro workflow engine import
 	cerebroworkflows "github.com/multica-ai/multica/server/internal/cerebro/workflows"
 	"github.com/multica-ai/multica/server/internal/daemonws"
@@ -369,6 +371,28 @@ func main() {
 				slog.Warn("seed Kristian tools failed", "error", err)
 			}
 		}
+		// CEREBRO-PATCH(main-runtime-tool-backfill): JEH-1710 bid 6 — backfill
+		// cerebro_runtime_tool with cloud built-ins for every runtime so the
+		// firtal_gateway_executor cascade can drop the legacy fallback path.
+		// Idempotent: re-runs preserve existing rows (and any admin-set
+		// enabled flag) via ON CONFLICT.
+		go func() {
+			meta := cerebroruntime.AllBuiltinToolMeta()
+			cloud := make([]cerebroruntimetools.BackfillToolMeta, 0, len(meta))
+			for _, m := range meta {
+				if m.Status != cerebroruntime.ToolStatusImplemented &&
+					m.Status != cerebroruntime.ToolStatusNewlyImplemented {
+					continue
+				}
+				cloud = append(cloud, cerebroruntimetools.BackfillToolMeta{
+					Name:        m.Name,
+					Description: m.Description,
+				})
+			}
+			if err := cerebroruntimetools.SeedCloudToolsForAllRuntimes(context.Background(), pool, cloud); err != nil {
+				slog.Warn("seed cerebro_runtime_tool cloud rows failed", "error", err)
+			}
+		}()
 	}
 
 	if metricsServer != nil {
