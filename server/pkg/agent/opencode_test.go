@@ -835,9 +835,9 @@ func TestOpencodeWindowsPackageCandidatesAmd64(t *testing.T) {
 
 // fakeOpencodeScript returns a POSIX-sh script that impersonates `opencode`
 // for argv / env capture. It writes the argv (one per line) to
-// $OPENCODE_ARGS_FILE and the resolved PWD to $OPENCODE_PWD_FILE, emits a
-// minimal completed step on stdout so the daemon's event loop terminates,
-// then exits.
+// $OPENCODE_ARGS_FILE, the resolved PWD to $OPENCODE_PWD_FILE, and the
+// permission config to $OPENCODE_PERMISSION_FILE. It emits a minimal completed
+// step on stdout so the daemon's event loop terminates, then exits.
 func fakeOpencodeScript() string {
 	return `#!/bin/sh
 if [ -n "$OPENCODE_ARGS_FILE" ]; then
@@ -847,6 +847,9 @@ if [ -n "$OPENCODE_ARGS_FILE" ]; then
 fi
 if [ -n "$OPENCODE_PWD_FILE" ]; then
   printf '%s\n' "$PWD" > "$OPENCODE_PWD_FILE"
+fi
+if [ -n "$OPENCODE_PERMISSION_FILE" ]; then
+  printf '%s\n' "$OPENCODE_PERMISSION" > "$OPENCODE_PERMISSION_FILE"
 fi
 printf '{"type":"step_start","timestamp":1,"sessionID":"ses_fake","part":{"type":"step-start"}}\n'
 printf '{"type":"text","timestamp":2,"sessionID":"ses_fake","part":{"type":"text","text":"ok"}}\n'
@@ -933,6 +936,61 @@ func TestOpencodeBackendAnchorsDirAndPWD(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(gotPWD)); got != workDir {
 		t.Errorf("child PWD = %q, want %q", got, workDir)
+	}
+}
+
+func TestOpencodeBackendDeniesInteractiveQuestionTool(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	permissionFile := filepath.Join(tempDir, "permission.json")
+	fakePath := filepath.Join(tempDir, "opencode")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScript()))
+
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"OPENCODE_PERMISSION_FILE": permissionFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new opencode backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	<-session.Result
+
+	raw, err := os.ReadFile(permissionFile)
+	if err != nil {
+		t.Fatalf("read permission file: %v", err)
+	}
+	// OpenCode applies the last matching permission rule, so `question` must
+	// appear after the wildcard allow rule.
+	if got := strings.TrimSpace(string(raw)); got != `{"*":"allow","question":"deny"}` {
+		t.Fatalf("OPENCODE_PERMISSION = %q, want wildcard allow followed by question deny", got)
+	}
+	var permission map[string]string
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(raw))), &permission); err != nil {
+		t.Fatalf("unmarshal OPENCODE_PERMISSION: %v", err)
+	}
+	if permission["*"] != "allow" {
+		t.Fatalf("wildcard permission = %q, want allow", permission["*"])
+	}
+	if permission["question"] != "deny" {
+		t.Fatalf("question permission = %q, want deny", permission["question"])
 	}
 }
 

@@ -87,8 +87,12 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 
 	env := buildEnv(b.cfg.Env)
-	// Auto-approve all tool use in daemon mode.
-	env = append(env, `OPENCODE_PERMISSION={"*":"allow"}`)
+	// Auto-approve normal tool use in daemon mode, but block OpenCode's
+	// interactive question tool. The daemon has no live prompt surface for
+	// that tool, so letting it through can either auto-answer or leave the
+	// task waiting invisibly. Clarification should happen through normal
+	// Multica task or chat replies instead.
+	env = append(env, `OPENCODE_PERMISSION={"*":"allow","question":"deny"}`)
 	// Override PWD so the child OpenCode process resolves its discovery root
 	// to the task workdir. cmd.Dir alone is not enough: OpenCode reads PWD
 	// (inherited from the parent daemon) before falling back to process.cwd()
