@@ -186,21 +186,8 @@ func (h *Handler) resolveCommentTargetAgentIDs(ctx context.Context, issue db.Iss
 		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 			continue
 		}
-		if agent.Visibility == "private" {
-			targetOwner := uuidToString(agent.OwnerID)
-			switch authorType {
-			case "member":
-				if targetOwner != authorID {
-					continue
-				}
-			case "agent":
-				triggerAgent, err := h.Queries.GetAgent(ctx, parseUUID(authorID))
-				if err != nil || uuidToString(triggerAgent.OwnerID) != targetOwner {
-					continue
-				}
-			default:
-				continue
-			}
+		if !h.canTriggerPrivateAgent(ctx, agent, authorType, authorID) {
+			continue
 		}
 		hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
 			IssueID: issue.ID,
@@ -587,6 +574,24 @@ func (h *Handler) isReplyToMemberThread(ctx context.Context, parent *db.Comment,
 	return true // Reply to member thread without agent participation — suppress
 }
 
+// shouldTargetParentAgentReply decides whether a member reply with no explicit
+// mentions should continue the conversation with the agent that authored the
+// parent comment. This is intentionally narrow: explicit mentions in the reply
+// are treated as the user's routing choice, and agent-authored replies must
+// never trigger another task.
+func shouldTargetParentAgentReply(parentComment *db.Comment, replyMentions []util.Mention, replyAuthorType string) bool {
+	if parentComment == nil {
+		return false
+	}
+	if len(replyMentions) > 0 {
+		return false
+	}
+	if replyAuthorType != "member" {
+		return false
+	}
+	return parentComment.AuthorType == "agent"
+}
+
 // shouldInheritParentMentions decides whether a reply with no explicit
 // mentions should inherit the parent (thread root) comment's mentions.
 //
@@ -628,12 +633,47 @@ func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util
 // explicitly @mentions only non-agent entities (members, issues), which
 // signals the user is talking to other people and not the agent.
 // Skips self-mentions, agents with on_mention trigger disabled, and private
-// agents mentioned by non-owner members (only the agent owner can trigger
-// a private agent via @mention).
+// agents mentioned by members who cannot trigger that private agent.
 // Note: no status gate here — @mention is an explicit action and should work
 // even on done/cancelled issues (the agent can reopen the issue if needed).
 func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string, taskContext []byte) {
 	mentions := util.ParseMentions(comment.Content)
+	enqueueAgent := func(agentUUID pgtype.UUID) {
+		agentID := uuidToString(agentUUID)
+		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID:          agentUUID,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+			return
+		}
+		if !h.canTriggerPrivateAgent(ctx, agent, authorType, authorID) {
+			return
+		}
+		// Dedup: skip if this agent already has a pending task for this issue.
+		hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
+			IssueID: issue.ID,
+			AgentID: agentUUID,
+		})
+		if err != nil || hasPending {
+			return
+		}
+		// Always use the current comment as the trigger so the agent reads the
+		// actual reply that mentioned or targeted it, not the thread root.
+		if _, err := h.TaskService.EnqueueTaskForMentionWithContext(
+			ctx,
+			issue,
+			agentUUID,
+			comment.ID,
+			taskContext,
+		); err != nil {
+			slog.Warn("enqueue mention agent task failed", "issue_id", uuidToString(issue.ID), "agent_id", agentID, "error", err)
+		}
+	}
+
+	if shouldTargetParentAgentReply(parentComment, mentions, authorType) {
+		enqueueAgent(parentComment.AuthorID)
+	}
 	if shouldInheritParentMentions(parentComment, mentions, authorType) {
 		mentions = util.ParseMentions(parentComment.Content)
 	}
@@ -691,43 +731,7 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 			continue
 		}
 		agentUUID := parseUUID(m.ID)
-		// Load the agent scoped to the current issue's workspace. Using the
-		// bare GetAgent here would let a mention resolve to an agent in a
-		// different workspace, and the visibility check below would then be
-		// applied against the wrong workspace's roles (a workspace owner in
-		// THIS workspace would pass the gate for a private agent that lives
-		// in someone else's workspace).
-		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
-			ID:          agentUUID,
-			WorkspaceID: issue.WorkspaceID,
-		})
-		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
-			continue
-		}
-		// OPE-531: strict trigger gate for private agents — only agent owner
-		// or same-owner agents can trigger via mention.
-		if !h.canTriggerPrivateAgent(ctx, agent, authorType, authorID) {
-			continue
-		}
-		// Dedup: skip if this agent already has a pending task for this issue.
-		hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
-			IssueID: issue.ID,
-			AgentID: agentUUID,
-		})
-		if err != nil || hasPending {
-			continue
-		}
-		// Always use the current comment as the trigger so the agent reads the
-		// actual reply that mentioned it, not the thread root.
-		if _, err := h.TaskService.EnqueueTaskForMentionWithContext(
-			ctx,
-			issue,
-			agentUUID,
-			comment.ID,
-			taskContext,
-		); err != nil {
-			slog.Warn("enqueue mention agent task failed", "issue_id", uuidToString(issue.ID), "agent_id", m.ID, "error", err)
-		}
+		enqueueAgent(agentUUID)
 	}
 }
 

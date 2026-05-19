@@ -160,6 +160,7 @@ export interface Agent {
   max_concurrent_tasks: number;
   model: string;
   owner_id: string | null;
+  allowed_user_ids?: string[];
   skills: AgentSkillSummary[];
   created_at: string;
   updated_at: string;
@@ -167,6 +168,20 @@ export interface Agent {
   archived_by: string | null;
   /** True when this agent was duplicated and env values were stripped; owner must fill secrets. */
   custom_env_copied_pending?: boolean;
+}
+
+export interface AgentAllowedPrincipal {
+  id: string;
+  agent_id: string;
+  user_id: string;
+  name: string;
+  email: string;
+  avatar_url: string | null;
+  created_at: string;
+}
+
+export interface UpdateAgentAllowedPrincipalsRequest {
+  user_ids: string[];
 }
 
 /** Optional body for POST /api/agents/:id/copy */

@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Camera, Loader2, Pencil } from "lucide-react";
+import { Camera, Check, Loader2, Pencil, Users } from "lucide-react";
 import { toast } from "sonner";
 import type {
   Agent,
@@ -23,6 +23,7 @@ import { isImeComposing, timeAgo } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Input } from "@multica/ui/components/ui/input";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -73,7 +74,11 @@ interface InspectorProps {
    * `server/internal/handler/agent.go:519-535`.
    */
   canEdit: boolean;
+  canManageAllowedPrincipals: boolean;
+  allowedPrincipalUserIds: string[];
+  allowedPrincipalsLoading?: boolean;
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
+  onUpdateAllowedPrincipals: (userIds: string[]) => Promise<void>;
 }
 
 /**
@@ -96,7 +101,11 @@ export function AgentDetailInspector({
   members,
   currentUserId,
   canEdit,
+  canManageAllowedPrincipals,
+  allowedPrincipalUserIds,
+  allowedPrincipalsLoading = false,
   onUpdate,
+  onUpdateAllowedPrincipals,
 }: InspectorProps) {
   const { t } = useT("agents");
   const update = (data: Record<string, unknown>) => onUpdate(agent.id, data);
@@ -167,6 +176,18 @@ export function AgentDetailInspector({
             onChange={(v) => update({ visibility: v })}
           />
         </PropRow>
+        {agent.visibility === "private" && (
+          <PropRow label={t(($) => $.inspector.prop_allowed_users)} interactive={false}>
+            <AllowedUsersPicker
+              agent={agent}
+              members={members}
+              allowedUserIds={allowedPrincipalUserIds}
+              canEdit={canManageAllowedPrincipals}
+              loading={allowedPrincipalsLoading}
+              onSave={onUpdateAllowedPrincipals}
+            />
+          </PropRow>
+        )}
         <PropRow label={t(($) => $.inspector.prop_concurrency)} interactive={false}>
           <ConcurrencyPicker
             value={agent.max_concurrent_tasks}
@@ -276,6 +297,156 @@ function Section({
       </div>
     </div>
   );
+}
+
+function AllowedUsersPicker({
+  agent,
+  members,
+  allowedUserIds,
+  canEdit,
+  loading,
+  onSave,
+}: {
+  agent: Agent;
+  members: MemberWithUser[];
+  allowedUserIds: string[];
+  canEdit: boolean;
+  loading: boolean;
+  onSave: (userIds: string[]) => Promise<void>;
+}) {
+  const { t } = useT("agents");
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<string[]>(allowedUserIds);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      setDraft(allowedUserIds);
+    }
+  }, [allowedUserIds, open]);
+
+  const allowedSet = new Set(allowedUserIds);
+  const draftSet = new Set(draft);
+  const selectableMembers = members.filter((member) => member.user_id !== agent.owner_id);
+  const selectedMembers = members.filter((member) => allowedSet.has(member.user_id));
+  const selectedLabel =
+    selectedMembers.length === 0
+      ? t(($) => $.inspector.allowed_users_none)
+      : selectedMembers.length === 1
+        ? selectedMembers[0].name
+        : t(($) => $.inspector.allowed_users_count, { count: selectedMembers.length });
+  const dirty = !sameStringSet(allowedUserIds, draft);
+
+  const toggle = (userId: string) => {
+    setDraft((current) =>
+      current.includes(userId)
+        ? current.filter((id) => id !== userId)
+        : [...current, userId],
+    );
+  };
+
+  const commit = async () => {
+    setSaving(true);
+    try {
+      await onSave(draft);
+      setOpen(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!canEdit) {
+    return (
+      <span className="truncate text-muted-foreground">
+        {selectedLabel}
+      </span>
+    );
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            className="inline-flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs transition-colors hover:bg-accent/50"
+          >
+            <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">
+              {loading ? t(($) => $.inspector.allowed_users_loading) : selectedLabel}
+            </span>
+          </button>
+        }
+      />
+      <PopoverContent align="start" className="w-80 p-2">
+        <div className="flex max-h-72 flex-col">
+          <div className="px-2 pb-2 text-xs font-medium">
+            {t(($) => $.inspector.allowed_users_title)}
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {selectableMembers.length === 0 ? (
+              <div className="px-2 py-5 text-center text-xs text-muted-foreground">
+                {t(($) => $.inspector.allowed_users_empty)}
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {selectableMembers.map((member) => {
+                  const checked = draftSet.has(member.user_id);
+                  return (
+                    <label
+                      key={member.user_id}
+                      className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent/50"
+                    >
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={() => toggle(member.user_id)}
+                      />
+                      <ActorAvatar
+                        actorType="member"
+                        actorId={member.user_id}
+                        size={20}
+                      />
+                      <span className="min-w-0 flex-1 truncate text-xs">
+                        {member.name}
+                      </span>
+                      {checked && <Check className="h-3.5 w-3.5 text-primary" />}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <div className="mt-2 flex items-center justify-end gap-2 border-t pt-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setOpen(false)}
+              disabled={saving}
+            >
+              {t(($) => $.inspector.cancel)}
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => void commit()}
+              disabled={saving || !dirty}
+            >
+              {saving ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                t(($) => $.inspector.save)
+              )}
+            </Button>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function sameStringSet(a: string[], b: string[]) {
+  if (a.length !== b.length) return false;
+  const bSet = new Set(b);
+  return a.every((value) => bSet.has(value));
 }
 
 // ---------------------------------------------------------------------------
