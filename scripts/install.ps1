@@ -70,6 +70,38 @@ function Get-SelfHostFrontendPort {
     return Get-EnvFileValue -Path (Join-Path $InstallDir ".env") -Name "FRONTEND_PORT" -Default "3000"
 }
 
+function New-HexSecret {
+    param([int]$Bytes)
+
+    $buffer = New-Object byte[] $Bytes
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($buffer)
+    return -join ($buffer | ForEach-Object { $_.ToString("x2") })
+}
+
+function Set-GeneratedSelfHostEnv {
+    param([string]$Path)
+
+    $jwt = New-HexSecret 32
+    $postgresPassword = New-HexSecret 24
+    $content = Get-Content $Path -Raw
+    $content = [regex]::Replace(
+        $content,
+        '(?m)^JWT_SECRET=.*$',
+        "JWT_SECRET=$jwt"
+    )
+    $content = [regex]::Replace(
+        $content,
+        '(?m)^POSTGRES_PASSWORD=.*$',
+        "POSTGRES_PASSWORD=$postgresPassword"
+    )
+    $content = [regex]::Replace(
+        $content,
+        '(?m)^(DATABASE_URL=postgres(?:ql)?://[^:/@]+:)[^@]*(@.*)$',
+        { param($match) "$($match.Groups[1].Value)$postgresPassword$($match.Groups[2].Value)" }
+    )
+    Set-Content -Path $Path -Value $content -NoNewline
+}
+
 function Get-LatestVersion {
     try {
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/multica-ai/multica/releases/latest" -ErrorAction Stop
@@ -411,11 +443,10 @@ function Install-Server {
     Write-Ok "Repository ready at $InstallDir ($serverRef)"
 
     if (-not (Test-Path ".env")) {
-        Write-Info "Creating .env with random JWT_SECRET..."
+        Write-Info "Creating .env with random secrets..."
         Copy-Item ".env.example" ".env"
-        $jwt = -join ((1..32) | ForEach-Object { "{0:x2}" -f (Get-Random -Maximum 256) })
-        (Get-Content ".env") -replace '^JWT_SECRET=.*', "JWT_SECRET=$jwt" | Set-Content ".env"
-        Write-Ok "Generated .env with random JWT_SECRET"
+        Set-GeneratedSelfHostEnv ".env"
+        Write-Ok "Generated .env with random JWT_SECRET and POSTGRES_PASSWORD"
     } else {
         Write-Ok "Using existing .env"
     }

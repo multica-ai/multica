@@ -57,16 +57,12 @@ selfhost: ## Create .env if needed, then pull and start the official self-hosted
 	@if [ ! -f .env ]; then \
 		echo "==> Creating .env from .env.example..."; \
 		cp .env.example .env; \
-		JWT=$$(openssl rand -hex 32); \
-		if [ "$$(uname)" = "Darwin" ]; then \
-			sed -i '' "s/^JWT_SECRET=.*/JWT_SECRET=$$JWT/" .env; \
-		else \
-			sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$$JWT/" .env; \
-		fi; \
-		echo "==> Generated random JWT_SECRET"; \
+		bash scripts/selfhost-env.sh .env; \
+		echo "==> Generated random JWT_SECRET and POSTGRES_PASSWORD"; \
 	fi
 	@echo "==> Pulling official Multica images..."
-	@if ! docker compose -f docker-compose.selfhost.yml pull; then \
+	@set -a; . ./.env; set +a; \
+	if ! docker compose -f docker-compose.selfhost.yml pull; then \
 		echo ""; \
 		echo "Official images for tag '$${MULTICA_IMAGE_TAG:-latest}' are not published yet."; \
 		echo "If this is before the first GHCR release, build from the current checkout:"; \
@@ -74,7 +70,7 @@ selfhost: ## Create .env if needed, then pull and start the official self-hosted
 		exit 1; \
 	fi
 	@echo "==> Starting Multica via Docker Compose..."
-	docker compose -f docker-compose.selfhost.yml up -d
+	set -a; . ./.env; set +a; docker compose -f docker-compose.selfhost.yml up -d
 	@echo "==> Waiting for backend to be ready..."
 	@for i in $$(seq 1 30); do \
 		if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
@@ -107,16 +103,11 @@ selfhost-build: ## Build backend/web from the current checkout and start the sel
 	@if [ ! -f .env ]; then \
 		echo "==> Creating .env from .env.example..."; \
 		cp .env.example .env; \
-		JWT=$$(openssl rand -hex 32); \
-		if [ "$$(uname)" = "Darwin" ]; then \
-			sed -i '' "s/^JWT_SECRET=.*/JWT_SECRET=$$JWT/" .env; \
-		else \
-			sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$$JWT/" .env; \
-		fi; \
-		echo "==> Generated random JWT_SECRET"; \
+		bash scripts/selfhost-env.sh .env; \
+		echo "==> Generated random JWT_SECRET and POSTGRES_PASSWORD"; \
 	fi
 	@echo "==> Building Multica from the current checkout..."
-	docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build
+	set -a; . ./.env; set +a; docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build
 	@echo "==> Waiting for backend to be ready..."
 	@for i in $$(seq 1 30); do \
 		if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \

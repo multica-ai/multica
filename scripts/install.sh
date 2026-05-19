@@ -81,6 +81,56 @@ selfhost_frontend_port() {
   env_file_value "${1:-.env}" "FRONTEND_PORT" "3000"
 }
 
+sed_in_place() {
+  local expr="$1"
+  local file="$2"
+  if [ "$(uname -s)" = "Darwin" ]; then
+    sed -i '' -E "$expr" "$file"
+  else
+    sed -i -E "$expr" "$file"
+  fi
+}
+
+escape_sed_replacement() {
+  printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'
+}
+
+set_env_value() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  local escaped
+  escaped="$(escape_sed_replacement "$value")"
+  sed_in_place "s|^${key}=.*|${key}=${escaped}|" "$file"
+}
+
+replace_database_url_password() {
+  local file="$1"
+  local password="$2"
+  local escaped
+  escaped="$(escape_sed_replacement "$password")"
+  sed_in_place "s|^(DATABASE_URL=postgres(ql)?://[^:/@]+:)[^@]*(@.*)$|\\1${escaped}\\3|" "$file"
+}
+
+randomize_generated_env() {
+  local file="$1"
+  local jwt
+  local postgres_password
+  jwt="$(openssl rand -hex 32)"
+  postgres_password="$(openssl rand -hex 24)"
+  set_env_value "$file" "JWT_SECRET" "$jwt"
+  set_env_value "$file" "POSTGRES_PASSWORD" "$postgres_password"
+  replace_database_url_password "$file" "$postgres_password"
+}
+
+load_env_file() {
+  local file="$1"
+  set -a
+  # shellcheck disable=SC1090
+  . "$file"
+  set +a
+}
+
 detect_os() {
   case "$(uname -s)" in
     Darwin) OS="darwin" ;;
@@ -357,21 +407,16 @@ setup_server() {
 
   # Generate .env if needed
   if [ ! -f .env ]; then
-    info "Creating .env with random JWT_SECRET..."
+    info "Creating .env with random secrets..."
     cp .env.example .env
-    local jwt
-    jwt=$(openssl rand -hex 32)
-    if [ "$(uname -s)" = "Darwin" ]; then
-      sed -i '' "s/^JWT_SECRET=.*/JWT_SECRET=$jwt/" .env
-    else
-      sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$jwt/" .env
-    fi
-    ok "Generated .env with random JWT_SECRET"
+    randomize_generated_env .env
+    ok "Generated .env with random JWT_SECRET and POSTGRES_PASSWORD"
   else
     ok "Using existing .env"
   fi
 
   # Start Docker Compose
+  load_env_file .env
   info "Pulling official Multica images..."
   pull_official_selfhost_images
   info "Starting Multica services (this may take a few minutes on first run)..."

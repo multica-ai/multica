@@ -30,7 +30,7 @@ make selfhost
 
 `make selfhost` will:
 
-1. Generate a `.env` from `.env.example` if missing, with a **random JWT_SECRET**
+1. Generate a `.env` from `.env.example` if missing, with random `JWT_SECRET` and `POSTGRES_PASSWORD`
 2. Pull the official Docker images (PostgreSQL, Multica backend, Multica frontend)
 3. Bring up every service using `docker-compose.selfhost.yml`
 4. Wait until the backend's `/health` endpoint is ready

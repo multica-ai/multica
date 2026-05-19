@@ -30,7 +30,7 @@ make selfhost
 
 `make selfhost` 会：
 
-1. 如果没有 `.env` 文件，从 `.env.example` 自动生成一份并**生成随机 JWT_SECRET**
+1. 如果没有 `.env` 文件，从 `.env.example` 自动生成一份，并生成随机 `JWT_SECRET` 和 `POSTGRES_PASSWORD`
 2. 拉取官方 Docker 镜像（PostgreSQL、Multica backend、Multica frontend）
 3. 用 `docker-compose.selfhost.yml` 启动全部服务
 4. 等后端 `/health` 端点准备就绪
