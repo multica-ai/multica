@@ -29,7 +29,6 @@ const (
 	EventAgentCreated                  = "agent_created"
 	EventOnboardingCompleted           = "onboarding_completed"
 	EventCloudWaitlistJoined           = "cloud_waitlist_joined"
-	EventStarterContentDecided         = "starter_content_decided"
 	EventFeedbackSubmitted             = "feedback_submitted"
 )
 
@@ -71,14 +70,6 @@ const (
 	OnboardingPathSkipExisting   = "skip_existing"   // "I've done this before" from welcome
 	OnboardingPathInviteAccept   = "invite_accept"   // accepted at least one invitation from /invitations
 	OnboardingPathUnknown        = "unknown"         // fallback when the server can't derive the path
-)
-
-// Starter content branches. Matches the server-authoritative decision in
-// ImportStarterContent (hasAgent ? agent_guided : self_serve). DismissStarter
-// carries the same branch so acceptance rates split cleanly.
-const (
-	StarterContentBranchAgentGuided = "agent_guided"
-	StarterContentBranchSelfServe   = "self_serve"
 )
 
 // Platform is used as the "platform" event property so funnels can split by
@@ -496,27 +487,6 @@ func CloudWaitlistJoined(userID string, hasReason bool) Event {
 		}, CoreProperties{
 			UserID: userID,
 			Source: SourceOnboarding,
-		}),
-	}
-}
-
-// StarterContentDecided fires on the atomic NULL -> terminal state
-// transition in both ImportStarterContent and DismissStarterContent.
-// branch carries agent_guided / self_serve for BOTH decisions — the
-// dismiss handler resolves it from the current ListAgents state so
-// acceptance rates split cleanly by branch.
-func StarterContentDecided(userID, workspaceID, decision, branch string) Event {
-	return Event{
-		Name:        EventStarterContentDecided,
-		DistinctID:  userID,
-		WorkspaceID: workspaceID,
-		Properties: withCoreProperties(map[string]any{
-			"decision": decision,
-			"branch":   branch,
-		}, CoreProperties{
-			UserID:      userID,
-			WorkspaceID: workspaceID,
-			Source:      SourceOnboarding,
 		}),
 	}
 }

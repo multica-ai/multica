@@ -65,7 +65,7 @@ function mergeQuestionnaire(
  *   straight into that onboarding issue; otherwise navigate into the
  *   workspace issues list. Runtime-connected onboarding creates one
  *   Multica Helper agent plus one issue; runtime-skipped onboarding creates one
- *   self-serve issue. Both suppress the old starter-content prompt.
+ *   self-serve install-runtime issue.
  */
 export function OnboardingFlow({
   onComplete,
@@ -172,11 +172,10 @@ export function OnboardingFlow({
 
   // "I've done this before" path — returning user who already has a
   // workspace and just wants to land there. Marks onboarding complete
-  // server-side (idempotent via COALESCE on onboarded_at) and navigates
-  // to their first workspace. Because starter_content_state is NULL for
-  // any user reaching this button (it's freshly added), they'll see the
-  // StarterContentPrompt dialog on arrival — which is correct, since
-  // they never got a starter project and may want one now.
+  // server-side (idempotent via COALESCE on onboarded_at); when the
+  // target workspace has no runtime yet, the server seeds the same
+  // install-runtime issue as Step 3 Skip so the user lands on a
+  // concrete next step.
   const handleWelcomeSkip = useCallback(async () => {
     try {
       await completeOnboarding("skip_existing", workspaces[0]?.id);
@@ -203,8 +202,8 @@ export function OnboardingFlow({
       if (!workspace) return;
       if (!rt) {
         // No runtime -> no agent execution yet. Create one focused
-        // self-serve onboarding issue instead of seeding the older
-        // multi-issue starter project.
+        // install-runtime onboarding issue so the user lands on a
+        // concrete next step.
         try {
           const result = await bootstrapNoRuntimeOnboarding(workspace.id);
           await qc.invalidateQueries({ queryKey: issueKeys.all(workspace.id) });

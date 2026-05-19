@@ -204,8 +204,27 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Becoming a workspace member is the physical event that "completes" onboarding —
 	// keep this atomic with CreateMember so `member` and `onboarded_at`
 	// can never disagree. COALESCE in MarkUserOnboarded keeps it idempotent.
-	if _, err := qtx.MarkUserOnboarded(r.Context(), parseUUID(userID)); err != nil {
+	updatedUser, err := qtx.MarkUserOnboarded(r.Context(), parseUUID(userID))
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to mark user onboarded")
+		return
+	}
+
+	// Brand-new workspaces never have a runtime yet, so seed the
+	// "install a runtime" issue so the user lands on a concrete next step.
+	// claimStarterContentStateIfUnset suppresses the legacy starter-content
+	// dialog on older desktop builds that still render it when the column
+	// is NULL.
+	seededIssue, seededIssueCreated, err := ensureNoRuntimeOnboardingIssue(
+		r.Context(), qtx, ws.ID, parseUUID(userID), updatedUser.Language,
+	)
+	if err != nil {
+		slog.Warn("create workspace: ensure install-runtime issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", uuidToString(ws.ID))...)
+		writeError(w, http.StatusInternalServerError, "failed to seed onboarding issue")
+		return
+	}
+	if err := claimStarterContentStateIfUnset(r.Context(), qtx, parseUUID(userID), updatedUser.StarterContentState); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to record starter content state")
 		return
 	}
 
@@ -214,13 +233,30 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	wsID := uuidToString(ws.ID)
+
 	// "Is this the user's first workspace?" is derived in PostHog by looking
 	// at whether they have a prior workspace_created event, not stamped at
 	// emit time. Stamping here would race under concurrent creates without
 	// a schema change, and the event stream answers the question exactly.
-	h.Analytics.Capture(analytics.WorkspaceCreated(userID, uuidToString(ws.ID)))
+	h.Analytics.Capture(analytics.WorkspaceCreated(userID, wsID))
 
-	slog.Info("workspace created", append(logger.RequestAttrs(r), "workspace_id", uuidToString(ws.ID), "name", ws.Name, "slug", ws.Slug)...)
+	if seededIssueCreated {
+		prefix := h.getIssuePrefix(r.Context(), seededIssue.WorkspaceID)
+		issueResp := issueToResponse(seededIssue, prefix)
+		h.publish(protocol.EventIssueCreated, wsID, "member", userID, map[string]any{"issue": issueResp})
+		h.Analytics.Capture(analytics.IssueCreated(
+			userID,
+			wsID,
+			uuidToString(seededIssue.ID),
+			"",
+			"",
+			"",
+			analytics.SourceOnboarding,
+		))
+	}
+
+	slog.Info("workspace created", append(logger.RequestAttrs(r), "workspace_id", wsID, "name", ws.Name, "slug", ws.Slug)...)
 	writeJSON(w, http.StatusCreated, workspaceToResponse(ws))
 }
 

@@ -1616,16 +1616,6 @@ func TestRequestBodyUUIDFieldsRejectMalformed(t *testing.T) {
 			}),
 			handle: testHandler.DaemonRegister,
 		},
-		{
-			name: "import starter content workspace_id",
-			req: newRequest("POST", "/api/onboarding/starter-content/import", map[string]any{
-				"workspace_id": "not-a-uuid",
-				"project": map[string]any{
-					"title": "Getting Started",
-				},
-			}),
-			handle: testHandler.ImportStarterContent,
-		},
 	}
 
 	for _, tt := range tests {
