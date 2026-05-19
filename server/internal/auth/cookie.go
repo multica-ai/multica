@@ -16,12 +16,31 @@ import (
 )
 
 const (
-	AuthCookieName   = "multica_auth"
-	CSRFCookieName   = "multica_csrf"
-	authCookieMaxAge = 30 * 24 * 60 * 60 // 30 days in seconds
+	AuthCookieName = "multica_auth"
+	CSRFCookieName = "multica_csrf"
+	defaultAuthTTL = 30 * 24 * time.Hour // 30 days
 )
 
 var ipCookieDomainWarnOnce sync.Once
+
+// AuthTokenTTL returns the auth token TTL from the AUTH_TOKEN_TTL environment
+// variable (Go duration format, e.g. "8760h" for 1 year). Falls back to 30 days.
+func AuthTokenTTL() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("AUTH_TOKEN_TTL"))
+	if raw == "" {
+		return defaultAuthTTL
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		slog.Warn("AUTH_TOKEN_TTL is not a valid Go duration, using default 30d", "value", raw, "error", err)
+		return defaultAuthTTL
+	}
+	if d <= 0 {
+		slog.Warn("AUTH_TOKEN_TTL must be positive, using default 30d", "value", raw)
+		return defaultAuthTTL
+	}
+	return d
+}
 
 // cookieDomain returns the trimmed COOKIE_DOMAIN env value, or "" if it looks
 // like an IP address. RFC 6265 §4.1.2.3 forbids IP literals in the cookie
@@ -84,14 +103,15 @@ func generateCSRFToken(authToken string) (string, error) {
 func SetAuthCookies(w http.ResponseWriter, token string) error {
 	secure := isSecureCookie()
 	domain := cookieDomain()
+	ttl := AuthTokenTTL()
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     AuthCookieName,
 		Value:    token,
 		Path:     "/",
 		Domain:   domain,
-		MaxAge:   authCookieMaxAge,
-		Expires:  time.Now().Add(30 * 24 * time.Hour),
+		MaxAge:   int(ttl.Seconds()),
+		Expires:  time.Now().Add(ttl),
 		HttpOnly: true,
 		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
@@ -107,8 +127,8 @@ func SetAuthCookies(w http.ResponseWriter, token string) error {
 		Value:    csrfToken,
 		Path:     "/",
 		Domain:   domain,
-		MaxAge:   authCookieMaxAge,
-		Expires:  time.Now().Add(30 * 24 * time.Hour),
+		MaxAge:   int(ttl.Seconds()),
+		Expires:  time.Now().Add(ttl),
 		HttpOnly: false,
 		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,

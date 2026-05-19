@@ -3,6 +3,7 @@ package auth
 import (
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestIsSecureCookie(t *testing.T) {
@@ -77,6 +78,48 @@ func TestSetAuthCookies_HTTPSelfHost(t *testing.T) {
 		}
 		if c.Domain != "" {
 			t.Errorf("cookie %q has Domain=%q; IP-address Domain would be rejected by the browser (RFC 6265)", c.Name, c.Domain)
+		}
+	}
+}
+
+func TestAuthTokenTTL(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string
+		want time.Duration
+	}{
+		{"unset → 30 days", "", 30 * 24 * time.Hour},
+		{"whitespace → 30 days", "   ", 30 * 24 * time.Hour},
+		{"explicit 1 year", "8760h", 8760 * time.Hour},
+		{"30 minutes", "30m", 30 * time.Minute},
+		{"malformed → 30 days", "not-a-duration", 30 * 24 * time.Hour},
+		{"zero → 30 days", "0s", 30 * 24 * time.Hour},
+		{"negative → 30 days", "-1h", 30 * 24 * time.Hour},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AUTH_TOKEN_TTL", tc.env)
+			if got := AuthTokenTTL(); got != tc.want {
+				t.Errorf("AuthTokenTTL() = %v, want %v (AUTH_TOKEN_TTL=%q)", got, tc.want, tc.env)
+			}
+		})
+	}
+}
+
+func TestSetAuthCookies_RespectsAuthTokenTTL(t *testing.T) {
+	t.Setenv("FRONTEND_ORIGIN", "https://app.example.com")
+	t.Setenv("COOKIE_DOMAIN", "app.example.com")
+	t.Setenv("AUTH_TOKEN_TTL", "8760h")
+
+	rec := httptest.NewRecorder()
+	if err := SetAuthCookies(rec, "test-token"); err != nil {
+		t.Fatalf("SetAuthCookies: %v", err)
+	}
+
+	wantSeconds := int((8760 * time.Hour).Seconds())
+	for _, c := range rec.Result().Cookies() {
+		if c.MaxAge != wantSeconds {
+			t.Errorf("cookie %q MaxAge = %d, want %d", c.Name, c.MaxAge, wantSeconds)
 		}
 	}
 }
