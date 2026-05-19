@@ -37,14 +37,16 @@ The login flow is documented in `tc-001-fixed-verification-code-login.md`. Execu
 - Email notification binding & delivery
 - Webhook custom message format
 
-### Agent Management (tc-009 to tc-012, tc-036)
+### Agent Management (tc-009 to tc-012, tc-036, tc-048, tc-049)
 - Mine/All agent filter
 - Agent duplicate with env masking
 - Agent permission controls (owner vs member)
 - Agent Defaults (system & personal)
 - DeepSeek TUI runtime integration
+- Agent Tasks panel with issue search
+- Agent transcript sort direction toggle
 
-### Issue Features (tc-004, tc-015 to tc-020, tc-024, tc-026, tc-027, tc-029 to tc-032)
+### Issue Features (tc-004, tc-015 to tc-020, tc-024, tc-026, tc-027, tc-029 to tc-032, tc-047, tc-050, tc-055)
 - Auto-set project on new issue
 - Clear issue history
 - Comment draft preservation
@@ -59,6 +61,9 @@ The login flow is documented in `tc-001-fixed-verification-code-login.md`. Execu
 - Comment copy link
 - Auto-block on task fail
 - Timeline cycle resilience
+- Thread-aware comment list and reply grouping
+- Workspace issue prefix editing
+- My Issues includes squad involvement
 
 ### Autopilot (tc-021)
 - Run row enhancements (duration, output, expand/collapse)
@@ -76,11 +81,19 @@ The login flow is documented in `tc-001-fixed-verification-code-login.md`. Execu
 ### Skills (tc-023)
 - Batch upload including dot directories
 
-### Projects (tc-025)
+### Projects (tc-025, tc-046)
 - Project sorting
+- Project Gantt view and scheduled issue timeline
 
-### Mobile (tc-033)
+### Dashboard / Usage (tc-051)
+- Workspace Usage 1d range and runtime weekly usage aggregation
+
+### Mobile (tc-033, tc-043 to tc-045, tc-057)
 - Core mobile app functionality (login, issues, search, i18n)
+- Mobile issue detail labels/start date/parent issue editing
+- Mobile inbox batch actions
+- Mobile issue list label filtering
+- Mobile issue detail comments and timeline
 
 ### CLI (tc-035)
 - Managed update flow with manifest
@@ -88,8 +101,9 @@ The login flow is documented in `tc-001-fixed-verification-code-login.md`. Execu
 ### Plan Mode (tc-028)
 - Native Claude plan mode with approval bridge
 
-### Editor (tc-038)
+### Editor (tc-038, tc-053)
 - Paste image upload with error feedback
+- Unified attachment rendering and HTML attachment preview
 
 ### Comment UX (tc-039)
 - Comment body collapse/expand for long comments (OPE-700)
@@ -112,6 +126,15 @@ The login flow is documented in `tc-001-fixed-verification-code-login.md`. Execu
 ### Mobile — Label Filter (tc-045)
 - Mobile issue list label filtering
 
+### Onboarding (tc-052)
+- v2 per-question source, role, and use-case onboarding flow
+
+### Runtimes (tc-054)
+- Simplified Add a computer dialog and connection guidance
+
+### Squads (tc-056)
+- Responsive squad list/detail layout
+
 ## Execution Order
 
 1. **tc-001** (login) — establishes session, required for all others
@@ -126,6 +149,8 @@ The login flow is documented in `tc-001-fixed-verification-code-login.md`. Execu
 10. **tc-033 to tc-038** — mobile, private chat, CLI, DeepSeek, paste
 11. **tc-039 to tc-042** — comment collapse, WeChat notification, wiki activity, subscription
 12. **tc-043 to tc-045** — mobile issue properties, inbox batch, label filter
+13. **tc-046 to tc-051** — Project Gantt, thread-aware comments, agent tasks/search, transcript sort, issue prefix, usage ranges
+14. **tc-052 to tc-057** — onboarding v2, HTML attachment preview, Add computer dialog, My Issues squad involvement, squad responsive layout, mobile comments/timeline
 
 ## Notes
 
