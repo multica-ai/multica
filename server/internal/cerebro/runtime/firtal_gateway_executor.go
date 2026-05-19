@@ -439,6 +439,11 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 	if e.registry != nil {
 		taskRegistry := NewDefaultRegistry(nil, e.queries, tctx, e.cerebro) // CEREBRO-PATCH(firtal-gateway-cerebro-tools): wire concrete Cerebro-family handlers into per-task registries.
 		taskRegistry.db = e.registry.db
+		// CEREBRO-PATCH(firtal-gateway-runtime-tools-cascade): JEH-1710 — the
+		// new cerebro_runtime_tool grant model needs the invoking user to apply
+		// group/user access rules. Tool resolution still falls back to the
+		// legacy agent_tool_grant path; the user-aware cascade lands in the
+		// follow-up that wires task.IssuerUserID through to the executor.
 		enabledTools = taskRegistry.GetEnabledToolsForAgent(ctx, agentID)
 		if len(enabledTools) > 0 {
 			// Also register the MCP-backed tools (get_issue, list_comments,

@@ -126,6 +126,10 @@ type Handler struct {
 	cerebroToolItems  []CerebroToolItem
 	cerebroToolDesc   map[string]string
 	cerebroToolStatus map[string]string // CEREBRO-PATCH(handler-tool-status): reject stale grants for excluded tools.
+	// CEREBRO-PATCH(handler-runtime-tools-admin): JEH-1710 unified runtime
+	// tool inventory + access-control admin service. Wired by router after
+	// handler.New().
+	runtimeToolsAdmin RuntimeToolsAdminService
 	cfg               Config
 }
 

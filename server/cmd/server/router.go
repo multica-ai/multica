@@ -41,6 +41,8 @@ import (
 	cerebroreferences "github.com/multica-ai/multica/server/internal/cerebro/references"
 	// CEREBRO-PATCH(router-runtime-pause): cerebro runtime pause/unpause service.
 	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
+	// CEREBRO-PATCH(router-runtime-tools-admin): JEH-1710 unified runtime tool admin service.
+	"github.com/multica-ai/multica/server/internal/cerebro/runtimetools"
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler import
 	cerebrotasks "github.com/multica-ai/multica/server/internal/cerebro/tasks"
 	// CEREBRO-PATCH(sharetoken-routes): JEH-1076 public-link share-token handler import
@@ -255,6 +257,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		}
 		h.SetCerebroToolMeta(items)
 	}
+	// CEREBRO-PATCH(router-runtime-tools-admin): JEH-1710 wire the unified
+	// runtime tool admin service (per-runtime tool inventory + group/user
+	// grants + per-agent overrides).
+	h.SetRuntimeToolsAdmin(newRuntimeToolsAdminAdapter(runtimetools.New(pool)))
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler instance
 	cerebroTasksHandler := cerebrotasks.New(cerebroQueries)
 	// CEREBRO-PATCH(sharetoken-routes): JEH-1076 public-link share-token handler
@@ -816,6 +822,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Route("/tools/{name}", func(r chi.Router) {
 						r.Put("/", h.UpsertAgentTool)
 					})
+					// CEREBRO-PATCH(agent-tool-overrides-routes): JEH-1710 per-agent
+					// override of the runtime tool default.
+					r.Get("/tool-overrides", h.ListAgentToolOverrides)
+					r.Put("/tool-overrides/{toolName}", h.PutAgentToolOverride)
+					r.Delete("/tool-overrides/{toolName}", h.DeleteAgentToolOverride)
 				})
 			})
 
@@ -893,6 +904,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/persona-sandbox", h.UpdateAgentRuntimePersonaSandbox)
 					// CEREBRO-PATCH(router-runtime-tools-config): runtime-level MCP defaults (9031).
 					r.Patch("/tools-config", h.UpdateAgentRuntimeToolsConfig)
+					// CEREBRO-PATCH(router-runtime-tools-admin): JEH-1710 unified
+					// runtime tool inventory + per-tool group/user access grants.
+					r.Get("/tools", h.ListRuntimeTools)
+					r.Patch("/tools/{toolName}", h.SetRuntimeToolEnabled)
+					r.Get("/tool-grants", h.ListRuntimeToolGrants)
+					r.Post("/tools/{toolName}/groups/{groupId}", h.AddRuntimeToolGroupGrant)
+					r.Delete("/tools/{toolName}/groups/{groupId}", h.RemoveRuntimeToolGroupGrant)
+					r.Post("/tools/{toolName}/users/{userId}", h.AddRuntimeToolUserGrant)
+					r.Delete("/tools/{toolName}/users/{userId}", h.RemoveRuntimeToolUserGrant)
 					r.Delete("/", h.DeleteAgentRuntime)
 				})
 			})

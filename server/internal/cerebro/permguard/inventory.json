@@ -1,6 +1,10 @@
 {
   "http": [
     {
+      "id": "DELETE /api/agents/{id}/tool-overrides/{toolName}",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "DELETE /api/artifact-folders/{id}",
       "gate": "workspace_member"
     },
@@ -121,6 +125,14 @@
       "gate": "cerebro_runtime_access"
     },
     {
+      "id": "DELETE /api/runtimes/{runtimeId}/tools/{toolName}/groups/{groupId}",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "DELETE /api/runtimes/{runtimeId}/tools/{toolName}/users/{userId}",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "DELETE /api/skills/{id}/",
       "gate": "skill_ownership"
     },
@@ -214,6 +226,10 @@
     },
     {
       "id": "PATCH /api/runtimes/{runtimeId}/tools-config",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "PATCH /api/runtimes/{runtimeId}/tools/{toolName}",
       "gate": "workspace_admin"
     },
     {
@@ -653,6 +669,14 @@
       "gate": "cerebro_runtime_access"
     },
     {
+      "id": "POST /api/runtimes/{runtimeId}/tools/{toolName}/groups/{groupId}",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/runtimes/{runtimeId}/tools/{toolName}/users/{userId}",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "POST /api/skills/",
       "gate": "workspace_member"
     },
@@ -783,6 +807,10 @@
     {
       "id": "PUT /api/agents/{id}/tools/{name}/",
       "gate": "cerebro_agent_access"
+    },
+    {
+      "id": "PUT /api/agents/{id}/tool-overrides/{toolName}",
+      "gate": "workspace_admin"
     },
     {
       "id": "PUT /api/artifact-folders/{id}",

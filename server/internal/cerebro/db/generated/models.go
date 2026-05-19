@@ -296,6 +296,14 @@ type CerebroAgentPass struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroAgentRuntimeToolOverride struct {
+	AgentID   pgtype.UUID        `json:"agent_id"`
+	ToolName  string             `json:"tool_name"`
+	Enabled   bool               `json:"enabled"`
+	UpdatedBy pgtype.UUID        `json:"updated_by"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroChannelAgentSetting struct {
 	ChannelID  pgtype.UUID        `json:"channel_id"`
 	AgentID    pgtype.UUID        `json:"agent_id"`
@@ -440,6 +448,36 @@ type CerebroProjectGroupMember struct {
 	GroupID   pgtype.UUID        `json:"group_id"`
 	AddedBy   pgtype.UUID        `json:"added_by"`
 	AddedAt   pgtype.Timestamptz `json:"added_at"`
+}
+
+type CerebroRuntimeTool struct {
+	ID            pgtype.UUID        `json:"id"`
+	RuntimeID     pgtype.UUID        `json:"runtime_id"`
+	ToolName      string             `json:"tool_name"`
+	Source        string             `json:"source"`
+	McpServerName pgtype.Text        `json:"mcp_server_name"`
+	Description   pgtype.Text        `json:"description"`
+	SchemaJson    []byte             `json:"schema_json"`
+	Enabled       bool               `json:"enabled"`
+	LastScannedAt pgtype.Timestamptz `json:"last_scanned_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroRuntimeToolGroupGrant struct {
+	RuntimeID pgtype.UUID        `json:"runtime_id"`
+	ToolName  string             `json:"tool_name"`
+	GroupID   pgtype.UUID        `json:"group_id"`
+	GrantedBy pgtype.UUID        `json:"granted_by"`
+	GrantedAt pgtype.Timestamptz `json:"granted_at"`
+}
+
+type CerebroRuntimeToolUserGrant struct {
+	RuntimeID pgtype.UUID        `json:"runtime_id"`
+	ToolName  string             `json:"tool_name"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	GrantedBy pgtype.UUID        `json:"granted_by"`
+	GrantedAt pgtype.Timestamptz `json:"granted_at"`
 }
 
 type CerebroShareToken struct {
