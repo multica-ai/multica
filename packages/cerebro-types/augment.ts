@@ -99,4 +99,17 @@ export interface RuntimeToolGrants {
   user_grants: RuntimeToolUserGrant[];
 }
 
+// JEH-1710 (bid 4): per-agent override on top of the runtime-level tool grant.
+// One row per (agent_id, tool_name) with `enabled` forcing the effective state
+// either on or off — the absence of a row means the agent inherits the runtime
+// default. The override never widens beyond a runtime that has the tool off
+// for everyone; it expresses the agent-specific exception inside the rules the
+// runtime already permits.
+export interface AgentToolOverride {
+  agent_id: string;
+  tool_name: string;
+  enabled: boolean;
+  updated_at: string;
+}
+
 export {};

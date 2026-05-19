@@ -21,4 +21,5 @@ export type {
   RuntimeToolGroupGrant,
   RuntimeToolUserGrant,
   RuntimeToolGrants,
+  AgentToolOverride,
 } from "./augment";
