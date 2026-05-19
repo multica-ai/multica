@@ -139,7 +139,7 @@ func (h *Handler) issueJWT(user db.User) (string, error) {
 		"sub":   uuidToString(user.ID),
 		"email": user.Email,
 		"name":  user.Name,
-		"exp":   time.Now().Add(30 * 24 * time.Hour).Unix(),
+		"exp":   time.Now().Add(auth.AuthTokenTTL()).Unix(),
 		"iat":   time.Now().Unix(),
 	})
 	return token.SignedString(auth.JWTSecret())
@@ -393,7 +393,7 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 
 	// Set CloudFront signed cookies for CDN access.
 	if h.CFSigner != nil {
-		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(30 * 24 * time.Hour)) {
+		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(auth.AuthTokenTTL())) {
 			http.SetCookie(w, cookie)
 		}
 	}
