@@ -22,6 +22,8 @@ import {
   type PullRequestProgressSegment,
 } from "@multica/core/github";
 import type {
+  GitHubKnownPullRequestChecksConclusion,
+  GitHubKnownPullRequestState,
   GitHubPullRequest,
   GitHubPullRequestChecksConclusion,
   GitHubPullRequestState,
@@ -35,24 +37,24 @@ type IssuesT = ReturnType<typeof useT<"issues">>["t"];
 // collapse the rest once the section reaches 4 rows.
 const PR_LIMIT_BEFORE_COLLAPSE = 4;
 
-const STATE_ICON: Record<
-  GitHubPullRequestState,
-  { icon: React.ComponentType<{ className?: string }>; className: string }
-> = {
+const STATE_ICON = {
   open: { icon: GitPullRequestArrow, className: "text-emerald-600 dark:text-emerald-400" },
   draft: { icon: GitPullRequestDraft, className: "text-muted-foreground" },
   merged: { icon: GitMerge, className: "text-violet-600 dark:text-violet-400" },
   closed: { icon: GitPullRequestClosed, className: "text-rose-600 dark:text-rose-400" },
-};
-
-const CHECKS_ICON: Record<
-  GitHubPullRequestChecksConclusion,
+} satisfies Record<
+  GitHubKnownPullRequestState,
   { icon: React.ComponentType<{ className?: string }>; className: string }
-> = {
+>;
+
+const CHECKS_ICON = {
   passed: { icon: CheckCircle2, className: "text-emerald-600 dark:text-emerald-400" },
   failed: { icon: XCircle, className: "text-rose-600 dark:text-rose-400" },
   pending: { icon: CircleDashed, className: "text-amber-600 dark:text-amber-400" },
-};
+} satisfies Record<
+  GitHubKnownPullRequestChecksConclusion,
+  { icon: React.ComponentType<{ className?: string }>; className: string }
+>;
 
 export function PullRequestList({ issueId }: { issueId: string }) {
   const { t } = useT("issues");
@@ -106,7 +108,9 @@ export function PullRequestList({ issueId }: { issueId: string }) {
 
 function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
   const { t } = useT("issues");
-  const cfg = STATE_ICON[pr.state] ?? { icon: GitPullRequest, className: "" };
+  const cfg = isKnownPullRequestState(pr.state)
+    ? STATE_ICON[pr.state]
+    : { icon: GitPullRequest, className: "" };
   const StateIcon = cfg.icon;
   const kind = derivePullRequestStatusKind({
     state: pr.state,
@@ -284,18 +288,30 @@ function getChecksBadge(
   t: IssuesT,
 ): PullRequestBadgeConfig | null {
   const checks = pr.checks_conclusion ?? null;
-  return checks && CHECKS_ICON[checks]
-    ? {
-        icon: CHECKS_ICON[checks].icon,
-        className: CHECKS_ICON[checks].className,
-        label:
-          checks === "passed"
-            ? t(($) => $.detail.pull_request_checks_passed)
-            : checks === "failed"
-              ? t(($) => $.detail.pull_request_checks_failed)
-              : t(($) => $.detail.pull_request_checks_pending),
-      }
-    : null;
+  if (!checks || !isKnownPullRequestChecksConclusion(checks)) return null;
+  const cfg = CHECKS_ICON[checks];
+  return {
+    icon: cfg.icon,
+    className: cfg.className,
+    label:
+      checks === "passed"
+        ? t(($) => $.detail.pull_request_checks_passed)
+        : checks === "failed"
+          ? t(($) => $.detail.pull_request_checks_failed)
+          : t(($) => $.detail.pull_request_checks_pending),
+  };
+}
+
+function isKnownPullRequestState(
+  state: GitHubPullRequestState,
+): state is GitHubKnownPullRequestState {
+  return Object.prototype.hasOwnProperty.call(STATE_ICON, state);
+}
+
+function isKnownPullRequestChecksConclusion(
+  checks: GitHubPullRequestChecksConclusion,
+): checks is GitHubKnownPullRequestChecksConclusion {
+  return Object.prototype.hasOwnProperty.call(CHECKS_ICON, checks);
 }
 
 function getStateLabel(

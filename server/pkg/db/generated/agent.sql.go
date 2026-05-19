@@ -925,6 +925,59 @@ func (q *Queries) CreateQuickCreateTask(ctx context.Context, arg CreateQuickCrea
 	return i, err
 }
 
+const createContextTask = `-- name: CreateContextTask :one
+INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, context)
+VALUES ($1, $2, NULL, 'queued', $3, $4)
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task
+`
+
+type CreateContextTaskParams struct {
+	AgentID   pgtype.UUID `json:"agent_id"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+	Priority  int32       `json:"priority"`
+	Context   []byte      `json:"context"`
+}
+
+// Context tasks have no issue / chat / autopilot link; the entire job
+// description lives in context JSONB and is dispatched by context.type.
+func (q *Queries) CreateContextTask(ctx context.Context, arg CreateContextTaskParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, createContextTask,
+		arg.AgentID,
+		arg.RuntimeID,
+		arg.Priority,
+		arg.Context,
+	)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+	)
+	return i, err
+}
+
 const createRetryTask = `-- name: CreateRetryTask :one
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,

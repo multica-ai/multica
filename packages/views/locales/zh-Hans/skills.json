@@ -256,5 +256,19 @@
     "no_content": "*暂无内容*",
     "markdown_placeholder": "输入 Markdown 内容...",
     "raw_placeholder": "文件内容..."
+  },
+  "finder": {
+    "action": "AI 查找",
+    "title": "用 AI 查找 skill",
+    "subtitle": "让在线智能体根据目标推荐工作区 skill。",
+    "agent_label": "智能体",
+    "agent_placeholder": "选择智能体",
+    "prompt_label": "这个 skill 需要帮你做什么？",
+    "prompt_placeholder": "例如：优化 React 渲染性能，避免不必要的重渲染",
+    "no_agents": "当前没有可用于查找 skill 的在线智能体。",
+    "cancel": "取消",
+    "submit": "查找 skill",
+    "toast_queued": "skill 查找已开始，结果会进入收件箱。",
+    "fallback_error": "启动 skill 查找失败"
   }
 }

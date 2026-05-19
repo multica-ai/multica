@@ -3,6 +3,7 @@ import type {
   Agent,
   AgentTemplate,
   AgentTemplateSummary,
+  AITaskQueuedResponse,
   Attachment,
   BillingBalance,
   BillingBatchesPage,
@@ -13,8 +14,11 @@ import type {
   CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
+  GitHubConnectResponse,
+  GitHubPullRequest,
   GroupedIssuesResponse,
   ListIssuesResponse,
+  ListGitHubInstallationsResponse,
   ListWebhookDeliveriesResponse,
   Squad,
   TimelineEntry,
@@ -93,6 +97,13 @@ export const AttachmentResponseSchema = z.object({
   chat_message_id: z.string().nullable().optional(),
 }).loose();
 
+export const AITaskQueuedResponseSchema = z.object({
+  task_id: z.string(),
+}).loose();
+
+export const EMPTY_AI_TASK_QUEUED_RESPONSE: AITaskQueuedResponse = {
+  task_id: "",
+};
 export const EMPTY_ATTACHMENT: Attachment = {
   id: "",
   workspace_id: "",
@@ -554,6 +565,81 @@ export const SquadMemberStatusListResponseSchema = z.object({
 }).loose();
 
 export const EMPTY_SQUAD_MEMBER_STATUS_LIST = { members: [] };
+
+// ---------------------------------------------------------------------------
+// GitHub integration schemas — settings integration state and issue PR rows.
+//
+// These endpoints are consumed by web and installed desktop builds. GitHub's
+// server-facing enum-like strings (`state`, `mergeable_state`,
+// `checks_conclusion`) must stay forward-compatible: a future value should
+// render through the UI fallback path rather than fail schema validation.
+// ---------------------------------------------------------------------------
+
+const nullableString = z.string().nullable().optional().transform((v) => v ?? null);
+const numberWithZeroDefault = z.number().nullable().optional().transform((v) => v ?? 0);
+
+export const GitHubConnectResponseSchema = z.object({
+  configured: z.boolean(),
+  url: z.string().optional(),
+}).loose();
+
+export const EMPTY_GITHUB_CONNECT_RESPONSE: GitHubConnectResponse = {
+  configured: false,
+};
+
+const GitHubInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  installation_id: z.number(),
+  account_login: z.string(),
+  account_type: z.string(),
+  account_avatar_url: nullableString,
+  created_at: z.string(),
+}).loose();
+
+export const ListGitHubInstallationsResponseSchema = z.object({
+  installations: z.array(GitHubInstallationSchema).default([]),
+  configured: z.boolean().default(false),
+}).loose();
+
+export const EMPTY_GITHUB_INSTALLATIONS_RESPONSE: ListGitHubInstallationsResponse = {
+  configured: false,
+  installations: [],
+};
+
+const GitHubPullRequestSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  repo_owner: z.string(),
+  repo_name: z.string(),
+  number: z.number(),
+  title: z.string(),
+  state: z.string(),
+  html_url: z.string(),
+  branch: nullableString,
+  author_login: nullableString,
+  author_avatar_url: nullableString,
+  merged_at: nullableString,
+  closed_at: nullableString,
+  pr_created_at: z.string(),
+  pr_updated_at: z.string(),
+  mergeable_state: nullableString,
+  checks_conclusion: nullableString,
+  checks_passed: numberWithZeroDefault,
+  checks_failed: numberWithZeroDefault,
+  checks_pending: numberWithZeroDefault,
+  additions: numberWithZeroDefault,
+  deletions: numberWithZeroDefault,
+  changed_files: numberWithZeroDefault,
+}).loose();
+
+export const IssuePullRequestsResponseSchema = z.object({
+  pull_requests: z.array(GitHubPullRequestSchema).default([]),
+}).loose();
+
+export const EMPTY_ISSUE_PULL_REQUESTS_RESPONSE: { pull_requests: GitHubPullRequest[] } = {
+  pull_requests: [],
+};
 
 // ---------------------------------------------------------------------------
 // Structured error body — POST /api/workspaces/:wsId/issues 409 conflict.

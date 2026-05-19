@@ -117,7 +117,7 @@ export interface AgentTask {
    * tasks that have no linked issue (so e.g. quick-create tasks render
    * with a meaningful title instead of falling through to "Untracked").
    */
-  kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct";
+  kind?: "comment" | "autopilot" | "chat" | "quick_create" | "ai_task" | "direct";
   /**
    * Local working directory pinned for this task by the daemon. Empty until
    * the daemon reports a work_dir (typically once execution starts). This is
@@ -227,6 +227,33 @@ export interface AgentSkillSummary {
   description: string;
 }
 
+export interface FindSkillsWithAIRequest {
+  prompt: string;
+  agent_id: string;
+}
+
+export interface DraftAgentWithAIRequest {
+  prompt: string;
+  host_agent_id: string;
+}
+
+export interface AITaskQueuedResponse {
+  task_id: string;
+}
+
+export interface SkillFindRecommendation {
+  name: string;
+  description: string;
+  source_url: string;
+  reason: string;
+}
+
+export interface AgentDraftResult {
+  agent_id: string;
+  name: string;
+  summary: string;
+  skill_source_urls: string[];
+}
 export interface CreateAgentRequest {
   name: string;
   description?: string;

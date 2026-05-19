@@ -15,9 +15,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/agentdraft"
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/skillindex"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
@@ -2507,6 +2509,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AutopilotSource:                  task.AutopilotSource,
 		AutopilotTriggerPayload:          strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 		QuickCreatePrompt:                task.QuickCreatePrompt,
+		AITaskType:                       task.AITaskType,
+		AITaskPrompt:                     task.AITaskPrompt,
 		IsSquadLeader:                    strings.Contains(instructions, "## Squad Operating Protocol"),
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
@@ -2578,6 +2582,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
 		}
 	}
+	aiOutputPath := ""
+	if task.AITaskType != "" {
+		aiOutputPath = filepath.Join(env.WorkDir, "ai-task-output.json")
+	}
+
 	// Belt-and-suspenders: also mark whatever root we ended up with, in case
 	// future changes diverge from PredictRootDir.
 	if env.RootDir != predictedRoot && env.RootDir != "" {
@@ -2643,14 +2652,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentToken = d.client.Token()
 	}
 	agentEnv := map[string]string{
-		"MULTICA_TOKEN":        agentToken,
-		"MULTICA_SERVER_URL":   d.cfg.ServerBaseURL,
-		"MULTICA_DAEMON_PORT":  fmt.Sprintf("%d", d.cfg.HealthPort),
-		"MULTICA_WORKSPACE_ID": task.WorkspaceID,
-		"MULTICA_AGENT_NAME":   agentName,
-		"MULTICA_AGENT_ID":     task.AgentID,
-		"MULTICA_TASK_ID":      task.ID,
-		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
+		"MULTICA_TOKEN":            agentToken,
+		"MULTICA_SERVER_URL":       d.cfg.ServerBaseURL,
+		"MULTICA_DAEMON_PORT":      fmt.Sprintf("%d", d.cfg.HealthPort),
+		"MULTICA_WORKSPACE_ID":     task.WorkspaceID,
+		"MULTICA_AGENT_NAME":       agentName,
+		"MULTICA_AGENT_ID":         task.AgentID,
+		"MULTICA_AGENT_RUNTIME_ID": task.RuntimeID,
+		"MULTICA_TASK_ID":          task.ID,
+		"MULTICA_TASK_SLOT":        strconv.Itoa(slot),
 	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
@@ -2664,6 +2674,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// deterministically (see GetIssueByOrigin).
 	if task.QuickCreatePrompt != "" {
 		agentEnv["MULTICA_QUICK_CREATE_TASK_ID"] = task.ID
+	}
+	if aiOutputPath != "" {
+		agentEnv["MULTICA_AI_TASK_TYPE"] = task.AITaskType
+		agentEnv["MULTICA_AI_TASK_OUTPUT_PATH"] = aiOutputPath
 	}
 	// Ensure the multica CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
@@ -2883,6 +2897,44 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			CacheReadTokens:  u.CacheReadTokens,
 			CacheWriteTokens: u.CacheWriteTokens,
 		})
+	}
+
+	if result.Status == "completed" && task.AITaskType != "" {
+		raw, err := os.ReadFile(aiOutputPath)
+		if err != nil {
+			taskLog.Warn("ai task completed without structured output", "type", task.AITaskType, "error", err)
+			return TaskResult{
+				Status:        "blocked",
+				Comment:       "AI task did not write structured output",
+				SessionID:     result.SessionID,
+				WorkDir:       env.WorkDir,
+				EnvRoot:       env.RootDir,
+				FailureReason: "agent_error",
+				Usage:         usageEntries,
+			}, nil
+		}
+		var normalized []byte
+		switch task.AITaskType {
+		case "skill-find":
+			normalized, _, err = skillindex.NormalizeSkillFindResult(raw)
+		case "agent-create":
+			normalized, _, err = agentdraft.NormalizeAgentDraftResult(raw)
+		default:
+			err = fmt.Errorf("unsupported ai task type %q", task.AITaskType)
+		}
+		if err != nil {
+			taskLog.Warn("ai task wrote invalid structured output", "type", task.AITaskType, "error", err)
+			return TaskResult{
+				Status:        "blocked",
+				Comment:       "AI task wrote invalid structured output",
+				SessionID:     result.SessionID,
+				WorkDir:       env.WorkDir,
+				EnvRoot:       env.RootDir,
+				FailureReason: "agent_error",
+				Usage:         usageEntries,
+			}, nil
+		}
+		result.Output = string(normalized)
 	}
 
 	switch result.Status {

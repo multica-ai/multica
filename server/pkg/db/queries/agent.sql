@@ -154,6 +154,13 @@ INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, 
 VALUES ($1, $2, NULL, 'queued', $3, $4)
 RETURNING *;
 
+-- name: CreateContextTask :one
+-- Context tasks have no issue / chat / autopilot link; the entire job
+-- description lives in context JSONB and is dispatched by context.type.
+INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, context)
+VALUES ($1, $2, NULL, 'queued', $3, $4)
+RETURNING *;
+
 -- name: LinkTaskToIssue :exec
 -- Attaches the issue a quick-create task produced back to the task row, once
 -- the agent has finished and the issue exists. Guarded by `issue_id IS NULL`
