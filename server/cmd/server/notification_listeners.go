@@ -283,6 +283,7 @@ func recordNotification(
 		recordMentionEmailDelivery(ctx, queries, recipientID, event, payloadSnapshot)
 	}
 	recordCustomWebhookDeliveries(ctx, queries, recipientID, event, payloadSnapshot)
+	recordOpenclawWeixinDelivery(ctx, queries, recipientID, event, payloadSnapshot)
 }
 
 func recordMentionDingTalkDelivery(
@@ -444,6 +445,126 @@ func recordMentionEmailDelivery(
 		SentAt:              pgtype.Timestamptz{},
 	}); err != nil {
 		slog.Error("failed to create email delivery record for mention notification",
+			"notification_event_id", util.UUIDToString(event.ID),
+			"recipient_id", recipientID,
+			"error", err,
+		)
+	}
+}
+
+// openclawWeixinPreferenceEventType maps internal notification types to the
+// openclaw_weixin preference event types configured in supportedNotificationPreferences.
+func openclawWeixinPreferenceEventType(notificationType string) string {
+	switch notificationType {
+	case "mentioned":
+		return "mentioned"
+	case "task_completed":
+		return "task_completed"
+	case "task_failed":
+		return "task_failed"
+	case "new_comment":
+		return "replied"
+	default:
+		return ""
+	}
+}
+
+// recordOpenclawWeixinDelivery creates a pending delivery record for the
+// openclaw_weixin channel if the recipient has the preference enabled and
+// an active binding. Follows the same pattern as recordMentionDingTalkDelivery.
+func recordOpenclawWeixinDelivery(
+	ctx context.Context,
+	queries *db.Queries,
+	recipientID string,
+	event db.NotificationEvent,
+	payloadSnapshot []byte,
+) {
+	preferenceEventType := openclawWeixinPreferenceEventType(event.Type)
+	if preferenceEventType == "" {
+		return
+	}
+
+	prefs, err := queries.ListNotificationChannelPreferencesByUser(ctx, parseUUID(recipientID))
+	if err != nil {
+		slog.Error("failed to load notification preferences for openclaw_weixin delivery",
+			"recipient_id", recipientID,
+			"notification_event_id", util.UUIDToString(event.ID),
+			"error", err,
+		)
+		return
+	}
+
+	var weixinPref *db.NotificationChannelPreference
+	for i := range prefs {
+		pref := &prefs[i]
+		if pref.Channel == "openclaw_weixin" && pref.EventType == preferenceEventType && pref.Enabled {
+			weixinPref = pref
+			break
+		}
+	}
+	if weixinPref == nil {
+		return
+	}
+
+	bindings, err := queries.ListExternalAccountBindingsByUser(ctx, parseUUID(recipientID))
+	if err != nil {
+		slog.Error("failed to load external account bindings for openclaw_weixin delivery",
+			"recipient_id", recipientID,
+			"notification_event_id", util.UUIDToString(event.ID),
+			"error", err,
+		)
+		return
+	}
+
+	var binding *db.ExternalAccountBinding
+	for i := range bindings {
+		candidate := &bindings[i]
+		if candidate.Provider != "openclaw_weixin" || candidate.Status != "active" {
+			continue
+		}
+		if weixinPref.BindingID.Valid && util.UUIDToString(weixinPref.BindingID) != util.UUIDToString(candidate.ID) {
+			continue
+		}
+		binding = candidate
+		break
+	}
+	if binding == nil {
+		return
+	}
+
+	// Extract channel from binding metadata (defaults to "openclaw-weixin")
+	channel := "openclaw-weixin"
+	if len(binding.Metadata) > 0 {
+		var meta map[string]string
+		if err := json.Unmarshal(binding.Metadata, &meta); err == nil {
+			if ch := strings.TrimSpace(meta["channel"]); ch != "" {
+				channel = ch
+			}
+		}
+	}
+
+	payload := map[string]any{
+		"binding_id":       util.UUIDToString(binding.ID),
+		"provider":         binding.Provider,
+		"wechat_id":        binding.ExternalUserID,
+		"channel":          channel,
+		"notification_event": json.RawMessage(payloadSnapshot),
+	}
+	weixinPayload, err := json.Marshal(payload)
+	if err != nil {
+		weixinPayload = payloadSnapshot
+	}
+
+	if _, err := queries.CreateNotificationDelivery(ctx, db.CreateNotificationDeliveryParams{
+		NotificationEventID: event.ID,
+		Channel:             "openclaw_weixin",
+		Status:              "pending",
+		AttemptCount:        0,
+		LastError:           pgtype.Text{},
+		PayloadSnapshot:     weixinPayload,
+		SentAt:              pgtype.Timestamptz{},
+	}); err != nil {
+		slog.Error("failed to create openclaw_weixin delivery record",
 			"notification_event_id", util.UUIDToString(event.ID),
 			"recipient_id", recipientID,
 			"error", err,
@@ -1437,6 +1558,89 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 	})
 
 	// task:completed — no inbox notification (completion is visible from status change)
+	// but openclaw_weixin delivery is created if the user has it enabled.
+	bus.Subscribe(protocol.EventTaskCompleted, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		agentID, _ := payload["agent_id"].(string)
+		issueID, _ := payload["issue_id"].(string)
+		if issueID == "" {
+			return
+		}
+
+		issue, err := queries.GetIssue(ctx, parseUUID(issueID))
+		if err != nil {
+			slog.Error("task:completed openclaw_weixin: failed to get issue", "issue_id", issueID, "error", err)
+			return
+		}
+
+		// Determine the recipient: issue creator or assignee (member type)
+		recipientID := ""
+		if issue.AssigneeType.Valid && issue.AssigneeType.String == "member" && issue.AssigneeID.Valid {
+			recipientID = util.UUIDToString(issue.AssigneeID)
+		}
+		if recipientID == "" {
+			recipientID = util.UUIDToString(issue.CreatorID)
+		}
+		if recipientID == "" || recipientID == agentID {
+			return
+		}
+
+		// Get the last agent comment as notification body
+		nCtx := buildNotificationContext(ctx, queries, e.WorkspaceID, issueID, "", "")
+		body := ""
+		comments, err := queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
+			IssueID:     parseUUID(issueID),
+			WorkspaceID: parseUUID(e.WorkspaceID),
+			Limit:       100,
+		})
+		if err == nil {
+			for i := len(comments) - 1; i >= 0; i-- {
+				if comments[i].AuthorType == "agent" {
+					body = comments[i].Content
+					break
+				}
+			}
+		}
+
+		// Create a notification event for openclaw_weixin delivery
+		payloadSnapshot, _ := json.Marshal(map[string]any{
+			"type":             "task_completed",
+			"severity":         "info",
+			"title":            issue.Title,
+			"body":             body,
+			"link":             nCtx.Link,
+			"issue_id":         issueID,
+			"issue_identifier": nCtx.IssueIdentifier,
+			"actor_type":       "agent",
+			"actor_id":         agentID,
+			"details":          json.RawMessage(emptyDetails),
+		})
+
+		event, err := queries.CreateNotificationEvent(ctx, db.CreateNotificationEventParams{
+			WorkspaceID:     parseUUID(e.WorkspaceID),
+			RecipientUserID: parseUUID(recipientID),
+			Type:            "task_completed",
+			Severity:        "info",
+			IssueID:         parseUUID(issueID),
+			CommentID:       pgtype.UUID{},
+			ActorType:       util.StrToText("agent"),
+			ActorID:         parseUUID(agentID),
+			Title:           issue.Title,
+			Body:            util.StrToText(body),
+			Link:            util.StrToText(nCtx.Link),
+			Details:         emptyDetails,
+		})
+		if err != nil {
+			slog.Error("task:completed openclaw_weixin: failed to create notification event",
+				"issue_id", issueID, "recipient_id", recipientID, "error", err)
+			return
+		}
+
+		recordOpenclawWeixinDelivery(ctx, queries, recipientID, event, payloadSnapshot)
+	})
 
 	// task:failed — notify all subscribers except the agent
 	bus.Subscribe(protocol.EventTaskFailed, func(e events.Event) {

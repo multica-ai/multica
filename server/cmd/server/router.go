@@ -330,6 +330,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/me/notification-bindings/google/callback", h.CompleteMyGoogleBinding)
 		r.Post("/api/me/notification-bindings/email/start", h.StartMyEmailBinding)
 		r.Post("/api/me/notification-bindings/email/verify", h.VerifyMyEmailBinding)
+		r.Put("/api/me/notification-bindings/openclaw-weixin", h.BindMyOpenclawWeixin)
 		r.Get("/api/me/notification-bindings", h.GetMyNotificationBindings)
 		r.Delete("/api/me/notification-bindings/{bindingId}", h.DeleteMyNotificationBinding)
 		r.Get("/api/me/notification-webhooks", h.ListMyNotificationWebhooks)

@@ -1,5 +1,5 @@
-export type NotificationChannel = "inbox" | "dingtalk" | "email" | "custom_webhook";
-export type NotificationEventType = "mentioned" | "issue_assigned" | "subscribed_issue_updated";
+export type NotificationChannel = "inbox" | "dingtalk" | "email" | "custom_webhook" | "openclaw_weixin";
+export type NotificationEventType = "mentioned" | "issue_assigned" | "subscribed_issue_updated" | "task_completed" | "task_failed" | "replied";
 export type ExternalAccountBindingStatus = "active" | "expired" | "revoked" | "error";
 
 export interface ExternalAccountBinding {
@@ -114,4 +114,20 @@ export interface StartGoogleBindingResponse {
 export interface CompleteGoogleBindingResponse {
   binding: ExternalAccountBinding;
   next_path: string | null;
+}
+
+export interface BindOpenclawWeixinRequest {
+  wechat_id: string;
+  channel?: string;
+}
+
+export interface BindOpenclawWeixinResponse {
+  id: string;
+  provider: string;
+  external_user_id: string;
+  display_name: string | null;
+  status: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 }

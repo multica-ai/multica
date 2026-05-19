@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BellRing, Loader2, Send, Trash2 } from "lucide-react";
+import { BellRing, Loader2, MessageCircle, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import type {
@@ -11,6 +11,7 @@ import type {
   NotificationEventType,
   NotificationWebhook,
 } from "@multica/core/types";
+import type { AgentRuntime } from "@multica/core/types";
 import { Alert, AlertDescription, AlertTitle } from "@multica/ui/components/ui/alert";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
@@ -32,6 +33,7 @@ const channelLabels: Record<NotificationChannel, string> = {
   dingtalk: "DingTalk",
   email: "Email",
   custom_webhook: "Custom Webhook",
+  openclaw_weixin: "微信（OpenClaw）",
 };
 
 const channelDescriptions: Record<NotificationChannel, string> = {
@@ -39,6 +41,7 @@ const channelDescriptions: Record<NotificationChannel, string> = {
   dingtalk: "External notification sent to your linked DingTalk account once that channel is enabled.",
   email: "Email notification sent to your linked email address when you are mentioned.",
   custom_webhook: "POST @ mentions, assignments, and subscribed issue updates to your own webhook endpoint.",
+  openclaw_weixin: "通过 OpenClaw 本地助手将通知发送到你的微信。需要在线的 OpenClaw Runtime。",
 };
 
 const customWebhookEvents: NotificationEventType[] = [
@@ -46,6 +49,20 @@ const customWebhookEvents: NotificationEventType[] = [
   "issue_assigned",
   "subscribed_issue_updated",
 ];
+
+const openclawWeixinEvents: NotificationEventType[] = [
+  "task_completed",
+  "task_failed",
+  "mentioned",
+  "replied",
+];
+
+const openclawWeixinEventLabels: Record<string, string> = {
+  task_completed: "Agent 任务完成时",
+  task_failed: "Agent 任务失败时",
+  mentioned: "被 @提及时",
+  replied: "被回复时",
+};
 
 const webhookTemplatePlaceholder = `{
   "msgtype": "text",
@@ -71,17 +88,34 @@ export function NotificationsTab() {
   const [webhookPayloadTemplate, setWebhookPayloadTemplate] = useState("");
   const [creatingWebhook, setCreatingWebhook] = useState(false);
 
+  // OpenClaw WeChat state
+  const [runtimes, setRuntimes] = useState<AgentRuntime[]>([]);
+  const [weixinId, setWeixinId] = useState("");
+  const [bindingWeixin, setBindingWeixin] = useState(false);
+
+  const hasOpenclawRuntime = useMemo(() => {
+    return runtimes.some(
+      (rt) => rt.provider === "openclaw" && rt.status === "online",
+    );
+  }, [runtimes]);
+
+  const weixinBinding = useMemo(() => {
+    return bindings.find((b) => b.provider === "openclaw_weixin" && b.status === "active");
+  }, [bindings]);
+
   const loadSettings = useCallback(async () => {
     setLoading(true);
     try {
-      const [bindingsResp, preferencesResp, webhooksResp] = await Promise.all([
+      const [bindingsResp, preferencesResp, webhooksResp, runtimesList] = await Promise.all([
         api.listNotificationBindings(),
         api.listNotificationPreferences(),
         api.listNotificationWebhooks(),
+        api.listRuntimes({ owner: "me" }),
       ]);
       setBindings(bindingsResp.bindings);
       setPreferences(preferencesResp.preferences);
       setWebhooks(webhooksResp.webhooks);
+      setRuntimes(runtimesList);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to load notification settings");
     } finally {
@@ -219,6 +253,63 @@ export function NotificationsTab() {
       toast.error(err instanceof Error ? err.message : "Failed to delete webhook");
     } finally {
       setBusyWebhookId(null);
+    }
+  };
+
+  const handleBindWeixin = async () => {
+    const id = weixinId.trim();
+    if (!id) return;
+    setBindingWeixin(true);
+    try {
+      const resp = await api.bindOpenclawWeixin({ wechat_id: id });
+      setBindings((current) => {
+        const filtered = current.filter((b) => b.provider !== "openclaw_weixin");
+        return [...filtered, {
+          id: resp.id,
+          provider: resp.provider,
+          external_user_id: resp.external_user_id,
+          display_name: resp.display_name,
+          status: resp.status as "active",
+          metadata: resp.metadata,
+          created_at: resp.created_at,
+          updated_at: resp.updated_at,
+        }];
+      });
+      setWeixinId("");
+      toast.success("微信绑定成功");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "绑定失败");
+    } finally {
+      setBindingWeixin(false);
+    }
+  };
+
+  const handleToggleOpenclawWeixin = async (eventType: NotificationEventType, enabled: boolean) => {
+    const key = `openclaw_weixin:${eventType}`;
+    const previous = preferences;
+    setSavingKey(key);
+    setPreferences((current) =>
+      current.map((candidate) =>
+        preferenceKey(candidate) === key ? { ...candidate, enabled } : candidate,
+      ),
+    );
+
+    try {
+      const updated = await api.updateNotificationPreference({
+        channel: "openclaw_weixin",
+        event_type: eventType,
+        enabled,
+      });
+      setPreferences((current) =>
+        current.map((candidate) =>
+          preferenceKey(candidate) === key ? updated : candidate,
+        ),
+      );
+    } catch (err) {
+      setPreferences(previous);
+      toast.error(err instanceof Error ? err.message : "Failed to update preference");
+    } finally {
+      setSavingKey(null);
     }
   };
 
@@ -465,6 +556,98 @@ export function NotificationsTab() {
           Manage DingTalk and email account linking from <span className="font-medium">Profile → Linked Accounts</span>.
         </p>
       </section>
+
+      {hasOpenclawRuntime && (
+        <section className="space-y-4">
+          <h3 className="text-sm font-semibold">微信通知（OpenClaw）</h3>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <MessageCircle className="h-4 w-4" />
+                微信通知
+              </CardTitle>
+              <CardDescription>
+                通过 OpenClaw 本地助手将通知发送到你的微信。
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {!weixinBinding ? (
+                <div className="space-y-4">
+                  <Alert>
+                    <AlertTitle>绑定微信通知</AlertTitle>
+                    <AlertDescription className="space-y-3">
+                      <p className="text-sm">方式一：复制以下内容发送给你的 OpenClaw 助手自动绑定：</p>
+                      <code className="block rounded bg-muted p-2 text-xs">
+                        帮我配置 Multica 微信通知：通过 Multica API 将我的微信 ID 绑定到通知系统。
+                      </code>
+                      <p className="text-sm">方式二：手动获取微信 ID 后填写：</p>
+                      <code className="block rounded bg-muted p-2 text-xs">
+                        openclaw whoami --channel weixin
+                      </code>
+                    </AlertDescription>
+                  </Alert>
+                  <div className="flex items-end gap-3">
+                    <div className="flex-1 space-y-2">
+                      <Label htmlFor="weixin-id">微信 ID</Label>
+                      <Input
+                        id="weixin-id"
+                        value={weixinId}
+                        onChange={(e) => setWeixinId(e.target.value)}
+                        placeholder="o9cq809u...@im.wechat"
+                      />
+                    </div>
+                    <Button
+                      disabled={!weixinId.trim() || bindingWeixin}
+                      onClick={() => void handleBindWeixin()}
+                    >
+                      {bindingWeixin ? <Loader2 className="h-4 w-4 animate-spin" /> : "绑定"}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary">已绑定</Badge>
+                    <span className="text-sm text-muted-foreground">
+                      {weixinBinding.external_user_id}
+                    </span>
+                  </div>
+                  <div className="space-y-3">
+                    {openclawWeixinEvents.map((eventType) => {
+                      const pref = preferences.find(
+                        (p) => p.channel === "openclaw_weixin" && p.event_type === eventType,
+                      );
+                      const key = `openclaw_weixin:${eventType}`;
+                      const enabled = pref?.enabled ?? false;
+
+                      return (
+                        <div key={key} className="flex items-center justify-between gap-4 rounded-lg border p-3">
+                          <span className="text-sm font-medium">
+                            {openclawWeixinEventLabels[eventType] ?? eventType}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            {savingKey === key ? (
+                              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                            ) : null}
+                            <Switch
+                              checked={enabled}
+                              disabled={savingKey !== null}
+                              onCheckedChange={(checked) => {
+                                void handleToggleOpenclawWeixin(eventType, checked);
+                              }}
+                              aria-label={`Toggle ${openclawWeixinEventLabels[eventType]}`}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </section>
+      )}
     </div>
   );
 }

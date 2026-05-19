@@ -88,6 +88,8 @@ export type {
   StartGoogleBindingRequest,
   StartGoogleBindingResponse,
   CompleteGoogleBindingResponse,
+  BindOpenclawWeixinRequest,
+  BindOpenclawWeixinResponse,
 } from "./notification";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";

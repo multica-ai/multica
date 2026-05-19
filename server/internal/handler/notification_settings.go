@@ -55,6 +55,30 @@ var supportedNotificationPreferences = []notificationPreferenceSpec{
 		DefaultEnabled:  false,
 		RequiresBinding: false,
 	},
+	{
+		Channel:         "openclaw_weixin",
+		EventType:       "mentioned",
+		DefaultEnabled:  false,
+		RequiresBinding: true,
+	},
+	{
+		Channel:         "openclaw_weixin",
+		EventType:       "task_completed",
+		DefaultEnabled:  false,
+		RequiresBinding: true,
+	},
+	{
+		Channel:         "openclaw_weixin",
+		EventType:       "task_failed",
+		DefaultEnabled:  false,
+		RequiresBinding: true,
+	},
+	{
+		Channel:         "openclaw_weixin",
+		EventType:       "replied",
+		DefaultEnabled:  false,
+		RequiresBinding: true,
+	},
 }
 
 type NotificationBindingResponse struct {

@@ -319,7 +319,7 @@ func main() {
 	go runRuntimeSweeper(sweepCtx, pool, queries, liveness, taskSvc, bus)
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
-	go runNotificationDeliveryDispatcher(sweepCtx, queries, service.NewEmailService())
+	go runNotificationDeliveryDispatcher(sweepCtx, queries, service.NewEmailService(), daemonHub)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
 
