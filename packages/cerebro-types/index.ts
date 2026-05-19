@@ -14,3 +14,11 @@ import "./augment";
 
 // JEH-1290 W8 — agent tool grant types (cerebro-only, not in upstream)
 export type { AgentTool } from "./augment";
+
+// JEH-1710 — runtime-level unified tool inventory + grant types
+export type {
+  RuntimeTool,
+  RuntimeToolGroupGrant,
+  RuntimeToolUserGrant,
+  RuntimeToolGrants,
+} from "./augment";

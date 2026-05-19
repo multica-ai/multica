@@ -217,6 +217,47 @@ const AgentToolSchema = z.preprocess((value) => {
 }).loose());
 
 export const AgentToolsListSchema = z.array(AgentToolSchema).default([]);
+
+// CEREBRO-PATCH(runtime-tools-schema): JEH-1710 — runtime-level tool inventory
+// and grant shapes. Lenient on strings so an unknown `source` value still
+// parses and renders with a generic fallback (the switch in the UI has a
+// default branch per API Response Compatibility rules).
+const RuntimeToolViewSchema = z.object({
+  id: z.string().default(""),
+  runtime_id: z.string().default(""),
+  name: z.string().min(1),
+  source: z.string().default("mcp"),
+  mcp_server_name: z.string().optional().default(""),
+  description: z.string().default(""),
+  enabled: z.boolean().default(false),
+  last_scanned_at: z.string().nullable().optional().default(null),
+}).loose();
+
+export const RuntimeToolsListSchema = z.array(RuntimeToolViewSchema).default([]);
+
+const RuntimeToolGroupGrantSchema = z.object({
+  runtime_id: z.string().default(""),
+  tool_name: z.string().min(1),
+  group_id: z.string().min(1),
+  group_name: z.string().default(""),
+  granted_at: z.string().default(""),
+}).loose();
+
+const RuntimeToolUserGrantSchema = z.object({
+  runtime_id: z.string().default(""),
+  tool_name: z.string().min(1),
+  user_id: z.string().min(1),
+  user_name: z.string().default(""),
+  user_email: z.string().default(""),
+  user_avatar_url: z.string().optional().default(""),
+  granted_at: z.string().default(""),
+}).loose();
+
+export const RuntimeToolGrantsSchema = z.object({
+  group_grants: z.array(RuntimeToolGroupGrantSchema).default([]),
+  user_grants: z.array(RuntimeToolUserGrantSchema).default([]),
+}).loose();
+
 // ---------------------------------------------------------------------------
 // Workspace dashboard schemas
 //

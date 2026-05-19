@@ -140,6 +140,8 @@ import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
   AgentToolsListSchema,
+  RuntimeToolsListSchema,
+  RuntimeToolGrantsSchema,
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
   AttachmentResponseSchema,
@@ -1404,6 +1406,86 @@ export class ApiClient {
       method: "PATCH",
       body: JSON.stringify({ tools_config: toolsConfig }),
     });
+  }
+
+  // CEREBRO-PATCH(api-client-runtime-tools-admin): JEH-1710 — workspace
+  // owner/admin endpoints that drive the RuntimeToolsCard. Schema-validated
+  // per API Response Compatibility rules so a future server-side drift
+  // (e.g. an unknown source enum value) renders gracefully.
+  async listRuntimeTools(runtimeId: string): Promise<import("@multica/cerebro-types").RuntimeTool[]> {
+    const path = `/api/runtimes/${runtimeId}/tools`;
+    const raw = await this.fetch(path);
+    return parseWithFallback(raw, RuntimeToolsListSchema, [], {
+      endpoint: path,
+    }) as import("@multica/cerebro-types").RuntimeTool[];
+  }
+
+  async setRuntimeToolEnabled(
+    runtimeId: string,
+    toolName: string,
+    enabled: boolean,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/runtimes/${runtimeId}/tools/${encodeURIComponent(toolName)}`,
+      { method: "PATCH", body: JSON.stringify({ enabled }) },
+    );
+  }
+
+  async listRuntimeToolGrants(
+    runtimeId: string,
+  ): Promise<import("@multica/cerebro-types").RuntimeToolGrants> {
+    const path = `/api/runtimes/${runtimeId}/tool-grants`;
+    const raw = await this.fetch(path);
+    return parseWithFallback(
+      raw,
+      RuntimeToolGrantsSchema,
+      { group_grants: [], user_grants: [] },
+      { endpoint: path },
+    ) as import("@multica/cerebro-types").RuntimeToolGrants;
+  }
+
+  async addRuntimeToolGroupGrant(
+    runtimeId: string,
+    toolName: string,
+    groupId: string,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/runtimes/${runtimeId}/tools/${encodeURIComponent(toolName)}/groups/${groupId}`,
+      { method: "POST" },
+    );
+  }
+
+  async removeRuntimeToolGroupGrant(
+    runtimeId: string,
+    toolName: string,
+    groupId: string,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/runtimes/${runtimeId}/tools/${encodeURIComponent(toolName)}/groups/${groupId}`,
+      { method: "DELETE" },
+    );
+  }
+
+  async addRuntimeToolUserGrant(
+    runtimeId: string,
+    toolName: string,
+    userId: string,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/runtimes/${runtimeId}/tools/${encodeURIComponent(toolName)}/users/${userId}`,
+      { method: "POST" },
+    );
+  }
+
+  async removeRuntimeToolUserGrant(
+    runtimeId: string,
+    toolName: string,
+    userId: string,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/runtimes/${runtimeId}/tools/${encodeURIComponent(toolName)}/users/${userId}`,
+      { method: "DELETE" },
+    );
   }
 
   async updateRuntimeSandbox(

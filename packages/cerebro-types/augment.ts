@@ -61,4 +61,42 @@ export interface AgentTool {
   config: Record<string, unknown>;
 }
 
+// JEH-1710: Runtime-level unified tool inventory. One row per (runtime, tool)
+// regardless of whether the tool comes from the cloud gateway (`cloud`) or a
+// daemon-discovered MCP server (`mcp`, with `mcp_server_name` filled). The UI
+// blends both sources in one table — the source is a badge, not a section.
+export interface RuntimeTool {
+  id: string;
+  runtime_id: string;
+  name: string;
+  source: string; // "cloud" | "mcp" | future values — switch on with a default branch.
+  mcp_server_name: string;
+  description: string;
+  enabled: boolean;
+  last_scanned_at: string | null;
+}
+
+export interface RuntimeToolGroupGrant {
+  runtime_id: string;
+  tool_name: string;
+  group_id: string;
+  group_name: string;
+  granted_at: string;
+}
+
+export interface RuntimeToolUserGrant {
+  runtime_id: string;
+  tool_name: string;
+  user_id: string;
+  user_name: string;
+  user_email: string;
+  user_avatar_url: string;
+  granted_at: string;
+}
+
+export interface RuntimeToolGrants {
+  group_grants: RuntimeToolGroupGrant[];
+  user_grants: RuntimeToolUserGrant[];
+}
+
 export {};
