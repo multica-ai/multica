@@ -14,7 +14,10 @@ export type GitHubMergeableState = string;
 export interface GitHubInstallation {
   id: string;
   workspace_id: string;
-  installation_id: number;
+  /** GitHub's numeric installation id — the management handle used by the
+   * connect / disconnect flows. Omitted when the caller cannot manage
+   * integrations (see `ListGitHubInstallationsResponse.can_manage`). */
+  installation_id?: number;
   account_login: string;
   account_type: "User" | "Organization";
   account_avatar_url: string | null;
@@ -57,6 +60,11 @@ export interface ListGitHubInstallationsResponse {
   installations: GitHubInstallation[];
   /** Whether the deployment has GitHub App credentials configured. When false, the Connect button is hidden / disabled. */
   configured: boolean;
+  /** Whether the caller can connect / disconnect installations. Non-admin
+   * members get `false` along with installations that omit `installation_id`.
+   * Older backends predating MUL-2413 omit the field; treat absence as
+   * `false` for read-only safety. */
+  can_manage?: boolean;
 }
 
 export interface GitHubConnectResponse {

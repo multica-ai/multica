@@ -22,16 +22,24 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // ── Response shapes ─────────────────────────────────────────────────────────
 
+// GitHubInstallationResponse is the JSON shape returned by the installation
+// list endpoint and broadcast on installation-related WS events.
+//
+// InstallationID is admin-only: the numeric GitHub installation_id is the
+// management handle used by the Connect/Disconnect flows, so non-admin
+// members receive responses with the field omitted. See the list handler
+// for the role gate.
 type GitHubInstallationResponse struct {
 	ID               string  `json:"id"`
 	WorkspaceID      string  `json:"workspace_id"`
-	InstallationID   int64   `json:"installation_id"`
+	InstallationID   *int64  `json:"installation_id,omitempty"`
 	AccountLogin     string  `json:"account_login"`
 	AccountType      string  `json:"account_type"`
 	AccountAvatarURL *string `json:"account_avatar_url"`
@@ -83,10 +91,11 @@ type GitHubConnectResponse struct {
 }
 
 func githubInstallationToResponse(i db.GithubInstallation) GitHubInstallationResponse {
+	instID := i.InstallationID
 	return GitHubInstallationResponse{
 		ID:               uuidToString(i.ID),
 		WorkspaceID:      uuidToString(i.WorkspaceID),
-		InstallationID:   i.InstallationID,
+		InstallationID:   &instID,
 		AccountLogin:     i.AccountLogin,
 		AccountType:      i.AccountType,
 		AccountAvatarURL: textToPtr(i.AccountAvatarUrl),
@@ -378,12 +387,21 @@ func fetchInstallationAccount(ctx context.Context, installationID int64) (login,
 
 // ── Listing / disconnect ────────────────────────────────────────────────────
 
+// ListGitHubInstallations returns the workspace's connected GitHub
+// installations to any workspace member. Connect/disconnect remain
+// admin-only at the router level, so the response carries a `can_manage`
+// hint and strips the numeric `installation_id` for non-admin callers —
+// they get visibility into "is GitHub wired up, and by whom?" without the
+// management handle.
 func (h *Handler) ListGitHubInstallations(w http.ResponseWriter, r *http.Request) {
 	workspaceID := chi.URLParam(r, "id")
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
 		return
 	}
+	member, _ := middleware.MemberFromContext(r.Context())
+	canManage := roleAllowed(member.Role, "owner", "admin")
+
 	rows, err := h.Queries.ListGitHubInstallationsByWorkspace(r.Context(), wsUUID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list installations")
@@ -391,9 +409,17 @@ func (h *Handler) ListGitHubInstallations(w http.ResponseWriter, r *http.Request
 	}
 	out := make([]GitHubInstallationResponse, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, githubInstallationToResponse(row))
+		resp := githubInstallationToResponse(row)
+		if !canManage {
+			resp.InstallationID = nil
+		}
+		out = append(out, resp)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"installations": out, "configured": isGitHubConfigured()})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"installations": out,
+		"configured":    isGitHubConfigured(),
+		"can_manage":    canManage,
+	})
 }
 
 func (h *Handler) DeleteGitHubInstallation(w http.ResponseWriter, r *http.Request) {

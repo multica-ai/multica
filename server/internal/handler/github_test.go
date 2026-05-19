@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -1037,4 +1038,108 @@ func TestWebhook_PullRequest_MetadataPreservesMergeable(t *testing.T) {
 	if !rows[0].MergeableState.Valid || rows[0].MergeableState.String != "clean" {
 		t.Errorf("expected mergeable_state preserved as clean after metadata event, got %+v", rows[0].MergeableState)
 	}
+}
+
+// TestListGitHubInstallations_RoleGating covers the read-only relaxation
+// in MUL-2413: the endpoint is now reachable by any workspace member, but
+// the handler strips the numeric installation_id and reports `can_manage`
+// based on the caller's role. Admins / owners still receive the full row.
+func TestListGitHubInstallations_RoleGating(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+
+	const installationID int64 = 42424242
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "role-gating-acct",
+		AccountType:    "Organization",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+	})
+
+	call := func(t *testing.T, role string) map[string]any {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/github/installations", nil)
+		req = withURLParam(req, "id", testWorkspaceID)
+		req = req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, db.Member{Role: role}))
+		w := httptest.NewRecorder()
+		testHandler.ListGitHubInstallations(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("ListGitHubInstallations(%s): %d %s", role, w.Code, w.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode body (%s): %v", role, err)
+		}
+		return body
+	}
+
+	t.Run("admin sees installation_id + can_manage true", func(t *testing.T) {
+		body := call(t, "admin")
+		if got, _ := body["can_manage"].(bool); !got {
+			t.Errorf("can_manage = %v, want true", body["can_manage"])
+		}
+		installs, _ := body["installations"].([]any)
+		if len(installs) == 0 {
+			t.Fatalf("expected at least one installation row, got %v", installs)
+		}
+		row, _ := installs[0].(map[string]any)
+		gotID, ok := row["installation_id"].(float64)
+		if !ok {
+			t.Fatalf("admin response missing installation_id: %v", row)
+		}
+		if int64(gotID) != installationID {
+			t.Errorf("installation_id = %v, want %d", gotID, installationID)
+		}
+	})
+
+	t.Run("owner sees installation_id + can_manage true", func(t *testing.T) {
+		body := call(t, "owner")
+		if got, _ := body["can_manage"].(bool); !got {
+			t.Errorf("can_manage = %v, want true", body["can_manage"])
+		}
+		installs, _ := body["installations"].([]any)
+		row, _ := installs[0].(map[string]any)
+		if _, ok := row["installation_id"]; !ok {
+			t.Errorf("owner response missing installation_id: %v", row)
+		}
+	})
+
+	t.Run("member sees row without installation_id and can_manage false", func(t *testing.T) {
+		body := call(t, "member")
+		canManage, _ := body["can_manage"].(bool)
+		if canManage {
+			t.Errorf("can_manage = true, want false for non-admin member")
+		}
+		installs, _ := body["installations"].([]any)
+		if len(installs) == 0 {
+			t.Fatalf("member should still see installation rows, got %v", installs)
+		}
+		row, _ := installs[0].(map[string]any)
+		if _, present := row["installation_id"]; present {
+			t.Errorf("installation_id must be omitted for non-admin members, row=%v", row)
+		}
+		// Display fields the read-only view still needs must round-trip.
+		if got, _ := row["account_login"].(string); got != "role-gating-acct" {
+			t.Errorf("account_login = %q, want role-gating-acct", got)
+		}
+	})
+
+	t.Run("guest is treated as read-only and can_manage is false", func(t *testing.T) {
+		body := call(t, "guest")
+		if canManage, _ := body["can_manage"].(bool); canManage {
+			t.Errorf("can_manage = true, want false for guest")
+		}
+		installs, _ := body["installations"].([]any)
+		row, _ := installs[0].(map[string]any)
+		if _, present := row["installation_id"]; present {
+			t.Errorf("installation_id must be omitted for guest, row=%v", row)
+		}
+	})
 }
