@@ -141,10 +141,14 @@ describe("AgentToolsCard", () => {
 
     // Inherit row: shows "Arver" tag.
     expect(screen.getAllByText("— Arver").length).toBeGreaterThan(0);
-    // Force-off row: shows "Tving fra" tag.
-    expect(screen.getByText("Tving fra")).toBeInTheDocument();
-    // Force-on row: shows "Tving på" tag.
-    expect(screen.getByText("Tving på")).toBeInTheDocument();
+    // The override badges are <span>s. The same words appear inside <option>
+    // elements of the row override-picker, so scope to span to pick the badge.
+    expect(
+      screen.getByText("Tving fra", { selector: "span" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Tving på", { selector: "span" }),
+    ).toBeInTheDocument();
 
     // Effective: firtal_bq_query (on, inherit) = Aktiv;
     // github_create_issue (force_off) = Inaktiv;
