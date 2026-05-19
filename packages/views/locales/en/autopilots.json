@@ -92,7 +92,14 @@
     "running": "Running",
     "skipped": "Skipped",
     "completed": "Completed",
-    "failed": "Failed"
+    "failed": "Failed",
+    "skipped": "Skipped"
+  },
+  "run_source": {
+    "schedule": "Schedule",
+    "manual": "Manual",
+    "webhook": "Webhook",
+    "api": "API"
   },
   "run": {
     "issue_linked": "Issue linked",
@@ -102,9 +109,38 @@
       "summary": "{{count}} skipped runs"
     }
   },
+  "webhook_payload": {
+    "label": "Webhook event:",
+    "unknown_event": "webhook.received",
+    "payload": "Payload",
+    "content_type": "Content-Type: {{type}}",
+    "copy": "Copy",
+    "copied": "Webhook payload copied",
+    "copied_short": "Copied",
+    "copy_failed": "Failed to copy",
+    "truncated_marker": "[truncated — click Copy to get the full payload]"
+  },
+  "trigger_kind": {
+    "schedule": "Schedule",
+    "webhook": "Webhook",
+    "api": "API"
+  },
   "trigger_row": {
     "disabled_badge": "Disabled",
+    "deprecated_badge": "Deprecated",
     "next_label": "Next: {{date}}",
+    "webhook_url_label": "Webhook URL",
+    "copy_url": "Copy URL",
+    "url_copied": "Webhook URL copied",
+    "url_copy_failed": "Failed to copy",
+    "rotate_url": "Rotate URL",
+    "rotate_confirm_title": "Rotate webhook URL",
+    "rotate_confirm_description": "The current URL will stop working immediately. Any external systems calling it must be updated with the new URL. Continue?",
+    "rotate_confirm_cancel": "Cancel",
+    "rotate_confirm_action": "Rotate URL",
+    "rotate_in_progress": "Rotating...",
+    "toast_rotated": "Webhook URL rotated",
+    "toast_rotate_failed": "Failed to rotate URL",
     "toast_deleted": "Trigger deleted",
     "toast_delete_failed": "Failed to delete trigger",
     "delete_dialog": {
@@ -115,13 +151,63 @@
       "deleting": "Deleting..."
     }
   },
+  "deliveries": {
+    "section_title": "Webhook Deliveries",
+    "empty": "No webhook deliveries yet. Send a POST to the webhook URL to see entries here.",
+    "row": {
+      "attempts": "{{count}}× attempts",
+      "replay_badge": "Replay"
+    },
+    "status": {
+      "queued": "Queued",
+      "dispatched": "Dispatched",
+      "rejected": "Rejected",
+      "ignored": "Ignored",
+      "failed": "Failed"
+    },
+    "signature": {
+      "not_required": "No signature",
+      "valid": "Signature valid",
+      "invalid": "Signature invalid",
+      "missing": "Signature missing"
+    },
+    "detail": {
+      "title": "Delivery",
+      "received_at": "Received",
+      "last_attempt_at": "Last attempt",
+      "attempt_count": "Attempts",
+      "response_status": "Response",
+      "dedupe_key": "Dedupe key",
+      "dedupe_source": "Dedupe source",
+      "content_type": "Content-Type",
+      "replayed_from": "Replayed from",
+      "error_label": "Error",
+      "raw_body": "Raw body",
+      "selected_headers": "Headers",
+      "response_body": "Response body"
+    },
+    "replay": {
+      "action": "Replay",
+      "in_progress": "Replaying...",
+      "toast_success": "Delivery replayed",
+      "toast_failed": "Replay failed",
+      "disabled_invalid_signature": "Can't replay — signature was invalid",
+      "disabled_rejected": "Can't replay a rejected delivery",
+      "disabled_queued": "Still queued — replay once it settles"
+    }
+  },
   "add_trigger_dialog": {
     "title": "Add Trigger",
+    "type_label": "Type",
+    "type_schedule": "Schedule",
+    "type_webhook": "Webhook",
     "label_field": "Label (optional)",
     "label_placeholder": "e.g. Weekday morning",
+    "webhook_help": "Multica will generate a webhook URL after you save. POST any JSON to it to fire this autopilot.",
     "submit": "Add trigger",
     "submitting": "Adding...",
-    "toast_added": "Trigger added",
+    "toast_added_schedule": "Schedule trigger added",
+    "toast_added_webhook": "Webhook trigger added",
     "toast_add_failed": "Failed to add trigger"
   },
   "dialog": {
@@ -145,14 +231,26 @@
     "saving": "Saving...",
     "toast_created": "Autopilot created",
     "toast_create_partial": "Autopilot created, but schedule failed to save",
+    "toast_create_partial_with_reason": "Autopilot created, but schedule failed to save: {{reason}}",
     "toast_create_failed": "Failed to create autopilot",
     "toast_updated": "Autopilot updated",
     "toast_update_partial": "Autopilot updated, but schedule failed to save",
+    "toast_update_partial_with_reason": "Autopilot updated, but schedule failed to save: {{reason}}",
     "toast_update_failed": "Failed to update autopilot",
     "section_agent": "Agent",
     "select_agent": "Select agent",
     "section_output_mode": "Output mode",
     "section_schedule": "Schedule",
+    "section_trigger_kind": "Trigger",
+    "trigger_kind_schedule": "Schedule",
+    "trigger_kind_webhook": "Webhook",
+    "section_webhook": "Webhook",
+    "webhook_help_create": "Multica will generate a webhook URL after this autopilot is created. POST any JSON to that URL to fire it.",
+    "webhook_help_edit": "This autopilot is fired by webhook. Manage the URL (copy / rotate) on the autopilot's detail page.",
+    "webhook_created_title": "Webhook autopilot ready",
+    "webhook_created_description": "POST any JSON to the URL below and the autopilot will fire. Copy it now — you can also find and rotate it on the autopilot's detail page.",
+    "webhook_created_warning": "Treat this URL like a password. Anyone who has it can trigger the autopilot.",
+    "webhook_created_done": "Done",
     "schedule_disabled_reason": "This autopilot has multiple schedules — edit them in the detail page.",
     "next_run_label": "Next run:",
     "output_modes": {

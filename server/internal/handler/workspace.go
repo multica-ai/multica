@@ -523,6 +523,8 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.MembershipCache.Invalidate(r.Context(), uuidToString(target.UserID), workspaceID)
+
 	user, err := h.Queries.GetUser(r.Context(), updatedMember.UserID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load member")
@@ -580,6 +582,8 @@ func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.MembershipCache.Invalidate(r.Context(), uuidToString(target.UserID), workspaceID)
+
 	wsIDStr := uuidToString(requester.WorkspaceID)
 	logRevocation(result, wsIDStr, uuidToString(target.UserID))
 	h.publishRevocation(r.Context(), result, wsIDStr, "member", requesterUserID)
@@ -620,6 +624,8 @@ func (h *Handler) LeaveWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.MembershipCache.Invalidate(r.Context(), uuidToString(member.UserID), workspaceID)
+
 	userID := requestUserID(r)
 	logRevocation(result, workspaceID, uuidToString(member.UserID))
 	h.publishRevocation(r.Context(), result, workspaceID, "member", userID)
@@ -648,6 +654,16 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	if requester.Role != "owner" {
 		writeError(w, http.StatusForbidden, "insufficient permissions")
 		return
+	}
+
+	// Invalidate membership cache for all workspace members before deletion.
+	// After CASCADE deletes the member rows, cache entries become harmless
+	// orphans (downstream lookups for the deleted workspace will fail), but
+	// proactive invalidation prevents any stale-access window up to TTL.
+	if members, err := h.Queries.ListMembers(r.Context(), requester.WorkspaceID); err == nil {
+		for _, m := range members {
+			h.MembershipCache.Invalidate(r.Context(), uuidToString(m.UserID), workspaceID)
+		}
 	}
 
 	// At this point workspaceMember has resolved → workspaceID is a valid UUID

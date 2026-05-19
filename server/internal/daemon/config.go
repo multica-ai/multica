@@ -72,7 +72,7 @@ type Config struct {
 	GCOrphanTTL                    time.Duration         // clean orphan dirs with no meta, or dirs whose issue gc-check returns 404, once they exceed this age (default: 72h). The 404 path uses the same TTL — a scoped-down token can't instantly wipe live workspaces.
 	GCArtifactTTL                  time.Duration         // when a task has been completed for at least this long but its issue is still open, drop regenerable artifacts (default: 12h, set 0 to disable)
 	GCArtifactPatterns             []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
-	AutoUpdateEnabled              bool                  // periodically check for a newer CLI release and self-update when idle (default: true)
+	AutoUpdateEnabled              bool                  // periodically check for a newer CLI release and self-update when idle (default: true on Multica Cloud, false on self-host)
 	AutoUpdateCheckInterval        time.Duration         // how often the auto-update loop polls for a new release (default: 6h)
 	PollInterval                   time.Duration
 	HeartbeatInterval              time.Duration
@@ -355,10 +355,23 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 	gcArtifactPatterns := patternsFromEnv("MULTICA_GC_ARTIFACT_PATTERNS", DefaultGCArtifactPatterns)
 
-	// Auto-update config: env > defaults > CLI override.
-	autoUpdateEnabled := true
-	if v := strings.TrimSpace(os.Getenv("MULTICA_DAEMON_AUTO_UPDATE")); v == "false" || v == "0" {
-		autoUpdateEnabled = false
+	// Auto-update config: default -> env override -> CLI override.
+	//
+	// Default is opt-in on Multica Cloud (api.multica.ai) and opt-out for
+	// self-hosted instances. Self-host operators frequently run a fork with
+	// their own patches, and silently upgrading their daemon to an upstream
+	// GitHub release would clobber that work; they also commonly stay on an
+	// older server build, which a fresh CLI may no longer talk to. Keeping
+	// auto-update off by default for self-host avoids both footguns (MUL-2381).
+	// Operators on either side can flip the default with MULTICA_DAEMON_AUTO_UPDATE.
+	autoUpdateEnabled := isOfficialCloudServer(serverBaseURL)
+	if v := strings.TrimSpace(os.Getenv("MULTICA_DAEMON_AUTO_UPDATE")); v != "" {
+		switch strings.ToLower(v) {
+		case "false", "0", "no", "off":
+			autoUpdateEnabled = false
+		case "true", "1", "yes", "on":
+			autoUpdateEnabled = true
+		}
 	}
 	if overrides.DisableAutoUpdate {
 		autoUpdateEnabled = false
@@ -399,6 +412,26 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		ClaudeArgs:                     claudeArgs,
 		CodexArgs:                      codexArgs,
 	}, nil
+}
+
+// officialCloudHost is the hostname of Multica's hosted cloud. It's the only
+// origin we treat as "official" for the auto-update default — staging,
+// preview, and any future *.multica.ai subdomains are deliberately excluded
+// so they inherit the safer self-host default until explicitly opted in.
+const officialCloudHost = "api.multica.ai"
+
+// isOfficialCloudServer reports whether the resolved server base URL points
+// at Multica's hosted cloud. Used to pick the auto-update default: cloud
+// users run a server that publishes the matching CLI release, so opt-in
+// self-update is safe; self-host users may run a fork or pin to an older
+// server, so the default flips to off. Matching is host-only and
+// case-insensitive — port and path are ignored.
+func isOfficialCloudServer(baseURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Hostname(), officialCloudHost)
 }
 
 // NormalizeServerBaseURL converts a WebSocket or HTTP URL to a base HTTP URL.

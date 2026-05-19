@@ -8,7 +8,7 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { isImeComposing, timeAgo } from "@multica/core/utils";
-import { agentListOptions, memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { agentListOptions, memberListOptions, squadMemberStatusOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import { CreateAgentDialog } from "../../agents/components/create-agent-dialog";
 import { useNavigation } from "../../navigation";
@@ -56,7 +56,7 @@ import {
 } from "../../issues/components/pickers/property-picker";
 import { ChevronDown, UserPlus } from "lucide-react";
 import { toast } from "sonner";
-import type { Squad, SquadMember, Agent, CreateAgentRequest, MemberWithUser } from "@multica/core/types";
+import type { Squad, SquadMember, SquadMemberStatus, Agent, CreateAgentRequest, MemberWithUser } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
@@ -80,6 +80,20 @@ export function SquadDetailPage() {
     queryFn: () => api.listSquadMembers(squadId),
     enabled: !!workspace?.id && !!squadId,
   });
+
+  // Per-squad working/idle/offline + active-issue snapshot. WS task / agent /
+  // daemon events invalidate this via use-realtime-sync; the staleTime is a
+  // tab-focus safety net. Indexed by member_id so SquadMembersTab can look up
+  // its row in O(1).
+  const { data: memberStatusResp } = useQuery({
+    ...squadMemberStatusOptions(wsId, squadId),
+    enabled: !!workspace?.id && !!squadId,
+  });
+  const memberStatusById = useMemo(() => {
+    const map = new Map<string, SquadMemberStatus>();
+    for (const s of memberStatusResp?.members ?? []) map.set(s.member_id, s);
+    return map;
+  }, [memberStatusResp]);
 
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: wsMembers = [] } = useQuery(memberListOptions(wsId));
@@ -120,13 +134,15 @@ export function SquadDetailPage() {
         role: input.role?.trim() || undefined,
       }),
     onSuccess: () => { refetchMembers(); toast.success("Member added"); },
-    onError: () => toast.error("Failed to add member"),
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to add member"),
   });
 
   const removeMemberMut = useMutation({
     mutationFn: (m: SquadMember) => api.removeSquadMember(squadId, { member_type: m.member_type, member_id: m.member_id }),
     onSuccess: () => { refetchMembers(); toast.success("Member removed"); },
-    onError: () => toast.error("Failed to remove member"),
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to remove member"),
   });
 
   const updateRoleMut = useMutation({
@@ -137,7 +153,8 @@ export function SquadDetailPage() {
         role: input.role,
       }),
     onSuccess: () => { refetchMembers(); toast.success("Role updated"); },
-    onError: () => toast.error("Failed to update role"),
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to update role"),
   });
 
   const setLeaderMut = useMutation({
@@ -148,13 +165,15 @@ export function SquadDetailPage() {
       queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
       toast.success("Leader updated");
     },
-    onError: () => toast.error("Failed to update leader"),
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to update leader"),
   });
 
   const deleteMut = useMutation({
     mutationFn: () => api.deleteSquad(squadId),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) }); push(p.squads()); toast.success("Squad archived"); },
-    onError: () => toast.error("Failed to archive squad"),
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to archive squad"),
   });
 
   // CreateAgentDialog's onCreate contract: hit POST /api/agents and
@@ -215,7 +234,7 @@ export function SquadDetailPage() {
       {/* Two-column grid mirrors agent-detail-page: left inspector (identity +
           properties + leader), right pane with tabs (Members | Instructions).
           Mobile collapses to stacked single column. */}
-      <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[320px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6">
+      <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[280px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6 lg:grid-cols-[320px_minmax(0,1fr)]">
         <SquadDetailInspector
           squad={squad}
           memberCount={members.length}
@@ -230,6 +249,7 @@ export function SquadDetailPage() {
         <SquadOverviewPane
           squad={squad}
           members={members}
+          memberStatusById={memberStatusById}
           isLeader={isLeader}
           getEntityName={getEntityName}
           onAddMemberClick={() => setShowAddMember(true)}
@@ -907,6 +927,7 @@ const squadDetailTabs: { id: SquadDetailTab; label: string; icon: typeof FileTex
 function SquadOverviewPane({
   squad,
   members,
+  memberStatusById,
   isLeader,
   getEntityName,
   onAddMemberClick,
@@ -919,6 +940,7 @@ function SquadOverviewPane({
 }: {
   squad: Squad;
   members: SquadMember[];
+  memberStatusById: Map<string, SquadMemberStatus>;
   isLeader: (m: SquadMember) => boolean;
   getEntityName: (type: string, id: string) => string;
   onAddMemberClick: () => void;
@@ -976,6 +998,7 @@ function SquadOverviewPane({
           <div className="flex h-full flex-col p-4 md:p-6">
             <SquadMembersTab
               members={members}
+              memberStatusById={memberStatusById}
               isLeader={isLeader}
               getEntityName={getEntityName}
               onAddMemberClick={onAddMemberClick}
@@ -1020,9 +1043,23 @@ function SquadOverviewPane({
   );
 }
 
+// Visual config for the four squad member status buckets. Mirrors
+// availabilityConfig + workloadConfig in packages/views/agents/presence.ts —
+// same semantic tokens so a status dot here matches the agent page's dot.
+// Unknown / null statuses (human members, server-side enum drift) render as
+// a neutral muted pill; this is the "downgrade, don't crash" defense from
+// CLAUDE.md > API Response Compatibility.
+const SQUAD_STATUS_DOT_CLASS: Record<"working" | "idle" | "offline" | "unstable", string> = {
+  working: "bg-success",
+  idle: "bg-muted-foreground/40",
+  offline: "bg-muted-foreground/40",
+  unstable: "bg-warning",
+};
+
 // Members tab body — re-uses the existing list/role editing patterns.
 function SquadMembersTab({
   members,
+  memberStatusById,
   isLeader,
   getEntityName,
   onAddMemberClick,
@@ -1033,6 +1070,7 @@ function SquadMembersTab({
   setLeaderPending,
 }: {
   members: SquadMember[];
+  memberStatusById: Map<string, SquadMemberStatus>;
   isLeader: (m: SquadMember) => boolean;
   getEntityName: (type: string, id: string) => string;
   onAddMemberClick: () => void;
@@ -1069,32 +1107,87 @@ function SquadMembersTab({
       </div>
 
       <div className="space-y-2">
-        {members.map((m) => (
-          <div key={m.id} className="group flex items-start gap-3 rounded-lg border p-3">
-            <ActorAvatar
-              actorType={m.member_type}
-              actorId={m.member_id}
-              size={32}
-              showStatusDot
-              enableHoverCard={m.member_type === "agent"}
-              hoverCardVariant="live"
-            />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium">{getEntityName(m.member_type, m.member_id)}</span>
-                <span className="text-xs text-muted-foreground capitalize">{m.member_type}</span>
-                {isLeader(m) && (
-                  <span className="inline-flex items-center gap-0.5 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded">
-                    <Crown className="size-3" />
-                    {t(($) => $.members_tab.leader_chip)}
-                  </span>
+        {members.map((m) => {
+          const status = memberStatusById.get(m.member_id);
+          const statusValue = status?.status ?? null;
+          const dotClass =
+            statusValue && statusValue in SQUAD_STATUS_DOT_CLASS
+              ? SQUAD_STATUS_DOT_CLASS[statusValue as keyof typeof SQUAD_STATUS_DOT_CLASS]
+              : null;
+          const statusLabel =
+            statusValue === "working" ? t(($) => $.members_tab.status_working)
+              : statusValue === "idle" ? t(($) => $.members_tab.status_idle)
+              : statusValue === "offline" ? t(($) => $.members_tab.status_offline)
+              : statusValue === "unstable" ? t(($) => $.members_tab.status_unstable)
+              : null;
+          const activeIssues = status?.active_issues ?? [];
+          const primaryIssue = activeIssues[0];
+          const extraIssueCount = Math.max(0, activeIssues.length - 1);
+          // Show last_active only when the agent isn't currently working —
+          // a "working" pill already implies the agent is live, and a
+          // "last active 2s ago" line next to it is just noise.
+          const showLastActive =
+            m.member_type === "agent" && statusValue && statusValue !== "working" && status?.last_active_at;
+          return (
+            <div key={m.id} className="group flex items-start gap-3 rounded-lg border p-3">
+              <ActorAvatar
+                actorType={m.member_type}
+                actorId={m.member_id}
+                size={32}
+                showStatusDot
+                enableHoverCard={m.member_type === "agent"}
+                hoverCardVariant="live"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">{getEntityName(m.member_type, m.member_id)}</span>
+                  <span className="text-xs text-muted-foreground capitalize">{m.member_type}</span>
+                  {isLeader(m) && (
+                    <span className="inline-flex items-center gap-0.5 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded">
+                      <Crown className="size-3" />
+                      {t(($) => $.members_tab.leader_chip)}
+                    </span>
+                  )}
+                  {m.member_type === "agent" && statusLabel && (
+                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                      <span className={`h-1.5 w-1.5 rounded-full ${dotClass ?? "bg-muted-foreground/40"}`} />
+                      {statusLabel}
+                    </span>
+                  )}
+                </div>
+                <RoleEditor
+                  value={m.role ?? ""}
+                  onSave={async (next) => { await onUpdateRole(m, next); }}
+                />
+                {primaryIssue && (
+                  <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground min-w-0">
+                    <AppLink
+                      href={p.issueDetail(primaryIssue.issue_id)}
+                      className="inline-flex items-center gap-1 min-w-0 hover:text-foreground transition-colors"
+                    >
+                      <span className="font-mono text-[10px] uppercase shrink-0">{primaryIssue.identifier}</span>
+                      <span className="truncate">{primaryIssue.title}</span>
+                      {primaryIssue.issue_status === "blocked" && (
+                        <span className="shrink-0 inline-flex items-center text-[10px] uppercase tracking-wide text-warning">
+                          {t(($) => $.members_tab.issue_status_blocked)}
+                        </span>
+                      )}
+                    </AppLink>
+                    {extraIssueCount > 0 && (
+                      <span className="shrink-0">
+                        · {t(($) => $.members_tab.active_issue_more, { count: extraIssueCount })}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {showLastActive && (
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    {t(($) => $.members_tab.last_active_label, {
+                      time: timeAgo(status!.last_active_at!),
+                    })}
+                  </div>
                 )}
               </div>
-              <RoleEditor
-                value={m.role ?? ""}
-                onSave={async (next) => { await onUpdateRole(m, next); }}
-              />
-            </div>
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
               {m.member_type === "agent" && (
                 <Tooltip>
@@ -1157,7 +1250,8 @@ function SquadMembersTab({
               )}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

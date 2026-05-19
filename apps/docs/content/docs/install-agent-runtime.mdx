@@ -1,0 +1,169 @@
+---
+title: Install an agent runtime
+description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 11 supported tools so the daemon can detect them.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 11 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
+
+This page is the install-side companion to:
+
+- [Daemon and runtimes](/daemon-runtimes) — how detection works
+- [AI coding tools matrix](/providers) — what each tool can and can't do (session resumption, MCP, model selection)
+
+<Callout type="info">
+The Multica server never sees your API keys or the tools themselves. Everything below — installation, authentication, model access — lives on your local machine. If something fails, it's almost always a local problem.
+</Callout>
+
+## Before you start
+
+Two prerequisites apply to **every** tool below:
+
+1. **The Multica daemon must be running.** Either run `multica daemon start` after installing the [Multica CLI](/cli), or use the [Multica desktop app](/desktop-app), which launches the daemon automatically. Without a running daemon there is nothing to detect tools.
+2. **The tool's binary must be reachable on `PATH`.** The daemon shells out to each tool by name (see the **Daemon looks for** column in each section). If `which <name>` doesn't find it in your terminal, the daemon won't find it either. After installing, open a fresh terminal (or restart the daemon) so the new `PATH` entry is picked up.
+
+After installing a tool, restart the daemon:
+
+```bash
+multica daemon restart
+```
+
+Or, in the desktop app, just relaunch the app. The daemon re-scans `PATH` on every start.
+
+## The 11 supported tools
+
+Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 11.
+
+### Claude Code (Anthropic)
+
+The most complete integration. Session resumption works, MCP works, and it's the **only one of the 11 that actually consumes the `mcp_config` field** on agents (see the [matrix](/providers#mcp-configuration-only-claude-code-actually-reads-it)).
+
+| | |
+|---|---|
+| Daemon looks for | `claude` |
+| Install | Follow the official guide at [claude.com/claude-code](https://www.claude.com/claude-code). The standard route is the npm package `@anthropic-ai/claude-code` (Node.js 18+ required). |
+| Authentication | Run `claude` once and follow the in-CLI login flow, or set `ANTHROPIC_API_KEY`. |
+| Notes | First-choice recommendation for new users. |
+
+### Codex (OpenAI)
+
+JSON-RPC 2.0 transport with finer-grained approval gates. **Session resumption code exists but is currently unreachable** — pick Claude Code or one of the ACP family if you need resume.
+
+| | |
+|---|---|
+| Daemon looks for | `codex` |
+| Install | Follow the official guide at [github.com/openai/codex](https://github.com/openai/codex). The standard route is the npm package `@openai/codex`. |
+| Authentication | `codex login` (browser-based) or `OPENAI_API_KEY`. |
+
+### Cursor (Anysphere)
+
+The CLI counterpart to the Cursor editor. **Session resumption is broken** — Cursor's CLI doesn't return a session id, so the value you pass on resume is always invalid.
+
+| | |
+|---|---|
+| Daemon looks for | `cursor-agent` |
+| Install | Install the [Cursor editor](https://cursor.com/) and then the CLI per their docs at [docs.cursor.com](https://docs.cursor.com/). The binary name is `cursor-agent`, not `cursor`. |
+| Authentication | Sign in through the Cursor editor; the CLI reuses that session. |
+
+### GitHub Copilot
+
+Model routing goes through your GitHub account entitlement — the tool doesn't pick a model itself; GitHub decides which model you get.
+
+| | |
+|---|---|
+| Daemon looks for | `copilot` |
+| Install | See GitHub's CLI docs at [github.com/github/copilot-cli](https://github.com/github/copilot-cli). |
+| Authentication | Browser-based GitHub login through the CLI. |
+| Notes | Requires an active GitHub Copilot subscription on the signed-in account. |
+
+### Gemini (Google)
+
+Supports the Gemini 2.5 and 3 series. No session resumption, no MCP — suitable for one-shot tasks.
+
+| | |
+|---|---|
+| Daemon looks for | `gemini` |
+| Install | Follow the official guide at [github.com/google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli). The standard route is the npm package `@google/gemini-cli`. |
+| Authentication | `gemini` will prompt for a Google account login, or set `GEMINI_API_KEY`. |
+
+### OpenCode (SST)
+
+Open-source CLI agent. Dynamically discovers available models from its own configuration file — good fit for users who want to bring their own model catalog.
+
+| | |
+|---|---|
+| Daemon looks for | `opencode` |
+| Install | Follow the official guide at [opencode.ai](https://opencode.ai/) or the GitHub repo at [github.com/sst/opencode](https://github.com/sst/opencode). The typical route is the install script or the npm package. |
+| Authentication | Configure your model provider(s) per OpenCode's docs (Anthropic, OpenAI, etc.). |
+
+### Kiro CLI (Amazon)
+
+ACP-over-stdio transport. Session resumption works through ACP `session/load`; skills are copied into `.kiro/skills/`.
+
+| | |
+|---|---|
+| Daemon looks for | `kiro-cli` |
+| Install | See the Kiro docs at [kiro.dev](https://kiro.dev/). The binary name is `kiro-cli`, not `kiro`. |
+| Authentication | AWS-account-based; follow Kiro's own onboarding. |
+
+### Kimi (Moonshot)
+
+ACP-protocol agent, primarily aimed at the Chinese market. Skills live under `.kimi/skills/` (native discovery).
+
+| | |
+|---|---|
+| Daemon looks for | `kimi` |
+| Install | Follow the official guide at [github.com/MoonshotAI/kimi-cli](https://github.com/MoonshotAI/kimi-cli). |
+| Authentication | Moonshot API key, configured per the vendor's docs. |
+
+### Hermes (Nous Research)
+
+ACP-protocol agent (shares the transport with Kimi). Session resumption works. The skill injection path falls back to the generic `.agent_context/skills/` — verify your skills are loading before relying on them.
+
+| | |
+|---|---|
+| Daemon looks for | `hermes` |
+| Install | See Nous Research's repository at [github.com/NousResearch](https://github.com/NousResearch) for the latest CLI distribution. |
+| Authentication | Per the vendor's docs. |
+
+### OpenClaw
+
+Open-source CLI agent orchestrator. **Model is bound at the agent layer** (`openclaw agents add --model`) — it can't be overridden per task, and you can't pass `--model` or `--system-prompt` from Multica.
+
+| | |
+|---|---|
+| Daemon looks for | `openclaw` |
+| Install | See the project at [github.com/openclaw-org/openclaw](https://github.com/openclaw-org/openclaw) (community-maintained). |
+| Authentication | Configure the underlying model provider per OpenClaw's docs. |
+
+### Pi (Inflection AI)
+
+Minimalist. **Session resumption is unusual** — the resume id is the path to a session file on disk, not a string id.
+
+| | |
+|---|---|
+| Daemon looks for | `pi` |
+| Install | See Inflection's CLI docs at [pi.ai](https://pi.ai/). |
+| Authentication | Per the vendor's docs. |
+
+## After installing
+
+1. **Confirm the binary is on `PATH`.** Open a fresh terminal and run `which <name>` (for example `which claude`, `which cursor-agent`, `which kiro-cli`). If it prints a path, the daemon will find it. If it prints nothing, fix your shell `PATH` first (the typical cause is a per-shell rc file that wasn't reloaded).
+2. **Restart the daemon.** `multica daemon restart`, or relaunch the desktop app. The daemon only scans `PATH` at startup.
+3. **Check the Runtimes page.** In the Multica UI, the **Runtimes** page should now list one row per `(workspace × tool)` combination. If the row says "offline", see [Daemon and runtimes → When a runtime is marked offline](/daemon-runtimes#when-a-runtime-is-marked-offline).
+4. **Go back to onboarding.** The "Connect a runtime" step polls and will pick up the new runtime within a few seconds — no need to refresh.
+
+## Troubleshooting
+
+- **`which` finds the binary but the daemon doesn't.** The daemon was started with an older `PATH`. Restart it.
+- **The binary exists but launching fails.** Run the tool's own `--version` or `--help` once from the terminal — most failures here are missing auth, expired tokens, or a Node.js / runtime mismatch.
+- **The Runtimes page shows the row, but tasks fail immediately.** Check `multica daemon logs -f` while triggering a task. The daemon surfaces the tool's own error output.
+
+For broader symptoms, see the [Troubleshooting guide](/troubleshooting).
+
+## Next
+
+- [Daemon and runtimes](/daemon-runtimes) — how detection, heartbeats, and offline handling work
+- [AI coding tools matrix](/providers) — capability differences once a tool is connected
+- [Creating and configuring agents](/agents-create) — pick a tool for your agent and start running tasks

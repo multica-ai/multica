@@ -1498,6 +1498,106 @@ func TestIssueSubscriberMutationBody(t *testing.T) {
 	}
 }
 
+// newIssueCommentListTestCmd mirrors the flag set wired in main.init() for
+// the comment list command. We replicate it here so the runIssueCommentList
+// guards can be exercised in isolation — the real command tree pulls in the
+// daemon init path.
+func newIssueCommentListTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "list"}
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("since", "", "")
+	cmd.Flags().String("thread", "", "")
+	cmd.Flags().Int("recent", 0, "")
+	cmd.Flags().String("before", "", "")
+	cmd.Flags().String("before-id", "", "")
+	return cmd
+}
+
+// TestRunIssueCommentListFlagGuards locks the CLI-side flag combination
+// matrix. Two behaviours matter here:
+//
+//   - --recent 0 / --recent -3 must error rather than silently fall back to
+//     the default list path. Previously `recent > 0` collapsed "not passed"
+//     and "passed an invalid value" into the same branch; using
+//     Flags().Changed("recent") distinguishes them so an explicit non-
+//     positive value is rejected.
+//   - --before / --before-id without --recent must error. Before this fix
+//     the cursor would be sent to the server but ignored because RecentN=0,
+//     so callers asking for "comments before X" got the full timeline.
+//
+// All four cases must fail before any HTTP round-trip — verified by an
+// httptest server that fatals if /api/issues/<key>/comments is hit.
+func TestRunIssueCommentListFlagGuards(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// resolveIssueRef hits GET /api/issues/<ref>; everything else means
+		// the guard let an invalid combination through to the wire.
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/issues/") && !strings.Contains(r.URL.Path, "/comments") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+			})
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cases := []struct {
+		name    string
+		setup   func(c *cobra.Command)
+		wantMsg string
+	}{
+		{
+			name: "explicit zero recent rejected",
+			setup: func(c *cobra.Command) {
+				_ = c.Flags().Set("recent", "0")
+			},
+			wantMsg: "--recent must be a positive integer",
+		},
+		{
+			name: "negative recent rejected",
+			setup: func(c *cobra.Command) {
+				_ = c.Flags().Set("recent", "-3")
+			},
+			wantMsg: "--recent must be a positive integer",
+		},
+		{
+			name: "before + before-id without recent rejected",
+			setup: func(c *cobra.Command) {
+				_ = c.Flags().Set("before", "2026-01-01T00:00:00Z")
+				_ = c.Flags().Set("before-id", "00000000-0000-0000-0000-000000000001")
+			},
+			wantMsg: "--before / --before-id require --recent",
+		},
+		{
+			name: "thread + recent still rejected when --recent explicit zero", // also covers the Changed() path
+			setup: func(c *cobra.Command) {
+				_ = c.Flags().Set("thread", "00000000-0000-0000-0000-000000000001")
+				_ = c.Flags().Set("recent", "5")
+			},
+			wantMsg: "--thread and --recent are mutually exclusive",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newIssueCommentListTestCmd()
+			tc.setup(cmd)
+			err := runIssueCommentList(cmd, []string{"MUL-1"})
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tc.wantMsg)
+			}
+			if !strings.Contains(err.Error(), tc.wantMsg) {
+				t.Fatalf("error = %q, want substring %q", err.Error(), tc.wantMsg)
+			}
+		})
+	}
+}
+
 func TestValidIssueStatuses(t *testing.T) {
 	expected := map[string]bool{
 		"backlog":     true,
