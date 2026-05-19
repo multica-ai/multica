@@ -303,6 +303,7 @@ func init() {
 	issueUpdateCmd.Flags().String("start-date", "", "New start date (RFC3339 format; pass empty string to clear)")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (RFC3339 format)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
+	issueUpdateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times; appends to existing attachments)")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
@@ -716,7 +717,13 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// Use a longer timeout when attachments are present (file uploads can be slow).
+	timeout := 15 * time.Second
+	attachments, _ := cmd.Flags().GetStringSlice("attachment")
+	if len(attachments) > 0 {
+		timeout = 60 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, args[0])
@@ -787,13 +794,47 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use flags like --title, --status, --priority, --assignee, etc.")
+	if len(body) == 0 && len(attachments) == 0 {
+		return fmt.Errorf("no fields to update; use flags like --title, --status, --priority, --assignee, --attachment, etc.")
+	}
+
+	// Pre-read attachment files before making any API call.
+	type pendingAttachment struct {
+		path string
+		data []byte
+	}
+	pending := make([]pendingAttachment, 0, len(attachments))
+	for _, filePath := range attachments {
+		if isHTTPURL(filePath) {
+			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
+			continue
+		}
+		data, readErr := os.ReadFile(filePath)
+		if readErr != nil {
+			return fmt.Errorf("read attachment %s: %w", filePath, readErr)
+		}
+		pending = append(pending, pendingAttachment{path: filePath, data: data})
 	}
 
 	var result map[string]any
-	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
-		return fmt.Errorf("update issue: %w", err)
+	if len(body) > 0 {
+		if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
+			return fmt.Errorf("update issue: %w", err)
+		}
+	} else {
+		// No field updates, but attachments need uploading — fetch current issue for output.
+		if err := client.GetJSON(ctx, "/api/issues/"+issueRef.ID, &result); err != nil {
+			return fmt.Errorf("get issue: %w", err)
+		}
+	}
+
+	// Upload attachments and link them to the issue.
+	for _, att := range pending {
+		if _, uploadErr := client.UploadFile(ctx, att.data, att.path, issueRef.ID); uploadErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: upload attachment %s failed: %v\n", att.path, uploadErr)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
