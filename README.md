@@ -79,7 +79,7 @@ Use `brew upgrade multica-ai/tap/multica` to keep the CLI current.
 curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
 ```
 
-Use this if Homebrew is not available. The script installs the Multica CLI on macOS and Linux by using Homebrew when it is on `PATH`, otherwise it downloads the binary directly.
+The script installs the Multica CLI on macOS and Linux by trying Homebrew first when it is on `PATH`; if Homebrew is unavailable or fails, it downloads the release binary directly.
 
 ### Windows (PowerShell)
 

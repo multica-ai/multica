@@ -65,15 +65,18 @@ detect_os() {
 # ---------------------------------------------------------------------------
 install_cli_brew() {
   info "Installing Multica CLI via Homebrew..."
-  if ! brew tap multica-ai/tap 2>/dev/null; then
-    fail "Failed to add Homebrew tap. Check your network connection."
+  if ! brew tap multica-ai/tap; then
+    warn "Failed to add Homebrew tap."
+    return 1
   fi
   # brew install exits non-zero if already installed on older Homebrew versions
-  if ! brew install "$BREW_PACKAGE" 2>/dev/null; then
+  if ! brew install "$BREW_PACKAGE"; then
     if brew list "$BREW_PACKAGE" >/dev/null 2>&1; then
       ok "Multica CLI already installed via Homebrew"
+      return 0
     else
-      fail "Failed to install multica via Homebrew."
+      warn "Failed to install multica via Homebrew."
+      return 1
     fi
   else
     ok "Multica CLI installed via Homebrew"
@@ -191,12 +194,12 @@ pull_official_selfhost_images() {
 
 upgrade_cli_brew() {
   info "Upgrading Multica CLI via Homebrew..."
-  brew update 2>/dev/null || true
-  if brew upgrade "$BREW_PACKAGE" 2>/dev/null; then
+  brew update || true
+  if brew upgrade "$BREW_PACKAGE"; then
     ok "Multica CLI upgraded via Homebrew"
   else
-    # brew upgrade exits non-zero if already up to date
-    ok "Multica CLI is already the latest version"
+    warn "Failed to upgrade multica via Homebrew."
+    return 1
   fi
 }
 
@@ -220,7 +223,10 @@ install_cli() {
 
     info "Multica CLI $current_ver installed, latest is $latest_ver — upgrading..."
     if command_exists brew && brew list "$BREW_PACKAGE" >/dev/null 2>&1; then
-      upgrade_cli_brew
+      if ! upgrade_cli_brew; then
+        warn "Falling back to direct GitHub Releases install."
+        install_cli_binary
+      fi
     else
       install_cli_binary
     fi
@@ -232,7 +238,10 @@ install_cli() {
   fi
 
   if command_exists brew; then
-    install_cli_brew
+    if ! install_cli_brew; then
+      warn "Falling back to direct GitHub Releases install."
+      install_cli_binary
+    fi
   else
     install_cli_binary
   fi

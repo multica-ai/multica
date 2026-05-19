@@ -79,7 +79,7 @@ brew install multica-ai/tap/multica
 curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
 ```
 
-如果没有 Homebrew，可以使用安装脚本。脚本会安装 Multica CLI：检测到 `brew` 时通过 Homebrew 安装，否则直接下载二进制。
+安装脚本会安装 Multica CLI：检测到 `brew` 时优先通过 Homebrew 安装；如果 Homebrew 不可用或安装失败，会直接下载 release 二进制。
 
 ### Windows (PowerShell)
 

@@ -23,11 +23,13 @@ import { Callout } from "fumadocs-ui/components/callout";
 brew install multica-ai/tap/multica
 ```
 
-**macOS / Linux（没有 Homebrew）**：
+**macOS / Linux（安装脚本）**：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
 ```
+
+脚本会优先尝试 Homebrew；如果 Homebrew 不可用或失败，会改为下载 release 二进制。
 
 **Windows（PowerShell）**：
 

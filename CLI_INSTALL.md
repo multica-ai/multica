@@ -43,6 +43,12 @@ If `brew` is found, install via Homebrew:
 brew install multica-ai/tap/multica
 ```
 
+If Homebrew fails, use the install script instead. It tries Homebrew first and falls back to the release binary:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+```
+
 Then verify:
 
 ```bash
