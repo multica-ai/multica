@@ -118,9 +118,10 @@ type ChannelHistoryEntry struct {
 
 // SkillContextForEnv represents a skill to be written into the execution environment.
 type SkillContextForEnv struct {
-	Name    string
-	Content string
-	Files   []SkillFileContextForEnv
+	Name        string
+	Description string
+	Content     string
+	Files       []SkillFileContextForEnv
 }
 
 // SkillFileContextForEnv represents a supporting file within a skill.
