@@ -6,10 +6,10 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/multica-ai/multica/server/internal/util"
-
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // Tool is the interface every in-process tool must implement.
@@ -92,6 +92,81 @@ func (r *Registry) GetEnabledToolsForAgent(ctx context.Context, agentID pgtype.U
 			"agent_id", util.UUIDToString(agentID),
 			"error", err,
 		)
+	}
+	return out
+}
+
+// GetCascadeEnabledToolsForAgent resolves the tool list for an agent using
+// the cerebro_runtime_tool cascade (JEH-1710 bid 5):
+//
+//	tool is callable iff
+//	  runtime_tool.enabled = true
+//	  AND (user has a direct user_grant
+//	       OR user is in a group with a group_grant
+//	       OR the user is workspace owner/admin)
+//	  AND (no override OR override.enabled = true)
+//
+// If the agent's runtime has no cerebro_runtime_tool rows (the new grant
+// system has not been configured for this runtime yet), this falls back to
+// the legacy agent_tool_grant path so existing agents keep working until the
+// bid-6 migration backfills the new tables.
+//
+// userID may be invalid (e.g. autopilot runs without an originating user).
+// In that case the cascade cannot match the workspace-admin/user-grant arms
+// of the rule, so we fall back to the legacy path rather than fail closed —
+// otherwise scheduled autopilots would lose every tool overnight when bid 6
+// rolls out. Once issue-driven autopilots all carry an original_user_id this
+// can be tightened to fail closed.
+func (r *Registry) GetCascadeEnabledToolsForAgent(ctx context.Context, cerebro *cerebrodb.Queries, agentID, userID pgtype.UUID) []Tool {
+	if cerebro == nil || !agentID.Valid {
+		return r.GetEnabledToolsForAgent(ctx, agentID)
+	}
+
+	configured, err := cerebro.HasCerebroRuntimeToolsForAgent(ctx, agentID)
+	if err != nil {
+		slog.Warn("tool registry: cascade configured-check failed",
+			"agent_id", util.UUIDToString(agentID),
+			"error", err,
+		)
+		return nil
+	}
+	if !configured {
+		return r.GetEnabledToolsForAgent(ctx, agentID)
+	}
+
+	if !userID.Valid {
+		slog.Info("tool registry: cascade skipped — no originating user, falling back to legacy grants",
+			"agent_id", util.UUIDToString(agentID),
+		)
+		return r.GetEnabledToolsForAgent(ctx, agentID)
+	}
+
+	rows, err := cerebro.ResolveCerebroAgentToolAccess(ctx, cerebrodb.ResolveCerebroAgentToolAccessParams{
+		ID:     agentID,
+		UserID: userID,
+	})
+	if err != nil {
+		slog.Warn("tool registry: cascade resolution failed",
+			"agent_id", util.UUIDToString(agentID),
+			"user_id", util.UUIDToString(userID),
+			"error", err,
+		)
+		return nil
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]Tool, 0, len(rows))
+	seen := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		if _, dup := seen[row.ToolName]; dup {
+			// Same tool surfaced via multiple grant arms — only register once.
+			continue
+		}
+		seen[row.ToolName] = struct{}{}
+		if t, ok := r.tools[row.ToolName]; ok {
+			out = append(out, t)
+		}
 	}
 	return out
 }

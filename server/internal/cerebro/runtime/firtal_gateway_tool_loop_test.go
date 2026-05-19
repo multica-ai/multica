@@ -400,6 +400,7 @@ func TestRunToolLoopUsesGatewayCompatTransportForToolEnabledTasks(t *testing.T) 
 		GatewayRequestMeta{TaskID: "t1"},
 		pgtype.UUID{},
 		pgtype.UUID{},
+		pgtype.UUID{},
 	)
 	if err != nil {
 		t.Fatalf("runToolLoop error = %v", err)
