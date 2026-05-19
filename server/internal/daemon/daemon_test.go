@@ -812,6 +812,44 @@ func TestWatchTaskCancellation_RunningTaskNotInterrupted(t *testing.T) {
 	}
 }
 
+func TestClaudeInitialImagesDownloadsImageAttachments(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/attachments/img-1":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":           "img-1",
+				"download_url": "/files/img-1",
+				"filename":     "server-shot.png",
+				"content_type": "image/png",
+			})
+		case "/files/img-1":
+			w.Write([]byte("image-bytes"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	images := d.claudeInitialImages(context.Background(), Task{
+		IssueAttachments: []AttachmentMeta{
+			{ID: "img-1", Filename: "client-shot.png", ContentType: "image/png"},
+			{ID: "txt-1", Filename: "notes.txt", ContentType: "text/plain"},
+		},
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	if len(images) != 1 {
+		t.Fatalf("initial images length = %d, want 1", len(images))
+	}
+	got := images[0]
+	if got.Filename != "server-shot.png" || got.MediaType != "image/png" || string(got.Data) != "image-bytes" {
+		t.Fatalf("unexpected initial image: %+v data=%q", got, string(got.Data))
+	}
+}
+
 func TestMergeUsage(t *testing.T) {
 	t.Parallel()
 

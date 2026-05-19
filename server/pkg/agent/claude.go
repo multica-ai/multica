@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -97,7 +98,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("start claude: %w", err)
 	}
-	if err := writeClaudeInput(stdin, prompt); err != nil {
+	if err := writeClaudeInput(stdin, prompt, opts.InitialImages); err != nil {
 		// claude almost certainly died during startup (broken pipe). The
 		// real reason is sitting in stderrBuf — surface it the same way the
 		// post-handshake error path does, otherwise the daemon log is the
@@ -518,8 +519,8 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	return args
 }
 
-func writeClaudeInput(w io.Writer, prompt string) error {
-	data, err := buildClaudeInput(prompt)
+func writeClaudeInput(w io.Writer, prompt string, images []InputImage) error {
+	data, err := buildClaudeInput(prompt, images)
 	if err != nil {
 		return err
 	}
@@ -529,17 +530,44 @@ func writeClaudeInput(w io.Writer, prompt string) error {
 	return nil
 }
 
-func buildClaudeInput(prompt string) ([]byte, error) {
+func buildClaudeInput(prompt string, images []InputImage) ([]byte, error) {
+	content := []map[string]any{
+		{
+			"type": "text",
+			"text": prompt,
+		},
+	}
+	for _, image := range images {
+		if len(image.Data) == 0 || image.MediaType == "" {
+			continue
+		}
+		label := "Attached image"
+		if image.Filename != "" {
+			label = fmt.Sprintf("Attached image %q", image.Filename)
+		}
+		if image.MediaType != "" {
+			label += fmt.Sprintf(" (%s)", image.MediaType)
+		}
+		content = append(content,
+			map[string]any{
+				"type": "text",
+				"text": label + ":",
+			},
+			map[string]any{
+				"type": "image",
+				"source": map[string]string{
+					"type":       "base64",
+					"media_type": image.MediaType,
+					"data":       base64.StdEncoding.EncodeToString(image.Data),
+				},
+			},
+		)
+	}
 	payload := map[string]any{
 		"type": "user",
 		"message": map[string]any{
-			"role": "user",
-			"content": []map[string]string{
-				{
-					"type": "text",
-					"text": prompt,
-				},
-			},
+			"role":    "user",
+			"content": content,
 		},
 	}
 	data, err := json.Marshal(payload)

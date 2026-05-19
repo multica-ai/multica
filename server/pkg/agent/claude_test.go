@@ -322,7 +322,7 @@ func TestBuildClaudeArgsFiltersBlockedCustomArgs(t *testing.T) {
 func TestBuildClaudeInputEncodesUserMessage(t *testing.T) {
 	t.Parallel()
 
-	data, err := buildClaudeInput("say pong")
+	data, err := buildClaudeInput("say pong", nil)
 	if err != nil {
 		t.Fatalf("buildClaudeInput: %v", err)
 	}
@@ -356,6 +356,45 @@ func TestBuildClaudeInputEncodesUserMessage(t *testing.T) {
 	}
 	if block["type"] != "text" || block["text"] != "say pong" {
 		t.Fatalf("unexpected content block: %v", block)
+	}
+}
+
+func TestBuildClaudeInputEncodesInitialImages(t *testing.T) {
+	t.Parallel()
+
+	data, err := buildClaudeInput("describe the attachment", []InputImage{
+		{
+			Filename:  "screenshot.png",
+			MediaType: "image/png",
+			Data:      []byte("png-bytes"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildClaudeInput: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(data), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	message := payload["message"].(map[string]any)
+	content := message["content"].([]any)
+	if len(content) != 3 {
+		t.Fatalf("expected prompt text + image label + image block, got %v", content)
+	}
+
+	label := content[1].(map[string]any)
+	if label["type"] != "text" || !strings.Contains(label["text"].(string), "screenshot.png") {
+		t.Fatalf("unexpected image label block: %v", label)
+	}
+
+	image := content[2].(map[string]any)
+	if image["type"] != "image" {
+		t.Fatalf("expected image block, got %v", image)
+	}
+	source := image["source"].(map[string]any)
+	if source["type"] != "base64" || source["media_type"] != "image/png" || source["data"] != "cG5nLWJ5dGVz" {
+		t.Fatalf("unexpected image source: %v", source)
 	}
 }
 

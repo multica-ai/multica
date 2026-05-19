@@ -240,6 +240,74 @@ func TestDefaultTerminalRetrySchedule_MatchesAgreedPlan(t *testing.T) {
 	}
 }
 
+func TestClient_DownloadAttachmentDownloadsRelativeURLWithAuthHeaders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/attachments/att-1":
+			if got := r.Header.Get("Authorization"); got != "Bearer tok" {
+				t.Errorf("metadata request Authorization = %q, want Bearer tok", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":           "att-1",
+				"download_url": "/download/att-1",
+				"filename":     "shot.png",
+				"content_type": "image/png",
+			})
+		case "/download/att-1":
+			if got := r.Header.Get("Authorization"); got != "Bearer tok" {
+				t.Errorf("download request Authorization = %q, want Bearer tok", got)
+			}
+			if got := r.Header.Get("X-Client-Platform"); got != "daemon" {
+				t.Errorf("download request X-Client-Platform = %q, want daemon", got)
+			}
+			w.Write([]byte("png-bytes"))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	c.SetToken("tok")
+
+	meta, data, err := c.DownloadAttachment(context.Background(), "att-1")
+	if err != nil {
+		t.Fatalf("DownloadAttachment: %v", err)
+	}
+	if meta.Filename != "shot.png" || meta.ContentType != "image/png" {
+		t.Fatalf("unexpected attachment metadata: %+v", meta)
+	}
+	if string(data) != "png-bytes" {
+		t.Fatalf("downloaded data = %q, want png-bytes", string(data))
+	}
+}
+
+func TestClient_DownloadFileAbsoluteURLOmitsAuthHeaders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("absolute download Authorization = %q, want empty", got)
+		}
+		if got := r.Header.Get("X-Client-Platform"); got != "" {
+			t.Errorf("absolute download X-Client-Platform = %q, want empty", got)
+		}
+		w.Write([]byte("image-data"))
+	}))
+	defer srv.Close()
+
+	c := NewClient("https://api.example.test")
+	c.SetToken("tok")
+
+	data, err := c.downloadFile(context.Background(), srv.URL+"/signed")
+	if err != nil {
+		t.Fatalf("downloadFile: %v", err)
+	}
+	if string(data) != "image-data" {
+		t.Fatalf("downloaded data = %q, want image-data", string(data))
+	}
+}
+
 func TestNormalizeGOOS(t *testing.T) {
 	cases := map[string]string{
 		"darwin":  "macos",
