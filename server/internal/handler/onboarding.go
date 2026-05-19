@@ -149,7 +149,15 @@ func (q questionnaireAnswers) useCaseResolved() bool {
 	return q.UseCase != "" || q.UseCaseSkipped
 }
 
+// questionnaireSchemaVersion is the schema this handler understands.
+// `complete()` and the funnel event are scoped to this version so a
+// future v3 row can't be silently mis-counted against v2 semantics.
+const questionnaireSchemaVersion = 2
+
 func (q questionnaireAnswers) complete() bool {
+	if q.Version != questionnaireSchemaVersion {
+		return false
+	}
 	return q.sourceResolved() && q.roleResolved() && q.useCaseResolved()
 }
 

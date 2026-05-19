@@ -250,7 +250,7 @@
       "skills_label": "skill",
       "skills_meta": "可复用的剧本",
       "more_label": "更多",
-      "more_meta": "and more"
+      "more_meta": "等等"
     }
   },
   "step_runtime": {
@@ -273,7 +273,7 @@
     "empty_skip_action": "跳过",
     "empty_waitlist_title": "改用云电脑",
     "empty_waitlist_subtitle": "我们会在云上为你运行一台电脑。尚未上线。",
-    "empty_waitlist_action": "敬请期待",
+    "empty_waitlist_action": "即将推出",
     "skip": "暂时跳过",
     "refresh": "刷新",
     "refreshing": "正在刷新…",

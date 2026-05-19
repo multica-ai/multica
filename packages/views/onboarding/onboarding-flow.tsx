@@ -130,8 +130,29 @@ export function OnboardingFlow({
   // introducing a redundant prop.
   const isWeb = !!runtimeInstructions;
 
+  // Derive "what comes after `from`" from ONBOARDING_STEP_ORDER so
+  // inserting/reordering a persisted step only requires editing the
+  // canonical array. Returns null if `from` is the last persisted step
+  // or not in the array (callers fall back to bespoke routing).
+  const nextStep = useCallback((from: OnboardingStep): OnboardingStep | null => {
+    const idx = ONBOARDING_STEP_ORDER.indexOf(from);
+    if (idx < 0 || idx >= ONBOARDING_STEP_ORDER.length - 1) return null;
+    return ONBOARDING_STEP_ORDER[idx + 1]!;
+  }, []);
+
+  const advanceFrom = useCallback(
+    (from: OnboardingStep) => {
+      const next = nextStep(from);
+      if (next) setStep(next);
+    },
+    [nextStep],
+  );
+
   const handleWelcomeNext = useCallback(() => {
-    setStep("source");
+    // Welcome is intentionally not in ONBOARDING_STEP_ORDER (it's a
+    // product intro, not a persisted step), so the first persisted
+    // step is hard-coded as the entry point.
+    setStep(ONBOARDING_STEP_ORDER[0]!);
   }, []);
 
   // Apply an in-memory patch and fire-and-forget a PATCH to persist
@@ -170,17 +191,22 @@ export function OnboardingFlow({
     onComplete(workspaces[0] ?? undefined);
   }, [workspaces, onComplete]);
 
-  const handleWorkspaceCreated = useCallback((ws: Workspace) => {
-    setWorkspace(ws);
-    setCurrentWorkspace(ws.slug, ws.id);
-    setStep("runtime");
-  }, []);
+  const handleWorkspaceCreated = useCallback(
+    (ws: Workspace) => {
+      setWorkspace(ws);
+      setCurrentWorkspace(ws.slug, ws.id);
+      advanceFrom("workspace");
+    },
+    [advanceFrom],
+  );
 
   const handleRuntimeNext = useCallback((rt: AgentRuntime | null) => {
     setRuntime(rt);
-    // No runtime → no agent possible; skip Step 4 and go straight to
-    // the finalizer. The post-landing StarterContentPrompt will detect
-    // "no agent in this workspace" and offer the self-serve template.
+    // Custom branch — not derived from ONBOARDING_STEP_ORDER because no
+    // runtime → no agent possible, so we skip Step 4 ("agent") and go
+    // straight to the finalizer. The post-landing StarterContentPrompt
+    // will detect "no agent in this workspace" and offer the self-serve
+    // template.
     setStep(rt ? "agent" : "first_issue");
   }, []);
 
@@ -197,9 +223,9 @@ export function OnboardingFlow({
           queryKey: workspaceKeys.agents(workspace.id),
         });
       }
-      setStep("first_issue");
+      advanceFrom("agent");
     },
-    [workspace, qc],
+    [workspace, qc, advanceFrom],
   );
 
   const handleBack = useCallback((from: OnboardingStep) => {
@@ -240,8 +266,8 @@ export function OnboardingFlow({
       <StepSource
         answers={answers}
         onChange={applyAnswers}
-        onAdvance={() => setStep("role")}
-        onSkip={() => setStep("role")}
+        onAdvance={() => advanceFrom("source")}
+        onSkip={() => advanceFrom("source")}
         onBack={() => handleBack("source")}
       />
     );
@@ -252,8 +278,8 @@ export function OnboardingFlow({
       <StepRole
         answers={answers}
         onChange={applyAnswers}
-        onAdvance={() => setStep("use_case")}
-        onSkip={() => setStep("use_case")}
+        onAdvance={() => advanceFrom("role")}
+        onSkip={() => advanceFrom("role")}
         onBack={() => handleBack("role")}
       />
     );
@@ -264,8 +290,8 @@ export function OnboardingFlow({
       <StepUseCase
         answers={answers}
         onChange={applyAnswers}
-        onAdvance={() => setStep("workspace")}
-        onSkip={() => setStep("workspace")}
+        onAdvance={() => advanceFrom("use_case")}
+        onSkip={() => advanceFrom("use_case")}
         onBack={() => handleBack("use_case")}
       />
     );
