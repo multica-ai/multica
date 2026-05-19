@@ -58,11 +58,17 @@ import {
 
 // Period selector — mirrors the runtime detail page so users see the same
 // option set across both dashboards. `dims` declares which dimensions each
-// range is allowed in: 7d at the weekly grain is one bar, 180d at the daily
-// grain is 180 unreadable bars, so each end of the range belongs to a single
-// dimension. Switching dimensions resets `days` if the current value isn't
-// in the new dimension's allowed set (see `handleDimChange` below).
+// range is allowed in: 1d / 7d at the weekly grain collapse to a single bar,
+// 180d at the daily grain is 180 unreadable bars, so each end of the range
+// belongs to a single dimension. Switching dimensions resets `days` if the
+// current value isn't in the new dimension's allowed set (see
+// `handleDimChange` below).
+//
+// 1d semantic: "today" (the natural calendar day from 00:00 in UTC, matching
+// the rollup's bucket_date axis), not "the last 24 hours". The client-side
+// `dailyCutoffIso` filter below enforces this even at the midnight edge.
 const TIME_RANGES = [
+  { label: "1d", days: 1, dims: ["daily"] as const },
   { label: "7d", days: 7, dims: ["daily"] as const },
   { label: "30d", days: 30, dims: ["daily", "weekly"] as const },
   { label: "90d", days: 90, dims: ["daily", "weekly"] as const },
@@ -209,24 +215,20 @@ export function DashboardPage() {
   // trend chart) re-scope to the user-selected `days` even when we
   // over-fetched for the weekly chart. UTC matches the bucket_date the
   // backend filters on, so the cutoff lands on the same calendar boundary
-  // the rollup used.
+  // the rollup used. Applied in both dims so 1d strictly means "today" even
+  // at the midnight UTC edge where the server's wall-clock cutoff would
+  // otherwise include yesterday.
   const dailyCutoffIso = useMemo(
     () => addDaysIso(todayIso(WEEK_TZ), -(days - 1)),
     [days],
   );
   const dailyUsageInWindow = useMemo(
-    () =>
-      dim === "weekly"
-        ? dailyUsage.filter((u) => u.date >= dailyCutoffIso)
-        : dailyUsage,
-    [dailyUsage, dim, dailyCutoffIso],
+    () => dailyUsage.filter((u) => u.date >= dailyCutoffIso),
+    [dailyUsage, dailyCutoffIso],
   );
   const runTimeDailyInWindow = useMemo(
-    () =>
-      dim === "weekly"
-        ? runTimeDailyRows.filter((r) => r.date >= dailyCutoffIso)
-        : runTimeDailyRows,
-    [runTimeDailyRows, dim, dailyCutoffIso],
+    () => runTimeDailyRows.filter((r) => r.date >= dailyCutoffIso),
+    [runTimeDailyRows, dailyCutoffIso],
   );
 
   const isLoading =
