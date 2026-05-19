@@ -173,10 +173,7 @@ export function useTaskMessagesQueries(_workspaceId: string, taskIds: string[]) 
 export function useIssueTimelineEntries(_workspaceId: string, issueId: string) {
   return useQuery({
     queryKey: issueKeys.timeline(issueId),
-    queryFn: async () => {
-      const page = await api.listTimeline(issueId);
-      return Array.isArray(page.entries) ? page.entries : [];
-    },
+    queryFn: () => api.listTimeline(issueId),
     select: (entries): TimelineEntry[] => (Array.isArray(entries) ? entries : []),
     enabled: !!issueId,
   });
