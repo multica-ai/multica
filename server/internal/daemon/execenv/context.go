@@ -220,6 +220,9 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	if ctx.QuickCreatePrompt != "" {
 		return renderQuickCreateContext(ctx)
 	}
+	if ctx.AITaskType != "" {
+		return renderAITaskContext(ctx)
+	}
 
 	var b strings.Builder
 
@@ -270,6 +273,24 @@ func renderQuickCreateContext(ctx TaskContextForEnv) string {
 	return b.String()
 }
 
+// renderAITaskContext renders issue_context.md for generic no-parent AI tasks.
+func renderAITaskContext(ctx TaskContextForEnv) string {
+	var b strings.Builder
+	b.WriteString("# AI Task\n\n")
+	fmt.Fprintf(&b, "**Task type:** %s\n\n", ctx.AITaskType)
+	b.WriteString("## User input\n\n")
+	b.WriteString("> ")
+	b.WriteString(ctx.AITaskPrompt)
+	b.WriteString("\n\n")
+	if len(ctx.AgentSkills) > 0 {
+		b.WriteString("## Agent Skills\n\n")
+		for _, skill := range ctx.AgentSkills {
+			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
 func renderAutopilotContext(ctx TaskContextForEnv) string {
 	var b strings.Builder
 

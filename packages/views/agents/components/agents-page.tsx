@@ -8,6 +8,7 @@ import {
   Bot,
   Plus,
   Search,
+  Sparkles,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCoreRowModel, useReactTable } from "@tanstack/react-table";
@@ -44,6 +45,7 @@ import { DataTable } from "@multica/ui/components/ui/data-table";
 import { useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig, availabilityOrder } from "../presence";
+import { AgentDraftDialog } from "./agent-draft-dialog";
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { type AgentRow, createAgentColumns } from "./agent-columns";
 import { useT } from "../../i18n";
@@ -110,6 +112,7 @@ export function AgentsPage() {
   const [sort, setSort] = useState<SortKey>("recent");
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [showAIDraft, setShowAIDraft] = useState(false);
   // When set, the Create dialog opens pre-populated with this agent's
   // config — driven by the row-level "Duplicate" action. We keep this
   // separate from `showCreate` so a stray null-template doesn't open the
@@ -398,6 +401,7 @@ export function AgentsPage() {
       <PageHeaderBar
         totalCount={totalActiveCount}
         onCreate={() => setShowCreate(true)}
+        onDraft={() => setShowAIDraft(true)}
       />
 
       <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
@@ -452,6 +456,14 @@ export function AgentsPage() {
         )}
       </div>
 
+      {showAIDraft && (
+        <AgentDraftDialog
+          agents={agents}
+          runtimesById={runtimesById}
+          onClose={() => setShowAIDraft(false)}
+        />
+      )}
+
       {showCreate && (
         <CreateAgentDialog
           runtimes={runtimes}
@@ -477,9 +489,11 @@ export function AgentsPage() {
 function PageHeaderBar({
   totalCount,
   onCreate,
+  onDraft,
 }: {
   totalCount: number;
   onCreate: () => void;
+  onDraft?: () => void;
 }) {
   const { t } = useT("agents");
   return (
@@ -505,10 +519,18 @@ function PageHeaderBar({
           </a>
         </p>
       </div>
-      <Button type="button" size="sm" onClick={onCreate}>
-        <Plus className="h-3 w-3" />
-        {t(($) => $.page.new_agent)}
-      </Button>
+      <div className="flex items-center gap-2">
+        {onDraft && (
+          <Button type="button" variant="outline" size="sm" onClick={onDraft}>
+            <Sparkles className="h-3 w-3" />
+            {t(($) => $.page.ai_draft)}
+          </Button>
+        )}
+        <Button type="button" size="sm" onClick={onCreate}>
+          <Plus className="h-3 w-3" />
+          {t(($) => $.page.new_agent)}
+        </Button>
+      </div>
     </PageHeader>
   );
 }

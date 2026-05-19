@@ -61,6 +61,8 @@ type TaskContextForEnv struct {
 	AutopilotSource         string
 	AutopilotTriggerPayload string
 	QuickCreatePrompt       string // non-empty for quick-create tasks
+	AITaskType              string // non-empty for generic no-parent AI tasks
+	AITaskPrompt            string // user's input for generic no-parent AI tasks
 	IsSquadLeader           bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
 }
 

@@ -19,7 +19,11 @@ export type InboxItemType =
   | "agent_completed"
   | "reaction_added"
   | "quick_create_done"
-  | "quick_create_failed";
+  | "quick_create_failed"
+  | "agent_draft_done"
+  | "agent_draft_failed"
+  | "skill_find_done"
+  | "skill_find_failed";
 
 export interface InboxItem {
   id: string;
@@ -37,5 +41,5 @@ export interface InboxItem {
   read: boolean;
   archived: boolean;
   created_at: string;
-  details: Record<string, string> | null;
+  details: Record<string, unknown> | null;
 }

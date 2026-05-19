@@ -25,7 +25,11 @@
     "empty": "Your inbox is empty",
     "original_input": "Original input",
     "edit_advanced": "Edit as advanced form",
-    "archive": "Archive"
+    "archive": "Archive",
+    "skill_find_empty": "No valid recommendations were returned.",
+    "agent_draft_fallback_name": "New agent",
+    "open_agent": "Open agent",
+    "attached_skills": "Attached skills"
   },
   "types": {
     "issue_assigned": "Assigned",
@@ -44,7 +48,11 @@
     "agent_completed": "Agent completed",
     "reaction_added": "Reacted",
     "quick_create_done": "Created with agent",
-    "quick_create_failed": "Create with agent failed"
+    "quick_create_failed": "Create with agent failed",
+    "skill_find_done": "Skill recommendations",
+    "skill_find_failed": "Skill finder failed",
+    "agent_draft_done": "Agent draft",
+    "agent_draft_failed": "Agent draft failed"
   },
   "labels": {
     "set_status_to": "Set status to",

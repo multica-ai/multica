@@ -4,7 +4,7 @@ import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { StatusIcon, PriorityIcon } from "../../issues/components";
 import type { InboxItem, InboxItemType, IssueStatus, IssuePriority } from "@multica/core/types";
-import { getQuickCreateFailureDetail } from "./inbox-display";
+import { getInboxStringDetail, getQuickCreateFailureDetail } from "./inbox-display";
 import { useT } from "../../i18n";
 
 // Hook returning the inbox-item type → human label map. Replaces the
@@ -30,6 +30,10 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     reaction_added: t(($) => $.types.reaction_added),
     quick_create_done: t(($) => $.types.quick_create_done),
     quick_create_failed: t(($) => $.types.quick_create_failed),
+    agent_draft_done: t(($) => $.types.agent_draft_done),
+    agent_draft_failed: t(($) => $.types.agent_draft_failed),
+    skill_find_done: t(($) => $.types.skill_find_done),
+    skill_find_failed: t(($) => $.types.skill_find_failed),
   };
 }
 
@@ -45,51 +49,59 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
   const { t } = useT("inbox");
   const typeLabels = useTypeLabels();
   const { getActorName } = useActorName();
-  const details = item.details ?? {};
+  const detail = (key: string) => getInboxStringDetail(item, key);
 
   switch (item.type) {
     case "status_changed": {
-      if (!details.to) return <span>{typeLabels[item.type]}</span>;
-      const label = STATUS_CONFIG[details.to as IssueStatus]?.label ?? details.to;
+      const to = detail("to");
+      if (!to) return <span>{typeLabels[item.type]}</span>;
+      const label = STATUS_CONFIG[to as IssueStatus]?.label ?? to;
       return (
         <span className="inline-flex items-center gap-1">
           {t(($) => $.labels.set_status_to)}
-          <StatusIcon status={details.to as IssueStatus} className="h-3 w-3" />
+          <StatusIcon status={to as IssueStatus} className="h-3 w-3" />
           {label}
         </span>
       );
     }
     case "priority_changed": {
-      if (!details.to) return <span>{typeLabels[item.type]}</span>;
-      const label = PRIORITY_CONFIG[details.to as IssuePriority]?.label ?? details.to;
+      const to = detail("to");
+      if (!to) return <span>{typeLabels[item.type]}</span>;
+      const label = PRIORITY_CONFIG[to as IssuePriority]?.label ?? to;
       return (
         <span className="inline-flex items-center gap-1">
           {t(($) => $.labels.set_priority_to)}
-          <PriorityIcon priority={details.to as IssuePriority} className="h-3 w-3" />
+          <PriorityIcon priority={to as IssuePriority} className="h-3 w-3" />
           {label}
         </span>
       );
     }
     case "issue_assigned": {
-      if (details.new_assignee_id) {
-        return <span>{t(($) => $.labels.assigned_to, { name: getActorName(details.new_assignee_type ?? "member", details.new_assignee_id) })}</span>;
+      const assigneeID = detail("new_assignee_id");
+      if (assigneeID) {
+        const assigneeType = detail("new_assignee_type") || "member";
+        return <span>{t(($) => $.labels.assigned_to, { name: getActorName(assigneeType, assigneeID) })}</span>;
       }
       return <span>{typeLabels[item.type]}</span>;
     }
     case "unassigned":
       return <span>{t(($) => $.labels.removed_assignee)}</span>;
     case "assignee_changed": {
-      if (details.new_assignee_id) {
-        return <span>{t(($) => $.labels.assigned_to, { name: getActorName(details.new_assignee_type ?? "member", details.new_assignee_id) })}</span>;
+      const assigneeID = detail("new_assignee_id");
+      if (assigneeID) {
+        const assigneeType = detail("new_assignee_type") || "member";
+        return <span>{t(($) => $.labels.assigned_to, { name: getActorName(assigneeType, assigneeID) })}</span>;
       }
       return <span>{typeLabels[item.type]}</span>;
     }
     case "start_date_changed": {
-      if (details.to) return <span>{t(($) => $.labels.set_start_date_to, { date: shortDate(details.to) })}</span>;
+      const to = detail("to");
+      if (to) return <span>{t(($) => $.labels.set_start_date_to, { date: shortDate(to) })}</span>;
       return <span>{t(($) => $.labels.removed_start_date)}</span>;
     }
     case "due_date_changed": {
-      if (details.to) return <span>{t(($) => $.labels.set_due_date_to, { date: shortDate(details.to) })}</span>;
+      const to = detail("to");
+      if (to) return <span>{t(($) => $.labels.set_due_date_to, { date: shortDate(to) })}</span>;
       return <span>{t(($) => $.labels.removed_due_date)}</span>;
     }
     case "new_comment": {
@@ -97,12 +109,12 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
       return <span>{typeLabels[item.type]}</span>;
     }
     case "reaction_added": {
-      const emoji = details.emoji;
+      const emoji = detail("emoji");
       if (emoji) return <span>{t(($) => $.labels.reacted_to_comment, { emoji })}</span>;
       return <span>{typeLabels[item.type]}</span>;
     }
     case "quick_create_done": {
-      const identifier = details.identifier;
+      const identifier = detail("identifier");
       if (identifier) return <span>{t(($) => $.labels.created_with_agent, { identifier })}</span>;
       return <span>{typeLabels[item.type]}</span>;
     }

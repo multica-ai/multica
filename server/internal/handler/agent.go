@@ -174,6 +174,9 @@ type AgentTaskResponse struct {
 	AutopilotSource         string                `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
 	AutopilotTriggerPayload json.RawMessage       `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
 	QuickCreatePrompt       string                `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
+	AITaskType              string                `json:"ai_task_type,omitempty"`              // generic no-parent AI task type, e.g. skill-find
+	AITaskPrompt            string                `json:"ai_task_prompt,omitempty"`            // user's natural-language input for AI tasks
+	AITaskVersion           int                   `json:"ai_task_version,omitempty"`           // AI task context version
 	SquadID                 string                `json:"squad_id,omitempty"`                  // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
 	SquadName               string                `json:"squad_name,omitempty"`                // display name for the picker squad
 	Kind                    string                `json:"kind"`                                // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
@@ -260,6 +263,9 @@ func computeTaskKind(t db.AgentTaskQueue) string {
 		return "autopilot"
 	}
 	if uuidToString(t.IssueID) == "" {
+		if _, ok := service.ParseAITaskContext(t.Context); ok {
+			return "ai_task"
+		}
 		return "quick_create"
 	}
 	if uuidToString(t.TriggerCommentID) != "" {

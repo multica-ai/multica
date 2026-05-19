@@ -206,6 +206,19 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- Run exactly one `multica issue create` invocation, then exit.\n")
 		b.WriteString("- Do NOT call `multica issue get`, `multica issue status`, or `multica issue comment add` for this task — there is no issue to query, transition, or comment on. The platform writes the user's success/failure inbox notification automatically based on whether `multica issue create` succeeded.\n")
 		b.WriteString("- If the CLI returns an error, exit with that error as the only output. Do not retry.\n\n")
+	} else if ctx.AITaskType == "skill-find" {
+		b.WriteString("**This task is an AI skill finder request.** There is NO existing Multica issue. Follow the skill finder prompt and ignore the default assignment-task workflow.\n\n")
+		b.WriteString("Hard guardrails:\n")
+		b.WriteString("- Recommend only from the curated skill index shown in the user message.\n")
+		b.WriteString("- Write the final JSON through `multica skill find --output-results`.\n")
+		b.WriteString("- Do NOT call `multica issue get`, `multica issue status`, or `multica issue comment add` for this task.\n\n")
+	} else if ctx.AITaskType == "agent-create" {
+		b.WriteString("**This task is an AI agent draft request.** There is NO existing Multica issue. Follow the agent draft prompt and ignore the default assignment-task workflow.\n\n")
+		b.WriteString("Hard guardrails:\n")
+		b.WriteString("- Create the agent through `multica agent create --output json`.\n")
+		b.WriteString("- Import and assign only curated skills when skills are useful.\n")
+		b.WriteString("- Write the final JSON through `multica agent draft --output-results`.\n")
+		b.WriteString("- Do NOT call `multica issue get`, `multica issue status`, or `multica issue comment add` for this task.\n\n")
 	} else if ctx.AutopilotRunID != "" {
 		// Autopilot run_only task: no issue exists, so the agent must not
 		// follow the assignment/comment workflow.
@@ -329,6 +342,10 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- Do NOT call `multica issue comment add` — the issue you just created has no conversation context for this run.\n")
 		b.WriteString("- Print exactly one final line: `Created <identifier-or-id>: <title>` after a successful `multica issue create`. Use the created issue's `identifier` from JSON output when available; otherwise use its `id`. Do not assume any workspace issue prefix such as `MUL-`; workspaces can use custom prefixes.\n")
 		b.WriteString("- On CLI failure, exit with the CLI error as the only output. The platform translates that into a `quick_create_failed` inbox item carrying the original prompt for the user.\n")
+	case ctx.AITaskType == "skill-find":
+		b.WriteString("This is an AI skill finder task. There is NO existing issue to comment on. Your structured recommendations are captured through `multica skill find --output-results` and the platform writes the user's inbox notification.\n")
+	case ctx.AITaskType == "agent-create":
+		b.WriteString("This is an AI agent draft task. There is NO existing issue to comment on. Your structured draft result is captured through `multica agent draft --output-results` and the platform writes the user's inbox notification.\n")
 	default:
 		if ctx.IsSquadLeader {
 			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`** — unless your outcome is `no_action`. When you evaluate a trigger and decide no action is needed, calling `multica squad activity <issue-id> no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment that announces no_action, acknowledges another agent, or says you are exiting silently — such comments are noise. For all other outcomes (`action`, `failed`), a comment is still mandatory.\n\n")

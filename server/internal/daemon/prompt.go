@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/skillindex"
 )
 
 // BuildPrompt constructs the task prompt for an agent CLI.
@@ -24,6 +25,12 @@ func BuildPrompt(task Task, provider string) string {
 	if task.AutopilotRunID != "" {
 		return buildAutopilotPrompt(task)
 	}
+	if task.AITaskType == "skill-find" {
+		return buildSkillFindPrompt(task)
+	}
+	if task.AITaskType == "agent-create" {
+		return buildAgentCreatePrompt(task)
+	}
 	if task.QuickCreatePrompt != "" {
 		return buildQuickCreatePrompt(task)
 	}
@@ -35,6 +42,53 @@ func BuildPrompt(task Task, provider string) string {
 	return b.String()
 }
 
+// buildSkillFindPrompt asks the agent to map a user goal to the curated
+// skill catalog and persist a structured result through the multica CLI.
+func buildSkillFindPrompt(task Task) string {
+	var b strings.Builder
+	b.WriteString("You are running as an AI skill finder for a Multica workspace.\n\n")
+	b.WriteString("A user wants help finding reusable agent skills. Recommend only skills from the curated index below.\n\n")
+	fmt.Fprintf(&b, "User goal:\n> %s\n\n", task.AITaskPrompt)
+	b.WriteString("Curated skill index JSON:\n")
+	b.WriteString("```json\n")
+	b.WriteString(skillindex.MustJSON())
+	b.WriteString("\n```\n\n")
+	b.WriteString("Selection rules:\n")
+	b.WriteString("- Return 1 to 5 recommendations.\n")
+	b.WriteString("- Do not invent URLs, names, or skills. Every source_url must exactly match one source_url in the curated index.\n")
+	b.WriteString("- Prefer specific matches over broad skills. If no skill is a strong fit, choose the closest safe option and explain the limitation in reason.\n")
+	b.WriteString("- Keep each reason concise and tied to the user's goal.\n\n")
+	b.WriteString("Output rules:\n")
+	b.WriteString("- Produce a JSON array of objects with exactly these fields: name, description, source_url, reason.\n")
+	b.WriteString("- Then run exactly one command to hand the JSON to Multica: `multica skill find --output-results '<json-array>'`.\n")
+	b.WriteString("- Do not create or install skills in this task. Do not print extra commentary after the command succeeds.\n")
+	return b.String()
+}
+// buildAgentCreatePrompt asks the agent to create a workspace agent from a
+// natural-language goal, optionally importing curated skills first.
+func buildAgentCreatePrompt(task Task) string {
+	var b strings.Builder
+	b.WriteString("You are running as an AI agent draft assistant for a Multica workspace.\n\n")
+	b.WriteString("A user wants a new Multica agent. Create the agent directly with the multica CLI, using the curated skill index below when skills would help.\n\n")
+	fmt.Fprintf(&b, "User goal:\n> %s\n\n", task.AITaskPrompt)
+	b.WriteString("Curated skill index JSON:\n")
+	b.WriteString("```json\n")
+	b.WriteString(skillindex.MustJSON())
+	b.WriteString("\n```\n\n")
+	b.WriteString("Workflow rules:\n")
+	b.WriteString("- Choose a concise agent name, a short description, and useful instructions from the user goal.\n")
+	b.WriteString("- If curated skills help, import each chosen skill with `multica skill import --url <source_url> --output json`, collect the returned skill ids, and then assign them with `multica agent skills set <agent-id> --skill-ids <ids> --output json`.\n")
+	b.WriteString("- Do not invent skill URLs. Every imported URL must exactly match a source_url from the curated index.\n")
+	b.WriteString("- Create the agent with exactly one `multica agent create --runtime-id \"$MULTICA_AGENT_RUNTIME_ID\" --output json` invocation. Do not use any other runtime id for this task.\n")
+	b.WriteString("- Prefer `--visibility workspace` only when the user asks for a team/workspace agent; otherwise use the CLI default.\n\n")
+	b.WriteString("Structured output rules:\n")
+	b.WriteString("- After the agent and any skill assignments are complete, produce a JSON object with exactly these fields: agent_id, name, summary, skill_source_urls.\n")
+	b.WriteString("- summary should describe what was created and any skills attached, in 1-3 concise sentences.\n")
+	b.WriteString("- skill_source_urls must be an array of curated source_url strings that were actually imported/assigned, or an empty array.\n")
+	b.WriteString("- Then run exactly one command to hand the JSON to Multica: `multica agent draft --output-results '<json-object>'`.\n")
+	b.WriteString("- Do not create an issue or post a comment. Do not print extra commentary after the command succeeds.\n")
+	return b.String()
+}
 // buildQuickCreatePrompt constructs a prompt for quick-create tasks. The
 // user typed a single natural-language sentence in the create-issue modal;
 // the agent's job is to translate it into one `multica issue create` CLI

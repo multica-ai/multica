@@ -13,10 +13,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/agentdraft"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mention"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/skillindex"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -310,6 +312,11 @@ func (s *TaskService) taskAnalyticsContext(ctx context.Context, task db.AgentTas
 		tc.UserID = qc.RequesterID
 		tc.Source = analytics.SourceManual
 	}
+	if ai, ok := ParseAITaskContext(task.Context); ok {
+		tc.WorkspaceID = ai.WorkspaceID
+		tc.UserID = ai.RequesterID
+		tc.Source = analytics.SourceManual
+	}
 	s.storeTaskAnalyticsContext(task, tc)
 	return tc
 }
@@ -518,6 +525,41 @@ type QuickCreateContext struct {
 // QuickCreateContextType marks a task as a quick-create job.
 const QuickCreateContextType = "quick_create"
 
+const (
+	AITaskContextTypeSkillFind   = "skill-find"
+	AITaskContextTypeAgentCreate = "agent-create"
+)
+
+// AITaskContext is a generic no-parent task payload. The daemon dispatches
+// by Type while preserving the human prompt and requester/workspace identity
+// for completion inbox notifications.
+type AITaskContext struct {
+	Type        string `json:"type"`
+	Version     int    `json:"version"`
+	Prompt      string `json:"prompt"`
+	RequesterID string `json:"requester_id"`
+	WorkspaceID string `json:"workspace_id"`
+}
+
+func ParseAITaskContext(raw []byte) (AITaskContext, bool) {
+	if len(raw) == 0 {
+		return AITaskContext{}, false
+	}
+	var ctx AITaskContext
+	if err := json.Unmarshal(raw, &ctx); err != nil {
+		return AITaskContext{}, false
+	}
+	if ctx.Version != 1 {
+		return AITaskContext{}, false
+	}
+	switch ctx.Type {
+	case AITaskContextTypeSkillFind, AITaskContextTypeAgentCreate:
+		return ctx, true
+	default:
+		return AITaskContext{}, false
+	}
+}
+
 // EnqueueQuickCreateTask creates a queued task that has no issue / chat /
 // autopilot link — the user's natural-language prompt is stored in the
 // task's context JSONB and the agent is expected to translate it into a
@@ -585,6 +627,48 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	// cycle. Without this the user perceives "quick create never
 	// triggered" because the modal closes immediately and the task
 	// sits in 'queued' until the next sleepWithContextOrWakeup tick.
+	s.NotifyTaskEnqueued(ctx, task)
+	return task, nil
+}
+
+// EnqueueAITask creates a generic no-parent task whose dispatch behavior is
+// selected by the context type.
+func (s *TaskService) EnqueueAITask(ctx context.Context, kind string, workspaceID, requesterID, agentID pgtype.UUID, prompt string) (db.AgentTaskQueue, error) {
+	switch kind {
+	case AITaskContextTypeSkillFind, AITaskContextTypeAgentCreate:
+	default:
+		return db.AgentTaskQueue{}, fmt.Errorf("unsupported ai task type %q", kind)
+	}
+	agent, err := s.Queries.GetAgent(ctx, agentID)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+	payload := AITaskContext{
+		Type:        kind,
+		Version:     1,
+		Prompt:      prompt,
+		RequesterID: util.UUIDToString(requesterID),
+		WorkspaceID: util.UUIDToString(workspaceID),
+	}
+	contextJSON, err := json.Marshal(payload)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("marshal ai task context: %w", err)
+	}
+	task, err := s.Queries.CreateContextTask(ctx, db.CreateContextTaskParams{
+		AgentID:   agentID,
+		RuntimeID: agent.RuntimeID,
+		Priority:  priorityToInt("medium"),
+		Context:   contextJSON,
+	})
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("create ai task: %w", err)
+	}
 	s.NotifyTaskEnqueued(ctx, task)
 	return task, nil
 }
@@ -1056,6 +1140,9 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	if qc, ok := s.parseQuickCreateContext(task); ok {
 		s.notifyQuickCreateCompleted(ctx, task, qc)
 	}
+	if ai, ok := ParseAITaskContext(task.Context); ok {
+		s.notifyAITaskCompleted(ctx, task, ai, result)
+	}
 
 	// For chat tasks, save assistant reply and broadcast chat:done. The
 	// resume pointer was already persisted inside the transaction above.
@@ -1219,6 +1306,9 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	if retried == nil {
 		if qc, ok := s.parseQuickCreateContext(task); ok {
 			s.notifyQuickCreateFailed(ctx, task, qc, errMsg)
+		}
+		if ai, ok := ParseAITaskContext(task.Context); ok {
+			s.notifyAITaskFailed(ctx, task, ai, errMsg)
 		}
 	}
 	// Reconcile agent status
@@ -1917,6 +2007,188 @@ func (s *TaskService) parseQuickCreateContext(task db.AgentTaskQueue) (QuickCrea
 		return QuickCreateContext{}, false
 	}
 	return qc, true
+}
+
+func (s *TaskService) notifyAITaskCompleted(ctx context.Context, task db.AgentTaskQueue, ai AITaskContext, result []byte) {
+	switch ai.Type {
+	case AITaskContextTypeSkillFind:
+		s.notifySkillFindCompleted(ctx, task, ai, result)
+	case AITaskContextTypeAgentCreate:
+		s.notifyAgentDraftCompleted(ctx, task, ai, result)
+	}
+}
+
+func (s *TaskService) notifySkillFindCompleted(ctx context.Context, task db.AgentTaskQueue, ai AITaskContext, result []byte) {
+	requesterID, err := util.ParseUUID(ai.RequesterID)
+	if err != nil {
+		slog.Warn("skill-find completion: invalid requester id", "task_id", util.UUIDToString(task.ID), "error", err)
+		return
+	}
+	workspaceID, err := util.ParseUUID(ai.WorkspaceID)
+	if err != nil {
+		slog.Warn("skill-find completion: invalid workspace id", "task_id", util.UUIDToString(task.ID), "error", err)
+		return
+	}
+	var payload protocol.TaskCompletedPayload
+	if err := json.Unmarshal(result, &payload); err != nil {
+		s.notifyAITaskFailed(ctx, task, ai, "agent completed with an unreadable result")
+		return
+	}
+	normalized, recs, err := skillindex.NormalizeSkillFindResult([]byte(payload.Output))
+	if err != nil {
+		slog.Warn("skill-find completion: invalid structured output", "task_id", util.UUIDToString(task.ID), "error", err)
+		s.notifyAITaskFailed(ctx, task, ai, "agent returned invalid skill recommendations")
+		return
+	}
+	var recommendations []map[string]any
+	if err := json.Unmarshal(normalized, &recommendations); err != nil {
+		s.notifyAITaskFailed(ctx, task, ai, "agent returned invalid skill recommendations")
+		return
+	}
+	details, _ := json.Marshal(map[string]any{
+		"task_id":         util.UUIDToString(task.ID),
+		"agent_id":        util.UUIDToString(task.AgentID),
+		"original_prompt": ai.Prompt,
+		"recommendations": recommendations,
+	})
+	title := "Skill recommendations ready"
+	if len(recs) == 1 {
+		title = "1 skill recommendation ready"
+	} else if len(recs) > 1 {
+		title = fmt.Sprintf("%d skill recommendations ready", len(recs))
+	}
+	item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		WorkspaceID:   workspaceID,
+		RecipientType: "member",
+		RecipientID:   requesterID,
+		Type:          "skill_find_done",
+		Severity:      "info",
+		IssueID:       pgtype.UUID{},
+		Title:         title,
+		Body:          pgtype.Text{String: redact.Text(ai.Prompt), Valid: ai.Prompt != ""},
+		ActorType:     pgtype.Text{String: "agent", Valid: true},
+		ActorID:       task.AgentID,
+		Details:       details,
+	})
+	if err != nil {
+		slog.Error("skill-find completion: inbox write failed", "task_id", util.UUIDToString(task.ID), "error", err)
+		return
+	}
+	s.publishQuickCreateInbox(item, ai.WorkspaceID, util.UUIDToString(task.AgentID), "")
+}
+
+func (s *TaskService) notifyAgentDraftCompleted(ctx context.Context, task db.AgentTaskQueue, ai AITaskContext, result []byte) {
+	requesterID, err := util.ParseUUID(ai.RequesterID)
+	if err != nil {
+		slog.Warn("agent-draft completion: invalid requester id", "task_id", util.UUIDToString(task.ID), "error", err)
+		return
+	}
+	workspaceID, err := util.ParseUUID(ai.WorkspaceID)
+	if err != nil {
+		slog.Warn("agent-draft completion: invalid workspace id", "task_id", util.UUIDToString(task.ID), "error", err)
+		return
+	}
+	var payload protocol.TaskCompletedPayload
+	if err := json.Unmarshal(result, &payload); err != nil {
+		s.notifyAITaskFailed(ctx, task, ai, "agent completed with an unreadable result")
+		return
+	}
+	normalized, draft, err := agentdraft.NormalizeAgentDraftResult([]byte(payload.Output))
+	if err != nil {
+		slog.Warn("agent-draft completion: invalid structured output", "task_id", util.UUIDToString(task.ID), "error", err)
+		s.notifyAITaskFailed(ctx, task, ai, "agent returned invalid agent draft details")
+		return
+	}
+	draftedAgentID, err := util.ParseUUID(draft.AgentID)
+	if err != nil {
+		s.notifyAITaskFailed(ctx, task, ai, "agent returned invalid agent id")
+		return
+	}
+	if _, err := s.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: draftedAgentID, WorkspaceID: workspaceID}); err != nil {
+		slog.Warn("agent-draft completion: drafted agent not found in workspace", "task_id", util.UUIDToString(task.ID), "drafted_agent_id", draft.AgentID, "error", err)
+		s.notifyAITaskFailed(ctx, task, ai, "agent draft was not created in this workspace")
+		return
+	}
+	var details map[string]any
+	if err := json.Unmarshal(normalized, &details); err != nil {
+		s.notifyAITaskFailed(ctx, task, ai, "agent returned invalid agent draft details")
+		return
+	}
+	details["task_id"] = util.UUIDToString(task.ID)
+	details["host_agent_id"] = util.UUIDToString(task.AgentID)
+	details["drafted_agent_id"] = draft.AgentID
+	details["drafted_agent_name"] = draft.Name
+	details["original_prompt"] = ai.Prompt
+	detailsJSON, _ := json.Marshal(details)
+	item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		WorkspaceID:   workspaceID,
+		RecipientType: "member",
+		RecipientID:   requesterID,
+		Type:          "agent_draft_done",
+		Severity:      "info",
+		IssueID:       pgtype.UUID{},
+		Title:         fmt.Sprintf("Agent draft ready: %s", draft.Name),
+		Body:          pgtype.Text{String: redact.Text(draft.Summary), Valid: draft.Summary != ""},
+		ActorType:     pgtype.Text{String: "agent", Valid: true},
+		ActorID:       task.AgentID,
+		Details:       detailsJSON,
+	})
+	if err != nil {
+		slog.Error("agent-draft completion: inbox write failed", "task_id", util.UUIDToString(task.ID), "error", err)
+		return
+	}
+	s.publishQuickCreateInbox(item, ai.WorkspaceID, util.UUIDToString(task.AgentID), "")
+}
+
+func (s *TaskService) notifyAITaskFailed(ctx context.Context, task db.AgentTaskQueue, ai AITaskContext, errMsg string) {
+	if ai.Type != AITaskContextTypeSkillFind && ai.Type != AITaskContextTypeAgentCreate {
+		return
+	}
+	requesterID, err := util.ParseUUID(ai.RequesterID)
+	if err != nil {
+		return
+	}
+	workspaceID, err := util.ParseUUID(ai.WorkspaceID)
+	if err != nil {
+		return
+	}
+	if strings.TrimSpace(errMsg) == "" {
+		if ai.Type == AITaskContextTypeAgentCreate {
+			errMsg = "AI agent draft did not finish successfully"
+		} else {
+			errMsg = "AI skill finder did not finish successfully"
+		}
+	}
+	itemType := "skill_find_failed"
+	title := "AI skill finder failed"
+	if ai.Type == AITaskContextTypeAgentCreate {
+		itemType = "agent_draft_failed"
+		title = "AI agent draft failed"
+	}
+	details, _ := json.Marshal(map[string]any{
+		"task_id":         util.UUIDToString(task.ID),
+		"agent_id":        util.UUIDToString(task.AgentID),
+		"original_prompt": ai.Prompt,
+		"error":           redact.Text(errMsg),
+	})
+	item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		WorkspaceID:   workspaceID,
+		RecipientType: "member",
+		RecipientID:   requesterID,
+		Type:          itemType,
+		Severity:      "action_required",
+		IssueID:       pgtype.UUID{},
+		Title:         title,
+		Body:          pgtype.Text{String: redact.Text(errMsg), Valid: true},
+		ActorType:     pgtype.Text{String: "agent", Valid: true},
+		ActorID:       task.AgentID,
+		Details:       details,
+	})
+	if err != nil {
+		slog.Error("ai task failure: inbox write failed", "task_id", util.UUIDToString(task.ID), "type", ai.Type, "error", err)
+		return
+	}
+	s.publishQuickCreateInbox(item, ai.WorkspaceID, util.UUIDToString(task.AgentID), "")
 }
 
 // notifyQuickCreateCompleted writes a success inbox notification to the

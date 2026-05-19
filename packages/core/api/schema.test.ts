@@ -127,6 +127,121 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("skill finder", () => {
+    it("parses the queued task response", async () => {
+      stubFetchJson({ task_id: "task-1" });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.findSkillsWithAI({
+        agent_id: "agent-1",
+        prompt: "Find React performance skills",
+      });
+      expect(res).toEqual({ task_id: "task-1" });
+    });
+
+    it("falls back to an empty task id when the response is malformed", async () => {
+      stubFetchJson({ task_id: 123 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.findSkillsWithAI({
+        agent_id: "agent-1",
+        prompt: "Find React performance skills",
+      });
+      expect(res).toEqual({ task_id: "" });
+    });
+  });
+
+  describe("agent draft", () => {
+    it("parses the queued task response", async () => {
+      stubFetchJson({ task_id: "task-2" });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.draftAgentWithAI({
+        host_agent_id: "agent-1",
+        prompt: "Create a frontend review agent",
+      });
+      expect(res).toEqual({ task_id: "task-2" });
+    });
+  });
+  describe("github integration", () => {
+    it("accepts a configured GitHub connect URL response", async () => {
+      stubFetchJson({
+        configured: true,
+        url: "https://github.com/apps/multica/installations/new",
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.getGitHubConnectURL("ws-1");
+      expect(res).toEqual({
+        configured: true,
+        url: "https://github.com/apps/multica/installations/new",
+      });
+    });
+
+    it("falls back to unconfigured when GitHub connect configured has the wrong type", async () => {
+      stubFetchJson({ configured: "yes", url: "https://github.com/apps/multica/installations/new" });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.getGitHubConnectURL("ws-1");
+      expect(res).toEqual({ configured: false });
+    });
+
+    it("defaults GitHub installations to [] when the field is missing", async () => {
+      stubFetchJson({ configured: true });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listGitHubInstallations("ws-1");
+      expect(res).toEqual({ configured: true, installations: [] });
+    });
+
+    it("falls back to an unconfigured empty GitHub installations response when installations is not an array", async () => {
+      stubFetchJson({ configured: true, installations: "not-an-array" });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listGitHubInstallations("ws-1");
+      expect(res).toEqual({ configured: false, installations: [] });
+    });
+
+    it("accepts future pull request state, mergeability, and checks values", async () => {
+      stubFetchJson({
+        pull_requests: [
+          {
+            id: "pr-1",
+            workspace_id: "ws-1",
+            repo_owner: "acme",
+            repo_name: "widget",
+            number: 42,
+            title: "Future PR",
+            state: "queued_for_merge",
+            html_url: "https://github.com/acme/widget/pull/42",
+            branch: "feat/future",
+            author_login: "octocat",
+            author_avatar_url: null,
+            merged_at: null,
+            closed_at: null,
+            pr_created_at: "2026-01-01T00:00:00Z",
+            pr_updated_at: "2026-01-02T00:00:00Z",
+            mergeable_state: "future_state",
+            checks_conclusion: "waiting",
+          },
+        ],
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssuePullRequests("issue-1");
+      expect(res.pull_requests).toHaveLength(1);
+      expect(res.pull_requests[0]?.state).toBe("queued_for_merge");
+      expect(res.pull_requests[0]?.mergeable_state).toBe("future_state");
+      expect(res.pull_requests[0]?.checks_conclusion).toBe("waiting");
+    });
+
+    it("defaults pull_requests to [] when the field is missing", async () => {
+      stubFetchJson({});
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssuePullRequests("issue-1");
+      expect(res).toEqual({ pull_requests: [] });
+    });
+
+    it("falls back to an empty pull request list when pull_requests is not an array", async () => {
+      stubFetchJson({ pull_requests: "not-an-array" });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssuePullRequests("issue-1");
+      expect(res).toEqual({ pull_requests: [] });
+    });
+  });
+
   // Agent template catalog is hit by the desktop create-agent picker.
   // Installed desktop builds outlive any given server, so the shape MUST
   // survive future field renames / wrapping without crashing. Each test
