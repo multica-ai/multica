@@ -131,21 +131,21 @@ func TestGenerate_WritablePathsEmittedBeforeDenies(t *testing.T) {
 	}
 }
 
-// TestGenerate_KeychainReadAllowedWriteDenied guards JEH-405's second
-// blocker: claude (and the other agent CLIs) authenticate via the
-// macOS Keychain. securityd serves keychain items over XPC but
-// requires the calling process to have file-read access on the
-// keychain DB. The previous full-deny on Library/Keychains broke
-// auth — claude exited with "Not logged in · Please run /login".
+// TestGenerate_KeychainReadOnlyMode_PreservesJEH405Behaviour guards the
+// legacy opt-in path used by claude/cursor/gemini/copilot: those CLIs
+// authenticate via the user's macOS Keychain. securityd serves keychain
+// items over XPC but requires the calling process to have file-read
+// access on the keychain DB. The previous full-deny on Library/Keychains
+// broke auth — claude exited with "Not logged in · Please run /login".
 //
-// Reads must be allowed (covered by the broad $HOME read); writes
-// must still be denied so a sandboxed agent cannot corrupt the DB
-// or smuggle items in (legitimate mutations go through securityd
-// which runs unsandboxed).
-func TestGenerate_KeychainReadAllowedWriteDenied(t *testing.T) {
+// Under KeychainAccessReadOnly: reads are allowed (covered by the broad
+// $HOME read), writes are denied, and mach-lookup of SecurityServer is
+// NOT denied (the broad mach-lookup allow stands).
+func TestGenerate_KeychainReadOnlyMode_PreservesJEH405Behaviour(t *testing.T) {
 	out, err := Generate(Profile{
-		Workdir: "/Users/sandbox/work",
-		Home:    "/Users/sandbox",
+		Workdir:        "/Users/sandbox/work",
+		Home:           "/Users/sandbox",
+		KeychainAccess: KeychainAccessReadOnly,
 	})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -170,6 +170,97 @@ func TestGenerate_KeychainReadAllowedWriteDenied(t *testing.T) {
 	}
 	if idxWriteDeny < idxBroadHome {
 		t.Errorf("write-deny on keychain must come after broad $HOME read (deny@%d allow@%d)", idxWriteDeny, idxBroadHome)
+	}
+	// SecurityServer mach-lookup must remain reachable so the agent CLI
+	// can still ask securityd for its own item.
+	if strings.Contains(out, `(deny mach-lookup (global-name "com.apple.SecurityServer"`) {
+		t.Errorf("read-only mode must not deny SecurityServer mach-lookup:\n%s", out)
+	}
+}
+
+// TestGenerate_KeychainDenyMode_BlocksReadWriteAndSecurityServer is the
+// JEH-1774 acceptance proof: in the default mode (deny-by-default for new
+// agents) the sandboxed process must be unable to reach the keychain by
+// any path — neither direct file-read of ~/Library/Keychains, nor an
+// XPC call to securityd. Without both denies, a sandboxed agent could
+// invoke `security find-generic-password -s "Chrome Safe Storage"` and
+// trigger the macOS ACL prompt against an item it has no legitimate
+// claim to.
+func TestGenerate_KeychainDenyMode_BlocksReadWriteAndSecurityServer(t *testing.T) {
+	out, err := Generate(Profile{
+		Workdir: "/Users/sandbox/work",
+		Home:    "/Users/sandbox",
+		// KeychainAccess intentionally omitted — zero value is Deny.
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	bothDenied := `(deny file-read* file-write* (subpath "/Users/sandbox/Library/Keychains"))`
+	if !strings.Contains(out, bothDenied) {
+		t.Errorf("expected read+write deny on keychain DB by default:\n%s", out)
+	}
+	// The read+write deny replaces (and must not co-exist with) the
+	// legacy write-only deny.
+	writeOnly := "(deny file-write* (subpath \"/Users/sandbox/Library/Keychains\"))\n"
+	if strings.Contains(out, writeOnly) {
+		t.Errorf("legacy write-only deny must not appear in deny mode:\n%s", out)
+	}
+	for _, want := range []string{
+		`(deny mach-lookup (global-name "com.apple.SecurityServer"))`,
+		`(deny mach-lookup (global-name "com.apple.SecurityServer.xpc"))`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("profile missing SecurityServer mach-lookup deny %q\nprofile:\n%s", want, out)
+		}
+	}
+	// Ordering: the SecurityServer deny must come AFTER the broad
+	// (allow mach-lookup) so "last match wins" gives us the deny.
+	idxAllow := strings.Index(out, "(allow mach-lookup)")
+	idxDeny := strings.Index(out, `(deny mach-lookup (global-name "com.apple.SecurityServer"))`)
+	if idxAllow < 0 || idxDeny < 0 {
+		t.Fatalf("missing required rules; allowMach@%d denySec@%d", idxAllow, idxDeny)
+	}
+	if idxDeny < idxAllow {
+		t.Errorf("SecurityServer deny must come after broad mach-lookup allow (deny@%d allow@%d)", idxDeny, idxAllow)
+	}
+}
+
+// TestGenerate_KeychainItemsAllowed_EmittedAsComment verifies the
+// audit-trail contract: when the caller passes a list of keychain item
+// names, the generated profile records them verbatim as a comment so
+// operators can grep `multica-sandbox-*.sb` and see exactly which items
+// the daemon was authorised to pre-fetch for this task. Sandbox-exec
+// cannot enforce the list at the kernel layer (a single SQLite-shaped
+// DB inside securityd), so the comment is the only place the audit
+// signal lives.
+func TestGenerate_KeychainItemsAllowed_EmittedAsComment(t *testing.T) {
+	out, err := Generate(Profile{
+		Workdir: "/Users/sandbox/work",
+		Home:    "/Users/sandbox",
+		KeychainItemsAllowed: []string{
+			"Claude Code-credentials",
+			// Duplicates + whitespace are normalised away.
+			"  Claude Code-credentials  ",
+			"",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	want := ";;   - Claude Code-credentials"
+	if !strings.Contains(out, want) {
+		t.Errorf("profile missing keychain-item audit comment %q\nprofile:\n%s", want, out)
+	}
+	// Must never be emitted as an allow rule — sandbox-exec cannot
+	// enforce per-item allowlists, and a fake allow would be misleading.
+	if strings.Contains(out, "(allow") && strings.Contains(out, "Claude Code-credentials") {
+		// Belt-and-suspenders: ensure the literal item name only appears
+		// in comment lines, not in an allow rule.
+		for _, line := range strings.Split(out, "\n") {
+			if strings.Contains(line, "Claude Code-credentials") && !strings.HasPrefix(strings.TrimSpace(line), ";") {
+				t.Errorf("keychain item name leaked into a non-comment line: %q", line)
+			}
+		}
 	}
 }
 

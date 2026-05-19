@@ -90,11 +90,11 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `agent-handler` | server/internal/handler/agent.go | 16 | Cerebro additions to agent runtime |
 | `agent-live-card-cerebro` | packages/views/issues/components/agent-live-card.tsx | 224 | Cerebro additions to agent runtime |
 | `agent-profile-tab` | packages/views/settings/components/agent-profile-tab.tsx | 439 | Cerebro additions to agent runtime |
-| `agent-sandbox-cerebro` | server/pkg/agent/sandbox.go | 113 | Cerebro sandbox/seatbelt additions for macOS agent runtime |
-| `agent-sandbox-default-golden` | server/pkg/agent/sandbox/testdata/default.golden.sb | 74 | Cerebro sandbox/seatbelt additions for macOS agent runtime |
-| `agent-sandbox-macos` | server/pkg/agent/sandbox/macos.go | 453 | Cerebro sandbox/seatbelt additions for macOS agent runtime |
-| `agent-sandbox-macos-seatbelt-test` | server/pkg/agent/sandbox/macos_seatbelt_test.go | 397 | Cerebro sandbox/seatbelt additions for macOS agent runtime |
-| `agent-sandbox-macos-test` | server/pkg/agent/sandbox/macos_test.go | 417 | Cerebro sandbox/seatbelt additions for macOS agent runtime |
+| `agent-sandbox-cerebro` | server/pkg/agent/sandbox.go | 134 | Cerebro sandbox/seatbelt additions for macOS agent runtime; JEH-1774 keychain deny-by-default + per-task item allowlist |
+| `agent-sandbox-default-golden` | server/pkg/agent/sandbox/testdata/default.golden.sb | 76 | Cerebro sandbox/seatbelt additions for macOS agent runtime; JEH-1774 keychain deny-by-default |
+| `agent-sandbox-macos` | server/pkg/agent/sandbox/macos.go | 577 | Cerebro sandbox/seatbelt additions for macOS agent runtime; JEH-1774 keychain deny-by-default (Library/Keychains read+write + com.apple.SecurityServer mach-lookup) |
+| `agent-sandbox-macos-seatbelt-test` | server/pkg/agent/sandbox/macos_seatbelt_test.go | 501 | Cerebro sandbox/seatbelt additions for macOS agent runtime; JEH-1774 keychain deny + read-only kernel-level seatbelt tests |
+| `agent-sandbox-macos-test` | server/pkg/agent/sandbox/macos_test.go | 510 | Cerebro sandbox/seatbelt additions for macOS agent runtime; JEH-1774 keychain deny/read-only mode unit tests |
 | `agent-transcript-dialog` | packages/views/issues/components/agent-transcript-dialog.tsx | 1 | Cerebro additions to agent runtime |
 | `handler-agent-firtal-gateway-chat-history` | server/internal/handler/agent.go | 49 | Add bounded chat transcript to daemon claim responses for stateless managed HTTP runtimes |
 | `handler-chat-coalesce-firtal-gateway` | server/internal/handler/chat_coalesce_test.go | 11 | Regression coverage for the chat transcript payload used by the managed gateway runtime |
@@ -312,8 +312,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `daemon-prompt-firtal-gateway-chat` | server/internal/daemon/prompt.go | 28 | Build explicit transcript prompts for stateless managed HTTP chat tasks |
 | `daemon-prompt-test` | server/internal/daemon/prompt_test.go | 66 | Daemon additions (sandbox/prompt/types) |
 | `daemon-runtime-config` | server/internal/daemon/execenv/runtime_config.go | 20 | Daemon additions (sandbox/prompt/types) |
-| `daemon-sandbox` | server/internal/daemon/sandbox.go | 147 | Daemon additions (sandbox/prompt/types) |
-| `daemon-sandbox-test` | server/internal/daemon/sandbox_test.go | 183 | Daemon additions (sandbox/prompt/types) |
+| `daemon-sandbox` | server/internal/daemon/sandbox.go | 188 | Daemon additions (sandbox/prompt/types); JEH-1774 per-provider keychain access mode (legacy read-only vs new deny) + item allowlist plumbing |
+| `daemon-sandbox-test` | server/internal/daemon/sandbox_test.go | 228 | Daemon additions (sandbox/prompt/types); JEH-1774 tests for legacy/new keychain wiring |
 | `daemon-types` | server/internal/daemon/types.go | 23 | Daemon additions (sandbox/prompt/types) |
 | `daemon-types-firtal-gateway-usage-cost` | server/internal/daemon/types.go | 35 | Forward exact managed gateway spend in daemon task usage payloads |
 | `dashboard-layout-cerebro` | packages/views/layout/dashboard-layout.tsx | 1 | Layout cerebro additions |

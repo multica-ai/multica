@@ -35,6 +35,23 @@ type SandboxConfig struct {
 	// Caller is responsible for joining $HOME-relative subpaths to the
 	// real home directory before passing them in.
 	WritablePaths []string
+	// KeychainAccess controls how the generated profile treats macOS
+	// keychain access. The zero value (sandbox.KeychainAccessDeny) blocks
+	// both file-read on ~/Library/Keychains and mach-lookup of
+	// com.apple.SecurityServer — so a sandboxed agent cannot invoke
+	// `security find-generic-password` or any other libsecurity call
+	// against any keychain item (the agent's own or another app's).
+	// Legacy providers whose CLI authenticates through the user's
+	// keychain set sandbox.KeychainAccessReadOnly as an opt-in escape
+	// hatch.
+	KeychainAccess sandbox.KeychainAccess
+	// KeychainItemsAllowed is the audit-only list of keychain item names
+	// the daemon is authorised to pre-fetch and inject as env vars before
+	// spawn. The sandbox profile cannot enforce per-item allowlists at
+	// the kernel layer; this list is recorded as a profile comment for
+	// forensics and represents the contract the higher-level token
+	// injector must honour.
+	KeychainItemsAllowed []string
 }
 
 // errSandboxRequiredButUnavailable is returned when SandboxConfig.Enabled is
@@ -86,10 +103,12 @@ func prepareCommand(
 	}
 
 	profilePath, err := sandbox.WriteToTemp(sandbox.Profile{
-		Workdir:       wd,
-		Home:          home,
-		AllowedHosts:  sb.NetworkAllowlist,
-		WritablePaths: sb.WritablePaths,
+		Workdir:              wd,
+		Home:                 home,
+		AllowedHosts:         sb.NetworkAllowlist,
+		WritablePaths:        sb.WritablePaths,
+		KeychainAccess:       sb.KeychainAccess,
+		KeychainItemsAllowed: sb.KeychainItemsAllowed,
 	})
 	if err != nil {
 		return nil, noopCleanup, fmt.Errorf("agent: write sandbox profile: %w", err)

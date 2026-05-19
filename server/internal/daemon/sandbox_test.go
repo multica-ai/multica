@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
+	"github.com/multica-ai/multica/server/pkg/agent/sandbox"
 )
 
 func sandboxTestDaemon(cfg Config) *Daemon {
@@ -153,6 +154,48 @@ func TestBuildSandboxConfig_PopulatesProviderWritePaths(t *testing.T) {
 	}
 	if !hasClaudeDir {
 		t.Errorf("expected ~/.claude in writable paths: %v", got.WritablePaths)
+	}
+}
+
+// TestBuildSandboxConfig_LegacyProviderGetsReadOnlyKeychain guards the
+// JEH-1774 backward-compat path: claude/cursor/gemini/copilot all
+// authenticate via the user's macOS keychain. Until the env-var
+// injection work lands, they must keep the legacy read-only access
+// mode or they will exit with "Not logged in".
+func TestBuildSandboxConfig_LegacyProviderGetsReadOnlyKeychain(t *testing.T) {
+	d := sandboxTestDaemon(Config{SandboxConfig: cerebroruntime.SandboxConfig{EnableSandbox: true}, HealthPort: 19514})
+	for _, provider := range []string{"claude", "cursor", "gemini", "copilot"} {
+		t.Run(provider, func(t *testing.T) {
+			got := d.buildSandboxConfig(provider, nil, nil)
+			if got == nil {
+				t.Fatal("expected sandbox config")
+			}
+			if got.KeychainAccess != sandbox.KeychainAccessReadOnly {
+				t.Errorf("expected KeychainAccessReadOnly for %s, got %v", provider, got.KeychainAccess)
+			}
+			if len(got.KeychainItemsAllowed) == 0 {
+				t.Errorf("expected at least one allowed keychain item for %s", provider)
+			}
+		})
+	}
+}
+
+// TestBuildSandboxConfig_NewProviderGetsKeychainDeny is the JEH-1774
+// acceptance criterion for "deny-by-default for new agents". Any provider
+// not in providersWithLegacyKeychain must default to KeychainAccessDeny
+// so a sandboxed task cannot invoke `security find-generic-password`
+// against any keychain item.
+func TestBuildSandboxConfig_NewProviderGetsKeychainDeny(t *testing.T) {
+	d := sandboxTestDaemon(Config{SandboxConfig: cerebroruntime.SandboxConfig{EnableSandbox: true}, HealthPort: 19514})
+	got := d.buildSandboxConfig("unknown-cli", nil, nil)
+	if got == nil {
+		t.Fatal("expected sandbox config")
+	}
+	if got.KeychainAccess != sandbox.KeychainAccessDeny {
+		t.Errorf("expected KeychainAccessDeny for unknown provider, got %v", got.KeychainAccess)
+	}
+	if len(got.KeychainItemsAllowed) != 0 {
+		t.Errorf("expected empty keychain items for unknown provider, got %v", got.KeychainItemsAllowed)
 	}
 }
 
