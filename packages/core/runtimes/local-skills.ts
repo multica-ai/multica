@@ -14,6 +14,17 @@ export const runtimeLocalSkillsKeys = {
 
 const POLL_INTERVAL_MS = 500;
 const POLL_TIMEOUT_MS = 30_000;
+// Import timeout is longer than discovery because old daemons (pre-batch) pop
+// only one import per heartbeat cycle (~15s). With 10 queued imports the 10th
+// can wait up to 150s in pending before being claimed, plus up to 60s for
+// the daemon to actually run the import.
+//
+// Timeout invariant: IMPORT_POLL_TIMEOUT_MS must exceed
+// runtimeLocalSkillPendingTimeout + runtimeLocalSkillRunningTimeout
+// (server/internal/handler/runtime_local_skills.go).
+// See also IMPORT_CONCURRENCY in packages/views/.../runtime-local-skill-import-panel.tsx
+// and maxLocalSkillImportBatch in server/internal/handler/daemon.go.
+const IMPORT_POLL_TIMEOUT_MS = 4 * 60_000; // 4 minutes
 
 export async function resolveRuntimeLocalSkills(
   runtimeId: string,
@@ -49,7 +60,7 @@ export async function resolveRuntimeLocalSkillImport(
   let current = initial;
 
   while (current.status === "pending" || current.status === "running") {
-    if (Date.now() - start > POLL_TIMEOUT_MS) {
+    if (Date.now() - start > IMPORT_POLL_TIMEOUT_MS) {
       throw new Error("runtime local skill import timed out");
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));

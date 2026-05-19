@@ -1,41 +1,69 @@
-import type { QuestionnaireAnswers } from "./types";
+import type { QuestionnaireAnswers, Role, UseCase } from "./types";
 
 /**
- * Identifier for the four agent templates offered during onboarding Step 4.
- * Keep in sync with the template registry inside StepAgent in
- * `packages/views/onboarding/steps/step-agent.tsx`.
+ * Identifier for the four agent templates offered during onboarding
+ * Step 6 (Agent). Keep in sync with the template registry inside
+ * StepAgent in `packages/views/onboarding/steps/step-agent.tsx`.
  */
 export type AgentTemplateId = "coding" | "planning" | "writing" | "assistant";
 
 /**
- * Pick a recommended agent template for a user based on their
- * questionnaire answers. Role is treated as the primary signal (who the
- * user is); use_case is only a tiebreaker for roles that legitimately
- * split between templates (developer / product_lead).
+ * Pick a recommended agent template based on the v2 questionnaire
+ * (role × use_case). Role is the primary signal; use_case is a
+ * tiebreaker for roles that legitimately split between templates
+ * (engineer / product / marketing).
  *
- * `role = other` and `role = founder` both fall back to the generic
- * Assistant: "other" means the user declined to claim a role, and
- * "founder" means they wear every hat, so a single specialized agent is
- * a poor default.
+ * Fallback chain when role is skipped or null:
+ *   1. Derive from use_case alone.
+ *   2. Both unknown → `assistant` (the generic default).
  *
  * Pure / deterministic — safe to call on every render.
  */
 export function recommendTemplate(
   answers: Pick<QuestionnaireAnswers, "role" | "use_case">,
 ): AgentTemplateId {
-  const { role, use_case } = answers;
+  const role: Role | null = answers.role;
+  const useCase: UseCase | null = answers.use_case;
 
-  if (role === "other" || role === "founder") return "assistant";
-  if (role === "writer") return "writing";
+  if (role === null) return fallbackFromUseCase(useCase);
 
-  if (role === "developer") {
-    return use_case === "planning" ? "planning" : "coding";
+  switch (role) {
+    case "engineer":
+      if (useCase === "manage_team" || useCase === "plan_research")
+        return "planning";
+      if (useCase === "write_publish") return "writing";
+      return "coding";
+    case "product":
+      if (useCase === "ship_code") return "coding";
+      return "planning";
+    case "designer":
+      return "assistant";
+    case "writer":
+      return "writing";
+    case "marketing":
+      if (useCase === "write_publish" || useCase === "plan_research")
+        return "writing";
+      return "planning";
+    case "research":
+      return "planning";
+    case "founder":
+    case "ops":
+    case "student":
+    case "other":
+      return "assistant";
   }
+}
 
-  if (role === "product_lead") {
-    return use_case === "coding" ? "coding" : "planning";
+function fallbackFromUseCase(useCase: UseCase | null): AgentTemplateId {
+  switch (useCase) {
+    case "ship_code":
+      return "coding";
+    case "write_publish":
+      return "writing";
+    case "manage_team":
+    case "plan_research":
+      return "planning";
+    default:
+      return "assistant";
   }
-
-  // Unknown / null role — user hasn't answered Q2 yet.
-  return "assistant";
 }

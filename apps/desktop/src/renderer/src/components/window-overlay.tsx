@@ -74,6 +74,13 @@ function WindowOverlayInner() {
               push(paths.root());
             }
           }}
+          // Restart the bundled daemon when the user hits Refresh on
+          // Step 3. The daemon's PATH probe runs once at boot, so a
+          // newly-installed CLI (Claude / Codex / Cursor) doesn't show
+          // up until the daemon is bounced.
+          onRuntimeRefresh={async () => {
+            await window.daemonAPI?.restart?.();
+          }}
         />
       )}
     </div>

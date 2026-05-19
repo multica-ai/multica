@@ -63,25 +63,32 @@ export function buildWelcomeIssueText(
   ].join("\n");
 
   switch (q.use_case) {
-    case "coding":
+    case "ship_code":
       return {
         title: "👋 Welcome to Multica — let's work together",
-        description: `${header}Hi agent, this is ${name}'s first time using Multica. They plan to use you mostly for **coding work**.\n\n${sharedInstructions}`,
+        description: `${header}Hi agent, this is ${name}'s first time using Multica. They plan to use you mostly for **shipping code**.\n\n${sharedInstructions}`,
       };
-    case "planning":
+    case "manage_team":
+    case "plan_research":
       return {
         title: "👋 Welcome to Multica — let's work together",
         description: `${header}Hi agent, this is ${name}'s first time using Multica. They want your help with **planning and breaking down work**.\n\n${sharedInstructions}`,
       };
-    case "writing_research":
+    case "write_publish":
       return {
         title: "👋 Welcome to Multica — let's work together",
-        description: `${header}Hi agent, this is ${name}'s first time using Multica. They'll use you for **research and writing** — drafting, summarizing, analysis.\n\n${sharedInstructions}`,
+        description: `${header}Hi agent, this is ${name}'s first time using Multica. They'll use you for **writing and publishing** — drafting, editing, summarizing.\n\n${sharedInstructions}`,
       };
-    case "explore":
+    case "evaluate":
       return {
         title: "👋 Welcome to Multica — let's work together",
         description: `${header}Hi agent, this is ${name}'s first time using Multica. They're **exploring** what Multica can do — no specific goal yet.\n\n${exploreInstructions}`,
+      };
+    case "personal_tasks":
+    case "automate_ops":
+      return {
+        title: "👋 Welcome to Multica — let's work together",
+        description: `${header}Hi agent, this is ${name}'s first time using Multica. They want your help with **day-to-day tasks and automation**.\n\n${sharedInstructions}`,
       };
     case "other": {
       const customUseCase = (q.use_case_other ?? "").trim();
@@ -185,7 +192,7 @@ export function buildAgentGuidedSubIssues(
 
   const tier2: ImportStarterIssuePayload[] = [];
 
-  if (q.team_size === "team") {
+  if (q.use_case === "manage_team") {
     tier2.push({
       status: "todo",
       priority: "medium",
@@ -208,7 +215,7 @@ export function buildAgentGuidedSubIssues(
     });
   }
 
-  if (q.role === "developer" || q.use_case === "coding") {
+  if (q.role === "engineer" || q.use_case === "ship_code") {
     tier2.push({
       status: "todo",
       priority: "medium",
@@ -489,7 +496,7 @@ export function buildSelfServeSubIssues(
     },
   ];
 
-  if (q.role === "developer" || q.use_case === "coding") {
+  if (q.role === "engineer" || q.use_case === "ship_code") {
     tier3.push({
       status: "backlog",
       priority: "low",
@@ -508,7 +515,7 @@ export function buildSelfServeSubIssues(
     });
   }
 
-  if (q.team_size === "team") {
+  if (q.use_case === "manage_team") {
     tier3.push({
       status: "backlog",
       priority: "low",

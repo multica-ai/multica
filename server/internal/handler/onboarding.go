@@ -121,20 +121,44 @@ type patchOnboardingRequest struct {
 	Questionnaire *json.RawMessage `json:"questionnaire,omitempty"`
 }
 
-// questionnaireAnswers mirrors the frontend's `QuestionnaireAnswers`
-// shape. Only the first-time submission — every slot filled — is a
-// funnel signal; partial saves are allowed but never emit.
+// questionnaireAnswers mirrors the frontend's v2 `QuestionnaireAnswers`
+// shape. Each of source / role / use_case has a value, an optional
+// free-text "other" override, and a skip marker. The questionnaire is
+// "resolved" once every slot has either an answer or a skip marker;
+// the funnel event fires on the transition into that state.
 type questionnaireAnswers struct {
-	TeamSize      string `json:"team_size"`
-	TeamSizeOther string `json:"team_size_other"`
-	Role          string `json:"role"`
-	RoleOther     string `json:"role_other"`
-	UseCase       string `json:"use_case"`
-	UseCaseOther  string `json:"use_case_other"`
+	Source         string `json:"source"`
+	SourceOther    string `json:"source_other"`
+	SourceSkipped  bool   `json:"source_skipped"`
+	Role           string `json:"role"`
+	RoleOther      string `json:"role_other"`
+	RoleSkipped    bool   `json:"role_skipped"`
+	UseCase        string `json:"use_case"`
+	UseCaseOther   string `json:"use_case_other"`
+	UseCaseSkipped bool   `json:"use_case_skipped"`
+	Version        int    `json:"version"`
 }
 
+func (q questionnaireAnswers) sourceResolved() bool {
+	return q.Source != "" || q.SourceSkipped
+}
+func (q questionnaireAnswers) roleResolved() bool {
+	return q.Role != "" || q.RoleSkipped
+}
+func (q questionnaireAnswers) useCaseResolved() bool {
+	return q.UseCase != "" || q.UseCaseSkipped
+}
+
+// questionnaireSchemaVersion is the schema this handler understands.
+// `complete()` and the funnel event are scoped to this version so a
+// future v3 row can't be silently mis-counted against v2 semantics.
+const questionnaireSchemaVersion = 2
+
 func (q questionnaireAnswers) complete() bool {
-	return q.TeamSize != "" && q.Role != "" && q.UseCase != ""
+	if q.Version != questionnaireSchemaVersion {
+		return false
+	}
+	return q.sourceResolved() && q.roleResolved() && q.useCaseResolved()
 }
 
 // PatchOnboarding persists the user's questionnaire answers. The
@@ -185,10 +209,13 @@ func (h *Handler) PatchOnboarding(w http.ResponseWriter, r *http.Request) {
 	if after.complete() && !before.complete() {
 		h.Analytics.Capture(analytics.OnboardingQuestionnaireSubmitted(
 			userID,
-			after.TeamSize,
+			after.Source,
 			after.Role,
 			after.UseCase,
-			after.TeamSizeOther != "",
+			after.SourceSkipped,
+			after.RoleSkipped,
+			after.UseCaseSkipped,
+			after.SourceOther != "",
 			after.RoleOther != "",
 			after.UseCaseOther != "",
 		))

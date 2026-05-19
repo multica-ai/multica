@@ -101,7 +101,9 @@
         "title": "No created issues",
         "description": "Issues created here will appear in this view."
       }
-    }
+    },
+    "search_placeholder": "Search issues...",
+    "search_empty": "No issues match your search."
   },
   "list": {
     "empty_status": "No issues",

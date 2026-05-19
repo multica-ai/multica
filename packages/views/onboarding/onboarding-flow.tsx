@@ -19,7 +19,9 @@ import type { Agent, AgentRuntime, Workspace } from "@multica/core/types";
 import { DragStrip } from "@multica/views/platform";
 import { StepHeader } from "./components/step-header";
 import { StepWelcome } from "./steps/step-welcome";
-import { StepQuestionnaire } from "./steps/step-questionnaire";
+import { StepSource } from "./steps/step-source";
+import { StepRole } from "./steps/step-role";
+import { StepUseCase } from "./steps/step-use-case";
 import { StepWorkspace } from "./steps/step-workspace";
 import { StepRuntimeConnect } from "./steps/step-runtime-connect";
 import { StepPlatformFork } from "./steps/step-platform-fork";
@@ -28,18 +30,34 @@ import { StepFirstIssue } from "./steps/step-first-issue";
 import { useT } from "../i18n";
 
 const EMPTY_QUESTIONNAIRE: QuestionnaireAnswers = {
-  team_size: null,
-  team_size_other: null,
+  source: null,
+  source_other: null,
+  source_skipped: false,
   role: null,
   role_other: null,
+  role_skipped: false,
   use_case: null,
   use_case_other: null,
+  use_case_skipped: false,
+  version: 2,
 };
 
+/**
+ * Merge persisted answers into the empty default. Re-entry pre-fills
+ * answered slots but treats `*_skipped` as fresh (the user can answer
+ * this time) — the v1 skip marker is dropped on read, the analytics
+ * record of the prior skip stays in the DB.
+ */
 function mergeQuestionnaire(
   raw: Record<string, unknown>,
 ): QuestionnaireAnswers {
-  return { ...EMPTY_QUESTIONNAIRE, ...(raw as Partial<QuestionnaireAnswers>) };
+  const merged = { ...EMPTY_QUESTIONNAIRE, ...(raw as Partial<QuestionnaireAnswers>) };
+  return {
+    ...merged,
+    source_skipped: false,
+    role_skipped: false,
+    use_case_skipped: false,
+  };
 }
 
 /**
@@ -53,9 +71,15 @@ function mergeQuestionnaire(
 export function OnboardingFlow({
   onComplete,
   runtimeInstructions,
+  onRuntimeRefresh,
 }: {
   onComplete: (workspace?: Workspace) => void;
   runtimeInstructions?: React.ReactNode;
+  /** Desktop wires this to restart the bundled daemon so a freshly
+   *  installed agent CLI gets picked up on the runtime step. Web omits
+   *  it — its CLI install flow already runs on the user's machine and
+   *  the embedded picker reacts to daemon:register events. */
+  onRuntimeRefresh?: () => void | Promise<void>;
 }) {
   const { t } = useT("onboarding");
   const user = useAuthStore((s) => s.user);
@@ -63,11 +87,12 @@ export function OnboardingFlow({
     throw new Error("OnboardingFlow requires an authenticated user");
   }
 
-  // Questionnaire answers are server-persisted and pre-fill Step 1
-  // on re-entry. That's the only piece of onboarding state persisted
-  // across sessions — which step the user is on is deliberately not
-  // saved, so every entry starts at Welcome.
+  // Questionnaire answers are server-persisted and pre-fill the per-
+  // question steps on re-entry. That's the only piece of onboarding
+  // state persisted across sessions — which step the user is on is
+  // deliberately not saved, so every entry starts at Welcome.
   const storedQuestionnaire = mergeQuestionnaire(user.onboarding_questionnaire);
+  const [answers, setAnswers] = useState<QuestionnaireAnswers>(storedQuestionnaire);
 
   const qc = useQueryClient();
 
@@ -75,11 +100,6 @@ export function OnboardingFlow({
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [runtime, setRuntime] = useState<AgentRuntime | null>(null);
   const [, setAgent] = useState<Agent | null>(null);
-  // Sticky flag: Step 3's cloud-waitlist dialog only lives inside
-  // StepPlatformFork's local state, so the completion path for
-  // `runtime=null && waitlist submitted` would be invisible here without
-  // a shell-level record. One way latch; never cleared once set.
-  const [waitlistSubmitted, setWaitlistSubmitted] = useState(false);
 
   // Fetched at Step 0 + Step 2. Step 2 uses it to detect a pre-existing
   // workspace from an earlier abandoned onboarding (so StepWorkspace shows
@@ -110,9 +130,47 @@ export function OnboardingFlow({
   // introducing a redundant prop.
   const isWeb = !!runtimeInstructions;
 
-  const handleWelcomeNext = useCallback(() => {
-    setStep("questionnaire");
+  // Derive "what comes after `from`" from ONBOARDING_STEP_ORDER so
+  // inserting/reordering a persisted step only requires editing the
+  // canonical array. Returns null if `from` is the last persisted step
+  // or not in the array (callers fall back to bespoke routing).
+  const nextStep = useCallback((from: OnboardingStep): OnboardingStep | null => {
+    const idx = ONBOARDING_STEP_ORDER.indexOf(from);
+    if (idx < 0 || idx >= ONBOARDING_STEP_ORDER.length - 1) return null;
+    return ONBOARDING_STEP_ORDER[idx + 1]!;
   }, []);
+
+  const advanceFrom = useCallback(
+    (from: OnboardingStep) => {
+      const next = nextStep(from);
+      if (next) setStep(next);
+    },
+    [nextStep],
+  );
+
+  const handleWelcomeNext = useCallback(() => {
+    // Welcome is intentionally not in ONBOARDING_STEP_ORDER (it's a
+    // product intro, not a persisted step), so the first persisted
+    // step is hard-coded as the entry point.
+    setStep(ONBOARDING_STEP_ORDER[0]!);
+  }, []);
+
+  // Apply an in-memory patch and fire-and-forget a PATCH to persist
+  // it. We never block UI on the request — the next step's render is
+  // what matters; a transient save failure surfaces as a toast but
+  // does not roll the user back.
+  const applyAnswers = useCallback(
+    (patch: Partial<QuestionnaireAnswers>) => {
+      setAnswers((a) => {
+        const next = { ...a, ...patch };
+        void saveQuestionnaire(next).catch((err) => {
+          if (err instanceof Error) toast.error(err.message);
+        });
+        return next;
+      });
+    },
+    [],
+  );
 
   // "I've done this before" path — returning user who already has a
   // workspace and just wants to land there. Marks onboarding complete
@@ -133,25 +191,22 @@ export function OnboardingFlow({
     onComplete(workspaces[0] ?? undefined);
   }, [workspaces, onComplete]);
 
-  const handleQuestionnaireSubmit = useCallback(
-    async (answers: QuestionnaireAnswers) => {
-      await saveQuestionnaire(answers);
-      setStep("workspace");
+  const handleWorkspaceCreated = useCallback(
+    (ws: Workspace) => {
+      setWorkspace(ws);
+      setCurrentWorkspace(ws.slug, ws.id);
+      advanceFrom("workspace");
     },
-    [],
+    [advanceFrom],
   );
-
-  const handleWorkspaceCreated = useCallback((ws: Workspace) => {
-    setWorkspace(ws);
-    setCurrentWorkspace(ws.slug, ws.id);
-    setStep("runtime");
-  }, []);
 
   const handleRuntimeNext = useCallback((rt: AgentRuntime | null) => {
     setRuntime(rt);
-    // No runtime → no agent possible; skip Step 4 and go straight to
-    // the finalizer. The post-landing StarterContentPrompt will detect
-    // "no agent in this workspace" and offer the self-serve template.
+    // Custom branch — not derived from ONBOARDING_STEP_ORDER because no
+    // runtime → no agent possible, so we skip Step 4 ("agent") and go
+    // straight to the finalizer. The post-landing StarterContentPrompt
+    // will detect "no agent in this workspace" and offer the self-serve
+    // template.
     setStep(rt ? "agent" : "first_issue");
   }, []);
 
@@ -168,14 +223,18 @@ export function OnboardingFlow({
           queryKey: workspaceKeys.agents(workspace.id),
         });
       }
-      setStep("first_issue");
+      advanceFrom("agent");
     },
-    [workspace, qc],
+    [workspace, qc, advanceFrom],
   );
 
   const handleBack = useCallback((from: OnboardingStep) => {
     const idx = ONBOARDING_STEP_ORDER.indexOf(from);
-    if (idx <= 0) return;
+    if (idx <= 0) {
+      // Source (the first persisted step) returns to Welcome.
+      setStep("welcome");
+      return;
+    }
     const prev = ONBOARDING_STEP_ORDER[idx - 1]!;
     setStep(prev);
   }, []);
@@ -202,11 +261,38 @@ export function OnboardingFlow({
     );
   }
 
-  if (step === "questionnaire") {
+  if (step === "source") {
     return (
-      <StepQuestionnaire
-        initial={storedQuestionnaire}
-        onSubmit={handleQuestionnaireSubmit}
+      <StepSource
+        answers={answers}
+        onChange={applyAnswers}
+        onAdvance={() => advanceFrom("source")}
+        onSkip={() => advanceFrom("source")}
+        onBack={() => handleBack("source")}
+      />
+    );
+  }
+
+  if (step === "role") {
+    return (
+      <StepRole
+        answers={answers}
+        onChange={applyAnswers}
+        onAdvance={() => advanceFrom("role")}
+        onSkip={() => advanceFrom("role")}
+        onBack={() => handleBack("role")}
+      />
+    );
+  }
+
+  if (step === "use_case") {
+    return (
+      <StepUseCase
+        answers={answers}
+        onChange={applyAnswers}
+        onAdvance={() => advanceFrom("use_case")}
+        onSkip={() => advanceFrom("use_case")}
+        onBack={() => handleBack("use_case")}
       />
     );
   }
@@ -234,7 +320,7 @@ export function OnboardingFlow({
           wsId={workspace.id}
           onNext={handleRuntimeNext}
           onBack={() => handleBack("runtime")}
-          onWaitlistSubmitted={() => setWaitlistSubmitted(true)}
+          onRefresh={onRuntimeRefresh}
         />
       );
     }
@@ -244,7 +330,6 @@ export function OnboardingFlow({
         onNext={handleRuntimeNext}
         onBack={() => handleBack("runtime")}
         cliInstructions={runtimeInstructions}
-        onWaitlistSubmitted={() => setWaitlistSubmitted(true)}
       />
     );
   }
@@ -260,24 +345,19 @@ export function OnboardingFlow({
     return (
       <StepAgent
         runtime={runtime}
-        questionnaire={storedQuestionnaire}
+        questionnaire={answers}
         onCreated={handleAgentCreated}
         onBack={() => handleBack("agent")}
       />
     );
   }
 
-  // Derive the completion-path label for Step 5 here — runtime +
-  // waitlist state both live in this shell, StepFirstIssue doesn't
-  // have the visibility to compute it itself.
-  //   runtime set          → "full"
-  //   no runtime + waitlist → "cloud_waitlist"
-  //   no runtime, no waitlist → "runtime_skipped"
+  // Derive the completion-path label for Step 5. The cloud-waitlist
+  // exit was removed from Step 3 (replaced with a "Coming soon" badge)
+  // so this is now a binary: runtime → "full", no runtime → "runtime_skipped".
   const completionPath: OnboardingCompletionPath = runtime
     ? "full"
-    : waitlistSubmitted
-      ? "cloud_waitlist"
-      : "runtime_skipped";
+    : "runtime_skipped";
 
   return (
     <div className="animate-onboarding-enter flex min-h-full flex-col">

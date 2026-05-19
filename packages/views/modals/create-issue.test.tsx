@@ -554,4 +554,31 @@ describe("CreateIssueModal", () => {
       }),
     );
   });
+
+  // Title + description are packed into the agent prompt on switch; if we
+  // leave them in the shared draft store, the next agent→manual switch
+  // surfaces the stale manual draft on top of the prompt-as-description,
+  // duplicating the user's text on every round-trip.
+  it("clears the manual draft when packing title and description into the agent prompt", async () => {
+    const user = userEvent.setup();
+
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={vi.fn()}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+        backlogHintIssueId={null}
+        setBacklogHintIssueId={vi.fn()}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Update");
+    await user.type(screen.getByPlaceholderText("Add description..."), "Some body");
+
+    mockSetDraft.mockClear();
+    await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
+
+    expect(mockSetDraft).toHaveBeenCalledWith({ title: "", description: "" });
+  });
 });

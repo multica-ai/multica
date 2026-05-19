@@ -240,7 +240,7 @@ function AvatarEditor({
 
   if (!canEdit) {
     return (
-      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted">
+      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg">
         <ActorAvatar
           actorType="agent"
           actorId={agent.id}
@@ -271,7 +271,7 @@ function AvatarEditor({
         type="button"
         // rounded-lg matches the standard agent avatar treatment used in
         // list rows. Avoid rounded-full — circles are reserved for humans.
-        className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onClick={() => fileInputRef.current?.click()}
         disabled={uploading}
         aria-label={t(($) => $.inspector.change_avatar_aria)}

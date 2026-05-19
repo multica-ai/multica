@@ -22,7 +22,7 @@ Create a new autopilot on the workspace's **Autopilot** page. You set:
 
 An autopilot has two execution modes. **Start with "create issue" mode.**
 
-- **Create issue mode** (`create_issue`) — default, **recommended**. Each trigger first creates an issue in the workspace (the title supports interpolation like `{{date}}`), then assigns the issue to the agent through the normal assignment flow. All work lands on the issue board with the same history, comments, and status as a manually assigned issue.
+- **Create issue mode** (`create_issue`) — default, **recommended**. Each trigger first creates an issue in the workspace (the title currently supports a single placeholder, `{{date}}`, which interpolates to the UTC date in `YYYY-MM-DD` format; any other `{{...}}` token is rejected at create-time so a typo cannot silently land as the literal string in your issue titles), then assigns the issue to the agent through the normal assignment flow. All work lands on the issue board with the same history, comments, and status as a manually assigned issue.
 - **Run-only mode** (`run_only`) — skips issue creation and enqueues a `task` directly. The run is invisible on the board — you can only see it in the autopilot's run history.
 
 ## Run it on a schedule

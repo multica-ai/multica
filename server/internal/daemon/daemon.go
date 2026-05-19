@@ -1300,7 +1300,14 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 			go d.handleLocalSkillList(ctx, *rt, resp.PendingLocalSkills.ID)
 		}
 	}
-	if resp.PendingLocalSkillImport != nil {
+	// Prefer the batch field (new backend); fall back to singular (old backend).
+	if len(resp.PendingLocalSkillImports) > 0 {
+		if rt := d.findRuntime(runtimeID); rt != nil {
+			for _, imp := range resp.PendingLocalSkillImports {
+				go d.handleLocalSkillImport(ctx, *rt, imp)
+			}
+		}
+	} else if resp.PendingLocalSkillImport != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
 			go d.handleLocalSkillImport(ctx, *rt, *resp.PendingLocalSkillImport)
 		}
@@ -3042,11 +3049,11 @@ func convertAttachmentsForEnv(attachments []ChatAttachmentMeta) []execenv.Attach
 		return nil
 	}
 	result := make([]execenv.AttachmentContextForEnv, len(attachments))
-	for i, a := range attachments {
+	for i, attachment := range attachments {
 		result[i] = execenv.AttachmentContextForEnv{
-			ID:          a.ID,
-			Filename:    a.Filename,
-			ContentType: a.ContentType,
+			ID:          attachment.ID,
+			Filename:    attachment.Filename,
+			ContentType: attachment.ContentType,
 		}
 	}
 	return result

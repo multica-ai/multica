@@ -651,37 +651,6 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 	}
 }
 
-// Regression test for #2347: the runtime config injected into agent harnesses
-// must advertise both autopilot execution modes on create AND update, so an
-// agent acting as a CLI user is not confined to create_issue.
-func TestInjectRuntimeConfigAutopilotAdvertisesBothModes(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	if _, err := InjectRuntimeConfig(dir, "claude", TaskContextForEnv{
-		IssueID:    "issue-1",
-		IssueTitle: "Create an autopilot for stale issue triage",
-	}); err != nil {
-		t.Fatalf("InjectRuntimeConfig failed: %v", err)
-	}
-
-	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
-	if err != nil {
-		t.Fatalf("failed to read CLAUDE.md: %v", err)
-	}
-
-	s := string(content)
-	for _, want := range []string{
-		"multica autopilot create --title \"...\" --agent <name> --mode create_issue|run_only",
-		"multica autopilot update <id>",
-		"[--mode create_issue|run_only]",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("CLAUDE.md missing %q", want)
-		}
-	}
-}
-
 func TestInjectRuntimeConfigGemini(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -1198,180 +1167,6 @@ func TestInjectRuntimeConfigAvailableCommandsIsNeutral(t *testing.T) {
 			})
 		}
 	}
-}
-
-func TestInjectRuntimeConfigConditionalRuleBlocks(t *testing.T) {
-	t.Parallel()
-
-	render := func(t *testing.T, ctx TaskContextForEnv) string {
-		t.Helper()
-		dir := t.TempDir()
-		if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
-			t.Fatalf("InjectRuntimeConfig failed: %v", err)
-		}
-		data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
-		if err != nil {
-			t.Fatalf("read CLAUDE.md: %v", err)
-		}
-		return string(data)
-	}
-	assertContains := func(t *testing.T, s string, wants ...string) {
-		t.Helper()
-		for _, want := range wants {
-			if !strings.Contains(s, want) {
-				t.Fatalf("runtime config missing %q\n---\n%s", want, s)
-			}
-		}
-	}
-	assertAbsent := func(t *testing.T, s string, banned ...string) {
-		t.Helper()
-		for _, ban := range banned {
-			if strings.Contains(s, ban) {
-				t.Fatalf("runtime config should not include %q\n---\n%s", ban, s)
-			}
-		}
-	}
-
-	t.Run("ordinary comment trigger gets core loop only", func(t *testing.T) {
-		s := render(t, TaskContextForEnv{
-			IssueID:               "issue-1",
-			TriggerCommentID:      "comment-1",
-			TriggerCommentContent: "Please fix the login redirect.",
-		})
-		assertContains(t, s,
-			"multica issue get issue-1 --output json",
-			"multica issue comment add issue-1",
-			"Do not create member or agent mention links unless the task explicitly requires",
-		)
-		assertAbsent(t, s,
-			"multica attachment download",
-			"multica issue label add",
-			"multica issue subscriber add",
-			"multica autopilot create",
-			"multica project resource list",
-			"side-effecting actions",
-		)
-	})
-
-	t.Run("ordinary webhook notification work does not trigger optional rule blocks", func(t *testing.T) {
-		s := render(t, TaskContextForEnv{
-			IssueID:               "issue-1",
-			IssueTitle:            "Build webhook notification delivery",
-			IssueDescription:      "Implement retry handling for webhook events and notification preferences.",
-			TriggerCommentID:      "comment-1",
-			TriggerCommentContent: "Please fix the webhook and notification code paths.",
-		})
-		assertContains(t, s,
-			"Do not create member or agent mention links unless the task explicitly requires",
-			"multica issue comment add issue-1",
-		)
-		assertAbsent(t, s,
-			"multica autopilot create",
-			"multica autopilot list",
-			"side-effecting actions",
-			"enqueues a new run for that agent",
-		)
-	})
-
-	t.Run("issue mention link does not trigger full mention block", func(t *testing.T) {
-		s := render(t, TaskContextForEnv{
-			IssueID:               "issue-1",
-			TriggerCommentID:      "comment-1",
-			TriggerCommentContent: "Please follow up on [MUL-123](mention://issue/issue-123) while fixing this.",
-		})
-		assertContains(t, s,
-			"Do not create member or agent mention links unless the task explicitly requires",
-			"multica issue comment add issue-1",
-		)
-		assertAbsent(t, s,
-			"side-effecting actions",
-			"enqueues a new run for that agent",
-			"When a mention IS appropriate",
-		)
-	})
-
-	t.Run("attachment context gets attachment block", func(t *testing.T) {
-		s := render(t, TaskContextForEnv{
-			IssueID:                      "issue-1",
-			TriggerCommentID:             "comment-1",
-			TriggerCommentContent:        "The screenshot is attached.",
-			HasIssueOrCommentAttachments: true,
-		})
-		assertContains(t, s,
-			"## Attachments",
-			"multica attachment download <id>",
-			"[--attachment <path>]",
-		)
-		assertAbsent(t, s, "multica autopilot create", "multica issue label add")
-	})
-
-	t.Run("label and subscriber request gets label subscriber block", func(t *testing.T) {
-		s := render(t, TaskContextForEnv{
-			IssueID:          "issue-1",
-			IssueTitle:       "Add bug label and subscribe Alice",
-			IssueDescription: "Please label this as regression and subscribe the reporter.",
-		})
-		assertContains(t, s,
-			"multica issue label list <issue-id> --output json",
-			"multica issue label add <issue-id> <label-id>",
-			"multica issue subscriber add <issue-id>",
-			"multica label create --name",
-		)
-		assertAbsent(t, s, "multica autopilot create", "multica attachment download")
-	})
-
-	t.Run("autopilot request gets autopilot block", func(t *testing.T) {
-		s := render(t, TaskContextForEnv{
-			IssueID:    "issue-1",
-			IssueTitle: "Create an autopilot for weekly dependency reports",
-		})
-		assertContains(t, s,
-			"multica autopilot list",
-			"multica autopilot create --title \"...\" --agent <name> --mode create_issue|run_only",
-			"multica autopilot update <id>",
-			"[--mode create_issue|run_only]",
-			"multica autopilot trigger <id>",
-		)
-		assertAbsent(t, s, "multica issue label add", "multica project resource list")
-	})
-
-	t.Run("project resources get resource block", func(t *testing.T) {
-		s := render(t, TaskContextForEnv{
-			IssueID:      "issue-1",
-			ProjectID:    "project-1",
-			ProjectTitle: "Platform",
-			ProjectResources: []ProjectResourceForEnv{
-				{
-					ID:           "resource-1",
-					ResourceType: "github_repo",
-					ResourceRef:  json.RawMessage(`{"url":"https://github.com/multica-ai/multica","default_branch_hint":"main"}`),
-				},
-			},
-		})
-		assertContains(t, s,
-			"multica project get <id> --output json",
-			"multica project resource list <project-id> --output json",
-			"## Project Context",
-			"https://github.com/multica-ai/multica",
-			"resources.json",
-		)
-		assertAbsent(t, s, "multica autopilot create", "multica issue label add")
-	})
-
-	t.Run("squad delegation gets squad block", func(t *testing.T) {
-		s := render(t, TaskContextForEnv{
-			IssueID:          "issue-1",
-			TriggerCommentID: "comment-1",
-			IsSquadLeader:    true,
-		})
-		assertContains(t, s,
-			"multica squad get <squad-id> --output json",
-			"multica squad member list <squad-id> --output json",
-			"multica squad activity <issue-id> action|no_action|failed",
-			"Squad leader rule",
-		)
-		assertAbsent(t, s, "multica autopilot create", "multica project resource list")
-	})
 }
 
 // TestInjectRuntimeConfigCodexLinuxEmphasizesStdin pins the
@@ -2894,11 +2689,6 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 		IssueID:          "issue-1",
 		TriggerCommentID: "comment-1",
 	}
-	mentionCtx := TaskContextForEnv{
-		IssueID:               "issue-1",
-		TriggerCommentID:      "comment-1",
-		TriggerCommentContent: "Please loop in [@ReviewBot](mention://agent/agent-1) for a second pass.",
-	}
 	assignmentCtx := TaskContextForEnv{IssueID: "issue-1"}
 
 	readClaudeMD := func(t *testing.T, ctx TaskContextForEnv) string {
@@ -2916,7 +2706,7 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 
 	t.Run("mentions-section-lists-loop-protocol", func(t *testing.T) {
 		t.Parallel()
-		s := readClaudeMD(t, mentionCtx)
+		s := readClaudeMD(t, assignmentCtx)
 		for _, want := range []string{
 			"side-effecting actions",
 			"enqueues a new run for that agent",
@@ -2928,23 +2718,6 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 			if !strings.Contains(s, want) {
 				t.Errorf("Mentions section missing %q\n---\n%s", want, s)
 			}
-		}
-	})
-
-	t.Run("ordinary-task-keeps-minimal-mention-warning", func(t *testing.T) {
-		t.Parallel()
-		s := readClaudeMD(t, assignmentCtx)
-		for _, banned := range []string{
-			"side-effecting actions",
-			"enqueues a new run for that agent",
-			"When a mention IS appropriate",
-		} {
-			if strings.Contains(s, banned) {
-				t.Errorf("ordinary CLAUDE.md should not include full mention block %q\n---\n%s", banned, s)
-			}
-		}
-		if !strings.Contains(s, "Do not create member or agent mention links unless the task explicitly requires") {
-			t.Errorf("ordinary CLAUDE.md missing minimal mention warning\n---\n%s", s)
 		}
 	})
 

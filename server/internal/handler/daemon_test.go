@@ -205,7 +205,7 @@ func TestHandleDaemonWSHeartbeat_RuntimeGoneReturnsAckNotError(t *testing.T) {
 	missingRuntime := uuid.New().String()
 	ack, err := testHandler.HandleDaemonWSHeartbeat(context.Background(),
 		daemonws.ClientIdentity{WorkspaceID: testWorkspaceID},
-		missingRuntime)
+		missingRuntime, false)
 	if err != nil {
 		t.Fatalf("HandleDaemonWSHeartbeat: unexpected error %v", err)
 	}
@@ -1548,135 +1548,6 @@ func TestClaimTask_ProjectWithoutRepos_FallsBackToWorkspaceRepos(t *testing.T) {
 	if len(resp.Task.Repos) != 1 || !strings.HasSuffix(resp.Task.Repos[0].URL, "workspace-fallback") {
 		t.Fatalf("expected workspace fallback repo, got %+v", resp.Task.Repos)
 	}
-}
-
-func TestClaimTaskByRuntime_SurfacesIssueTriggerAndAttachmentSignals(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	ctx := context.Background()
-
-	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
-		testWorkspaceID,
-	).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("get agent: %v", err)
-	}
-
-	runCase := func(t *testing.T, attachTo string) {
-		t.Helper()
-
-		const (
-			issueTitle          = "Claim context signal fixture"
-			issueDescription    = "Issue description used by runtime capability derivation."
-			triggerCommentBody  = "Trigger comment used by daemon context."
-			attachmentURLSuffix = "/claim-context-signal.txt"
-		)
-
-		var issueID string
-		if err := testPool.QueryRow(ctx, `
-			INSERT INTO issue (
-				workspace_id, title, description, status, priority, creator_id, creator_type, number, position
-			) VALUES (
-				$1, $2, $3, 'todo', 'medium', $4, 'member',
-				(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1),
-				0
-			)
-			RETURNING id
-		`, testWorkspaceID, issueTitle, issueDescription, testUserID).Scan(&issueID); err != nil {
-			t.Fatalf("create issue: %v", err)
-		}
-		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
-
-		var commentID string
-		if err := testPool.QueryRow(ctx, `
-			INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content)
-			VALUES ($1, $2, 'member', $3, $4)
-			RETURNING id
-		`, testWorkspaceID, issueID, testUserID, triggerCommentBody).Scan(&commentID); err != nil {
-			t.Fatalf("create trigger comment: %v", err)
-		}
-
-		switch attachTo {
-		case "issue":
-			if _, err := testPool.Exec(ctx, `
-				INSERT INTO attachment (
-					workspace_id, issue_id, uploader_type, uploader_id, filename, url, content_type, size_bytes
-				) VALUES ($1, $2, 'member', $3, 'claim-context-signal.txt', $4, 'text/plain', 12)
-			`, testWorkspaceID, issueID, testUserID, "s3://test"+attachmentURLSuffix); err != nil {
-				t.Fatalf("create issue attachment: %v", err)
-			}
-		case "comment":
-			if _, err := testPool.Exec(ctx, `
-				INSERT INTO attachment (
-					workspace_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes
-				) VALUES ($1, $2, 'member', $3, 'claim-context-signal.txt', $4, 'text/plain', 12)
-			`, testWorkspaceID, commentID, testUserID, "s3://test-comment"+attachmentURLSuffix); err != nil {
-				t.Fatalf("create comment attachment: %v", err)
-			}
-		default:
-			t.Fatalf("unknown attachTo %q", attachTo)
-		}
-
-		var taskID string
-		if err := testPool.QueryRow(ctx, `
-			INSERT INTO agent_task_queue (
-				agent_id, runtime_id, issue_id, status, priority, trigger_comment_id
-			) VALUES ($1, $2, $3, 'queued', 9999, $4)
-			RETURNING id
-		`, agentID, runtimeID, issueID, commentID).Scan(&taskID); err != nil {
-			t.Fatalf("create task: %v", err)
-		}
-		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
-
-		w := httptest.NewRecorder()
-		req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-context-signals")
-		req = withURLParam(req, "runtimeId", runtimeID)
-		testHandler.ClaimTaskByRuntime(w, req)
-		if w.Code != http.StatusOK {
-			t.Fatalf("ClaimTaskByRuntime: %d %s", w.Code, w.Body.String())
-		}
-
-		var resp struct {
-			Task *struct {
-				ID                           string `json:"id"`
-				IssueTitle                   string `json:"issue_title"`
-				IssueDescription             string `json:"issue_description"`
-				TriggerCommentContent        string `json:"trigger_comment_content"`
-				HasIssueOrCommentAttachments bool   `json:"has_issue_or_comment_attachments"`
-			} `json:"task"`
-		}
-		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
-		if resp.Task == nil {
-			t.Fatal("expected task in response")
-		}
-		if resp.Task.ID != taskID {
-			t.Fatalf("claimed task id = %q, want %q", resp.Task.ID, taskID)
-		}
-		if resp.Task.IssueTitle != issueTitle {
-			t.Fatalf("issue_title = %q, want %q", resp.Task.IssueTitle, issueTitle)
-		}
-		if resp.Task.IssueDescription != issueDescription {
-			t.Fatalf("issue_description = %q, want %q", resp.Task.IssueDescription, issueDescription)
-		}
-		if resp.Task.TriggerCommentContent != triggerCommentBody {
-			t.Fatalf("trigger_comment_content = %q, want %q", resp.Task.TriggerCommentContent, triggerCommentBody)
-		}
-		if !resp.Task.HasIssueOrCommentAttachments {
-			t.Fatalf("has_issue_or_comment_attachments = false for %s attachment", attachTo)
-		}
-	}
-
-	t.Run("issue attachment", func(t *testing.T) {
-		runCase(t, "issue")
-	})
-	t.Run("comment attachment", func(t *testing.T) {
-		runCase(t, "comment")
-	})
 }
 
 // Regression test for #1276: ClaimTaskByRuntime must populate workspace_id in

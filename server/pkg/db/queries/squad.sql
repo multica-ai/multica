@@ -72,3 +72,37 @@ ORDER BY s.created_at ASC;
 -- Transfer all issues assigned to a squad to the squad's leader agent.
 UPDATE issue SET assignee_type = 'agent', assignee_id = $2, updated_at = now()
 WHERE assignee_type = 'squad' AND assignee_id = $1;
+
+-- name: ListSquadMemberStatusRows :many
+-- Per-row join used to build the squad-members status view. One row per
+-- (squad_member × active_task); members with no active task return a
+-- single row with NULL task_* columns. Human members and agent members
+-- with no agent row also return one row with NULL agent_/runtime_ columns.
+-- The handler aggregates rows by member_id.
+SELECT
+    sm.id              AS squad_member_id,
+    sm.member_type     AS member_type,
+    sm.member_id       AS member_id,
+    a.archived_at      AS agent_archived_at,
+    ar.status          AS runtime_status,
+    ar.last_seen_at    AS runtime_last_seen_at,
+    atq.id             AS task_id,
+    atq.status         AS task_status,
+    atq.issue_id       AS task_issue_id,
+    atq.dispatched_at  AS task_dispatched_at,
+    i.number           AS issue_number,
+    i.title            AS issue_title,
+    i.status           AS issue_status
+FROM squad_member sm
+LEFT JOIN agent a
+       ON sm.member_type = 'agent' AND a.id = sm.member_id
+LEFT JOIN agent_runtime ar
+       ON ar.id = a.runtime_id
+LEFT JOIN agent_task_queue atq
+       ON sm.member_type = 'agent'
+      AND atq.agent_id = sm.member_id
+      AND atq.status IN ('dispatched', 'running')
+LEFT JOIN issue i
+       ON i.id = atq.issue_id
+WHERE sm.squad_id = $1
+ORDER BY sm.created_at ASC, atq.dispatched_at DESC NULLS LAST;

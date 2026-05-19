@@ -46,6 +46,7 @@
     "./onboarding": "./onboarding/index.ts",
     "./platform": "./platform/index.ts",
     "./i18n": "./i18n/index.ts",
+    "./attachments": "./attachments/index.ts",
     "./locales": "./locales/index.ts",
     "./locales/*": "./locales/*"
   },
@@ -77,7 +78,7 @@
     "@tiptap/starter-kit": "^3.22.1",
     "@tiptap/suggestion": "^3.22.1",
     "cmdk": "^1.1.1",
-    "hast-util-to-html": "^4.0.1",
+    "hast-util-to-html": "^9.0.5",
     "katex": "catalog:",
     "lowlight": "^3.3.0",
     "mermaid": "catalog:",

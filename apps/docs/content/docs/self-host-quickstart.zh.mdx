@@ -44,6 +44,10 @@ make selfhost
 - **前端**：[http://localhost:3000](http://localhost:3000)
 - **后端**：[http://localhost:8080](http://localhost:8080)
 
+<Callout type="info">
+**所有端口只监听 `127.0.0.1`。** `docker-compose.selfhost.yml` 把每个 publish 出来的端口都绑到 loopback —— `ss -tlnp` 不会看到 `0.0.0.0:8080`，外网/其它机器默认根本连不上。这是为了避免默认 `JWT_SECRET` 和 Postgres 凭据被直接暴露到公网。要做跨机访问，请用反向代理在前面终结 TLS，详见下方 [Step 5b —— 跨机访问：用反向代理把服务挡在前面](#5b-跨机访问用反向代理把服务挡在前面)。
+</Callout>
+
 ## 2. 重要：保持生产安全配置
 
 <Callout type="warning">
@@ -98,21 +102,53 @@ RESEND_FROM_EMAIL=noreply@yourdomain.com  # 同时作为 SMTP From: 头
 
 ## 5. 连接命令行工具到你自己的 server
 
-命令行装法和 [Cloud 快速上手 → 2. 装命令行工具](/cloud-quickstart#2-装-multica-命令行工具) 一样——Homebrew / 脚本 / PowerShell 任选。装好之后，**用 self-host 版本的 setup 命令**：
+命令行装法和 [Cloud 快速上手 → 2. 装命令行工具](/cloud-quickstart#2-装-multica-命令行工具) 一样——Homebrew / 脚本 / PowerShell 任选。
 
-```bash
-multica setup self-host --server-url http://<你的服务器地址>:8080 --app-url http://<你的服务器地址>:3000
-```
+### 5a. 同一台机器
 
-本地就是一台电脑跑整套的话：
+CLI 和 server 在同一台机器上时，默认参数就够用：
 
 ```bash
 multica setup self-host
 ```
 
-默认连 `http://localhost:8080`（backend）+ `http://localhost:3000`（frontend）。
+会自动连 `http://localhost:8080`（backend）+ `http://localhost:3000`（frontend），引导你在浏览器里登录、把 PAT 存到本地、**自动启动守护进程**。
 
-`setup self-host` 会让你在浏览器里完成登录，把 PAT 存到本地，**自动启动守护进程**。
+### 5b. 跨机访问：用反向代理把服务挡在前面
+
+因为 compose 默认只监听 `127.0.0.1`，从别的机器跑的 daemon 是连不上 `http://<server-ip>:8080` 的——这也是有意为之，否则默认 `JWT_SECRET` 等于直接暴露在公网。正确做法是在 server 上跑一个反向代理（Caddy / nginx / Cloudflare Tunnel），由它终结 TLS，再反代到 `127.0.0.1:8080`（backend）和 `127.0.0.1:3000`（frontend）。然后把 CLI 指到公开的 HTTPS 域名：
+
+```bash
+multica setup self-host \
+  --server-url https://<你的域名> \
+  --app-url https://<你的域名>
+```
+
+最小可用的 Caddyfile，单域名同时挂前后端（带 WebSocket 转发，daemon 和网页端都依赖）：
+
+```nginx
+multica.example.com {
+    # WebSocket 路由——必须在 catch-all 之前
+    @ws path /ws /ws/*
+    handle @ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # Backend API
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # 其它请求 → 前端
+    reverse_proxy 127.0.0.1:3000
+}
+```
+
+代理起好之后，记得在 server 的 `.env` 里把 `FRONTEND_ORIGIN` 设成 `https://multica.example.com` 并重启后端，否则 WebSocket 的 origin 校验会把浏览器拒掉（见 [故障排查 → WebSocket 连不上](/troubleshooting#websocket-连不上)）。
+
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) 也是不错的选择——它直接给一个公开域名 + TLS，host 上不用对外暴露任何端口。Nginx 也能做（分 `app.` / `api.` 两个域名 + `proxy_set_header Upgrade` 转 WebSocket），关键就是终结 TLS、并在 `/ws` 上转发 `Upgrade` 头。
 
 ## 6. 创建智能体 + 分配第一个任务
 
