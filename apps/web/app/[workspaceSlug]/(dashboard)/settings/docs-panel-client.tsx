@@ -3,6 +3,15 @@
 import { useState, useEffect, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import { cn } from "@multica/ui/lib/utils";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
 
 export interface DocPage {
   slug: string;
@@ -58,9 +67,38 @@ export function DocsPanelClient({ pages }: DocsPanelClientProps) {
   });
 
   return (
-    <div className="absolute inset-0 flex">
-      {/* Inner left nav */}
-      <nav className="w-56 shrink-0 border-r overflow-y-auto p-3">
+    <div className="absolute inset-0 flex flex-col md:flex-row">
+      {/* Mobile: compact select nav */}
+      <div className="md:hidden shrink-0 border-b bg-background p-2">
+        <Select value={activeSlug} onValueChange={(v) => v !== null && setActiveSlug(v)}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {sortedGroups.map(([group, groupPages]) =>
+              group ? (
+                <SelectGroup key={group}>
+                  <SelectLabel className="capitalize">{group.replace(/-/g, " ")}</SelectLabel>
+                  {groupPages.map((page) => (
+                    <SelectItem key={page.slug} value={page.slug}>
+                      {page.title}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ) : (
+                groupPages.map((page) => (
+                  <SelectItem key={page.slug} value={page.slug}>
+                    {page.title}
+                  </SelectItem>
+                ))
+              )
+            )}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Desktop: left sidebar nav */}
+      <nav className="hidden md:block w-56 shrink-0 border-r overflow-y-auto p-3">
         {sortedGroups.map(([group, groupPages]) => (
           <div key={group || "_top"} className="mb-3">
             {group && (
@@ -89,7 +127,7 @@ export function DocsPanelClient({ pages }: DocsPanelClientProps) {
 
       {/* Page content */}
       <div className="flex-1 min-w-0 overflow-y-auto">
-        <article className="docs-prose max-w-3xl mx-auto px-8 py-8">
+        <article className="docs-prose max-w-3xl mx-auto px-4 py-6 md:px-8 md:py-8">
           {active && (
             <>
               <h1 className="text-2xl font-semibold mb-1">{active.title}</h1>
