@@ -22,6 +22,10 @@ export interface GitHubInstallation {
   account_type: "User" | "Organization";
   account_avatar_url: string | null;
   created_at: string;
+  /** Display name of the workspace member who connected this installation.
+   * Optional because older backends and minimum-visibility deployments may
+   * omit it; the UI renders the "connected by" line only when present. */
+  connected_by?: string;
 }
 
 export interface GitHubPullRequest {

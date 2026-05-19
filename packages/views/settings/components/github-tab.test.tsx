@@ -22,11 +22,21 @@ const workspaceRef = vi.hoisted(() => ({
     repos: [{ url: "https://github.com/acme/api" }] as { url: string }[],
   },
 }));
+type MemberRole = "owner" | "admin" | "member" | "guest";
 const membersRef = vi.hoisted(() => ({
-  current: [{ user_id: "user-1", role: "owner" as const }],
+  current: [{ user_id: "user-1", role: "owner" as MemberRole }],
 }));
 const installationsRef = vi.hoisted(() => ({
-  current: { installations: [] as { id: string; account_login: string }[], configured: true },
+  current: {
+    installations: [] as {
+      id: string;
+      account_login: string;
+      installation_id?: number;
+      connected_by?: string;
+    }[],
+    configured: true,
+    can_manage: true as boolean,
+  },
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -124,7 +134,7 @@ function resetFixtures() {
     repos: [{ url: "https://github.com/acme/api" }],
   };
   membersRef.current = [{ user_id: "user-1", role: "owner" }];
-  installationsRef.current = { installations: [], configured: true };
+  installationsRef.current = { installations: [], configured: true, can_manage: true };
 }
 
 describe("GitHubTab", () => {
@@ -184,7 +194,8 @@ describe("GitHubTab", () => {
     const user = userEvent.setup();
     installationsRef.current = {
       configured: true,
-      installations: [{ id: "inst-42", account_login: "acme" }],
+      can_manage: true,
+      installations: [{ id: "inst-42", account_login: "acme", installation_id: 42 }],
     };
     mockDeleteInstallation.mockResolvedValue(undefined);
 
@@ -208,10 +219,56 @@ describe("GitHubTab", () => {
     workspaceRef.current.settings = { github_enabled: false };
     installationsRef.current = {
       configured: true,
-      installations: [{ id: "inst-1", account_login: "acme" }],
+      can_manage: true,
+      installations: [{ id: "inst-1", account_login: "acme", installation_id: 1 }],
     };
     render(<GitHubTab />, { wrapper: I18nWrapper });
     expect(screen.getByRole("button", { name: /^Disconnect$/ })).toBeTruthy();
+  });
+
+  it("non-admin sees the existing connection but no Connect/Disconnect controls", () => {
+    membersRef.current = [{ user_id: "user-1", role: "member" }];
+    installationsRef.current = {
+      configured: true,
+      can_manage: false,
+      installations: [{ id: "inst-1", account_login: "acme" }],
+    };
+    render(<GitHubTab />, { wrapper: I18nWrapper });
+
+    expect(screen.getByText(/Connected to acme/i)).toBeTruthy();
+    expect(screen.getByText(/Read-only view\./i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Connect GitHub$/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Disconnect$/ })).toBeNull();
+  });
+
+  it("non-admin with no connection sees the contact-admin hint", () => {
+    membersRef.current = [{ user_id: "user-1", role: "member" }];
+    installationsRef.current = {
+      configured: true,
+      can_manage: false,
+      installations: [],
+    };
+    render(<GitHubTab />, { wrapper: I18nWrapper });
+
+    expect(screen.getByText(/Ask an admin or owner/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Connect GitHub$/ })).toBeNull();
+  });
+
+  it("renders the connected_by line when the backend provides it", () => {
+    installationsRef.current = {
+      configured: true,
+      can_manage: true,
+      installations: [
+        {
+          id: "inst-7",
+          account_login: "acme",
+          installation_id: 7,
+          connected_by: "Jiayuan",
+        },
+      ],
+    };
+    render(<GitHubTab />, { wrapper: I18nWrapper });
+    expect(screen.getByText(/Connected by Jiayuan/)).toBeTruthy();
   });
 
   it("repositories shortcut navigates to the repositories tab", async () => {

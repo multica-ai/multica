@@ -48,15 +48,21 @@ export function GitHubTab() {
 
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
-  const canManage = currentMember?.role === "owner" || currentMember?.role === "admin";
+  // `canView` gates the read-only installation list (every workspace member
+  // sees it after MUL-2413); `canManage` gates the Connect / Disconnect
+  // actions and comes from the backend response (`can_manage`) so the
+  // frontend never claims management rights the server would reject.
+  const canView = !!currentMember;
 
   const { data: installationData } = useQuery({
     ...githubInstallationsOptions(wsId),
-    enabled: !!wsId && canManage,
+    enabled: !!wsId && canView,
   });
   const installations = installationData?.installations ?? [];
   const configured = installationData?.configured ?? false;
+  const canManage = installationData?.can_manage === true;
   const connected = installations.length > 0;
+  const primaryInstallation = installations[0] ?? null;
 
   const flags = deriveGitHubSettings(workspace);
   const [savingKey, setSavingKey] = useState<SettingsKey | null>(null);
@@ -169,12 +175,21 @@ export function GitHubTab() {
                 <div className="space-y-1">
                   <p className="text-sm font-medium">{t(($) => $.github.connection_title)}</p>
                   {connected ? (
-                    <p className="text-xs text-muted-foreground">
-                      {t(($) => $.github.connected_to, {
-                        login: installations.map((i) => i.account_login).join(", "),
-                      })}
-                    </p>
-                  ) : (
+                    <>
+                      <p className="text-xs text-muted-foreground">
+                        {t(($) => $.github.connected_to, {
+                          login: installations.map((i) => i.account_login).join(", "),
+                        })}
+                      </p>
+                      {primaryInstallation?.connected_by && (
+                        <p className="text-xs text-muted-foreground">
+                          {t(($) => $.github.connected_by, {
+                            name: primaryInstallation.connected_by!,
+                          })}
+                        </p>
+                      )}
+                    </>
+                  ) : canManage ? (
                     <p className="text-xs text-muted-foreground">
                       {t(($) => $.github.connection_description_prefix)}{" "}
                       <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
@@ -183,19 +198,23 @@ export function GitHubTab() {
                       {t(($) => $.github.connection_description_suffix)}{" "}
                       <strong>{t(($) => $.github.connection_description_done)}</strong>.
                     </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      {t(($) => $.github.contact_admin_to_connect)}
+                    </p>
                   )}
                 </div>
               </div>
               {canManage && (
                 <div className="flex items-center gap-2">
-                  {connected && installations[0] ? (
+                  {connected && primaryInstallation ? (
                     // Disconnect must stay reachable even when the master switch
                     // is off — disconnect is a separate intent (revoke the App
                     // grant) from hiding the feature.
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setDisconnectTarget(installations[0]!.id)}
+                      onClick={() => setDisconnectTarget(primaryInstallation.id)}
                     >
                       {t(($) => $.github.disconnect)}
                     </Button>
@@ -228,9 +247,9 @@ export function GitHubTab() {
               </p>
             )}
 
-            {!canManage && (
+            {!canManage && connected && (
               <p className="text-xs text-muted-foreground">
-                {t(($) => $.github.manage_hint)}
+                {t(($) => $.github.read_only_hint)}
               </p>
             )}
           </CardContent>
