@@ -136,6 +136,7 @@ describe("applyWorkspaceUpdatedToCache", () => {
       slug: "test",
       description: null,
       context: null,
+      wiki_content: null,
       settings: {},
       repos: [],
       issue_prefix: "TES",

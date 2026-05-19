@@ -61,6 +61,7 @@ function fakeQc(data: {
     archived_at: string | null;
     visibility?: "workspace" | "private";
     owner_id?: string | null;
+    allowed_user_ids?: string[];
   }>;
   squads?: Array<{
     id: string;

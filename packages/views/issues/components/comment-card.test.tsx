@@ -104,7 +104,6 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
   };
 });
 
-import { AttachmentList } from "./comment-card";
 
 vi.mock("../../navigation", () => ({
   useNavigation: () => ({
