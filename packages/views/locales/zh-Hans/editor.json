@@ -40,7 +40,8 @@
     "preview_failed": "预览加载失败",
     "preview_too_large": "文件太大，无法在线预览，请下载查看。",
     "preview_unsupported": "该文件类型暂不支持预览。",
-    "close": "关闭"
+    "close": "关闭",
+    "open_in_new_tab": "在新标签页打开"
   },
   "link_hover": {
     "copy_link": "复制链接",
@@ -56,7 +57,9 @@
     "no_results": "无结果"
   },
   "code_block": {
-    "copy_code": "复制代码"
+    "copy_code": "复制代码",
+    "show_preview": "显示预览",
+    "show_source": "显示源码"
   },
   "file_card": {
     "uploading": "正在上传 {{filename}}"

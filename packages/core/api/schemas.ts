@@ -198,6 +198,17 @@ export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
 }).loose();
 
+export const OnboardingRuntimeBootstrapResponseSchema = z.object({
+  workspace_id: z.string(),
+  agent_id: z.string(),
+  issue_id: z.string(),
+}).loose();
+
+export const OnboardingNoRuntimeBootstrapResponseSchema = z.object({
+  workspace_id: z.string(),
+  issue_id: z.string(),
+}).loose();
+
 // ---------------------------------------------------------------------------
 // Workspace dashboard schemas
 //
@@ -335,6 +346,31 @@ export const EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE: CreateAgentFromTemplateR
   imported_skill_ids: [],
   reused_skill_ids: [],
 };
+
+// Squad member status — backs the Squad detail page's Members tab. status
+// is `string | null` (not the narrow `SquadMemberStatusValue` union) so a
+// new server-side status doesn't fail the parse; the UI defaults to a
+// neutral pill for unknown values.
+const SquadActiveIssueBriefSchema = z.object({
+  issue_id: z.string(),
+  identifier: z.string(),
+  title: z.string(),
+  issue_status: z.string(),
+}).loose();
+
+const SquadMemberStatusSchema = z.object({
+  member_type: z.string(),
+  member_id: z.string(),
+  status: z.string().nullable().optional().transform((v) => v ?? null),
+  active_issues: z.array(SquadActiveIssueBriefSchema).default([]),
+  last_active_at: z.string().nullable().optional().transform((v) => v ?? null),
+}).loose();
+
+export const SquadMemberStatusListResponseSchema = z.object({
+  members: z.array(SquadMemberStatusSchema).default([]),
+}).loose();
+
+export const EMPTY_SQUAD_MEMBER_STATUS_LIST = { members: [] };
 
 // ---------------------------------------------------------------------------
 // Structured error body — POST /api/workspaces/:wsId/issues 409 conflict.

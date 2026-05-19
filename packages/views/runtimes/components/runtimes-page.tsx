@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import {
   Cloud,
@@ -85,6 +85,14 @@ export function RuntimesPage({
   const [selectedMachineId, setSelectedMachineId] = useState<string | null>(
     null,
   );
+  // Tracks whether the user has explicitly picked a machine. Until then,
+  // auto-default keeps preferring the Local section (which on desktop may
+  // appear later than remotes — `localDaemonId` is fetched async).
+  const userSelectedRef = useRef(false);
+  const handleSelectMachine = useCallback((id: string) => {
+    userSelectedRef.current = true;
+    setSelectedMachineId(id);
+  }, []);
   const [showConnectDialog, setShowConnectDialog] = useState(false);
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_runtimes_layout",
@@ -133,9 +141,16 @@ export function RuntimesPage({
       if (selectedMachineId !== null) setSelectedMachineId(null);
       return;
     }
-    if (!selectedMachineId || !filteredMachines.some((m) => m.id === selectedMachineId)) {
-      setSelectedMachineId(filteredMachines[0]?.id ?? null);
-    }
+    const stillValid =
+      !!selectedMachineId &&
+      filteredMachines.some((m) => m.id === selectedMachineId);
+    // Honor an explicit user pick. Otherwise re-evaluate the default so the
+    // Local machine wins as soon as it shows up, even if a remote was the
+    // first-paint default.
+    if (userSelectedRef.current && stillValid) return;
+    const local = filteredMachines.find((m) => m.section === "local");
+    const nextId = local?.id ?? filteredMachines[0]?.id ?? null;
+    if (nextId !== selectedMachineId) setSelectedMachineId(nextId);
   }, [filteredMachines, selectedMachineId]);
 
   const selectedMachine =
@@ -170,7 +185,7 @@ export function RuntimesPage({
             setSearch={setMachineSearch}
             filter={machineFilter}
             setFilter={setMachineFilter}
-            onSelect={setSelectedMachineId}
+            onSelect={handleSelectMachine}
           />
           <MachineDetail
             machine={selectedMachine}
@@ -206,7 +221,7 @@ export function RuntimesPage({
                 setSearch={setMachineSearch}
                 filter={machineFilter}
                 setFilter={setMachineFilter}
-                onSelect={setSelectedMachineId}
+                onSelect={handleSelectMachine}
                 className="h-full border-b-0 border-r"
               />
             </ResizablePanel>

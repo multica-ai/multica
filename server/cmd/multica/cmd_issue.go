@@ -309,6 +309,10 @@ func init() {
 	// issue comment list
 	issueCommentListCmd.Flags().String("output", "table", "Output format: table or json")
 	issueCommentListCmd.Flags().String("since", "", "Only return comments created after this timestamp (RFC3339)")
+	issueCommentListCmd.Flags().String("thread", "", "Comment UUID — return the thread containing this comment (root + every descendant). May be a root or a reply id.")
+	issueCommentListCmd.Flags().Int("recent", 0, "Return the N most recently active threads (root + descendants per thread). Use --before/--before-id from the previous response to scroll to older threads.")
+	issueCommentListCmd.Flags().String("before", "", "Thread cursor: last_activity_at (RFC3339Nano). Read from the X-Multica-Next-Before response header; must be paired with --before-id.")
+	issueCommentListCmd.Flags().String("before-id", "", "Thread cursor: root comment UUID. Read from the X-Multica-Next-Before-Id response header; must be paired with --before.")
 
 	// issue runs
 	issueRunsCmd.Flags().String("output", "table", "Output format: table or json")
@@ -921,9 +925,51 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve issue: %w", err)
 	}
 
+	since, _ := cmd.Flags().GetString("since")
+	thread, _ := cmd.Flags().GetString("thread")
+	recent, _ := cmd.Flags().GetInt("recent")
+	// Flags().Changed distinguishes "user did not pass --recent" from
+	// "user explicitly passed --recent 0" (or a negative value). The
+	// GetInt zero-value collapses both cases, which would otherwise
+	// cause us to silently drop an invalid value and fall back to the
+	// default unparameterized list — exactly the drift Elon flagged in
+	// the PR #2787 second review.
+	recentSet := cmd.Flags().Changed("recent")
+	before, _ := cmd.Flags().GetString("before")
+	beforeID, _ := cmd.Flags().GetString("before-id")
+
+	// Mirror the server-side combination rules client-side so the user gets
+	// a clear local error instead of a 400 round-trip. These match the
+	// validation in handler.ListComments (server/internal/handler/comment.go).
+	if recentSet && recent <= 0 {
+		return fmt.Errorf("--recent must be a positive integer")
+	}
+	if thread != "" && recentSet {
+		return fmt.Errorf("--thread and --recent are mutually exclusive")
+	}
+	if thread != "" && (before != "" || beforeID != "") {
+		return fmt.Errorf("--thread cannot be combined with --before / --before-id")
+	}
+	if (before == "") != (beforeID == "") {
+		return fmt.Errorf("--before and --before-id must be set together (composite cursor for stable pagination)")
+	}
+	if before != "" && !recentSet {
+		return fmt.Errorf("--before / --before-id require --recent (cursor scrolls within a recent window)")
+	}
+
 	params := url.Values{}
-	if v, _ := cmd.Flags().GetString("since"); v != "" {
-		params.Set("since", v)
+	if since != "" {
+		params.Set("since", since)
+	}
+	if thread != "" {
+		params.Set("thread", thread)
+	}
+	if recentSet {
+		params.Set("recent", fmt.Sprintf("%d", recent))
+	}
+	if before != "" {
+		params.Set("before", before)
+		params.Set("before_id", beforeID)
 	}
 
 	path := "/api/issues/" + issueRef.ID + "/comments"
@@ -932,10 +978,20 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	}
 
 	var comments []map[string]any
-	if err := client.GetJSON(ctx, path, &comments); err != nil {
+	respHeaders, err := client.GetJSONWithHeaders(ctx, path, &comments)
+	if err != nil {
 		return fmt.Errorf("list comments: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "Showing %d comments.\n", len(comments))
+	// Under --recent the server emits a thread cursor in headers when there
+	// is likely an older page. Surface it on stderr so an operator (and the
+	// agent prompt update that follows this PR) can scroll deeper without
+	// having to dig into the raw HTTP response.
+	if nb := respHeaders.Get("X-Multica-Next-Before"); nb != "" {
+		if nbid := respHeaders.Get("X-Multica-Next-Before-Id"); nbid != "" {
+			fmt.Fprintf(os.Stderr, "Next thread cursor: --before %s --before-id %s\n", nb, nbid)
+		}
+	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {

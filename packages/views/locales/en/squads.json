@@ -41,7 +41,14 @@
     "leader_chip": "Leader",
     "view_agent_tooltip": "Open agent detail",
     "make_leader_tooltip": "Make squad leader",
-    "remove_member_tooltip": "Remove from squad"
+    "remove_member_tooltip": "Remove from squad",
+    "status_working": "Working",
+    "status_idle": "Idle",
+    "status_offline": "Offline",
+    "status_unstable": "Unstable",
+    "issue_status_blocked": "blocked",
+    "active_issue_more": "and {{count}} more",
+    "last_active_label": "last active {{time}}"
   },
   "instructions_tab": {
     "description": "Squad instructions are injected into the leader agent's prompt whenever it works on an issue assigned to this squad. Use them to give the leader squad-wide guidance, working agreements, or context the leader should follow on every task.",

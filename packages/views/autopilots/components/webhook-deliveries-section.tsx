@@ -246,7 +246,11 @@ function DeliveryDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      {/* max-h + overflow-y-auto: webhook bodies + headers + response can
+          easily exceed viewport height. Without a cap the dialog grows past
+          the screen edge and the bottom (e.g. Replay button) becomes
+          unreachable. 85vh leaves breathing room around the dialog. */}
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogTitle className="flex items-center gap-2">
           <Webhook className="h-4 w-4 text-muted-foreground" />
           {t(($) => $.deliveries.detail.title)}
@@ -445,7 +449,11 @@ function CodeBlock({ label, value }: { label: string; value: string }) {
   };
 
   return (
-    <div className="rounded-md border bg-background">
+    // min-w-0 lets this card shrink below the <pre>'s intrinsic min-content
+    // width — without it, a minified single-line JSON body would push the
+    // surrounding grid/flex cell (and the whole DialogContent) past the
+    // viewport edge.
+    <div className="min-w-0 rounded-md border bg-background">
       <div className="flex items-center justify-between border-b px-3 py-1.5 text-[11px]">
         <span className="font-medium text-muted-foreground">{label}</span>
         <button
@@ -463,7 +471,10 @@ function CodeBlock({ label, value }: { label: string; value: string }) {
             : t(($) => $.webhook_payload.copy)}
         </button>
       </div>
-      <pre className="max-h-48 overflow-auto bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed">
+      {/* whitespace-pre-wrap keeps pretty-printed indentation but lets
+          long lines wrap; break-all is the only thing that breaks mid-token
+          (necessary for minified JSON, which has no whitespace to break at). */}
+      <pre className="max-h-48 overflow-auto bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed whitespace-pre-wrap break-all">
         {display}
         {isTruncated && (
           <span className="block pt-2 text-muted-foreground/70">

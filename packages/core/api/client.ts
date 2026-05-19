@@ -98,6 +98,7 @@ import type {
   GitHubConnectResponse,
   Squad,
   SquadMember,
+  SquadMemberStatusListResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -121,12 +122,16 @@ import {
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
+  EMPTY_SQUAD_MEMBER_STATUS_LIST,
   EMPTY_TIMELINE_ENTRIES,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
   GroupedIssuesResponseSchema,
   ListIssuesResponseSchema,
   ListWebhookDeliveriesResponseSchema,
+  OnboardingNoRuntimeBootstrapResponseSchema,
+  OnboardingRuntimeBootstrapResponseSchema,
+  SquadMemberStatusListResponseSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
   WebhookDeliveryResponseSchema,
@@ -156,6 +161,30 @@ export interface LoginResponse {
   token: string;
   user: User;
 }
+
+export interface OnboardingRuntimeBootstrapResponse {
+  workspace_id: string;
+  agent_id: string;
+  issue_id: string;
+}
+
+const EMPTY_ONBOARDING_RUNTIME_BOOTSTRAP_RESPONSE:
+  OnboardingRuntimeBootstrapResponse = {
+  workspace_id: "",
+  agent_id: "",
+  issue_id: "",
+};
+
+export interface OnboardingNoRuntimeBootstrapResponse {
+  workspace_id: string;
+  issue_id: string;
+}
+
+const EMPTY_ONBOARDING_NO_RUNTIME_BOOTSTRAP_RESPONSE:
+  OnboardingNoRuntimeBootstrapResponse = {
+  workspace_id: "",
+  issue_id: "",
+};
 
 // --- Starter content (post-onboarding import) -----------------------------
 // Shape mirrors the Go request/response in handler/onboarding.go.
@@ -411,6 +440,43 @@ export class ApiClient {
     });
   }
 
+  async bootstrapOnboardingRuntime(payload: {
+    workspace_id: string;
+    runtime_id: string;
+  }): Promise<OnboardingRuntimeBootstrapResponse> {
+    const raw = await this.fetch<unknown>(
+      "/api/me/onboarding/runtime-bootstrap",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+    return parseWithFallback(
+      raw,
+      OnboardingRuntimeBootstrapResponseSchema,
+      EMPTY_ONBOARDING_RUNTIME_BOOTSTRAP_RESPONSE,
+      { endpoint: "POST /api/me/onboarding/runtime-bootstrap" },
+    );
+  }
+
+  async bootstrapOnboardingNoRuntime(payload: {
+    workspace_id: string;
+  }): Promise<OnboardingNoRuntimeBootstrapResponse> {
+    const raw = await this.fetch<unknown>(
+      "/api/me/onboarding/no-runtime-bootstrap",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+    return parseWithFallback(
+      raw,
+      OnboardingNoRuntimeBootstrapResponseSchema,
+      EMPTY_ONBOARDING_NO_RUNTIME_BOOTSTRAP_RESPONSE,
+      { endpoint: "POST /api/me/onboarding/no-runtime-bootstrap" },
+    );
+  }
+
   async joinCloudWaitlist(payload: {
     email: string;
     reason?: string;
@@ -477,6 +543,7 @@ export class ApiClient {
     if (params?.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     if (params?.creator_id) search.set("creator_id", params.creator_id);
     if (params?.project_id) search.set("project_id", params.project_id);
+    if (params?.involves_user_id) search.set("involves_user_id", params.involves_user_id);
     if (params?.open_only) search.set("open_only", "true");
     const path = `/api/issues?${search}`;
     const raw = await this.fetch<unknown>(path);
@@ -497,6 +564,7 @@ export class ApiClient {
     if (params.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     if (params.creator_id) search.set("creator_id", params.creator_id);
     if (params.project_id) search.set("project_id", params.project_id);
+    if (params.involves_user_id) search.set("involves_user_id", params.involves_user_id);
     if (params.assignee_filters?.length) {
       search.set("assignee_filters", params.assignee_filters.map((f) => `${f.type}:${f.id}`).join(","));
     }
@@ -1099,7 +1167,7 @@ export class ApiClient {
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[] }): Promise<Workspace> {
+  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string }): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -1542,6 +1610,17 @@ export class ApiClient {
 
   async updateSquadMemberRole(squadId: string, data: { member_type: string; member_id: string; role: string }): Promise<SquadMember> {
     return this.fetch(`/api/squads/${squadId}/members/role`, { method: "PATCH", body: JSON.stringify(data) });
+  }
+
+  // Per-squad members status snapshot: one row per member with derived
+  // working/idle/offline/unstable plus the issues each agent is currently
+  // running. Parsed with a lenient schema so a new server-side status
+  // value or extra field can't white-screen the Squad page (#2143).
+  async getSquadMemberStatus(squadId: string): Promise<SquadMemberStatusListResponse> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/members/status`);
+    return parseWithFallback(raw, SquadMemberStatusListResponseSchema, EMPTY_SQUAD_MEMBER_STATUS_LIST, {
+      endpoint: "GET /api/squads/:id/members/status",
+    }) as SquadMemberStatusListResponse;
   }
 
   // Autopilots

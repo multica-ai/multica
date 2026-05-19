@@ -123,7 +123,7 @@ func init() {
 	autopilotCreateCmd.Flags().String("mode", "", "Execution mode: create_issue or run_only (required)")
 	autopilotCreateCmd.Flags().String("priority", "none", "Priority for created issues (none, low, medium, high, urgent)")
 	autopilotCreateCmd.Flags().String("project", "", "Project ID (optional)")
-	autopilotCreateCmd.Flags().String("issue-title-template", "", "Template for issue titles (create_issue mode)")
+	autopilotCreateCmd.Flags().String("issue-title-template", "", "Template for issue titles (create_issue mode). Only {{date}} (UTC, YYYY-MM-DD) is interpolated; any other {{...}} token is rejected at create-time.")
 	autopilotCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// update
@@ -134,7 +134,7 @@ func init() {
 	autopilotUpdateCmd.Flags().String("priority", "", "New priority")
 	autopilotUpdateCmd.Flags().String("status", "", "New status (active, paused)")
 	autopilotUpdateCmd.Flags().String("mode", "", "New execution mode (create_issue or run_only)")
-	autopilotUpdateCmd.Flags().String("issue-title-template", "", "New issue title template")
+	autopilotUpdateCmd.Flags().String("issue-title-template", "", "New issue title template. Only {{date}} (UTC, YYYY-MM-DD) is interpolated; any other {{...}} token is rejected.")
 	autopilotUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// delete

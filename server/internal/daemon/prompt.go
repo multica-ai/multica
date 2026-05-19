@@ -31,7 +31,7 @@ func BuildPrompt(task Task, provider string) string {
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
-	fmt.Fprintf(&b, "If you need comment history, `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). Pass `--since <RFC3339>` to fetch only comments newer than a known cursor.\n", task.IssueID)
+	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). On long-running issues use `--recent 20 --output json` to read the 20 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
 	return b.String()
 }
 
@@ -147,7 +147,7 @@ func buildCommentPrompt(task Task, provider string) string {
 		}
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
-	fmt.Fprintf(&b, "If you need comment history, `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). Pass `--since <RFC3339>` to fetch only comments newer than a known cursor.\n\n", task.IssueID)
+	fmt.Fprintf(&b, "For comment history, read the triggering thread first: `multica issue comment list %s --thread %s --output json` returns the root and every reply in the same thread as the trigger comment. If you still need more context, `multica issue comment list %s --recent 20 --output json` pulls the 20 most recently active threads on the issue (each `--recent` page prints a `Next thread cursor: --before <ts> --before-id <root-id>` line on stderr — pass the same pair back to scroll older threads). Avoid the unfiltered `--output json` form on long-running issues; it dumps the full flat timeline (cap 2000) and wastes context. `--since <RFC3339>` is still available for incremental polling and may combine with `--thread` or `--recent`.\n\n", task.IssueID, task.TriggerCommentID, task.IssueID)
 	b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID))
 	return b.String()
 }

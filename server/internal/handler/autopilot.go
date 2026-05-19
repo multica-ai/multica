@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -349,6 +347,12 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "execution_mode must be create_issue or run_only")
 		return
 	}
+	if req.IssueTitleTemplate != nil {
+		if err := service.ValidateIssueTitleTemplate(*req.IssueTitleTemplate); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
@@ -442,6 +446,12 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		params.Description = ptrToText(req.Description)
 	}
 	if _, ok := rawFields["issue_title_template"]; ok {
+		if req.IssueTitleTemplate != nil {
+			if err := service.ValidateIssueTitleTemplate(*req.IssueTitleTemplate); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
 		params.IssueTitleTemplate = ptrToText(req.IssueTitleTemplate)
 	}
 	if _, ok := rawFields["assignee_id"]; ok {
@@ -1067,20 +1077,6 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 
 	run, err := h.AutopilotService.DispatchAutopilot(r.Context(), autopilot, pgtype.UUID{}, "manual", nil)
 	if err != nil {
-		var duplicate *issueguard.ActiveDuplicateError
-		if errors.As(err, &duplicate) {
-			writeJSON(w, http.StatusConflict, map[string]any{
-				"code":  "active_duplicate_issue",
-				"error": duplicate.Error(),
-				"issue": map[string]any{
-					"id":         duplicate.ID,
-					"identifier": duplicate.Identifier,
-					"title":      duplicate.Title,
-					"status":     duplicate.Status,
-				},
-			})
-			return
-		}
 		writeError(w, http.StatusInternalServerError, "failed to trigger autopilot: "+err.Error())
 		return
 	}

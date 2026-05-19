@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -29,12 +30,142 @@ const (
 	// letting a malicious user stuff the JSONB column.
 	patchOnboardingBodyLimit = 16 * 1024
 
+	// Runtime bootstrap is just workspace_id + runtime_id, but keep a
+	// separate small cap so this endpoint cannot be used as bulk storage.
+	runtimeBootstrapBodyLimit = 8 * 1024
+
 	// Import payload contains the full starter-content template. Each
 	// sub-issue's markdown description is ~2 KiB; with ~8 sub-issues,
 	// a welcome issue (~3 KiB), and a project description, 64 KiB is
 	// comfortably above realistic and still bounded.
 	importStarterContentBodyLimit = 64 * 1024
 )
+
+const (
+	onboardingAssistantName = "Multica Helper"
+	onboardingIssueTitle    = "Start here: learn Multica with Multica Helper"
+	onboardingAgentTemplate = "multica_helper"
+	noRuntimeIssueTitle     = "Connect a runtime to start using agents"
+)
+
+const onboardingAssistantDescription = "Default guide for your first Multica workspace."
+
+const onboardingAssistantAvatarURL = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Crect width='128' height='128' rx='30' fill='%23111217'/%3E%3Cpath d='M28 76c8-22 22-33 42-33 15 0 26 7 32 20' fill='none' stroke='%23ffffff' stroke-width='10' stroke-linecap='round'/%3E%3Cpath d='M38 88c13 13 39 17 58 1' fill='none' stroke='%238EE3C8' stroke-width='8' stroke-linecap='round'/%3E%3Ccircle cx='48' cy='56' r='7' fill='%23ffffff'/%3E%3Ccircle cx='78' cy='56' r='7' fill='%23ffffff'/%3E%3Cpath d='M64 20v14' stroke='%238EE3C8' stroke-width='8' stroke-linecap='round'/%3E%3Ccircle cx='64' cy='16' r='6' fill='%238EE3C8'/%3E%3C/svg%3E"
+
+const onboardingAssistantInstructions = `You are Multica Helper, the user's first Multica teammate. Your job is to onboard them inside the first issue.
+
+When the onboarding issue starts, leave a concise first comment that:
+1. Explains that issues are where work happens in Multica.
+2. Tells the user they can reply in the thread or @mention you to continue.
+3. Asks for one concrete task they want help with.
+4. Mentions that they can create more agents and connect more runtimes later.
+
+Keep the tone practical. Do not create extra issues or projects unless the user asks.`
+
+const onboardingIssueDescription = `Welcome to Multica.
+
+This is your guided first run. Multica Helper is assigned to this issue and will help you try the core workflow:
+
+1. Read Multica Helper's first comment.
+2. Reply with something you want to build, fix, write, or plan.
+3. @mention Multica Helper when you want it to continue.
+4. Open Agents and Runtimes later when you want to customize the teammate or the computer it runs on.
+
+You can close this issue when the workflow makes sense.`
+
+func noRuntimeIssueDescription(language pgtype.Text) string {
+	if language.Valid && strings.HasPrefix(language.String, "zh") {
+		return zhNoRuntimeIssueDescription()
+	}
+	return enNoRuntimeIssueDescription()
+}
+
+func enNoRuntimeIssueDescription() string {
+	return strings.Join([]string{
+		"Welcome to Multica.",
+		"",
+		"Agents need a runtime before they can execute work. You can still use Multica as a lightweight project-management workspace while you install one.",
+		"",
+		"## Try Multica first",
+		"",
+		"Before the runtime is ready, you can:",
+		"",
+		"1. Create a project for your current work.",
+		"2. Create a few issues and move them across backlog, todo, in_progress, and done.",
+		"3. Add priorities, labels, comments, and subscriptions.",
+		"4. Use Inbox to track assignments and mentions.",
+		"",
+		"That gives you the project-management layer first. Once a runtime is connected, agents can start working from the same issues.",
+		"",
+		"## Install your first agent runtime",
+		"",
+		"Full guide: https://multica.ai/docs/install-agent-runtime",
+		"",
+		"For English users, the fastest first path is Codex:",
+		"",
+		"1. Make sure Node.js is installed.",
+		"2. Install Codex:",
+		"   npm i -g @openai/codex",
+		"3. Sign in:",
+		"   codex",
+		"4. Confirm your terminal can find it:",
+		"   which codex",
+		"   codex --version",
+		"5. Restart the Multica daemon:",
+		"   multica daemon restart",
+		"   If you use the desktop app, restarting the app is enough.",
+		"6. Return to Runtimes and refresh. You should see a Codex runtime online.",
+		"7. Create your first agent from that runtime, then assign an issue to the agent and set status to todo.",
+		"",
+		"Codex reference: https://developers.openai.com/codex/cli",
+		"",
+		"When the runtime is connected, you can create Multica Helper for a guided first run.",
+	}, "\n")
+}
+
+func zhNoRuntimeIssueDescription() string {
+	return strings.Join([]string{
+		"欢迎来到 Multica。",
+		"",
+		"智能体需要先连上运行时才能执行工作。运行时还没准备好时，你也可以先把 Multica 当作轻量项目管理工具体验起来。",
+		"",
+		"## 先体验项目管理功能",
+		"",
+		"运行时安装前，你可以先做这些事：",
+		"",
+		"1. 为当前工作创建一个项目。",
+		"2. 新建几个 issue，并在 backlog、todo、in_progress、done 之间流转。",
+		"3. 给 issue 加优先级、标签、评论和订阅。",
+		"4. 用收件箱追踪分配给你的事项和 @mention。",
+		"",
+		"这样你先熟悉项目管理层。连上运行时后，智能体会直接在这些 issue 上开始工作。",
+		"",
+		"## 安装第一个 Agent 运行时",
+		"",
+		"完整文档：https://multica.ai/docs/install-agent-runtime",
+		"",
+		"中文用户建议先装 Kimi CLI：",
+		"",
+		"1. 在 macOS / Linux 终端安装 Kimi CLI：",
+		"   curl -LsSf https://code.kimi.com/install.sh | bash",
+		"   Windows PowerShell：",
+		"   Invoke-RestMethod https://code.kimi.com/install.ps1 | Invoke-Expression",
+		"2. 确认终端能找到 Kimi：",
+		"   kimi --version",
+		"3. 在你想让 Kimi 工作的项目目录里启动一次：",
+		"   kimi",
+		"4. 首次启动后输入 /login，按提示完成 Kimi Code 或 API key 配置。",
+		"5. 重启 Multica 守护进程：",
+		"   multica daemon restart",
+		"   如果你用桌面端，重启 app 即可。",
+		"6. 回到 Runtimes 页面刷新。你应该能看到一个在线的 Kimi 运行时。",
+		"7. 用这个运行时创建第一个智能体，再把一个 issue 分配给它，并把状态切到 todo。",
+		"",
+		"Kimi CLI 官方文档：https://moonshotai.github.io/kimi-cli/zh/guides/getting-started.html",
+		"",
+		"运行时连上后，你就可以创建 Multica Helper，开始一次有智能体参与的上手引导。",
+	}, "\n")
+}
 
 // completeOnboardingRequest carries the client's view of which exit the
 // user took from the flow. The client is the only place that knows
@@ -117,24 +248,471 @@ func (h *Handler) CompleteOnboarding(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, userToResponse(user))
 }
 
+type bootstrapOnboardingRuntimeRequest struct {
+	WorkspaceID string `json:"workspace_id"`
+	RuntimeID   string `json:"runtime_id"`
+}
+
+type bootstrapOnboardingRuntimeResponse struct {
+	WorkspaceID string `json:"workspace_id"`
+	AgentID     string `json:"agent_id"`
+	IssueID     string `json:"issue_id"`
+}
+
+type bootstrapOnboardingNoRuntimeRequest struct {
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type bootstrapOnboardingNoRuntimeResponse struct {
+	WorkspaceID string `json:"workspace_id"`
+	IssueID     string `json:"issue_id"`
+}
+
+// BootstrapOnboardingRuntime is the runtime-connected onboarding exit:
+// create or reuse one default helper agent, create or reuse one onboarding
+// issue assigned to it, mark onboarding complete, and suppress the older
+// starter-content dialog. The flow is deliberately one issue, not a seeded
+// project with many tasks.
+func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, runtimeBootstrapBodyLimit)
+	var req bootstrapOnboardingRuntimeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.WorkspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	if req.RuntimeID == "" {
+		writeError(w, http.StatusBadRequest, "runtime_id is required")
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, req.WorkspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
+	if !ok {
+		return
+	}
+	req.WorkspaceID = uuidToString(wsUUID)
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start onboarding")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	userBefore, err := qtx.GetUser(r.Context(), parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load user")
+		return
+	}
+	firstCompletion := !userBefore.OnboardedAt.Valid
+
+	member, err := qtx.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+		UserID:      parseUUID(userID),
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusForbidden, "not a member of this workspace")
+		return
+	}
+
+	runtime, err := qtx.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+		ID:          runtimeUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid runtime_id")
+		return
+	}
+	if !canUseRuntimeForAgent(member, runtime) {
+		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can create agents on it")
+		return
+	}
+
+	agents, err := qtx.ListAgents(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list agents")
+		return
+	}
+	isFirstAgent := len(agents) == 0
+
+	var assistant db.Agent
+	assistantCreated := false
+	// Only reuse helpers this flow could have created: name match AND
+	// workspace-visible. Skipping private agents is the access-control
+	// gate — a private "Multica Helper" owned by another member must not
+	// be auto-assigned to the bootstrap issue, which would bypass
+	// canAccessPrivateAgent and trigger a task as that private agent.
+	for _, existing := range agents {
+		if existing.Name == onboardingAssistantName && existing.Visibility == "workspace" {
+			assistant = existing
+			break
+		}
+	}
+	if !assistant.ID.Valid {
+		assistant, err = qtx.CreateAgent(r.Context(), db.CreateAgentParams{
+			WorkspaceID:        wsUUID,
+			Name:               onboardingAssistantName,
+			Description:        onboardingAssistantDescription,
+			AvatarUrl:          pgtype.Text{String: onboardingAssistantAvatarURL, Valid: true},
+			RuntimeMode:        runtime.RuntimeMode,
+			RuntimeConfig:      []byte("{}"),
+			RuntimeID:          runtime.ID,
+			Visibility:         "workspace",
+			MaxConcurrentTasks: 6,
+			OwnerID:            parseUUID(userID),
+			Instructions:       onboardingAssistantInstructions,
+			CustomEnv:          []byte("{}"),
+			CustomArgs:         []byte("[]"),
+			McpConfig:          nil,
+			Model:              pgtype.Text{},
+		})
+		if err != nil {
+			slog.Warn("bootstrap onboarding: create assistant failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
+			writeError(w, http.StatusInternalServerError, "failed to create onboarding assistant")
+			return
+		}
+		assistantCreated = true
+	}
+
+	var emptyUUID pgtype.UUID
+	issue, foundIssue, err := issueguard.LockAndFindActiveDuplicate(
+		r.Context(),
+		qtx,
+		wsUUID,
+		emptyUUID,
+		emptyUUID,
+		onboardingIssueTitle,
+		false,
+	)
+	if err != nil {
+		slog.Warn("bootstrap onboarding: duplicate issue check failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
+		return
+	}
+	issueCreated := false
+	if !foundIssue {
+		issueNumber, err := qtx.IncrementIssueCounter(r.Context(), wsUUID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to allocate issue number")
+			return
+		}
+		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
+			WorkspaceID:   wsUUID,
+			Title:         onboardingIssueTitle,
+			Description:   strOrNullText(onboardingIssueDescription),
+			Status:        "todo",
+			Priority:      "high",
+			AssigneeType:  pgtype.Text{String: "agent", Valid: true},
+			AssigneeID:    assistant.ID,
+			CreatorType:   "member",
+			CreatorID:     parseUUID(userID),
+			ParentIssueID: emptyUUID,
+			Position:      0,
+			Number:        issueNumber,
+			ProjectID:     emptyUUID,
+		})
+		if err != nil {
+			slog.Warn("bootstrap onboarding: create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
+			writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
+			return
+		}
+		issueCreated = true
+	}
+
+	updatedUser, err := qtx.MarkUserOnboarded(r.Context(), parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mark onboarded")
+		return
+	}
+	starterContentClaimed := false
+	if !updatedUser.StarterContentState.Valid {
+		updatedUser, err = qtx.SetStarterContentState(r.Context(), db.SetStarterContentStateParams{
+			ID:                  parseUUID(userID),
+			StarterContentState: pgtype.Text{String: "imported", Valid: true},
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to record starter content state")
+			return
+		}
+		starterContentClaimed = true
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to finish onboarding")
+		return
+	}
+
+	if assistantCreated {
+		resp := agentToResponse(assistant)
+		h.publish(protocol.EventAgentCreated, req.WorkspaceID, "member", userID, map[string]any{"agent": resp})
+		h.Analytics.Capture(analytics.AgentCreated(
+			userID,
+			req.WorkspaceID,
+			uuidToString(assistant.ID),
+			runtime.Provider,
+			runtime.RuntimeMode,
+			onboardingAgentTemplate,
+			isFirstAgent,
+		))
+	}
+	if issueCreated {
+		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+		resp := issueToResponse(issue, prefix)
+		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
+		h.Analytics.Capture(analytics.IssueCreated(
+			userID,
+			req.WorkspaceID,
+			uuidToString(issue.ID),
+			uuidToString(assistant.ID),
+			"",
+			"",
+			analytics.SourceOnboarding,
+		))
+		if h.shouldEnqueueAgentTask(r.Context(), issue) {
+			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+		}
+	}
+	if firstCompletion {
+		onboardedAt := ""
+		if updatedUser.OnboardedAt.Valid {
+			onboardedAt = updatedUser.OnboardedAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00")
+		}
+		h.Analytics.Capture(analytics.OnboardingCompleted(
+			userID,
+			req.WorkspaceID,
+			analytics.OnboardingPathFull,
+			onboardedAt,
+			updatedUser.CloudWaitlistEmail.Valid,
+		))
+	}
+	if starterContentClaimed {
+		h.Analytics.Capture(analytics.StarterContentDecided(
+			userID,
+			req.WorkspaceID,
+			"imported",
+			analytics.StarterContentBranchAgentGuided,
+		))
+	}
+
+	writeJSON(w, http.StatusOK, bootstrapOnboardingRuntimeResponse{
+		WorkspaceID: req.WorkspaceID,
+		AgentID:     uuidToString(assistant.ID),
+		IssueID:     uuidToString(issue.ID),
+	})
+}
+
+// BootstrapOnboardingNoRuntime is the runtime-skipped onboarding exit:
+// create or reuse one self-serve onboarding issue, mark onboarding complete,
+// and suppress the older starter-content dialog. This keeps the no-runtime
+// path focused on the single real blocker instead of seeding a project full
+// of follow-up tasks.
+func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, runtimeBootstrapBodyLimit)
+	var req bootstrapOnboardingNoRuntimeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.WorkspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, req.WorkspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	req.WorkspaceID = uuidToString(wsUUID)
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start onboarding")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	userBefore, err := qtx.GetUser(r.Context(), parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load user")
+		return
+	}
+	firstCompletion := !userBefore.OnboardedAt.Valid
+
+	if _, err := qtx.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+		UserID:      parseUUID(userID),
+		WorkspaceID: wsUUID,
+	}); err != nil {
+		writeError(w, http.StatusForbidden, "not a member of this workspace")
+		return
+	}
+
+	var emptyUUID pgtype.UUID
+	issue, foundIssue, err := issueguard.LockAndFindActiveDuplicate(
+		r.Context(),
+		qtx,
+		wsUUID,
+		emptyUUID,
+		emptyUUID,
+		noRuntimeIssueTitle,
+		false,
+	)
+	if err != nil {
+		slog.Warn("bootstrap no-runtime onboarding: duplicate issue check failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
+		return
+	}
+	issueCreated := false
+	if !foundIssue {
+		issueNumber, err := qtx.IncrementIssueCounter(r.Context(), wsUUID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to allocate issue number")
+			return
+		}
+		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
+			WorkspaceID:   wsUUID,
+			Title:         noRuntimeIssueTitle,
+			Description:   strOrNullText(noRuntimeIssueDescription(userBefore.Language)),
+			Status:        "todo",
+			Priority:      "high",
+			AssigneeType:  pgtype.Text{String: "member", Valid: true},
+			AssigneeID:    parseUUID(userID),
+			CreatorType:   "member",
+			CreatorID:     parseUUID(userID),
+			ParentIssueID: emptyUUID,
+			Position:      0,
+			Number:        issueNumber,
+			ProjectID:     emptyUUID,
+		})
+		if err != nil {
+			slog.Warn("bootstrap no-runtime onboarding: create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
+			writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
+			return
+		}
+		issueCreated = true
+	}
+
+	updatedUser, err := qtx.MarkUserOnboarded(r.Context(), parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mark onboarded")
+		return
+	}
+	starterContentClaimed := false
+	if !updatedUser.StarterContentState.Valid {
+		updatedUser, err = qtx.SetStarterContentState(r.Context(), db.SetStarterContentStateParams{
+			ID:                  parseUUID(userID),
+			StarterContentState: pgtype.Text{String: "imported", Valid: true},
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to record starter content state")
+			return
+		}
+		starterContentClaimed = true
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to finish onboarding")
+		return
+	}
+
+	if issueCreated {
+		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+		resp := issueToResponse(issue, prefix)
+		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
+		h.Analytics.Capture(analytics.IssueCreated(
+			userID,
+			req.WorkspaceID,
+			uuidToString(issue.ID),
+			"",
+			"",
+			"",
+			analytics.SourceOnboarding,
+		))
+	}
+	if firstCompletion {
+		onboardedAt := ""
+		if updatedUser.OnboardedAt.Valid {
+			onboardedAt = updatedUser.OnboardedAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00")
+		}
+		h.Analytics.Capture(analytics.OnboardingCompleted(
+			userID,
+			req.WorkspaceID,
+			analytics.OnboardingPathRuntimeSkipped,
+			onboardedAt,
+			updatedUser.CloudWaitlistEmail.Valid,
+		))
+	}
+	if starterContentClaimed {
+		h.Analytics.Capture(analytics.StarterContentDecided(
+			userID,
+			req.WorkspaceID,
+			"imported",
+			analytics.StarterContentBranchSelfServe,
+		))
+	}
+
+	writeJSON(w, http.StatusOK, bootstrapOnboardingNoRuntimeResponse{
+		WorkspaceID: req.WorkspaceID,
+		IssueID:     uuidToString(issue.ID),
+	})
+}
+
 type patchOnboardingRequest struct {
 	Questionnaire *json.RawMessage `json:"questionnaire,omitempty"`
 }
 
-// questionnaireAnswers mirrors the frontend's `QuestionnaireAnswers`
-// shape. Only the first-time submission — every slot filled — is a
-// funnel signal; partial saves are allowed but never emit.
+// questionnaireAnswers mirrors the frontend's v2 `QuestionnaireAnswers`
+// shape. Each of source / role / use_case has a value, an optional
+// free-text "other" override, and a skip marker. The questionnaire is
+// "resolved" once every slot has either an answer or a skip marker;
+// the funnel event fires on the transition into that state.
 type questionnaireAnswers struct {
-	TeamSize      string `json:"team_size"`
-	TeamSizeOther string `json:"team_size_other"`
-	Role          string `json:"role"`
-	RoleOther     string `json:"role_other"`
-	UseCase       string `json:"use_case"`
-	UseCaseOther  string `json:"use_case_other"`
+	Source         string `json:"source"`
+	SourceOther    string `json:"source_other"`
+	SourceSkipped  bool   `json:"source_skipped"`
+	Role           string `json:"role"`
+	RoleOther      string `json:"role_other"`
+	RoleSkipped    bool   `json:"role_skipped"`
+	UseCase        string `json:"use_case"`
+	UseCaseOther   string `json:"use_case_other"`
+	UseCaseSkipped bool   `json:"use_case_skipped"`
+	Version        int    `json:"version"`
 }
 
+func (q questionnaireAnswers) sourceResolved() bool {
+	return q.Source != "" || q.SourceSkipped
+}
+func (q questionnaireAnswers) roleResolved() bool {
+	return q.Role != "" || q.RoleSkipped
+}
+func (q questionnaireAnswers) useCaseResolved() bool {
+	return q.UseCase != "" || q.UseCaseSkipped
+}
+
+// questionnaireSchemaVersion is the schema this handler understands.
+// `complete()` and the funnel event are scoped to this version so a
+// future v3 row can't be silently mis-counted against v2 semantics.
+const questionnaireSchemaVersion = 2
+
 func (q questionnaireAnswers) complete() bool {
-	return q.TeamSize != "" && q.Role != "" && q.UseCase != ""
+	if q.Version != questionnaireSchemaVersion {
+		return false
+	}
+	return q.sourceResolved() && q.roleResolved() && q.useCaseResolved()
 }
 
 // PatchOnboarding persists the user's questionnaire answers. The
@@ -185,10 +763,13 @@ func (h *Handler) PatchOnboarding(w http.ResponseWriter, r *http.Request) {
 	if after.complete() && !before.complete() {
 		h.Analytics.Capture(analytics.OnboardingQuestionnaireSubmitted(
 			userID,
-			after.TeamSize,
+			after.Source,
 			after.Role,
 			after.UseCase,
-			after.TeamSizeOther != "",
+			after.SourceSkipped,
+			after.RoleSkipped,
+			after.UseCaseSkipped,
+			after.SourceOther != "",
 			after.RoleOther != "",
 			after.UseCaseOther != "",
 		))

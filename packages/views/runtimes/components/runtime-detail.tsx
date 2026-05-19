@@ -204,7 +204,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
               cliVersion={cliVersion}
               daemonShort={daemonShort}
             />
-            <UsageSection runtimeId={runtime.id} />
+            <UsageSection runtime={runtime} />
           </div>
 
           {/* Right rail: serving agents + diagnostics */}

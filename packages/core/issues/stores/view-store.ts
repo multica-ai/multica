@@ -9,7 +9,8 @@ import { ALL_STATUSES } from "../config";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
-export type ViewMode = "board" | "list";
+export type ViewMode = "board" | "list" | "gantt";
+export type GanttZoom = "day" | "week" | "month";
 export type IssueGrouping = "status" | "assignee";
 export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title";
 export type SortDirection = "asc" | "desc";
@@ -70,7 +71,11 @@ export interface IssueViewState {
   sortDirection: SortDirection;
   cardProperties: CardProperties;
   listCollapsedStatuses: IssueStatus[];
+  ganttZoom: GanttZoom;
+  ganttShowCompleted: boolean;
   setViewMode: (mode: ViewMode) => void;
+  setGanttZoom: (zoom: GanttZoom) => void;
+  toggleGanttShowCompleted: () => void;
   setGrouping: (grouping: IssueGrouping) => void;
   toggleStatusFilter: (status: IssueStatus) => void;
   togglePriorityFilter: (priority: IssuePriority) => void;
@@ -113,8 +118,13 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     labels: true,
   },
   listCollapsedStatuses: [],
+  ganttZoom: "week",
+  ganttShowCompleted: false,
 
   setViewMode: (mode) => set({ viewMode: mode }),
+  setGanttZoom: (zoom) => set({ ganttZoom: zoom }),
+  toggleGanttShowCompleted: () =>
+    set((state) => ({ ganttShowCompleted: !state.ganttShowCompleted })),
   setGrouping: (grouping) => set({ grouping }),
   toggleStatusFilter: (status) =>
     set((state) => ({
@@ -232,6 +242,8 @@ export const viewStorePersistOptions = (name: string) => ({
     sortDirection: state.sortDirection,
     cardProperties: state.cardProperties,
     listCollapsedStatuses: state.listCollapsedStatuses,
+    ganttZoom: state.ganttZoom,
+    ganttShowCompleted: state.ganttShowCompleted,
   }),
   // Default Zustand merge is shallow, so a persisted `cardProperties` snapshot
   // saved before a new toggle was introduced wins entirely and the new key is

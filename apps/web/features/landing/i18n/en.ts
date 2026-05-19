@@ -285,6 +285,33 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.2",
+        date: "2026-05-18",
+        title:
+          "Webhook Autopilots, Clearer Workboards & Better Runtime Control",
+        changes: [],
+        features: [
+          "Autopilots can now start from webhook events, show delivery history, and replay a delivery when a connected system needs another attempt",
+          "Issue boards can group work by assignee, show linked pull request status, and include start dates for clearer planning",
+          "Runtime pages now have a redesigned machine view plus time and task trends in usage charts",
+          "Skills can be copied from local runtimes in bulk, making workspace setup faster",
+          "HTML attachments and HTML code blocks can be previewed directly inside issue discussions",
+        ],
+        improvements: [
+          "Failed issue actions now show clearer error messages so teams can understand what happened without digging through logs",
+          "GitHub-linked pull requests now surface CI and merge-conflict status inside Multica",
+          "Self-hosted deployments get safer defaults and clearer guidance for reverse proxies, auth limits, and local-only services",
+          "Search results are ranked more usefully and include better snippets",
+        ],
+        fixes: [
+          "Autopilot-created issues can repeat reliably and are attributed to the right assignee agent",
+          "Runtime setup now prefers the local machine by default and uses cleaner labels in machine lists",
+          "Squad pages scroll correctly and show which members are already working",
+          "Desktop zoom shortcuts work again across the common keyboard combinations",
+          "Auth, dependency, and local-service updates improve the safety of hosted and self-hosted deployments",
+        ],
+      },
+      {
         version: "0.3.1",
         date: "2026-05-15",
         title: "Faster Navigation, Background Updates & More Reliable Squads",

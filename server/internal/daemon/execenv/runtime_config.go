@@ -83,7 +83,6 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (strin
 // about the Multica runtime environment and available CLI tools.
 func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
-	caps := deriveRuntimeCapabilities(ctx)
 
 	b.WriteString("# Multica Agent Runtime\n\n")
 	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
@@ -109,7 +108,33 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n\n")
 	}
 
-	writeAvailableCommands(&b, caps)
+	b.WriteString("## Available Commands\n\n")
+	b.WriteString("**Use `--output json` for structured data.** Human table output now prints routable issue keys (for example `MUL-123`) and short UUID prefixes for workspace resources; use `--full-id` on list commands when you need canonical UUIDs.\n\n")
+	b.WriteString("The default brief includes the commands needed for the core agent loop and common issue create/update tasks. For everything else, run `multica --help`, `multica <command> --help`, or `multica <command> <subcommand> --help`; prefer `--output json` when the command supports it.\n\n")
+	b.WriteString("### Core\n")
+	b.WriteString("- `multica issue get <id> --output json` — Get full issue details.\n")
+	b.WriteString("- `multica issue comment list <issue-id> [--thread <comment-id> | --recent N [--before <ts> --before-id <root-id>]] [--since <RFC3339>] --output json` — List comments on an issue. Default returns everything (server cap 2000). On busy issues prefer the thread-aware reads: `--thread <comment-id>` returns one conversation (root + every reply), `--recent N` returns the N most recently active threads. `--before` / `--before-id` pair (printed as a `Next thread cursor:` line on stderr after a `--recent` page) scrolls to older threads. `--since` is for incremental polling and may combine with `--thread` or `--recent`.\n")
+	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated.\n")
+	b.WriteString("- `multica issue update <id> [--title X] [--description X | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update issue fields; use `--parent \"\"` to clear parent.\n")
+	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>]` — Check out a repository into the working directory (creates a git worktree with a dedicated branch; use `--ref` for review/QA on a specific branch, tag, or commit)\n")
+	b.WriteString("- `multica issue status <id> <status>` — Shortcut for `issue update --status` when you only need to flip status (todo, in_progress, in_review, done, blocked, backlog, cancelled)\n")
+	// Available Commands lists `multica issue comment add` neutrally —
+	// three input modes, pick what fits.
+	// The previous "MUST pipe via stdin" mandate (#1795 / #1851) was
+	// originally a Codex-specific fix for codex emitting literal `\n`
+	// escapes inside `--content "..."`, but it landed in this global
+	// section and ended up steering every provider at stdin, which then
+	// burned non-ASCII bytes on Windows where the agent's shell layer
+	// (typically PowerShell) re-encodes the pipe through an ASCII /
+	// non-UTF-8 codepage and drops non-representable bytes as `?`
+	// (issues #2198 / #2236 / #2376).
+	//
+	// Strong "MUST" wording lives in the Codex-Specific section below
+	// where it actually belongs; non-Codex providers handle inline
+	// escaping correctly and can pick whichever flag suits their
+	// content. The `--content-file` line in the menu doubles as a
+	// pointer at the Windows-safe path.
+	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-stdin | --content-file <path>] [--parent <comment-id>] [--attachment <path>]` — Post a comment. Pick the input mode that preserves your content; run `multica issue comment add --help` for details.\n\n")
 
 	if provider == "codex" {
 		b.WriteString("## Codex-Specific Comment Formatting\n\n")
@@ -135,7 +160,25 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\nThe checkout command creates a git worktree with a dedicated branch. You can check out one or more repos as needed, and can pass `--ref` for review/QA on a non-default branch or commit.\n\n")
 	}
 
-	writeProjectContext(&b, ctx, caps)
+	// Inject project-scoped context (resources attached to the issue's project).
+	// The full structured payload is also available at .multica/project/resources.json
+	// so skills can consume it programmatically.
+	if ctx.ProjectID != "" || len(ctx.ProjectResources) > 0 {
+		b.WriteString("## Project Context\n\n")
+		if ctx.ProjectTitle != "" {
+			fmt.Fprintf(&b, "This issue belongs to **%s**.\n\n", ctx.ProjectTitle)
+		}
+		if len(ctx.ProjectResources) > 0 {
+			b.WriteString("Project resources (also written to `.multica/project/resources.json`):\n\n")
+			for _, r := range ctx.ProjectResources {
+				fmt.Fprintf(&b, "- %s\n", formatProjectResource(r))
+			}
+			b.WriteString("\nResources are pointers — open them only when relevant to the task. ")
+			b.WriteString("For `github_repo` resources, use `multica repo checkout <url>` to fetch the code. Add `--ref <branch-or-sha>` when a task or handoff names an exact revision.\n\n")
+		} else {
+			b.WriteString("This project has no resources attached yet.\n\n")
+		}
+	}
 
 	b.WriteString("### Workflow\n\n")
 
@@ -194,9 +237,10 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		// Comment-triggered: focus on reading and replying
 		b.WriteString("**This task was triggered by a NEW comment.** Your primary job is to respond to THIS specific comment, even if you have handled similar requests before in this session.\n\n")
 		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand the issue context\n", ctx.IssueID)
-		fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the conversation (returns all comments, capped server-side at 2000)\n", ctx.IssueID)
-		b.WriteString("   - For incremental polling, use `--since <RFC3339-timestamp>` to fetch only comments newer than a known cursor\n")
-		fmt.Fprintf(&b, "3. Find the triggering comment (ID: `%s`) and understand what is being asked — do NOT confuse it with previous comments\n", ctx.TriggerCommentID)
+		fmt.Fprintf(&b, "2. Read the triggering thread first — that is what this comment is actually about: `multica issue comment list %s --thread %s --output json` returns the root and every reply in the same thread as the trigger.\n", ctx.IssueID, ctx.TriggerCommentID)
+		fmt.Fprintf(&b, "   - If the thread alone is not enough context, pull the most recently active threads on the issue: `multica issue comment list %s --recent 20 --output json`. Each `--recent` page also prints a `Next thread cursor: --before <ts> --before-id <root-id>` line on stderr; pass the same pair back as `--before <ts> --before-id <root-id>` to scroll to older threads when 20 still isn't enough.\n", ctx.IssueID)
+		b.WriteString("   - Avoid the unfiltered `multica issue comment list <issue-id> --output json` form on long-running issues — it dumps the entire flat timeline (cap 2000) and wastes context on chatter unrelated to the trigger. `--since <RFC3339-timestamp>` is still available for incremental polling against a known cursor and may combine with `--thread` or `--recent`.\n")
+		fmt.Fprintf(&b, "3. Find the triggering comment (ID: `%s`) inside the thread you just read and understand what is being asked — do NOT confuse it with previous comments\n", ctx.TriggerCommentID)
 		if ctx.IsSquadLeader {
 			b.WriteString("4. **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 6 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
 			fmt.Fprintf(&b, "   - **Squad leader rule:** If your evaluation outcome is `no_action`, call `multica squad activity %s no_action --reason \"...\"` and then EXIT IMMEDIATELY. DO NOT post any comment whose only purpose is to announce that you are taking no action, exiting silently, or acknowledging another agent. A comment like \"No action needed\" or \"Exiting silently\" is noise — the `squad activity` call already records your decision in the timeline.\n", ctx.IssueID)
@@ -211,7 +255,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		// Assignment-triggered: defer to agent Skills for workflow specifics.
 		b.WriteString("You are responsible for managing the issue status throughout your work.\n\n")
 		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
-		fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the full comment history (returns all comments, capped server-side at 2000) — this is mandatory, not optional. Earlier comments often carry context the issue body lacks (e.g. which repo to work in, the prior agent's findings, the reason the issue was reassigned to you). Skipping this step is the most common cause of agents acting on stale or incomplete instructions.\n", ctx.IssueID)
+		fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the full comment history (returns all comments, capped server-side at 2000) — this is mandatory, not optional. Earlier comments often carry context the issue body lacks (e.g. which repo to work in, the prior agent's findings, the reason the issue was reassigned to you). Skipping this step is the most common cause of agents acting on stale or incomplete instructions. When the flat dump is too large to ingest in one shot, treat `--recent 20 --output json` plus the `--before` / `--before-id` cursor (from the stderr `Next thread cursor:` line) as a paging strategy: keep walking older threads until you have read enough history to satisfy this mandatory step. `--recent` is a way to read the full history page-by-page, not a shortcut that replaces it.\n", ctx.IssueID)
 		fmt.Fprintf(&b, "3. Run `multica issue status %s in_progress`\n", ctx.IssueID)
 		b.WriteString("4. Follow your Skills and Agent Identity to complete the task (write code, investigate, etc.)\n")
 		if ctx.IsSquadLeader {
@@ -250,8 +294,25 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n")
 	}
 
-	writeMentionRules(&b, caps)
-	writeAttachmentRules(&b, caps)
+	b.WriteString("## Mentions\n\n")
+	b.WriteString("Mention links are **side-effecting actions**, not just formatting:\n\n")
+	b.WriteString("- `[MUL-123](mention://issue/<issue-id>)` — clickable link to an issue (safe, no side effect)\n")
+	b.WriteString("- `[@Name](mention://member/<user-id>)` — **sends a notification to a human**\n")
+	b.WriteString("- `[@Name](mention://agent/<agent-id>)` — **enqueues a new run for that agent**\n\n")
+	b.WriteString("### When NOT to use a mention link\n\n")
+	b.WriteString("- Referring to someone in prose (e.g. \"GPT-Boy is right\") — write the plain name, no link.\n")
+	b.WriteString("- **Replying to another agent that just spoke to you.** By default, do NOT put a `mention://agent/...` link anywhere in your reply. The platform already shows your comment to everyone on the issue; re-mentioning the other agent will make them run again, and if they reply with a mention back, you will be triggered again. That is a loop and it costs the user money.\n")
+	b.WriteString("- Thanking, acknowledging, wrapping up, or signing off. These are exactly the moments where an accidental `@mention` causes the other agent to reply \"you're welcome\" and restart the loop. If the work is done, **end with no mention at all**.\n\n")
+	b.WriteString("### When a mention IS appropriate\n\n")
+	b.WriteString("- Escalating to a human owner who is not yet involved.\n")
+	b.WriteString("- Delegating a concrete sub-task to another agent for the first time, with a clear request.\n")
+	b.WriteString("- The user explicitly asked you to loop someone in.\n\n")
+	b.WriteString("If you are unsure whether a mention is warranted, **don't mention**. Silence ends conversations; `@` restarts them.\n\n")
+	b.WriteString("If you need IDs for mention links, inspect the relevant CLI help path and request JSON output when available.\n\n")
+
+	b.WriteString("## Attachments\n\n")
+	b.WriteString("Issues and comments may include file attachments (images, documents, etc.).\n")
+	b.WriteString("When a task includes attachment IDs and you need the files, inspect `multica attachment --help` and use the authenticated CLI path. Do not open Multica resource URLs directly.\n\n")
 
 	b.WriteString("## Important: Always Use the `multica` CLI\n\n")
 	b.WriteString("All interactions with Multica platform resources — including issues, comments, attachments, images, files, and any other platform data — **must** go through the `multica` CLI. ")
