@@ -1,0 +1,10 @@
+[Unit]
+Description=Multica Failed Task Compensation Timer (every 5 minutes)
+Requires=compensate-failed-runs.service
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+
+[Install]
+WantedBy=timers.target

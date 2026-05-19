@@ -1,0 +1,11 @@
+[Unit]
+Description=Multica Failed Task Compensation Service
+After=network.target multica-daemon.service
+
+[Service]
+Type=oneshot
+User=multica
+WorkingDirectory=/opt/multica/compensation
+ExecStart=/usr/bin/python3 scripts/compensate_failed_runs.py --apply
+StandardOutput=journal
+StandardError=journal

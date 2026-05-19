@@ -1,0 +1,10 @@
+# 外部补偿脚本 — 部署说明
+#
+# 将本文件添加到 crontab（替换 /path/to/workdir 为实际路径）：
+#   crontab -e
+#
+# 每 5 分钟执行一次补偿扫描
+*/5 * * * * cd /path/to/workdir && python3 scripts/compensate_failed_runs.py --apply >> /var/log/compensate_failed_runs.log 2>&1
+#
+# 可选：每小时清理一次过期幂等状态
+0 * * * * cd /path/to/workdir && python3 -c "from compensate_failed_runs import load_state, clean_expired_state, save_state; s=load_state(); save_state(clean_expired_state(s))"
