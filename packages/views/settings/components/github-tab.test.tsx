@@ -130,18 +130,17 @@ function resetFixtures() {
 describe("GitHubTab", () => {
   beforeEach(resetFixtures);
 
-  it("renders the non-dev hint when master switch is on but no installation exists", () => {
+  it("folds the non-dev hint into the master switch description (no separate callout)", () => {
     render(<GitHubTab />, { wrapper: I18nWrapper });
-    expect(screen.getByText("Not a development team?")).toBeTruthy();
+    expect(screen.getByText(/Not a development team\? Just turn it off here\./)).toBeTruthy();
+    // The old standalone callout (title + dedicated "Turn GitHub off" button) is gone.
+    expect(screen.queryByRole("button", { name: /^Turn GitHub off$/ })).toBeNull();
   });
 
-  it("hides the non-dev hint once GitHub is connected", () => {
-    installationsRef.current = {
-      configured: true,
-      installations: [{ id: "inst-1", account_login: "acme" }],
-    };
+  it("does not show the hint once the master switch is off", () => {
+    workspaceRef.current.settings = { github_enabled: false };
     render(<GitHubTab />, { wrapper: I18nWrapper });
-    expect(screen.queryByText("Not a development team?")).toBeNull();
+    expect(screen.queryByText(/Not a development team\?/)).toBeNull();
   });
 
   it("disables every feature switch when the master switch is off", () => {

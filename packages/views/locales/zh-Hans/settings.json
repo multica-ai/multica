@@ -167,11 +167,8 @@
   "github": {
     "page_description": "连接 GitHub App、控制 Pull Request 如何出现在 Multica 中，并决定智能体在 commit 记录里留下哪些痕迹。",
     "section_master": "启用 GitHub 功能",
-    "master_description_on": "关闭后，所有 GitHub 入口都会被隐藏，也不再产生新的副作用。后台已有数据不会被删除。",
+    "master_description_on": "关闭后，所有 GitHub 入口都会被隐藏，也不再产生新的副作用。后台已有数据不会被删除。团队不使用 GitHub？在这里直接关掉即可。",
     "master_description_off": "GitHub 功能已关闭。PR 侧栏、Co-authored-by trailer 与自动关联都已暂停。后台数据未删除。",
-    "non_dev_hint_title": "团队不使用 GitHub？",
-    "non_dev_hint_description": "一键隐藏本工作区所有 GitHub 相关入口，随时可再次开启。",
-    "non_dev_hint_action": "关闭 GitHub 功能",
     "section_connection": "Connection",
     "connection_title": "GitHub App",
     "connection_description_prefix": "自动把 issue 关联到 Pull Request。当 PR 的分支、标题或正文中包含",

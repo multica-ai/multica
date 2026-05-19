@@ -66,7 +66,6 @@ export function GitHubTab() {
 
   const githubRepoCount =
     workspace?.repos?.filter((r) => /github\.com/i.test(r.url ?? "")).length ?? 0;
-  const showNonDevHint = canManage && flags.enabled && !connected;
 
   async function persistSetting(key: SettingsKey, next: boolean) {
     if (!workspace || savingKey) return;
@@ -158,31 +157,6 @@ export function GitHubTab() {
             </div>
           </CardContent>
         </Card>
-
-        {showNonDevHint && (
-          <Card className="border-dashed">
-            <CardContent>
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="space-y-1">
-                  <p className="text-sm font-medium">
-                    {t(($) => $.github.non_dev_hint_title)}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {t(($) => $.github.non_dev_hint_description)}
-                  </p>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => persistSetting("github_enabled", false)}
-                  disabled={savingKey === "github_enabled"}
-                >
-                  {t(($) => $.github.non_dev_hint_action)}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
       </section>
 
       <section className="space-y-3">
