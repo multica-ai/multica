@@ -277,6 +277,16 @@ type FixedVerificationCode struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type GiteeWebhookConfig struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	RepoOwner   string             `json:"repo_owner"`
+	RepoName    string             `json:"repo_name"`
+	Secret      string             `json:"secret"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type GithubInstallation struct {
 	ID               pgtype.UUID        `json:"id"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
@@ -292,7 +302,7 @@ type GithubInstallation struct {
 type GithubPullRequest struct {
 	ID              pgtype.UUID        `json:"id"`
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
-	InstallationID  int64              `json:"installation_id"`
+	InstallationID  pgtype.Int8        `json:"installation_id"`
 	RepoOwner       string             `json:"repo_owner"`
 	RepoName        string             `json:"repo_name"`
 	PrNumber        int32              `json:"pr_number"`
@@ -313,6 +323,7 @@ type GithubPullRequest struct {
 	Additions       int32              `json:"additions"`
 	Deletions       int32              `json:"deletions"`
 	ChangedFiles    int32              `json:"changed_files"`
+	Provider        string             `json:"provider"`
 }
 
 type GithubPullRequestCheckSuite struct {
@@ -762,20 +773,6 @@ type VerificationCode struct {
 	Attempts  int32              `json:"attempts"`
 }
 
-type WikiPage struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	ParentID    pgtype.UUID        `json:"parent_id"`
-	Title       string             `json:"title"`
-	Slug        string             `json:"slug"`
-	Content     string             `json:"content"`
-	Position    float64            `json:"position"`
-	CreatedBy   pgtype.UUID        `json:"created_by"`
-	UpdatedBy   pgtype.UUID        `json:"updated_by"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-}
-
 type WebhookDelivery struct {
 	ID                     pgtype.UUID        `json:"id"`
 	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
@@ -799,6 +796,20 @@ type WebhookDelivery struct {
 	ReceivedAt             pgtype.Timestamptz `json:"received_at"`
 	LastAttemptAt          pgtype.Timestamptz `json:"last_attempt_at"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+}
+
+type WikiPage struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ParentID    pgtype.UUID        `json:"parent_id"`
+	Title       string             `json:"title"`
+	Slug        string             `json:"slug"`
+	Content     string             `json:"content"`
+	Position    float64            `json:"position"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	UpdatedBy   pgtype.UUID        `json:"updated_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Workspace struct {

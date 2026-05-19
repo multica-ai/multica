@@ -72,9 +72,10 @@ type GitHubPullRequestResponse struct {
 	// `pull_request` webhook payload. Legacy rows that pre-date this
 	// field default to 0; the frontend treats total == 0 as "unknown"
 	// and hides the stats row.
-	Additions    int32 `json:"additions"`
-	Deletions    int32 `json:"deletions"`
-	ChangedFiles int32 `json:"changed_files"`
+	Additions    int32  `json:"additions"`
+	Deletions    int32  `json:"deletions"`
+	ChangedFiles int32  `json:"changed_files"`
+	Provider     string `json:"provider"`
 }
 
 type GitHubConnectResponse struct {
@@ -119,6 +120,7 @@ func githubPullRequestToResponse(p db.GithubPullRequest) GitHubPullRequestRespon
 		Additions:        p.Additions,
 		Deletions:        p.Deletions,
 		ChangedFiles:     p.ChangedFiles,
+		Provider:         p.Provider,
 	}
 }
 
@@ -147,6 +149,7 @@ func issuePullRequestRowToResponse(p db.ListPullRequestsByIssueRow) GitHubPullRe
 		Additions:        p.Additions,
 		Deletions:        p.Deletions,
 		ChangedFiles:     p.ChangedFiles,
+		Provider:         p.Provider,
 	}
 }
 
@@ -621,90 +624,45 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 
 	state := derivePRState(p.PullRequest.State, p.PullRequest.Draft, p.PullRequest.Merged)
 	mergeable, clearMergeable := derivePRMergeableState(p.Action, p.PullRequest.MergeableState, baseRefChanged(p.Changes))
-	pr, err := h.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
-		WorkspaceID:           inst.WorkspaceID,
-		InstallationID:        inst.InstallationID,
-		RepoOwner:             p.Repository.Owner.Login,
-		RepoName:              p.Repository.Name,
-		PrNumber:              p.PullRequest.Number,
-		Title:                 p.PullRequest.Title,
-		State:                 state,
-		HtmlUrl:               p.PullRequest.HTMLURL,
-		Branch:                ptrToText(strPtrOrNil(p.PullRequest.Head.Ref)),
-		AuthorLogin:           ptrToText(strPtrOrNil(p.PullRequest.User.Login)),
-		AuthorAvatarUrl:       ptrToText(strPtrOrNil(p.PullRequest.User.AvatarURL)),
-		MergedAt:              parseGHTime(p.PullRequest.MergedAt),
-		ClosedAt:              parseGHTime(p.PullRequest.ClosedAt),
-		PrCreatedAt:           parseGHTimeRequired(p.PullRequest.CreatedAt),
-		PrUpdatedAt:           parseGHTimeRequired(p.PullRequest.UpdatedAt),
-		HeadSha:               p.PullRequest.Head.SHA,
-		MergeableState:        mergeable,
-		ClearMergeableState:   pgtype.Bool{Bool: clearMergeable, Valid: true},
-		Additions:             p.PullRequest.Additions,
-		Deletions:             p.PullRequest.Deletions,
-		ChangedFiles:          p.PullRequest.ChangedFiles,
-	})
-	if err != nil {
-		slog.Warn("github: upsert pr failed", "err", err)
-		return
+
+	var mergedAt *time.Time
+	if t := parseGHTime(p.PullRequest.MergedAt); t.Valid {
+		mergedAt = &t.Time
+	}
+	var closedAt *time.Time
+	if t := parseGHTime(p.PullRequest.ClosedAt); t.Valid {
+		closedAt = &t.Time
+	}
+	createdAt := parseGHTimeRequired(p.PullRequest.CreatedAt)
+	updatedAt := parseGHTimeRequired(p.PullRequest.UpdatedAt)
+
+	evt := NormalizedPREvent{
+		Provider:        "github",
+		WorkspaceID:     inst.WorkspaceID,
+		InstallationID:  pgtype.Int8{Int64: inst.InstallationID, Valid: true},
+		RepoOwner:       p.Repository.Owner.Login,
+		RepoName:        p.Repository.Name,
+		Number:          p.PullRequest.Number,
+		Title:           p.PullRequest.Title,
+		Body:            p.PullRequest.Body,
+		HTMLURL:         p.PullRequest.HTMLURL,
+		SourceBranch:    p.PullRequest.Head.Ref,
+		AuthorLogin:     p.PullRequest.User.Login,
+		AuthorAvatarURL: p.PullRequest.User.AvatarURL,
+		State:           state,
+		CreatedAt:       createdAt.Time,
+		UpdatedAt:       updatedAt.Time,
+		MergedAt:        mergedAt,
+		ClosedAt:        closedAt,
+		HeadSHA:         p.PullRequest.Head.SHA,
+		MergeableState:  mergeable,
+		ClearMergeable:  clearMergeable,
+		Additions:       p.PullRequest.Additions,
+		Deletions:       p.PullRequest.Deletions,
+		ChangedFiles:    p.PullRequest.ChangedFiles,
 	}
 
-	workspaceID := uuidToString(inst.WorkspaceID)
-	resp := githubPullRequestToResponse(pr)
-
-	// Auto-link: scan title/body/branch for issue identifiers, look them
-	// up in this workspace, attach the link rows. Idempotent (ON CONFLICT
-	// DO NOTHING) so re-firing the webhook doesn't duplicate.
-	idents := extractIdentifiers(p.PullRequest.Title, p.PullRequest.Body, p.PullRequest.Head.Ref)
-	prefix := h.getIssuePrefix(ctx, inst.WorkspaceID)
-	linkedIssueIDs := make([]string, 0, len(idents))
-	for _, id := range idents {
-		issue, ok := h.lookupIssueByIdentifier(ctx, inst.WorkspaceID, prefix, id)
-		if !ok {
-			continue
-		}
-		if err := h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
-			IssueID:        issue.ID,
-			PullRequestID:  pr.ID,
-			LinkedByType:   strToText("system"),
-			LinkedByID:     pgtype.UUID{},
-		}); err != nil {
-			slog.Warn("github: link failed", "err", err)
-			continue
-		}
-		linkedIssueIDs = append(linkedIssueIDs, uuidToString(issue.ID))
-
-		// A terminal PR event (`merged` or `closed`) may be the moment the
-		// last in-flight sibling resolves, so we re-evaluate the issue on
-		// both. We advance the issue to done when:
-		//   1. the issue isn't already terminal (`done` / `cancelled`);
-		//   2. no sibling PR is still `open` / `draft`;
-		//   3. at least one linked PR (this one or a sibling) is `merged`.
-		// Rule (3) prevents an "all closed-without-merge" sequence from
-		// silently auto-closing the issue — if nothing was ever delivered,
-		// the user should decide what to do manually.
-		if (state == "merged" || state == "closed") && issue.Status != "done" && issue.Status != "cancelled" {
-			counts, err := h.Queries.GetSiblingPullRequestStateCountsForIssue(ctx, db.GetSiblingPullRequestStateCountsForIssueParams{
-				IssueID: issue.ID,
-				ID:      pr.ID,
-			})
-			if err != nil {
-				slog.Warn("github: count sibling pr states failed", "err", err, "issue_id", uuidToString(issue.ID))
-				continue
-			}
-			anyMerged := state == "merged" || counts.MergedCount > 0
-			if counts.OpenCount == 0 && anyMerged {
-				h.advanceIssueToDone(ctx, issue, workspaceID)
-			}
-		}
-	}
-
-	// Broadcast PR change to the workspace so any open issue detail page
-	// re-queries its PR list.
-	h.publish(protocol.EventPullRequestUpdated, workspaceID, "system", "", map[string]any{
-		"pull_request": resp,
-		"linked_issue_ids": linkedIssueIDs,
-	})
+	h.ProcessPullRequestEvent(ctx, evt, true)
 }
 
 // ── check_suite webhook ────────────────────────────────────────────────────
