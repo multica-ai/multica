@@ -466,7 +466,11 @@ function MachineRow({
         <span className="flex min-w-0 items-center gap-1.5">
           <span
             className="truncate text-sm font-medium"
-            title={machine.subtitle ?? undefined}
+            title={
+              machine.daemonId
+                ? `daemon ${machine.daemonId}`
+                : (machine.subtitle ?? undefined)
+            }
           >
             {machine.title}
           </span>
@@ -574,9 +578,9 @@ function MachineDetail({
   const metaParts: React.ReactNode[] = [
     <span key="runtimes">
       <span className="font-medium tabular-nums text-foreground">
-        {runtimeTotal}
-      </span>{" "}
-      {runtimesMeta}
+        {t(($) => $.machine.runtime_count, { count: runtimeTotal })}
+      </span>
+      {runtimeTotal > 0 && <> · {runtimesMeta}</>}
     </span>,
     <span key="workload" className={busyCount > 0 ? "text-primary" : undefined}>
       {workloadLabel}
