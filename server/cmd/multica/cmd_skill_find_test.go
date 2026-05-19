@@ -51,7 +51,7 @@ func TestWriteStructuredAIResultRequiresTaskOutputEnv(t *testing.T) {
 }
 
 func TestWriteStructuredAIResultRejectsPathTraversal(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "subdir") + string(os.PathSeparator) + ".." + string(os.PathSeparator) + "ai-task-output.json"
+	path := t.TempDir() + string(os.PathSeparator) + ".." + string(os.PathSeparator) + "ai-task-output.json"
 	t.Setenv(aiTaskOutputPathEnv, path)
 
 	err := writeStructuredAIResult(`[]`)

@@ -12,6 +12,11 @@ function singleLine(value: string | null | undefined): string {
   return (value ?? "").replace(/\s+/g, " ").trim();
 }
 
+export function getInboxStringDetail(item: InboxItem, key: string): string {
+  const value = item.details?.[key];
+  return typeof value === "string" ? value : "";
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -34,15 +39,28 @@ export function stripQuickCreatePrefix(
 }
 
 export function getInboxDisplayTitle(item: InboxItem): string {
-  const details = item.details ?? {};
   if (item.type === "quick_create_done") {
-    const cleanedTitle = stripQuickCreatePrefix(item.title, details.identifier);
+    const cleanedTitle = stripQuickCreatePrefix(item.title, getInboxStringDetail(item, "identifier"));
     if (cleanedTitle) return cleanedTitle;
-    const prompt = singleLine(details.original_prompt);
+    const prompt = singleLine(getInboxStringDetail(item, "original_prompt"));
     if (prompt) return prompt;
   }
   if (item.type === "quick_create_failed") {
-    const prompt = singleLine(details.original_prompt);
+    const prompt = singleLine(getInboxStringDetail(item, "original_prompt"));
+    if (prompt) return prompt;
+  }
+  if (item.type === "skill_find_done") {
+    const prompt = singleLine(getInboxStringDetail(item, "original_prompt"));
+    if (prompt) return prompt;
+  }
+  if (item.type === "agent_draft_done") {
+    const name = singleLine(getInboxStringDetail(item, "drafted_agent_name") || getInboxStringDetail(item, "name"));
+    if (name) return name;
+    const prompt = singleLine(getInboxStringDetail(item, "original_prompt"));
+    if (prompt) return prompt;
+  }
+  if (item.type === "agent_draft_failed") {
+    const prompt = singleLine(getInboxStringDetail(item, "original_prompt"));
     if (prompt) return prompt;
   }
   return item.title;
