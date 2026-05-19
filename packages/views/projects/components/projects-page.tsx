@@ -141,7 +141,7 @@ function ProjectCard({ project }: { project: Project }) {
             </span>
           </div>
         ) : (
-          <span className="text-[10px] text-muted-foreground pt-2 flex justify-end">No issues yet</span>
+          <span className="text-[10px] text-muted-foreground pt-2 flex justify-end">{t(($) => $.detail.no_issues_yet)}</span>
         )}
       </div>
 
@@ -470,20 +470,20 @@ export function ProjectsPage() {
                     />
                   }
                 />
-                <TooltipContent side="bottom">
-                  {isCompact ? "Compact" : "Comfortable"}
-                </TooltipContent>
+              <TooltipContent side="bottom">
+                {isCompact ? t(($) => $.page.view_compact) : t(($) => $.page.view_comfortable)}
+              </TooltipContent>
               </Tooltip>
               <DropdownMenuContent align="end" className="w-auto">
                 <DropdownMenuGroup>
-                  <DropdownMenuItem onClick={() => setViewMode("compact")}>
-                    <Rows3 className="mr-2 h-4 w-4" />
-                    Compact
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setViewMode("comfortable")}>
-                    <LayoutGrid className="mr-2 h-4 w-4" />
-                    Comfortable
-                  </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setViewMode("compact")}>
+                  <Rows3 className="mr-2 h-4 w-4" />
+                  {t(($) => $.page.view_compact)}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setViewMode("comfortable")}>
+                  <LayoutGrid className="mr-2 h-4 w-4" />
+                  {t(($) => $.page.view_comfortable)}
+                </DropdownMenuItem>
                 </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>
