@@ -925,6 +925,60 @@ func (c *Client) postJSONViaWithRetry(ctx context.Context, httpClient *http.Clie
 	}
 }
 
+type AttachmentResponse struct {
+	ID          string `json:"id"`
+	DownloadURL string `json:"download_url"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	SizeBytes   int64  `json:"size_bytes"`
+}
+
+func (c *Client) DownloadAttachment(ctx context.Context, attachmentID string) (*AttachmentResponse, []byte, error) {
+	var att AttachmentResponse
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/attachments/%s", attachmentID), &att); err != nil {
+		return nil, nil, err
+	}
+	if att.DownloadURL == "" {
+		return nil, nil, fmt.Errorf("attachment %s has no download_url", attachmentID)
+	}
+	data, err := c.downloadFile(ctx, att.DownloadURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &att, data, nil
+}
+
+func (c *Client) downloadFile(ctx context.Context, downloadURL string) ([]byte, error) {
+	isRelative := !strings.HasPrefix(downloadURL, "http://") && !strings.HasPrefix(downloadURL, "https://")
+	if isRelative {
+		if c.baseURL == "" {
+			return nil, fmt.Errorf("download URL %q is relative but client has no base URL", downloadURL)
+		}
+		downloadURL = c.baseURL + downloadURL
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if isRelative && c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+		c.setIdentityHeaders(req)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, &requestError{Method: http.MethodGet, Path: downloadURL, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 100*1024*1024+1))
+}
+
 func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBody any) error {
 	return c.postJSONVia(ctx, c.client, path, reqBody, respBody)
 }
