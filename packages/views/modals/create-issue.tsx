@@ -159,6 +159,7 @@ export function ManualCreatePanel({
   });
 
   const draftAttachments = draft.attachments ?? [];
+  const [pendingUploads, setPendingUploads] = useState(0);
 
   // Prune draft attachments whose markdown reference was deleted in an
   // earlier editing session. Runs once on mount: at that point the persisted
@@ -178,16 +179,21 @@ export function ManualCreatePanel({
 
   const { uploadWithToast } = useFileUpload(api);
   const handleUpload = async (file: File) => {
-    const result = await uploadWithToast(file);
-    if (result) {
-      const currentAttachments =
-        useIssueDraftStore.getState().draft.attachments ?? [];
-      const attachments = currentAttachments.some((a) => a.id === result.id)
-        ? currentAttachments
-        : [...currentAttachments, toDraftAttachment(result)];
-      setDraft({ attachments });
+    setPendingUploads((n) => n + 1);
+    try {
+      const result = await uploadWithToast(file);
+      if (result) {
+        const currentAttachments =
+          useIssueDraftStore.getState().draft.attachments ?? [];
+        const attachments = currentAttachments.some((a) => a.id === result.id)
+          ? currentAttachments
+          : [...currentAttachments, toDraftAttachment(result)];
+        setDraft({ attachments });
+      }
+      return result;
+    } finally {
+      setPendingUploads((n) => Math.max(0, n - 1));
     }
-    return result;
   };
 
   // Sync field changes to draft store
@@ -212,6 +218,7 @@ export function ManualCreatePanel({
     setProjectId(undefined);
     setParentIssueId(undefined);
     setChildIssues([]);
+    setPendingUploads(0);
     setDraft({
       title: "",
       description: "",
@@ -228,7 +235,9 @@ export function ManualCreatePanel({
   };
 
   const handleSubmit = async () => {
-    if (!title.trim() || submitting) return;
+    if (!title.trim() || submitting || pendingUploads > 0 || descEditorRef.current?.hasActiveUploads()) {
+      return;
+    }
     setSubmitting(true);
     try {
       const description = descEditorRef.current?.getMarkdown()?.trim() || undefined;
@@ -719,6 +728,7 @@ export function ManualCreatePanel({
             <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-h-7 items-center gap-2">
                 <FileUploadButton
+                  disabled={pendingUploads > 0}
                   onSelect={(file) => descEditorRef.current?.uploadFile(file)}
                 />
               </div>
@@ -748,7 +758,7 @@ export function ManualCreatePanel({
                     </Tooltip>
                   </TooltipProvider>
                 ) : (
-                  <Button size="sm" onClick={handleSubmit} disabled={submitting}>
+                  <Button size="sm" onClick={handleSubmit} disabled={submitting || pendingUploads > 0}>
                     {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
                   </Button>
                 )}
