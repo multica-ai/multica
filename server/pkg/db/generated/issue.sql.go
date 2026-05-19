@@ -295,7 +295,7 @@ func (q *Queries) DeleteIssue(ctx context.Context, id pgtype.UUID) error {
 }
 
 const findActiveDuplicateIssue = `-- name: FindActiveDuplicateIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date FROM issue
 WHERE workspace_id = $1
   AND status NOT IN ('done', 'cancelled')
   AND project_id IS NOT DISTINCT FROM $2::uuid
@@ -306,18 +306,18 @@ LIMIT 1
 `
 
 type FindActiveDuplicateIssueParams struct {
-	WorkspaceID     pgtype.UUID `json:"workspace_id"`
-	ProjectID       pgtype.UUID `json:"project_id"`
-	ParentIssueID   pgtype.UUID `json:"parent_issue_id"`
-	NormalizedTitle string      `json:"normalized_title"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Column2     pgtype.UUID `json:"column_2"`
+	Column3     pgtype.UUID `json:"column_3"`
+	Title       string      `json:"title"`
 }
 
 func (q *Queries) FindActiveDuplicateIssue(ctx context.Context, arg FindActiveDuplicateIssueParams) (Issue, error) {
 	row := q.db.QueryRow(ctx, findActiveDuplicateIssue,
 		arg.WorkspaceID,
-		arg.ProjectID,
-		arg.ParentIssueID,
-		arg.NormalizedTitle,
+		arg.Column2,
+		arg.Column3,
+		arg.Title,
 	)
 	var i Issue
 	err := row.Scan(
@@ -343,6 +343,7 @@ func (q *Queries) FindActiveDuplicateIssue(ctx context.Context, arg FindActiveDu
 		&i.OriginType,
 		&i.OriginID,
 		&i.FirstExecutedAt,
+		&i.StartDate,
 	)
 	return i, err
 }
@@ -758,8 +759,8 @@ const lockIssueDuplicateKey = `-- name: LockIssueDuplicateKey :exec
 SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
 `
 
-func (q *Queries) LockIssueDuplicateKey(ctx context.Context, key string) error {
-	_, err := q.db.Exec(ctx, lockIssueDuplicateKey, key)
+func (q *Queries) LockIssueDuplicateKey(ctx context.Context, dollar_1 string) error {
+	_, err := q.db.Exec(ctx, lockIssueDuplicateKey, dollar_1)
 	return err
 }
 

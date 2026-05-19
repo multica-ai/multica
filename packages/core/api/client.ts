@@ -135,6 +135,7 @@ import type {
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
+  GiteeWebhookConfig,
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
@@ -2150,5 +2151,29 @@ export class ApiClient {
 
   async listIssuePullRequests(issueId: string): Promise<{ pull_requests: GitHubPullRequest[] }> {
     return this.fetch(`/api/issues/${issueId}/pull-requests`);
+  }
+
+  // ── Gitee Integration ───────────────────────────────────────────────────
+
+  async listGiteeWebhookConfigs(workspaceId: string): Promise<{ configs: GiteeWebhookConfig[] }> {
+    return this.fetch(`/api/workspaces/${workspaceId}/gitee/webhook-configs`);
+  }
+
+  async createGiteeWebhookConfig(
+    workspaceId: string,
+    repoOwner: string,
+    repoName: string,
+  ): Promise<GiteeWebhookConfig> {
+    return this.fetch(`/api/workspaces/${workspaceId}/gitee/webhook-configs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo_owner: repoOwner, repo_name: repoName }),
+    });
+  }
+
+  async deleteGiteeWebhookConfig(workspaceId: string, configId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/gitee/webhook-configs/${configId}`, {
+      method: "DELETE",
+    });
   }
 }

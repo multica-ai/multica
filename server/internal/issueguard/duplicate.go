@@ -61,10 +61,10 @@ func LockAndFindActiveDuplicate(
 	}
 
 	duplicate, err := q.FindActiveDuplicateIssue(ctx, db.FindActiveDuplicateIssueParams{
-		WorkspaceID:     workspaceID,
-		ProjectID:       projectID,
-		ParentIssueID:   parentIssueID,
-		NormalizedTitle: normalizedTitle,
+		WorkspaceID: workspaceID,
+		Column2:     projectID,
+		Column3:     parentIssueID,
+		Title:       normalizedTitle,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
