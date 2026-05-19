@@ -119,7 +119,7 @@ function SubscriberPopoverContent({
 }: {
   members: { user_id: string; name: string }[];
   agents: { id: string; name: string; archived_at?: string | null }[];
-  subscribers: { user_type: string; user_id: string }[];
+  subscribers: { user_type: string; user_id: string; created_at?: string }[];
   toggleSubscriber: (id: string, type: "member" | "agent", subscribed: boolean) => void;
   t: ActivityT;
 }) {
@@ -136,6 +136,28 @@ function SubscriberPopoverContent({
     ? activeAgents.filter((a) => a.name.toLowerCase().includes(q) || matchesPinyin(a.name, q))
     : activeAgents;
 
+  // Sort: subscribed first (by created_at desc), then unsubscribed
+  const sortedMembers = [...filteredMembers].sort((a, b) => {
+    const subA = subscribers.find((s) => s.user_type === "member" && s.user_id === a.user_id);
+    const subB = subscribers.find((s) => s.user_type === "member" && s.user_id === b.user_id);
+    if (subA && !subB) return -1;
+    if (!subA && subB) return 1;
+    if (subA && subB) {
+      return (subB.created_at ?? "").localeCompare(subA.created_at ?? "");
+    }
+    return 0;
+  });
+  const sortedAgents = [...filteredAgents].sort((a, b) => {
+    const subA = subscribers.find((s) => s.user_type === "agent" && s.user_id === a.id);
+    const subB = subscribers.find((s) => s.user_type === "agent" && s.user_id === b.id);
+    if (subA && !subB) return -1;
+    if (!subA && subB) return 1;
+    if (subA && subB) {
+      return (subB.created_at ?? "").localeCompare(subA.created_at ?? "");
+    }
+    return 0;
+  });
+
   return (
     <PopoverContent align="end" className="w-64 p-0">
       <Command shouldFilter={false}>
@@ -145,12 +167,12 @@ function SubscriberPopoverContent({
           onValueChange={setSearch}
         />
         <CommandList className="max-h-64">
-          {filteredMembers.length === 0 && filteredAgents.length === 0 && (
+          {sortedMembers.length === 0 && sortedAgents.length === 0 && (
             <CommandEmpty>{t(($) => $.detail.no_subscribers_results)}</CommandEmpty>
           )}
-          {filteredMembers.length > 0 && (
+          {sortedMembers.length > 0 && (
             <CommandGroup heading={t(($) => $.detail.members_group)}>
-              {filteredMembers.map((m) => {
+              {sortedMembers.map((m) => {
                 const sub = subscribers.find((s) => s.user_type === "member" && s.user_id === m.user_id);
                 const isSubbed = !!sub;
                 return (
@@ -167,9 +189,9 @@ function SubscriberPopoverContent({
               })}
             </CommandGroup>
           )}
-          {filteredAgents.length > 0 && (
+          {sortedAgents.length > 0 && (
             <CommandGroup heading={t(($) => $.detail.agents_group)}>
-              {filteredAgents.map((a) => {
+              {sortedAgents.map((a) => {
                 const sub = subscribers.find((s) => s.user_type === "agent" && s.user_id === a.id);
                 const isSubbed = !!sub;
                 return (
