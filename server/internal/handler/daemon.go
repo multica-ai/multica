@@ -1976,6 +1976,19 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		if ai, ok := service.ParseAITaskContext(task.Context); ok {
+			resp.AITaskType = ai.Type
+			resp.AITaskPrompt = ai.Prompt
+			resp.AITaskVersion = ai.Version
+			resp.ThreadName = ai.Prompt
+			resp.WorkspaceID = ai.WorkspaceID
+			if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(ai.WorkspaceID)); err == nil && ws.Repos != nil {
+				var repos []RepoData
+				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+					resp.Repos = repos
+				}
+			}
+		}
 	}
 
 	// Workspace isolation check: the daemon uses this response's workspace_id

@@ -1,0 +1,79 @@
+[
+  {
+    "name": "vercel-react-best-practices",
+    "description": "React and Next.js performance optimization guidelines from Vercel Engineering.",
+    "source_url": "https://github.com/vercel-labs/agent-skills/tree/main/skills/react-best-practices",
+    "tags": [
+      "react",
+      "nextjs",
+      "performance"
+    ],
+    "category": "Engineering"
+  },
+  {
+    "name": "web-artifacts-builder",
+    "description": "Build polished browser-rendered HTML artifacts and interactive web outputs.",
+    "source_url": "https://github.com/anthropics/skills/tree/main/skills/web-artifacts-builder",
+    "tags": [
+      "html",
+      "frontend",
+      "artifacts"
+    ],
+    "category": "Design"
+  },
+  {
+    "name": "canvas-design",
+    "description": "Design visual canvases, layouts, and presentation-like compositions.",
+    "source_url": "https://github.com/anthropics/skills/tree/main/skills/canvas-design",
+    "tags": [
+      "design",
+      "canvas",
+      "visual"
+    ],
+    "category": "Design"
+  },
+  {
+    "name": "webapp-testing",
+    "description": "Test web applications with browser-driven checks and user-visible regression coverage.",
+    "source_url": "https://github.com/anthropics/skills/tree/main/skills/webapp-testing",
+    "tags": [
+      "testing",
+      "browser",
+      "playwright"
+    ],
+    "category": "Engineering"
+  },
+  {
+    "name": "frontend-design",
+    "description": "Create frontend UI with careful layout, visual hierarchy, responsiveness, and interaction states.",
+    "source_url": "https://github.com/anthropics/skills/tree/main/skills/frontend-design",
+    "tags": [
+      "frontend",
+      "ui",
+      "design"
+    ],
+    "category": "Design"
+  },
+  {
+    "name": "web-design-guidelines",
+    "description": "Guidelines for high-quality web page composition and visual design.",
+    "source_url": "https://github.com/vercel-labs/agent-skills/tree/main/skills/web-design-guidelines",
+    "tags": [
+      "web",
+      "design",
+      "guidelines"
+    ],
+    "category": "Design"
+  },
+  {
+    "name": "internal-comms",
+    "description": "Draft concise internal communications, updates, and email-style replies.",
+    "source_url": "https://github.com/anthropics/skills/tree/main/skills/internal-comms",
+    "tags": [
+      "writing",
+      "email",
+      "communication"
+    ],
+    "category": "Writing"
+  }
+]
