@@ -471,18 +471,6 @@ export function BoardView({
       onDragEnd={handleDragEnd}
     >
       <div className="flex flex-1 min-h-0 gap-4 overflow-x-auto p-4">
-        {visibleStatuses.map((status) => (
-          <PaginatedBoardColumn
-            key={status}
-            group={{ id: status, title: status, status }}
-            issueIds={columns[status] ?? []}
-            issueMap={issueMapRef.current}
-            childProgressMap={childProgressMap}
-            myIssuesOpts={myIssuesOpts}
-            projectId={projectId}
-            displayCount={columnCounts?.[status]}
-          />
-        ))}
         {groups.length === 0 ? (
           <div className="flex min-w-full flex-1 items-center justify-center text-sm text-muted-foreground">
             {t(($) => $.board.empty_grouping)}
@@ -498,6 +486,7 @@ export function BoardView({
                 childProgressMap={childProgressMap}
                 myIssuesOpts={myIssuesOpts}
                 projectId={projectId}
+                displayCount={columnCounts?.[group.status]}
               />
             ) : (
               assigneeGroupQueryKey && assigneeGroupFilter ? (
