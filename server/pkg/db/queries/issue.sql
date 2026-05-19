@@ -116,11 +116,11 @@ INSERT INTO issue (
 ) RETURNING *;
 
 -- name: LockIssueDuplicateKey :exec
-SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0));
+SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(key)::text, 0));
 
 -- name: FindActiveDuplicateIssue :one
 SELECT * FROM issue
-WHERE workspace_id = $1
+WHERE workspace_id = sqlc.arg(workspace_id)
   AND status NOT IN ('done', 'cancelled')
   AND project_id IS NOT DISTINCT FROM sqlc.arg('project_id')::uuid
   AND parent_issue_id IS NOT DISTINCT FROM sqlc.arg('parent_issue_id')::uuid

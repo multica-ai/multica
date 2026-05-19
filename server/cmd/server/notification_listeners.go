@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -18,7 +20,6 @@ type mention struct {
 	Type string // "member", "agent", "issue", or "all"
 	ID   string // user_id, agent_id, issue_id, or "all"
 }
-
 
 // statusLabels maps DB status values to human-readable labels for notifications.
 var statusLabels = map[string]string{
@@ -54,6 +55,63 @@ func priorityLabel(p string) string {
 	return p
 }
 
+func issueAssignedDirectBody(issue handler.IssueResponse) string {
+	if id := strings.TrimSpace(issue.Identifier); id != "" {
+		return fmt.Sprintf("你已被指派为 %s 的负责人。", id)
+	}
+	return "你已被指派为该 Issue 的负责人。"
+}
+
+func issueUnassignedDirectBody(issue handler.IssueResponse) string {
+	if id := strings.TrimSpace(issue.Identifier); id != "" {
+		return fmt.Sprintf("你已不再担任 %s 的负责人。", id)
+	}
+	return "你已不再担任该 Issue 的负责人。"
+}
+
+func subscriberAssigneeChangedBody() string {
+	return "该 Issue 的负责人已变更。"
+}
+
+func subscriberStatusChangedBody(prevStatus, newStatus string) string {
+	if strings.TrimSpace(prevStatus) == "" {
+		return fmt.Sprintf("当前状态：**%s**。", statusLabel(newStatus))
+	}
+	return fmt.Sprintf("状态已从 **%s** 变更为 **%s**。", statusLabel(prevStatus), statusLabel(newStatus))
+}
+
+func subscriberPriorityChangedBody(from, to string) string {
+	return fmt.Sprintf("优先级已从 **%s** 调整为 **%s**。", priorityLabel(from), priorityLabel(to))
+}
+
+func subscriberDueDateChangedBody(from, to string) string {
+	from, to = strings.TrimSpace(from), strings.TrimSpace(to)
+	if from == "" && to == "" {
+		return "截止日期已更新。"
+	}
+	if from == "" {
+		return fmt.Sprintf("截止日期已设为 **%s**。", to)
+	}
+	if to == "" {
+		return fmt.Sprintf("截止日期已清除（原为 **%s**）。", from)
+	}
+	return fmt.Sprintf("截止日期已从 **%s** 变更为 **%s**。", from, to)
+}
+
+func taskFailedSubscriberBody() string {
+	return "Agent 任务失败，请查看此 Issue。"
+}
+
+func reactionAddedInboxBody(details []byte) string {
+	var m map[string]string
+	if err := json.Unmarshal(details, &m); err == nil {
+		if emoji := strings.TrimSpace(m["emoji"]); emoji != "" {
+			return fmt.Sprintf("添加了反应 **%s**。", emoji)
+		}
+	}
+	return "添加了表情反应。"
+}
+
 var emptyDetails = []byte("{}")
 
 // parseMentions extracts mentions from markdown content.
@@ -78,19 +136,19 @@ var parentBubbleNotifTypes = map[string]bool{
 // notifTypeToGroup maps each InboxItemType to a user-configurable preference
 // group. Types not in this map are always delivered (not configurable).
 var notifTypeToGroup = map[string]string{
-	"issue_assigned":  "assignments",
-	"unassigned":      "assignments",
+	"issue_assigned":   "assignments",
+	"unassigned":       "assignments",
 	"assignee_changed": "assignments",
-	"status_changed":  "status_changes",
-	"new_comment":     "comments",
-	"mentioned":       "comments",
+	"status_changed":   "status_changes",
+	"new_comment":      "comments",
+	"mentioned":        "comments",
 	"priority_changed": "updates",
 	"start_date_changed": "updates",
 	"due_date_changed": "updates",
-	"task_completed":  "agent_activity",
-	"task_failed":     "agent_activity",
-	"agent_blocked":   "agent_activity",
-	"agent_completed": "agent_activity",
+	"task_completed":   "agent_activity",
+	"task_failed":      "agent_activity",
+	"agent_blocked":    "agent_activity",
+	"agent_completed":  "agent_activity",
 }
 
 // isNotifMuted returns true if the given notification type is muted for a user
@@ -215,6 +273,9 @@ func archiveStaleTaskFailedInbox(
 // If the issue has a parent and the notification type is in the bubble
 // allowlist, parent issue subscribers are also notified (deduplicated
 // against direct subscribers).
+//
+// The returned map is the set of member user IDs that received an inbox item
+// (issue subscribers plus, when bubbling, parent issue subscribers).
 func notifySubscribers(
 	ctx context.Context,
 	queries *db.Queries,
@@ -229,14 +290,14 @@ func notifySubscribers(
 	title string,
 	body string,
 	details []byte,
-) {
+) map[string]bool {
 	notified := notifyIssueSubscribers(ctx, queries, bus,
 		issueID, issueID, issueStatus, workspaceID, e, exclude,
 		notifType, severity, title, body, details)
 
 	// Only a small allowlist of event types bubbles to parent subscribers.
 	if !parentBubbleNotifTypes[notifType] {
-		return
+		return notified
 	}
 
 	// Also notify parent issue subscribers if this is a sub-issue.
@@ -244,10 +305,10 @@ func notifySubscribers(
 	if err != nil {
 		slog.Error("failed to get issue for parent notification",
 			"issue_id", issueID, "error", err)
-		return
+		return notified
 	}
 	if !issue.ParentIssueID.Valid {
-		return
+		return notified
 	}
 
 	// Merge already-notified IDs into exclude set for parent subscribers.
@@ -262,9 +323,12 @@ func notifySubscribers(
 	// Query subscribers from the parent issue, but the inbox item still
 	// points to the sub-issue so the user navigates to the actual change.
 	parentID := util.UUIDToString(issue.ParentIssueID)
-	notifyIssueSubscribers(ctx, queries, bus,
+	for id := range notifyIssueSubscribers(ctx, queries, bus,
 		parentID, issueID, issueStatus, workspaceID, e, parentExclude,
-		notifType, severity, title, body, details)
+		notifType, severity, title, body, details) {
+		notified[id] = true
+	}
+	return notified
 }
 
 // notifyIssueSubscribers sends inbox notifications to subscribers of
@@ -436,6 +500,7 @@ func notifyMentionedMembers(
 	issueTitle string,
 	issueStatus string,
 	title string,
+	body string,
 	skip map[string]bool,
 	details []byte,
 ) {
@@ -514,6 +579,7 @@ func notifyMentionedMembers(
 			Severity:      "info",
 			IssueID:       parseUUID(issueID),
 			Title:         title,
+			Body:          util.StrToText(body),
 			ActorType:     util.StrToText(e.ActorType),
 			ActorID:       optionalUUID(e.ActorID),
 			Details:       details,
@@ -566,7 +632,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				issue.WorkspaceID, e, issue.ID, issue.Status,
 				"issue_assigned", "action_required",
 				issue.Title,
-				"",
+				issueAssignedDirectBody(issue),
 				emptyDetails,
 			)
 		}
@@ -575,7 +641,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if issue.Description != nil && *issue.Description != "" {
 			mentions := parseMentions(*issue.Description)
 			notifyMentionedMembers(bus, queries, e, mentions, issue.ID, issue.Title, issue.Status,
-				issue.Title, skip, emptyDetails)
+				issue.Title, *issue.Description, skip, emptyDetails)
 		}
 	})
 
@@ -620,7 +686,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 					e.WorkspaceID, e, issue.ID, issue.Status,
 					"issue_assigned", "action_required",
 					issue.Title,
-					"",
+					issueAssignedDirectBody(issue),
 					assigneeDetails,
 				)
 			}
@@ -632,7 +698,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 					e.WorkspaceID, e, issue.ID, issue.Status,
 					"unassigned", "info",
 					issue.Title,
-					"",
+					issueUnassignedDirectBody(issue),
 					assigneeDetails,
 				)
 			}
@@ -648,7 +714,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			}
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
 				exclude, "assignee_changed", "info",
-				issue.Title, "",
+				issue.Title, subscriberAssigneeChangedBody(),
 				assigneeDetails)
 		}
 
@@ -660,7 +726,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			})
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
 				nil, "status_changed", "info",
-				issue.Title, "",
+				issue.Title, subscriberStatusChangedBody(prevStatus, issue.Status),
 				statusDetails)
 
 			// When the issue progresses past the failure (in_review / done /
@@ -680,7 +746,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			})
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
 				nil, "priority_changed", "info",
-				issue.Title, "",
+				issue.Title, subscriberPriorityChangedBody(prevPriority, issue.Priority),
 				priorityDetails)
 		}
 
@@ -718,7 +784,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			})
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
 				nil, "due_date_changed", "info",
-				issue.Title, "",
+				issue.Title, subscriberDueDateChangedBody(prevDueDateStr, newDueDateStr),
 				dueDateDetails)
 		}
 
@@ -740,7 +806,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				}
 				skip := map[string]bool{e.ActorID: true}
 				notifyMentionedMembers(bus, queries, e, added, issue.ID, issue.Title, issue.Status,
-					issue.Title, skip, emptyDetails)
+					issue.Title, *issue.Description, skip, emptyDetails)
 			}
 		}
 	})
@@ -772,6 +838,10 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		issueTitle, _ := payload["issue_title"].(string)
 		issueStatus, _ := payload["issue_status"].(string)
 
+		if strings.TrimSpace(commentContent) == "" {
+			commentContent = "有一条新评论（无正文）。"
+		}
+
 		commentDetails := emptyDetails
 		if commentID != "" {
 			commentDetails, _ = json.Marshal(map[string]string{
@@ -779,7 +849,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			})
 		}
 
-		notifySubscribers(ctx, queries, bus, issueID, issueStatus, e.WorkspaceID, e,
+		notifiedSubscribers := notifySubscribers(ctx, queries, bus, issueID, issueStatus, e.WorkspaceID, e,
 			nil, "new_comment", "info",
 			issueTitle, commentContent,
 			commentDetails)
@@ -788,8 +858,11 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		mentions := parseMentions(commentContent)
 		if len(mentions) > 0 {
 			skip := map[string]bool{e.ActorID: true}
+			for id := range notifiedSubscribers {
+				skip[id] = true
+			}
 			notifyMentionedMembers(bus, queries, e, mentions, issueID, issueTitle, issueStatus,
-				issueTitle, skip, commentDetails)
+				issueTitle, commentContent, skip, commentDetails)
 		}
 	})
 
@@ -823,7 +896,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			creatorType, creatorID,
 			e.WorkspaceID, e, issueID, issueStatus,
 			"reaction_added", "info",
-			issueTitle, "",
+			issueTitle, reactionAddedInboxBody(details),
 			details,
 		)
 	})
@@ -863,7 +936,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			commentAuthorType, commentAuthorID,
 			e.WorkspaceID, e, issueID, issueStatus,
 			"reaction_added", "info",
-			issueTitle, "",
+			issueTitle, reactionAddedInboxBody(details),
 			details,
 		)
 	})
@@ -901,7 +974,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				ActorID:     agentID,
 			},
 			exclude, "task_failed", "action_required",
-			issue.Title, "",
+			issue.Title, taskFailedSubscriberBody(),
 			emptyDetails)
 	})
 }

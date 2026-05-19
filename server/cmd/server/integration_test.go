@@ -38,6 +38,7 @@ const (
 	integrationTestEmail         = "integration-test@multica.ai"
 	integrationTestName          = "Integration Tester"
 	integrationTestWorkspaceSlug = "integration-tests"
+	integrationTestChannelConnID = "feishu"
 )
 
 func TestMain(m *testing.M) {
@@ -49,10 +50,24 @@ func TestMain(m *testing.M) {
 
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
+		// M1/M2 acceptance gate (STA-10 / STA-46 directive): when
+		// MULTICA_M1_REQUIRE_PG or MULTICA_M2_REQUIRE_PG is set, an
+		// unreachable database is a hard failure rather than a quiet skip.
+		// CI sets these env vars so a green build with the dev DB stopped
+		// can never claim acceptance.
+		if os.Getenv("MULTICA_M1_REQUIRE_PG") != "" || os.Getenv("MULTICA_M2_REQUIRE_PG") != "" {
+			fmt.Printf("M1/M2 acceptance: DATABASE_URL unreachable: %v\n", err)
+			os.Exit(1)
+		}
 		fmt.Printf("Skipping integration tests: could not connect to database: %v\n", err)
 		os.Exit(0)
 	}
 	if err := pool.Ping(ctx); err != nil {
+		if os.Getenv("MULTICA_M1_REQUIRE_PG") != "" || os.Getenv("MULTICA_M2_REQUIRE_PG") != "" {
+			fmt.Printf("M1/M2 acceptance: DATABASE_URL not reachable: %v\n", err)
+			pool.Close()
+			os.Exit(1)
+		}
 		fmt.Printf("Skipping integration tests: database not reachable: %v\n", err)
 		pool.Close()
 		os.Exit(0)
@@ -112,8 +127,8 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 
 	var workspaceID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug, description)
-		VALUES ($1, $2, $3)
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ($1, $2, $3, 'INT')
 		RETURNING id
 	`, "Integration Tests", integrationTestWorkspaceSlug, "Temporary workspace for router integration tests").Scan(&workspaceID); err != nil {
 		return "", "", err
@@ -147,10 +162,26 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 		return "", "", err
 	}
 
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO channel_connection (id, provider, display_name, enabled, is_default, status)
+		VALUES ($1, 'feishu', 'Feishu Test', TRUE, FALSE, 'configured')
+		ON CONFLICT (id) DO UPDATE SET
+			display_name = EXCLUDED.display_name,
+			enabled = EXCLUDED.enabled,
+			is_default = EXCLUDED.is_default,
+			status = EXCLUDED.status,
+			updated_at = now()
+	`, integrationTestChannelConnID); err != nil {
+		return "", "", err
+	}
+
 	return userID, workspaceID, nil
 }
 
 func cleanupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) error {
+	if _, err := pool.Exec(ctx, `DELETE FROM channel_connection WHERE id = $1`, integrationTestChannelConnID); err != nil {
+		return err
+	}
 	if _, err := pool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, integrationTestWorkspaceSlug); err != nil {
 		return err
 	}

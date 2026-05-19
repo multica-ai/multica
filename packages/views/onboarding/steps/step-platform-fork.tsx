@@ -230,7 +230,6 @@ export function StepPlatformFork({
     </div>
   );
 }
-
 // ------------------------------------------------------------
 // Fork cards
 // ------------------------------------------------------------
@@ -545,4 +544,3 @@ function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
     </div>
   );
 }
-

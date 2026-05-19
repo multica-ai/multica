@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // ErrRepoNotConfigured is returned by ensureRepoReady when the requested repo
@@ -743,7 +744,10 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		"cli_version":       d.cfg.CLIVersion,
 		"launched_by":       d.cfg.LaunchedBy,
 		"timezone":          detectLocalTimezone(),
-		"runtimes":          runtimes,
+		"capabilities": []string{
+			protocol.DaemonCapabilityChannelTurn,
+		},
+		"runtimes": runtimes,
 	}
 
 	resp, err := d.client.Register(ctx, req)
@@ -2206,25 +2210,32 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Repos are passed as metadata only — the agent checks them out on demand
 	// via `multica repo checkout <url>`.
 	taskCtx := execenv.TaskContextForEnv{
-		IssueID:                 task.IssueID,
-		TriggerCommentID:        task.TriggerCommentID,
-		AgentID:                 agentID,
-		AgentName:               agentName,
-		AgentInstructions:       instructions,
-		AgentSkills:             convertSkillsForEnv(skills),
-		Repos:                   convertReposForEnv(task.Repos),
-		ProjectID:               task.ProjectID,
-		ProjectTitle:            task.ProjectTitle,
-		ProjectResources:        convertProjectResourcesForEnv(task.ProjectResources),
-		ChatSessionID:           task.ChatSessionID,
-		AutopilotRunID:          task.AutopilotRunID,
-		AutopilotID:             task.AutopilotID,
-		AutopilotTitle:          task.AutopilotTitle,
-		AutopilotDescription:    task.AutopilotDescription,
-		AutopilotSource:         task.AutopilotSource,
-		AutopilotTriggerPayload: strings.TrimSpace(string(task.AutopilotTriggerPayload)),
-		QuickCreatePrompt:       task.QuickCreatePrompt,
-		IsSquadLeader:           strings.Contains(instructions, "## Squad Operating Protocol"),
+		IssueID:                      task.IssueID,
+		IssueTitle:                   task.IssueTitle,
+		IssueDescription:             task.IssueDescription,
+		TriggerCommentID:             task.TriggerCommentID,
+		TriggerCommentContent:        task.TriggerCommentContent,
+		AgentID:                      agentID,
+		AgentName:                    agentName,
+		AgentInstructions:            instructions,
+		AgentSkills:                  convertSkillsForEnv(skills),
+		Repos:                        convertReposForEnv(task.Repos),
+		ProjectID:                    task.ProjectID,
+		ProjectTitle:                 task.ProjectTitle,
+		ProjectResources:             convertProjectResourcesForEnv(task.ProjectResources),
+		HasIssueOrCommentAttachments: task.HasIssueOrCommentAttachments,
+		ChatSessionID:                task.ChatSessionID,
+		ChatMessage:                  task.ChatMessage,
+		ChatMessageAttachments:       convertAttachmentsForEnv(task.ChatMessageAttachments),
+		AutopilotRunID:               task.AutopilotRunID,
+		AutopilotID:                  task.AutopilotID,
+		AutopilotTitle:               task.AutopilotTitle,
+		AutopilotDescription:         task.AutopilotDescription,
+		AutopilotSource:              task.AutopilotSource,
+		AutopilotTriggerPayload:      strings.TrimSpace(string(task.AutopilotTriggerPayload)),
+		QuickCreatePrompt:            task.QuickCreatePrompt,
+		IsSquadLeader:                strings.Contains(instructions, "## Squad Operating Protocol"),
+		ChannelTurnPrompt:            task.ChannelTurnPrompt,
 	}
 
 	// Mark candidate env roots as active before any env work so the GC loop
@@ -2292,21 +2303,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	prompt := BuildPrompt(task, provider)
 
-	// Pass the daemon's auth credentials and context so the spawned agent CLI
-	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
+	// Pass task context and daemon auth credentials to the spawned agent CLI so
+	// it can call the Multica API and local daemon helpers (e.g. `multica repo checkout`).
 	// MULTICA_TASK_SLOT is allocated from the daemon-wide concurrency pool, not
 	// per-agent. When one daemon hosts multiple agents, slots index shared
 	// daemon-level resources such as GPUs.
 	agentEnv := map[string]string{
-		"MULTICA_TOKEN":        d.client.Token(),
-		"MULTICA_SERVER_URL":   d.cfg.ServerBaseURL,
-		"MULTICA_DAEMON_PORT":  fmt.Sprintf("%d", d.cfg.HealthPort),
 		"MULTICA_WORKSPACE_ID": task.WorkspaceID,
 		"MULTICA_AGENT_NAME":   agentName,
 		"MULTICA_AGENT_ID":     task.AgentID,
 		"MULTICA_TASK_ID":      task.ID,
 		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
 	}
+	agentEnv["MULTICA_TOKEN"] = d.client.Token()
+	agentEnv["MULTICA_SERVER_URL"] = d.cfg.ServerBaseURL
+	agentEnv["MULTICA_DAEMON_PORT"] = fmt.Sprintf("%d", d.cfg.HealthPort)
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
 	}
@@ -3028,6 +3039,21 @@ func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.Pr
 			ResourceType: r.ResourceType,
 			ResourceRef:  r.ResourceRef,
 			Label:        r.Label,
+		}
+	}
+	return result
+}
+
+func convertAttachmentsForEnv(attachments []ChatAttachmentMeta) []execenv.AttachmentContextForEnv {
+	if len(attachments) == 0 {
+		return nil
+	}
+	result := make([]execenv.AttachmentContextForEnv, len(attachments))
+	for i, attachment := range attachments {
+		result[i] = execenv.AttachmentContextForEnv{
+			ID:          attachment.ID,
+			Filename:    attachment.Filename,
+			ContentType: attachment.ContentType,
 		}
 	}
 	return result

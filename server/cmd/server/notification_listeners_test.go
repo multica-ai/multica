@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -56,9 +57,18 @@ func createTestSubIssue(t *testing.T, workspaceID, creatorID, parentIssueID stri
 	ctx := context.Background()
 	var issueID string
 	err := testPool.QueryRow(ctx, `
+		WITH bumped AS (
+			UPDATE workspace
+			SET issue_counter = GREATEST(
+				issue_counter,
+				COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0)
+			) + 1
+			WHERE id = $1
+			RETURNING issue_counter
+		)
 		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, parent_issue_id, number)
-		VALUES ($1, 'sub-issue test', 'todo', 'medium', 'member', $2, 0, $3,
-		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		SELECT $1, 'sub-issue test', 'todo', 'medium', 'member', $2, 0, $3, issue_counter
+		FROM bumped
 		RETURNING id
 	`, workspaceID, creatorID, parentIssueID).Scan(&issueID)
 	if err != nil {
@@ -388,6 +398,109 @@ func TestNotification_CommentCreated(t *testing.T) {
 	}
 }
 
+func TestNotification_CommentMentionCarriesBody(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	commenterEmail := "notif-mention-commenter@multica.ai"
+	commenterID := createTestUser(t, commenterEmail)
+	t.Cleanup(func() { cleanupTestUser(t, commenterEmail) })
+
+	mentionedEmail := "notif-mentioned-body@multica.ai"
+	mentionedID := createTestUser(t, mentionedEmail)
+	t.Cleanup(func() { cleanupTestUser(t, mentionedEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	commentBody := fmt.Sprintf("[@Mentioned](mention://member/%s) 在新的评论中@我，而不是回复我的评论", mentionedID)
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     commenterID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-000000000001",
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   commenterID,
+				Content:    commentBody,
+				Type:       "comment",
+			},
+			"issue_title":  "mention body issue",
+			"issue_status": "todo",
+		},
+	})
+
+	items := inboxItemsForRecipient(t, queries, mentionedID)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 inbox item for mentioned member, got %d", len(items))
+	}
+	if items[0].Type != "mentioned" {
+		t.Fatalf("expected type 'mentioned', got %q", items[0].Type)
+	}
+	if !items[0].Body.Valid || items[0].Body.String != commentBody {
+		t.Fatalf("expected mentioned inbox body %q, got valid=%v body=%q", commentBody, items[0].Body.Valid, items[0].Body.String)
+	}
+}
+
+// TestNotification_CommentSubscriberMentionNoDup verifies that a member who is
+// both an issue subscriber and @mentioned in a comment receives a single inbox
+// notification (new_comment), not a second redundant "mentioned" with the same body.
+func TestNotification_CommentSubscriberMentionNoDup(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	commenterEmail := "notif-commenter-dedup@multica.ai"
+	commenterID := createTestUser(t, commenterEmail)
+	t.Cleanup(func() { cleanupTestUser(t, commenterEmail) })
+
+	subMentionEmail := "notif-sub-mention-dedup@multica.ai"
+	subMentionID := createTestUser(t, subMentionEmail)
+	t.Cleanup(func() { cleanupTestUser(t, subMentionEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	addTestSubscriber(t, issueID, "member", testUserID, "creator")
+	addTestSubscriber(t, issueID, "member", subMentionID, "assignee")
+
+	commentBody := fmt.Sprintf("hello [@Sub](mention://member/%s) from commenter", subMentionID)
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     commenterID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-000000000002",
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   commenterID,
+				Content:    commentBody,
+				Type:       "comment",
+			},
+			"issue_title":  "dedup comment issue",
+			"issue_status": "todo",
+		},
+	})
+
+	items := inboxItemsForRecipient(t, queries, subMentionID)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 inbox item for subscriber+mentioned, got %d", len(items))
+	}
+	if items[0].Type != "new_comment" {
+		t.Fatalf("expected type 'new_comment', got %q", items[0].Type)
+	}
+}
+
 // TestNotification_AssigneeChanged verifies the full assignee change flow:
 // - New assignee gets "issue_assigned" (Direct)
 // - Old assignee gets "unassigned" (Direct)
@@ -439,8 +552,8 @@ func TestNotification_AssigneeChanged(t *testing.T) {
 				AssigneeType: &newAssigneeType,
 				AssigneeID:   &newAssigneeID,
 			},
-			"assignee_changed":  true,
-			"status_changed":    false,
+			"assignee_changed":   true,
+			"status_changed":     false,
 			"prev_assignee_type": &oldAssigneeType,
 			"prev_assignee_id":   &oldAssigneeID,
 		},

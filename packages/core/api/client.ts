@@ -98,6 +98,17 @@ import type {
   GitHubConnectResponse,
   Squad,
   SquadMember,
+  ChannelBinding,
+  ChannelUserBindingResponse,
+  ListChannelConnectionsResponse,
+  ListChannelProvidersResponse,
+  ChannelConnection,
+  ChannelConnectionWriteRequest,
+  ChannelBindTokenPreview,
+  ListChannelBindingsResponse,
+  CreateChannelBindingRequest,
+  CreateChannelUserBindingRequest,
+  PatchChannelBindingRequest,
   SquadMemberStatusListResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
@@ -109,6 +120,11 @@ import {
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
   AttachmentResponseSchema,
+  ChannelBindingSchema,
+  ChannelBindTokenPreviewSchema,
+  ChannelConnectionSchema,
+  ChannelConnectionTestResponseSchema,
+  ChannelUserBindingResponseSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
   CreateAgentFromTemplateResponseSchema,
@@ -119,14 +135,25 @@ import {
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_ATTACHMENT,
+  EMPTY_CHANNEL_BINDING,
+  EMPTY_CHANNEL_BIND_TOKEN_PREVIEW,
+  EMPTY_CHANNEL_CONNECTION,
+  EMPTY_CHANNEL_CONNECTION_TEST_RESPONSE,
+  EMPTY_CHANNEL_USER_BINDING_RESPONSE,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
+  EMPTY_LIST_CHANNEL_BINDINGS_RESPONSE,
+  EMPTY_LIST_CHANNEL_CONNECTIONS_RESPONSE,
+  EMPTY_LIST_CHANNEL_PROVIDERS_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_SQUAD_MEMBER_STATUS_LIST,
   EMPTY_TIMELINE_ENTRIES,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
   GroupedIssuesResponseSchema,
+  ListChannelBindingsResponseSchema,
+  ListChannelConnectionsResponseSchema,
+  ListChannelProvidersResponseSchema,
   ListIssuesResponseSchema,
   ListWebhookDeliveriesResponseSchema,
   SquadMemberStatusListResponseSchema,
@@ -1391,10 +1418,14 @@ export class ApiClient {
   }
 
   // Projects
-  async listProjects(params?: { status?: string }): Promise<ListProjectsResponse> {
+  async listProjects(params?: { status?: string; workspace_id?: string }): Promise<ListProjectsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
-    return this.fetch(`/api/projects?${search}`);
+    if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
+    const init = params?.workspace_id
+      ? { headers: { "X-Workspace-Slug": "" } }
+      : undefined;
+    return this.fetch(`/api/projects?${search}`, init);
   }
 
   async getProject(id: string): Promise<Project> {
@@ -1710,5 +1741,104 @@ export class ApiClient {
 
   async listIssuePullRequests(issueId: string): Promise<{ pull_requests: GitHubPullRequest[] }> {
     return this.fetch(`/api/issues/${issueId}/pull-requests`);
+  }
+
+  // Channel Bindings
+  async listChannelProviders(): Promise<ListChannelProvidersResponse> {
+    const raw = await this.fetch<unknown>("/api/channel-providers");
+    return parseWithFallback(raw, ListChannelProvidersResponseSchema, EMPTY_LIST_CHANNEL_PROVIDERS_RESPONSE, {
+      endpoint: "GET /api/channel-providers",
+    });
+  }
+
+  async listChannelConnections(): Promise<ListChannelConnectionsResponse> {
+    const raw = await this.fetch<unknown>("/api/channel-connections");
+    return parseWithFallback(raw, ListChannelConnectionsResponseSchema, EMPTY_LIST_CHANNEL_CONNECTIONS_RESPONSE, {
+      endpoint: "GET /api/channel-connections",
+    });
+  }
+
+  async createChannelConnection(data: ChannelConnectionWriteRequest): Promise<ChannelConnection> {
+    const raw = await this.fetch<unknown>("/api/channel-connections", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, ChannelConnectionSchema, EMPTY_CHANNEL_CONNECTION, {
+      endpoint: "POST /api/channel-connections",
+    });
+  }
+
+  async updateChannelConnection(id: string, data: ChannelConnectionWriteRequest): Promise<ChannelConnection> {
+    const raw = await this.fetch<unknown>(`/api/channel-connections/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, ChannelConnectionSchema, EMPTY_CHANNEL_CONNECTION, {
+      endpoint: "PATCH /api/channel-connections/:id",
+    });
+  }
+
+  async deleteChannelConnection(id: string): Promise<void> {
+    await this.fetch(`/api/channel-connections/${id}`, { method: "DELETE" });
+  }
+
+  async testChannelConnection(id: string): Promise<{ ok: boolean }> {
+    const raw = await this.fetch<unknown>(`/api/channel-connections/${id}/test`, { method: "POST" });
+    return parseWithFallback(raw, ChannelConnectionTestResponseSchema, EMPTY_CHANNEL_CONNECTION_TEST_RESPONSE, {
+      endpoint: "POST /api/channel-connections/:id/test",
+    });
+  }
+
+  async getChannelBindTokenPreview(token: string): Promise<ChannelBindTokenPreview> {
+    const params = new URLSearchParams({ token });
+    const raw = await this.fetch<unknown>(`/api/channel-bind-token?${params.toString()}`);
+    return parseWithFallback(raw, ChannelBindTokenPreviewSchema, EMPTY_CHANNEL_BIND_TOKEN_PREVIEW, {
+      endpoint: "GET /api/channel-bind-token",
+    });
+  }
+
+  async listChannelBindings(workspaceId: string): Promise<ListChannelBindingsResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/channel-bindings`);
+    return parseWithFallback(raw, ListChannelBindingsResponseSchema, EMPTY_LIST_CHANNEL_BINDINGS_RESPONSE, {
+      endpoint: "GET /api/workspaces/:id/channel-bindings",
+    });
+  }
+
+  async createChannelBinding(workspaceId: string, data: CreateChannelBindingRequest): Promise<ChannelBinding> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/channel-bindings`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, ChannelBindingSchema, EMPTY_CHANNEL_BINDING, {
+      endpoint: "POST /api/workspaces/:id/channel-bindings",
+    });
+  }
+
+  async createChannelUserBinding(data: CreateChannelUserBindingRequest): Promise<ChannelUserBindingResponse> {
+    const raw = await this.fetch<unknown>("/api/channel-user-bindings", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, ChannelUserBindingResponseSchema, EMPTY_CHANNEL_USER_BINDING_RESPONSE, {
+      endpoint: "POST /api/channel-user-bindings",
+    });
+  }
+
+  async deleteChannelBinding(workspaceId: string, bindingId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/channel-bindings/${bindingId}`, { method: "DELETE" });
+  }
+
+  async updateChannelBinding(workspaceId: string, bindingId: string, data: PatchChannelBindingRequest): Promise<ChannelBinding> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/channel-bindings/${bindingId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, ChannelBindingSchema, EMPTY_CHANNEL_BINDING, {
+      endpoint: "PATCH /api/workspaces/:id/channel-bindings/:bindingId",
+    });
+  }
+
+  async setPrimaryChannelBinding(workspaceId: string, bindingId: string, data: { is_primary: boolean }): Promise<ChannelBinding> {
+    return this.updateChannelBinding(workspaceId, bindingId, data);
   }
 }

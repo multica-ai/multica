@@ -23,9 +23,18 @@ func createTestIssue(t *testing.T, workspaceID, creatorID string) string {
 	ctx := context.Background()
 	var issueID string
 	err := testPool.QueryRow(ctx, `
+		WITH bumped AS (
+			UPDATE workspace
+			SET issue_counter = GREATEST(
+				issue_counter,
+				COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0)
+			) + 1
+			WHERE id = $1
+			RETURNING issue_counter
+		)
 		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number)
-		VALUES ($1, 'subscriber test issue', 'todo', 'medium', 'member', $2, 0,
-		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		SELECT $1, 'subscriber test issue', 'todo', 'medium', 'member', $2, 0, issue_counter
+		FROM bumped
 		RETURNING id
 	`, workspaceID, creatorID).Scan(&issueID)
 	if err != nil {

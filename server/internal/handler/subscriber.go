@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -96,10 +97,12 @@ func (h *Handler) SubscribeToIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.publish(protocol.EventSubscriberAdded, workspaceID, callerActorType, callerActorID, map[string]any{
-		"issue_id":  issueID,
-		"user_type": targetUserType,
-		"user_id":   targetUserID,
-		"reason":    "manual",
+		"issue_id":         issueID,
+		"issue_identifier": fmt.Sprintf("%s-%d", h.getIssuePrefix(r.Context(), issue.WorkspaceID), issue.Number),
+		"issue_title":      issue.Title,
+		"user_type":        targetUserType,
+		"user_id":          targetUserID,
+		"reason":           "manual",
 	})
 
 	writeJSON(w, http.StatusOK, map[string]bool{"subscribed": true})

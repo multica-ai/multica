@@ -4,8 +4,15 @@ import type {
   AgentTemplate,
   AgentTemplateSummary,
   Attachment,
+  ChannelBindTokenPreview,
+  ChannelBinding,
+  ChannelConnection,
+  ChannelUserBindingResponse,
   CreateAgentFromTemplateResponse,
   GroupedIssuesResponse,
+  ListChannelBindingsResponse,
+  ListChannelConnectionsResponse,
+  ListChannelProvidersResponse,
   ListIssuesResponse,
   ListWebhookDeliveriesResponse,
   TimelineEntry,
@@ -360,6 +367,150 @@ export const SquadMemberStatusListResponseSchema = z.object({
 }).loose();
 
 export const EMPTY_SQUAD_MEMBER_STATUS_LIST = { members: [] };
+
+// ---------------------------------------------------------------------------
+// Channel management schemas
+//
+// These endpoints back the workspace channel settings screen. Keep them
+// lenient like the issue schemas above: arrays default to [], boolean flags
+// default to false, and unknown provider-specific fields pass through.
+// ---------------------------------------------------------------------------
+
+const ChannelConfigFieldSchema = z.object({
+  key: z.string().default(""),
+  label: z.string().default(""),
+  required: z.boolean().default(false),
+  secret: z.boolean().default(false),
+  configured: z.boolean().optional(),
+}).loose();
+
+export const ChannelConnectionSchema = z.object({
+  id: z.string().default(""),
+  provider: z.string().default(""),
+  display_name: z.string().default(""),
+  enabled: z.boolean().default(false),
+  is_default: z.boolean().default(false),
+  status: z.string().default(""),
+  last_error: z.string().nullable().default(null),
+  config: z.record(z.string(), z.string()).default({}),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  config_schema: z.array(ChannelConfigFieldSchema).default([]),
+}).loose();
+
+export const EMPTY_CHANNEL_CONNECTION: ChannelConnection = {
+  id: "",
+  provider: "",
+  display_name: "",
+  enabled: false,
+  is_default: false,
+  status: "",
+  last_error: null,
+  config: {},
+  created_at: "",
+  updated_at: "",
+  config_schema: [],
+};
+
+export const ListChannelConnectionsResponseSchema = z.object({
+  connections: z.array(ChannelConnectionSchema).default([]),
+  can_manage: z.boolean().default(false),
+}).loose();
+
+export const EMPTY_LIST_CHANNEL_CONNECTIONS_RESPONSE: ListChannelConnectionsResponse = {
+  connections: [],
+  can_manage: false,
+};
+
+const ChannelProviderSchema = z.object({
+  provider: z.string().default(""),
+  display_name: z.string().default(""),
+  config_schema: z.array(ChannelConfigFieldSchema).default([]),
+}).loose();
+
+export const ListChannelProvidersResponseSchema = z.object({
+  providers: z.array(ChannelProviderSchema).default([]),
+}).loose();
+
+export const EMPTY_LIST_CHANNEL_PROVIDERS_RESPONSE: ListChannelProvidersResponse = {
+  providers: [],
+};
+
+export const ChannelBindTokenPreviewSchema = z.object({
+  kind: z.string().default("user"),
+  provider: z.string().default(""),
+  connection_id: z.string().default(""),
+  connection_display_name: z.string().default(""),
+  external_chat_id: z.string().nullable().default(null),
+  external_chat_name: z.string().nullable().default(null),
+  expires_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_CHANNEL_BIND_TOKEN_PREVIEW: ChannelBindTokenPreview = {
+  kind: "user",
+  provider: "",
+  connection_id: "",
+  connection_display_name: "",
+  external_chat_id: null,
+  external_chat_name: null,
+  expires_at: "",
+};
+
+export const ChannelBindingSchema = z.object({
+  id: z.string().default(""),
+  provider: z.string().default(""),
+  connection_id: z.string().default(""),
+  external_chat_id: z.string().default(""),
+  chat_type: z.string().default(""),
+  external_chat_name: z.string().nullable().default(null),
+  default_project_id: z.string().nullable().optional(),
+  listen_mode: z.string().default("mentions"),
+  agent_id: z.string().nullable().optional(),
+  is_primary: z.boolean().default(false),
+  bound_by_user_id: z.string().default(""),
+  created_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_CHANNEL_BINDING: ChannelBinding = {
+  id: "",
+  provider: "",
+  connection_id: "",
+  external_chat_id: "",
+  chat_type: "",
+  external_chat_name: null,
+  listen_mode: "mentions",
+  is_primary: false,
+  bound_by_user_id: "",
+  created_at: "",
+};
+
+export const ListChannelBindingsResponseSchema = z.object({
+  bindings: z.array(ChannelBindingSchema).default([]),
+}).loose();
+
+export const EMPTY_LIST_CHANNEL_BINDINGS_RESPONSE: ListChannelBindingsResponse = {
+  bindings: [],
+};
+
+export const ChannelUserBindingResponseSchema = z.object({
+  provider: z.string().default(""),
+  connection_id: z.string().default(""),
+  external_user_id: z.string().default(""),
+  user_id: z.string().default(""),
+}).loose();
+
+export const EMPTY_CHANNEL_USER_BINDING_RESPONSE: ChannelUserBindingResponse = {
+  provider: "",
+  connection_id: "",
+  external_user_id: "",
+  user_id: "",
+};
+
+export const ChannelConnectionTestResponseSchema = z.object({
+  ok: z.boolean().default(false),
+}).loose();
+
+export const EMPTY_CHANNEL_CONNECTION_TEST_RESPONSE = { ok: false };
 
 // ---------------------------------------------------------------------------
 // Structured error body — POST /api/workspaces/:wsId/issues 409 conflict.

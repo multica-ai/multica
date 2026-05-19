@@ -71,6 +71,24 @@
       "description": "Control native OS notification banners shown when Multica is in the background.",
       "label": "Show system notifications",
       "hint": "Show a banner from your operating system for new inbox items when the app isn't focused."
+    },
+    "channel": {
+      "title": "Channel Notifications",
+      "description": "Control which events are forwarded to connected channel providers. Disabled types will not send outbound channel messages.",
+      "types": {
+        "issues": {
+          "label": "Issue events",
+          "description": "New issues, status changes, and assignments in this workspace"
+        },
+        "comments": {
+          "label": "Comments",
+          "description": "New comments on issues you follow"
+        },
+        "mentions": {
+          "label": "Mentions",
+          "description": "When someone @mentions you in a connected conversation"
+        }
+      }
     }
   },
   "tokens": {
@@ -169,7 +187,69 @@
     "not_configured_and": "and",
     "manage_hint": "Only admins and owners can manage integrations.",
     "toast_not_configured": "GitHub integration is not configured for this deployment",
-    "toast_open_failed": "Failed to open GitHub install"
+    "toast_open_failed": "Failed to open GitHub install",
+    "channel": {
+      "connections_title": "Channel Connections ({{count}})",
+      "bindings_title": "Channel Bindings ({{count}})",
+      "bindings_title_plain": "Channel Bindings",
+      "add": "Add",
+      "owner_manage_hint": "Only workspace owners can manage channel connections.",
+      "no_connections": "No channel connections configured.",
+      "no_bindings": "No integrations yet.",
+      "loading": "Loading...",
+      "load_bindings_failed": "Failed to load channel bindings",
+      "agent_label": "Agent",
+      "agent_optional": "Agent (optional)",
+      "agent_auto_select": "Auto-select",
+      "assistant_mode": "Work assistant mode: issue summaries answer directly; changes require text confirmation.",
+      "edit": "Edit",
+      "edit_title": "Edit binding settings",
+      "primary": "Primary",
+      "set_primary": "Set as Primary",
+      "unbind": "Unbind",
+      "unbind_title": "Unbind {{name}}?",
+      "unbind_description": "This will remove the binding to this {{connection}} conversation. The conversation will no longer receive notifications or be able to interact with this workspace.",
+      "delete_connection_title": "Delete {{name}}?",
+      "delete_connection_description": "This removes the connection and its channel bindings.",
+      "cancel": "Cancel",
+      "confirm": "Confirm",
+      "save": "Save",
+      "binding_settings_title": "Channel binding settings",
+      "binding_settings_description": "Configure this chat as a work assistant entry point.",
+      "binding_settings_help": "Queries return a work summary with status, recent activity, agent execution, and next step. Mutating requests create a confirmation code before any issue is changed. Group notifications still follow each member's channel notification preferences.",
+      "default_project": "Default project",
+      "none": "None",
+      "listen_scope": "Listen scope",
+      "listen_modes": {
+        "mentions": "Mentions only (@ bot)",
+        "all": "All messages"
+      },
+      "add_connection_title": "Add Channel Connection",
+      "edit_connection_title": "Edit Channel Connection",
+      "connection_description": "Configure a channel connection for this Multica instance.",
+      "provider": "Provider",
+      "display_name": "Display name",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "secret_configured": "Configured; leave blank to keep",
+      "required_config": "Required config: {{fields}}",
+      "test_connection": "Test connection",
+      "edit_connection": "Edit connection",
+      "delete_connection": "Delete connection",
+      "toast_primary_updated": "Primary binding updated",
+      "toast_primary_failed": "Failed to update primary binding",
+      "toast_binding_saved": "Binding settings saved",
+      "toast_binding_failed": "Failed to update binding settings",
+      "toast_connection_saved": "Channel connection saved",
+      "toast_connection_save_failed": "Failed to save channel connection",
+      "toast_test_succeeded": "Connection test succeeded",
+      "toast_test_failed": "Connection test failed",
+      "toast_connection_update_failed": "Failed to update connection",
+      "toast_binding_removed": "Binding removed",
+      "toast_binding_remove_failed": "Failed to remove binding",
+      "toast_connection_deleted": "Channel connection deleted",
+      "toast_connection_delete_failed": "Failed to delete channel connection"
+    }
   },
   "repositories": {
     "section_title": "Repositories",

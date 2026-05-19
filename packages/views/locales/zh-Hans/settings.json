@@ -71,6 +71,24 @@
       "description": "控制 Multica 在后台时是否显示操作系统的原生通知横幅。",
       "label": "显示系统通知",
       "hint": "App 未获得焦点时，新的收件箱条目通过操作系统弹出通知横幅。"
+    },
+    "channel": {
+      "title": "Channel 通知",
+      "description": "控制哪些事件会转发到已连接的 Channel。关闭后，对应类型不会发送外部 Channel 消息。",
+      "types": {
+        "issues": {
+          "label": "Issue 事件",
+          "description": "该工作区中的新 issue、状态变更和分配事件"
+        },
+        "comments": {
+          "label": "评论",
+          "description": "你订阅的 issue 有新评论时"
+        },
+        "mentions": {
+          "label": "提及",
+          "description": "有人在已连接会话中 @ 你时"
+        }
+      }
     }
   },
   "tokens": {
@@ -169,7 +187,69 @@
     "not_configured_and": "和",
     "manage_hint": "只有管理员和所有者可以管理集成。",
     "toast_not_configured": "当前部署未配置 GitHub 集成",
-    "toast_open_failed": "打开 GitHub 安装页失败"
+    "toast_open_failed": "打开 GitHub 安装页失败",
+    "channel": {
+      "connections_title": "Channel 连接（{{count}}）",
+      "bindings_title": "Channel 绑定（{{count}}）",
+      "bindings_title_plain": "Channel 绑定",
+      "add": "添加",
+      "owner_manage_hint": "只有工作区所有者可以管理 Channel 连接。",
+      "no_connections": "尚未配置 Channel 连接。",
+      "no_bindings": "暂无集成。",
+      "loading": "加载中...",
+      "load_bindings_failed": "加载 Channel 绑定失败",
+      "agent_label": "智能体",
+      "agent_optional": "智能体（可选）",
+      "agent_auto_select": "自动选择",
+      "assistant_mode": "工作助手模式：查询会直接返回 issue 摘要，变更操作需要文字确认。",
+      "edit": "编辑",
+      "edit_title": "编辑绑定设置",
+      "primary": "主绑定",
+      "set_primary": "设为主绑定",
+      "unbind": "解绑",
+      "unbind_title": "解绑 {{name}}？",
+      "unbind_description": "这会移除该 {{connection}} 会话的绑定。该会话将不再接收通知，也不能继续与此工作区交互。",
+      "delete_connection_title": "删除 {{name}}？",
+      "delete_connection_description": "这会删除该连接及其 Channel 绑定。",
+      "cancel": "取消",
+      "confirm": "确认",
+      "save": "保存",
+      "binding_settings_title": "Channel 绑定设置",
+      "binding_settings_description": "将该会话配置为工作助手入口。",
+      "binding_settings_help": "查询会返回包含状态、近期活动、智能体执行情况和下一步的工作摘要。变更请求会先生成确认码，不会直接修改 issue。群通知仍遵循每位成员自己的 Channel 通知偏好。",
+      "default_project": "默认项目",
+      "none": "无",
+      "listen_scope": "监听范围",
+      "listen_modes": {
+        "mentions": "仅 @ 机器人",
+        "all": "所有消息"
+      },
+      "add_connection_title": "添加 Channel 连接",
+      "edit_connection_title": "编辑 Channel 连接",
+      "connection_description": "为此 Multica 实例配置一个 Channel 连接。",
+      "provider": "提供方",
+      "display_name": "显示名称",
+      "enabled": "已启用",
+      "disabled": "已停用",
+      "secret_configured": "已配置，留空则保持不变",
+      "required_config": "必填配置：{{fields}}",
+      "test_connection": "测试连接",
+      "edit_connection": "编辑连接",
+      "delete_connection": "删除连接",
+      "toast_primary_updated": "主绑定已更新",
+      "toast_primary_failed": "更新主绑定失败",
+      "toast_binding_saved": "绑定设置已保存",
+      "toast_binding_failed": "更新绑定设置失败",
+      "toast_connection_saved": "Channel 连接已保存",
+      "toast_connection_save_failed": "保存 Channel 连接失败",
+      "toast_test_succeeded": "连接测试成功",
+      "toast_test_failed": "连接测试失败",
+      "toast_connection_update_failed": "更新连接失败",
+      "toast_binding_removed": "绑定已移除",
+      "toast_binding_remove_failed": "移除绑定失败",
+      "toast_connection_deleted": "Channel 连接已删除",
+      "toast_connection_delete_failed": "删除 Channel 连接失败"
+    }
   },
   "repositories": {
     "section_title": "代码仓库",

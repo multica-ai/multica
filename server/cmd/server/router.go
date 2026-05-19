@@ -18,6 +18,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	channelprovider "github.com/multica-ai/multica/server/internal/channel/provider"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -98,14 +99,16 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 }
 
 type RouterOptions struct {
-	HTTPMetrics  *obsmetrics.HTTPMetrics
-	DaemonHub    *daemonws.Hub
-	DaemonWakeup service.TaskWakeupNotifier
+	HTTPMetrics        *obsmetrics.HTTPMetrics
+	DaemonHub          *daemonws.Hub
+	DaemonWakeup       service.TaskWakeupNotifier
 	// HeartbeatScheduler, when non-nil, replaces the default synchronous
 	// passthrough scheduler on the constructed Handler. main.go injects a
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
 	// tests leave this nil and get the legacy synchronous behavior.
 	HeartbeatScheduler handler.HeartbeatScheduler
+	Storage            storage.Storage
+	ChannelProviders   []channelprovider.Factory
 }
 
 func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client, opts RouterOptions) chi.Router {
@@ -116,16 +119,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		daemonHub = daemonws.NewHub()
 	}
 
-	// Initialize storage with S3 as primary, fallback to local
-	var store storage.Storage
-	s3 := storage.NewS3StorageFromEnv()
-	if s3 != nil {
-		store = s3
-	} else {
-		local := storage.NewLocalStorageFromEnv()
-		if local != nil {
-			store = local
-		}
+	store := opts.Storage
+	if store == nil {
+		store = newStorageFromEnv()
 	}
 
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
@@ -140,6 +136,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		TrustedProxies:                parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
+	h.ChannelProviderSchemas = channelProviderSchemas(opts.ChannelProviders)
+	h.ChannelProviderFactories = channelProviderFactories(opts.ChannelProviders)
 	if opts.DaemonWakeup != nil {
 		h.TaskService.Wakeup = opts.DaemonWakeup
 	}
@@ -314,6 +312,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/cli-token", h.IssueCliToken)
 		r.Post("/api/upload-file", h.UploadFile)
 		r.Post("/api/feedback", h.CreateFeedback)
+		r.Get("/api/channel-providers", h.ListChannelProviders)
+		r.Get("/api/channel-bind-token", h.GetChannelBindTokenPreview)
+		r.Route("/api/channel-connections", func(r chi.Router) {
+			r.Get("/", h.ListChannelConnections)
+			r.Post("/", h.CreateChannelConnection)
+			r.Patch("/{connectionId}", h.UpdateChannelConnection)
+			r.Delete("/{connectionId}", h.DeleteChannelConnection)
+			r.Post("/{connectionId}/test", h.TestChannelConnection)
+		})
+		r.Post("/api/channel-user-bindings", h.CreateChannelUserBinding)
 
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
@@ -326,6 +334,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
+					r.Get("/channel-bindings", h.ListChannelBindings)
+					r.Post("/channel-bindings", h.CreateChannelBinding)
+					r.Delete("/channel-bindings/{bindingId}", h.DeleteChannelBinding)
+					r.Patch("/channel-bindings/{bindingId}", h.SetPrimaryChannelBinding)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -635,6 +647,32 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	})
 
 	return r
+}
+
+func channelProviderSchemas(factories []channelprovider.Factory) map[string][]handler.ChannelConfigFieldResponse {
+	schemas := make(map[string][]handler.ChannelConfigFieldResponse, len(factories))
+	for _, factory := range factories {
+		fields := factory.ConfigSchema()
+		resp := make([]handler.ChannelConfigFieldResponse, 0, len(fields))
+		for _, field := range fields {
+			resp = append(resp, handler.ChannelConfigFieldResponse{
+				Key:      field.Key,
+				Label:    field.Label,
+				Required: field.Required,
+				Secret:   field.Secret,
+			})
+		}
+		schemas[factory.Provider()] = resp
+	}
+	return schemas
+}
+
+func channelProviderFactories(factories []channelprovider.Factory) map[string]channelprovider.Factory {
+	out := make(map[string]channelprovider.Factory, len(factories))
+	for _, factory := range factories {
+		out[factory.Provider()] = factory
+	}
+	return out
 }
 
 // membershipChecker implements realtime.MembershipChecker using database queries.

@@ -38,6 +38,24 @@ func TestPublishOnlyMatchingType(t *testing.T) {
 	}
 }
 
+func TestUnsubscribeStopsTypeSpecificHandler(t *testing.T) {
+	bus := New()
+	var count int32
+
+	unsubscribe := bus.Subscribe("test:event", func(e Event) {
+		atomic.AddInt32(&count, 1)
+	})
+
+	bus.Publish(Event{Type: "test:event"})
+	unsubscribe()
+	unsubscribe()
+	bus.Publish(Event{Type: "test:event"})
+
+	if count != 1 {
+		t.Fatalf("expected handler to be called once before unsubscribe, got %d", count)
+	}
+}
+
 func TestPublishNoSubscribersIsNoop(t *testing.T) {
 	bus := New()
 	// Should not panic
@@ -79,6 +97,24 @@ func TestSubscribeAllReceivesAllEventTypes(t *testing.T) {
 	}
 	if received[0] != "issue:created" || received[1] != "comment:deleted" || received[2] != "skill:updated" {
 		t.Fatalf("unexpected events: %v", received)
+	}
+}
+
+func TestUnsubscribeStopsGlobalHandler(t *testing.T) {
+	bus := New()
+	var count int32
+
+	unsubscribe := bus.SubscribeAll(func(e Event) {
+		atomic.AddInt32(&count, 1)
+	})
+
+	bus.Publish(Event{Type: "issue:created"})
+	unsubscribe()
+	unsubscribe()
+	bus.Publish(Event{Type: "comment:created"})
+
+	if count != 1 {
+		t.Fatalf("expected global handler to be called once before unsubscribe, got %d", count)
 	}
 }
 

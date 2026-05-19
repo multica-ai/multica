@@ -11,7 +11,7 @@ export const projectKeys = {
 export function projectListOptions(wsId: string) {
   return queryOptions({
     queryKey: projectKeys.list(wsId),
-    queryFn: () => api.listProjects(),
+    queryFn: () => api.listProjects({ workspace_id: wsId }),
     select: (data) => data.projects,
   });
 }

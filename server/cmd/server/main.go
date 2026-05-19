@@ -12,6 +12,11 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/channel"
+	channelgateway "github.com/multica-ai/multica/server/internal/channel/gateway"
+	channelmanager "github.com/multica-ai/multica/server/internal/channel/manager"
+	channelmetrics "github.com/multica-ai/multica/server/internal/channel/metrics"
+	channelproviders "github.com/multica-ai/multica/server/internal/channel/providers"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -26,6 +31,16 @@ import (
 var (
 	version = "dev"
 	commit  = "unknown"
+)
+
+const (
+	defaultChannelInboundConversationLimit = 3
+	defaultChannelInboundGlobalLimit       = 5000
+	defaultChannelInboundWorkers           = 16
+	defaultChannelInboundClaimBatch        = 32
+	defaultChannelAgentTaskTimeout        = 15 * time.Minute
+	defaultChannelActionTaskTimeout        = 30 * time.Minute
+	defaultChannelInboundProcessingLease   = 5 * time.Minute
 )
 
 func newNamedRedisClient(base *redis.Options, suffix string) *redis.Client {
@@ -243,11 +258,51 @@ func main() {
 		slog.Info("realtime: REDIS_URL not set — using in-memory hub (single-node mode)")
 	}
 	registerListeners(bus, broadcaster)
+	queries := db.New(pool)
+	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
+	taskSvc.EmptyClaim = service.NewEmptyClaimCache(storeRedis)
 
+	// M1-T1: channel port registry — assembly point for external messaging adapters.
+	channelRegistry := channel.NewRegistry()
+	channelGateway := channelgateway.NewRegistryGateway(channelRegistry)
+	channelStorage := newStorageFromEnv()
+	channelProviders := channelproviders.All()
+	channelCtx, channelCancel := context.WithCancel(context.Background())
+	channelManager := channelmanager.New(channelmanager.Config{
+		Pool:      pool,
+		Queries:   queries,
+		Bus:       bus,
+		Registry:  channelRegistry,
+		Gateway:   channelGateway,
+		Factories: channelProviders,
+		RuntimeBuilder: func() channelmanager.RuntimeComponents {
+			pipelineOpt := channelPipelineOptions{Observer: channelmetrics.M, TaskService: taskSvc, Gateway: channelGateway}
+			if channelStorage != nil {
+				pipelineOpt.Storage = channelStorage
+			}
+			components := newChannelInboundRuntimeComponents(pool, pipelineOpt)
+			return channelmanager.RuntimeComponents{
+				PrePipeline:        components.PrePipeline,
+				PostPipeline:       components.PostPipeline,
+				RuleResolvers:      components.RuleResolvers,
+				ChannelTurn:        components.ChannelTurn,
+				DispatchStore:      components.DispatchStore,
+				ConversationStore:  components.ConversationStore,
+				ContextMaxEntities: components.ContextMaxEntities,
+			}
+		},
+		ConversationLimit:      envPositiveInt("CHANNEL_INBOUND_CONVERSATION_LIMIT", defaultChannelInboundConversationLimit),
+		GlobalLimit:            envPositiveInt("CHANNEL_INBOUND_GLOBAL_PENDING_LIMIT", defaultChannelInboundGlobalLimit),
+		Workers:                envPositiveInt("CHANNEL_INBOUND_WORKERS", defaultChannelInboundWorkers),
+		ClaimBatch:             envPositiveInt("CHANNEL_INBOUND_CLAIM_BATCH", defaultChannelInboundClaimBatch),
+		AgentTaskTimeout:       envDuration("CHANNEL_AGENT_TASK_TIMEOUT", defaultChannelAgentTaskTimeout),
+		ActionTaskTimeout:      envDuration("CHANNEL_ACTION_TASK_TIMEOUT", defaultChannelActionTaskTimeout),
+		ProcessingLease:        envDuration("CHANNEL_INBOUND_PROCESSING_LEASE", defaultChannelInboundProcessingLease),
+		OutboundCleanupEnabled: true,
+	})
 	analyticsClient := analytics.NewFromEnv()
 	defer analyticsClient.Close()
 
-	queries := db.New(pool)
 	hub.SetAuthorizer(newScopeAuthorizer(queries))
 	// Order matters: subscriber listeners must register BEFORE notification listeners.
 	// The notification listener queries the subscriber table to determine recipients,
@@ -255,6 +310,7 @@ func main() {
 	registerSubscriberListeners(bus, queries)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
+	channelManager.Start(channelCtx)
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server
@@ -288,6 +344,8 @@ func main() {
 		DaemonHub:          daemonHub,
 		DaemonWakeup:       daemonWakeup,
 		HeartbeatScheduler: heartbeatScheduler,
+		Storage:            channelStorage,
+		ChannelProviders:   channelProviders,
 	})
 
 	srv := &http.Server{
@@ -298,7 +356,6 @@ func main() {
 	// Start background workers.
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
-	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
 	taskSvc.Analytics = analyticsClient
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
@@ -342,6 +399,8 @@ func main() {
 
 	slog.Info("shutting down server")
 	autopilotCancel()
+	channelManager.Stop()
+	channelCancel()
 
 	// Order matters: drain in-flight HTTP first so any heartbeat handlers
 	// finish calling Schedule() before we stop the scheduler. Otherwise a

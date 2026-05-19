@@ -169,8 +169,9 @@ type DaemonRegisterRequest struct {
 	// first-time registration; once a user overrides the tz via the web
 	// UI, the upsert query preserves that override on subsequent
 	// daemon reconnects (see UpsertAgentRuntime in runtime.sql).
-	Timezone string `json:"timezone"`
-	Runtimes []struct {
+	Timezone     string   `json:"timezone"`
+	Capabilities []string `json:"capabilities"`
+	Runtimes     []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
@@ -335,9 +336,10 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			status = "offline"
 		}
 		metadata, _ := json.Marshal(map[string]any{
-			"version":     runtime.Version,
-			"cli_version": req.CLIVersion,
-			"launched_by": req.LaunchedBy,
+			"version":      runtime.Version,
+			"cli_version":  req.CLIVersion,
+			"launched_by":  req.LaunchedBy,
+			"capabilities": req.Capabilities,
 		})
 
 		row, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
@@ -1491,6 +1493,26 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Channel-turn task: natural-language channel work with no issue / chat /
+	// autopilot link. It reuses the daemon runtime and returns the final
+	// channel reply from task completion output.
+	hasChannelTurn := false
+	if task.Context != nil && !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid {
+		var ct service.ChannelTurnContext
+		if json.Unmarshal(task.Context, &ct) == nil && ct.Type == service.ChannelTurnContextType {
+			hasChannelTurn = true
+			resp.ChannelTurnPrompt = ct.Prompt
+			resp.ChannelTurnMessage = ct.Message
+			resp.WorkspaceID = ct.WorkspaceID
+			if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(ct.WorkspaceID)); err == nil && ws.Repos != nil {
+				var repos []RepoData
+				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+					resp.Repos = repos
+				}
+			}
+		}
+	}
+
 	// Workspace isolation check: the daemon uses this response's workspace_id
 	// as the only authority for MULTICA_WORKSPACE_ID in the agent env. An
 	// empty value would make the CLI silently fall back to the user-global
@@ -1510,6 +1532,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			"has_chat", task.ChatSessionID.Valid,
 			"has_autopilot_run", task.AutopilotRunID.Valid,
 			"has_quick_create", hasQuickCreate,
+			"has_channel_turn", hasChannelTurn,
 		)
 		if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
 			slog.Error("task claim: cancel after workspace check failed",
@@ -1645,7 +1668,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 // triggered follow-ups hit the WHERE first_executed_at IS NULL clause and
 // no-op, so the funnel counts unique issues, not tasks.
 func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.AgentTaskQueue) {
-	if task == nil {
+	if task == nil || !task.IssueID.Valid {
 		return
 	}
 	marked, err := h.Queries.MarkIssueFirstExecuted(r.Context(), task.IssueID)

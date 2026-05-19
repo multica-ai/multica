@@ -11,6 +11,12 @@ WHERE id = $1;
 SELECT * FROM member
 WHERE user_id = $1 AND workspace_id = $2;
 
+-- name: UserHasWorkspaceOwnerRole :one
+SELECT EXISTS (
+    SELECT 1 FROM member
+    WHERE user_id = $1 AND role = 'owner'
+)::bool;
+
 -- name: CreateMember :one
 INSERT INTO member (workspace_id, user_id, role)
 VALUES ($1, $2, $3)

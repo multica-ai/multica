@@ -7,6 +7,7 @@ dist
 # build outputs
 .turbo
 .next
+.next-standalone
 out
 build
 bin
@@ -47,6 +48,11 @@ apps/web/test-results/
 
 # feature tracking
 _features/
+docs/plans/
+
+# local deployment bundles and scripts
+scripts/deploy/build-fullstack-bundle.sh
+scripts/deploy/fullstack/
 
 # runtime
 *.pid

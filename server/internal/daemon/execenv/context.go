@@ -220,6 +220,9 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	if ctx.QuickCreatePrompt != "" {
 		return renderQuickCreateContext(ctx)
 	}
+	if ctx.ChannelTurnPrompt != "" {
+		return renderChannelTurnContext(ctx)
+	}
 
 	var b strings.Builder
 
@@ -245,6 +248,20 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n")
 	}
 
+	return b.String()
+}
+
+func renderChannelTurnContext(ctx TaskContextForEnv) string {
+	var b strings.Builder
+	b.WriteString("# Channel Agent Turn\n\n")
+	b.WriteString("This task was triggered by a natural-language channel message. Use the Multica CLI as needed and return the final channel reply as your assistant output.\n\n")
+	if len(ctx.AgentSkills) > 0 {
+		b.WriteString("## Agent Skills\n\n")
+		for _, skill := range ctx.AgentSkills {
+			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
+		}
+		b.WriteString("\n")
+	}
 	return b.String()
 }
 
