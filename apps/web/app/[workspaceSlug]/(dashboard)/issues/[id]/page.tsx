@@ -1,8 +1,8 @@
 "use client";
 
 import { use } from "react";
-import { IssueDetail } from "@multica/views/issues/components";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
+import { CerebroIssueDetailRoute } from "./cerebro-issue-detail-route";
 
 export default function IssueDetailPage({
   params,
@@ -12,7 +12,7 @@ export default function IssueDetailPage({
   const { id } = use(params);
   return (
     <ErrorBoundary resetKeys={[id]}>
-      <IssueDetail issueId={id} />
+      <CerebroIssueDetailRoute id={id} />
     </ErrorBoundary>
   );
 }
