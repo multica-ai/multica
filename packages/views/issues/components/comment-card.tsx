@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, ChevronRight, Copy, Link2, MoreHorizontal, Pencil, RotateCcw, RotateCw, Trash2 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -155,6 +155,89 @@ function DeleteCommentDialog({
 // ---------------------------------------------------------------------------
 // Standalone attachment list — renders attachments not already in the markdown
 // ---------------------------------------------------------------------------
+
+const COLLAPSED_COMMENT_BODY_MAX_HEIGHT = 320;
+const LONG_COMMENT_CHAR_THRESHOLD = 500;
+const LONG_COMMENT_LINE_THRESHOLD = 8;
+
+function isLongCommentContent(content: string): boolean {
+  return content.length > LONG_COMMENT_CHAR_THRESHOLD || content.split("\n").length > LONG_COMMENT_LINE_THRESHOLD;
+}
+
+function ExpandableCommentBody({
+  content,
+  attachments,
+  className,
+}: {
+  content: string;
+  attachments?: Attachment[];
+  className?: string;
+}) {
+  const { t } = useT("issues");
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [hasMeasuredOverflow, setHasMeasuredOverflow] = useState(false);
+  const isTextLong = isLongCommentContent(content);
+  const canCollapse = isTextLong || hasMeasuredOverflow;
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [content]);
+
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+
+    const measure = () => {
+      setHasMeasuredOverflow(el.scrollHeight > COLLAPSED_COMMENT_BODY_MAX_HEIGHT + 1);
+    };
+
+    measure();
+
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [content, attachments]);
+
+  return (
+    <div className={cn(className, "relative")}>
+      <div
+        ref={contentRef}
+        className={cn(
+          "text-sm leading-relaxed text-foreground/85",
+          canCollapse && !expanded && "max-h-80 overflow-hidden",
+        )}
+      >
+        <ReadonlyContent content={content} attachments={attachments} />
+      </div>
+      {canCollapse && !expanded && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-t from-card via-card/95 to-transparent pt-14">
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="pointer-events-auto h-7 px-2.5 text-xs shadow-sm"
+            onClick={() => setExpanded(true)}
+          >
+            {t(($) => $.comment.expand_content)}
+          </Button>
+        </div>
+      )}
+      {canCollapse && expanded && (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="mt-1.5 h-7 px-2.5 text-xs text-muted-foreground"
+          onClick={() => setExpanded(false)}
+        >
+          {t(($) => $.comment.collapse_content)}
+        </Button>
+      )}
+    </div>
+  );
+}
 
 export function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
   const download = useDownloadAttachment();
@@ -373,7 +456,7 @@ function CommentRow({
 
   const reactions = entry.reactions ?? [];
   const contentText = entry.content ?? "";
-  const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
+  const isLongContent = isLongCommentContent(contentText);
 
   return (
     <div className={`py-3${isTemp ? " opacity-60" : ""}`}>
@@ -497,9 +580,11 @@ function CommentRow({
         </div>
       ) : (
         <>
-          <div className="mt-1.5 pl-8 text-sm leading-relaxed text-foreground/85">
-            <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
-          </div>
+          <ExpandableCommentBody
+            content={entry.content ?? ""}
+            attachments={entry.attachments}
+            className="mt-1.5 pl-8"
+          />
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8" />
           {!isTemp && (
             <ReactionBar
@@ -652,7 +737,7 @@ function CommentCardImpl({
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
   const reactions = entry.reactions ?? [];
   const contentText = entry.content ?? "";
-  const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
+  const isLongContent = isLongCommentContent(contentText);
 
   const isHighlighted = highlightedCommentId === entry.id;
   const registerReplyInput = useCallback(
@@ -864,9 +949,11 @@ function CommentCardImpl({
               </div>
             ) : (
               <>
-                <div className="pl-10 text-sm leading-relaxed text-foreground/85">
-                  <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
-                </div>
+                <ExpandableCommentBody
+                  content={entry.content ?? ""}
+                  attachments={entry.attachments}
+                  className="pl-10"
+                />
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
                 {!isTemp && (
                   <ReactionBar
