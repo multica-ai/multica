@@ -153,6 +153,18 @@ export default function WorkspaceLayout() {
           }}
         />
         <Stack.Screen
+          name="issue/[id]/new-comment"
+          options={{
+            // Comment composition is its own modal so we get the iOS slide-up
+            // sheet, full keyboard real estate, and a clean back-stack.
+            // Title flips between "New comment" and "Reply" via Stack.Screen
+            // override inside the screen based on route params.
+            title: "New comment",
+            presentation: "modal",
+            headerLeft: () => <ModalCloseButton />,
+          }}
+        />
+        <Stack.Screen
           name="search"
           options={{
             title: "Search",

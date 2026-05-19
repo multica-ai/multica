@@ -25,6 +25,8 @@ import {
 } from "@/data/queries/issues";
 import { useRunsSheetStore } from "@/data/runs-sheet-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { useColorScheme } from "@/lib/use-color-scheme";
+import { THEME } from "@/lib/theme";
 
 interface Props {
   issueId: string;
@@ -33,6 +35,8 @@ interface Props {
 export function AgentActivityRow({ issueId }: Props) {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const open = useRunsSheetStore((s) => s.open);
+  const { colorScheme } = useColorScheme();
+  const mutedFg = THEME[colorScheme].mutedForeground;
 
   const { data: activeTasks = [] } = useQuery(
     issueActiveTasksOptions(wsId, issueId),
@@ -70,9 +74,9 @@ export function AgentActivityRow({ issueId }: Props) {
           }))}
         />
       ) : (
-        <IdleContent count={pastCount} />
+        <IdleContent count={pastCount} mutedFg={mutedFg} />
       )}
-      <Ionicons name="chevron-forward" size={16} color="#a1a1aa" />
+      <Ionicons name="chevron-forward" size={16} color={mutedFg} />
     </Pressable>
   );
 }
@@ -87,10 +91,10 @@ function ActiveContent({ actors }: { actors: StackActor[] }) {
   );
 }
 
-function IdleContent({ count }: { count: number }) {
+function IdleContent({ count, mutedFg }: { count: number; mutedFg: string }) {
   return (
     <View className="flex-1 flex-row items-center gap-2">
-      <Ionicons name="time-outline" size={16} color="#a1a1aa" />
+      <Ionicons name="time-outline" size={16} color={mutedFg} />
       <Text className="text-sm text-foreground">Runs · {count}</Text>
     </View>
   );

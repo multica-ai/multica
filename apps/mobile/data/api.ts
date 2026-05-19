@@ -582,12 +582,12 @@ class ApiClient {
     id: string,
     opts?: { signal?: AbortSignal },
   ): Promise<Issue> {
-    const raw = await this.fetch<unknown>(`/api/issues/${id}`, {
-      signal: opts?.signal,
-    });
-    return parseWithFallback(raw, IssueSchema, EMPTY_ISSUE_FALLBACK, {
-      endpoint: "getIssue",
-    });
+    return this.fetchValidated(
+      `/api/issues/${id}`,
+      IssueSchema,
+      EMPTY_ISSUE_FALLBACK,
+      { ...opts, endpoint: "getIssue" },
+    );
   }
 
   // Write endpoint — mirrors POST /api/issues
@@ -611,15 +611,11 @@ class ApiClient {
     issueId: string,
     opts?: { signal?: AbortSignal },
   ): Promise<TimelineEntry[]> {
-    const raw = await this.fetch<unknown>(
+    return this.fetchValidated(
       `/api/issues/${issueId}/timeline`,
-      { signal: opts?.signal },
-    );
-    return parseWithFallback(
-      raw,
       TimelineEntriesSchema,
       EMPTY_TIMELINE_ENTRIES,
-      { endpoint: "GET /api/issues/:id/timeline" },
+      { ...opts, endpoint: "GET /api/issues/:id/timeline" },
     );
   }
 
@@ -631,15 +627,11 @@ class ApiClient {
     issueId: string,
     opts?: { signal?: AbortSignal },
   ): Promise<Attachment[]> {
-    const raw = await this.fetch<unknown>(
+    return this.fetchValidated(
       `/api/issues/${issueId}/attachments`,
-      { signal: opts?.signal },
-    );
-    return parseWithFallback(
-      raw,
       AttachmentListSchema,
       EMPTY_ATTACHMENT_LIST,
-      { endpoint: "GET /api/issues/:id/attachments" },
+      { ...opts, endpoint: "GET /api/issues/:id/attachments" },
     );
   }
 
@@ -651,15 +643,11 @@ class ApiClient {
     issueId: string,
     opts?: { signal?: AbortSignal },
   ): Promise<AgentTask[]> {
-    const raw = await this.fetch<unknown>(
+    const parsed = await this.fetchValidated(
       `/api/issues/${issueId}/active-task`,
-      { signal: opts?.signal },
-    );
-    const parsed = parseWithFallback(
-      raw,
       ActiveTasksResponseSchema,
       EMPTY_ACTIVE_TASKS_RESPONSE,
-      { endpoint: "GET /api/issues/:id/active-task" },
+      { ...opts, endpoint: "GET /api/issues/:id/active-task" },
     );
     return parsed.tasks;
   }
@@ -671,15 +659,11 @@ class ApiClient {
     issueId: string,
     opts?: { signal?: AbortSignal },
   ): Promise<AgentTask[]> {
-    const raw = await this.fetch<unknown>(
+    return this.fetchValidated(
       `/api/issues/${issueId}/task-runs`,
-      { signal: opts?.signal },
-    );
-    return parseWithFallback(
-      raw,
       AgentTaskListSchema,
       EMPTY_AGENT_TASK_LIST,
-      { endpoint: "GET /api/issues/:id/task-runs" },
+      { ...opts, endpoint: "GET /api/issues/:id/task-runs" },
     );
   }
 

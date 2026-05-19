@@ -1,36 +1,35 @@
 /**
- * Issue detail screen (V1).
+ * Issue detail screen.
  *
- * Read-mostly + comment composer. Property edits, replies, reactions,
- * attachments inline render, mention chips, and image lightbox are deferred
- * to V2+ — see /Users/qingnaiyuan/.claude/plans/plan-dynamic-narwhal.md.
+ * Read-mostly + bottom "Comment" button. Tapping the button (or "Reply"
+ * on a long-pressed comment) opens the new-comment modal at
+ * issue/[id]/new-comment — full-screen composer with MentionSuggestionBar
+ * and toolbar. The inline always-on composer was retired because it
+ * competed with the timeline for vertical space and the KeyboardAvoiding
+ * logic was clunky (user feedback). The new pattern matches iOS Mail
+ * "Compose" / Slack thread reply.
  *
- * Header note: the parent _layout.tsx already declares the
- * `issue/[id]` Stack.Screen with title "Issue". We override that here once
- * the data lands so the navigation bar shows `MUL-123` (Linear-style).
+ * Header note: the parent _layout.tsx already declares the `issue/[id]`
+ * Stack.Screen with title "Issue". We override that here once the data
+ * lands so the navigation bar shows `MUL-123` (Linear-style).
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
 import {
   ActionSheetIOS,
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
   Linking,
-  Platform,
-  Pressable,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Stack, router, useLocalSearchParams } from "expo-router";
-import { useHeaderHeight } from "@react-navigation/elements";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import type { Issue } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { TimelineList } from "@/components/issue/timeline-list";
-import { CommentComposer } from "@/components/issue/comment-composer";
 import { AgentHeaderBadge } from "@/components/issue/agent-header-badge";
 import { RunsSheet } from "@/components/issue/runs-sheet";
 import {
@@ -38,7 +37,7 @@ import {
   issueKeys,
   issueTimelineOptions,
 } from "@/data/queries/issues";
-import { useCreateComment, useDeleteIssue } from "@/data/mutations/issues";
+import { useDeleteIssue } from "@/data/mutations/issues";
 import { useIssueRealtime } from "@/data/realtime/use-issue-realtime";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useViewedIssuesStore } from "@/data/viewed-issues-store";
@@ -48,23 +47,17 @@ export default function IssueDetail() {
   // [workspace]/(tabs)/inbox.tsx). `highlight` is the target comment id;
   // `h` is a per-tap nonce so re-tapping the same row re-fires the
   // scroll-and-flash effect.
-  const { id, highlight, h } = useLocalSearchParams<{
+  const { id, workspace: wsSlug, highlight, h } = useLocalSearchParams<{
     id: string;
+    workspace: string;
     highlight?: string;
     h?: string;
   }>();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const qc = useQueryClient();
-  // KeyboardAvoidingView's `padding` behaviour calculates from screen top.
-  // The native iOS Stack header above this screen takes ~88pt that the
-  // padding doesn't subtract — without this offset, the comment composer
-  // ends up under the keyboard by exactly the header height. See
-  // https://reactnavigation.org/docs/use-header-height.
-  const headerHeight = useHeaderHeight();
 
   const detail = useQuery(issueDetailOptions(wsId, id));
   const timeline = useQuery(issueTimelineOptions(wsId, id));
-  const createComment = useCreateComment(id);
 
   // Subscribe to per-issue WS events: status/priority/assignee/label
   // changes, comments, activity, reactions, agent task progress.
@@ -83,14 +76,6 @@ export default function IssueDetail() {
     }
   }, [wsId, id]);
 
-  // Lifted: long-press a comment → action sheet → "Reply" sets this; the
-  // composer reads it to render a "Replying to <name>" chip and sends the
-  // resulting comment with `parent_id`.
-  const [replyingTo, setReplyingTo] = useState<{
-    commentId: string;
-    name: string;
-  } | null>(null);
-
   const onRefresh = useCallback(async () => {
     await Promise.all([
       detail.refetch(),
@@ -98,22 +83,27 @@ export default function IssueDetail() {
     ]);
   }, [detail, qc, wsId, id]);
 
-  const onSubmitComment = useCallback(
-    async (vars: { content: string; parentId?: string }) => {
-      await createComment.mutateAsync(vars);
-      setReplyingTo(null);
+  // Long-press on a comment → ActionSheet → Reply. Lifts to a route push so
+  // the new-comment modal receives `parent` + `parentName` and titles
+  // itself "Reply". No local state — the modal owns its own input.
+  const onReplyTo = useCallback(
+    (commentId: string, name: string) => {
+      router.push({
+        pathname: "/[workspace]/issue/[id]/new-comment",
+        params: { workspace: wsSlug, id, parent: commentId, parentName: name },
+      });
     },
-    [createComment],
+    [wsSlug, id],
   );
 
-  const onReplyTo = useCallback((commentId: string, name: string) => {
-    setReplyingTo({ commentId, name });
-  }, []);
-
-  const onCancelReply = useCallback(() => setReplyingTo(null), []);
+  const openNewComment = useCallback(() => {
+    router.push({
+      pathname: "/[workspace]/issue/[id]/new-comment",
+      params: { workspace: wsSlug, id },
+    });
+  }, [wsSlug, id]);
 
   const issue = detail.data;
-  const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const deleteIssue = useDeleteIssue();
 
   // Three-dot menu: Copy link / Open on web (if web URL set) / Delete.
@@ -169,18 +159,11 @@ export default function IssueDetail() {
                    *  active tasks, so it doesn't crowd the header in the
                    *  common case. See agent-header-badge.tsx. */}
                   <AgentHeaderBadge issueId={id} />
-                  <Pressable
+                  <IconButton
+                    name="ellipsis-horizontal"
                     onPress={onPressMore}
-                    hitSlop={8}
-                    className="px-2 py-1"
                     accessibilityLabel="Issue actions"
-                  >
-                    <Ionicons
-                      name="ellipsis-horizontal"
-                      size={20}
-                      color={Platform.OS === "ios" ? "#0a84ff" : "#71717a"}
-                    />
-                  </Pressable>
+                  />
                 </View>
               )
             : undefined,
@@ -203,34 +186,31 @@ export default function IssueDetail() {
           </Button>
         </View>
       ) : (
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          keyboardVerticalOffset={headerHeight}
-          className="flex-1"
-        >
-          <View className="flex-1">
-            <TimelineList
-              issue={issue}
-              entries={timeline.data}
-              timelineLoading={timeline.isLoading}
-              refreshing={detail.isRefetching || timeline.isRefetching}
-              onRefresh={onRefresh}
-              onReplyTo={onReplyTo}
-              highlightCommentId={highlight}
-              highlightNonce={h}
-            />
-          </View>
-          <CommentComposer
-            issueId={id}
-            onSubmit={onSubmitComment}
-            replyingTo={replyingTo}
-            onCancelReply={onCancelReply}
+        <View className="flex-1">
+          <TimelineList
+            issue={issue}
+            entries={timeline.data}
+            timelineLoading={timeline.isLoading}
+            refreshing={detail.isRefetching || timeline.isRefetching}
+            onRefresh={onRefresh}
+            onReplyTo={onReplyTo}
+            highlightCommentId={highlight}
+            highlightNonce={h}
           />
+          {/* Bottom Comment button — push the new-comment modal. Replaces
+           *  the old always-on inline composer (user feedback: cramped,
+           *  keyboard avoidance clunky). Linear / Slack thread reply
+           *  pattern. */}
+          <View className="px-4 py-3 border-t border-border bg-background">
+            <Button onPress={openNewComment}>
+              <Text>Comment</Text>
+            </Button>
+          </View>
           {/* Mounted once at the page level so both the in-card
            *  AgentActivityRow and the Stack-header AgentHeaderBadge open
            *  the same sheet instance via useRunsSheetStore. */}
           <RunsSheet issueId={id} />
-        </KeyboardAvoidingView>
+        </View>
       )}
     </SafeAreaView>
   );

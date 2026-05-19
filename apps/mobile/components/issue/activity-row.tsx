@@ -33,10 +33,16 @@ import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { formatActivity } from "@/lib/format-activity";
 import { timeAgo } from "@/lib/time-ago";
 import { useActorLookup } from "@/data/use-actor-name";
+import { useColorScheme } from "@/lib/use-color-scheme";
+import { THEME } from "@/lib/theme";
 
-const MUTED = "#71717a";
-
-function CalendarGlyph({ size = 14 }: { size?: number }) {
+function CalendarGlyph({
+  size = 14,
+  stroke,
+}: {
+  size?: number;
+  stroke: string;
+}) {
   return (
     <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
       <Rect
@@ -45,7 +51,7 @@ function CalendarGlyph({ size = 14 }: { size?: number }) {
         width={12}
         height={10.5}
         rx={1.5}
-        stroke={MUTED}
+        stroke={stroke}
         strokeWidth={1.2}
       />
       <Line
@@ -53,7 +59,7 @@ function CalendarGlyph({ size = 14 }: { size?: number }) {
         y1={1.5}
         x2={5}
         y2={4.5}
-        stroke={MUTED}
+        stroke={stroke}
         strokeWidth={1.2}
         strokeLinecap="round"
       />
@@ -62,16 +68,22 @@ function CalendarGlyph({ size = 14 }: { size?: number }) {
         y1={1.5}
         x2={11}
         y2={4.5}
-        stroke={MUTED}
+        stroke={stroke}
         strokeWidth={1.2}
         strokeLinecap="round"
       />
-      <Line x1={2} y1={6.8} x2={14} y2={6.8} stroke={MUTED} strokeWidth={1} />
+      <Line x1={2} y1={6.8} x2={14} y2={6.8} stroke={stroke} strokeWidth={1} />
     </Svg>
   );
 }
 
-function LeadIcon({ entry }: { entry: TimelineEntry }) {
+function LeadIcon({
+  entry,
+  mutedFg,
+}: {
+  entry: TimelineEntry;
+  mutedFg: string;
+}) {
   const details = (entry.details ?? {}) as Record<string, string>;
   if (entry.action === "status_changed" && details.to) {
     return <StatusIcon status={details.to as IssueStatus} size={14} />;
@@ -80,7 +92,7 @@ function LeadIcon({ entry }: { entry: TimelineEntry }) {
     return <PriorityIcon priority={details.to as IssuePriority} size={14} />;
   }
   if (entry.action === "due_date_changed") {
-    return <CalendarGlyph size={14} />;
+    return <CalendarGlyph size={14} stroke={mutedFg} />;
   }
   return (
     <ActorAvatar
@@ -93,6 +105,8 @@ function LeadIcon({ entry }: { entry: TimelineEntry }) {
 
 export function ActivityRow({ entry }: { entry: TimelineEntry }) {
   const { getName } = useActorLookup();
+  const { colorScheme } = useColorScheme();
+  const mutedFg = THEME[colorScheme].mutedForeground;
   const resolveName = (
     type: string | null | undefined,
     id: string | null | undefined,
@@ -108,7 +122,7 @@ export function ActivityRow({ entry }: { entry: TimelineEntry }) {
   return (
     <View className="flex-row items-center px-4 gap-2">
       <View className="w-4 items-center justify-center shrink-0">
-        <LeadIcon entry={entry} />
+        <LeadIcon entry={entry} mutedFg={mutedFg} />
       </View>
       <Text
         className="text-xs text-muted-foreground flex-1"

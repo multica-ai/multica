@@ -10,8 +10,8 @@
  * issue rarely format markdown, and attachment upload is deferred to a
  * later release (see plan-issue-majestic-rabin.md "skip uploads").
  *
- * Mention pipeline shares `useMentionInput` with `comment-composer.tsx` —
- * both surfaces produce canonical `[@name](mention://type/id)` markdown
+ * Mention pipeline shares `useMentionInput` with `issue/[id]/new-comment.tsx`
+ * — both surfaces produce canonical `[@name](mention://type/id)` markdown
  * recognised by util.ParseMentions on the server.
  */
 import { useCallback, useMemo, useState } from "react";
@@ -151,9 +151,9 @@ export default function NewIssueModal() {
   );
 }
 
-/** Description field with a focus-tinted rounded-2xl container, visually
- *  matching `CommentComposer`'s input so the two "write markdown body"
- *  surfaces feel like the same product. */
+/** Description field with a focus-tinted rounded-2xl container — the
+ *  same "write markdown body" treatment used by the comment modal
+ *  (issue/[id]/new-comment.tsx) so the two surfaces feel consistent. */
 function DescriptionField({
   description,
   disabled,

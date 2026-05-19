@@ -15,7 +15,7 @@
  * ReactionBar (existing behavior, only visible when a reaction exists).
  */
 import { useCallback, useEffect, useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, View } from "react-native";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -56,11 +56,6 @@ interface Props {
    *  packages/views/issues/components/comment-card.tsx:498-682. */
   highlightedCommentId?: string | null;
 }
-
-// Brand color (apps/mobile/tailwind.config.js:48 brand = #4571e0) decomposed
-// into the two rgba alphas that web uses (`ring-brand/50`, `bg-brand/5`).
-const BRAND_RING = "rgba(69, 113, 224, 0.5)";
-const BRAND_WASH = "rgba(69, 113, 224, 0.05)";
 
 export function CommentCard({
   entry,
@@ -118,19 +113,15 @@ function RootHighlightOverlay({ active }: { active: boolean }) {
 
   const style = useAnimatedStyle(() => ({ opacity: progress.value }));
 
+  // Brand colour comes from the `brand` token; alpha via NativeWind `/50`
+  // syntax mirrors web's `ring-brand/50 bg-brand/5`. Only opacity is
+  // animated — the borderColor / backgroundColor stay constant, so
+  // className is safe here (animating those channels via className isn't).
   return (
     <Animated.View
       pointerEvents="none"
-      style={[
-        StyleSheet.absoluteFillObject,
-        {
-          borderRadius: 16,
-          borderWidth: 2,
-          borderColor: BRAND_RING,
-          backgroundColor: BRAND_WASH,
-        },
-        style,
-      ]}
+      className="absolute inset-0 rounded-2xl border-2 border-brand/50 bg-brand/5"
+      style={style}
     />
   );
 }
@@ -156,11 +147,8 @@ function ReplyHighlightOverlay({ active }: { active: boolean }) {
   return (
     <Animated.View
       pointerEvents="none"
-      style={[
-        StyleSheet.absoluteFillObject,
-        { backgroundColor: BRAND_WASH },
-        style,
-      ]}
+      className="absolute inset-0 bg-brand/5"
+      style={style}
     />
   );
 }
@@ -249,7 +237,18 @@ function CommentBody({
           </Text>
         </View>
         {entry.content ? (
-          <Markdown content={entry.content} attachments={attachments} />
+          // userSelect: 'none' so long-press goes only to the Pressable
+          // wrapper's onLongPress (action sheet) — without this, iOS' native
+          // text selection bubble fires in parallel and the user has to
+          // tap-elsewhere to dismiss the selection caret. Users can still
+          // copy the full body via the action sheet "Copy text" entry.
+          //
+          // The cast is because ViewStyle's type def in our RN types
+          // doesn't yet list `userSelect`, but RN ≥ 0.74 supports it at
+          // runtime on iOS 17+ / Android and propagates to descendant Text.
+          <View style={{ userSelect: "none" } as object}>
+            <Markdown content={entry.content} attachments={attachments} />
+          </View>
         ) : null}
         <ReactionBar
           reactions={reactions}
