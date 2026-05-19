@@ -18,6 +18,18 @@
 // The profile shape was chosen so that the kernel-level rules survive even
 // if Multica's application-level permission policy (Claude Code hooks) has
 // a bug or is bypassed: the seatbelt is the failsafe.
+//
+// Keychain access (JEH-1774): the default mode is "deny" — both file-read*
+// on ~/Library/Keychains AND mach-lookup of com.apple.SecurityServer are
+// blocked. This is what prevents a sandboxed agent from invoking
+// `security find-generic-password -s "Chrome Safe Storage"` (or any other
+// SecKeychainFind*Password variant) and triggering the macOS ACL prompt
+// against an item it has no legitimate need for. Legacy agent CLIs
+// (claude, cursor, gemini, copilot) that still authenticate via the
+// user's keychain set KeychainAccess to "read-only" as an opt-in escape
+// hatch; new agents must inject their auth tokens via environment
+// variables before spawn (see Profile.KeychainItemsAllowed for the
+// intended contract).
 package sandbox
 
 // CEREBRO-PATCH(agent-sandbox-macos): cerebro modification of upstream file
@@ -29,6 +41,39 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+)
+
+// CEREBRO-PATCH(agent-sandbox-macos): JEH-1774 keychain deny-by-default mode.
+// New type + emitted Seatbelt rules that deny ~/Library/Keychains read+write
+// and com.apple.SecurityServer mach-lookup unless KeychainAccessReadOnly.
+//
+// KeychainAccess controls how the generated profile treats macOS keychain
+// access for the sandboxed process.
+//
+// The zero value is KeychainAccessDeny — new agents are deny-by-default so
+// an attempt to invoke `security find-generic-password` (or any other
+// SecKeychainFind*Password call) cannot reach securityd and therefore
+// cannot raise the user-facing ACL prompt. Legacy providers that still
+// authenticate via the user's keychain opt back into KeychainAccessReadOnly
+// until env-var injection of their auth tokens lands (tracked separately).
+type KeychainAccess int
+
+const (
+	// KeychainAccessDeny blocks both file-read* on ~/Library/Keychains and
+	// mach-lookup of com.apple.SecurityServer. The sandboxed process
+	// cannot read keychain DB files directly and cannot talk to securityd
+	// over XPC — so `security` CLI invocations, SecItemCopyMatching, and
+	// any other libsecurity entry point fail with "Operation not permitted"
+	// before the keychain ACL evaluator ever runs.
+	KeychainAccessDeny KeychainAccess = 0
+	// KeychainAccessReadOnly preserves the JEH-405 behaviour: file-read on
+	// ~/Library/Keychains is granted via the broad $HOME read, file-write
+	// is denied, and com.apple.SecurityServer mach-lookup remains allowed
+	// via the global (allow mach-lookup) rule. Only legacy provider
+	// runtimes whose CLI authenticates via the user's keychain should
+	// request this mode; everything else must use KeychainAccessDeny and
+	// receive auth tokens via environment variables.
+	KeychainAccessReadOnly KeychainAccess = 1
 )
 
 // Profile describes the inputs needed to generate a Seatbelt profile.
@@ -66,6 +111,21 @@ type Profile struct {
 	// rule. Application-level hostname filtering (e.g. Claude Code hooks,
 	// outbound proxy) is required if hostname-level enforcement is needed.
 	AllowedHosts []string
+	// KeychainAccess selects between deny-all (default) and the legacy
+	// read-only behaviour. See the KeychainAccess constants for the
+	// security trade-offs.
+	KeychainAccess KeychainAccess
+	// KeychainItemsAllowed records the keychain item names the sandbox
+	// caller has authorised this agent to read. Sandbox-exec cannot match
+	// individual items inside the keychain DB at the kernel layer, so this
+	// field is NOT used to relax the deny rules — it is emitted as a
+	// comment in the generated profile for audit/forensics and is the
+	// contract the higher-level token injector (daemon) must honour when
+	// pre-fetching tokens before spawning the sandboxed process.
+	//
+	// Empty list means no items are authorised (the deny default stands
+	// and no env-var injection is expected).
+	KeychainItemsAllowed []string
 }
 
 // Generate renders the Seatbelt profile as a Scheme-DSL string.
@@ -111,8 +171,25 @@ func Generate(p Profile) (string, error) {
 
 	// IPC and system info lookups. Without these, common macOS APIs
 	// (resolv, dyld, locale lookups, ...) fail.
+	//
+	// Keychain (JEH-1774): the broad mach-lookup allow below would let a
+	// sandboxed process call into com.apple.SecurityServer (securityd) over
+	// XPC, which is the entry point for `security find-generic-password`
+	// and every libsecurity API. We emit an explicit deny for that global
+	// name AFTER the broad allow when KeychainAccess == Deny — Seatbelt
+	// uses "last match wins", so the deny seals the SecurityServer service
+	// while leaving every other mach service reachable. Legacy callers
+	// that opt into KeychainAccessReadOnly skip this deny and retain the
+	// previous behaviour.
 	b.WriteString(";; System lookups & IPC\n")
 	b.WriteString("(allow mach-lookup)\n")
+	if p.KeychainAccess == KeychainAccessDeny {
+		// Two service names cover the legacy (Mach) and modern (XPC) entry
+		// points to securityd; we deny both so neither code path can talk
+		// to the keychain daemon from inside the sandbox.
+		b.WriteString("(deny mach-lookup (global-name \"com.apple.SecurityServer\"))\n")
+		b.WriteString("(deny mach-lookup (global-name \"com.apple.SecurityServer.xpc\"))\n")
+	}
 	b.WriteString("(allow ipc-posix-shm)\n")
 	b.WriteString("(allow sysctl-read)\n")
 	b.WriteString("(allow iokit-open)\n")
@@ -192,14 +269,44 @@ func Generate(p Profile) (string, error) {
 	for _, sub := range sensitiveHomeSubpaths {
 		fmt.Fprintf(&b, "(deny file-read* file-write* (subpath %s))\n", schemeString(filepath.Join(home, sub)))
 	}
-	// Keychain DB: read is required so securityd can serve the agent CLI's
-	// own item via XPC; the actual cross-item authorisation is enforced by
-	// per-item ACLs inside securityd (a sandboxed claude can only decrypt
-	// items the user's keychain ACL grants to the claude binary). Writes
-	// would only be a DOS / corruption vector — securityd is the legitimate
-	// path for mutations and runs unsandboxed.
-	for _, sub := range keychainReadOnlySubpaths {
-		fmt.Fprintf(&b, "(deny file-write* (subpath %s))\n", schemeString(filepath.Join(home, sub)))
+	// Keychain DB (JEH-1774): two modes.
+	//
+	// KeychainAccessDeny (default, deny-by-default for new agents):
+	// emit a full read+write deny on ~/Library/Keychains. Combined with
+	// the SecurityServer mach-lookup deny above, the sandboxed process
+	// has no way to reach the keychain — neither via direct file I/O
+	// (libsecurity's mmap fallback) nor via securityd XPC. Calls to
+	// `security find-generic-password -s "Chrome Safe Storage"` fail with
+	// "Operation not permitted" instead of triggering the user-facing ACL
+	// prompt.
+	//
+	// KeychainAccessReadOnly (legacy opt-in, preserves JEH-405): the
+	// broad $HOME read covers keychain file-read, so we only deny writes.
+	// Mach access to securityd remains via the broad mach-lookup allow.
+	// This mode is retained for claude/cursor/gemini/copilot runtimes
+	// whose CLI fetches its own OAuth token from the user's keychain and
+	// would otherwise exit with "Not logged in".
+	switch p.KeychainAccess {
+	case KeychainAccessReadOnly:
+		for _, sub := range keychainSubpaths {
+			fmt.Fprintf(&b, "(deny file-write* (subpath %s))\n", schemeString(filepath.Join(home, sub)))
+		}
+	default:
+		for _, sub := range keychainSubpaths {
+			fmt.Fprintf(&b, "(deny file-read* file-write* (subpath %s))\n", schemeString(filepath.Join(home, sub)))
+		}
+	}
+	// Audit trail: record which keychain item names the higher-level
+	// token injector is authorised to pre-fetch for this task. Sandbox-exec
+	// cannot enforce per-item access at the kernel layer (the keychain DB
+	// is a single SQLite file inside securityd), so this list is emitted
+	// as a comment — never as an allow rule — and is meaningful only
+	// because the deny rules above already seal the broader surface.
+	if items := normalizeKeychainItems(p.KeychainItemsAllowed); len(items) > 0 {
+		b.WriteString(";; Keychain items authorised for env-var injection (informational):\n")
+		for _, item := range items {
+			fmt.Fprintf(&b, ";;   - %s\n", item)
+		}
 	}
 	b.WriteString("\n")
 
@@ -299,15 +406,34 @@ var sensitiveHomeSubpaths = []string{
 	"Library/Messages",
 }
 
-// keychainReadOnlySubpaths are home subpaths that need file-read so the
-// agent CLI can fetch its own auth token via securityd, but where direct
-// file-write is denied. securityd enforces per-item ACLs at decrypt time,
-// so reading the keychain DB does not grant access to other apps' items.
-// Mutations to the keychain go through securityd (unsandboxed) anyway, so
-// blocking file-write here only stops corruption / cooperative-mmap
-// shenanigans, never legitimate use.
-var keychainReadOnlySubpaths = []string{
+// keychainSubpaths are home subpaths containing the user's keychain DBs.
+// They receive read+write denies under KeychainAccessDeny (default) and
+// write-only denies under KeychainAccessReadOnly (legacy opt-in).
+var keychainSubpaths = []string{
 	"Library/Keychains",
+}
+
+// normalizeKeychainItems returns a deduplicated, sorted list of keychain
+// item names with whitespace stripped. Empty entries are dropped.
+func normalizeKeychainItems(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, raw := range in {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		if _, dup := seen[raw]; dup {
+			continue
+		}
+		seen[raw] = struct{}{}
+		out = append(out, raw)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // translateAllowlistToTCPRules converts host:port pairs into the

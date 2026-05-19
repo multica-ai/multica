@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/agent/sandbox"
 )
 
 // providerSandboxAllowlist is the per-provider set of API endpoints required
@@ -39,6 +40,41 @@ var providerSandboxWritePaths = map[string][]string{
 // codex has its own internal sandbox; the daemon does not wrap it.
 var providersWithOwnSandbox = map[string]bool{
 	"codex": true,
+}
+
+// CEREBRO-PATCH(daemon-sandbox): JEH-1774 — per-provider keychain access mode.
+// Legacy CLIs keep KeychainAccessReadOnly until env-var injection lands; new
+// agents fall through to KeychainAccessDeny so SecurityServer is unreachable.
+//
+// providersWithLegacyKeychain lists the agent CLIs that authenticate via the
+// user's macOS keychain (login.keychain-db) and would exit with
+// "Not logged in" if the sandbox blocked keychain reads. They retain the
+// pre-JEH-1774 read-only behaviour as an explicit opt-in until their auth
+// path is migrated to env-var injection by the daemon.
+//
+// New agents — anything not in this map — are deny-by-default (sandbox blocks
+// both keychain file-read and com.apple.SecurityServer mach-lookup, so
+// `security find-generic-password -s "Chrome Safe Storage"` cannot trigger
+// an OS prompt from inside the sandbox).
+var providersWithLegacyKeychain = map[string]bool{
+	"claude":  true,
+	"cursor":  true,
+	"gemini":  true,
+	"copilot": true,
+}
+
+// providerKeychainItems lists, per legacy provider, the keychain item names
+// the daemon is authorised to pre-fetch (and eventually inject as env vars).
+// Sandbox-exec cannot enforce per-item allowlists at the kernel layer, so
+// these are recorded as a comment in the generated profile for audit/
+// forensics and define the contract for the in-flight env-var injection
+// work (separate issue). New agents declare an empty list so no item is
+// implicitly authorised.
+var providerKeychainItems = map[string][]string{
+	"claude":  {"Claude Code-credentials"},
+	"cursor":  {"Cursor"},
+	"gemini":  {"Gemini CLI OAuth"},
+	"copilot": {"github-copilot"},
 }
 
 // buildSandboxConfig assembles the sandbox configuration to pass to a backend
@@ -96,10 +132,17 @@ func (d *Daemon) buildSandboxConfig(provider string, runtimeOverride *bool, agen
 		hosts = append(hosts, agentData.SandboxAllowlist...)
 	}
 
+	keychainAccess := sandbox.KeychainAccessDeny
+	if providersWithLegacyKeychain[provider] {
+		keychainAccess = sandbox.KeychainAccessReadOnly
+	}
+
 	return &agent.SandboxConfig{
-		Enabled:          true,
-		NetworkAllowlist: hosts,
-		WritablePaths:    providerWritablePaths(provider),
+		Enabled:              true,
+		NetworkAllowlist:     hosts,
+		WritablePaths:        providerWritablePaths(provider),
+		KeychainAccess:       keychainAccess,
+		KeychainItemsAllowed: providerKeychainItems[provider],
 	}
 }
 

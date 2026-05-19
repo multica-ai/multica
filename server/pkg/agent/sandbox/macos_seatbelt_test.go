@@ -257,6 +257,112 @@ func TestSeatbelt_WritablePathOverlappingSensitiveStillDenied(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(agent-sandbox-macos-seatbelt-test): JEH-1774 kernel-level
+// proofs that KeychainAccessDeny actually blocks reads — not just emits a
+// deny rule in the profile string.
+//
+// TestSeatbelt_KeychainAccessDenied is the JEH-1774 kernel-level proof
+// that the default (KeychainAccessDeny) mode actually blocks reads of
+// the keychain DB. We pretend a sandboxed agent tries to read a file
+// under $HOME/Library/Keychains; the sandbox must deny it even though
+// the broad $HOME read would otherwise cover the path. The unit test
+// asserts that the deny rule is emitted in the right order; this test
+// asserts the kernel honours it.
+func TestSeatbelt_KeychainAccessDenied(t *testing.T) {
+	if _, err := exec.LookPath("sandbox-exec"); err != nil {
+		t.Skip("sandbox-exec not available on this host")
+	}
+
+	tmpHome := t.TempDir()
+	workdir := filepath.Join(tmpHome, "work")
+	if err := os.MkdirAll(workdir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	keychainDir := filepath.Join(tmpHome, "Library", "Keychains")
+	if err := os.MkdirAll(keychainDir, 0o700); err != nil {
+		t.Fatalf("mkdir keychain dir: %v", err)
+	}
+	// A real macOS install would put the user's login DB here; we stand
+	// in for it with a sentinel value so the test asserts "the bytes
+	// never reached the sandboxed process".
+	keychainFile := filepath.Join(keychainDir, "login.keychain-db")
+	if err := os.WriteFile(keychainFile, []byte("SECRET-KEYCHAIN"), 0o600); err != nil {
+		t.Fatalf("write fake keychain: %v", err)
+	}
+
+	profilePath, err := WriteToTemp(Profile{
+		Workdir: workdir,
+		Home:    tmpHome,
+		// Default KeychainAccess (Deny) — the failure mode under test.
+	})
+	if err != nil {
+		t.Fatalf("WriteToTemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(profilePath) })
+
+	cmd := exec.Command("sandbox-exec", "-f", profilePath, "/bin/cat", keychainFile)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected sandboxed cat of keychain DB to fail; got output: %s", out)
+	}
+	if strings.Contains(string(out), "SECRET-KEYCHAIN") {
+		t.Errorf("sandbox failed to deny keychain read; output included secret:\n%s", out)
+	}
+}
+
+// TestSeatbelt_KeychainReadOnlyModeStillReads is the regression test for
+// the legacy opt-in path (claude/cursor/gemini/copilot). Read access
+// to the keychain DB must continue to work so the agent CLI can fetch
+// its own OAuth token via libsecurity; only writes are denied.
+func TestSeatbelt_KeychainReadOnlyModeStillReads(t *testing.T) {
+	if _, err := exec.LookPath("sandbox-exec"); err != nil {
+		t.Skip("sandbox-exec not available on this host")
+	}
+
+	tmpHome := t.TempDir()
+	workdir := filepath.Join(tmpHome, "work")
+	if err := os.MkdirAll(workdir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	keychainDir := filepath.Join(tmpHome, "Library", "Keychains")
+	if err := os.MkdirAll(keychainDir, 0o700); err != nil {
+		t.Fatalf("mkdir keychain dir: %v", err)
+	}
+	keychainFile := filepath.Join(keychainDir, "login.keychain-db")
+	if err := os.WriteFile(keychainFile, []byte("LEGACY-TOKEN"), 0o600); err != nil {
+		t.Fatalf("write fake keychain: %v", err)
+	}
+
+	profilePath, err := WriteToTemp(Profile{
+		Workdir:        workdir,
+		Home:           tmpHome,
+		KeychainAccess: KeychainAccessReadOnly,
+	})
+	if err != nil {
+		t.Fatalf("WriteToTemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(profilePath) })
+
+	cmd := exec.Command("sandbox-exec", "-f", profilePath, "/bin/cat", keychainFile)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		profile, _ := os.ReadFile(profilePath)
+		t.Fatalf("sandboxed read of keychain DB failed in read-only mode: %v\noutput: %s\nprofile:\n%s", err, out, profile)
+	}
+	if !strings.Contains(string(out), "LEGACY-TOKEN") {
+		t.Errorf("expected keychain contents in sandboxed read, got: %s", out)
+	}
+
+	// Writes must still be denied in read-only mode.
+	writeCmd := exec.Command("sandbox-exec", "-f", profilePath, "/bin/sh", "-c", "echo CORRUPT > "+keychainFile)
+	if err := writeCmd.Run(); err == nil {
+		t.Fatalf("sandboxed write to keychain DB succeeded but should be denied")
+	}
+	if data, err := os.ReadFile(keychainFile); err == nil && strings.Contains(string(data), "CORRUPT") {
+		t.Errorf("sandbox failed to deny keychain write; file now contains: %q", data)
+	}
+}
+
 // TestSeatbelt_AllowsWorkdirAccess verifies the positive case: reads inside
 // the workdir succeed. Catches over-broad deny rules that would break
 // legitimate agent operation.

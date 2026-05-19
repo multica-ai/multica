@@ -10,6 +10,8 @@
 
 ;; System lookups & IPC
 (allow mach-lookup)
+(deny mach-lookup (global-name "com.apple.SecurityServer"))
+(deny mach-lookup (global-name "com.apple.SecurityServer.xpc"))
 (allow ipc-posix-shm)
 (allow sysctl-read)
 (allow iokit-open)
@@ -62,7 +64,7 @@
 (deny file-read* file-write* (subpath "/Users/sandbox/Library/Cookies"))
 (deny file-read* file-write* (subpath "/Users/sandbox/Library/Mail"))
 (deny file-read* file-write* (subpath "/Users/sandbox/Library/Messages"))
-(deny file-write* (subpath "/Users/sandbox/Library/Keychains"))
+(deny file-read* file-write* (subpath "/Users/sandbox/Library/Keychains"))
 
 ;; Network (deny by default; allow specific ports)
 ;; Seatbelt cannot match hostnames; rules are port-scoped.
