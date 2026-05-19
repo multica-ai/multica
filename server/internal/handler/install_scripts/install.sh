@@ -236,6 +236,12 @@ download_and_install() {
     # Install
     cp "$binary_src" "${INSTALL_DIR}/${binary_name}"
     chmod +x "${INSTALL_DIR}/${binary_name}"
+
+    # macOS: ad-hoc sign to prevent Gatekeeper from killing the binary
+    if [ "$OS" = "darwin" ]; then
+        codesign --force --sign - "${INSTALL_DIR}/${binary_name}" 2>/dev/null || true
+    fi
+
     ok "Installed ${INSTALL_DIR}/${binary_name}"
 }
 
