@@ -13,7 +13,15 @@
     "in_review": "In Review",
     "done": "Done",
     "blocked": "Blocked",
-    "cancelled": "Cancelled"
+    "cancelled": "Cancelled",
+    "planning": "Planning",
+    "ready_for_dev": "Ready for Dev",
+    "code_review": "Code Review",
+    "fixing": "Fixing",
+    "testing": "Testing",
+    "coderabbit": "CodeRabbit",
+    "resolving": "Resolving",
+    "staged": "Staged"
   },
   "priority": {
     "urgent": "Urgent",

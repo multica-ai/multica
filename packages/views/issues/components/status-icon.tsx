@@ -151,6 +151,16 @@ const STATUS_RENDERERS: Record<IssueStatus, () => React.ReactNode> = {
   done: DoneIcon,
   blocked: BlockedIcon,
   cancelled: CancelledIcon,
+  // BMAD overlay: provisional glyphs reuse upstream shapes. The status
+  // colors come from STATUS_CONFIG[status].iconColor.
+  planning: InProgressIcon,
+  ready_for_dev: TodoIcon,
+  code_review: InReviewIcon,
+  fixing: InProgressIcon,
+  testing: InProgressIcon,
+  coderabbit: InReviewIcon,
+  resolving: InProgressIcon,
+  staged: DoneIcon,
 };
 
 // ---------------------------------------------------------------------------
