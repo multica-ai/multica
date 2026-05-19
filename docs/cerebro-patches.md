@@ -671,3 +671,17 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `autopilot-private-badge-list-row` | packages/views/autopilots/components/autopilots-page.tsx | 2 | JEH-1750 — render `PrivateBadge` next to the autopilot title in list rows when `autopilot.is_private`. |
 | `issue-private-badge-import` | packages/views/issues/components/issue-detail.tsx | 1 | JEH-1750 — re-uses the existing `PrivacyToggle` import statement to also pull in `PrivateBadge` from cerebro-access. |
 | `issue-private-badge-header` | packages/views/issues/components/issue-detail.tsx | 2 | JEH-1750 — render `PrivateBadge` next to the issue identifier in the desktop breadcrumb header when `issue.is_private`. |
+| `autopilot-new-path` | packages/core/paths/paths.ts | 1 | JEH-1766 — `autopilotNew()` path helper for the full-page create route at `/autopilots/new`. |
+| `autopilot-edit-path` | packages/core/paths/paths.ts | 1 | JEH-1766 — `autopilotEdit(id)` path helper for the full-page edit route at `/autopilots/:id/edit`. |
+| `autopilot-list-nav-hook` | packages/views/autopilots/components/autopilots-page.tsx | 1 | JEH-1766 — add `useNavigation` to navigation import for navigate-to-full-page create flow. |
+| `autopilot-list-nav-dialog-removed` | packages/views/autopilots/components/autopilots-page.tsx | 1 | JEH-1766 — remove `AutopilotDialog` import; create now navigates to /autopilots/new. |
+| `autopilot-list-nav-no-usestate` | packages/views/autopilots/components/autopilots-page.tsx | 1 | JEH-1766 — remove unused `useState` import after dialog state removal. |
+| `autopilot-list-nav-state` | packages/views/autopilots/components/autopilots-page.tsx | 2 | JEH-1766 — replace dialog open state with `router` + `wsPaths` for navigation. |
+| `autopilot-list-nav-button` | packages/views/autopilots/components/autopilots-page.tsx | 1 | JEH-1766 — "New Autopilot" button navigates to `/autopilots/new` instead of opening dialog. |
+| `autopilot-list-nav-template` | packages/views/autopilots/components/autopilots-page.tsx | 1 | JEH-1766 — template cards navigate to `/autopilots/new?template=<id>`. |
+| `autopilot-list-nav-blank` | packages/views/autopilots/components/autopilots-page.tsx | 1 | JEH-1766 — "Start from blank" button navigates to `/autopilots/new`. |
+| `autopilot-list-nav-no-dialog` | packages/views/autopilots/components/autopilots-page.tsx | 1 | JEH-1766 — remove create dialog render block from list page. |
+| `autopilot-detail-nav-import` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | JEH-1766 — remove `AutopilotDialog` import; edit now navigates to `/autopilots/:id/edit`. |
+| `autopilot-detail-nav-state` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | JEH-1766 — remove `editDialogOpen` state; edit button navigates to full-page edit. |
+| `autopilot-detail-nav-edit-button` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | JEH-1766 — Edit button navigates to `/autopilots/:id/edit` instead of opening dialog. |
+| `autopilot-detail-nav-no-dialog` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | JEH-1766 — remove edit dialog render block from detail page. |

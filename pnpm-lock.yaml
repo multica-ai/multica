@@ -171,6 +171,9 @@ importers:
       '@multica/cerebro-attachments':
         specifier: workspace:*
         version: link:../../packages/cerebro-attachments
+      '@multica/cerebro-autopilot-pages':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-autopilot-pages
       '@multica/cerebro-budgets':
         specifier: workspace:*
         version: link:../../packages/cerebro-budgets
@@ -325,6 +328,9 @@ importers:
       '@multica/cerebro-attachments':
         specifier: workspace:*
         version: link:../../packages/cerebro-attachments
+      '@multica/cerebro-autopilot-pages':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-autopilot-pages
       '@multica/cerebro-budgets':
         specifier: workspace:*
         version: link:../../packages/cerebro-budgets
@@ -710,6 +716,49 @@ importers:
       '@types/react':
         specifier: ^19.2.0
         version: 19.2.14
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.0(@opentelemetry/api@1.9.1)(@types/node@25.5.0)(jsdom@29.1.1(@noble/hashes@1.8.0))(msw@2.12.14(@types/node@25.5.0)(typescript@5.9.3))(vite@8.0.1(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(jiti@2.6.1))
+
+  packages/cerebro-autopilot-pages:
+    dependencies:
+      '@multica/cerebro-access':
+        specifier: workspace:*
+        version: link:../cerebro-access
+      '@multica/core':
+        specifier: workspace:*
+        version: link:../core
+      '@multica/ui':
+        specifier: workspace:*
+        version: link:../ui
+      '@multica/views':
+        specifier: workspace:*
+        version: link:../views
+      '@tanstack/react-query':
+        specifier: 'catalog:'
+        version: 5.96.2(react@19.2.3)
+      lucide-react:
+        specifier: 'catalog:'
+        version: 1.0.1(react@19.2.3)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.3
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+    devDependencies:
+      '@multica/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/react':
+        specifier: ^19.2.0
+        version: 19.2.14
+      '@vitejs/plugin-react':
+        specifier: 'catalog:'
+        version: 6.0.1(vite@8.0.1(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(jiti@2.6.1))
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
