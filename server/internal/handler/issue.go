@@ -26,33 +26,33 @@ import (
 
 // IssueResponse is the JSON response for an issue.
 type IssueResponse struct {
-	ID                 string                  `json:"id"`
-	WorkspaceID        string                  `json:"workspace_id"`
-	Number             int32                   `json:"number"`
-	Identifier         string                  `json:"identifier"`
-	Title              string                  `json:"title"`
-	Description        *string                 `json:"description"`
-	Status             string                  `json:"status"`
-	Priority           string                  `json:"priority"`
-	AssigneeType       *string                 `json:"assignee_type"`
-	AssigneeID         *string                 `json:"assignee_id"`
-	CreatorType        string                  `json:"creator_type"`
-	CreatorID          string                  `json:"creator_id"`
-	ParentIssueID      *string                 `json:"parent_issue_id"`
-	ProjectID          *string                 `json:"project_id"`
-	Position           float64                 `json:"position"`
-	DueDate            *string                 `json:"due_date"`
-	CreatedAt          string                  `json:"created_at"`
-	UpdatedAt          string                  `json:"updated_at"`
-	Reactions          []IssueReactionResponse `json:"reactions,omitempty"`
-	Attachments        []AttachmentResponse    `json:"attachments,omitempty"`
+	ID            string                  `json:"id"`
+	WorkspaceID   string                  `json:"workspace_id"`
+	Number        int32                   `json:"number"`
+	Identifier    string                  `json:"identifier"`
+	Title         string                  `json:"title"`
+	Description   *string                 `json:"description"`
+	Status        string                  `json:"status"`
+	Priority      string                  `json:"priority"`
+	AssigneeType  *string                 `json:"assignee_type"`
+	AssigneeID    *string                 `json:"assignee_id"`
+	CreatorType   string                  `json:"creator_type"`
+	CreatorID     string                  `json:"creator_id"`
+	ParentIssueID *string                 `json:"parent_issue_id"`
+	ProjectID     *string                 `json:"project_id"`
+	Position      float64                 `json:"position"`
+	DueDate       *string                 `json:"due_date"`
+	CreatedAt     string                  `json:"created_at"`
+	UpdatedAt     string                  `json:"updated_at"`
+	Reactions     []IssueReactionResponse `json:"reactions,omitempty"`
+	Attachments   []AttachmentResponse    `json:"attachments,omitempty"`
 	// Labels are bulk-attached by list/detail endpoints so the client can render
 	// chips without an N+1 round-trip per row. Pointer + omitempty so paths that
 	// don't load labels (e.g. UpdateIssue, batch UpdateIssues, the issue:updated
 	// WS broadcast) emit no `labels` field at all — the client merge then
 	// preserves whatever labels are already in cache. nil pointer = "field
 	// absent, do not touch"; non-nil (incl. empty slice) = authoritative list.
-	Labels             *[]LabelResponse        `json:"labels,omitempty"`
+	Labels *[]LabelResponse `json:"labels,omitempty"`
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -286,7 +286,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	}
 
 	escapedPhrase := escapeLike(phrase)
-	phraseParam := nextArg(escapedPhrase)               // $1
+	phraseParam := nextArg(escapedPhrase) // $1
 	phraseContains := "'%' || " + phraseParam + " || '%'"
 	phraseStartsWith := phraseParam + " || '%'"
 
@@ -600,6 +600,55 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func parseUUIDListFilter(w http.ResponseWriter, raw string, fieldName string) ([]pgtype.UUID, bool) {
+	if raw == "" {
+		return nil, true
+	}
+	out := make([]pgtype.UUID, 0)
+	for _, part := range strings.Split(raw, ",") {
+		s := strings.TrimSpace(part)
+		if s == "" {
+			continue
+		}
+		id, ok := parseUUIDOrBadRequest(w, s, fieldName)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, id)
+	}
+	return out, true
+}
+
+func parseActorPairFilters(w http.ResponseWriter, raw string, fieldName string) ([]string, bool) {
+	if raw == "" {
+		return nil, true
+	}
+	out := make([]string, 0)
+	for _, part := range strings.Split(raw, ",") {
+		s := strings.TrimSpace(part)
+		if s == "" {
+			continue
+		}
+		actorType, actorID, ok := strings.Cut(s, ":")
+		if !ok {
+			writeError(w, http.StatusBadRequest, fieldName+" must contain type:id values")
+			return nil, false
+		}
+		switch actorType {
+		case "member", "agent", "squad":
+		default:
+			writeError(w, http.StatusBadRequest, fieldName+" type must be 'member', 'agent', or 'squad'")
+			return nil, false
+		}
+		id, parsed := parseUUIDOrBadRequest(w, actorID, fieldName)
+		if !parsed {
+			return nil, false
+		}
+		out = append(out, actorType+":"+uuidToString(id))
+	}
+	return out, true
+}
+
 func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -615,6 +664,14 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	var priorityFilter pgtype.Text
 	if p := r.URL.Query().Get("priority"); p != "" {
 		priorityFilter = pgtype.Text{String: p, Valid: true}
+	}
+	var priorityFilters []string
+	if priorities := r.URL.Query().Get("priorities"); priorities != "" {
+		for _, raw := range strings.Split(priorities, ",") {
+			if s := strings.TrimSpace(raw); s != "" {
+				priorityFilters = append(priorityFilters, s)
+			}
+		}
 	}
 	var assigneeFilter pgtype.UUID
 	if a := r.URL.Query().Get("assignee_id"); a != "" {
@@ -636,6 +693,14 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	assigneePairs, ok := parseActorPairFilters(w, r.URL.Query().Get("assignees"), "assignees")
+	if !ok {
+		return
+	}
+	var includeNoAssignee pgtype.Bool
+	if r.URL.Query().Get("include_no_assignee") == "true" {
+		includeNoAssignee = pgtype.Bool{Bool: true, Valid: true}
+	}
 	var creatorFilter pgtype.UUID
 	if c := r.URL.Query().Get("creator_id"); c != "" {
 		id, ok := parseUUIDOrBadRequest(w, c, "creator_id")
@@ -643,6 +708,10 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		creatorFilter = id
+	}
+	creatorPairs, ok := parseActorPairFilters(w, r.URL.Query().Get("creators"), "creators")
+	if !ok {
+		return
 	}
 	var projectFilter pgtype.UUID
 	if p := r.URL.Query().Get("project_id"); p != "" {
@@ -652,16 +721,30 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		projectFilter = id
 	}
+	projectIdsFilter, ok := parseUUIDListFilter(w, r.URL.Query().Get("project_ids"), "project_ids")
+	if !ok {
+		return
+	}
+	var includeNoProject pgtype.Bool
+	if r.URL.Query().Get("include_no_project") == "true" {
+		includeNoProject = pgtype.Bool{Bool: true, Valid: true}
+	}
 
 	// open_only=true returns all non-done/cancelled issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
-			WorkspaceID: wsUUID,
-			Priority:    priorityFilter,
-			AssigneeID:  assigneeFilter,
-			AssigneeIds: assigneeIdsFilter,
-			CreatorID:   creatorFilter,
-			ProjectID:   projectFilter,
+			WorkspaceID:       wsUUID,
+			Priority:          priorityFilter,
+			Priorities:        priorityFilters,
+			AssigneeID:        assigneeFilter,
+			AssigneeIds:       assigneeIdsFilter,
+			AssigneePairs:     assigneePairs,
+			IncludeNoAssignee: includeNoAssignee,
+			CreatorID:         creatorFilter,
+			CreatorPairs:      creatorPairs,
+			ProjectID:         projectFilter,
+			ProjectIds:        projectIdsFilter,
+			IncludeNoProject:  includeNoProject,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -710,15 +793,21 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	issues, err := h.Queries.ListIssues(ctx, db.ListIssuesParams{
-		WorkspaceID: wsUUID,
-		Limit:       int32(limit),
-		Offset:      int32(offset),
-		Status:      statusFilter,
-		Priority:    priorityFilter,
-		AssigneeID:  assigneeFilter,
-		AssigneeIds: assigneeIdsFilter,
-		CreatorID:   creatorFilter,
-		ProjectID:   projectFilter,
+		WorkspaceID:       wsUUID,
+		Limit:             int32(limit),
+		Offset:            int32(offset),
+		Status:            statusFilter,
+		Priority:          priorityFilter,
+		Priorities:        priorityFilters,
+		AssigneeID:        assigneeFilter,
+		AssigneeIds:       assigneeIdsFilter,
+		AssigneePairs:     assigneePairs,
+		IncludeNoAssignee: includeNoAssignee,
+		CreatorID:         creatorFilter,
+		CreatorPairs:      creatorPairs,
+		ProjectID:         projectFilter,
+		ProjectIds:        projectIdsFilter,
+		IncludeNoProject:  includeNoProject,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -727,13 +816,19 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	// Get the true total count for pagination awareness.
 	total, err := h.Queries.CountIssues(ctx, db.CountIssuesParams{
-		WorkspaceID: wsUUID,
-		Status:      statusFilter,
-		Priority:    priorityFilter,
-		AssigneeID:  assigneeFilter,
-		AssigneeIds: assigneeIdsFilter,
-		CreatorID:   creatorFilter,
-		ProjectID:   projectFilter,
+		WorkspaceID:       wsUUID,
+		Status:            statusFilter,
+		Priority:          priorityFilter,
+		Priorities:        priorityFilters,
+		AssigneeID:        assigneeFilter,
+		AssigneeIds:       assigneeIdsFilter,
+		AssigneePairs:     assigneePairs,
+		IncludeNoAssignee: includeNoAssignee,
+		CreatorID:         creatorFilter,
+		CreatorPairs:      creatorPairs,
+		ProjectID:         projectFilter,
+		ProjectIds:        projectIdsFilter,
+		IncludeNoProject:  includeNoProject,
 	})
 	if err != nil {
 		total = int64(len(issues))
@@ -1118,16 +1213,16 @@ func readRuntimeCLIVersion(metadata []byte) string {
 }
 
 type CreateIssueRequest struct {
-	Title              string   `json:"title"`
-	Description        *string  `json:"description"`
-	Status             string   `json:"status"`
-	Priority           string   `json:"priority"`
-	AssigneeType       *string  `json:"assignee_type"`
-	AssigneeID         *string  `json:"assignee_id"`
-	ParentIssueID      *string  `json:"parent_issue_id"`
-	ProjectID          *string  `json:"project_id"`
-	DueDate            *string  `json:"due_date"`
-	AttachmentIDs      []string `json:"attachment_ids,omitempty"`
+	Title         string   `json:"title"`
+	Description   *string  `json:"description"`
+	Status        string   `json:"status"`
+	Priority      string   `json:"priority"`
+	AssigneeType  *string  `json:"assignee_type"`
+	AssigneeID    *string  `json:"assignee_id"`
+	ParentIssueID *string  `json:"parent_issue_id"`
+	ProjectID     *string  `json:"project_id"`
+	DueDate       *string  `json:"due_date"`
+	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 	// OriginType / OriginID stamp the new issue with its provenance so
 	// platform-internal flows can deterministically locate it later. Only
 	// trusted callers should set these — currently the daemon CLI passes
@@ -1409,16 +1504,16 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
-	Title              *string  `json:"title"`
-	Description        *string  `json:"description"`
-	Status             *string  `json:"status"`
-	Priority           *string  `json:"priority"`
-	AssigneeType       *string  `json:"assignee_type"`
-	AssigneeID         *string  `json:"assignee_id"`
-	Position           *float64 `json:"position"`
-	DueDate            *string  `json:"due_date"`
-	ParentIssueID      *string  `json:"parent_issue_id"`
-	ProjectID          *string  `json:"project_id"`
+	Title         *string  `json:"title"`
+	Description   *string  `json:"description"`
+	Status        *string  `json:"status"`
+	Priority      *string  `json:"priority"`
+	AssigneeType  *string  `json:"assignee_type"`
+	AssigneeID    *string  `json:"assignee_id"`
+	Position      *float64 `json:"position"`
+	DueDate       *string  `json:"due_date"`
+	ParentIssueID *string  `json:"parent_issue_id"`
+	ProjectID     *string  `json:"project_id"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings

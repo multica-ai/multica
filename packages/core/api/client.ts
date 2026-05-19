@@ -632,10 +632,20 @@ export class ApiClient {
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.status) search.set("status", params.status);
     if (params?.priority) search.set("priority", params.priority);
+    if (params?.priorities?.length) search.set("priorities", params.priorities.join(","));
     if (params?.assignee_id) search.set("assignee_id", params.assignee_id);
     if (params?.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
+    if (params?.assignees?.length) {
+      search.set("assignees", params.assignees.map((actor) => `${actor.type}:${actor.id}`).join(","));
+    }
+    if (params?.include_no_assignee) search.set("include_no_assignee", "true");
     if (params?.creator_id) search.set("creator_id", params.creator_id);
+    if (params?.creators?.length) {
+      search.set("creators", params.creators.map((actor) => `${actor.type}:${actor.id}`).join(","));
+    }
     if (params?.project_id) search.set("project_id", params.project_id);
+    if (params?.project_ids?.length) search.set("project_ids", params.project_ids.join(","));
+    if (params?.include_no_project) search.set("include_no_project", "true");
     if (params?.open_only) search.set("open_only", "true");
     const path = `/api/issues?${search}`;
     const raw = await this.fetch<unknown>(path);

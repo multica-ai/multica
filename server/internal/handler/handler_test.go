@@ -748,6 +748,101 @@ func TestCreateIssueAcceptsValidMemberAssignee(t *testing.T) {
 	testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
 }
 
+func TestListIssuesSupportsCompoundMobileFilters(t *testing.T) {
+	var projectID string
+	createdIssueIDs := make([]string, 0)
+	defer func() {
+		for _, issueID := range createdIssueIDs {
+			req := newRequest("DELETE", "/api/issues/"+issueID, nil)
+			req = withURLParam(req, "id", issueID)
+			testHandler.DeleteIssue(httptest.NewRecorder(), req)
+		}
+		if projectID != "" {
+			req := newRequest("DELETE", "/api/projects/"+projectID, nil)
+			req = withURLParam(req, "id", projectID)
+			testHandler.DeleteProject(httptest.NewRecorder(), req)
+		}
+	}()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Mobile compound filter project",
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProject: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var project ProjectResponse
+	json.NewDecoder(w.Body).Decode(&project)
+	projectID = project.ID
+
+	createIssue := func(title string, body map[string]any) IssueResponse {
+		t.Helper()
+		body["title"] = title
+		body["status"] = "blocked"
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, body)
+		testHandler.CreateIssue(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateIssue %q: expected 201, got %d: %s", title, w.Code, w.Body.String())
+		}
+		var created IssueResponse
+		json.NewDecoder(w.Body).Decode(&created)
+		createdIssueIDs = append(createdIssueIDs, created.ID)
+		return created
+	}
+
+	assignedProject := createIssue("Mobile filter assigned project match", map[string]any{
+		"priority":      "low",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
+		"project_id":    projectID,
+	})
+	noAssigneeNoProject := createIssue("Mobile filter empty match", map[string]any{
+		"priority": "urgent",
+	})
+	wrongPriority := createIssue("Mobile filter wrong priority", map[string]any{
+		"priority":      "medium",
+		"assignee_type": "member",
+		"assignee_id":   testUserID,
+		"project_id":    projectID,
+	})
+
+	query := fmt.Sprintf(
+		"/api/issues?workspace_id=%s&status=blocked&priorities=urgent,low&assignees=member:%s&include_no_assignee=true&project_ids=%s&include_no_project=true&limit=1000",
+		testWorkspaceID,
+		testUserID,
+		projectID,
+	)
+	w = httptest.NewRecorder()
+	req = newRequest("GET", query, nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssues: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var listResp struct {
+		Issues []IssueResponse `json:"issues"`
+		Total  int             `json:"total"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&listResp); err != nil {
+		t.Fatalf("decode ListIssues: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, issue := range listResp.Issues {
+		seen[issue.ID] = true
+	}
+	if !seen[assignedProject.ID] {
+		t.Fatalf("ListIssues: expected assigned project issue %s in results", assignedProject.ID)
+	}
+	if !seen[noAssigneeNoProject.ID] {
+		t.Fatalf("ListIssues: expected no-assignee/no-project issue %s in results", noAssigneeNoProject.ID)
+	}
+	if seen[wrongPriority.ID] {
+		t.Fatalf("ListIssues: did not expect wrong-priority issue %s in results", wrongPriority.ID)
+	}
+}
+
 // TestCreateIssueRejectsMalformedAssigneeID covers the case where parseUUID
 // silently produces an invalid pgtype.UUID and the validator would otherwise
 // treat (no type + unparseable id) as "no assignee" and accept the request.
