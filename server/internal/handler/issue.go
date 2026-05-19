@@ -1707,6 +1707,18 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		assigneeID = id
 	}
 
+	// When the request carries no assignee, fall back to the workspace's
+	// default_unassigned_to setting if configured. The helper soft-fails on
+	// stale config (missing / archived / private agent), so an admin's
+	// misconfiguration cannot block issue creation — the issue lands as
+	// unassigned, matching the legacy behaviour.
+	if !assigneeType.Valid && !assigneeID.Valid {
+		if t, id, ok := h.defaultAssigneeForUnassignedIssue(r.Context(), r, wsUUID, workspaceID); ok {
+			assigneeType = t
+			assigneeID = id
+		}
+	}
+
 	if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, assigneeID); status != 0 {
 		writeError(w, status, msg)
 		return

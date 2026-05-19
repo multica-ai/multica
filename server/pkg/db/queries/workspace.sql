@@ -34,5 +34,25 @@ UPDATE workspace SET issue_counter = issue_counter + 1
 WHERE id = $1
 RETURNING issue_counter;
 
+-- MergeWorkspaceSetting upserts a single key into workspace.settings.
+-- jsonb || jsonb is a server-side merge so concurrent PATCH requests for
+-- different keys do not clobber each other (unlike a client-side
+-- read / modify / write through UpdateWorkspace.settings).
+-- name: MergeWorkspaceSetting :one
+UPDATE workspace
+SET settings = settings || jsonb_build_object(sqlc.arg('key')::text, sqlc.arg('value')::jsonb),
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- DeleteWorkspaceSetting removes a single key from workspace.settings,
+-- restoring the unset behaviour without touching other keys.
+-- name: DeleteWorkspaceSetting :one
+UPDATE workspace
+SET settings = settings - sqlc.arg('key')::text,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: DeleteWorkspace :exec
 DELETE FROM workspace WHERE id = $1;

@@ -46,11 +46,44 @@ var workspaceUpdateCmd = &cobra.Command{
 	RunE:  runWorkspaceUpdate,
 }
 
+var workspaceSettingsCmd = &cobra.Command{
+	Use:   "settings",
+	Short: "Manage workspace settings (admin/owner only)",
+}
+
+var workspaceSettingsSetCmd = &cobra.Command{
+	Use:   "set <key> <value>",
+	Short: "Set a workspace setting (kebab-case key, e.g. default-unassigned-to)",
+	Long: `Set a workspace setting.
+
+Keys are accepted in kebab-case and normalized to snake_case server-side.
+Use --workspace-id or MULTICA_WORKSPACE_ID to target a workspace.
+
+Available keys:
+  default-unassigned-to    UUID of the agent to auto-assign new issues that
+                            arrive without an assignee.
+
+Example:
+  multica workspace settings set default-unassigned-to 5c6c59b8-3d1a-4ec1-a1f0-9547934cf440`,
+	Args: cobra.ExactArgs(2),
+	RunE: runWorkspaceSettingsSet,
+}
+
+var workspaceSettingsUnsetCmd = &cobra.Command{
+	Use:   "unset <key>",
+	Short: "Clear a workspace setting, restoring the default behaviour",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runWorkspaceSettingsUnset,
+}
+
 func init() {
 	workspaceCmd.AddCommand(workspaceListCmd)
 	workspaceCmd.AddCommand(workspaceGetCmd)
 	workspaceCmd.AddCommand(workspaceMembersCmd)
 	workspaceCmd.AddCommand(workspaceUpdateCmd)
+	workspaceCmd.AddCommand(workspaceSettingsCmd)
+	workspaceSettingsCmd.AddCommand(workspaceSettingsSetCmd)
+	workspaceSettingsCmd.AddCommand(workspaceSettingsUnsetCmd)
 
 	workspaceGetCmd.Flags().String("output", "json", "Output format: table or json")
 	workspaceMembersCmd.Flags().String("output", "table", "Output format: table or json")
@@ -62,6 +95,9 @@ func init() {
 	workspaceUpdateCmd.Flags().Bool("context-stdin", false, "Read context from stdin (preserves multi-line content verbatim)")
 	workspaceUpdateCmd.Flags().String("issue-prefix", "", "New issue prefix (uppercased server-side)")
 	workspaceUpdateCmd.Flags().String("output", "json", "Output format: table or json")
+
+	workspaceSettingsSetCmd.Flags().String("output", "json", "Output format: table or json")
+	workspaceSettingsUnsetCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
 func runWorkspaceList(cmd *cobra.Command, _ []string) error {
@@ -276,4 +312,83 @@ func runWorkspaceMembers(cmd *cobra.Command, args []string) error {
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
+}
+
+// normalizeSettingKey converts the kebab-case keys the CLI accepts (e.g.
+// "default-unassigned-to") into the snake_case keys the server stores.
+// Doing the swap in one place keeps the two naming conventions cleanly
+// separated: kebab in the CLI surface, snake on the wire and in the DB.
+func normalizeSettingKey(key string) string {
+	return strings.ReplaceAll(strings.TrimSpace(key), "-", "_")
+}
+
+func runWorkspaceSettingsSet(cmd *cobra.Command, args []string) error {
+	wsID := resolveWorkspaceID(cmd)
+	if wsID == "" {
+		return fmt.Errorf("workspace ID is required: pass --workspace-id or set MULTICA_WORKSPACE_ID")
+	}
+	key := normalizeSettingKey(args[0])
+	if key == "" {
+		return fmt.Errorf("setting key is required")
+	}
+	value := args[1]
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	body := map[string]any{
+		"key":   key,
+		"value": value,
+	}
+	var ws map[string]any
+	if err := client.PatchJSON(ctx, "/api/workspaces/"+wsID+"/settings", body, &ws); err != nil {
+		return fmt.Errorf("update workspace setting: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		fmt.Fprintf(os.Stdout, "Setting %s updated for workspace %s\n", key, wsID)
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, ws)
+}
+
+func runWorkspaceSettingsUnset(cmd *cobra.Command, args []string) error {
+	wsID := resolveWorkspaceID(cmd)
+	if wsID == "" {
+		return fmt.Errorf("workspace ID is required: pass --workspace-id or set MULTICA_WORKSPACE_ID")
+	}
+	key := normalizeSettingKey(args[0])
+	if key == "" {
+		return fmt.Errorf("setting key is required")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	body := map[string]any{
+		"key":   key,
+		"value": nil,
+	}
+	var ws map[string]any
+	if err := client.PatchJSON(ctx, "/api/workspaces/"+wsID+"/settings", body, &ws); err != nil {
+		return fmt.Errorf("clear workspace setting: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		fmt.Fprintf(os.Stdout, "Setting %s cleared for workspace %s\n", key, wsID)
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, ws)
 }

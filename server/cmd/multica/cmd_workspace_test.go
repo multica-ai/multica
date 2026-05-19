@@ -152,3 +152,19 @@ func TestBuildWorkspaceUpdateBody(t *testing.T) {
 		}
 	})
 }
+
+// TestNormalizeSettingKey pins the kebab-on-CLI / snake-on-wire boundary so
+// the two naming conventions stay confined to their own layer.
+func TestNormalizeSettingKey(t *testing.T) {
+	cases := map[string]string{
+		"default-unassigned-to":   "default_unassigned_to",
+		"default_unassigned_to":   "default_unassigned_to",
+		"  default-unassigned-to": "default_unassigned_to",
+		"":                        "",
+	}
+	for in, want := range cases {
+		if got := normalizeSettingKey(in); got != want {
+			t.Errorf("normalizeSettingKey(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
