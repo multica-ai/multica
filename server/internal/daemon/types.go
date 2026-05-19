@@ -60,7 +60,17 @@ type Task struct {
 	AutopilotTriggerPayload json.RawMessage `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
 	QuickCreatePrompt       string          `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
 	SquadID                 string          `json:"squad_id,omitempty"`                  // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
-	SquadName               string          `json:"squad_name,omitempty"`                // display name for the picker squad, used in prompt text
+	SquadName               string             `json:"squad_name,omitempty"`                // display name for the picker squad, used in prompt text
+	LabelInstructions       []LabelInstruction `json:"label_instructions,omitempty"`        // per-label instructions injected into the agent prompt
+}
+
+// LabelInstruction carries a single label's agent-facing instructions.
+// The daemon appends all non-empty entries to the system prompt so the
+// agent is context-aware of the label's intent (e.g. "security-check"
+// → "Run OWASP top 10 checks").
+type LabelInstruction struct {
+	Name         string `json:"name"`
+	Instructions string `json:"instructions"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon
