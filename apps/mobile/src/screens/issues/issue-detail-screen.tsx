@@ -38,6 +38,12 @@ import {
   useUpdateComment,
   useUpdateIssue,
 } from "@multica/core/issues/mutations";
+import {
+  issueLabelsOptions,
+  labelListOptions,
+  useAttachLabel,
+  useDetachLabel,
+} from "@multica/core/labels";
 import { useProjectList } from "@multica/core/projects/hooks";
 import {
   useChildIssueProgress,
@@ -77,6 +83,7 @@ import type {
   IssuePriority,
   IssueReaction,
   IssueStatus,
+  Label,
   MemberWithUser,
   Project,
   Reaction,
@@ -98,7 +105,8 @@ import {
 import {
   DatePickerModal,
   dateInputToRfc3339,
-  formatDueDateLabel,
+  formatDateLabel,
+  normalizeDateInput,
   normalizeDueDateInput,
 } from "./date-picker-modal";
 import { TaskMessageRow } from "./task-transcript-components";
@@ -996,15 +1004,23 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
   const { data: members = [] } = useCoreQuery(memberListOptions(workspace.id));
   const { data: agents = [] } = useCoreQuery(agentListOptions(workspace.id));
   const { data: projects = [] } = useProjectList(workspace.id);
+  const { data: allLabels = [] } = useCoreQuery(labelListOptions(workspace.id));
+  const { data: attachedLabels = [] } = useCoreQuery(issueLabelsOptions(workspace.id, issueId));
   const updateIssue = useUpdateIssue();
+  const attachLabel = useAttachLabel(issueId);
+  const detachLabel = useDetachLabel(issueId);
   const [assigneePickerOpen, setAssigneePickerOpen] = useState(false);
   const [assigneeError, setAssigneeError] = useState<string | null>(null);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
   const [parentError, setParentError] = useState<string | null>(null);
-  const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
+  const [dueDatePickerOpen, setDueDatePickerOpen] = useState(false);
+  const [labelPickerOpen, setLabelPickerOpen] = useState(false);
+  const [startDateError, setStartDateError] = useState<string | null>(null);
   const [dueDateError, setDueDateError] = useState<string | null>(null);
+  const [labelError, setLabelError] = useState<string | null>(null);
 
   const currentMemberRole = useMemo(
     () => members.find((member) => member.user_id === userId)?.role ?? null,
@@ -1020,6 +1036,11 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
   const projectLabel = issue?.project_id
     ? currentProject ? formatProjectLabel(currentProject) : t("issues.unknown_project")
     : t("issues.no_project");
+  const attachedLabelIds = useMemo(
+    () => new Set(attachedLabels.map((label) => label.id)),
+    [attachedLabels],
+  );
+  const labelSaving = attachLabel.isPending || detachLabel.isPending;
 
   const changeStatus = useCallback(async (status: IssueStatus) => {
     if (!issue || status === issue.status) return;
@@ -1071,8 +1092,31 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
     }
   }, [issue, t, updateIssue]);
 
+  const changeStartDate = useCallback(async (startDate: string | null) => {
+    if (!issue || startDate === normalizeDateInput(issue.start_date)) return;
+    const dueDate = normalizeDateInput(issue.due_date);
+    if (startDate && dueDate && startDate > dueDate) {
+      setStartDateError(t("issues.start_date_after_due_date"));
+      return;
+    }
+    setStartDateError(null);
+    try {
+      await updateIssue.mutateAsync({
+        id: issue.id,
+        start_date: startDate ? dateInputToRfc3339(startDate) : null,
+      });
+    } catch (err) {
+      setStartDateError(err instanceof Error ? err.message : t("issues.unable_to_save_issue"));
+    }
+  }, [issue, t, updateIssue]);
+
   const changeDueDate = useCallback(async (dueDate: string | null) => {
     if (!issue || dueDate === normalizeDueDateInput(issue.due_date)) return;
+    const startDate = normalizeDateInput(issue.start_date);
+    if (dueDate && startDate && dueDate < startDate) {
+      setDueDateError(t("issues.due_date_before_start_date"));
+      return;
+    }
     setDueDateError(null);
     try {
       await updateIssue.mutateAsync({
@@ -1083,6 +1127,19 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
       setDueDateError(err instanceof Error ? err.message : t("issues.unable_to_save_issue"));
     }
   }, [issue, t, updateIssue]);
+
+  const toggleLabel = useCallback(async (labelId: string) => {
+    setLabelError(null);
+    try {
+      if (attachedLabelIds.has(labelId)) {
+        await detachLabel.mutateAsync(labelId);
+      } else {
+        await attachLabel.mutateAsync(labelId);
+      }
+    } catch (err) {
+      setLabelError(err instanceof Error ? err.message : t("issues.unable_to_save_issue"));
+    }
+  }, [attachLabel, attachedLabelIds, detachLabel, t]);
 
   const changeParentIssue = useCallback(async (parentIssueId: string | null) => {
     if (!issue) return;
@@ -1207,11 +1264,43 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
                 {getActorName(issue.creator_type, issue.creator_id)}
               </Text>
             </Property>
+            <Property label={t("issues.start_date")}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={updateIssue.isPending}
+                onPress={() => {
+                  setStartDateError(null);
+                  setStartDatePickerOpen(true);
+                }}
+                style={({ pressed }) => [
+                  styles.dueDateTrigger,
+                  pressed && styles.buttonPressed,
+                  updateIssue.isPending && styles.disabledAction,
+                ]}
+              >
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.dueDateTriggerText,
+                    !issue.start_date && styles.dueDatePlaceholder,
+                  ]}
+                >
+                  {issue.start_date ? formatDateLabel(issue.start_date) : t("issues.no_start_date")}
+                </Text>
+                <Text style={styles.dueDateTriggerMeta}>
+                  {updateIssue.isPending ? t("issues.saving") : t("issues.select")}
+                </Text>
+              </Pressable>
+              {startDateError ? <Text style={styles.errorText}>{startDateError}</Text> : null}
+            </Property>
             <Property label={t("issues.due_date")}>
               <Pressable
                 accessibilityRole="button"
                 disabled={updateIssue.isPending}
-                onPress={() => setDatePickerOpen(true)}
+                onPress={() => {
+                  setDueDateError(null);
+                  setDueDatePickerOpen(true);
+                }}
                 style={({ pressed }) => [
                   styles.dueDateTrigger,
                   pressed && styles.buttonPressed,
@@ -1225,13 +1314,44 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
                     !issue.due_date && styles.dueDatePlaceholder,
                   ]}
                 >
-                  {issue.due_date ? formatDueDateLabel(issue.due_date) : t("issues.no_due_date")}
+                  {issue.due_date ? formatDateLabel(issue.due_date) : t("issues.no_due_date")}
                 </Text>
                 <Text style={styles.dueDateTriggerMeta}>
                   {updateIssue.isPending ? t("issues.saving") : t("issues.select")}
                 </Text>
               </Pressable>
               {dueDateError ? <Text style={styles.errorText}>{dueDateError}</Text> : null}
+            </Property>
+            <Property label={t("issues.labels")}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={labelSaving}
+                onPress={() => {
+                  setLabelError(null);
+                  setLabelPickerOpen(true);
+                }}
+                style={({ pressed }) => [
+                  styles.labelTrigger,
+                  pressed && styles.buttonPressed,
+                  labelSaving && styles.disabledAction,
+                ]}
+              >
+                {attachedLabels.length > 0 ? (
+                  <View style={styles.labelChipList}>
+                    {attachedLabels.map((label) => (
+                      <IssueLabelChip key={label.id} label={label} />
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={[styles.propertySelectText, styles.propertySelectPlaceholder]}>
+                    {t("issues.no_labels")}
+                  </Text>
+                )}
+                <Text style={styles.propertySelectMeta}>
+                  {labelSaving ? t("issues.saving") : t("issues.select")}
+                </Text>
+              </Pressable>
+              {labelError ? <Text style={styles.errorText}>{labelError}</Text> : null}
             </Property>
           </View>
         </View>
@@ -1324,10 +1444,43 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
         ) : null}
       </ScrollView>
       <DatePickerModal
+        disabledDateMessage={
+          issue.due_date
+            ? t("issues.start_date_after_due_date")
+            : undefined
+        }
+        maxDate={issue.due_date}
+        onChange={(startDate) => void changeStartDate(startDate)}
+        onClose={() => setStartDatePickerOpen(false)}
+        open={startDatePickerOpen}
+        title={t("issues.start_date")}
+        value={issue.start_date}
+      />
+      <DatePickerModal
+        disabledDateMessage={
+          issue.start_date
+            ? t("issues.due_date_before_start_date")
+            : undefined
+        }
+        minDate={issue.start_date}
         onChange={(dueDate) => void changeDueDate(dueDate)}
-        onClose={() => setDatePickerOpen(false)}
-        open={datePickerOpen}
+        onClose={() => setDueDatePickerOpen(false)}
+        open={dueDatePickerOpen}
+        title={t("issues.due_date")}
         value={issue.due_date}
+      />
+      <LabelPickerSheet
+        allLabels={allLabels}
+        attachedLabelIds={attachedLabelIds}
+        bottomInset={insets.bottom}
+        error={labelError}
+        onClose={() => {
+          setLabelPickerOpen(false);
+          setLabelError(null);
+        }}
+        onToggle={(labelId) => void toggleLabel(labelId)}
+        open={labelPickerOpen}
+        saving={labelSaving}
       />
       <AssigneePickerSheet
         agents={agents}
@@ -1374,6 +1527,156 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
         saving={updateIssue.isPending}
       />
     </Screen>
+  );
+}
+
+function LabelPickerSheet({
+  allLabels,
+  attachedLabelIds,
+  bottomInset,
+  error,
+  onClose,
+  onToggle,
+  open,
+  saving,
+}: {
+  allLabels: Label[];
+  attachedLabelIds: Set<string>;
+  bottomInset: number;
+  error: string | null;
+  onClose: () => void;
+  onToggle: (labelId: string) => void;
+  open: boolean;
+  saving: boolean;
+}) {
+  const { t } = useTranslation();
+  const [query, setQuery] = useState("");
+  const keyboardHeight = useKeyboardHeight(open);
+  const { height: windowHeight } = useWindowDimensions();
+  const sheetMaxHeight = Math.max(0, windowHeight - keyboardHeight - spacing.xl);
+  const sheetBottomPadding = keyboardHeight > 0 ? spacing.md : Math.max(bottomInset, spacing.md);
+
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
+
+  const normalizedQuery = normalizeSearch(query);
+  const filteredLabels = useMemo(
+    () => allLabels.filter((label) => {
+      if (!normalizedQuery) return true;
+      return normalizeSearch(label.name).includes(normalizedQuery);
+    }),
+    [allLabels, normalizedQuery],
+  );
+
+  return (
+    <Modal
+      animationType="fade"
+      onRequestClose={onClose}
+      transparent
+      visible={open}
+    >
+      <View style={styles.sheetKeyboardView}>
+        <Pressable style={styles.sheetBackdrop} onPress={onClose} />
+        <View style={[
+          styles.sheet,
+          {
+            marginBottom: keyboardHeight,
+            maxHeight: sheetMaxHeight,
+            paddingBottom: sheetBottomPadding,
+          },
+        ]}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>{t("issues.labels")}</Text>
+            <Button disabled={saving} onPress={onClose} variant="ghost">
+              {t("common.close")}
+            </Button>
+          </View>
+          <TextInput
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!saving}
+            onChangeText={setQuery}
+            placeholder={t("issues.search_labels")}
+            placeholderTextColor={colors.mutedForeground}
+            style={styles.assigneeSearchInput}
+            value={query}
+          />
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            style={styles.assigneePickerList}
+          >
+            {filteredLabels.length > 0 ? (
+              <View style={styles.assigneeSection}>
+                {filteredLabels.map((label) => (
+                  <LabelOptionRow
+                    active={attachedLabelIds.has(label.id)}
+                    disabled={saving}
+                    key={label.id}
+                    label={label}
+                    onPress={() => onToggle(label.id)}
+                  />
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.assigneeEmptyText}>
+                {allLabels.length === 0 ? t("issues.no_labels") : t("common.no_results")}
+              </Text>
+            )}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function LabelOptionRow({
+  active,
+  disabled,
+  label,
+  onPress,
+}: {
+  active: boolean;
+  disabled: boolean;
+  label: Label;
+  onPress: () => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.assigneeOption,
+        active && styles.assigneeOptionActive,
+        pressed && styles.buttonPressed,
+        disabled && styles.disabledAction,
+      ]}
+    >
+      <View style={[styles.labelOptionSwatch, { backgroundColor: label.color }]} />
+      <Text
+        numberOfLines={1}
+        style={[styles.assigneeOptionLabel, styles.labelOptionName, active && styles.assigneeOptionLabelActive]}
+      >
+        {label.name}
+      </Text>
+      {active ? <Text style={styles.labelOptionSelected}>{t("common.selected")}</Text> : null}
+    </Pressable>
+  );
+}
+
+function IssueLabelChip({ label }: { label: Label }) {
+  return (
+    <View style={styles.issueLabelChip}>
+      <View style={[styles.issueLabelChipDot, { backgroundColor: label.color }]} />
+      <Text numberOfLines={1} style={styles.issueLabelChipText}>
+        {label.name}
+      </Text>
+    </View>
   );
 }
 
@@ -3693,6 +3996,50 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "500",
   },
+  labelTrigger: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "space-between",
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    width: "100%",
+  },
+  labelChipList: {
+    flex: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    minWidth: 0,
+  },
+  issueLabelChip: {
+    alignItems: "center",
+    backgroundColor: colors.muted,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.xs,
+    maxWidth: "100%",
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+  },
+  issueLabelChipDot: {
+    borderRadius: 4,
+    height: 8,
+    width: 8,
+  },
+  issueLabelChipText: {
+    color: colors.foreground,
+    flexShrink: 1,
+    fontSize: 12,
+    fontWeight: "500",
+  },
   disabledAction: {
     opacity: 0.6,
   },
@@ -3778,6 +4125,21 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     height: 8,
     width: 8,
+  },
+  labelOptionSwatch: {
+    borderRadius: 6,
+    height: 12,
+    width: 12,
+  },
+  labelOptionName: {
+    flex: 1,
+    minWidth: 0,
+  },
+  labelOptionSelected: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "600",
+    marginLeft: "auto",
   },
   sectionTitle: {
     color: colors.foreground,

@@ -11,28 +11,42 @@ import { Button } from "../../components/ui/primitives";
 import { colors, radii, spacing } from "../../theme/tokens";
 
 export function DatePickerModal({
+  disabledDateMessage,
+  maxDate,
+  minDate,
   onChange,
   onClose,
   open,
+  title,
   value,
 }: {
+  disabledDateMessage?: string;
+  maxDate?: string | null;
+  minDate?: string | null;
   onChange: (value: string | null) => void;
   onClose: () => void;
   open: boolean;
+  title?: string;
   value: string | null | undefined;
 }) {
   const { t } = useTranslation();
-  const normalizedValue = normalizeDueDateInput(value);
+  const normalizedValue = normalizeDateInput(value);
+  const normalizedMinDate = normalizeDateInput(minDate);
+  const normalizedMaxDate = normalizeDateInput(maxDate);
   const selectedDate = useMemo(() => parseDateInput(normalizedValue ?? ""), [normalizedValue]);
   const [visibleMonth, setVisibleMonth] = useState(() => selectedDate ?? startOfUtcMonth(new Date()));
   const days = useMemo(() => getCalendarDays(visibleMonth), [visibleMonth]);
+  const todayValue = formatDateInput(new Date());
+  const todayDisabled = isDateDisabled(todayValue, normalizedMinDate, normalizedMaxDate);
 
   useEffect(() => {
     if (open) setVisibleMonth(selectedDate ?? startOfUtcMonth(new Date()));
   }, [open, selectedDate]);
 
   function selectDate(date: Date) {
-    onChange(formatDateInput(date));
+    const dateValue = formatDateInput(date);
+    if (isDateDisabled(dateValue, normalizedMinDate, normalizedMaxDate)) return;
+    onChange(dateValue);
     onClose();
   }
 
@@ -49,6 +63,7 @@ export function DatePickerModal({
       <View style={styles.datePickerRoot}>
         <Pressable onPress={onClose} style={styles.datePickerBackdrop} />
         <View style={styles.datePickerCard}>
+          {title ? <Text style={styles.datePickerModalTitle}>{title}</Text> : null}
           <View style={styles.datePickerHeader}>
             <Button onPress={() => shiftMonth(-1)} variant="ghost">
               {t("issues.prev")}
@@ -68,21 +83,25 @@ export function DatePickerModal({
               const dateValue = formatDateInput(day.date);
               const isSelected = normalizedValue === dateValue;
               const isCurrentMonth = day.date.getUTCMonth() === visibleMonth.getUTCMonth();
+              const isDisabled = isDateDisabled(dateValue, normalizedMinDate, normalizedMaxDate);
               return (
                 <Pressable
                   accessibilityRole="button"
+                  disabled={isDisabled}
                   key={dateValue}
                   onPress={() => selectDate(day.date)}
                   style={({ pressed }) => [
                     styles.calendarDay,
                     isSelected && styles.calendarDaySelected,
-                    pressed && styles.optionPressed,
+                    isDisabled && styles.calendarDayDisabled,
+                    pressed && !isDisabled && styles.optionPressed,
                   ]}
                 >
                   <Text
                     style={[
                       styles.calendarDayText,
                       !isCurrentMonth && styles.calendarDayMuted,
+                      isDisabled && styles.calendarDayTextDisabled,
                       isSelected && styles.calendarDayTextSelected,
                     ]}
                   >
@@ -92,6 +111,9 @@ export function DatePickerModal({
               );
             })}
           </View>
+          {disabledDateMessage ? (
+            <Text style={styles.datePickerConstraintText}>{disabledDateMessage}</Text>
+          ) : null}
           <View style={styles.datePickerActions}>
             <Button
               onPress={() => {
@@ -102,7 +124,7 @@ export function DatePickerModal({
             >
               {t("issues.clear")}
             </Button>
-            <Button onPress={() => selectDate(new Date())} variant="secondary">
+            <Button disabled={todayDisabled} onPress={() => selectDate(new Date())} variant="secondary">
               {t("issues.today")}
             </Button>
             <Button onPress={onClose} variant="ghost">
@@ -122,6 +144,10 @@ export function isValidDateInput(value: string) {
 }
 
 export function normalizeDueDateInput(value: string | null | undefined) {
+  return normalizeDateInput(value);
+}
+
+export function normalizeDateInput(value: string | null | undefined) {
   if (!value) return null;
   const dateInput = value.slice(0, 10);
   return isValidDateInput(dateInput) ? dateInput : null;
@@ -150,7 +176,11 @@ export function formatDateInput(date: Date) {
 }
 
 export function formatDueDateLabel(value: string | null | undefined) {
-  const normalizedValue = normalizeDueDateInput(value);
+  return formatDateLabel(value);
+}
+
+export function formatDateLabel(value: string | null | undefined) {
+  const normalizedValue = normalizeDateInput(value);
   if (!normalizedValue) return value ?? "";
   const date = parseDateInput(normalizedValue);
   if (!date) return value ?? "";
@@ -160,6 +190,16 @@ export function formatDueDateLabel(value: string | null | undefined) {
     year: "numeric",
     timeZone: "UTC",
   });
+}
+
+function isDateDisabled(
+  value: string,
+  minDate: string | null,
+  maxDate: string | null,
+) {
+  if (minDate && value < minDate) return true;
+  if (maxDate && value > maxDate) return true;
+  return false;
 }
 
 function formatMonthLabel(date: Date) {
@@ -213,6 +253,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
   },
+  datePickerModalTitle: {
+    color: colors.foreground,
+    fontSize: 16,
+    fontWeight: "600",
+    textAlign: "center",
+  },
   datePickerTitle: {
     color: colors.foreground,
     fontSize: 16,
@@ -242,6 +288,9 @@ const styles = StyleSheet.create({
   calendarDaySelected: {
     backgroundColor: colors.primary,
   },
+  calendarDayDisabled: {
+    opacity: 0.36,
+  },
   calendarDayText: {
     color: colors.foreground,
     fontSize: 14,
@@ -252,6 +301,14 @@ const styles = StyleSheet.create({
   },
   calendarDayTextSelected: {
     color: colors.primaryForeground,
+  },
+  calendarDayTextDisabled: {
+    color: colors.mutedForeground,
+  },
+  datePickerConstraintText: {
+    color: colors.mutedForeground,
+    fontSize: 12,
+    lineHeight: 16,
   },
   datePickerActions: {
     flexDirection: "row",
