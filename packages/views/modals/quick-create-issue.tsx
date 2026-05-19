@@ -247,13 +247,22 @@ export function AgentCreatePanel({
   const [justSent, setJustSent] = useState(false);
   const [sentCount, setSentCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [pendingUploads, setPendingUploads] = useState(0);
 
   // Image paste/drop support: route uploads through the same helper Advanced
   // uses, so users can paste screenshots straight into the prompt and the
   // agent receives them as embedded markdown image URLs in the prompt.
   const { uploadWithToast, uploading } = useFileUpload(api);
+  const hasPendingUploads = pendingUploads > 0 || uploading;
   const handleUploadFile = useCallback(
-    (file: File) => uploadWithToast(file),
+    async (file: File) => {
+      setPendingUploads((n) => n + 1);
+      try {
+        return await uploadWithToast(file);
+      } finally {
+        setPendingUploads((n) => Math.max(0, n - 1));
+      }
+    },
     [uploadWithToast],
   );
   const { isDragOver, dropZoneProps } = useFileDropZone({
@@ -270,7 +279,16 @@ export function AgentCreatePanel({
 
   const submit = async () => {
     const md = editorRef.current?.getMarkdown()?.trim() ?? "";
-    if (!md || !actor || submitting || versionBlocked || uploading) return;
+    if (
+      !md ||
+      !actor ||
+      submitting ||
+      versionBlocked ||
+      hasPendingUploads ||
+      editorRef.current?.hasActiveUploads()
+    ) {
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -482,7 +500,7 @@ export function AgentCreatePanel({
           <div className="flex min-h-7 items-center gap-2">
             <FileUploadButton
               size="sm"
-              disabled={uploading}
+              disabled={hasPendingUploads}
               onSelect={(file) => editorRef.current?.uploadFile(file)}
             />
             {keepOpen && sentCount > 0 && (
@@ -512,7 +530,7 @@ export function AgentCreatePanel({
             <Button
               size="sm"
               onClick={submit}
-              disabled={!hasContent || !actor || submitting || versionBlocked || uploading}
+              disabled={!hasContent || !actor || submitting || versionBlocked || hasPendingUploads}
               title={
                 versionBlocked
                   ? t(($) => $.create_issue.agent.version_blocked_tooltip, { min: versionCheck.min })
@@ -520,7 +538,7 @@ export function AgentCreatePanel({
               }
               className={justSent ? "min-w-28 !bg-emerald-600 !text-white" : "min-w-28"}
             >
-              {submitting ? t(($) => $.create_issue.agent.sending) : uploading ? t(($) => $.create_issue.agent.uploading) : justSent ? (
+              {submitting ? t(($) => $.create_issue.agent.sending) : hasPendingUploads ? t(($) => $.create_issue.agent.uploading) : justSent ? (
                 <span className="flex items-center gap-1"><Check className="size-3.5" />{t(($) => $.create_issue.agent.sent_label)}</span>
               ) : `${t(($) => $.create_issue.agent.submit)} (${formatShortcut(modKey, enterKey)})`}
             </Button>

@@ -11,6 +11,7 @@ const mockClearPrompt = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockSetLastMode = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
+const mockUploadWithToast = vi.hoisted(() => vi.fn());
 
 const mockQuickCreateStore = {
   lastActorType: null as "agent" | "squad" | null,
@@ -116,7 +117,7 @@ vi.mock("@multica/core/runtimes", () => ({
 }));
 
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
-  useFileUpload: () => ({ uploadWithToast: vi.fn(), uploading: false }),
+  useFileUpload: () => ({ uploadWithToast: mockUploadWithToast, uploading: false }),
 }));
 
 vi.mock("../issues/components/pickers/assignee-picker", () => ({
@@ -141,9 +142,19 @@ vi.mock("../common/pill-button", () => ({
 }));
 
 vi.mock("../editor", () => {
-  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onSubmit, placeholder }: any, ref: any) => {
+  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onSubmit, onUploadFile, placeholder }: any, ref: any) => {
     const valueRef = useRef(defaultValue || "");
+    const uploadingRef = useRef(0);
     const [value, setValue] = useState(defaultValue || "");
+    const appendAttachment = (result: any) => {
+      const next = [
+        valueRef.current,
+        `!file[${result.filename}](${result.url})`,
+      ].filter(Boolean).join("\n");
+      valueRef.current = next;
+      setValue(next);
+      onUpdate?.(next);
+    };
 
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
@@ -151,7 +162,18 @@ vi.mock("../editor", () => {
         valueRef.current = "";
         setValue("");
       },
-      uploadFile: vi.fn(),
+      uploadFile: (file: File) => {
+        if (!onUploadFile) return;
+        uploadingRef.current += 1;
+        void onUploadFile(file)
+          .then((result: any) => {
+            if (result) appendAttachment(result);
+          })
+          .finally(() => {
+            uploadingRef.current = Math.max(0, uploadingRef.current - 1);
+          });
+      },
+      hasActiveUploads: () => uploadingRef.current > 0,
       focus: vi.fn(),
     }));
 
@@ -166,6 +188,7 @@ vi.mock("../editor", () => {
         }}
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+            e.preventDefault();
             onSubmit?.();
           }
         }}
@@ -251,7 +274,21 @@ vi.mock("@multica/ui/components/ui/switch", () => ({
 }));
 
 vi.mock("@multica/ui/components/common/file-upload-button", () => ({
-  FileUploadButton: () => <button type="button">Upload file</button>,
+  FileUploadButton: ({
+    onSelect,
+    disabled,
+  }: {
+    onSelect: (file: File) => void;
+    disabled?: boolean;
+  }) => (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onSelect(new File(["test"], "test.txt", { type: "text/plain" }))}
+    >
+      Upload file
+    </button>
+  ),
 }));
 
 vi.mock("sonner", () => ({
@@ -287,6 +324,23 @@ describe("AgentCreatePanel", () => {
     mockProjectsQuery.isSuccess = true;
     mockSquadsData.list = [];
     mockQuickCreateIssue.mockResolvedValue(undefined);
+    mockUploadWithToast.mockResolvedValue({
+      id: "att-1",
+      workspace_id: "ws-test",
+      issue_id: null,
+      comment_id: null,
+      chat_session_id: null,
+      chat_message_id: null,
+      uploader_type: "member",
+      uploader_id: "user-1",
+      filename: "test.txt",
+      url: "https://cdn.example.test/test.txt",
+      download_url: "https://cdn.example.test/test.txt?download=1",
+      content_type: "text/plain",
+      size_bytes: 4,
+      created_at: "2026-05-19T00:00:00Z",
+      link: "https://cdn.example.test/test.txt",
+    });
     mockSetKeepOpen.mockImplementation((value: boolean) => {
       mockQuickCreateStore.keepOpen = value;
     });
@@ -368,6 +422,62 @@ describe("AgentCreatePanel", () => {
       });
     });
     expect(mockSetLastActor).toHaveBeenCalledWith("squad", "squad-1");
+  });
+
+  it("waits for attachment uploads before sending the agent prompt", async () => {
+    const user = userEvent.setup();
+    let resolveUpload: (value: unknown) => void = () => {};
+    mockUploadWithToast.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveUpload = resolve;
+      }),
+    );
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    const editor = screen.getByPlaceholderText(
+      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+    );
+    await user.clear(editor);
+    await user.type(editor, "Attach logs");
+    await user.click(screen.getByRole("button", { name: "Upload file" }));
+
+    const uploadingButton = await screen.findByRole("button", { name: /^Uploading/i });
+    expect(uploadingButton).toBeDisabled();
+
+    await user.click(editor);
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+    expect(mockQuickCreateIssue).not.toHaveBeenCalled();
+
+    resolveUpload({
+      id: "att-1",
+      workspace_id: "ws-test",
+      issue_id: null,
+      comment_id: null,
+      chat_session_id: null,
+      chat_message_id: null,
+      uploader_type: "member",
+      uploader_id: "user-1",
+      filename: "test.txt",
+      url: "https://cdn.example.test/test.txt",
+      download_url: "https://cdn.example.test/test.txt?download=1",
+      content_type: "text/plain",
+      size_bytes: 4,
+      created_at: "2026-05-19T00:00:00Z",
+      link: "https://cdn.example.test/test.txt",
+    });
+
+    const createButton = await screen.findByRole("button", { name: /^Create \(/i });
+    await waitFor(() => expect(createButton).not.toBeDisabled());
+    await user.click(createButton);
+
+    await waitFor(() => {
+      expect(mockQuickCreateIssue).toHaveBeenCalledWith({
+        agent_id: "agent-1",
+        prompt: "Attach logs\n!file[test.txt](https://cdn.example.test/test.txt)",
+        project_id: undefined,
+      });
+    });
   });
 
   // Squads whose leader agent isn't visible (archived, private, etc.) must
