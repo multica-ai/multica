@@ -186,6 +186,59 @@ describe("markdownPaste — code block context", () => {
     expectLiteralPaste(editor, text);
   });
 
+  it("inserts medium single-line SQL-like text without running the Markdown parser", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    const columns = Array.from(
+      { length: 120 },
+      (_, index) => `\`column_${index}\``,
+    ).join(", ");
+    const values = Array.from(
+      { length: 120 },
+      (_, index) => `'value_${index}_${"x".repeat(12)}'`,
+    ).join(", ");
+    const sql = `INSERT INTO \`huge_table\` (${columns}) VALUES (${values});`;
+
+    expect(sql.length).toBeGreaterThan(2_000);
+    expect(sql.split("\n")).toHaveLength(1);
+
+    expectLiteralPaste(editor, sql);
+  });
+
+  it("still parses medium-length Markdown with explicit block syntax", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    const markdown = [
+      "# Incident report",
+      "",
+      ...Array.from(
+        { length: 40 },
+        (_, index) => `- item ${index}: keep **Markdown** parsing enabled for structured notes`,
+      ),
+      "",
+      ...Array.from(
+        { length: 12 },
+        () => "Regular wrapped prose keeps line lengths modest while total content stays large.",
+      ),
+    ].join("\n");
+
+    expect(markdown.length).toBeGreaterThan(2_000);
+
+    const handled = paste(editor, markdown);
+    expect(handled).toBe(true);
+
+    const json = editor.getJSON() as JsonNode;
+    const types = (json.content ?? []).map((n) => n.type);
+    expect(types).toContain("heading");
+    expect(types).toContain("bulletList");
+  });
+
   it("does not parse oversized bracketed plain text as JSON", () => {
     editor = makeEditor({
       type: "doc",

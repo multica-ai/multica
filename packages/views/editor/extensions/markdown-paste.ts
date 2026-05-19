@@ -32,6 +32,8 @@ import { Slice } from "@tiptap/pm/model";
 import { getClipboardFiles } from "./file-upload";
 
 const LARGE_PASTE_TEXT_THRESHOLD = 50_000;
+const MEDIUM_LITERAL_TEXT_THRESHOLD = 2_000;
+const LONG_LINE_LITERAL_THRESHOLD = 1_500;
 
 type PasteMode = "native" | "literal" | "markdown";
 
@@ -63,6 +65,27 @@ function isStructuredPlainText(text: string): boolean {
   return isJsonDocumentText(text);
 }
 
+function hasMarkdownSignals(text: string): boolean {
+  return (
+    /(^|\n)(#{1,6}\s|>\s|\s*[-*+]\s|\s*\d+\.\s|```|~~~)/m.test(text) ||
+    /!\[[^\]]*]\([^)]+\)|\[[^\]]+\]\([^)]+\)/.test(text)
+  );
+}
+
+function longestLineLength(text: string): number {
+  let max = 0;
+  for (const line of text.split("\n")) {
+    if (line.length > max) max = line.length;
+  }
+  return max;
+}
+
+function isLongSingleLineLiteralText(text: string): boolean {
+  if (text.length < MEDIUM_LITERAL_TEXT_THRESHOLD) return false;
+  if (hasMarkdownSignals(text)) return false;
+  return longestLineLength(text) >= LONG_LINE_LITERAL_THRESHOLD;
+}
+
 function classifyPaste({
   text,
   html,
@@ -75,6 +98,7 @@ function classifyPaste({
   if (html && html.includes("data-pm-slice")) return "native";
   if (text.length > LARGE_PASTE_TEXT_THRESHOLD) return "literal";
   if (isStructuredPlainText(text)) return "literal";
+  if (isLongSingleLineLiteralText(text)) return "literal";
   return "markdown";
 }
 
