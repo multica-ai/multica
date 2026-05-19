@@ -42,7 +42,7 @@ export function isAgentSelectable(
   if (agent.archived_at) return false;
   if (agent.visibility === "workspace") return true;
   if (agent.owner_id === null) return true;
-  return agent.owner_id === userId || (!!userId && agent.allowed_user_ids?.includes(userId));
+  return agent.owner_id === userId || (!!userId && (agent.allowed_user_ids?.includes(userId) ?? false));
 }
 
 /**
