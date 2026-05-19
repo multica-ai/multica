@@ -72,6 +72,7 @@ services:
       GITHUB_APP_WEBHOOK_SECRET: ${GITHUB_APP_WEBHOOK_SECRET:-}
       TEAM_APP_URL: ${TEAM_APP_URL:-}
       TEAM_APP_SHARED_SECRET: ${TEAM_APP_SHARED_SECRET:-}
+      MULTICA_WORKDIR_SHARING: issue
     volumes:
       - stage_backend_uploads:/app/data/uploads
     ports:
