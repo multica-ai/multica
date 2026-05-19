@@ -258,6 +258,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Public API
 	r.Get("/api/config", h.GetConfig)
 
+	// CLI install endpoints (public, no auth required)
+	r.Get("/install.sh", h.ServeInstallSH)
+	r.Get("/install.ps1", h.ServeInstallPS1)
+	r.Get("/install/latest-cli-version", h.ServeLatestCLIVersion)
+
 	// Webhook ingress for autopilots. Outside the authenticated group on
 	// purpose: the bearer token in the URL path IS the credential. Workspace
 	// context is derived from the trigger row, never from request headers.
