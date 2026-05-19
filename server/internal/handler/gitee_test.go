@@ -1,31 +1,47 @@
 package handler
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"fmt"
 	"testing"
 )
 
 func TestVerifyGiteeToken(t *testing.T) {
 	cases := []struct {
-		name   string
-		secret string
-		token  string
-		want   bool
+		name      string
+		secret    string
+		token     string
+		timestamp string
+		want      bool
 	}{
-		{"valid_match", "my-secret-123", "my-secret-123", true},
-		{"mismatch", "my-secret-123", "wrong-secret", false},
-		{"empty_token", "my-secret-123", "", false},
-		{"empty_secret", "", "some-token", false},
-		{"both_empty", "", "", false},
+		{"password_mode_valid", "my-secret-123", "my-secret-123", "", true},
+		{"password_mode_mismatch", "my-secret-123", "wrong-secret", "", false},
+		{"empty_token", "my-secret-123", "", "", false},
+		{"empty_secret", "", "some-token", "", false},
+		{"both_empty", "", "", "", false},
+		{"sign_mode_valid", "my-secret", computeGiteeSign("1779176154262", "my-secret"), "1779176154262", true},
+		{"sign_mode_wrong_timestamp", "my-secret", computeGiteeSign("1779176154262", "my-secret"), "9999999999999", false},
+		{"sign_mode_wrong_secret", "wrong-secret", computeGiteeSign("1779176154262", "my-secret"), "1779176154262", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := verifyGiteeToken(tc.secret, tc.token, nil)
+			got := verifyGiteeToken(tc.secret, tc.token, tc.timestamp)
 			if got != tc.want {
-				t.Errorf("verifyGiteeToken(%q, %q) = %v, want %v",
-					tc.secret, tc.token, got, tc.want)
+				t.Errorf("verifyGiteeToken(%q, %q, %q) = %v, want %v",
+					tc.secret, tc.token, tc.timestamp, got, tc.want)
 			}
 		})
 	}
+}
+
+// computeGiteeSign replicates Gitee's sign mode: Base64(HMAC-SHA256(key=secret, msg=timestamp+"\n"+secret))
+func computeGiteeSign(timestamp, secret string) string {
+	stringToSign := fmt.Sprintf("%s\n%s", timestamp, secret)
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(stringToSign))
+	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
 }
 
 func TestDeriveGiteePRState(t *testing.T) {
