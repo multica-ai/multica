@@ -8,6 +8,7 @@ import {
   MoreHorizontal,
   Plus,
   Trash2,
+  History,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -15,8 +16,8 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { api } from "@multica/core/api";
-import type { ListWikiPagesResponse, WikiPageSummary } from "@multica/core/types";
-import { wikiKeys, wikiPageDetailOptions, wikiPageListOptions } from "@multica/core/wiki";
+import type { ListWikiPagesResponse, WikiPageSummary, WikiPageActivity } from "@multica/core/types";
+import { wikiKeys, wikiPageDetailOptions, wikiPageListOptions, wikiPageActivityOptions } from "@multica/core/wiki";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -38,9 +39,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@multica/ui/components/ui/tooltip";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { cn } from "@multica/ui/lib/utils";
+import { ActorAvatar } from "../../common/actor-avatar";
 import { useNavigation } from "../../navigation";
 import {
   ContentEditor,
@@ -76,6 +83,7 @@ export function WikiPage({ pageId }: WikiPageProps) {
     ? pageId
     : pages[0]?.id ?? null;
   const { data: selectedPage, isLoading: pageLoading } = useQuery(wikiPageDetailOptions(wsId, selectedPageId));
+  const { data: activities = [] } = useQuery(wikiPageActivityOptions(wsId, selectedPageId));
   const { uploadWithToast, uploading } = useFileUpload(api, (err) => {
     toast.error(err.message);
   });
@@ -94,6 +102,11 @@ export function WikiPage({ pageId }: WikiPageProps) {
     tree.forEach(count);
     return counts;
   }, [tree]);
+
+  const getMemberByUserId = useCallback(
+    (userId: string | null) => (userId ? members.find((m) => m.user_id === userId) : undefined),
+    [members],
+  );
 
   useEffect(() => {
     if (selectedPageId && pageId !== selectedPageId) {
@@ -162,6 +175,7 @@ export function WikiPage({ pageId }: WikiPageProps) {
       const updated = await api.updateWikiPage(page.id, { title: nextTitle });
       queryClient.setQueryData(wikiKeys.detail(wsId, page.id), updated);
       queryClient.invalidateQueries({ queryKey: wikiKeys.list(wsId) });
+      queryClient.invalidateQueries({ queryKey: wikiKeys.activity(wsId, page.id) });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to rename wiki page");
     }
@@ -202,6 +216,7 @@ export function WikiPage({ pageId }: WikiPageProps) {
       lastSavedContentRef.current = updated.content;
       queryClient.setQueryData(wikiKeys.detail(wsId, selectedPageId), updated);
       queryClient.invalidateQueries({ queryKey: wikiKeys.list(wsId) });
+      queryClient.invalidateQueries({ queryKey: wikiKeys.activity(wsId, selectedPageId) });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save wiki page");
     }
@@ -281,6 +296,7 @@ export function WikiPage({ pageId }: WikiPageProps) {
                 onSelect={(id) => void selectPage(id)}
                 onCreateChild={(id) => void createPage(id)}
                 onDelete={setDeleteTarget}
+                members={members}
               />
             ) : (
               <div className="px-3 py-10 text-center">
@@ -303,7 +319,13 @@ export function WikiPage({ pageId }: WikiPageProps) {
             {selectedPage ? (
               <>
                 <h2 className="text-2xl font-bold leading-snug tracking-tight">{selectedPage.title}</h2>
-                <p className="mt-1 text-sm text-muted-foreground">{workspace.name}</p>
+                <WikiPageMeta
+                  createdBy={selectedPage.created_by}
+                  updatedBy={selectedPage.updated_by}
+                  createdAt={selectedPage.created_at}
+                  updatedAt={selectedPage.updated_at}
+                  getMemberByUserId={getMemberByUserId}
+                />
                 <div
                   {...(canEdit ? dropZoneProps : {})}
                   className={cn("relative mt-6", canEdit && "rounded-lg")}
@@ -335,6 +357,9 @@ export function WikiPage({ pageId }: WikiPageProps) {
                     <p className="text-sm text-muted-foreground">No wiki content yet.</p>
                   )}
                 </div>
+                {activities.length > 0 && (
+                  <WikiPageActivityList activities={activities} getMemberByUserId={getMemberByUserId} />
+                )}
               </>
             ) : pageLoading ? (
               <>
@@ -392,6 +417,7 @@ function WikiTree({
   onSelect,
   onCreateChild,
   onDelete,
+  members,
   depth = 0,
 }: {
   nodes: WikiPageTreeNode[];
@@ -405,6 +431,7 @@ function WikiTree({
   onSelect: (id: string) => void;
   onCreateChild: (id: string) => void;
   onDelete: (page: WikiPageTreeNode) => void;
+  members: Array<{ user_id: string; name: string; avatar_url: string | null }>;
   depth?: number;
 }) {
   return (
@@ -412,6 +439,7 @@ function WikiTree({
       {nodes.map((node) => {
         const active = node.id === selectedPageId;
         const renaming = node.id === renamingId;
+        const creator = node.created_by ? members.find((m) => m.user_id === node.created_by) : undefined;
         return (
           <div key={node.id}>
             <div
@@ -446,6 +474,18 @@ function WikiTree({
                 >
                   {node.title}
                 </button>
+              )}
+              {creator && !renaming && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <ActorAvatar actorType="member" actorId={creator.user_id} size={14} />
+                      </span>
+                    }
+                  />
+                  <TooltipContent side="right">{creator.name}</TooltipContent>
+                </Tooltip>
               )}
               {canEdit && !renaming && (
                 <DropdownMenu>
@@ -486,12 +526,149 @@ function WikiTree({
                 onSelect={onSelect}
                 onCreateChild={onCreateChild}
                 onDelete={onDelete}
+                members={members}
                 depth={depth + 1}
               />
             )}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function formatRelativeTime(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 30) return `${diffDays}d ago`;
+  return date.toLocaleDateString();
+}
+
+function WikiPageMeta({
+  createdBy,
+  updatedBy,
+  createdAt,
+  updatedAt,
+  getMemberByUserId,
+}: {
+  createdBy: string | null;
+  updatedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+  getMemberByUserId: (userId: string | null) => { user_id: string; name: string; avatar_url: string | null } | undefined;
+}) {
+  const creator = getMemberByUserId(createdBy);
+  const updater = getMemberByUserId(updatedBy);
+  const isUpdated = createdAt !== updatedAt;
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+      <span className="inline-flex items-center gap-1.5">
+        {creator ? (
+          <>
+            <ActorAvatar actorType="member" actorId={creator.user_id} size={16} />
+            <span>{creator.name}</span>
+          </>
+        ) : (
+          <span className="italic">Unknown author</span>
+        )}
+        <span>·</span>
+        <Tooltip>
+          <TooltipTrigger
+            render={<time dateTime={createdAt}>{formatRelativeTime(createdAt)}</time>}
+          />
+          <TooltipContent>{new Date(createdAt).toLocaleString()}</TooltipContent>
+        </Tooltip>
+      </span>
+      {isUpdated && (
+        <span className="inline-flex items-center gap-1.5">
+          <span>Updated by</span>
+          {updater ? (
+            <>
+              <ActorAvatar actorType="member" actorId={updater.user_id} size={16} />
+              <span>{updater.name}</span>
+            </>
+          ) : (
+            <span className="italic">unknown</span>
+          )}
+          <span>·</span>
+          <Tooltip>
+            <TooltipTrigger
+              render={<time dateTime={updatedAt}>{formatRelativeTime(updatedAt)}</time>}
+            />
+            <TooltipContent>{new Date(updatedAt).toLocaleString()}</TooltipContent>
+          </Tooltip>
+        </span>
+      )}
+    </div>
+  );
+}
+
+const activityLabels: Record<string, string> = {
+  created: "created this page",
+  updated: "updated this page",
+  title_updated: "renamed this page",
+  content_updated: "edited content",
+  deleted: "deleted this page",
+};
+
+function WikiPageActivityList({
+  activities,
+  getMemberByUserId,
+}: {
+  activities: WikiPageActivity[];
+  getMemberByUserId: (userId: string | null) => { user_id: string; name: string; avatar_url: string | null } | undefined;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const visibleActivities = expanded ? activities : activities.slice(0, 5);
+
+  return (
+    <div className="mt-8 border-t pt-6">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+        <History className="size-4" />
+        Activity
+      </h3>
+      <div className="mt-3 space-y-2">
+        {visibleActivities.map((activity) => {
+          const member = getMemberByUserId(activity.actor_id);
+          return (
+            <div key={activity.id} className="flex items-center gap-2 text-xs text-muted-foreground">
+              {member ? (
+                <ActorAvatar actorType="member" actorId={member.user_id} size={18} />
+              ) : (
+                <span className="inline-flex size-[18px] items-center justify-center rounded-full bg-muted text-[10px]">?</span>
+              )}
+              <span className="font-medium text-foreground">{member?.name ?? "Unknown"}</span>
+              <span>{activityLabels[activity.action] ?? activity.action}</span>
+              {"title" in activity.details && (
+                <span className="truncate italic">&quot;{String(activity.details.title)}&quot;</span>
+              )}
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <time className="ml-auto shrink-0" dateTime={activity.created_at}>
+                      {formatRelativeTime(activity.created_at)}
+                    </time>
+                  }
+                />
+                <TooltipContent>{new Date(activity.created_at).toLocaleString()}</TooltipContent>
+              </Tooltip>
+            </div>
+          );
+        })}
+      </div>
+      {activities.length > 5 && !expanded && (
+        <Button variant="ghost" size="sm" className="mt-2 text-xs" onClick={() => setExpanded(true)}>
+          Show all {activities.length} activities
+        </Button>
+      )}
     </div>
   );
 }

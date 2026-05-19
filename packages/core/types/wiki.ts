@@ -36,3 +36,24 @@ export interface UpdateWikiPageRequest {
 export interface ReorderWikiPagesRequest {
   pages: Array<{ id: string; position: number }>;
 }
+
+export type WikiPageActivityAction =
+  | "created"
+  | "updated"
+  | "title_updated"
+  | "content_updated"
+  | "deleted";
+
+export interface WikiPageActivity {
+  id: string;
+  page_id: string;
+  actor_id: string | null;
+  action: WikiPageActivityAction;
+  details: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ListWikiPageActivitiesResponse {
+  activities: WikiPageActivity[];
+  total: number;
+}

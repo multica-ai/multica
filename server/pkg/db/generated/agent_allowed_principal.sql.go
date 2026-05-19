@@ -33,6 +33,39 @@ func (q *Queries) IsAgentAllowedPrincipal(ctx context.Context, arg IsAgentAllowe
 	return allowed, err
 }
 
+const listAgentAllowedPrincipalIDsByWorkspace = `-- name: ListAgentAllowedPrincipalIDsByWorkspace :many
+SELECT agent_id, principal_id
+FROM agent_allowed_principal
+WHERE workspace_id = $1
+  AND principal_type = 'member'
+ORDER BY agent_id, principal_id
+`
+
+type ListAgentAllowedPrincipalIDsByWorkspaceRow struct {
+	AgentID     pgtype.UUID `json:"agent_id"`
+	PrincipalID pgtype.UUID `json:"principal_id"`
+}
+
+func (q *Queries) ListAgentAllowedPrincipalIDsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListAgentAllowedPrincipalIDsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listAgentAllowedPrincipalIDsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentAllowedPrincipalIDsByWorkspaceRow{}
+	for rows.Next() {
+		var i ListAgentAllowedPrincipalIDsByWorkspaceRow
+		if err := rows.Scan(&i.AgentID, &i.PrincipalID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentAllowedPrincipals = `-- name: ListAgentAllowedPrincipals :many
 SELECT ap.id, ap.workspace_id, ap.agent_id, ap.principal_type, ap.principal_id,
        ap.created_by, ap.created_at, u.name AS user_name, u.email AS user_email,
@@ -77,39 +110,6 @@ func (q *Queries) ListAgentAllowedPrincipals(ctx context.Context, agentID pgtype
 			&i.UserEmail,
 			&i.UserAvatarUrl,
 		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listAgentAllowedPrincipalIDsByWorkspace = `-- name: ListAgentAllowedPrincipalIDsByWorkspace :many
-SELECT agent_id, principal_id
-FROM agent_allowed_principal
-WHERE workspace_id = $1
-  AND principal_type = 'member'
-ORDER BY agent_id, principal_id
-`
-
-type ListAgentAllowedPrincipalIDsByWorkspaceRow struct {
-	AgentID     pgtype.UUID `json:"agent_id"`
-	PrincipalID pgtype.UUID `json:"principal_id"`
-}
-
-func (q *Queries) ListAgentAllowedPrincipalIDsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListAgentAllowedPrincipalIDsByWorkspaceRow, error) {
-	rows, err := q.db.Query(ctx, listAgentAllowedPrincipalIDsByWorkspace, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListAgentAllowedPrincipalIDsByWorkspaceRow{}
-	for rows.Next() {
-		var i ListAgentAllowedPrincipalIDsByWorkspaceRow
-		if err := rows.Scan(&i.AgentID, &i.PrincipalID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

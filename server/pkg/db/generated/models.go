@@ -812,6 +812,16 @@ type WikiPage struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type WikiPageActivity struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	PageID      pgtype.UUID        `json:"page_id"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
+	Action      string             `json:"action"`
+	Details     []byte             `json:"details"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type Workspace struct {
 	ID           pgtype.UUID        `json:"id"`
 	Name         string             `json:"name"`

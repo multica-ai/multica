@@ -131,6 +131,7 @@ import type {
   ListInstructionsHistoryResponse,
   WikiPage,
   ListWikiPagesResponse,
+  ListWikiPageActivitiesResponse,
   CreateWikiPageRequest,
   UpdateWikiPageRequest,
   ReorderWikiPagesRequest,
@@ -1490,6 +1491,10 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify(data),
     });
+  }
+
+  async listWikiPageActivities(pageId: string, limit = 50): Promise<ListWikiPageActivitiesResponse> {
+    return this.fetch(`/api/wiki-pages/${pageId}/activity?limit=${limit}`);
   }
 
   // Members
