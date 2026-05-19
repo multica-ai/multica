@@ -38,6 +38,7 @@ import {
   useUpdateComment,
   useUpdateIssue,
 } from "@multica/core/issues/mutations";
+import { useProjectList } from "@multica/core/projects/hooks";
 import {
   useChildIssueProgress,
   useChildIssues,
@@ -77,7 +78,9 @@ import type {
   IssueReaction,
   IssueStatus,
   MemberWithUser,
+  Project,
   Reaction,
+  SearchIssueResult,
   TaskMessagePayload,
   TimelineEntry,
 } from "@multica/core/types";
@@ -992,9 +995,14 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
   const { data: childProgress } = useChildIssueProgress(workspace.id);
   const { data: members = [] } = useCoreQuery(memberListOptions(workspace.id));
   const { data: agents = [] } = useCoreQuery(agentListOptions(workspace.id));
+  const { data: projects = [] } = useProjectList(workspace.id);
   const updateIssue = useUpdateIssue();
   const [assigneePickerOpen, setAssigneePickerOpen] = useState(false);
   const [assigneeError, setAssigneeError] = useState<string | null>(null);
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [projectError, setProjectError] = useState<string | null>(null);
+  const [parentPickerOpen, setParentPickerOpen] = useState(false);
+  const [parentError, setParentError] = useState<string | null>(null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [dueDateError, setDueDateError] = useState<string | null>(null);
 
@@ -1006,6 +1014,12 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
   const assigneeLabel = issue?.assignee_type && issue.assignee_id
     ? getActorName(issue.assignee_type, issue.assignee_id)
     : t("issues.unassigned");
+  const currentProject = issue?.project_id
+    ? projects.find((project) => project.id === issue.project_id)
+    : undefined;
+  const projectLabel = issue?.project_id
+    ? currentProject ? formatProjectLabel(currentProject) : t("issues.unknown_project")
+    : t("issues.no_project");
 
   const changeStatus = useCallback(async (status: IssueStatus) => {
     if (!issue || status === issue.status) return;
@@ -1039,6 +1053,24 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
     }
   }, [issue, t, updateIssue]);
 
+  const changeProject = useCallback(async (projectId: string | null) => {
+    if (!issue) return;
+    if (projectId === issue.project_id) {
+      setProjectPickerOpen(false);
+      return;
+    }
+    setProjectError(null);
+    try {
+      await updateIssue.mutateAsync({
+        id: issue.id,
+        project_id: projectId,
+      });
+      setProjectPickerOpen(false);
+    } catch (err) {
+      setProjectError(err instanceof Error ? err.message : t("issues.unable_to_save_issue"));
+    }
+  }, [issue, t, updateIssue]);
+
   const changeDueDate = useCallback(async (dueDate: string | null) => {
     if (!issue || dueDate === normalizeDueDateInput(issue.due_date)) return;
     setDueDateError(null);
@@ -1049,6 +1081,24 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
       });
     } catch (err) {
       setDueDateError(err instanceof Error ? err.message : t("issues.unable_to_save_issue"));
+    }
+  }, [issue, t, updateIssue]);
+
+  const changeParentIssue = useCallback(async (parentIssueId: string | null) => {
+    if (!issue) return;
+    if (parentIssueId === issue.parent_issue_id) {
+      setParentPickerOpen(false);
+      return;
+    }
+    setParentError(null);
+    try {
+      await updateIssue.mutateAsync({
+        id: issue.id,
+        parent_issue_id: parentIssueId,
+      });
+      setParentPickerOpen(false);
+    } catch (err) {
+      setParentError(err instanceof Error ? err.message : t("issues.unable_to_save_issue"));
     }
   }, [issue, t, updateIssue]);
 
@@ -1124,6 +1174,34 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
                 </Text>
               </Pressable>
             </Property>
+            <Property label={t("issues.project")}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={updateIssue.isPending}
+                onPress={() => {
+                  setProjectError(null);
+                  setProjectPickerOpen(true);
+                }}
+                style={({ pressed }) => [
+                  styles.propertySelectTrigger,
+                  pressed && styles.buttonPressed,
+                  updateIssue.isPending && styles.disabledAction,
+                ]}
+              >
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.propertySelectText,
+                    !issue.project_id && styles.propertySelectPlaceholder,
+                  ]}
+                >
+                  {projectLabel}
+                </Text>
+                <Text style={styles.propertySelectMeta}>
+                  {updateIssue.isPending ? t("issues.saving") : t("issues.select")}
+                </Text>
+              </Pressable>
+            </Property>
             <Property label={t("issues.creator")}>
               <Text style={styles.value}>
                 {getActorName(issue.creator_type, issue.creator_id)}
@@ -1158,17 +1236,22 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
           </View>
         </View>
 
-        {issue.parent_issue_id ? (
-          <View style={styles.propertiesBlock}>
-            <View style={styles.propertiesBlockHeader}>
-              <Text style={styles.propertiesBlockTitle}>{t("issues.parent_issue")}</Text>
-            </View>
+        <View style={styles.propertiesBlock}>
+          <View style={styles.propertiesBlockHeader}>
+            <Text style={styles.propertiesBlockTitle}>{t("issues.parent_issue")}</Text>
+          </View>
+          <View style={styles.relationList}>
             <Pressable
-              disabled={!parentIssue}
-              onPress={() => navigation.push("IssueDetail", { issueId: issue.parent_issue_id! })}
+              accessibilityRole="button"
+              disabled={updateIssue.isPending}
+              onPress={() => {
+                setParentError(null);
+                setParentPickerOpen(true);
+              }}
               style={({ pressed }) => [
                 styles.childRow,
-                pressed && parentIssue && styles.buttonPressed,
+                pressed && styles.buttonPressed,
+                updateIssue.isPending && styles.disabledAction,
               ]}
             >
               {parentIssue ? (
@@ -1177,13 +1260,36 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
                   <Text style={styles.childTitle}>{parentIssue.title}</Text>
                 </>
               ) : (
-                <Text style={styles.attachmentMeta}>
-                  {parentIssueLoading ? t("issues.loading_parent_issue") : t("issues.unable_to_load_parent_issue")}
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.childTitle,
+                    !issue.parent_issue_id && styles.propertySelectPlaceholder,
+                  ]}
+                >
+                  {issue.parent_issue_id
+                    ? parentIssueLoading
+                      ? t("issues.loading_parent_issue")
+                      : t("issues.unable_to_load_parent_issue")
+                    : t("issues.no_parent_issue")}
                 </Text>
               )}
+              <Text style={styles.attachmentMeta}>
+                {updateIssue.isPending ? t("issues.saving") : t("issues.select")}
+              </Text>
             </Pressable>
+            {issue.parent_issue_id ? (
+              <Button
+                disabled={!parentIssue}
+                onPress={() => navigation.push("IssueDetail", { issueId: issue.parent_issue_id! })}
+                variant="secondary"
+              >
+                {t("common.open")}
+              </Button>
+            ) : null}
+            {parentError ? <Text style={styles.errorText}>{parentError}</Text> : null}
           </View>
-        ) : null}
+        </View>
 
         {children.length > 0 ? (
           <View style={styles.propertiesBlock}>
@@ -1239,6 +1345,33 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
         open={assigneePickerOpen}
         saving={updateIssue.isPending}
         userId={userId ?? null}
+      />
+      <ProjectPickerSheet
+        bottomInset={insets.bottom}
+        currentProjectId={issue.project_id}
+        error={projectError}
+        onChange={(projectId) => void changeProject(projectId)}
+        onClose={() => {
+          setProjectPickerOpen(false);
+          setProjectError(null);
+        }}
+        open={projectPickerOpen}
+        projects={projects}
+        saving={updateIssue.isPending}
+      />
+      <ParentIssuePickerSheet
+        bottomInset={insets.bottom}
+        childrenIds={children.map((child) => child.id)}
+        currentParentIssueId={issue.parent_issue_id}
+        currentIssueId={issue.id}
+        error={parentError}
+        onChange={(parentIssueId) => void changeParentIssue(parentIssueId)}
+        onClose={() => {
+          setParentPickerOpen(false);
+          setParentError(null);
+        }}
+        open={parentPickerOpen}
+        saving={updateIssue.isPending}
       />
     </Screen>
   );
@@ -1393,6 +1526,354 @@ function AssigneePickerSheet({
   );
 }
 
+function ProjectPickerSheet({
+  bottomInset,
+  currentProjectId,
+  error,
+  onChange,
+  onClose,
+  open,
+  projects,
+  saving,
+}: {
+  bottomInset: number;
+  currentProjectId: string | null;
+  error: string | null;
+  onChange: (projectId: string | null) => void;
+  onClose: () => void;
+  open: boolean;
+  projects: Project[];
+  saving: boolean;
+}) {
+  const { t } = useTranslation();
+  const [query, setQuery] = useState("");
+  const keyboardHeight = useKeyboardHeight(open);
+  const { height: windowHeight } = useWindowDimensions();
+  const sheetMaxHeight = Math.max(0, windowHeight - keyboardHeight - spacing.xl);
+  const sheetBottomPadding = keyboardHeight > 0 ? spacing.md : Math.max(bottomInset, spacing.md);
+
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
+
+  const normalizedQuery = normalizeSearch(query);
+  const projectOptions = useMemo(
+    () => projects.filter((project) => {
+      if (!normalizedQuery) return true;
+      return normalizeSearch(formatProjectLabel(project)).includes(normalizedQuery);
+    }),
+    [normalizedQuery, projects],
+  );
+  const showNoProject = !normalizedQuery || normalizeSearch(t("issues.no_project")).includes(normalizedQuery);
+  const hasResults = showNoProject || projectOptions.length > 0;
+
+  return (
+    <Modal
+      animationType="fade"
+      onRequestClose={onClose}
+      transparent
+      visible={open}
+    >
+      <View style={styles.sheetKeyboardView}>
+        <Pressable style={styles.sheetBackdrop} onPress={onClose} />
+        <View style={[
+          styles.sheet,
+          {
+            marginBottom: keyboardHeight,
+            maxHeight: sheetMaxHeight,
+            paddingBottom: sheetBottomPadding,
+          },
+        ]}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>{t("issues.project")}</Text>
+            <Button disabled={saving} onPress={onClose} variant="ghost">
+              {t("common.close")}
+            </Button>
+          </View>
+          <TextInput
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!saving}
+            onChangeText={setQuery}
+            placeholder={t("issues.search_projects")}
+            placeholderTextColor={colors.mutedForeground}
+            style={styles.assigneeSearchInput}
+            value={query}
+          />
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            style={styles.assigneePickerList}
+          >
+            {showNoProject ? (
+              <AssigneeOptionRow
+                active={!currentProjectId}
+                disabled={saving}
+                label={t("issues.no_project")}
+                onPress={() => onChange(null)}
+              />
+            ) : null}
+            {projectOptions.length > 0 ? (
+              <View style={styles.assigneeSection}>
+                <Text style={styles.assigneeSectionTitle}>{t("issues.project")}</Text>
+                {projectOptions.map((project) => (
+                  <AssigneeOptionRow
+                    active={currentProjectId === project.id}
+                    disabled={saving}
+                    key={project.id}
+                    label={formatProjectLabel(project)}
+                    onPress={() => onChange(project.id)}
+                  />
+                ))}
+              </View>
+            ) : null}
+            {!hasResults ? (
+              <Text style={styles.assigneeEmptyText}>{t("common.no_results")}</Text>
+            ) : null}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function ParentIssuePickerSheet({
+  bottomInset,
+  childrenIds,
+  currentIssueId,
+  currentParentIssueId,
+  error,
+  onChange,
+  onClose,
+  open,
+  saving,
+}: {
+  bottomInset: number;
+  childrenIds: string[];
+  currentIssueId: string;
+  currentParentIssueId: string | null;
+  error: string | null;
+  onChange: (parentIssueId: string | null) => void;
+  onClose: () => void;
+  open: boolean;
+  saving: boolean;
+}) {
+  const { t } = useTranslation();
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SearchIssueResult[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [isError, setIsError] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const keyboardHeight = useKeyboardHeight(open);
+  const { height: windowHeight } = useWindowDimensions();
+  const sheetMaxHeight = Math.max(0, windowHeight - keyboardHeight - spacing.xl);
+  const sheetBottomPadding = keyboardHeight > 0 ? spacing.md : Math.max(bottomInset, spacing.md);
+  const excludedIssueIds = useMemo(
+    () => new Set([currentIssueId, ...childrenIds]),
+    [childrenIds, currentIssueId],
+  );
+
+  useEffect(() => {
+    if (open) return undefined;
+    setQuery("");
+    setResults([]);
+    setIsLoading(false);
+    setHasSearched(false);
+    setIsError(false);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    abortRef.current?.abort();
+    return undefined;
+  }, [open]);
+
+  useEffect(() => () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    abortRef.current?.abort();
+  }, []);
+
+  const runSearch = useCallback((value: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    abortRef.current?.abort();
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setResults([]);
+      setIsLoading(false);
+      setHasSearched(false);
+      setIsError(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setIsError(false);
+    debounceRef.current = setTimeout(() => {
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      void (async () => {
+        try {
+          const res = await api.searchIssues({
+            q: trimmed,
+            limit: SERVER_ISSUE_SEARCH_LIMIT,
+            include_closed: true,
+            signal: controller.signal,
+          });
+          if (!controller.signal.aborted) {
+            setResults(res.issues);
+            setHasSearched(true);
+          }
+        } catch {
+          if (!controller.signal.aborted) {
+            setResults([]);
+            setIsError(true);
+            setHasSearched(true);
+          }
+        } finally {
+          if (!controller.signal.aborted) {
+            setIsLoading(false);
+          }
+        }
+      })();
+    }, SERVER_SEARCH_DEBOUNCE_MS);
+  }, []);
+
+  const handleChangeText = useCallback((value: string) => {
+    setQuery(value);
+    runSearch(value);
+  }, [runSearch]);
+
+  return (
+    <Modal
+      animationType="fade"
+      onRequestClose={onClose}
+      transparent
+      visible={open}
+    >
+      <View style={styles.sheetKeyboardView}>
+        <Pressable style={styles.sheetBackdrop} onPress={onClose} />
+        <View style={[
+          styles.sheet,
+          {
+            marginBottom: keyboardHeight,
+            maxHeight: sheetMaxHeight,
+            paddingBottom: sheetBottomPadding,
+          },
+        ]}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>{t("issues.parent_issue")}</Text>
+            <Button disabled={saving} onPress={onClose} variant="ghost">
+              {t("common.close")}
+            </Button>
+          </View>
+          <TextInput
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!saving}
+            onChangeText={handleChangeText}
+            placeholder={t("issues.search_parent_issues")}
+            placeholderTextColor={colors.mutedForeground}
+            style={styles.assigneeSearchInput}
+            value={query}
+          />
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          {isError ? <Text style={styles.errorText}>{t("issues.unable_to_search")}</Text> : null}
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            style={styles.assigneePickerList}
+          >
+            <AssigneeOptionRow
+              active={!currentParentIssueId}
+              disabled={saving || !currentParentIssueId}
+              label={t("issues.no_parent_issue")}
+              onPress={() => onChange(null)}
+            />
+            {!hasSearched && !query.trim() ? (
+              <Text style={styles.assigneeEmptyText}>{t("issues.search_parent_empty")}</Text>
+            ) : null}
+            {results.length > 0 ? (
+              <View style={styles.assigneeSection}>
+                <Text style={styles.assigneeSectionTitle}>{t("issues.issue")}</Text>
+                {results.map((result) => {
+                  const excluded = excludedIssueIds.has(result.id);
+                  return (
+                    <ParentIssueOptionRow
+                      active={currentParentIssueId === result.id}
+                      disabled={saving || excluded}
+                      excluded={excluded}
+                      issue={result}
+                      key={result.id}
+                      onPress={() => onChange(result.id)}
+                    />
+                  );
+                })}
+              </View>
+            ) : null}
+            {isLoading ? (
+              <View style={styles.parentSearchLoading}>
+                <ActivityIndicator color={colors.mutedForeground} size="small" />
+                <Text style={styles.attachmentMeta}>{t("issues.searching")}</Text>
+              </View>
+            ) : null}
+            {!isError && !isLoading && hasSearched && results.length === 0 ? (
+              <Text style={styles.assigneeEmptyText}>{t("issues.no_matching")}</Text>
+            ) : null}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function ParentIssueOptionRow({
+  active,
+  disabled,
+  excluded,
+  issue,
+  onPress,
+}: {
+  active: boolean;
+  disabled: boolean;
+  excluded: boolean;
+  issue: SearchIssueResult;
+  onPress: () => void;
+}) {
+  const { t } = useTranslation();
+  const statusColor = getIssueStatusColor(issue.status);
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.assigneeOption,
+        active && styles.assigneeOptionActive,
+        pressed && styles.buttonPressed,
+        disabled && styles.disabledAction,
+      ]}
+    >
+      <View style={styles.assigneeOptionTextGroup}>
+        <View style={styles.parentIssueOptionHeader}>
+          <View style={[styles.parentIssueStatusDot, { backgroundColor: statusColor }]} />
+          <Text style={styles.childIdentifier}>{issue.identifier}</Text>
+          <Text
+            numberOfLines={1}
+            style={[styles.assigneeOptionLabel, active && styles.assigneeOptionLabelActive]}
+          >
+            {issue.title}
+          </Text>
+        </View>
+        <Text style={[styles.assigneeOptionSubtitle, { color: statusColor }]}>
+          {excludedParentIssueReason(excluded, active, t) ?? formatIssueStatus(t, issue.status)}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
 function AssigneeOptionSection({
   currentAssigneeId,
   currentAssigneeType,
@@ -1465,6 +1946,34 @@ function AssigneeOptionRow({
       </View>
     </Pressable>
   );
+}
+
+function formatProjectLabel(project: Pick<Project, "icon" | "title">) {
+  return `${project.icon ?? ""}${project.icon ? " " : ""}${project.title}`;
+}
+
+function normalizeSearch(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, "");
+}
+
+function getIssueStatusColor(status: IssueStatus) {
+  switch (status) {
+    case "in_progress":
+      return colors.warning;
+    case "in_review":
+      return colors.success;
+    case "done":
+      return colors.info;
+    case "blocked":
+      return colors.destructive;
+    default:
+      return colors.mutedForeground;
+  }
+}
+
+function excludedParentIssueReason(excluded: boolean, active: boolean, t: Translate) {
+  if (!excluded || active) return null;
+  return t("issues.parent_issue_not_selectable");
 }
 
 function IssueActionsMenu({
@@ -3251,6 +3760,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     paddingVertical: spacing.lg,
     textAlign: "center",
+  },
+  parentSearchLoading: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "center",
+    paddingVertical: spacing.lg,
+  },
+  parentIssueOptionHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    minWidth: 0,
+  },
+  parentIssueStatusDot: {
+    borderRadius: 4,
+    height: 8,
+    width: 8,
   },
   sectionTitle: {
     color: colors.foreground,
