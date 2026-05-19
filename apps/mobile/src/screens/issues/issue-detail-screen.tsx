@@ -80,6 +80,12 @@ import {
   createDraftCommentAttachment,
   type DraftCommentAttachment,
 } from "./comment-attachment-drafts";
+import {
+  DatePickerModal,
+  dateInputToRfc3339,
+  formatDueDateLabel,
+  normalizeDueDateInput,
+} from "./date-picker-modal";
 import { TaskMessageRow } from "./task-transcript-components";
 import {
   formatAgentTaskStatus,
@@ -968,6 +974,8 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
   const { data: children = [] } = useChildIssues(workspace.id, issueId);
   const { data: childProgress } = useChildIssueProgress(workspace.id);
   const updateIssue = useUpdateIssue();
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [dueDateError, setDueDateError] = useState<string | null>(null);
 
   const changeStatus = useCallback(async (status: IssueStatus) => {
     if (!issue || status === issue.status) return;
@@ -978,6 +986,19 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
     if (!issue || priority === issue.priority) return;
     await updateIssue.mutateAsync({ id: issue.id, priority });
   }, [issue, updateIssue]);
+
+  const changeDueDate = useCallback(async (dueDate: string | null) => {
+    if (!issue || dueDate === normalizeDueDateInput(issue.due_date)) return;
+    setDueDateError(null);
+    try {
+      await updateIssue.mutateAsync({
+        id: issue.id,
+        due_date: dueDate ? dateInputToRfc3339(dueDate) : null,
+      });
+    } catch (err) {
+      setDueDateError(err instanceof Error ? err.message : t("issues.unable_to_save_issue"));
+    }
+  }, [issue, t, updateIssue]);
 
   if (isLoading) return <LoadingState />;
   if (isError || !issue) return <EmptyState title={t("issues.unable_to_load_properties")} />;
@@ -1036,7 +1057,30 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
               </Text>
             </Property>
             <Property label={t("issues.due_date")}>
-              <Text style={styles.value}>{formatDate(issue.due_date)}</Text>
+              <Pressable
+                accessibilityRole="button"
+                disabled={updateIssue.isPending}
+                onPress={() => setDatePickerOpen(true)}
+                style={({ pressed }) => [
+                  styles.dueDateTrigger,
+                  pressed && styles.buttonPressed,
+                  updateIssue.isPending && styles.disabledAction,
+                ]}
+              >
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.dueDateTriggerText,
+                    !issue.due_date && styles.dueDatePlaceholder,
+                  ]}
+                >
+                  {issue.due_date ? formatDueDateLabel(issue.due_date) : t("issues.no_due_date")}
+                </Text>
+                <Text style={styles.dueDateTriggerMeta}>
+                  {updateIssue.isPending ? t("issues.saving") : t("issues.select")}
+                </Text>
+              </Pressable>
+              {dueDateError ? <Text style={styles.errorText}>{dueDateError}</Text> : null}
             </Property>
           </View>
         </View>
@@ -1100,6 +1144,12 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
           </View>
         ) : null}
       </ScrollView>
+      <DatePickerModal
+        onChange={(dueDate) => void changeDueDate(dueDate)}
+        onClose={() => setDatePickerOpen(false)}
+        open={datePickerOpen}
+        value={issue.due_date}
+      />
     </Screen>
   );
 }
@@ -2766,6 +2816,36 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: colors.primaryForeground,
+  },
+  dueDateTrigger: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.sm,
+    height: 44,
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.md,
+    width: "100%",
+  },
+  dueDateTriggerText: {
+    color: colors.foreground,
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  dueDatePlaceholder: {
+    color: colors.mutedForeground,
+  },
+  dueDateTriggerMeta: {
+    color: colors.mutedForeground,
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  disabledAction: {
+    opacity: 0.6,
   },
   value: {
     color: colors.foreground,
