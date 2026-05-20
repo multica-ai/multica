@@ -47,7 +47,7 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/u
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
+import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -75,7 +75,7 @@ import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker
 import { useIssueActions } from "../actions";
 import { IssueActionsMenuItems, dropdownPrimitives } from "../actions/issue-actions-menu-items";
 import { ProjectPicker } from "../../projects/components/project-picker";
-import { CommentCard, AttachmentList } from "./comment-card";
+import { CommentCard } from "./comment-card";
 import { CommentInput, type CommentInputRef } from "./comment-input";
 import type { ReplyInputRef } from "./reply-input";
 import { AgentStreamSidebar } from "./agent-stream-sidebar";
@@ -336,6 +336,34 @@ function formatTokenCount(n: number): string {
 // Stable reference for threads with no replies. Inline `[]` would create a
 // new array on every render and bust React.memo on CommentCard / ResolvedThreadBar.
 const EMPTY_REPLIES: TimelineEntry[] = [];
+
+// ---------------------------------------------------------------------------
+// Issue-level attachment list — URL-only filtering, no sibling dedupe.
+// Unlike the comment-card AttachmentList, this only hides attachments whose
+// exact URL appears in the description markdown. Same-name / same-size
+// siblings are NOT collapsed — each attachment is an independent record.
+// ---------------------------------------------------------------------------
+
+function IssueAttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
+  if (!attachments?.length) return null;
+  const standalone = content
+    ? attachments.filter((a) => !content.includes(a.url))
+    : attachments;
+  if (!standalone.length) return null;
+
+  return (
+    <AttachmentDownloadProvider attachments={attachments}>
+      <div className={cn("flex flex-col gap-1", className)}>
+        {standalone.map((a) => (
+          <AttachmentRenderer
+            key={a.id}
+            attachment={{ kind: "record", attachment: a }}
+          />
+        ))}
+      </div>
+    </AttachmentDownloadProvider>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Sidebar progressive disclosure
@@ -2195,8 +2223,7 @@ export function IssueDetail({
             {descDragOver && <FileDropOverlay />}
           </div>
 
-          {/* Issue-level attachments — independent of description inline refs */}
-          <AttachmentList
+          <IssueAttachmentList
             attachments={issueAttachments}
             content={issue.description ?? ""}
             className="mt-3"
