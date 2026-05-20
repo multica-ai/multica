@@ -31,12 +31,14 @@ import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueD
 import { inboxKeys } from "../inbox/queries";
 import { notificationPreferenceOptions } from "../notification-preferences/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
+import type { Workspace } from "../types/workspace";
 import { chatKeys } from "../chat/queries";
 import { useChatStore } from "../chat";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
   MemberAddedPayload,
   WorkspaceDeletedPayload,
+  WorkspaceUpdatedPayload,
   MemberRemovedPayload,
   IssueUpdatedPayload,
   IssueCreatedPayload,
@@ -105,6 +107,36 @@ export function applyChatDoneToCache(
   // that took the fallback branch above.
   qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
   qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
+}
+
+/**
+ * Apply a workspace:updated event to the cache. Always refreshes the
+ * workspace list. If the incoming `issue_prefix` differs from what's
+ * currently cached, also invalidates issueKeys.all for that workspace,
+ * since every issue's rendered identifier (`MUL-123`) is recomputed from
+ * the workspace prefix at read time. Without this, the UI keeps showing
+ * the old `OLD-N` keys until the next hard refresh.
+ *
+ * If the workspace isn't in the cached list (first observation), we
+ * conservatively invalidate — the prefix is effectively "new" relative to
+ * what's cached, so any issues already loaded under the old prefix would
+ * be stale anyway.
+ */
+export function applyWorkspaceUpdatedToCache(
+  qc: QueryClient,
+  payload: WorkspaceUpdatedPayload,
+): void {
+  const next = payload.workspace;
+  if (next?.id) {
+    const cached =
+      qc
+        .getQueryData<Workspace[]>(workspaceKeys.list())
+        ?.find((w) => w.id === next.id) ?? null;
+    if (!cached || cached.issue_prefix !== next.issue_prefix) {
+      qc.invalidateQueries({ queryKey: issueKeys.all(next.id) });
+    }
+  }
+  qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
 /**
@@ -191,6 +223,11 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
       },
+      // workspace:updated is handled by the specific handler below
+      // (compares prefixes to decide whether to also invalidate issues).
+      // This generic fallback still fires for workspace:deleted (paired
+      // with the specific navigation handler) and any future workspace:*
+      // events without dedicated handlers.
       workspace: () => {
         qc.invalidateQueries({ queryKey: workspaceKeys.list() });
       },
@@ -303,6 +340,7 @@ export function useRealtimeSync(
 
     // Event types handled by specific handlers below -- skip generic refresh
     const specificEvents = new Set([
+      "workspace:updated",
       "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "comment:resolved", "comment:unresolved",
@@ -539,6 +577,10 @@ export function useRealtimeSync(
         window.location.assign(target);
       }
     };
+
+    const unsubWsUpdated = ws.on("workspace:updated", (p) => {
+      applyWorkspaceUpdatedToCache(qc, p as WorkspaceUpdatedPayload);
+    });
 
     const unsubWsDeleted = ws.on("workspace:deleted", (p) => {
       const { workspace_id } = p as WorkspaceDeletedPayload;
@@ -849,6 +891,7 @@ export function useRealtimeSync(
       unsubIssueReactionRemoved();
       unsubSubscriberAdded();
       unsubSubscriberRemoved();
+      unsubWsUpdated();
       unsubWsDeleted();
       unsubMemberRemoved();
       unsubMemberAdded();

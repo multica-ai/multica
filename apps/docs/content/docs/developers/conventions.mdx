@@ -70,7 +70,7 @@ If logic appears in both apps, it MUST be extracted to a shared package. There a
 
 ### Issue keys
 
-Every issue has a human-readable key like `MUL-123`: workspace `issue_prefix` (3 letters, uppercase) + sequence number. The prefix is set at workspace creation and is never changed afterward.
+Every issue has a human-readable key like `MUL-123`: workspace `issue_prefix` (uppercase letters and digits, typically 3 chars, max 10) + sequence number. Workspace admins can change the prefix in Settings → General; changing it renumbers every existing issue, so external references that embed the old prefix (PR titles, branch names, links in docs and chat) stop resolving.
 
 ### Comments in code
 

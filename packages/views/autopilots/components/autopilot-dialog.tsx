@@ -37,7 +37,7 @@ import { TimeInput } from "@multica/ui/components/ui/time-input";
 import { TimezonePicker } from "./pickers/timezone-picker";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { agentListOptions } from "@multica/core/workspace/queries";
+import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import {
   useCreateAutopilot,
   useCreateAutopilotTrigger,
@@ -47,12 +47,13 @@ import {
 import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
 import { api } from "@multica/core/api";
 import type {
+  AutopilotAssigneeType,
   AutopilotExecutionMode,
   AutopilotTrigger,
 } from "@multica/core/types";
 import { TitleEditor, ContentEditor } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { AgentPicker } from "./pickers/agent-picker";
+import { AgentPicker, type AssigneeSelection } from "./pickers/agent-picker";
 import {
   getDefaultTriggerConfig,
   getLocalTimezone,
@@ -71,6 +72,7 @@ import { formatSchedulePartialFailureToast } from "./autopilot-dialog-toast";
 export interface AutopilotInitial {
   title: string;
   description: string;
+  assignee_type: AutopilotAssigneeType;
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
 }
@@ -242,6 +244,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const workspaceName = useCurrentWorkspace()?.name;
   const wsId = useWorkspaceId();
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const [isExpanded, setIsExpanded] = useState(false);
 
   const isCreate = props.mode === "create";
@@ -251,6 +254,9 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
   const [title, setTitle] = useState(initial.title ?? "");
   const [description, setDescription] = useState(initial.description ?? "");
+  const [assigneeType, setAssigneeType] = useState<AutopilotAssigneeType>(
+    initial.assignee_type ?? "agent",
+  );
   const [assigneeId, setAssigneeId] = useState<string>(initial.assignee_id ?? "");
   const [executionMode, setExecutionMode] = useState<AutopilotExecutionMode>(
     initial.execution_mode ?? "create_issue",
@@ -296,10 +302,20 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const triggerCount = isCreate ? 0 : props.triggers.length;
   const schedulePillDisabled = !isCreate && triggerCount >= 2;
 
-  const selectedAgent = useMemo(
-    () => agents.find((a) => a.id === assigneeId) ?? null,
-    [agents, assigneeId],
-  );
+  const selectedAssignee = useMemo(() => {
+    if (!assigneeId) return null;
+    if (assigneeType === "squad") {
+      const squad = squads.find((s) => s.id === assigneeId);
+      return squad ? { name: squad.name, description: squad.description } : null;
+    }
+    const agent = agents.find((a) => a.id === assigneeId);
+    return agent ? { name: agent.name, description: agent.description } : null;
+  }, [agents, squads, assigneeId, assigneeType]);
+
+  const handleAssigneeChange = (next: AssigneeSelection) => {
+    setAssigneeType(next.type);
+    setAssigneeId(next.id);
+  };
 
   const createAutopilot = useCreateAutopilot();
   const createTrigger = useCreateAutopilotTrigger();
@@ -324,6 +340,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         const autopilot = await createAutopilot.mutateAsync({
           title: title.trim(),
           description: description.trim() || undefined,
+          assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
         });
@@ -370,6 +387,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           id: props.autopilotId,
           title: title.trim(),
           description: description.trim() || null,
+          assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
         });
@@ -548,10 +566,11 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           {/* Right: Configuration */}
           <aside className="w-full lg:w-[340px] shrink-0 overflow-y-auto px-5 py-5 space-y-5 bg-muted/30">
             <AgentSection
+              selectedType={assigneeType}
               selectedId={assigneeId}
-              onChange={setAssigneeId}
-              selectedName={selectedAgent?.name}
-              selectedDescription={selectedAgent?.description}
+              onChange={handleAssigneeChange}
+              selectedName={selectedAssignee?.name}
+              selectedDescription={selectedAssignee?.description}
             />
 
             <OutputModeSection mode={executionMode} onChange={setExecutionMode} />
@@ -618,22 +637,25 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 }
 
 function AgentSection({
+  selectedType,
   selectedId,
   onChange,
   selectedName,
   selectedDescription,
 }: {
+  selectedType: AutopilotAssigneeType;
   selectedId: string;
-  onChange: (id: string) => void;
+  onChange: (next: AssigneeSelection) => void;
   selectedName?: string;
   selectedDescription?: string;
 }) {
   const { t } = useT("autopilots");
+  const hasSelection = selectedId.length > 0;
   return (
     <div>
-      <SectionLabel>{t(($) => $.dialog.section_agent)}</SectionLabel>
+      <SectionLabel>{t(($) => $.dialog.section_assignee)}</SectionLabel>
       <AgentPicker
-        agentId={selectedId || null}
+        assignee={hasSelection ? { type: selectedType, id: selectedId } : null}
         onChange={onChange}
         align="start"
         triggerRender={
@@ -644,12 +666,12 @@ function AgentSection({
               "hover:bg-accent/40 transition-colors cursor-pointer",
             )}
           >
-            {selectedId ? (
+            {hasSelection ? (
               <ActorAvatar
-                actorType="agent"
+                actorType={selectedType}
                 actorId={selectedId}
                 size={28}
-                showStatusDot
+                showStatusDot={selectedType === "agent"}
               />
             ) : (
               <span className="inline-flex size-7 items-center justify-center rounded-full bg-muted text-muted-foreground">
@@ -658,7 +680,7 @@ function AgentSection({
             )}
             <span className="flex-1 min-w-0">
               <span className="block text-sm font-medium truncate">
-                {selectedName ?? t(($) => $.dialog.select_agent)}
+                {selectedName ?? t(($) => $.dialog.select_assignee)}
               </span>
               {selectedDescription && (
                 <span className="block text-xs text-muted-foreground truncate">

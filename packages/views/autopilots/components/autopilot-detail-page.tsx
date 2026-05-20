@@ -724,8 +724,16 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               <div>
                 <label className="text-xs text-muted-foreground">{t(($) => $.detail.field_agent)}</label>
                 <div className="mt-1 flex items-center gap-2">
-                  <ActorAvatar actorType="agent" actorId={autopilot.assignee_id} size={20} enableHoverCard showStatusDot />
-                  <span className="cursor-pointer">{getActorName("agent", autopilot.assignee_id)}</span>
+                  <ActorAvatar
+                    actorType={autopilot.assignee_type}
+                    actorId={autopilot.assignee_id}
+                    size={20}
+                    enableHoverCard={autopilot.assignee_type === "agent"}
+                    showStatusDot={autopilot.assignee_type === "agent"}
+                  />
+                  <span className="cursor-pointer">
+                    {getActorName(autopilot.assignee_type, autopilot.assignee_id)}
+                  </span>
                 </div>
               </div>
               <div>
@@ -796,7 +804,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               <RunHistoryList
                 runs={runs}
                 agentId={autopilot.assignee_id}
-                agentName={getActorName("agent", autopilot.assignee_id)}
+                agentName={getActorName(autopilot.assignee_type, autopilot.assignee_id)}
               />
             )}
           </section>
@@ -828,6 +836,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           initial={{
             title: autopilot.title,
             description: autopilot.description ?? "",
+            assignee_type: autopilot.assignee_type,
             assignee_id: autopilot.assignee_id,
             execution_mode: autopilot.execution_mode as AutopilotExecutionMode,
           }}

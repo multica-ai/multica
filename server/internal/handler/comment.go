@@ -382,8 +382,22 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 		// Only emit a cursor when the page is full. Fewer threads than
 		// requested ⇒ the SELECT exhausted matching threads, so there is
 		// no older page to scroll to.
+		//
+		// Additionally suppress the cursor when `since` is set and the head
+		// thread's last_activity_at is already <= since. The pagination
+		// walks threads in strictly decreasing last_activity_at, so every
+		// older page has last_activity_at strictly less than the head's —
+		// if the head itself can't satisfy `> since`, no older thread can
+		// either. Predicating on the head (not on whether `comments` is
+		// empty) also catches the mixed case where this page keeps rows
+		// from fresher threads but the head thread is already past `since`.
+		// Flagged by Elon in #2787's second review (MUL-2340 nit).
 		out := fetchCommentsResult{Comments: comments}
-		if len(seenRoot) >= args.RecentN && headRoot.Valid && headLast.Valid {
+		emitCursor := len(seenRoot) >= args.RecentN && headRoot.Valid && headLast.Valid
+		if emitCursor && args.Since.Valid && !headLast.Time.After(args.Since.Time) {
+			emitCursor = false
+		}
+		if emitCursor {
 			out.NextBefore = headLast.Time.UTC().Format(time.RFC3339Nano)
 			out.NextBeforeID = uuidToString(headRoot)
 		}

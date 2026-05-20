@@ -16,7 +16,7 @@
  * - Rendering mentions with the same IssueMentionCard component and .mention class
  */
 
-import { isValidElement, memo, useCallback, useMemo, useRef, useState } from "react";
+import { isValidElement, memo, useMemo, useRef } from "react";
 import ReactMarkdown, {
   defaultUrlTransform,
   type Components,
@@ -29,25 +29,19 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { createLowlight, common } from "lowlight";
 import { toHtml } from "hast-util-to-html";
-import { Maximize2, Download, Link as LinkIcon } from "lucide-react";
-import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
 import type { Attachment } from "@multica/core/types";
 import { useNavigation } from "../navigation";
-import { useT } from "../i18n";
-import { openExternal } from "../platform";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
-import { ImageLightbox } from "./extensions/image-view";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { isAllowedFileCardHref } from "@multica/ui/markdown";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { MermaidDiagram } from "./mermaid-diagram";
 import { HtmlBlockPreview } from "./html-block-preview";
-import { useDownloadAttachment } from "./use-download-attachment";
-import { useAttachmentPreview, type PreviewSource } from "./attachment-preview-modal";
-import { AttachmentBlock } from "./attachment-block";
+import { AttachmentDownloadProvider } from "./attachment-download-context";
+import { Attachment as AttachmentRenderer } from "./attachment";
 import "katex/dist/katex.min.css";
 import "./content-editor.css";
 
@@ -173,136 +167,26 @@ function ReadonlyLink({
   );
 }
 
-// Image renderer with a download button that prefers fresh-signed URLs.
-// Lifted out of the components map so it can call hooks; receives the
-// attachment lookup as props so the components map can stay a pure
-// data-build inside `ReadonlyContent`'s `useMemo`.
-function ReadonlyImage({
-  src,
-  alt,
-  resolveAttachmentId,
-  onDownload,
-}: {
-  src?: string;
-  alt?: string;
-  resolveAttachmentId: (url: string) => string | undefined;
-  onDownload: (attachmentId: string) => void;
-}) {
-  const { t } = useT("editor");
-  const [lightbox, setLightbox] = useState(false);
-  const imgSrc = typeof src === "string" ? src : "";
-  const imgAlt = alt ?? "";
-
-  const handleView = () => setLightbox(true);
-  const handleDownload = () => {
-    const id = imgSrc ? resolveAttachmentId(imgSrc) : undefined;
-    if (id) {
-      onDownload(id);
-      return;
-    }
-    // External image — no attachment record to re-sign through. Falling back
-    // to `openExternal` keeps us off `window.open(...)` (which Electron's
-    // setWindowOpenHandler would route through openExternalSafely anyway,
-    // but only after rejecting non-http schemes loudly).
-    if (imgSrc) openExternal(imgSrc);
-  };
-  const handleCopyLink = async () => {
-    try {
-      await navigator.clipboard.writeText(imgSrc);
-      toast.success(t(($) => $.image.link_copied));
-    } catch {
-      toast.error(t(($) => $.image.copy_link_failed));
-    }
-  };
-
-  return (
-    <span className="image-node">
-      <span className="image-figure" onClick={handleView}>
-        <img src={imgSrc} alt={imgAlt} className="image-content" draggable={false} />
-        <span
-          className="image-toolbar"
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button type="button" onClick={handleView} title={t(($) => $.image.view)}>
-            <Maximize2 className="size-3.5" />
-          </button>
-          <button type="button" onClick={handleDownload} title={t(($) => $.image.download)}>
-            <Download className="size-3.5" />
-          </button>
-          <button type="button" onClick={handleCopyLink} title={t(($) => $.image.copy_link)}>
-            <LinkIcon className="size-3.5" />
-          </button>
-        </span>
-      </span>
-      {lightbox && (
-        <ImageLightbox src={imgSrc} alt={imgAlt} onClose={() => setLightbox(false)} />
-      )}
-    </span>
-  );
-}
-
-// Inline file card — wraps the shared AttachmentCard with the same
-// download semantics as the standalone attachment list: fresh-sign through
-// `useDownloadAttachment` when the href matches a known attachment,
-// otherwise hand the raw URL to the platform's external opener.
-function ReadonlyFileCard({
-  href,
-  filename,
-  resolveAttachment,
-  onDownload,
-  onPreview,
-}: {
-  href: string;
-  filename: string;
-  resolveAttachment: (url: string) => Attachment | undefined;
-  onDownload: (attachmentId: string) => void;
-  onPreview: (source: PreviewSource) => boolean;
-}) {
-  const attachment = href ? resolveAttachment(href) : undefined;
-  const handleDownloadClick = () => {
-    if (attachment) {
-      onDownload(attachment.id);
-      return;
-    }
-    openExternal(href);
-  };
-  const handlePreviewClick = () => {
-    if (attachment) {
-      onPreview({ kind: "full", attachment });
-    } else if (href) {
-      onPreview({ kind: "url", url: href, filename });
-    }
-  };
-  return (
-    <AttachmentBlock
-      filename={filename}
-      contentType={attachment?.content_type ?? ""}
-      attachmentId={attachment?.id}
-      href={href}
-      onPreview={handlePreviewClick}
-      onDownload={handleDownloadClick}
-    />
-  );
-}
-
-function buildComponents(
-  resolveAttachmentId: (url: string) => string | undefined,
-  resolveAttachment: (url: string) => Attachment | undefined,
-  onDownload: (attachmentId: string) => void,
-  onPreview: (source: PreviewSource) => boolean,
-): Partial<Components> {
+function buildComponents(): Partial<Components> {
   return {
     // Links — route mention:// to mention components, others show preview card
     a: ReadonlyLink,
 
-    // Images — centered with toolbar + lightbox (matches Tiptap ImageView NodeView)
+    // Images — unified through <Attachment>. The resolver context provided
+    // by AttachmentDownloadProvider (mounted in ReadonlyContent below) turns
+    // a CDN URL into a full record when possible; external URLs render as
+    // plain images with lightbox-via-preview-modal. forceKind is mandatory
+    // here because markdown `![]()` carries no content-type and alt is
+    // commonly empty or descriptive — without it images fall through to
+    // the file-card chrome.
     img: ({ src, alt }) => (
-      <ReadonlyImage
-        src={typeof src === "string" ? src : undefined}
-        alt={alt ?? undefined}
-        resolveAttachmentId={resolveAttachmentId}
-        onDownload={onDownload}
+      <AttachmentRenderer
+        attachment={{
+          kind: "url",
+          url: typeof src === "string" ? src : "",
+          filename: alt ?? "",
+          forceKind: "image",
+        }}
       />
     ),
 
@@ -314,12 +198,8 @@ function buildComponents(
         const href = isAllowedFileCardHref(rawHref) ? rawHref : "";
         const filename = (node?.properties?.dataFilename as string) || "";
         return (
-          <ReadonlyFileCard
-            href={href}
-            filename={filename}
-            resolveAttachment={resolveAttachment}
-            onDownload={onDownload}
-            onPreview={onPreview}
+          <AttachmentRenderer
+            attachment={{ kind: "url", url: href, filename }}
           />
         );
       }
@@ -437,43 +317,24 @@ export const ReadonlyContent = memo(function ReadonlyContent({
   const processed = useMemo(() => preprocessMarkdown(content), [content]);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hover = useLinkHover(wrapperRef);
-  const download = useDownloadAttachment();
 
-  const resolveAttachmentId = useCallback(
-    (url: string): string | undefined => {
-      if (!url || !attachments?.length) return undefined;
-      return attachments.find((a) => a.url === url)?.id;
-    },
-    [attachments],
-  );
-
-  const resolveAttachment = useCallback(
-    (url: string): Attachment | undefined => {
-      if (!url || !attachments?.length) return undefined;
-      return attachments.find((a) => a.url === url);
-    },
-    [attachments],
-  );
-
-  const preview = useAttachmentPreview();
-
-  const components = useMemo(
-    () => buildComponents(resolveAttachmentId, resolveAttachment, download, preview.tryOpen),
-    [resolveAttachmentId, resolveAttachment, download, preview.tryOpen],
-  );
+  // Components map is now static — all attachment-aware logic lives in
+  // <Attachment>, which reads the surrounding AttachmentDownloadProvider.
+  const components = useMemo(() => buildComponents(), []);
 
   return (
-    <div ref={wrapperRef} className={cn("rich-text-editor readonly text-sm", className)}>
-      <ReactMarkdown
-        remarkPlugins={[remarkMath, remarkBreaks, [remarkGfm, { singleTilde: false }]]}
-        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
-        urlTransform={urlTransform}
-        components={components}
-      >
-        {processed}
-      </ReactMarkdown>
-      <LinkHoverCard {...hover} />
-      {preview.modal}
-    </div>
+    <AttachmentDownloadProvider attachments={attachments}>
+      <div ref={wrapperRef} className={cn("rich-text-editor readonly text-sm", className)}>
+        <ReactMarkdown
+          remarkPlugins={[remarkMath, remarkBreaks, [remarkGfm, { singleTilde: false }]]}
+          rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
+          urlTransform={urlTransform}
+          components={components}
+        >
+          {processed}
+        </ReactMarkdown>
+        <LinkHoverCard {...hover} />
+      </div>
+    </AttachmentDownloadProvider>
   );
 });

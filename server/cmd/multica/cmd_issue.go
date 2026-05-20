@@ -1664,7 +1664,7 @@ func ambiguousAssigneeError(input string, matches []assigneeMatch) error {
 // assignee_id) by looking it up against the workspace's members, agents, and
 // (when allowed) squads. It is the deterministic counterpart to
 // resolveAssignee: callers that already hold a UUID (e.g. agents reading IDs
-// from `multica workspace members --output json`) should use this instead of
+// from `multica workspace member list --output json`) should use this instead of
 // round-tripping through name matching, which can be ambiguous in workspaces
 // with overlapping names.
 func resolveAssigneeByID(ctx context.Context, client *cli.APIClient, id string, kinds assigneeKinds) (string, string, error) {

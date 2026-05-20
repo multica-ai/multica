@@ -238,7 +238,9 @@
     "toast_update_partial_with_reason": "Autopilot updated, but schedule failed to save: {{reason}}",
     "toast_update_failed": "Failed to update autopilot",
     "section_agent": "Agent",
+    "section_assignee": "Assignee",
     "select_agent": "Select agent",
+    "select_assignee": "Select agent or squad",
     "section_output_mode": "Output mode",
     "section_schedule": "Schedule",
     "section_trigger_kind": "Trigger",
@@ -326,8 +328,11 @@
     }
   },
   "agent_picker": {
-    "filter_placeholder": "Filter agents...",
-    "select_agent": "Select agent"
+    "filter_placeholder": "Filter agents or squads...",
+    "select_agent": "Select agent",
+    "select_assignee": "Select agent or squad",
+    "agents_group": "Agents",
+    "squads_group": "Squads"
   },
   "timezone_picker": {
     "search_placeholder": "Search timezone..."

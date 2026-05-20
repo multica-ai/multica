@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import {
   ArrowUpCircle,
   Globe,
-  Lock,
   MoreHorizontal,
   Trash2,
 } from "lucide-react";
@@ -231,36 +230,22 @@ function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
   );
 }
 
-// VisibilityBadge — small chip next to the runtime name showing whether
-// the runtime is shareable (public) or owner-only (private). Older backends
-// that don't ship the visibility field render the strict default (private).
+// Only public is worth a badge — private is the default and rendering a
+// `🔒 Private` chip on every row turns the whole column into noise.
 function VisibilityBadge({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");
-  const isPublic = runtime.visibility === "public";
-  const Icon = isPublic ? Globe : Lock;
-  const label = isPublic
-    ? t(($) => $.detail.visibility_label.public)
-    : t(($) => $.detail.visibility_label.private);
-  const tooltip = isPublic
-    ? t(($) => $.detail.visibility_hint.public)
-    : t(($) => $.detail.visibility_hint.private);
+  if (runtime.visibility !== "public") return null;
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <span
-            className={`shrink-0 inline-flex items-center gap-0.5 rounded px-1 text-[10px] font-medium ${
-              isPublic
-                ? "bg-info/10 text-info"
-                : "bg-muted text-muted-foreground"
-            }`}
-          >
-            <Icon className="h-2.5 w-2.5" />
-            {label}
+          <span className="shrink-0 inline-flex items-center gap-0.5 rounded bg-info/10 px-1 text-[10px] font-medium text-info">
+            <Globe className="h-2.5 w-2.5" />
+            {t(($) => $.detail.visibility_label.public)}
           </span>
         }
       />
-      <TooltipContent>{tooltip}</TooltipContent>
+      <TooltipContent>{t(($) => $.detail.visibility_hint.public)}</TooltipContent>
     </Tooltip>
   );
 }
@@ -424,11 +409,6 @@ function CliCell({
 
   return (
     <div className="flex min-w-0 items-center gap-1 text-xs">
-      {isManaged && (
-        <span className="shrink-0 rounded-sm bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">
-          {t(($) => $.list.cli_managed_badge)}
-        </span>
-      )}
       <span
         className={`truncate font-mono ${
           hasUpdate ? "text-warning" : "text-muted-foreground"

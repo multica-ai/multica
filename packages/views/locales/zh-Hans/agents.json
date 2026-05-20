@@ -381,7 +381,10 @@
     "copy_filtered": "复制筛选结果",
     "copied": "已复制",
     "waiting_events": "等待事件中...",
-    "no_data": "未记录执行数据。"
+    "no_data": "未记录执行数据。",
+    "sort_label": "排序",
+    "sort_chronological": "时间顺序",
+    "sort_newest_first": "最新在前"
   },
   "task_failure": {
     "agent_error": "智能体执行出错",

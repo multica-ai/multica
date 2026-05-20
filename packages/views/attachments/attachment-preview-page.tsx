@@ -21,6 +21,7 @@
 import { useEffect } from "react";
 import { useT } from "../i18n";
 import { useAttachmentHtmlText } from "../editor/hooks/use-attachment-html-text";
+import { withFragmentNavShim } from "../editor/utils/iframe-fragment-nav";
 
 interface AttachmentPreviewPageProps {
   attachmentId: string;
@@ -61,7 +62,7 @@ export function AttachmentPreviewPage({
         </div>
       ) : (
         <iframe
-          srcDoc={text}
+          srcDoc={withFragmentNavShim(text)}
           sandbox="allow-scripts"
           title={filename ?? "HTML attachment"}
           className="flex-1 w-full border-0 bg-background"

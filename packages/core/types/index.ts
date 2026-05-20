@@ -90,6 +90,7 @@ export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,
+  AutopilotAssigneeType,
   AutopilotTrigger,
   AutopilotTriggerKind,
   AutopilotRun,

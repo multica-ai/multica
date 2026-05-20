@@ -181,6 +181,7 @@ export function useCreateIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
     },
   });
 }
@@ -257,6 +258,7 @@ export function useUpdateIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
       // Refresh the issue's attachments cache when the description editor
       // bound new uploads — the description editor reads `issueAttachments`
       // to resolve text-preview Eye gates, and unlike other mutations this
@@ -340,6 +342,7 @@ export function useDeleteIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
       if (ctx?.metadata) invalidateDeletedIssueParentCaches(qc, wsId, ctx.metadata);
     },
   });
@@ -399,6 +402,7 @@ export function useBatchUpdateIssues() {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
       if (ctx?.affectedParentIds && ctx.affectedParentIds.size > 0) {
         for (const parentId of ctx.affectedParentIds) {
           qc.invalidateQueries({
@@ -501,6 +505,7 @@ export function useBatchDeleteIssues() {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
       if (ctx?.parentIssueIds && ctx.parentIssueIds.size > 0) {
         invalidateDeletedIssueParentCaches(qc, wsId, {
           parentIssueIds: Array.from(ctx.parentIssueIds),

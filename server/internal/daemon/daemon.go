@@ -848,8 +848,13 @@ func (d *Daemon) workspaceLastRepoSyncErr(workspaceID string) string {
 }
 
 // workspaceCoAuthoredByEnabled returns whether the Co-authored-by hook should
-// be installed for the given workspace. Defaults to true when the setting is
-// absent (new workspaces, older servers that don't send settings).
+// be installed for the given workspace. Defaults to true when either setting
+// is absent (new workspaces, older servers that don't send settings).
+//
+// The hook is gated by BOTH the GitHub master switch (`github_enabled`) and
+// the dedicated co-author switch (`co_authored_by_enabled`) so flipping the
+// workspace's master GitHub toggle off also stops new trailers from landing
+// in commits, matching the contract documented in RFC MUL-2414 §4.8.
 func (d *Daemon) workspaceCoAuthoredByEnabled(workspaceID string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -858,9 +863,16 @@ func (d *Daemon) workspaceCoAuthoredByEnabled(workspaceID string) bool {
 		return true // default: enabled
 	}
 	var s struct {
+		GitHubEnabled       *bool `json:"github_enabled"`
 		CoAuthoredByEnabled *bool `json:"co_authored_by_enabled"`
 	}
-	if err := json.Unmarshal(ws.settings, &s); err != nil || s.CoAuthoredByEnabled == nil {
+	if err := json.Unmarshal(ws.settings, &s); err != nil {
+		return true // default: enabled when payload is malformed
+	}
+	if s.GitHubEnabled != nil && !*s.GitHubEnabled {
+		return false
+	}
+	if s.CoAuthoredByEnabled == nil {
 		return true // default: enabled
 	}
 	return *s.CoAuthoredByEnabled
@@ -966,6 +978,12 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 	if ws, ok := d.workspaces[workspaceID]; ok {
 		ws.reposVersion = resp.ReposVersion
 		ws.allowedRepoURLs = repoAllowlist(resp.Repos)
+		// Keep the cached settings in sync with the server. The daemon's
+		// feature gates (e.g. workspaceCoAuthoredByEnabled) read directly from
+		// this field, so toggling a Setting in the web UI must update it here
+		// without requiring a daemon restart. An empty payload from the server
+		// clears the override and falls back to defaults.
+		ws.settings = resp.Settings
 	}
 	d.mu.Unlock()
 
@@ -986,14 +1004,26 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return fmt.Errorf("workspace is not watched by this daemon: %s", workspaceID)
 	}
 
-	if d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
-		return nil
-	}
+	// Record whether the cache already had this repo before we took the
+	// per-workspace mutex. The two states behave differently below:
+	//
+	//   - cacheHitOnEntry=true: the repo is already cloned; we still must
+	//     refresh `workspaceState.settings` because the /repo/checkout
+	//     handler reads workspaceCoAuthoredByEnabled right after this and
+	//     the 30s workspaceSyncLoop tick is too slow for a freshly-flipped
+	//     GitHub master switch / `co_authored_by_enabled` toggle to feel
+	//     live (RFC MUL-2414 §4.8; PR #2847 review by Emacs).
+	//
+	//   - cacheHitOnEntry=false but cache hit *after* we acquire the mutex:
+	//     a sibling goroutine on a concurrent cold-miss already refreshed
+	//     and populated the cache. We can skip the duplicate refresh — the
+	//     sibling's refresh is fresh enough for our gate read.
+	cacheHitOnEntry := d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != ""
 
 	ws.repoRefreshMu.Lock()
 	defer ws.repoRefreshMu.Unlock()
 
-	if d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
+	if !cacheHitOnEntry && d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
 		return nil
 	}
 
@@ -1004,6 +1034,10 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 
 	if !d.workspaceRepoAllowed(workspaceID, repoURL) {
 		return ErrRepoNotConfigured
+	}
+
+	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
+		return nil
 	}
 
 	d.syncWorkspaceRepos(workspaceID, resp.Repos)
@@ -1069,11 +1103,19 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	var removed int
 	for id, name := range apiIDs {
 		if currentIDs[id] {
-			// Already tracked: only intervene if the workspace lost all of
-			// its runtimes (most commonly because handleRuntimeGone pruned
-			// them and its inline re-register failed). The pointer is not
-			// replaced here either — ensureRepoReady holds repoRefreshMu
-			// from the original pointer.
+			// Already tracked: refresh the cached workspace settings so
+			// feature toggles flipped in the web UI take effect on the next
+			// gated operation without a daemon restart (see RFC MUL-2414 §4.8;
+			// reviewed in PR #2847). refreshWorkspaceRepos covers settings +
+			// repos in a single round trip.
+			if _, err := d.refreshWorkspaceRepos(ctx, id); err != nil {
+				d.logger.Debug("workspace sync: refresh settings failed", "workspace_id", id, "error", err)
+			}
+			// Only intervene further if the workspace lost all of its
+			// runtimes (most commonly because handleRuntimeGone pruned them
+			// and its inline re-register failed). The pointer is not replaced
+			// here either — ensureRepoReady holds repoRefreshMu from the
+			// original pointer.
 			if !d.workspaceNeedsRuntimeRecovery(id) {
 				continue
 			}
@@ -2225,6 +2267,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AutopilotTriggerPayload: strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 		QuickCreatePrompt:       task.QuickCreatePrompt,
 		IsSquadLeader:           strings.Contains(instructions, "## Squad Operating Protocol"),
+		RequestingUserName:               task.RequestingUserName,
+		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
 	}
 
 	// Mark candidate env roots as active before any env work so the GC loop
@@ -3091,8 +3135,9 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 	result := make([]execenv.SkillContextForEnv, len(skills))
 	for i, s := range skills {
 		result[i] = execenv.SkillContextForEnv{
-			Name:    s.Name,
-			Content: s.Content,
+			Name:        s.Name,
+			Description: s.Description,
+			Content:     s.Content,
 		}
 		for _, f := range s.Files {
 			result[i].Files = append(result[i].Files, execenv.SkillFileContextForEnv{

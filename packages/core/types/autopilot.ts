@@ -2,6 +2,12 @@ export type AutopilotStatus = "active" | "paused" | "archived";
 
 export type AutopilotExecutionMode = "create_issue" | "run_only";
 
+// `assignee_type` selects which polymorphic actor backs the autopilot:
+// "agent" → assignee_id references agent(id); "squad" → assignee_id references
+// squad(id) and dispatch resolves to squad.leader_id at run time (MUL-2429,
+// Path A). Older servers omit this field — callers should default to "agent".
+export type AutopilotAssigneeType = "agent" | "squad";
+
 export type AutopilotTriggerKind = "schedule" | "webhook" | "api";
 
 // `skipped` is emitted by the backend pre-flight admission check
@@ -22,6 +28,7 @@ export interface Autopilot {
   workspace_id: string;
   title: string;
   description: string | null;
+  assignee_type: AutopilotAssigneeType;
   assignee_id: string;
   status: AutopilotStatus;
   execution_mode: AutopilotExecutionMode;
@@ -75,6 +82,9 @@ export interface AutopilotRun {
 export interface CreateAutopilotRequest {
   title: string;
   description?: string;
+  // Optional on the wire — when omitted the server defaults to "agent" so
+  // older clients keep working.
+  assignee_type?: AutopilotAssigneeType;
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
   issue_title_template?: string;
@@ -83,6 +93,9 @@ export interface CreateAutopilotRequest {
 export interface UpdateAutopilotRequest {
   title?: string;
   description?: string | null;
+  // Send `assignee_type` together with `assignee_id` whenever you change the
+  // assignee — the server requires both for a type swap.
+  assignee_type?: AutopilotAssigneeType;
   assignee_id?: string;
   status?: AutopilotStatus;
   execution_mode?: AutopilotExecutionMode;
