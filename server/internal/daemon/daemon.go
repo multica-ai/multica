@@ -155,8 +155,8 @@ type Daemon struct {
 	// command resolves; read by runTask via customCommandPathForRuntime to
 	// launch the custom command for a claimed task. Guarded by mu.
 	profileCommandPaths map[string]string
-	reloading    sync.Mutex         // prevents concurrent workspace syncs
-	runtimeSet   *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
+	reloading           sync.Mutex         // prevents concurrent workspace syncs
+	runtimeSet          *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
 
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
@@ -3101,6 +3101,28 @@ func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, e
 	return reused
 }
 
+func additionalWritableDirsForProvider(provider, workspacesRoot, workspaceID string, logger *slog.Logger) []string {
+	if provider != "codex" {
+		return nil
+	}
+	dirs := codexAdditionalWritableDirs(workspacesRoot, workspaceID)
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			if logger != nil {
+				logger.Warn("codex sandbox: prepare writable dir failed", "dir", dir, "error", err)
+			}
+		}
+	}
+	return dirs
+}
+
+func codexAdditionalWritableDirs(workspacesRoot, workspaceID string) []string {
+	if strings.TrimSpace(workspacesRoot) == "" || strings.TrimSpace(workspaceID) == "" {
+		return nil
+	}
+	return []string{filepath.Join(workspacesRoot, ".repos", workspaceID)}
+}
+
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
@@ -3502,6 +3524,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ResumeSessionID:           task.PriorSessionID,
 		ExtraArgs:                 extraArgs,
 		CustomArgs:                customArgs,
+		AdditionalWritableDirs:    additionalWritableDirsForProvider(provider, d.cfg.WorkspacesRoot, task.WorkspaceID, taskLog),
 		McpConfig:                 mcpConfig,
 		ThinkingLevel:             thinkingLevel,
 		OpenclawMode:              openclawMode,
