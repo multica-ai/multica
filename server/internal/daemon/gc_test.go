@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -654,6 +656,36 @@ func TestIsBareRepo(t *testing.T) {
 	})
 }
 
+func TestPruneWorktree_RemovesOnlyStaleAgentBranches(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	barePath := filepath.Join(t.TempDir(), "cache.git")
+
+	runGitForGC(t, "", "clone", "--bare", sourceRepo, barePath)
+
+	activeWorktree := filepath.Join(t.TempDir(), "active")
+	activeBranch := "agent/live/12345678"
+	staleBranch := "agent/stale/87654321"
+	keepBranch := "main"
+
+	runGitForGC(t, "", "-C", barePath, "worktree", "add", "-b", activeBranch, activeWorktree, "HEAD")
+	runGitForGC(t, "", "-C", barePath, "branch", staleBranch, "HEAD")
+
+	d.pruneWorktree(barePath)
+
+	if gitRefExists(t, barePath, "refs/heads/"+staleBranch) {
+		t.Fatalf("expected stale branch %q to be deleted", staleBranch)
+	}
+	if !gitRefExists(t, barePath, "refs/heads/"+activeBranch) {
+		t.Fatalf("expected active branch %q to be preserved", activeBranch)
+	}
+	if !gitRefExists(t, barePath, "refs/heads/"+keepBranch) {
+		t.Fatalf("expected non-agent branch %q to be preserved", keepBranch)
+	}
+}
+
 // TestShouldCleanTaskDir_KindDispatch covers the four GCMeta kinds across
 // active / terminal / 404 / non-terminal axes. Each entry stands up a mock
 // server returning the expected payload (or 404) and asserts the action.
@@ -898,6 +930,48 @@ func TestShouldCleanTaskDir_EmptyParentIDFallsBackToOrphanMTime(t *testing.T) {
 			}
 		})
 	}
+}
+
+func createGCGitRepo(t *testing.T) string {
+	t.Helper()
+
+	repoDir := t.TempDir()
+	runGitForGC(t, repoDir, "init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	runGitForGC(t, repoDir, "add", "README.md")
+	runGitForGC(t, repoDir, "commit", "-m", "initial commit")
+	return repoDir
+}
+
+func runGitForGC(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+
+	fullArgs := args
+	if dir != "" {
+		fullArgs = append([]string{"-C", dir}, args...)
+	}
+	cmd := exec.Command("git", fullArgs...)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %s: %v", strings.Join(fullArgs, " "), out, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func gitRefExists(t *testing.T, repoPath, ref string) bool {
+	t.Helper()
+
+	cmd := exec.Command("git", "-C", repoPath, "show-ref", "--verify", "--quiet", ref)
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	return true
 }
 
 // TestShouldCleanTaskDir_ChatHardDeletedFreshMtime locks acceptance #3:

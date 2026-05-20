@@ -597,17 +597,110 @@ func (d *Daemon) pruneRepoWorktrees(workspacesRoot string) {
 }
 
 func (d *Daemon) pruneWorktree(barePath string) {
-	ctx, cancel := context.WithTimeout(context.Background(), gitCmdTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "-C", barePath, "worktree", "prune")
-
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runGitGCCommand(barePath, "worktree", "prune"); err != nil {
 		d.logger.Warn("gc: worktree prune failed",
 			"repo", barePath,
-			"output", strings.TrimSpace(string(out)),
+			"output", out,
 			"error", err,
 		)
 	}
+
+	activeBranches, err := agentWorktreeBranches(barePath)
+	if err != nil {
+		d.logger.Warn("gc: worktree branch scan failed", "repo", barePath, "error", err)
+		return
+	}
+
+	agentBranches, err := listAgentBranches(barePath)
+	if err != nil {
+		d.logger.Warn("gc: agent branch scan failed", "repo", barePath, "error", err)
+		return
+	}
+
+	deleted := 0
+	for _, branch := range agentBranches {
+		if _, ok := activeBranches[branch]; ok {
+			continue
+		}
+		if out, err := runGitGCCommand(barePath, "branch", "-D", "--", branch); err != nil {
+			d.logger.Warn("gc: agent branch delete failed",
+				"repo", barePath,
+				"branch", branch,
+				"output", out,
+				"error", err,
+			)
+			continue
+		}
+		deleted++
+	}
+	if deleted > 0 {
+		d.logger.Info("gc: deleted stale agent branches", "repo", barePath, "count", deleted)
+	}
+
+	for _, args := range [][]string{
+		{"gc", "--auto"},
+		{"reflog", "expire", "--expire=30.days", "--all"},
+		{"gc", "--prune=30.days"},
+	} {
+		if out, err := runGitGCCommand(barePath, args...); err != nil {
+			d.logger.Warn("gc: git maintenance failed",
+				"repo", barePath,
+				"command", strings.Join(args, " "),
+				"output", out,
+				"error", err,
+			)
+		}
+	}
+}
+
+func runGitGCCommand(barePath string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCmdTimeout)
+	defer cancel()
+
+	cmdArgs := append([]string{"-C", barePath}, args...)
+	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
+func agentWorktreeBranches(barePath string) (map[string]struct{}, error) {
+	out, err := runGitGCCommand(barePath, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+
+	branches := make(map[string]struct{})
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "branch refs/heads/") {
+			continue
+		}
+		branch := strings.TrimPrefix(line, "branch refs/heads/")
+		if strings.HasPrefix(branch, "agent/") {
+			branches[branch] = struct{}{}
+		}
+	}
+	return branches, nil
+}
+
+func listAgentBranches(barePath string) ([]string, error) {
+	out, err := runGitGCCommand(barePath, "for-each-ref", "--format=%(refname:short)", "refs/heads/agent")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+
+	var branches []string
+	for _, line := range strings.Split(out, "\n") {
+		branch := strings.TrimSpace(line)
+		if branch == "" {
+			continue
+		}
+		branches = append(branches, branch)
+	}
+	return branches, nil
 }
 
 // isBareRepo checks if a path looks like a bare git repository.
