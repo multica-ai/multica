@@ -6,6 +6,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { workspaceKeys, workspaceListOptions } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import { useHasOnboarded } from "@multica/core/paths";
+import { useApplyStartPage } from "@multica/cerebro-preferences/views";
 import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Toaster } from "@multica/ui/components/ui/sonner";
@@ -69,15 +70,6 @@ function AppContent() {
         // (setCurrentWorkspace, persist namespace) are synced later by
         // WorkspaceRouteLayout when the URL resolves.
         const wsList = await api.listWorkspaces();
-        // CEREBRO-PATCH(jeh-1642-start-page): open preferred start page on login
-        const loginUser = useAuthStore.getState().user;
-        const VALID_PAGES = new Set(["issues", "inbox", "my-issues", "projects", "documents", "notifications"]);
-        const prefVal = loginUser?.preferences?.["start_page_desktop"];
-        const startPage = typeof prefVal === "string" && VALID_PAGES.has(prefVal) ? prefVal : "issues";
-        const firstWs = wsList[0];
-        if (firstWs) {
-          useTabStore.getState().switchWorkspace(firstWs.slug, `/${firstWs.slug}/${startPage}`);
-        }
         qc.setQueryData(workspaceKeys.list(), wsList);
       } catch {
         // Token invalid or expired — user stays on login page
@@ -201,6 +193,26 @@ function AppContent() {
       switchWorkspace(workspaces[0].slug);
     }
   }, [workspaces, workspaceListFetched]);
+
+  // CEREBRO-PATCH(jeh-1642-start-page-boot): apply preferred start page once
+  // auth + workspaces are ready. Covers both fresh OAuth login (user goes
+  // null → set during onAuthToken) and app restart with a persisted session
+  // (user hydrated by useAuthStore on first render). Previously this only
+  // worked for the OAuth path, so reopening the desktop app landed users on
+  // their last tab instead of their chosen start page.
+  useApplyStartPage({
+    platform: "desktop",
+    ready: workspaceListFetched && workspaces.length > 0,
+    navigate: (page) => {
+      const { activeWorkspaceSlug: active, switchWorkspace } =
+        useTabStore.getState();
+      const slug =
+        active && workspaces.some((w) => w.slug === active)
+          ? active
+          : workspaces[0]?.slug;
+      if (slug) switchWorkspace(slug, `/${slug}/${page}`);
+    },
+  });
 
   // null = undecided (pre-login or list hasn't settled yet)
   // true  = session started with zero workspaces; next transition to >=1 triggers restart

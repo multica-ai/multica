@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { workspaceListOptions } from "@multica/core/workspace";
 import { resolvePostAuthDestination, useHasOnboarded } from "@multica/core/paths";
+import { getPreferredStartPage } from "@multica/cerebro-preferences/views";
 
 /**
  * Client-side fallback redirect for authenticated visitors on the landing page.
@@ -34,7 +35,17 @@ export function RedirectIfAuthenticated() {
 
   useEffect(() => {
     if (isLoading || !user || !isFetched) return;
-    router.replace(resolvePostAuthDestination(list, hasOnboarded));
+    // CEREBRO-PATCH(jeh-1642-start-page-boot): mobile start page preference
+    const fallback = resolvePostAuthDestination(list, hasOnboarded);
+    const isMobile =
+      typeof window !== "undefined" && window.innerWidth < 768;
+    const firstWs = list[0];
+    if (hasOnboarded && firstWs && isMobile) {
+      const page = getPreferredStartPage(user, "mobile");
+      router.replace(page ? `/${firstWs.slug}/${page}` : fallback);
+      return;
+    }
+    router.replace(fallback);
   }, [isLoading, user, isFetched, list, hasOnboarded, router]);
 
   return null;
