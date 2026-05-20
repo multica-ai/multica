@@ -139,8 +139,12 @@ function GeminiLogo({ className }: { className: string }) {
   const redId = `gemini-red-${uid}`;
   const yellowId = `gemini-yellow-${uid}`;
   const greenId = `gemini-green-${uid}`;
+  // 4-point spark outline normalized from the current gemini.google.com
+  // aurora sparkle (gstatic gemini_sparkle_aurora_*.svg) into a 24x24 viewBox.
+  // Cubic-bezier sides give the characteristic smooth inset between tips
+  // instead of the earlier sharp arc-based silhouette.
   const sparkPath =
-    "M12 24A14.304 14.304 0 0 0 0 12 14.304 14.304 0 0 0 12 0a14.305 14.305 0 0 0 12 12 14.305 14.305 0 0 0-12 12Z";
+    "M12 0c.6 4.4 1.83 7.43 3.69 9.07C17.55 10.72 19.6 11.4 24 12c-4.4.6-6.45 1.28-8.31 2.93C13.83 16.57 12.6 19.6 12 24c-.6-4.4-1.83-7.43-3.69-9.07C6.45 13.28 4.4 12.6 0 12c4.4-.6 6.45-1.28 8.31-2.93C10.17 7.43 11.4 4.4 12 0Z";
 
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
@@ -170,8 +174,8 @@ function GeminiLogo({ className }: { className: string }) {
         </radialGradient>
         <radialGradient
           id={yellowId}
-          cx="12"
-          cy="21"
+          cx="3"
+          cy="12"
           r="13"
           gradientUnits="userSpaceOnUse"
         >
@@ -180,8 +184,8 @@ function GeminiLogo({ className }: { className: string }) {
         </radialGradient>
         <radialGradient
           id={greenId}
-          cx="3"
-          cy="12"
+          cx="12"
+          cy="21"
           r="13"
           gradientUnits="userSpaceOnUse"
         >
