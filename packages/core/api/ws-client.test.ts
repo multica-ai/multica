@@ -69,4 +69,24 @@ describe("WSClient", () => {
     expect(url.searchParams.has("client_version")).toBe(false);
     expect(url.searchParams.has("client_os")).toBe(false);
   });
+
+  it("logs and skips malformed JSON messages instead of throwing", () => {
+    const warn = vi.fn();
+    const ws = new WSClient("ws://example.test/ws", {
+      logger: { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() },
+    });
+    ws.setAuth("tok", "acme");
+    ws.connect();
+
+    const fake = FakeWebSocket.lastUrl
+      ? (ws as any).ws as FakeWebSocket
+      : null;
+    expect(fake).not.toBeNull();
+
+    // Simulate a malformed frame — should not throw
+    expect(() => {
+      fake!.onmessage!({ data: "{truncated" });
+    }).not.toThrow();
+    expect(warn).toHaveBeenCalledWith("ws: received unparseable message");
+  });
 });
