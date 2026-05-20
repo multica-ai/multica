@@ -59,8 +59,8 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 	})
 
 	t.Run("agent context with explicit env uses env", func(t *testing.T) {
-		t.Setenv("MULTICA_AGENT_ID", "agent-123")
-		t.Setenv("MULTICA_TASK_ID", "task-456")
+		t.Setenv("MULTICA_AGENT_ID", "11111111-1111-4111-8111-111111111111")
+		t.Setenv("MULTICA_TASK_ID", "22222222-2222-4222-8222-222222222222")
 		t.Setenv("MULTICA_WORKSPACE_ID", "env-ws")
 
 		got := resolveWorkspaceID(testCmd())
@@ -70,8 +70,8 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 	})
 
 	t.Run("agent context without env returns empty, never config", func(t *testing.T) {
-		t.Setenv("MULTICA_AGENT_ID", "agent-123")
-		t.Setenv("MULTICA_TASK_ID", "task-456")
+		t.Setenv("MULTICA_AGENT_ID", "11111111-1111-4111-8111-111111111111")
+		t.Setenv("MULTICA_TASK_ID", "22222222-2222-4222-8222-222222222222")
 		t.Setenv("MULTICA_WORKSPACE_ID", "")
 
 		got := resolveWorkspaceID(testCmd())
@@ -82,7 +82,7 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 
 	t.Run("task marker alone also counts as agent context", func(t *testing.T) {
 		t.Setenv("MULTICA_AGENT_ID", "")
-		t.Setenv("MULTICA_TASK_ID", "task-456")
+		t.Setenv("MULTICA_TASK_ID", "22222222-2222-4222-8222-222222222222")
 		t.Setenv("MULTICA_WORKSPACE_ID", "")
 
 		if got := resolveWorkspaceID(testCmd()); got != "" {
@@ -91,8 +91,8 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 	})
 
 	t.Run("requireWorkspaceID surfaces agent-context error", func(t *testing.T) {
-		t.Setenv("MULTICA_AGENT_ID", "agent-123")
-		t.Setenv("MULTICA_TASK_ID", "task-456")
+		t.Setenv("MULTICA_AGENT_ID", "11111111-1111-4111-8111-111111111111")
+		t.Setenv("MULTICA_TASK_ID", "22222222-2222-4222-8222-222222222222")
 		t.Setenv("MULTICA_WORKSPACE_ID", "")
 
 		_, err := requireWorkspaceID(testCmd())
@@ -101,6 +101,99 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "agent execution context") {
 			t.Fatalf("requireWorkspaceID() error = %q, want it to mention agent execution context", err.Error())
+		}
+	})
+}
+
+func TestResolveToken_AgentContextSkipsConfigFallback(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "config-file-token"}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	t.Run("outside agent context falls back to config", func(t *testing.T) {
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_TOKEN", "")
+
+		if got := resolveToken(testCmd()); got != "config-file-token" {
+			t.Fatalf("resolveToken() = %q, want config fallback", got)
+		}
+	})
+
+	t.Run("agent context with explicit env uses env", func(t *testing.T) {
+		t.Setenv("MULTICA_AGENT_ID", "11111111-1111-4111-8111-111111111111")
+		t.Setenv("MULTICA_TASK_ID", "22222222-2222-4222-8222-222222222222")
+		t.Setenv("MULTICA_TOKEN", "env-token")
+
+		if got := resolveToken(testCmd()); got != "env-token" {
+			t.Fatalf("resolveToken() = %q, want env token", got)
+		}
+	})
+
+	t.Run("agent context without env returns empty, never config", func(t *testing.T) {
+		t.Setenv("MULTICA_AGENT_ID", "11111111-1111-4111-8111-111111111111")
+		t.Setenv("MULTICA_TASK_ID", "22222222-2222-4222-8222-222222222222")
+		t.Setenv("MULTICA_TOKEN", "")
+
+		if got := resolveToken(testCmd()); got != "" {
+			t.Fatalf("resolveToken() = %q, want empty (no config fallback in agent context)", got)
+		}
+	})
+}
+
+func TestNewAPIClient_AgentContextGuards(t *testing.T) {
+	t.Setenv("MULTICA_SERVER_URL", "http://example.test")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+
+	t.Run("complete agent context attaches headers", func(t *testing.T) {
+		t.Setenv("MULTICA_TOKEN", "env-token")
+		t.Setenv("MULTICA_AGENT_ID", "11111111-1111-4111-8111-111111111111")
+		t.Setenv("MULTICA_AGENT_NAME", "Codex")
+		t.Setenv("MULTICA_TASK_ID", "22222222-2222-4222-8222-222222222222")
+
+		client, err := newAPIClient(testCmd())
+		if err != nil {
+			t.Fatalf("newAPIClient(): unexpected error: %v", err)
+		}
+		if client.Token != "env-token" {
+			t.Fatalf("client.Token = %q, want env-token", client.Token)
+		}
+		if client.AgentID != "11111111-1111-4111-8111-111111111111" || client.TaskID != "22222222-2222-4222-8222-222222222222" {
+			t.Fatalf("client agent headers = (%q, %q), want (%q, %q)", client.AgentID, client.TaskID, "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")
+		}
+	})
+
+	t.Run("missing token errors instead of falling back", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "config-file-token"}); err != nil {
+			t.Fatalf("seed config: %v", err)
+		}
+		t.Setenv("MULTICA_TOKEN", "")
+		t.Setenv("MULTICA_AGENT_ID", "11111111-1111-4111-8111-111111111111")
+		t.Setenv("MULTICA_TASK_ID", "22222222-2222-4222-8222-222222222222")
+
+		_, err := newAPIClient(testCmd())
+		if err == nil {
+			t.Fatal("newAPIClient(): expected error for missing MULTICA_TOKEN in agent context")
+		}
+		if !strings.Contains(err.Error(), "MULTICA_TOKEN") {
+			t.Fatalf("error = %q, want MULTICA_TOKEN guidance", err.Error())
+		}
+	})
+
+	t.Run("missing task id errors instead of falling back to member identity", func(t *testing.T) {
+		t.Setenv("MULTICA_TOKEN", "env-token")
+		t.Setenv("MULTICA_AGENT_ID", "11111111-1111-4111-8111-111111111111")
+		t.Setenv("MULTICA_TASK_ID", "")
+
+		_, err := newAPIClient(testCmd())
+		if err == nil {
+			t.Fatal("newAPIClient(): expected error for incomplete agent context")
+		}
+		if !strings.Contains(err.Error(), "MULTICA_TASK_ID") {
+			t.Fatalf("error = %q, want MULTICA_TASK_ID guidance", err.Error())
 		}
 	})
 }
@@ -508,22 +601,22 @@ func TestAgentAvatarHappyPath(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPaths = append(gotPaths, r.URL.Path)
 		switch r.URL.Path {
-		case "/api/agents/agent-123":
+		case "/api/agents/11111111-1111-4111-8111-111111111111":
 			if r.Method == http.MethodGet {
 				json.NewEncoder(w).Encode(map[string]any{
-					"id":   "agent-123",
+					"id":   "11111111-1111-4111-8111-111111111111",
 					"name": "TestAgent",
 				})
 			} else if r.Method == http.MethodPut {
 				var body map[string]any
 				json.NewDecoder(r.Body).Decode(&body)
-				if body["avatar_url"] != "https://cdn.example.com/avatars/agent-123.png" {
+				if body["avatar_url"] != "https://cdn.example.com/avatars/11111111-1111-4111-8111-111111111111.png" {
 					t.Errorf("unexpected avatar_url: %v", body["avatar_url"])
 				}
 				json.NewEncoder(w).Encode(map[string]any{
-					"id":         "agent-123",
+					"id":         "11111111-1111-4111-8111-111111111111",
 					"name":       "TestAgent",
-					"avatar_url": "https://cdn.example.com/avatars/agent-123.png",
+					"avatar_url": "https://cdn.example.com/avatars/11111111-1111-4111-8111-111111111111.png",
 				})
 			} else {
 				t.Errorf("unexpected method: %s", r.Method)
@@ -534,7 +627,7 @@ func TestAgentAvatarHappyPath(t *testing.T) {
 			}
 			json.NewEncoder(w).Encode(map[string]any{
 				"id":  "att-456",
-				"url": "https://cdn.example.com/avatars/agent-123.png",
+				"url": "https://cdn.example.com/avatars/11111111-1111-4111-8111-111111111111.png",
 			})
 		default:
 			http.NotFound(w, r)
@@ -554,7 +647,7 @@ func TestAgentAvatarHappyPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := runAgentAvatar(cmd, []string{"agent-123"}); err != nil {
+	if err := runAgentAvatar(cmd, []string{"11111111-1111-4111-8111-111111111111"}); err != nil {
 		t.Fatalf("runAgentAvatar: %v", err)
 	}
 
@@ -583,7 +676,7 @@ func TestAgentAvatarUnsupportedFormat(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := runAgentAvatar(cmd, []string{"agent-123"})
+	err := runAgentAvatar(cmd, []string{"11111111-1111-4111-8111-111111111111"})
 	if err == nil {
 		t.Fatal("expected error for unsupported format, got nil")
 	}
@@ -613,7 +706,7 @@ func TestAgentAvatarOversizedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := runAgentAvatar(cmd, []string{"agent-123"})
+	err := runAgentAvatar(cmd, []string{"11111111-1111-4111-8111-111111111111"})
 	if err == nil {
 		t.Fatal("expected error for oversized file, got nil")
 	}
@@ -671,8 +764,8 @@ func TestAgentAvatarUploadFailure(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/agents/agent-123":
-			json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "TestAgent"})
+		case "/api/agents/11111111-1111-4111-8111-111111111111":
+			json.NewEncoder(w).Encode(map[string]any{"id": "11111111-1111-4111-8111-111111111111", "name": "TestAgent"})
 		case "/api/upload-file":
 			w.WriteHeader(http.StatusInternalServerError)
 			io.WriteString(w, "upload failed")
@@ -694,7 +787,7 @@ func TestAgentAvatarUploadFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := runAgentAvatar(cmd, []string{"agent-123"})
+	err := runAgentAvatar(cmd, []string{"11111111-1111-4111-8111-111111111111"})
 	if err == nil {
 		t.Fatal("expected error for upload failure, got nil")
 	}
@@ -713,17 +806,17 @@ func TestAgentAvatarUpdateFailure(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/agents/agent-123":
+		case "/api/agents/11111111-1111-4111-8111-111111111111":
 			if r.Method == http.MethodPut {
 				w.WriteHeader(http.StatusForbidden)
 				io.WriteString(w, "forbidden")
 				return
 			}
-			json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "TestAgent"})
+			json.NewEncoder(w).Encode(map[string]any{"id": "11111111-1111-4111-8111-111111111111", "name": "TestAgent"})
 		case "/api/upload-file":
 			json.NewEncoder(w).Encode(map[string]any{
 				"id":  "att-456",
-				"url": "https://cdn.example.com/avatars/agent-123.png",
+				"url": "https://cdn.example.com/avatars/11111111-1111-4111-8111-111111111111.png",
 			})
 		default:
 			http.NotFound(w, r)
@@ -743,7 +836,7 @@ func TestAgentAvatarUpdateFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := runAgentAvatar(cmd, []string{"agent-123"})
+	err := runAgentAvatar(cmd, []string{"11111111-1111-4111-8111-111111111111"})
 	if err == nil {
 		t.Fatal("expected error for update failure, got nil")
 	}
@@ -751,7 +844,6 @@ func TestAgentAvatarUpdateFailure(t *testing.T) {
 		t.Fatalf("expected 'update agent avatar' error, got: %v", err)
 	}
 }
-
 
 // TestAgentAvatarMissingFileFlag rejects when --file is not provided.
 func TestAgentAvatarMissingFileFlag(t *testing.T) {
@@ -764,7 +856,7 @@ func TestAgentAvatarMissingFileFlag(t *testing.T) {
 	cmd.Flags().String("output", "json", "")
 	cmd.Flags().String("profile", "", "")
 
-	err := runAgentAvatar(cmd, []string{"agent-123"})
+	err := runAgentAvatar(cmd, []string{"11111111-1111-4111-8111-111111111111"})
 	if err == nil {
 		t.Fatal("expected error when --file is missing, got nil")
 	}
@@ -787,7 +879,7 @@ func TestAgentAvatarNonexistentFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := runAgentAvatar(cmd, []string{"agent-123"})
+	err := runAgentAvatar(cmd, []string{"11111111-1111-4111-8111-111111111111"})
 	if err == nil {
 		t.Fatal("expected error for non-existent file, got nil")
 	}
@@ -819,7 +911,7 @@ func TestAgentAvatarSizeBoundary(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		err := runAgentAvatar(cmd, []string{"agent-123"})
+		err := runAgentAvatar(cmd, []string{"11111111-1111-4111-8111-111111111111"})
 		// We expect an error from the network call, not from size validation.
 		if err != nil && strings.Contains(err.Error(), "file too large") {
 			t.Fatalf("size validation should pass for exactly-5MB file, got: %v", err)
@@ -841,7 +933,7 @@ func TestAgentAvatarSizeBoundary(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		err := runAgentAvatar(cmd, []string{"agent-123"})
+		err := runAgentAvatar(cmd, []string{"11111111-1111-4111-8111-111111111111"})
 		if err == nil {
 			t.Fatal("expected error for 5MB+1 file, got nil")
 		}
@@ -873,7 +965,7 @@ func TestAgentAvatarCaseInsensitiveExtension(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			err := runAgentAvatar(cmd, []string{"agent-123"})
+			err := runAgentAvatar(cmd, []string{"11111111-1111-4111-8111-111111111111"})
 			// We expect an error from the network call, not from extension validation.
 			if err != nil && strings.Contains(err.Error(), "unsupported file format") {
 				t.Fatalf("extension validation should pass for %s, got: %v", ext, err)
@@ -885,17 +977,17 @@ func TestAgentAvatarCaseInsensitiveExtension(t *testing.T) {
 // TestAgentGetTableIncludesAvatarURL verifies the table output includes AVATAR_URL.
 func TestAgentGetTableIncludesAvatarURL(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/agents/agent-123" {
+		if r.URL.Path != "/api/agents/11111111-1111-4111-8111-111111111111" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		json.NewEncoder(w).Encode(map[string]any{
-			"id":         "agent-123",
-			"name":       "TestAgent",
-			"status":     "active",
+			"id":           "11111111-1111-4111-8111-111111111111",
+			"name":         "TestAgent",
+			"status":       "active",
 			"runtime_mode": "cloud",
-			"visibility": "workspace",
-			"avatar_url": "https://cdn.example.com/avatar.png",
-			"description": "A test agent",
+			"visibility":   "workspace",
+			"avatar_url":   "https://cdn.example.com/avatar.png",
+			"description":  "A test agent",
 		})
 	}))
 	defer srv.Close()
@@ -913,7 +1005,7 @@ func TestAgentGetTableIncludesAvatarURL(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := runAgentGet(cmd, []string{"agent-123"})
+	err := runAgentGet(cmd, []string{"11111111-1111-4111-8111-111111111111"})
 
 	w.Close()
 	os.Stdout = old

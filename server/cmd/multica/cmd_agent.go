@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
@@ -182,22 +183,102 @@ func resolveProfile(cmd *cobra.Command) string {
 	return val
 }
 
+type agentExecutionIdentity struct {
+	AgentID   string
+	AgentName string
+	TaskID    string
+}
+
+func resolveAgentExecutionIdentity() (agentExecutionIdentity, bool, error) {
+	identity := agentExecutionIdentity{
+		AgentID:   strings.TrimSpace(os.Getenv("MULTICA_AGENT_ID")),
+		AgentName: strings.TrimSpace(os.Getenv("MULTICA_AGENT_NAME")),
+		TaskID:    strings.TrimSpace(os.Getenv("MULTICA_TASK_ID")),
+	}
+	if identity.AgentID == "" && identity.TaskID == "" {
+		return agentExecutionIdentity{}, false, nil
+	}
+
+	missing := make([]string, 0, 2)
+	if identity.AgentID == "" {
+		missing = append(missing, "MULTICA_AGENT_ID")
+	}
+	if identity.TaskID == "" {
+		missing = append(missing, "MULTICA_TASK_ID")
+	}
+	if len(missing) > 0 {
+		return agentExecutionIdentity{}, true, fmt.Errorf(
+			"agent execution context is incomplete: %s must be set by the daemon (no fallback to member identity)",
+			strings.Join(missing, " and "),
+		)
+	}
+	if _, err := uuid.Parse(identity.AgentID); err != nil {
+		return agentExecutionIdentity{}, true, fmt.Errorf("agent execution context is invalid: MULTICA_AGENT_ID must be a UUID (no fallback to member identity)")
+	}
+	if _, err := uuid.Parse(identity.TaskID); err != nil {
+		return agentExecutionIdentity{}, true, fmt.Errorf("agent execution context is invalid: MULTICA_TASK_ID must be a UUID (no fallback to member identity)")
+	}
+
+	return identity, true, nil
+}
+
+func requireToken(cmd *cobra.Command) (string, error) {
+	token := resolveToken(cmd)
+	if token != "" {
+		return token, nil
+	}
+	if inAgentExecutionContext() {
+		return "", fmt.Errorf("authentication token is required: MULTICA_TOKEN must be set by the daemon in agent execution context (no fallback to user config)")
+	}
+	return "", fmt.Errorf("authentication token is required: use MULTICA_TOKEN env or run 'multica login'")
+}
+
+func tokenSourceSummary() string {
+	if v := strings.TrimSpace(os.Getenv("MULTICA_TOKEN")); v != "" {
+		return "env:MULTICA_TOKEN"
+	}
+	if inAgentExecutionContext() {
+		return "missing in agent execution context"
+	}
+	return "profile config"
+}
+
+func mutationIdentitySummary() (string, error) {
+	identity, inAgentContext, err := resolveAgentExecutionIdentity()
+	if err != nil {
+		return "", err
+	}
+	if !inAgentContext {
+		return "member", nil
+	}
+
+	actor := identity.AgentID
+	if identity.AgentName != "" {
+		actor = identity.AgentName + " (" + identity.AgentID + ")"
+	}
+	return fmt.Sprintf("agent %s [task %s]", actor, identity.TaskID), nil
+}
+
 func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	serverURL := resolveServerURL(cmd)
 	workspaceID := resolveWorkspaceID(cmd)
-	token := resolveToken(cmd)
+	token, err := requireToken(cmd)
+	if err != nil {
+		return nil, err
+	}
 
 	if serverURL == "" {
 		return nil, fmt.Errorf("server URL not set: use --server-url flag, MULTICA_SERVER_URL env, or 'multica config set server_url <url>'")
 	}
 
 	client := cli.NewAPIClient(serverURL, workspaceID, token)
-	// When running inside a daemon task, attribute actions to the agent.
-	if agentID := os.Getenv("MULTICA_AGENT_ID"); agentID != "" {
-		client.AgentID = agentID
+	identity, _, err := resolveAgentExecutionIdentity()
+	if err != nil {
+		return nil, err
 	}
-	if taskID := os.Getenv("MULTICA_TASK_ID"); taskID != "" {
-		client.TaskID = taskID
+	if identity.AgentID != "" {
+		client.AgentID = identity.AgentID
+		client.TaskID = identity.TaskID
 	}
 	return client, nil
 }
@@ -233,7 +314,7 @@ func normalizeAPIBaseURL(raw string) string {
 // user last configured, which is how cross-workspace contamination happens
 // when multiple workspaces share a host.
 func inAgentExecutionContext() bool {
-	return os.Getenv("MULTICA_AGENT_ID") != "" || os.Getenv("MULTICA_TASK_ID") != ""
+	return strings.TrimSpace(os.Getenv("MULTICA_AGENT_ID")) != "" || strings.TrimSpace(os.Getenv("MULTICA_TASK_ID")) != ""
 }
 
 func resolveWorkspaceID(cmd *cobra.Command) string {

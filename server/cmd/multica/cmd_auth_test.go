@@ -1,7 +1,12 @@
 package main
 
 import (
+	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -13,6 +18,30 @@ func testCmd() *cobra.Command {
 	cmd := &cobra.Command{}
 	cmd.PersistentFlags().String("profile", "", "")
 	return cmd
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stderr: %v", err)
+	}
+	os.Stderr = w
+	defer func() {
+		os.Stderr = old
+	}()
+
+	fn()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stderr writer: %v", err)
+	}
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read stderr: %v", err)
+	}
+	return string(out)
 }
 
 func TestResolveAppURL(t *testing.T) {
@@ -116,6 +145,73 @@ func TestResolveCallbackBinding(t *testing.T) {
 				t.Errorf("bind addr = %q, want %q", gotBind, tc.wantBind)
 			}
 		})
+	}
+}
+
+func TestRunAuthStatusReportsMutationIdentity(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/me" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer mul_test_token_1234567890" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"name":"Tester","email":"tester@example.com"}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mul_test_token_1234567890")
+	t.Setenv("MULTICA_AGENT_ID", "11111111-1111-4111-8111-111111111111")
+	t.Setenv("MULTICA_AGENT_NAME", "Codex")
+	t.Setenv("MULTICA_TASK_ID", "22222222-2222-4222-8222-222222222222")
+
+	stderr := captureStderr(t, func() {
+		if err := runAuthStatus(testCmd(), nil); err != nil {
+			t.Fatalf("runAuthStatus(): %v", err)
+		}
+	})
+
+	for _, want := range []string{
+		"Token source:      env:MULTICA_TOKEN",
+		"Mutation identity: agent Codex (11111111-1111-4111-8111-111111111111) [task 22222222-2222-4222-8222-222222222222]",
+		"User:              Tester (tester@example.com)",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr missing %q:\n%s", want, stderr)
+		}
+	}
+}
+
+func TestRunAuthStatusFlagsIncompleteAgentContext(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/me" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"name":"Tester","email":"tester@example.com"}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mul_test_token_1234567890")
+	t.Setenv("MULTICA_AGENT_ID", "11111111-1111-4111-8111-111111111111")
+	t.Setenv("MULTICA_TASK_ID", "")
+
+	stderr := captureStderr(t, func() {
+		if err := runAuthStatus(testCmd(), nil); err != nil {
+			t.Fatalf("runAuthStatus(): %v", err)
+		}
+	})
+
+	if !strings.Contains(stderr, "Mutation identity: invalid") {
+		t.Fatalf("stderr missing invalid mutation identity marker:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "MULTICA_TASK_ID") {
+		t.Fatalf("stderr missing missing-task guidance:\n%s", stderr)
 	}
 }
 

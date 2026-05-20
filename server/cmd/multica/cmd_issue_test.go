@@ -199,6 +199,18 @@ func newIssueCreateTestCmd() *cobra.Command {
 	return cmd
 }
 
+func newIssueCommentAddTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "comment-add"}
+	cmd.Flags().String("content", "", "")
+	cmd.Flags().Bool("content-stdin", false, "")
+	cmd.Flags().String("content-file", "", "")
+	cmd.Flags().String("parent", "", "")
+	cmd.Flags().StringSlice("attachment", nil, "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("profile", "", "")
+	return cmd
+}
+
 func TestRunIssueCreateSendsAllowDuplicate(t *testing.T) {
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -269,6 +281,100 @@ func TestRunIssueCreateShowsDuplicateMessage(t *testing.T) {
 	}
 	if got := err.Error(); got != want {
 		t.Fatalf("error = %q, want %q", got, want)
+	}
+}
+
+func TestRunIssueCreateAgentContextSendsAgentHeaders(t *testing.T) {
+	var gotAuth, gotAgent, gotTask string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/issues" {
+			http.NotFound(w, r)
+			return
+		}
+		gotAuth = r.Header.Get("Authorization")
+		gotAgent = r.Header.Get("X-Agent-ID")
+		gotTask = r.Header.Get("X-Task-ID")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":         "issue-1",
+			"identifier": "MUL-1",
+			"title":      "Agent issue",
+			"status":     "todo",
+			"priority":   "none",
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mul_test_token")
+	t.Setenv("MULTICA_AGENT_ID", "11111111-1111-4111-8111-111111111111")
+	t.Setenv("MULTICA_TASK_ID", "22222222-2222-4222-8222-222222222222")
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Agent issue")
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatalf("runIssueCreate: %v", err)
+	}
+
+	if gotAuth != "Bearer mul_test_token" || gotAgent != "11111111-1111-4111-8111-111111111111" || gotTask != "22222222-2222-4222-8222-222222222222" {
+		t.Fatalf("headers = auth:%q agent:%q task:%q", gotAuth, gotAgent, gotTask)
+	}
+}
+
+func TestRunIssueCommentAddPreservesMultilineAndAgentHeaders(t *testing.T) {
+	issueID := "1881a167-4bb6-4602-944b-f40ce4192fe6"
+	var gotAuth, gotAgent, gotTask, gotContent string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues/" + issueID:
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         issueID,
+				"identifier": "MUL-1852",
+				"title":      "Thread",
+			})
+		case "/api/issues/" + issueID + "/comments":
+			gotAuth = r.Header.Get("Authorization")
+			gotAgent = r.Header.Get("X-Agent-ID")
+			gotTask = r.Header.Get("X-Task-ID")
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode comment body: %v", err)
+			}
+			gotContent = fmt.Sprintf("%v", body["content"])
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":          "comment-1",
+				"issue_id":    issueID,
+				"author_type": "agent",
+				"author_id":   "11111111-1111-4111-8111-111111111111",
+				"content":     gotContent,
+				"type":        "comment",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mul_test_token")
+	t.Setenv("MULTICA_AGENT_ID", "11111111-1111-4111-8111-111111111111")
+	t.Setenv("MULTICA_TASK_ID", "22222222-2222-4222-8222-222222222222")
+
+	cmd := newIssueCommentAddTestCmd()
+	_ = cmd.Flags().Set("content-stdin", "true")
+	body := "first line\nsecond line\n"
+	pipeStdin(t, body, func() {
+		if err := runIssueCommentAdd(cmd, []string{issueID}); err != nil {
+			t.Fatalf("runIssueCommentAdd: %v", err)
+		}
+	})
+
+	if gotAuth != "Bearer mul_test_token" || gotAgent != "11111111-1111-4111-8111-111111111111" || gotTask != "22222222-2222-4222-8222-222222222222" {
+		t.Fatalf("headers = auth:%q agent:%q task:%q", gotAuth, gotAgent, gotTask)
+	}
+	if gotContent != "first line\nsecond line" {
+		t.Fatalf("content = %q, want preserved multiline body", gotContent)
 	}
 }
 
