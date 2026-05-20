@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -11,6 +11,7 @@ import {
 } from "@multica/core/paths";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
 import { CliInstallInstructions, OnboardingFlow } from "@multica/views/onboarding";
+import type { Workspace } from "@multica/core/types";
 
 /**
  * Web shell for the onboarding flow. The route is the platform chrome on
@@ -62,6 +63,23 @@ export default function OnboardingPage() {
     }
   }, [isLoading, user, hasOnboarded, workspacesFetched, workspaces, router]);
 
+  // Stable onComplete — avoids re-creating OnboardingFlow's internal
+  // useCallback chains on every parent render (which the workspace-list
+  // query refetch or auth-store subscription can trigger).
+  const handleComplete = useCallback(
+    (ws?: Workspace, issueId?: string) => {
+      completingRef.current = true;
+      if (ws && issueId) {
+        router.push(paths.workspace(ws.slug).issueDetail(issueId));
+      } else if (ws) {
+        router.push(paths.workspace(ws.slug).issues());
+      } else {
+        router.push(paths.root());
+      }
+    },
+    [router],
+  );
+
   if (isLoading || !user || hasOnboarded) return null;
 
   // Layout: page owns its own scroll (root layout sets `body {
@@ -71,19 +89,7 @@ export default function OnboardingPage() {
   return (
     <div className="h-full overflow-y-auto bg-background">
       <OnboardingFlow
-        onComplete={(ws, issueId) => {
-          // Runtime-connected onboarding now creates one focused
-          // onboarding issue. Skip/runtime-less exits still land on the
-          // workspace issues list.
-          completingRef.current = true;
-          if (ws && issueId) {
-            router.push(paths.workspace(ws.slug).issueDetail(issueId));
-          } else if (ws) {
-            router.push(paths.workspace(ws.slug).issues());
-          } else {
-            router.push(paths.root());
-          }
-        }}
+        onComplete={handleComplete}
         runtimeInstructions={<CliInstallInstructions />}
       />
     </div>

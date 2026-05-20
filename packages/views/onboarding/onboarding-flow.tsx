@@ -99,6 +99,11 @@ export function OnboardingFlow({
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [runtime, setRuntime] = useState<AgentRuntime | null>(null);
 
+  // Ref mirror of workspace — guarantees handleRuntimeNext always reads
+  // the latest value even if the useCallback closure captured a stale one.
+  const workspaceRef = useRef<Workspace | null>(workspace);
+  workspaceRef.current = workspace;
+
   // Fetched at Step 0 + Step 2. Step 2 uses it to detect a pre-existing
   // workspace from an earlier abandoned onboarding (so StepWorkspace shows
   // "Continue with {name}" instead of CreateWorkspaceForm — avoiding the
@@ -200,15 +205,21 @@ export function OnboardingFlow({
 
   const handleRuntimeNext = useCallback(
     async (rt: AgentRuntime | null) => {
-      if (!workspace) return;
+      // Read from ref to avoid stale-closure on workspace — the inline
+      // onComplete prop in OnboardingPage changes identity on every
+      // parent render, which forces this callback to recreate; but React
+      // may still deliver the PREVIOUS closure instance to a child that
+      // already captured it before the re-render committed.
+      const ws = workspaceRef.current;
+      if (!ws) return;
       if (!rt) {
         // No runtime -> no agent execution yet. Create one focused
         // self-serve onboarding issue instead of seeding the older
         // multi-issue starter project.
         try {
-          const result = await bootstrapNoRuntimeOnboarding(workspace.id);
-          await qc.invalidateQueries({ queryKey: issueKeys.all(workspace.id) });
-          onComplete(workspace, result.issue_id || undefined);
+          const result = await bootstrapNoRuntimeOnboarding(ws.id);
+          await qc.invalidateQueries({ queryKey: issueKeys.all(ws.id) });
+          onComplete(ws, result.issue_id || undefined);
         } catch (err) {
           toast.error(
             err instanceof Error ? err.message : t(($) => $.errors.skip_failed),
@@ -220,19 +231,20 @@ export function OnboardingFlow({
       setRuntime(rt);
       advanceFrom("runtime");
     },
-    [workspace, qc, onComplete, t, advanceFrom],
+    [qc, onComplete, t, advanceFrom],
   );
 
   const handleCreateTeammate = useCallback(async () => {
-    if (!workspace || !runtime) return;
+    const ws = workspaceRef.current;
+    if (!ws || !runtime) return;
 
     try {
-      const result = await bootstrapRuntimeOnboarding(workspace.id, runtime.id);
+      const result = await bootstrapRuntimeOnboarding(ws.id, runtime.id);
       await Promise.all([
-        qc.invalidateQueries({ queryKey: workspaceKeys.agents(workspace.id) }),
-        qc.invalidateQueries({ queryKey: issueKeys.all(workspace.id) }),
+        qc.invalidateQueries({ queryKey: workspaceKeys.agents(ws.id) }),
+        qc.invalidateQueries({ queryKey: issueKeys.all(ws.id) }),
       ]);
-      onComplete(workspace, result.issue_id || undefined);
+      onComplete(ws, result.issue_id || undefined);
     } catch (err) {
       toast.error(
         err instanceof Error
@@ -241,7 +253,7 @@ export function OnboardingFlow({
       );
       throw err;
     }
-  }, [workspace, runtime, qc, onComplete, t]);
+  }, [runtime, qc, onComplete, t]);
 
   const handleBack = useCallback((from: OnboardingStep) => {
     const idx = ONBOARDING_STEP_ORDER.indexOf(from);
