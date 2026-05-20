@@ -1463,7 +1463,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onClick={() => setMetadataOpen(true)}
           >
             {t(($) => $.detail.section_metadata)}
-            <span className="tabular-nums">
+            <span aria-hidden="true" className="tabular-nums">
               · {Object.keys(issue.metadata ?? {}).length}
             </span>
           </button>

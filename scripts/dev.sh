@@ -40,6 +40,9 @@ set -a
 . "$ENV_FILE"
 set +a
 
+PORT="${BACKEND_PORT:-${API_PORT:-${SERVER_PORT:-${PORT:-8080}}}}"
+export PORT
+
 # ---------- Install dependencies ----------
 if [ ! -d node_modules ]; then
   echo "==> Installing dependencies..."
