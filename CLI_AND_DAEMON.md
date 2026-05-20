@@ -144,7 +144,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | OpenCode | `opencode` | Open-source coding agent |
 | OpenClaw | `openclaw` | Open-source coding agent |
 | Hermes | `hermes` | Nous Research coding agent |
-| Gemini | `gemini` | Google's coding agent |
+| Gemini / AGY | `agy` | Google's Antigravity coding agent |
 | [Pi](https://pi.dev/) | `pi` | Pi coding agent |
 | [Cursor Agent](https://cursor.com/) | `cursor-agent` | Cursor's headless coding agent |
 | Kimi | `kimi` | Moonshot coding agent |
@@ -210,7 +210,7 @@ Agent-specific overrides:
 | `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
 | `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
 | `MULTICA_HERMES_MODEL` | Override the Hermes model used |
-| `MULTICA_GEMINI_PATH` | Custom path to the `gemini` binary |
+| `MULTICA_GEMINI_PATH` | Custom path to the `agy` binary |
 | `MULTICA_GEMINI_MODEL` | Override the Gemini model used |
 | `MULTICA_PI_PATH` | Custom path to the `pi` binary |
 | `MULTICA_PI_MODEL` | Override the Pi model used |

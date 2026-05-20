@@ -87,3 +87,10 @@ func TestLaunchHeaderReturnsEmptyForUnknownType(t *testing.T) {
 		t.Errorf("expected empty header for unknown type, got %q", header)
 	}
 }
+
+func TestLaunchHeaderUsesAgyForGeminiProvider(t *testing.T) {
+	t.Parallel()
+	if header := LaunchHeader("gemini"); header != "agy (stream-json)" {
+		t.Errorf("LaunchHeader(%q) = %q, want %q", "gemini", header, "agy (stream-json)")
+	}
+}

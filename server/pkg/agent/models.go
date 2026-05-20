@@ -204,8 +204,8 @@ func codexStaticModels() []Model {
 	}
 }
 
-// geminiStaticModels lists the values we pass via `gemini -m`. Gemini
-// CLI has no `models list` subcommand, so dynamic discovery isn't
+// geminiStaticModels lists the values we pass via `agy -m`. AGY
+// has no `models list` subcommand, so dynamic discovery isn't
 // possible; the next best thing is to expose the CLI's own aliases
 // (auto / pro / flash / flash-lite and the `auto-gemini-*` family)
 // alongside a few explicit version pins. Aliases track whatever the

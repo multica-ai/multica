@@ -12,7 +12,7 @@ func TestBuildGeminiArgsBaseline(t *testing.T) {
 	args := buildGeminiArgs("write a haiku", ExecOptions{}, slog.Default())
 	expected := []string{
 		"-p", "write a haiku",
-		"--yolo",
+		"--dangerously-skip-permissions",
 		"-o", "stream-json",
 	}
 
@@ -126,7 +126,7 @@ func TestBuildGeminiEnvRespectsExplicitOverride(t *testing.T) {
 	t.Parallel()
 
 	// Users who deliberately set the value (e.g. to "false" to opt back into
-	// gemini's folder-trust gate, or to a future-proofed value) must win over
+	// the legacy Gemini folder-trust gate, or to a future-proofed value) must win over
 	// our daemon default.
 	env := buildGeminiEnv(map[string]string{"GEMINI_CLI_TRUST_WORKSPACE": "false"})
 	got, ok := envLookup(env, "GEMINI_CLI_TRUST_WORKSPACE")

@@ -77,15 +77,17 @@ Model routing goes through your GitHub account entitlement — the tool doesn't 
 | Authentication | Browser-based GitHub login through the CLI. |
 | Notes | Requires an active GitHub Copilot subscription on the signed-in account. |
 
-### Gemini (Google)
+### Gemini / AGY (Google)
 
-Supports the Gemini 2.5 and 3 series. No session resumption, no MCP — suitable for one-shot tasks.
+Supports the Gemini 2.5 and 3 series through Google's Antigravity CLI. No session resumption, no MCP — suitable for one-shot tasks.
 
 | | |
 |---|---|
-| Daemon looks for | `gemini` |
-| Install | Follow the official guide at [github.com/google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli). The standard route is the npm package `@google/gemini-cli`. |
-| Authentication | `gemini` will prompt for a Google account login, or set `GEMINI_API_KEY`. |
+| Daemon looks for | `agy` |
+| Install | Follow the official Antigravity CLI install instructions at [antigravity.google/download](https://antigravity.google/download). |
+| Authentication | Authenticate with Antigravity or run `agy` interactively before using the daemon. `GEMINI_API_KEY` remains supported where AGY supports API-key auth. |
+| Settings | AGY stores CLI settings in `~/.gemini/antigravity-cli/settings.json`; use `/config`, `/settings`, or `/permissions` in the TUI to adjust safety and permissions. |
+| Headless mode | Multica launches AGY with `--dangerously-skip-permissions` so daemon jobs do not block on interactive approvals. |
 
 ### OpenCode (SST)
 

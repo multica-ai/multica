@@ -101,7 +101,7 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli)
+	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, agy, pi, cursor, kimi, kiro-cli)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
 }
@@ -157,7 +157,7 @@ var launchHeaders = map[string]string{
 	"codex":    "codex app-server",
 	"copilot":  "copilot (json)",
 	"cursor":   "cursor-agent (stream-json)",
-	"gemini":   "gemini (stream-json)",
+	"gemini":   "agy (stream-json)",
 	"hermes":   "hermes acp",
 	"openclaw": "openclaw agent (json)",
 	"opencode": "opencode run (json)",

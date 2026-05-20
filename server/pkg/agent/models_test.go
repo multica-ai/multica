@@ -55,7 +55,7 @@ func TestListModelsCopilotFallsBackToStatic(t *testing.T) {
 }
 
 func TestGeminiStaticModelsExposesAliasesAndGemini3(t *testing.T) {
-	// Gemini CLI has no `models list` subcommand, so we expose the
+	// AGY has no `models list` subcommand, so we expose the
 	// CLI's own aliases (auto / pro / flash / flash-lite) plus
 	// explicit version pins including Gemini 3. Regression guard
 	// for multica-ai/multica#1503 — Gemini 3 must be selectable.
@@ -144,9 +144,9 @@ func TestInferCopilotProvider(t *testing.T) {
 		"raptor-mini":       "",
 		// negative cases: must not be misidentified as OpenAI
 		// reasoning series even though they start with `o`.
-		"opus-fake":         "",
-		"omni":              "",
-		"o":                 "",
+		"opus-fake": "",
+		"omni":      "",
+		"o":         "",
 	}
 	for id, want := range cases {
 		if got := inferCopilotProvider(id); got != want {

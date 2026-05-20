@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// geminiBackend implements Backend by spawning the Google Gemini CLI
+// geminiBackend implements Backend by spawning Google's AGY CLI
 // with `--output-format stream-json` and parsing its NDJSON event stream.
 type geminiBackend struct {
 	cfg Config
@@ -20,10 +20,10 @@ type geminiBackend struct {
 func (b *geminiBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
-		execPath = "gemini"
+		execPath = "agy"
 	}
 	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("gemini executable not found at %q: %w", execPath, err)
+		return nil, fmt.Errorf("agy executable not found at %q: %w", execPath, err)
 	}
 
 	timeout := opts.Timeout
@@ -46,16 +46,16 @@ func (b *geminiBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("gemini stdout pipe: %w", err)
+		return nil, fmt.Errorf("agy stdout pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[gemini:stderr] ")
+	cmd.Stderr = newLogWriter(b.cfg.Logger, "[agy:stderr] ")
 
 	if err := cmd.Start(); err != nil {
 		cancel()
-		return nil, fmt.Errorf("start gemini: %w", err)
+		return nil, fmt.Errorf("start agy: %w", err)
 	}
 
-	b.cfg.Logger.Info("gemini started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info("agy started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -144,16 +144,16 @@ func (b *geminiBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		if runCtx.Err() == context.DeadlineExceeded {
 			finalStatus = "timeout"
-			finalError = fmt.Sprintf("gemini timed out after %s", timeout)
+			finalError = fmt.Sprintf("agy timed out after %s", timeout)
 		} else if runCtx.Err() == context.Canceled {
 			finalStatus = "aborted"
 			finalError = "execution cancelled"
 		} else if waitErr != nil && finalStatus == "completed" {
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("gemini exited with error: %v", waitErr)
+			finalError = fmt.Sprintf("agy exited with error: %v", waitErr)
 		}
 
-		b.cfg.Logger.Info("gemini finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("agy finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		resCh <- Result{
 			Status:     finalStatus,
@@ -182,10 +182,10 @@ func (b *geminiBackend) accumulateUsage(usage map[string]TokenUsage, stats *gemi
 // ── Gemini stream-json event types ──
 
 type geminiStreamEvent struct {
-	Type      string          `json:"type"`
-	Timestamp string          `json:"timestamp,omitempty"`
-	SessionID string          `json:"session_id,omitempty"`
-	Model     string          `json:"model,omitempty"`
+	Type      string `json:"type"`
+	Timestamp string `json:"timestamp,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	Model     string `json:"model,omitempty"`
 
 	// message fields
 	Role    string `json:"role,omitempty"`
@@ -216,12 +216,12 @@ type geminiStreamError struct {
 }
 
 type geminiStreamStats struct {
-	TotalTokens  int                          `json:"total_tokens"`
-	InputTokens  int                          `json:"input_tokens"`
-	OutputTokens int                          `json:"output_tokens"`
-	DurationMs   int                          `json:"duration_ms"`
-	ToolCalls    int                          `json:"tool_calls"`
-	Models       map[string]geminiModelStats  `json:"models,omitempty"`
+	TotalTokens  int                         `json:"total_tokens"`
+	InputTokens  int                         `json:"input_tokens"`
+	OutputTokens int                         `json:"output_tokens"`
+	DurationMs   int                         `json:"duration_ms"`
+	ToolCalls    int                         `json:"tool_calls"`
+	Models       map[string]geminiModelStats `json:"models,omitempty"`
 }
 
 type geminiModelStats struct {
@@ -233,27 +233,30 @@ type geminiModelStats struct {
 
 // ── Arg builder ──
 
-// buildGeminiArgs assembles the argv for a one-shot gemini invocation.
+// buildGeminiArgs assembles the argv for a one-shot AGY invocation.
 //
 // Flags:
 //
 //	-p / --prompt         non-interactive prompt (the user's task)
-//	--yolo                auto-approve all tool executions
+//	--dangerously-skip-permissions
+//	                      auto-approve all tool executions
 //	-o stream-json        streaming NDJSON output for live events
 //	-m <model>            optional model override
 //	-r <session>          resume a previous session (if provided)
+//
 // geminiBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args.
 var geminiBlockedArgs = map[string]blockedArgMode{
-	"-p":     blockedWithValue,  // non-interactive prompt
-	"--yolo": blockedStandalone, // auto-approve tool use
-	"-o":     blockedWithValue,  // stream-json output format
+	"-p":                             blockedWithValue,  // non-interactive prompt
+	"--dangerously-skip-permissions": blockedStandalone, // auto-approve tool use
+	"--yolo":                         blockedStandalone, // legacy Gemini spelling
+	"-o":                             blockedWithValue,  // stream-json output format
 }
 
 func buildGeminiArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{
 		"-p", prompt,
-		"--yolo",
+		"--dangerously-skip-permissions",
 		"-o", "stream-json",
 	}
 	if opts.Model != "" {
@@ -267,18 +270,15 @@ func buildGeminiArgs(prompt string, opts ExecOptions, logger *slog.Logger) []str
 }
 
 // buildGeminiEnv wraps buildEnv and defaults GEMINI_CLI_TRUST_WORKSPACE=true so
-// gemini's folder-trust gate doesn't fail every headless daemon invocation with
-// exit code 55 (FatalUntrustedWorkspaceError). When a user has enabled
-// `security.folderTrust.enabled` in `~/.gemini/settings.json` and the daemon
-// spawns gemini in a worktree that isn't pre-listed in `trustedFolders.json`,
-// the CLI throws during startup warnings with no interactive prompt available,
-// so the run fails after ~10s with no useful output (see #2516).
+// legacy Gemini CLI folder-trust gates do not fail every headless daemon
+// invocation with exit code 55 (FatalUntrustedWorkspaceError). AGY stores its
+// persistent settings under `~/.gemini/antigravity-cli/settings.json` and the
+// daemon supplies AGY's headless permission bypass on the command line, but this
+// environment default remains harmless and preserves compatibility for older
+// Gemini installations and user-pinned MULTICA_GEMINI_PATH values.
 //
-// The env-var bypass is gemini's own documented escape hatch (mirrors the
-// `--skip-trust` CLI flag) and has been in place for the entire folder-trust
-// feature lifetime, so this works on every gemini version that can produce the
-// crash. If the caller explicitly sets the same key in cfg.Env it wins,
-// preserving the ability to opt back into the check.
+// If the caller explicitly sets the same key in cfg.Env it wins, preserving the
+// ability to opt back into the check.
 func buildGeminiEnv(extra map[string]string) []string {
 	const trustKey = "GEMINI_CLI_TRUST_WORKSPACE"
 	if _, ok := extra[trustKey]; ok {
