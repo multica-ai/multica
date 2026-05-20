@@ -29,13 +29,13 @@ func TestBuildGeminiArgsBaseline(t *testing.T) {
 func TestBuildGeminiArgsWithModel(t *testing.T) {
 	t.Parallel()
 
-	args := buildGeminiArgs("hi", ExecOptions{Model: "gemini-2.5-pro"}, slog.Default())
+	args := buildGeminiArgs("hi", ExecOptions{Model: "gemini-3.5-flash-high"}, slog.Default())
 
 	var foundModel bool
 	for i, a := range args {
 		if a == "-m" {
-			if i+1 >= len(args) || args[i+1] != "gemini-2.5-pro" {
-				t.Fatalf("expected -m followed by gemini-2.5-pro, got %v", args)
+			if i+1 >= len(args) || args[i+1] != "gemini-3.5-flash-high" {
+				t.Fatalf("expected -m followed by gemini-3.5-flash-high, got %v", args)
 			}
 			foundModel = true
 			break

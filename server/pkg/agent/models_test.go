@@ -54,33 +54,44 @@ func TestListModelsCopilotFallsBackToStatic(t *testing.T) {
 	}
 }
 
-func TestGeminiStaticModelsExposesAliasesAndGemini3(t *testing.T) {
-	// AGY has no `models list` subcommand, so we expose the
-	// CLI's own aliases (auto / pro / flash / flash-lite) plus
-	// explicit version pins including Gemini 3. Regression guard
-	// for multica-ai/multica#1503 — Gemini 3 must be selectable.
+func TestGeminiStaticModelsExposesAgyOneCatalog(t *testing.T) {
+	// AGY has no `models list` subcommand, so this hand-maintained
+	// catalog mirrors AGY 1.0.0's model picker. Regression guard:
+	// Multica's dropdown should expose the current cross-provider AGY
+	// choices, not the old Gemini-only aliases.
 	models := geminiStaticModels()
 	ids := map[string]Model{}
 	for _, m := range models {
 		ids[m.ID] = m
 	}
 	for _, want := range []string{
-		"auto", "auto-gemini-2.5",
-		"pro", "flash", "flash-lite",
-		"gemini-3-pro-preview", "gemini-3-flash-preview",
-		"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite",
+		"gemini-3.5-flash-high",
+		"gemini-3.5-flash-medium",
+		"gemini-3.1-pro-high",
+		"gemini-3.1-pro-low",
+		"claude-sonnet-4.6-thinking",
+		"claude-opus-4.6-thinking",
+		"gpt-oss-120b-medium",
 	} {
 		if _, ok := ids[want]; !ok {
-			t.Errorf("missing expected Gemini model %q in: %+v", want, models)
+			t.Errorf("missing expected AGY model %q in: %+v", want, models)
 		}
 	}
-	auto, ok := ids["auto"]
-	if !ok || !auto.Default {
-		t.Errorf("expected `auto` to be the default Gemini entry, got %+v", auto)
+	providers := map[string]string{
+		"gemini-3.5-flash-high":      "google",
+		"gemini-3.5-flash-medium":    "google",
+		"gemini-3.1-pro-high":        "google",
+		"gemini-3.1-pro-low":         "google",
+		"claude-sonnet-4.6-thinking": "anthropic",
+		"claude-opus-4.6-thinking":   "anthropic",
+		"gpt-oss-120b-medium":        "openai",
 	}
 	for _, m := range models {
-		if m.Provider != "google" {
-			t.Errorf("all Gemini entries must carry Provider=google, got %+v", m)
+		if got, want := m.Provider, providers[m.ID]; got != want {
+			t.Errorf("AGY entry %q provider = %q, want %q", m.ID, got, want)
+		}
+		if m.Default {
+			t.Errorf("AGY entries should not set Default; AGY settings/env/default routing decides. got %+v", m)
 		}
 	}
 }
