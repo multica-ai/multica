@@ -502,6 +502,30 @@ func (q *Queries) TransferSquadAssignees(ctx context.Context, arg TransferSquadA
 	return err
 }
 
+const transferSquadAutopilotsToLeader = `-- name: TransferSquadAutopilotsToLeader :exec
+UPDATE autopilot
+SET assignee_type = 'agent',
+    assignee_id = $2,
+    updated_at = now()
+WHERE assignee_type = 'squad' AND assignee_id = $1
+`
+
+type TransferSquadAutopilotsToLeaderParams struct {
+	AssigneeID   pgtype.UUID `json:"assignee_id"`
+	AssigneeID_2 pgtype.UUID `json:"assignee_id_2"`
+}
+
+// Mirrors TransferSquadAssignees for autopilot rows: when a squad is archived,
+// any autopilot still pointing at the squad would otherwise dangle and the
+// admission gate would skip every subsequent dispatch with "assignee squad
+// cannot be resolved". Rewrite the assignee in place to the leader agent so
+// the autopilot keeps firing under the same leader-only execution semantics
+// it had a moment before the archive (Path A from MUL-2429).
+func (q *Queries) TransferSquadAutopilotsToLeader(ctx context.Context, arg TransferSquadAutopilotsToLeaderParams) error {
+	_, err := q.db.Exec(ctx, transferSquadAutopilotsToLeader, arg.AssigneeID, arg.AssigneeID_2)
+	return err
+}
+
 const updateSquad = `-- name: UpdateSquad :one
 UPDATE squad SET
     name = COALESCE($2, name),

@@ -1379,22 +1379,49 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	}
 
 	// Wire format matches handler.ModelEntry. Use a struct (not
-	// map[string]string) so the Default bool round-trips — without
-	// it the UI loses its "default" badge on the advertised pick.
+	// map[string]string) so the Default bool and the per-model
+	// Thinking catalog round-trip — without it the UI loses its
+	// "default" badge on the advertised pick and the thinking-level
+	// picker for claude/codex (MUL-2339).
+	type thinkingLevelWire struct {
+		Value       string `json:"value"`
+		Label       string `json:"label"`
+		Description string `json:"description,omitempty"`
+	}
+	type modelThinkingWire struct {
+		SupportedLevels []thinkingLevelWire `json:"supported_levels"`
+		DefaultLevel    string              `json:"default_level,omitempty"`
+	}
 	type modelWire struct {
-		ID       string `json:"id"`
-		Label    string `json:"label"`
-		Provider string `json:"provider,omitempty"`
-		Default  bool   `json:"default,omitempty"`
+		ID       string             `json:"id"`
+		Label    string             `json:"label"`
+		Provider string             `json:"provider,omitempty"`
+		Default  bool               `json:"default,omitempty"`
+		Thinking *modelThinkingWire `json:"thinking,omitempty"`
 	}
 	wire := make([]modelWire, 0, len(models))
 	for _, m := range models {
-		wire = append(wire, modelWire{
+		entry := modelWire{
 			ID:       m.ID,
 			Label:    m.Label,
 			Provider: m.Provider,
 			Default:  m.Default,
-		})
+		}
+		if m.Thinking != nil {
+			levels := make([]thinkingLevelWire, 0, len(m.Thinking.SupportedLevels))
+			for _, lvl := range m.Thinking.SupportedLevels {
+				levels = append(levels, thinkingLevelWire{
+					Value:       lvl.Value,
+					Label:       lvl.Label,
+					Description: lvl.Description,
+				})
+			}
+			entry.Thinking = &modelThinkingWire{
+				SupportedLevels: levels,
+				DefaultLevel:    m.Thinking.DefaultLevel,
+			}
+		}
+		wire = append(wire, entry)
 	}
 	d.reportModelListResult(ctx, rt, requestID, map[string]any{
 		"status":    "completed",
@@ -2505,6 +2532,38 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if model == "" {
 		model = entry.Model
 	}
+	thinkingLevel := ""
+	if task.Agent != nil {
+		thinkingLevel = task.Agent.ThinkingLevel
+	}
+	// Per-model guard: the server validates the literal token against the
+	// provider's enum, but per-model gaps (Claude's `xhigh` on a non-Opus
+	// model, Codex's per-model `supported_reasoning_levels`) only resolve
+	// here, against the daemon's local CLI catalog. Invalid combinations
+	// log a warning and drop the level rather than failing the task, so a
+	// stale persisted value never blocks execution. Empty model is passed
+	// through unchanged — ValidateThinkingLevel resolves it to the
+	// provider's default model internally so default-model tasks aren't
+	// misjudged. Discovery errors fail open: if we can't list models, we
+	// keep the persisted level and let the CLI surface any objection.
+	if thinkingLevel != "" {
+		ok, err := agent.ValidateThinkingLevel(ctx, provider, entry.Path, model, thinkingLevel)
+		if err != nil {
+			taskLog.Warn("thinking_level: catalog lookup failed; passing through",
+				"provider", provider,
+				"model", model,
+				"thinking_level", thinkingLevel,
+				"error", err,
+			)
+		} else if !ok {
+			taskLog.Warn("thinking_level: not valid for this (provider, model); skipping injection",
+				"provider", provider,
+				"model", model,
+				"thinking_level", thinkingLevel,
+			)
+			thinkingLevel = ""
+		}
+	}
 	execOpts := agent.ExecOptions{
 		Cwd:                       env.WorkDir,
 		Model:                     model,
@@ -2514,6 +2573,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ExtraArgs:                 extraArgs,
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
+		ThinkingLevel:             thinkingLevel,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
@@ -2659,13 +2719,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if comment == "" {
 			comment = fmt.Sprintf("%s timed out after %s", provider, d.cfg.AgentTimeout)
 		}
+		failureReason := "timeout"
+		if reason, ok := classifyResumeUnsafeTimeout(provider, comment); ok {
+			taskLog.Warn("agent timed out with resume-unsafe session, classifying as blocked",
+				"failure_reason", reason,
+			)
+			failureReason = reason
+		}
 		return TaskResult{
 			Status:        "blocked",
 			Comment:       comment,
 			SessionID:     result.SessionID,
 			WorkDir:       env.WorkDir,
 			EnvRoot:       env.RootDir,
-			FailureReason: "timeout",
+			FailureReason: failureReason,
 			Usage:         usageEntries,
 		}, nil
 	case "idle_watchdog":

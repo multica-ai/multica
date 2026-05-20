@@ -72,6 +72,9 @@
     "section_danger": "危险操作",
     "field_agent": "智能体",
     "field_output_mode": "输出模式",
+    "field_project": "关联项目",
+    "no_project": "不关联项目",
+    "project_unavailable": "项目不可用",
     "field_prompt": "Prompt",
     "add_trigger": "添加触发器",
     "no_triggers": "未配置触发器。添加一个时间表让它自动运行。",
@@ -238,7 +241,11 @@
     "toast_update_partial_with_reason": "自动化已更新，但时间表保存失败：{{reason}}",
     "toast_update_failed": "更新自动化失败",
     "section_agent": "智能体",
+    "section_assignee": "执行方",
     "select_agent": "选择智能体",
+    "select_assignee": "选择智能体或小队",
+    "section_project": "关联项目",
+    "no_project": "不关联项目",
     "section_output_mode": "输出模式",
     "section_schedule": "时间表",
     "section_trigger_kind": "触发方式",
@@ -326,8 +333,11 @@
     }
   },
   "agent_picker": {
-    "filter_placeholder": "筛选智能体...",
-    "select_agent": "选择智能体"
+    "filter_placeholder": "筛选智能体或小队...",
+    "select_agent": "选择智能体",
+    "select_assignee": "选择智能体或小队",
+    "agents_group": "智能体",
+    "squads_group": "小队"
   },
   "timezone_picker": {
     "search_placeholder": "搜索时区..."

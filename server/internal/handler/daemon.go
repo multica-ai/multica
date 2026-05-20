@@ -1159,14 +1159,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
 		resp.Agent = &TaskAgentData{
-			ID:           uuidToString(agent.ID),
-			Name:         agent.Name,
-			Instructions: agent.Instructions,
-			Skills:       skills,
-			CustomEnv:    customEnv,
-			CustomArgs:   customArgs,
-			McpConfig:    mcpConfig,
-			Model:        agent.Model.String,
+			ID:            uuidToString(agent.ID),
+			Name:          agent.Name,
+			Instructions:  agent.Instructions,
+			Skills:        skills,
+			CustomEnv:     customEnv,
+			CustomArgs:    customArgs,
+			McpConfig:     mcpConfig,
+			Model:         agent.Model.String,
+			ThinkingLevel: agent.ThinkingLevel.String,
 		}
 	}
 
@@ -1390,26 +1391,28 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
-			// Resume chat sessions only when the stored pointer was produced
-			// by the same runtime as the claiming task. When the chat_session
-			// pointer is missing (legacy NULL runtime_id), stale (last task
-			// failed before reporting completion), or runtime-mismatched, fall
-			// back to the most recent task row that recorded a session_id —
-			// otherwise a single failed turn would silently drop the entire
-			// conversation memory on the next message. The fallback also
-			// requires runtime to match.
-			if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
-				resp.PriorSessionID = cs.SessionID.String
-			}
-			if cs.WorkDir.Valid {
-				resp.PriorWorkDir = cs.WorkDir.String
-			}
-			if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil && prior.SessionID.Valid {
-				if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
-					resp.PriorSessionID = prior.SessionID.String
+			if !task.ForceFreshSession {
+				// Resume chat sessions only when the stored pointer was produced
+				// by the same runtime as the claiming task. When the chat_session
+				// pointer is missing (legacy NULL runtime_id), stale (last task
+				// failed before reporting completion), or runtime-mismatched, fall
+				// back to the most recent task row that recorded a session_id —
+				// otherwise a single failed turn would silently drop the entire
+				// conversation memory on the next message. The fallback also
+				// requires runtime to match.
+				if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
+					resp.PriorSessionID = cs.SessionID.String
 				}
-				if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
-					resp.PriorWorkDir = prior.WorkDir.String
+				if cs.WorkDir.Valid {
+					resp.PriorWorkDir = cs.WorkDir.String
+				}
+				if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil && prior.SessionID.Valid {
+					if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
+						resp.PriorSessionID = prior.SessionID.String
+					}
+					if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
+						resp.PriorWorkDir = prior.WorkDir.String
+					}
 				}
 			}
 			// Load the latest user message for the chat prompt, plus any
@@ -2072,8 +2075,12 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 // Verifies the task belongs to the caller's workspace.
 func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
+	taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task_id")
+	if !ok {
+		return
+	}
 
-	task, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskID))
+	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "task not found")
 		return
@@ -2097,11 +2104,11 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		messages, queryErr = h.Queries.ListTaskMessagesSince(r.Context(), db.ListTaskMessagesSinceParams{
-			TaskID: parseUUID(taskID),
+			TaskID: taskUUID,
 			Seq:    int32(sinceSeq),
 		})
 	} else {
-		messages, queryErr = h.Queries.ListTaskMessages(r.Context(), parseUUID(taskID))
+		messages, queryErr = h.Queries.ListTaskMessages(r.Context(), taskUUID)
 	}
 	if queryErr != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list task messages")

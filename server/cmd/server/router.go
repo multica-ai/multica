@@ -326,6 +326,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
+					// Listing GitHub installations is member-visible so the
+					// integrations tab no longer renders blank for non-admins;
+					// the handler strips the management handle and adds a
+					// can_manage hint so the UI can gate connect/disconnect.
+					r.Get("/github/installations", h.ListGitHubInstallations)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -342,12 +347,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// Owner-only access
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
 
-				// GitHub integration — admin-only operations live here so the
-				// nesting matches the rest of /api/workspaces/{id}/* routes.
+				// GitHub integration — connect / disconnect remain admin-only;
+				// the read-only list endpoint lives in the member-level group
+				// above so non-admins can see the workspace's connection state.
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Get("/github/connect", h.GitHubConnect)
-					r.Get("/github/installations", h.ListGitHubInstallations)
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
 				})
 			})

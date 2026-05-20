@@ -411,6 +411,13 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 	"--input-format":    blockedWithValue,  // stream-json protocol
 	"--permission-mode": blockedWithValue,  // bypassPermissions for autonomous operation
 	"--mcp-config":      blockedWithValue,  // set by daemon from agent.mcp_config
+	// `--effort` is owned by the per-agent thinking_level picker so a
+	// user-supplied custom_arg cannot silently outvote it. The daemon
+	// injects --effort only when opts.ThinkingLevel is set; if a user
+	// nevertheless writes it in custom_args we drop the duplicate and
+	// log a warning rather than letting the CLI receive two conflicting
+	// --effort values.
+	"--effort": blockedWithValue,
 }
 
 func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
@@ -431,6 +438,13 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
+	}
+	if opts.ThinkingLevel != "" {
+		// Slotted right after --model so the per-session effort runs
+		// against the same model selection the args advertise; the CLI
+		// itself accepts the flag in any order but this ordering makes
+		// the launch line readable in `agent command` logs.
+		args = append(args, "--effort", opts.ThinkingLevel)
 	}
 	if opts.MaxTurns > 0 {
 		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
