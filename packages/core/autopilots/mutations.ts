@@ -157,3 +157,15 @@ export function useReplayAutopilotDelivery() {
     },
   });
 }
+
+export function useCancelAutopilotRun() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ autopilotId, runId }: { autopilotId: string; runId: string }) =>
+      api.cancelAutopilotRun(autopilotId, runId),
+    onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: autopilotKeys.runs(wsId, vars.autopilotId) });
+    },
+  });
+}
