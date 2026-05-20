@@ -20,6 +20,9 @@ var opencodeBlockedArgs = map[string]blockedArgMode{
 	"--format":                       blockedWithValue,  // json output format for daemon communication
 	"--dir":                          blockedWithValue,  // task workdir anchor for skill / AGENTS.md discovery
 	"--dangerously-skip-permissions": blockedStandalone, // daemon manages non-interactive permission prompts
+	"--model":                        blockedWithValue,  // model is set by daemon from agent model_hint
+	"--prompt":                       blockedWithValue,  // system prompt is set by daemon
+	"--session":                      blockedWithValue,  // session resume is managed by daemon
 }
 
 // opencodeBackend implements Backend by spawning `opencode run --format json`
