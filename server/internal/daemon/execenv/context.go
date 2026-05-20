@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/multica-ai/multica/server/internal/runcontext"
 )
 
 // writeContextFiles renders and writes .agent_context/issue_context.md and
@@ -34,6 +36,10 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
 		return fmt.Errorf("write issue_context.md: %w", err)
 	}
 
+	if err := writeRunContext(workDir, ctx); err != nil {
+		return fmt.Errorf("write run context: %w", err)
+	}
+
 	if len(ctx.AgentSkills) > 0 {
 		skillsDir, err := resolveSkillsDir(workDir, provider)
 		if err != nil {
@@ -57,6 +63,36 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
 	}
 
 	return nil
+}
+
+func runContextPath(workDir string) string {
+	return filepath.Join(workDir, ".multica", "run", "context.json")
+}
+
+func writeRunContext(workDir string, ctx TaskContextForEnv) error {
+	dir := filepath.Dir(runContextPath(workDir))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+
+	payload := runcontext.BuildFile(
+		runcontext.TaskFields{
+			ID:          ctx.TaskID,
+			Kind:        ctx.TaskKind,
+			Attempt:     ctx.TaskAttempt,
+			MaxAttempts: ctx.TaskMaxAttempts,
+		},
+		runcontext.IssueSnapshot{
+			Issue:      ctx.IssueSnapshot,
+			Parent:     ctx.ParentSnapshot,
+			Properties: ctx.Properties,
+		},
+	)
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(runContextPath(workDir), data, 0o644)
 }
 
 // projectResourceFile is the on-disk JSON written into the agent's working
@@ -337,6 +373,7 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("## Quick Start\n\n")
 	fmt.Fprintf(&b, "Run `multica issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
+	b.WriteString("Machine-readable first-class fields are also available via `MULTICA_RUN_CONTEXT` -> `.multica/run/context.json`; treat that file as the dispatch-time snapshot.\n\n")
 
 	if len(ctx.AgentSkills) > 0 {
 		b.WriteString("## Agent Skills\n\n")

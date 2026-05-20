@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/runcontext"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -1124,6 +1125,21 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp := taskToResponse(*task)
+	if task.IssueID.Valid {
+		snapshot, err := runcontext.ParseIssueSnapshot(task.Context)
+		if err != nil {
+			slog.Warn("failed to parse stored issue run-context snapshot",
+				"task_id", uuidToString(task.ID),
+				"issue_id", uuidToString(task.IssueID),
+				"error", err,
+			)
+			resp.Properties = runcontext.EmptyProperties()
+		} else {
+			resp.Issue = snapshot.Issue
+			resp.Parent = snapshot.Parent
+			resp.Properties = snapshot.Properties
+		}
+	}
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
 		skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
 		var customEnv map[string]string
@@ -1182,6 +1198,55 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
+			prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+			if resp.Issue == nil {
+				resp.Issue = &runcontext.IssueFields{
+					ID:            uuidToString(issue.ID),
+					Identifier:    runcontext.FormatIssueIdentifier(prefix, issue.Number),
+					Title:         issue.Title,
+					Status:        issue.Status,
+					Priority:      issue.Priority,
+					ParentIssueID: uuidToString(issue.ParentIssueID),
+					ProjectID:     uuidToString(issue.ProjectID),
+				}
+				resp.Properties = runcontext.EmptyProperties()
+				slog.Warn("claimed issue task missing stored run-context snapshot; falling back to current issue fields",
+					"task_id", uuidToString(task.ID),
+					"issue_id", uuidToString(issue.ID),
+				)
+			} else {
+				if resp.Issue.ID == "" {
+					resp.Issue.ID = uuidToString(issue.ID)
+				}
+				if resp.Issue.Identifier == "" {
+					resp.Issue.Identifier = runcontext.FormatIssueIdentifier(prefix, issue.Number)
+				}
+				if resp.Issue.Title == "" {
+					resp.Issue.Title = issue.Title
+				}
+				if resp.Issue.Status == "" {
+					resp.Issue.Status = issue.Status
+				}
+				if resp.Issue.Priority == "" {
+					resp.Issue.Priority = issue.Priority
+				}
+				if resp.Issue.ParentIssueID == "" {
+					resp.Issue.ParentIssueID = uuidToString(issue.ParentIssueID)
+				}
+				if resp.Issue.ProjectID == "" {
+					resp.Issue.ProjectID = uuidToString(issue.ProjectID)
+				}
+			}
+			if resp.Parent == nil && issue.ParentIssueID.Valid {
+				if parent, err := h.Queries.GetIssue(r.Context(), issue.ParentIssueID); err == nil {
+					resp.Parent = &runcontext.ParentFields{
+						ID:         uuidToString(parent.ID),
+						Identifier: runcontext.FormatIssueIdentifier(prefix, parent.Number),
+						Title:      parent.Title,
+						Status:     parent.Status,
+					}
+				}
+			}
 
 			// Squad-leader briefing injection: when the issue is assigned
 			// to a squad and the claiming agent is that squad's current

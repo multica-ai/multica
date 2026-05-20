@@ -18,7 +18,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/runcontext"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
@@ -202,6 +204,45 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 				t.Fatalf("providerNeedsInlineSystemPrompt(%q) = %v, want %v", tc.provider, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestInjectTaskRunContextEnv(t *testing.T) {
+	t.Parallel()
+
+	envVars := map[string]string{}
+	injectTaskRunContextEnv(envVars, Task{
+		ID:               "task-1",
+		IssueID:          "issue-1",
+		TriggerCommentID: "",
+		Attempt:          2,
+		MaxAttempts:      4,
+		Kind:             "direct",
+		Issue: &runcontext.IssueFields{
+			Identifier:    "MUL-1",
+			Status:        "in_progress",
+			Priority:      "high",
+			ParentIssueID: "parent-1",
+			ProjectID:     "project-1",
+		},
+	}, &execenv.Environment{RunContextPath: "/tmp/context.json"})
+
+	want := map[string]string{
+		"MULTICA_RUN_CONTEXT":       "/tmp/context.json",
+		"MULTICA_TASK_KIND":         "direct",
+		"MULTICA_TASK_ATTEMPT":      "2",
+		"MULTICA_TASK_MAX_ATTEMPTS": "4",
+		"MULTICA_ISSUE_ID":          "issue-1",
+		"MULTICA_ISSUE_KEY":         "MUL-1",
+		"MULTICA_ISSUE_PARENT_ID":   "parent-1",
+		"MULTICA_ISSUE_PROJECT_ID":  "project-1",
+		"MULTICA_ISSUE_PRIORITY":    "high",
+		"MULTICA_ISSUE_STATUS":      "in_progress",
+	}
+	for key, wantVal := range want {
+		if got := envVars[key]; got != wantVal {
+			t.Fatalf("%s = %q, want %q", key, got, wantVal)
+		}
 	}
 }
 

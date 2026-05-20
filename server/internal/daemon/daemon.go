@@ -2210,6 +2210,51 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 	}
 }
 
+func taskKindForEnv(task Task) string {
+	if task.Kind != "" {
+		return task.Kind
+	}
+	switch {
+	case task.ChatSessionID != "":
+		return "chat"
+	case task.AutopilotRunID != "":
+		return "autopilot"
+	case task.IssueID == "":
+		return "quick_create"
+	case task.TriggerCommentID != "":
+		return "comment"
+	default:
+		return "direct"
+	}
+}
+
+func injectTaskRunContextEnv(agentEnv map[string]string, task Task, env *execenv.Environment) {
+	agentEnv["MULTICA_TASK_KIND"] = taskKindForEnv(task)
+	agentEnv["MULTICA_TASK_ATTEMPT"] = strconv.Itoa(int(task.Attempt))
+	agentEnv["MULTICA_TASK_MAX_ATTEMPTS"] = strconv.Itoa(int(task.MaxAttempts))
+	if env != nil && env.RunContextPath != "" {
+		agentEnv["MULTICA_RUN_CONTEXT"] = env.RunContextPath
+	}
+	if task.IssueID == "" {
+		return
+	}
+
+	agentEnv["MULTICA_ISSUE_ID"] = task.IssueID
+	agentEnv["MULTICA_ISSUE_KEY"] = ""
+	agentEnv["MULTICA_ISSUE_PARENT_ID"] = ""
+	agentEnv["MULTICA_ISSUE_PROJECT_ID"] = ""
+	agentEnv["MULTICA_ISSUE_PRIORITY"] = ""
+	agentEnv["MULTICA_ISSUE_STATUS"] = ""
+	if task.Issue == nil {
+		return
+	}
+	agentEnv["MULTICA_ISSUE_KEY"] = task.Issue.Identifier
+	agentEnv["MULTICA_ISSUE_PARENT_ID"] = task.Issue.ParentIssueID
+	agentEnv["MULTICA_ISSUE_PROJECT_ID"] = task.Issue.ProjectID
+	agentEnv["MULTICA_ISSUE_PRIORITY"] = task.Issue.Priority
+	agentEnv["MULTICA_ISSUE_STATUS"] = task.Issue.Status
+}
+
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
@@ -2248,25 +2293,32 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Repos are passed as metadata only — the agent checks them out on demand
 	// via `multica repo checkout <url>`.
 	taskCtx := execenv.TaskContextForEnv{
-		IssueID:                 task.IssueID,
-		TriggerCommentID:        task.TriggerCommentID,
-		AgentID:                 agentID,
-		AgentName:               agentName,
-		AgentInstructions:       instructions,
-		AgentSkills:             convertSkillsForEnv(skills),
-		Repos:                   convertReposForEnv(task.Repos),
-		ProjectID:               task.ProjectID,
-		ProjectTitle:            task.ProjectTitle,
-		ProjectResources:        convertProjectResourcesForEnv(task.ProjectResources),
-		ChatSessionID:           task.ChatSessionID,
-		AutopilotRunID:          task.AutopilotRunID,
-		AutopilotID:             task.AutopilotID,
-		AutopilotTitle:          task.AutopilotTitle,
-		AutopilotDescription:    task.AutopilotDescription,
-		AutopilotSource:         task.AutopilotSource,
-		AutopilotTriggerPayload: strings.TrimSpace(string(task.AutopilotTriggerPayload)),
-		QuickCreatePrompt:       task.QuickCreatePrompt,
-		IsSquadLeader:           strings.Contains(instructions, "## Squad Operating Protocol"),
+		IssueID:                          task.IssueID,
+		TaskID:                           task.ID,
+		TaskKind:                         taskKindForEnv(task),
+		TaskAttempt:                      task.Attempt,
+		TaskMaxAttempts:                  task.MaxAttempts,
+		IssueSnapshot:                    task.Issue,
+		ParentSnapshot:                   task.Parent,
+		Properties:                       task.Properties,
+		TriggerCommentID:                 task.TriggerCommentID,
+		AgentID:                          agentID,
+		AgentName:                        agentName,
+		AgentInstructions:                instructions,
+		AgentSkills:                      convertSkillsForEnv(skills),
+		Repos:                            convertReposForEnv(task.Repos),
+		ProjectID:                        task.ProjectID,
+		ProjectTitle:                     task.ProjectTitle,
+		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
+		ChatSessionID:                    task.ChatSessionID,
+		AutopilotRunID:                   task.AutopilotRunID,
+		AutopilotID:                      task.AutopilotID,
+		AutopilotTitle:                   task.AutopilotTitle,
+		AutopilotDescription:             task.AutopilotDescription,
+		AutopilotSource:                  task.AutopilotSource,
+		AutopilotTriggerPayload:          strings.TrimSpace(string(task.AutopilotTriggerPayload)),
+		QuickCreatePrompt:                task.QuickCreatePrompt,
+		IsSquadLeader:                    strings.Contains(instructions, "## Squad Operating Protocol"),
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
 	}
@@ -2351,6 +2403,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"MULTICA_TASK_ID":      task.ID,
 		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
 	}
+	injectTaskRunContextEnv(agentEnv, task, env)
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
 	}

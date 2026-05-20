@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/runcontext"
 )
 
 // RepoContextForEnv describes a workspace repo available for checkout.
@@ -44,6 +46,13 @@ type PrepareParams struct {
 // TaskContextForEnv is the subset of task context used for writing context files.
 type TaskContextForEnv struct {
 	IssueID                 string
+	TaskID                  string
+	TaskKind                string
+	TaskAttempt             int32
+	TaskMaxAttempts         int32
+	IssueSnapshot           *runcontext.IssueFields
+	ParentSnapshot          *runcontext.ParentFields
+	Properties              json.RawMessage
 	TriggerCommentID        string // comment that triggered this task (empty for on_assign)
 	AgentID                 string // unique ID of the dispatched agent
 	AgentName               string
@@ -92,6 +101,9 @@ type Environment struct {
 	RootDir string
 	// WorkDir is the directory to pass as Cwd to the agent ({RootDir}/workdir/).
 	WorkDir string
+	// RunContextPath is the machine-readable context JSON path exported to the
+	// agent via MULTICA_RUN_CONTEXT.
+	RunContextPath string
 	// CodexHome is the path to the per-task CODEX_HOME directory (set only for codex provider).
 	CodexHome string
 	// OpenclawConfigPath is the path to the per-task synthesized OpenClaw
@@ -153,9 +165,10 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	}
 
 	env := &Environment{
-		RootDir: envRoot,
-		WorkDir: workDir,
-		logger:  logger,
+		RootDir:        envRoot,
+		WorkDir:        workDir,
+		RunContextPath: runContextPath(workDir),
+		logger:         logger,
 	}
 
 	// Write context files into workdir (skills go to provider-native paths).
@@ -213,9 +226,10 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	}
 
 	env := &Environment{
-		RootDir: filepath.Dir(params.WorkDir),
-		WorkDir: params.WorkDir,
-		logger:  logger,
+		RootDir:        filepath.Dir(params.WorkDir),
+		WorkDir:        params.WorkDir,
+		RunContextPath: runContextPath(params.WorkDir),
+		logger:         logger,
 	}
 
 	// Refresh context files (issue_context.md, skills).
