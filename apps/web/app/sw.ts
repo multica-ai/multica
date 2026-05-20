@@ -10,6 +10,7 @@ import { defaultCache } from "@serwist/next/worker";
 import type { PrecacheEntry, SerwistGlobalConfig } from "serwist";
 import { NetworkOnly, Serwist } from "serwist";
 import { applyAppBadge, resolveBadgeCount, type BadgingNavigator } from "./sw-badge";
+import { isNavigationRequest, LEGACY_NAVIGATION_CACHES } from "./sw-navigation";
 import {
   newDraftToken,
   saveShareDraft,
@@ -32,11 +33,13 @@ const serwist = new Serwist({
   navigationPreload: true,
   // Navigation requests (HTML documents) must never be served from cache —
   // every page in this app has dynamic content. The NetworkOnly entry runs
-  // before defaultCache so it wins for all `mode === "navigate"` fetches.
-  // Static assets (JS, CSS, fonts, images) still go through defaultCache.
+  // before defaultCache so it wins for any request the matcher recognises
+  // as a document/navigation fetch (top-level navigation, document
+  // destination, or Accept: text/html). Static assets (JS, CSS, fonts,
+  // images) still go through defaultCache.
   runtimeCaching: [
     {
-      matcher: ({ request }) => request.mode === "navigate",
+      matcher: isNavigationRequest,
       handler: new NetworkOnly(),
     },
     ...defaultCache,
@@ -44,6 +47,25 @@ const serwist = new Serwist({
 });
 
 serwist.addEventListeners();
+
+// One-shot cleanup: when this SW version activates, drop any runtime caches
+// that a previous SW build populated with plain HTML (Tine found
+// `/login?platform=desktop` and `/jeh-*/issues` lingering in the `others`
+// cache after PR #415 deployed). The matcher above prevents new writes, but
+// existing entries survive SW updates until they expire, so wipe them here.
+// Precache (`serwist-precache-v2-<origin>`) is untouched on purpose.
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    (async () => {
+      const names = await caches.keys();
+      await Promise.all(
+        names
+          .filter((name) => LEGACY_NAVIGATION_CACHES.includes(name))
+          .map((name) => caches.delete(name)),
+      );
+    })(),
+  );
+});
 
 // --- Web Push ---------------------------------------------------------------
 // Handlers for incoming push messages and notification clicks. The payload
