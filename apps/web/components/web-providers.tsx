@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { Suspense, useMemo } from "react";
 import { CoreProvider } from "@multica/core/platform";
 import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
 import type { LocaleResources, SupportedLocale } from "@multica/core/i18n";
@@ -11,6 +11,18 @@ import {
   setLoggedInCookie,
   clearLoggedInCookie,
 } from "@/features/auth/auth-cookie";
+import {
+  deriveWsUrl as deriveConfiguredWsUrl,
+  resolveBasePath,
+  resolveApiBaseUrl,
+} from "@/config/base-path";
+import { PageviewTracker } from "./pageview-tracker";
+
+const WEB_RUNTIME_ENV = {
+  NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
+  NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL,
+  NEXT_PUBLIC_BASE_PATH: process.env.NEXT_PUBLIC_BASE_PATH,
+};
 
 // Legacy token in localStorage → keep this session in token mode so users who
 // logged in before the cookie-auth migration stay authed. They migrate to
@@ -31,10 +43,10 @@ function hasLegacyToken(): boolean {
 // work without explicit NEXT_PUBLIC_WS_URL.  The Next.js rewrite rule
 // (/ws → backend) handles proxying.
 function deriveWsUrl(): string | undefined {
-  if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
-  if (typeof window === "undefined") return undefined;
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.host}/ws`;
+  return deriveConfiguredWsUrl(
+    WEB_RUNTIME_ENV,
+    typeof window === "undefined" ? undefined : window.location,
+  );
 }
 
 // Build-time version preferred (CI sets NEXT_PUBLIC_APP_VERSION to a git tag
@@ -62,7 +74,8 @@ export function WebProviders({
   const localeAdapter = useMemo(() => createBrowserCookieLocaleAdapter(), []);
   return (
     <CoreProvider
-      apiBaseUrl={process.env.NEXT_PUBLIC_API_URL}
+      apiBaseUrl={resolveApiBaseUrl(WEB_RUNTIME_ENV)}
+      publicBasePath={resolveBasePath(WEB_RUNTIME_ENV)}
       wsUrl={deriveWsUrl()}
       cookieAuth={cookieAuth}
       onLogin={setLoggedInCookie}
@@ -81,6 +94,11 @@ export function WebProviders({
       resources={resources}
       localeAdapter={localeAdapter}
     >
+      {/* Suspense boundary is required by Next.js for useSearchParams in
+          a client component mounted this high in the tree. */}
+      <Suspense fallback={null}>
+        <PageviewTracker />
+      </Suspense>
       <WebNavigationProvider>{children}</WebNavigationProvider>
     </CoreProvider>
   );

@@ -9,6 +9,7 @@ import { DragStrip } from "@multica/views/platform";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 import type { IssueStatus } from "@multica/core/types";
 import { StatusIcon } from "../../issues/components/status-icon";
+import { useNavigation } from "../../navigation";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { useT } from "../../i18n";
 
@@ -46,6 +47,7 @@ export function StepWelcome({
   isWeb?: boolean;
 }) {
   const { t } = useT("onboarding");
+  const { getShareableUrl } = useNavigation();
   // Tracks which button is mid-flight so we can show a per-button
   // spinner and disable both while one is in progress.
   const [pending, setPending] = useState<"next" | "skip" | null>(null);
@@ -113,7 +115,7 @@ export function StepWelcome({
                       onboarding tab in case the desktop install
                       stalls and the user falls back here. */}
                   <a
-                    href="/download"
+                    href={getShareableUrl("/download")}
                     target="_blank"
                     rel="noopener noreferrer"
                     className={buttonVariants({ size: "lg" })}

@@ -19,6 +19,7 @@ import {
   UserMinus,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { resolveBasePath, withBasePath } from "@/config/base-path";
 import { ImageIcon } from "./shared";
 import { useLocale } from "../i18n";
 import type { LandingDict } from "../i18n";
@@ -26,6 +27,14 @@ import { StatusIcon, PriorityIcon } from "@multica/views/issues/components";
 import { STATUS_CONFIG } from "@multica/core/issues/config/status";
 import { PRIORITY_CONFIG } from "@multica/core/issues/config/priority";
 import type { IssueStatus, IssuePriority } from "@multica/core/types";
+
+const PUBLIC_BASE_PATH = resolveBasePath({
+  NEXT_PUBLIC_BASE_PATH: process.env.NEXT_PUBLIC_BASE_PATH,
+});
+
+function publicAsset(path: string): string {
+  return withBasePath(PUBLIC_BASE_PATH, path);
+}
 
 /* ------------------------------------------------------------------ */
 /*  Mock ActorAvatar — mirrors the real ActorAvatar styling exactly     */
@@ -1060,7 +1069,9 @@ export function FeaturesSection() {
                   {feature.visual ? (
                     <div className="relative overflow-hidden rounded-sm">
                       <Image
-                        src={feature.bgImage ?? "/images/feature-bg.jpg"}
+                        src={publicAsset(
+                          feature.bgImage ?? "/images/feature-bg.jpg",
+                        )}
                         alt=""
                         fill
                         className="object-cover object-center"
