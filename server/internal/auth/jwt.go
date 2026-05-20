@@ -45,6 +45,8 @@ func ValidateJWTSecretConfiguration() error {
 	return nil
 }
 
+// Deprecated: SessionDuration reads MULTICA_SESSION_TTL but does not affect cookie MaxAge.
+// Use AUTH_TOKEN_TTL (read by AuthTokenTTL() in cookie.go) to configure session lifetime.
 func SessionDuration() time.Duration {
 	raw := strings.TrimSpace(os.Getenv("MULTICA_SESSION_TTL"))
 	if raw == "" {

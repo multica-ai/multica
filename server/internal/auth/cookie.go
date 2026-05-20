@@ -25,7 +25,6 @@ const (
 )
 
 var (
-	ipCookieDomainWarnOnce     sync.Once
 	invalidCookieDomainWarnOnce sync.Once
 	authTokenTTLOnce           sync.Once
 	authTokenTTLCached         time.Duration
