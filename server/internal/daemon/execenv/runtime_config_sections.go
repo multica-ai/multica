@@ -58,6 +58,19 @@ func writeBackgroundTaskSafetySlim(b *strings.Builder) {
 	b.WriteString("- Never end a turn with a \"standing by\" / \"I'll report back when X finishes\" message — that becomes your final output and the task ends.\n\n")
 }
 
+func writeWorkspaceIsolationSlim(b *strings.Builder, workDir string) {
+	if workDir == "" {
+		return
+	}
+	b.WriteString("## Workspace Isolation\n\n")
+	fmt.Fprintf(b, "Your current working directory is this task's isolated workdir: `%s`.\n\n", workDir)
+	b.WriteString("- Before editing code, run `pwd` and confirm you are inside this workdir.\n")
+	b.WriteString("- Never edit files outside the isolated workdir unless the user explicitly asks for a non-repo local file.\n")
+	b.WriteString("- If you need repository code, use `multica repo checkout <url>` from this workdir; it creates a dedicated git worktree and keeps parallel tasks isolated.\n")
+	b.WriteString("- Do not run `git clone` for workspace repositories, and do not reuse a shared checkout from another task.\n")
+	b.WriteString("- If no listed repository matches the task, stop and ask for the correct repo instead of guessing or cloning arbitrary URLs.\n\n")
+}
+
 // writeAgentIdentity emits the Agent Identity heading and (optionally) the
 // agent's instructions body.
 func writeAgentIdentity(b *strings.Builder, ctx TaskContextForEnv) {
@@ -515,11 +528,16 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 // Workflow, Always Use CLI, Output — are shared by every kind and emitted
 // unconditionally (or gated by their own data preconditions).
 func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
+	return buildMetaSkillContentSlimWithWorkDir(provider, "", ctx)
+}
+
+func buildMetaSkillContentSlimWithWorkDir(provider string, workDir string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 	kind := classifyTask(ctx)
 
 	writeHeader(&b)
 	writeBackgroundTaskSafetySlim(&b)
+	writeWorkspaceIsolationSlim(&b, workDir)
 	writeAgentIdentity(&b, ctx)
 	writeRequestingUser(&b, ctx)
 	writeTaskInitiator(&b, ctx)
