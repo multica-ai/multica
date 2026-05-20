@@ -67,6 +67,14 @@ type Task struct {
 	PinnedDocuments      []DocumentData      `json:"pinned_documents,omitempty"`
 	DocumentIndex        []DocumentIndexData `json:"document_index,omitempty"`
 	IssueLinkedDocuments []DocumentData      `json:"issue_linked_documents,omitempty"`
+	// RequestingUserName + RequestingUserProfileDescription describe the human
+	// the agent is working on behalf of. v1 sources them from the runtime
+	// owner (the user who registered the daemon). Empty when the runtime has
+	// no owner (cloud / system runtimes) or the user hasn't set a description.
+	// Injected into the brief under `## Requesting User`; omitted entirely
+	// when description is empty so the agent doesn't see a useless heading.
+	RequestingUserName               string `json:"requesting_user_name,omitempty"`
+	RequestingUserProfileDescription string `json:"requesting_user_profile_description,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon
@@ -97,21 +105,23 @@ type DocumentIndexData struct {
 
 // AgentData holds agent details returned by the claim endpoint.
 type AgentData struct {
-	ID           string            `json:"id"`
-	Name         string            `json:"name"`
-	Instructions string            `json:"instructions"`
-	Skills       []SkillData       `json:"skills"`
-	CustomEnv    map[string]string `json:"custom_env,omitempty"`
-	CustomArgs   []string          `json:"custom_args,omitempty"`
-	McpConfig    json.RawMessage   `json:"mcp_config,omitempty"`
-	Model        string            `json:"model,omitempty"`
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	Instructions  string            `json:"instructions"`
+	Skills        []SkillData       `json:"skills"`
+	CustomEnv     map[string]string `json:"custom_env,omitempty"`
+	CustomArgs    []string          `json:"custom_args,omitempty"`
+	McpConfig     json.RawMessage   `json:"mcp_config,omitempty"`
+	Model         string            `json:"model,omitempty"`
+	ThinkingLevel string            `json:"thinking_level,omitempty"`
 }
 
 // SkillData represents a structured skill for task execution.
 type SkillData struct {
-	Name    string          `json:"name"`
-	Content string          `json:"content"`
-	Files   []SkillFileData `json:"files,omitempty"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Content     string          `json:"content"`
+	Files       []SkillFileData `json:"files,omitempty"`
 }
 
 // SkillFileData represents a supporting file within a skill.

@@ -345,7 +345,7 @@ func taskErrorType(reason string) string {
 	switch reason {
 	case "runtime_offline", "runtime_recovery":
 		return "runtime"
-	case "timeout":
+	case "timeout", "codex_semantic_inactivity":
 		return "timeout"
 	case "iteration_limit", "agent_fallback_message":
 		return "agent_output"
@@ -441,7 +441,7 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
 func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false)
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, false)
 }
 
 // EnqueueTaskForSquadLeader is the leader-role variant of EnqueueTaskForMention.
@@ -451,10 +451,10 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 // as a worker (do not skip). This matters for agents that are simultaneously
 // the leader and a worker of the same squad — see migration 090.
 func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true)
+	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, false)
 }
 
-func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, forceFreshSession bool) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -470,13 +470,14 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 	}
 
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
-		AgentID:          agentID,
-		RuntimeID:        agent.RuntimeID,
-		IssueID:          issue.ID,
-		Priority:         priorityToInt(issue.Priority),
-		TriggerCommentID: triggerCommentID,
-		TriggerSummary:   s.buildCommentTriggerSummary(ctx, triggerCommentID),
-		IsLeaderTask:     pgtype.Bool{Bool: isLeader, Valid: isLeader},
+		AgentID:           agentID,
+		RuntimeID:         agent.RuntimeID,
+		IssueID:           issue.ID,
+		Priority:          priorityToInt(issue.Priority),
+		TriggerCommentID:  triggerCommentID,
+		TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
+		IsLeaderTask:      pgtype.Bool{Bool: isLeader, Valid: isLeader},
+		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 	})
 	if err != nil {
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -1125,7 +1126,9 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		}
 		task = t
 
-		if t.ChatSessionID.Valid {
+		// Keep resume-unsafe sessions on the task row for observability, but
+		// do not promote them to the chat-level resume pointer.
+		if t.ChatSessionID.Valid && !resumeUnsafeFailureReason(failureReason) {
 			// Pin the chat_session's runtime_id alongside the session_id so the
 			// next claim can apply the runtime-guard. Both fields move together:
 			// when there's no session_id to record, leave runtime_id untouched
@@ -1235,18 +1238,30 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // etc.) are intentionally excluded — those are real problems that the user
 // should see, not infrastructure flakiness.
 var retryableReasons = map[string]bool{
-	"runtime_offline":  true,
-	"runtime_recovery": true,
-	"timeout":          true,
+	"runtime_offline":           true,
+	"runtime_recovery":          true,
+	"timeout":                   true,
+	"codex_semantic_inactivity": true,
+}
+
+func resumeUnsafeFailureReason(reason string) bool {
+	switch reason {
+	// Keep in sync with GetLastTaskSession / GetLastChatTaskSession and
+	// CreateRetryTask's fresh-session CASE WHEN.
+	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "codex_semantic_inactivity":
+		return true
+	default:
+		return false
+	}
 }
 
 // MaybeRetryFailedTask spawns a fresh queued attempt for a recently-failed
 // task when the failure was infrastructure-shaped (daemon crash, runtime
 // went offline, dispatch/run timeout) and the task hasn't exhausted its
 // max_attempts budget. The child task inherits agent/runtime/issue/chat
-// links and the parent's session_id/work_dir so the agent can resume the
-// conversation when the backend supports it. Returns the new task, or nil
-// when no retry was created.
+// links and, for resume-safe failures, the parent's session_id/work_dir so
+// the agent can resume the conversation when the backend supports it. Returns
+// the new task, or nil when no retry was created.
 //
 // Autopilot tasks are NOT auto-retried here; the autopilot scheduler owns
 // its own re-run cadence and we don't want to double-fire it.
@@ -1301,8 +1316,22 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	return &child, nil
 }
 
-// RerunIssue creates a fresh queued task for the agent currently assigned
-// to the issue. Used by the manual rerun endpoint.
+// RerunIssue creates a fresh queued task for an agent on the issue. Used by
+// the manual rerun endpoint.
+//
+// Target agent resolution:
+//   - sourceTaskID Valid: rerun the agent that ran that task (and reuse its
+//     leader/worker role). This is what the execution log retry button uses
+//     so a per-row retry survives a subsequent assignee change and correctly
+//     re-fires the squad worker or mention agent whose row was clicked. The
+//     source task's trigger_comment_id is also inherited (when the caller
+//     didn't pass one) so a per-row rerun of a comment- or mention-triggered
+//     task stays comment-triggered — the daemon's buildCommentPrompt path
+//     keys on TriggerCommentID, and losing it would degrade the rerun into
+//     a generic issue run that no longer carries the original comment.
+//   - sourceTaskID empty: fall back to the issue's current assignee (agent
+//     or squad leader). This preserves the CLI / API contract for callers
+//     that have an issue ID but no specific task to target.
 //
 // The new task is flagged force_fresh_session=true so the daemon starts a
 // clean agent session instead of resuming the prior (agent_id, issue_id)
@@ -1312,29 +1341,54 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 // MaybeRetryFailedTask → CreateRetryTask) does NOT take this path, so
 // MUL-1128's mid-flight resume contract is preserved.
 //
-// Only tasks belonging to the issue's current assignee are cancelled.
+// Only tasks belonging to the target agent on this issue are cancelled.
 // Tasks owned by other agents on the same issue (e.g. a parallel
 // @-mention agent) are left alone — rerun must not collateral-cancel
 // them.
-func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, triggerCommentID pgtype.UUID) (*db.AgentTaskQueue, error) {
+func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourceTaskID pgtype.UUID, triggerCommentID pgtype.UUID) (*db.AgentTaskQueue, error) {
 	issue, err := s.Queries.GetIssue(ctx, issueID)
 	if err != nil {
 		return nil, fmt.Errorf("load issue: %w", err)
 	}
 
 	// Determine the target agent for the rerun.
-	var agentID pgtype.UUID
-	switch {
-	case issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid:
-		agentID = issue.AssigneeID
-	case issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid:
-		squad, err := s.Queries.GetSquad(ctx, issue.AssigneeID)
+	var (
+		agentID  pgtype.UUID
+		isLeader bool
+	)
+	if sourceTaskID.Valid {
+		sourceTask, err := s.Queries.GetAgentTask(ctx, sourceTaskID)
 		if err != nil {
-			return nil, fmt.Errorf("issue is assigned to a squad but squad not found")
+			return nil, fmt.Errorf("load source task: %w", err)
 		}
-		agentID = squad.LeaderID
-	default:
-		return nil, fmt.Errorf("issue is not assigned to an agent or squad")
+		if !sourceTask.IssueID.Valid || util.UUIDToString(sourceTask.IssueID) != util.UUIDToString(issueID) {
+			return nil, fmt.Errorf("source task does not belong to this issue")
+		}
+		agentID = sourceTask.AgentID
+		isLeader = sourceTask.IsLeaderTask
+		// Inherit trigger provenance so a per-row rerun of a comment- or
+		// mention-triggered task stays a comment-triggered task. Without
+		// this the daemon's buildCommentPrompt path is skipped (it keys on
+		// TriggerCommentID) and the rerun degrades into a generic issue
+		// run that has lost the original comment context. Only override
+		// when the caller didn't pass one explicitly.
+		if !triggerCommentID.Valid && sourceTask.TriggerCommentID.Valid {
+			triggerCommentID = sourceTask.TriggerCommentID
+		}
+	} else {
+		switch {
+		case issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid:
+			agentID = issue.AssigneeID
+		case issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid:
+			squad, err := s.Queries.GetSquad(ctx, issue.AssigneeID)
+			if err != nil {
+				return nil, fmt.Errorf("issue is assigned to a squad but squad not found")
+			}
+			agentID = squad.LeaderID
+			isLeader = true
+		default:
+			return nil, fmt.Errorf("issue is not assigned to an agent or squad")
+		}
 	}
 
 	// Cancel only the target agent's active/queued tasks on this issue.
@@ -1345,7 +1399,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, trigg
 	if err != nil {
 		slog.Warn("rerun: cancel prior tasks failed",
 			"issue_id", util.UUIDToString(issueID),
-			"agent_id", util.UUIDToString(issue.AssigneeID),
+			"agent_id", util.UUIDToString(agentID),
 			"error", err,
 		)
 	}
@@ -1355,7 +1409,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, trigg
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
 
-	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID)
+	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, isLeader)
 	if err != nil {
 		return nil, err
 	}
@@ -1363,20 +1417,25 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, trigg
 		"task_id", util.UUIDToString(task.ID),
 		"issue_id", util.UUIDToString(issueID),
 		"agent_id", util.UUIDToString(agentID),
+		"source_task_id", util.UUIDToString(sourceTaskID),
+		"is_leader", isLeader,
 		"cancelled_prior", len(cancelled),
 	)
 	return &task, nil
 }
 
 // enqueueRerunTask enqueues a fresh task for the given agent on the issue.
-// For agent-assigned issues it uses enqueueIssueTask (which reads AssigneeID);
-// for squad-assigned issues the rerun targets the squad leader and is flagged
-// as a leader task so the self-trigger guard treats it correctly.
-func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	if issue.AssigneeType.String == "agent" {
+// When the target agent is the issue's single-agent assignee we use the
+// assignee-driven path (enqueueIssueTask) so the issue-assignee bookkeeping
+// stays in sync; otherwise (squad member, prior assignee that has since been
+// reassigned, mention agent) we use the mention path with the same
+// force_fresh_session=true contract.
+func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool) (db.AgentTaskQueue, error) {
+	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
+		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
 		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true)
 	}
-	return s.EnqueueTaskForSquadLeader(ctx, issue, agentID, triggerCommentID)
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, isLeader, true)
 }
 
 // HandleFailedTasks runs the post-failure side effects for a batch of
@@ -1546,7 +1605,7 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 
 	result := make([]AgentSkillData, 0, len(skills))
 	for _, sk := range skills {
-		data := AgentSkillData{Name: sk.Name, Content: sk.Content}
+		data := AgentSkillData{Name: sk.Name, Description: sk.Description, Content: sk.Content}
 		files, _ := s.Queries.ListSkillFiles(ctx, sk.ID)
 		for _, f := range files {
 			data.Files = append(data.Files, AgentSkillFileData{Path: f.Path, Content: f.Content})
@@ -1558,9 +1617,10 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 
 // AgentSkillData represents a skill for task execution responses.
 type AgentSkillData struct {
-	Name    string               `json:"name"`
-	Content string               `json:"content"`
-	Files   []AgentSkillFileData `json:"files,omitempty"`
+	Name        string               `json:"name"`
+	Description string               `json:"description,omitempty"`
+	Content     string               `json:"content"`
+	Files       []AgentSkillFileData `json:"files,omitempty"`
 }
 
 // AgentSkillFileData represents a supporting file within a skill.

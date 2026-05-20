@@ -200,6 +200,86 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 	}
 }
 
+// TestBuildPromptCommentTriggerPromotesThreadReads pins MUL-2387: the
+// per-turn prompt for a comment-triggered task must steer the agent at the
+// thread-aware reads first (--thread anchored on the trigger comment id,
+// then --recent N as a fallback with cursor guidance) instead of the legacy
+// "dump the entire comment list" recipe. Locking this in test stops the
+// guidance from decaying back to a full-flat-dump on prompt edits.
+func TestBuildPromptCommentTriggerPromotesThreadReads(t *testing.T) {
+	const (
+		issueID   = "issue-thread-1"
+		triggerID = "trigger-comment-1"
+	)
+	task := Task{
+		IssueID:               issueID,
+		TriggerCommentID:      triggerID,
+		TriggerCommentContent: "anything",
+		TriggerAuthorType:     "member",
+		TriggerAuthorName:     "Bohan",
+	}
+	out := BuildPrompt(task, "claude")
+
+	mustContain := []string{
+		// Thread-first read pinned by trigger comment id.
+		"--thread " + triggerID,
+		"`multica issue comment list " + issueID + " --thread " + triggerID + " --output json`",
+		// --recent fallback uses the documented default N=20.
+		"--recent 20 --output json",
+		// Cursor walks via the stderr line the CLI emits, not invented flags.
+		"Next thread cursor:",
+		"--before",
+		"--before-id",
+		// --since is preserved as an additional, combinable knob.
+		"--since",
+		"may combine with `--thread` or `--recent`",
+		// Discourage the unfiltered full dump on long-running issues.
+		"Avoid the unfiltered",
+		"wastes context",
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(out, s) {
+			t.Errorf("buildCommentPrompt missing thread-first guidance %q\n--- output ---\n%s", s, out)
+		}
+	}
+
+	// The old "dump everything via --output json alone" prose is exactly the
+	// pattern this PR is replacing — guard against the legacy phrasing
+	// sneaking back in.
+	if strings.Contains(out, "returns all comments for the issue (server caps at 2000)") {
+		t.Errorf("buildCommentPrompt still carries the legacy full-dump phrasing")
+	}
+}
+
+// TestBuildPromptDefaultMentionsRecent pins that the catch-all fallback
+// prompt (no trigger comment, no chat, no autopilot, no quick-create) also
+// teaches the agent about --recent as the long-issue-friendly alternative
+// to the flat dump, even though it cannot anchor a --thread without a
+// trigger comment id.
+func TestBuildPromptDefaultMentionsRecent(t *testing.T) {
+	out := BuildPrompt(Task{IssueID: "issue-default-1"}, "claude")
+	for _, s := range []string{
+		"--recent 20 --output json",
+		"Next thread cursor:",
+		"--since",
+	} {
+		if !strings.Contains(out, s) {
+			t.Errorf("default BuildPrompt missing %q\n--- output ---\n%s", s, out)
+		}
+	}
+	// And the default path must NOT inject a --thread example, because there
+	// is no trigger comment id to anchor on.
+	if strings.Contains(out, "--thread") {
+		t.Errorf("default BuildPrompt should NOT mention --thread (no trigger comment to anchor on)\n--- output ---\n%s", out)
+	}
+	// The legacy "If you need comment history" soft phrasing conflicts with
+	// the assignment-trigger runtime workflow, which treats reading comments
+	// as mandatory. Guard against it sneaking back in.
+	if strings.Contains(out, "If you need comment history") {
+		t.Errorf("default BuildPrompt still carries the legacy 'If you need' soft phrasing that conflicts with the mandatory workflow\n--- output ---\n%s", out)
+	}
+}
+
 // TestBuildPromptNonSquadLeaderNoRule verifies that non-squad-leader agents
 // do NOT get the squad leader no_action rule injected.
 func TestBuildPromptNonSquadLeaderNoRule(t *testing.T) {

@@ -48,10 +48,11 @@ describe("ApiClient", () => {
     await client.getAutopilot("ap-1");
     await client.createAutopilot({
       title: "Daily triage",
+      project_id: "project-1",
       assignee_id: "agent-1",
       execution_mode: "create_issue",
     });
-    await client.updateAutopilot("ap-1", { status: "paused" });
+    await client.updateAutopilot("ap-1", { status: "paused", project_id: null });
     await client.deleteAutopilot("ap-1");
     await client.triggerAutopilot("ap-1");
     await client.listAutopilotRuns("ap-1", { limit: 10, offset: 20 });
@@ -78,6 +79,7 @@ describe("ApiClient", () => {
         method: "POST",
         body: JSON.stringify({
           title: "Daily triage",
+          project_id: "project-1",
           assignee_id: "agent-1",
           execution_mode: "create_issue",
         }),
@@ -85,7 +87,7 @@ describe("ApiClient", () => {
       {
         url: "https://api.example.test/api/autopilots/ap-1",
         method: "PATCH",
-        body: JSON.stringify({ status: "paused" }),
+        body: JSON.stringify({ status: "paused", project_id: null }),
       },
       { url: "https://api.example.test/api/autopilots/ap-1", method: "DELETE" },
       { url: "https://api.example.test/api/autopilots/ap-1/trigger", method: "POST" },
@@ -256,47 +258,6 @@ describe("ApiClient", () => {
       await expect(client.getAttachmentTextContent("att-1")).rejects.toBeInstanceOf(
         PreviewUnsupportedError,
       );
-    });
-  });
-
-  describe("involves_user_id wiring", () => {
-    // The my-issues "My Agents / Squads" tab passes involves_user_id so the
-    // server expands it to "user + agents they own + squads they relate to"
-    // in a single UNION query. These tests pin the client wiring so a typo
-    // can't silently downgrade the tab to fetching everything.
-    it("listIssues forwards involves_user_id into the querystring", async () => {
-      const fetchMock = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ issues: [], total: 0 }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      );
-      vi.stubGlobal("fetch", fetchMock);
-
-      const client = new ApiClient("https://api.example.test");
-      await client.listIssues({ involves_user_id: "user-1" });
-
-      const [url] = fetchMock.mock.calls[0]!;
-      expect(url).toContain("involves_user_id=user-1");
-    });
-
-    it("listGroupedIssues forwards involves_user_id into the querystring", async () => {
-      const fetchMock = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ groups: [] }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      );
-      vi.stubGlobal("fetch", fetchMock);
-
-      const client = new ApiClient("https://api.example.test");
-      await client.listGroupedIssues({
-        group_by: "assignee",
-        involves_user_id: "user-1",
-      });
-
-      const [url] = fetchMock.mock.calls[0]!;
-      expect(url).toContain("involves_user_id=user-1");
     });
   });
 

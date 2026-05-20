@@ -102,28 +102,28 @@ WHERE i.workspace_id = $1
   AND ($5::uuid[] IS NULL OR i.assignee_id = ANY($5::uuid[]))
   AND ($6::uuid IS NULL OR i.creator_id = $6)
   AND ($7::uuid IS NULL OR i.project_id = $7)
+  AND ($8::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND (
-    $8::uuid IS NULL
-    OR (i.assignee_type = 'member' AND i.assignee_id = $8::uuid)
-    OR (i.assignee_type = 'agent'  AND i.assignee_id IN (
+    $9::uuid IS NULL
+    OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
            WHERE a.workspace_id = $1
-             AND a.owner_id     = $8::uuid
+             AND a.owner_id     = $9::uuid
     ))
-    OR (i.assignee_type = 'squad'  AND i.assignee_id IN (
+    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
           SELECT sm.squad_id
             FROM squad_member sm
             JOIN squad s ON s.id = sm.squad_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'member'
-             AND sm.member_id   = $8::uuid
+             AND sm.member_id   = $9::uuid
           UNION
           SELECT s.id
             FROM squad s
             JOIN agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
              AND a.workspace_id = $1
-             AND a.owner_id     = $8::uuid
+             AND a.owner_id     = $9::uuid
           UNION
           SELECT sm.squad_id
             FROM squad_member sm
@@ -132,7 +132,7 @@ WHERE i.workspace_id = $1
            WHERE s.workspace_id = $1
              AND sm.member_type = 'agent'
              AND a.workspace_id = $1
-             AND a.owner_id     = $8::uuid
+             AND a.owner_id     = $9::uuid
     ))
   )
 `
@@ -145,9 +145,11 @@ type CountIssuesParams struct {
 	AssigneeIds    []pgtype.UUID `json:"assignee_ids"`
 	CreatorID      pgtype.UUID   `json:"creator_id"`
 	ProjectID      pgtype.UUID   `json:"project_id"`
+	Scheduled      pgtype.Bool   `json:"scheduled"`
 	InvolvesUserID pgtype.UUID   `json:"involves_user_id"`
 }
 
+// See ListIssues for the semantics of involves_user_id.
 func (q *Queries) CountIssues(ctx context.Context, arg CountIssuesParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countIssues,
 		arg.WorkspaceID,
@@ -157,6 +159,7 @@ func (q *Queries) CountIssues(ctx context.Context, arg CountIssuesParams) (int64
 		arg.AssigneeIds,
 		arg.CreatorID,
 		arg.ProjectID,
+		arg.Scheduled,
 		arg.InvolvesUserID,
 	)
 	var count int64
@@ -613,34 +616,37 @@ WHERE i.workspace_id = $1
   AND ($7::uuid[] IS NULL OR i.assignee_id = ANY($7::uuid[]))
   AND ($8::uuid IS NULL OR i.creator_id = $8)
   AND ($9::uuid IS NULL OR i.project_id = $9)
+  AND ($10::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND (
-    $10::uuid IS NULL
-    OR (i.assignee_type = 'member' AND i.assignee_id = $10::uuid)
-    OR (i.assignee_type = 'agent'  AND i.assignee_id IN (
+    $11::uuid IS NULL
+    -- (1) assignee is an agent owned by the user
+    OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
            WHERE a.workspace_id = $1
-             AND a.owner_id     = $10::uuid
+             AND a.owner_id     = $11::uuid
     ))
-    OR (i.assignee_type = 'squad'  AND i.assignee_id IN (
-          -- (a) I am a human member of the squad.
+    -- (2)(3)(4) assignee is a squad related to the user — three relations
+    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
+          -- (2) the user is a human member of the squad
           SELECT sm.squad_id
             FROM squad_member sm
             JOIN squad s ON s.id = sm.squad_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'member'
-             AND sm.member_id   = $10::uuid
+             AND sm.member_id   = $11::uuid
           UNION
-          -- (b) Canonical leader relation. Independent of squad_member copy row
-          -- because AddSquadMember errors are ignored in
-          -- server/internal/handler/squad.go (create + update-leader paths).
+          -- (3) the squad's canonical leader is an agent owned by the user.
+          -- We read squad.leader_id directly rather than relying on a
+          -- squad_member row, because the leader copy in squad_member is
+          -- best-effort (see squad.go AddSquadMember error handling).
           SELECT s.id
             FROM squad s
             JOIN agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
              AND a.workspace_id = $1
-             AND a.owner_id     = $10::uuid
+             AND a.owner_id     = $11::uuid
           UNION
-          -- (c) Squad has an agent member whose owner is me.
+          -- (4) the squad has an agent member owned by the user
           SELECT sm.squad_id
             FROM squad_member sm
             JOIN squad s ON s.id = sm.squad_id
@@ -648,7 +654,7 @@ WHERE i.workspace_id = $1
            WHERE s.workspace_id = $1
              AND sm.member_type = 'agent'
              AND a.workspace_id = $1
-             AND a.owner_id     = $10::uuid
+             AND a.owner_id     = $11::uuid
     ))
   )
 ORDER BY i.position ASC, i.created_at DESC
@@ -665,6 +671,7 @@ type ListIssuesParams struct {
 	AssigneeIds    []pgtype.UUID `json:"assignee_ids"`
 	CreatorID      pgtype.UUID   `json:"creator_id"`
 	ProjectID      pgtype.UUID   `json:"project_id"`
+	Scheduled      pgtype.Bool   `json:"scheduled"`
 	InvolvesUserID pgtype.UUID   `json:"involves_user_id"`
 }
 
@@ -689,6 +696,12 @@ type ListIssuesRow struct {
 	ProjectID     pgtype.UUID        `json:"project_id"`
 }
 
+// involves_user_id widens the assignee filter to surface issues where the user
+// is *indirectly* the assignee — via an owned agent or a squad they belong to /
+// lead / have an agent inside. The semantics intentionally exclude direct
+// member assignment (`assignee_type='member' AND assignee_id=involves_user_id`)
+// because that is already the meaning of the `assignee_id` filter (tab 1
+// "Assigned to me"), and the two filters must produce disjoint result sets.
 func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListIssuesRow, error) {
 	rows, err := q.db.Query(ctx, listIssues,
 		arg.WorkspaceID,
@@ -700,6 +713,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 		arg.AssigneeIds,
 		arg.CreatorID,
 		arg.ProjectID,
+		arg.Scheduled,
 		arg.InvolvesUserID,
 	)
 	if err != nil {
@@ -753,13 +767,12 @@ WHERE i.workspace_id = $1
   AND ($6::uuid IS NULL OR i.project_id = $6)
   AND (
     $7::uuid IS NULL
-    OR (i.assignee_type = 'member' AND i.assignee_id = $7::uuid)
-    OR (i.assignee_type = 'agent'  AND i.assignee_id IN (
+    OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
            WHERE a.workspace_id = $1
              AND a.owner_id     = $7::uuid
     ))
-    OR (i.assignee_type = 'squad'  AND i.assignee_id IN (
+    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
           SELECT sm.squad_id
             FROM squad_member sm
             JOIN squad s ON s.id = sm.squad_id
@@ -818,6 +831,8 @@ type ListOpenIssuesRow struct {
 	ProjectID     pgtype.UUID        `json:"project_id"`
 }
 
+// See ListIssues for the semantics of involves_user_id (mirrors the 4-branch
+// filter; member-direct assignment is intentionally excluded).
 func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) ([]ListOpenIssuesRow, error) {
 	rows, err := q.db.Query(ctx, listOpenIssues,
 		arg.WorkspaceID,

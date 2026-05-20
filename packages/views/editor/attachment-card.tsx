@@ -3,17 +3,10 @@
 /**
  * AttachmentCard — shared file-card row UI (icon + filename + Eye + Download).
  *
+ * Subcomponent of the unified `<Attachment>` dispatcher (see attachment.tsx).
  * Rendered for every attachment kind that does not have a richer inline
- * renderer. Three call sites reach it indirectly through AttachmentBlock,
- * which picks the right component per kind:
- *
- *   1. `extensions/file-card.tsx`        — Tiptap NodeView for `!file[name](url)`.
- *   2. `readonly-content.tsx`            — readonly `<div data-type="fileCard">`.
- *   3. `comment-card.tsx` AttachmentList — standalone attachments not inlined.
- *
- * Kind-aware routing (e.g. HTML → inline iframe preview) lives in
- * AttachmentBlock — keep that decision out of this file so this stays a
- * single-purpose row UI.
+ * renderer (image / html). Kind-aware routing lives in `<Attachment>` — keep
+ * that decision out of this file so this stays a single-purpose row UI.
  */
 
 import { Download, Eye, FileText, Loader2 } from "lucide-react";

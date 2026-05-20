@@ -15,9 +15,9 @@
  * `openInNewTab` to add an app tab; web falls back to `window.open` against
  * the shareable URL.
  *
- * Mounted by AttachmentBlock when the attachment is HTML and the caller can
- * supply an `attachmentId` (the /content proxy is ID-keyed). For other kinds,
- * AttachmentBlock falls back to the shared AttachmentCard.
+ * Mounted by the unified `<Attachment>` dispatcher when the attachment is
+ * HTML and an `attachmentId` is resolvable (the /content proxy is ID-keyed).
+ * For other kinds, `<Attachment>` falls back to the shared AttachmentCard.
  *
  * Failure mode (413 / 415 / transport): we do not unmount the figure or fall
  * back to AttachmentCard chrome — standalone attachment lists filter URLs
@@ -32,6 +32,7 @@ import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { useT } from "../i18n";
 import { useNavigation } from "../navigation";
 import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
+import { withFragmentNavShim } from "./utils/iframe-fragment-nav";
 
 const PREVIEW_HEIGHT = "h-[480px]";
 const ERROR_PLACEHOLDER_HEIGHT = "h-20";
@@ -72,7 +73,7 @@ export function HtmlAttachmentPreview({
     const nameQuery = filename ? `?name=${encodeURIComponent(filename)}` : "";
     const path = `${paths.workspace(slug).attachmentPreview(attachmentId)}${nameQuery}`;
     if (navigation.openInNewTab) {
-      navigation.openInNewTab(path, filename);
+      navigation.openInNewTab(path, filename, { activate: true });
       return;
     }
     const url = navigation.getShareableUrl(path);
@@ -105,7 +106,7 @@ export function HtmlAttachmentPreview({
         </div>
       ) : (
         <iframe
-          srcDoc={text}
+          srcDoc={withFragmentNavShim(text)}
           sandbox="allow-scripts"
           title={filename}
           className={cn(

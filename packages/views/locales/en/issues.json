@@ -77,9 +77,20 @@
   "view": {
     "tooltip_board": "Board view",
     "tooltip_list": "List view",
+    "tooltip_gantt": "Gantt view",
     "section": "View",
     "board": "Board",
-    "list": "List"
+    "list": "List",
+    "gantt": "Gantt"
+  },
+  "gantt": {
+    "header_issue": "Issue",
+    "zoom_day": "Day",
+    "zoom_week": "Week",
+    "zoom_month": "Month",
+    "show_completed": "Show completed",
+    "empty": "No scheduled issues yet — set a start or due date on any issue to see it on the timeline.",
+    "inverted_dates_warning": "Start date is after due date — bar shown from min to max."
   },
   "actor_issues": {
     "scope": {
@@ -119,6 +130,7 @@
   },
   "detail": {
     "not_found": "This issue does not exist or has been deleted in this workspace.",
+    "breadcrumb_project_unknown": "Unknown project",
     "back_to_issues": "Back to Issues",
     "title_placeholder": "Issue title",
     "desc_placeholder": "Add description...",

@@ -382,8 +382,22 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 		// Only emit a cursor when the page is full. Fewer threads than
 		// requested ⇒ the SELECT exhausted matching threads, so there is
 		// no older page to scroll to.
+		//
+		// Additionally suppress the cursor when `since` is set and the head
+		// thread's last_activity_at is already <= since. The pagination
+		// walks threads in strictly decreasing last_activity_at, so every
+		// older page has last_activity_at strictly less than the head's —
+		// if the head itself can't satisfy `> since`, no older thread can
+		// either. Predicating on the head (not on whether `comments` is
+		// empty) also catches the mixed case where this page keeps rows
+		// from fresher threads but the head thread is already past `since`.
+		// Flagged by Elon in #2787's second review (MUL-2340 nit).
 		out := fetchCommentsResult{Comments: comments}
-		if len(seenRoot) >= args.RecentN && headRoot.Valid && headLast.Valid {
+		emitCursor := len(seenRoot) >= args.RecentN && headRoot.Valid && headLast.Valid
+		if emitCursor && args.Since.Valid && !headLast.Time.After(args.Since.Time) {
+			emitCursor = false
+		}
+		if emitCursor {
 			out.NextBefore = headLast.Time.UTC().Format(time.RFC3339Nano)
 			out.NextBeforeID = uuidToString(headRoot)
 		}
@@ -713,9 +727,13 @@ func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util
 // re-triggered by subsequent replies in the same thread — unless the reply
 // explicitly @mentions only non-agent entities (members, issues), which
 // signals the user is talking to other people and not the agent.
-// Skips self-mentions, agents with on_mention trigger disabled, and private
-// agents mentioned by non-owner members (only the agent owner or workspace
-// admin/owner can mention a private agent).
+// Skips agents with on_mention trigger disabled, and private agents mentioned
+// by non-owner members (only the agent owner or workspace admin/owner can
+// mention a private agent). Self-mentions are intentionally allowed so an
+// agent running in one issue can explicitly enqueue itself on another (e.g.
+// a child-issue run notifying the parent issue whose assignee is the same
+// agent); runaway loops are prevented by HasPendingTaskForIssueAndAgent
+// dedupe and the natural queued/dispatched coalescing of the task queue.
 // Note: no status gate here — @mention is an explicit action and should work
 // even on done/cancelled issues (the agent can reopen the issue if needed).
 func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string) {
@@ -770,10 +788,6 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 			continue
 		}
 		if m.Type != "agent" {
-			continue
-		}
-		// Prevent self-trigger: skip if the comment author is this agent.
-		if authorType == "agent" && authorID == m.ID {
 			continue
 		}
 		agentUUID := parseUUID(m.ID)

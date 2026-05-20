@@ -63,6 +63,15 @@ type TaskContextForEnv struct {
 	QuickCreatePrompt       string // non-empty for quick-create tasks
 	IsSquadLeader           bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
 
+  // RequestingUserName + RequestingUserProfileDescription describe the
+	// human the agent is acting on behalf of. v1 sources them from the
+	// runtime owner (the user who registered the daemon). Rendered into the
+	// brief as the `## Requesting User` section only when description is
+	// non-empty — empty means the user opted out of injecting profile
+	// context and the agent stays anonymous-user mode.
+	RequestingUserName               string
+	RequestingUserProfileDescription string
+
 	// Knowledge base context — populated from workspace_document tables.
 	WorkspaceContext     string               // workspace.context content (injected verbatim)
 	PinnedDocuments      []DocumentForEnv     // pinned docs with full content
@@ -87,9 +96,10 @@ type DocumentIndexEntry struct {
 
 // SkillContextForEnv represents a skill to be written into the execution environment.
 type SkillContextForEnv struct {
-	Name    string
-	Content string
-	Files   []SkillFileContextForEnv
+	Name        string
+	Description string
+	Content     string
+	Files       []SkillFileContextForEnv
 }
 
 // SkillFileContextForEnv represents a supporting file within a skill.

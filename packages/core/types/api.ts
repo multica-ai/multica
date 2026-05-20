@@ -45,15 +45,23 @@ export interface ListIssuesParams {
   assignee_ids?: string[];
   creator_id?: string;
   project_id?: string;
-  open_only?: boolean;
   /**
-   * Server-side "involves user" expansion: matches issues assigned directly
-   * to this user, to an agent they own, or to a squad where they are a
-   * member, the leader (via canonical squad.leader_id), or the owner of an
-   * agent member. Backed by a single UNION subquery in issue.sql so the
-   * client doesn't have to fan out into multiple requests.
+   * Widen the assignee filter to issues where the user is the *indirect*
+   * assignee — assignee is one of the user's owned agents, or a squad that
+   * involves the user (human member / leader-via-owned-agent / agent member
+   * owned by the user). Direct member assignment is intentionally excluded:
+   * `involves_user_id` and `assignee_id=<user>` (tab "Assigned to me") produce
+   * disjoint result sets by construction.
    */
   involves_user_id?: string;
+  open_only?: boolean;
+  /**
+   * Restrict the result to issues with at least one of `start_date` /
+   * `due_date` set. Used by the Project Gantt view so it doesn't have to
+   * page through every issue on the project just to discard the unscheduled
+   * majority on the client.
+   */
+  scheduled?: boolean;
 }
 
 export interface IssueActorRef {
@@ -73,6 +81,8 @@ export interface ListGroupedIssuesParams {
   assignee_ids?: string[];
   creator_id?: string;
   project_id?: string;
+  /** See `ListIssuesParams.involves_user_id` — same semantics. */
+  involves_user_id?: string;
   assignee_filters?: IssueActorRef[];
   include_no_assignee?: boolean;
   creator_filters?: IssueActorRef[];
@@ -81,8 +91,6 @@ export interface ListGroupedIssuesParams {
   label_ids?: string[];
   group_assignee_type?: IssueAssigneeType | "none";
   group_assignee_id?: string;
-  /** See ListIssuesParams.involves_user_id — same semantics in the grouped path. */
-  involves_user_id?: string;
 }
 
 /** Raw backend response shape for `GET /api/issues`. */
@@ -145,6 +153,8 @@ export interface UpdateMeRequest {
   name?: string;
   avatar_url?: string;
   language?: string;
+  /** Free-form self-description (max 2000 chars). Pass "" to clear. */
+  profile_description?: string;
 }
 
 export interface CreateMemberRequest {

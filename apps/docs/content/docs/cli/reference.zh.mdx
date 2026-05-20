@@ -210,7 +210,7 @@ multica workspace get <workspace-id> --output json
 ### List Members
 
 ```bash
-multica workspace members <workspace-id>
+multica workspace member list <workspace-id>
 ```
 
 ### Update Workspace
@@ -267,7 +267,7 @@ multica issue create --title "Fix login bug" --description "..." --priority high
 multica issue create --title "Fix login bug" --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
 ```
 
-Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assignee` / `--assignee-id`, `--parent`, `--project`, `--due-date`. 脚本里如果已经拿到了 UUID（例如来自 `multica workspace members --output json`），传 `--assignee-id <uuid>`（与 `--assignee` 互斥）以精确锁定。
+Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assignee` / `--assignee-id`, `--parent`, `--project`, `--due-date`. 脚本里如果已经拿到了 UUID（例如来自 `multica workspace member list --output json`），传 `--assignee-id <uuid>`（与 `--assignee` 互斥）以精确锁定。
 
 ### Update Issue
 

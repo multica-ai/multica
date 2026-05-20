@@ -1,7 +1,6 @@
 import type {
   RuntimeUsage,
   RuntimeUsageByAgent,
-  RuntimeUsageByHour,
 } from "@multica/core/types";
 import { getCustomPricing } from "@multica/core/runtimes/custom-pricing-store";
 
@@ -353,6 +352,37 @@ export interface ModelDistribution {
   cost: number;
 }
 
+export interface WeeklyTokenData {
+  weekStart: string;
+  weekEnd: string;
+  // X-axis tick — Monday of the week, e.g. "May 12".
+  label: string;
+  // Tooltip header — inclusive range, e.g. "May 12 – May 18".
+  rangeLabel: string;
+  // True when `weekEnd` is in the future (today is mid-week). Surface this
+  // in the chart so the bar can be drawn at reduced opacity / striped to
+  // signal "don't read this as a finished week".
+  partial: boolean;
+  daysCovered: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+export interface WeeklyCostStackData {
+  weekStart: string;
+  weekEnd: string;
+  label: string;
+  rangeLabel: string;
+  partial: boolean;
+  daysCovered: number;
+  input: number;
+  output: number;
+  cacheWrite: number;
+  total: number;
+}
+
 export function aggregateByDate(usage: RuntimeUsage[]): {
   dailyTokens: DailyTokenData[];
   dailyCost: DailyCostData[];
@@ -444,6 +474,210 @@ export function aggregateByDate(usage: RuntimeUsage[]): {
   return { dailyTokens, dailyCost, dailyCostStack, modelDist };
 }
 
+// Fold daily-grain rows into ISO calendar weeks (Mon–Sun). Reuses the same
+// 180-day cache the daily aggregation reads from — no extra request. The
+// latest week is flagged `partial` when today (in the runtime's tz) is
+// before Sunday, so the chart can render the in-progress bar at half
+// opacity instead of letting the user misread "this week" as a dip.
+//
+// `weekCount` pins the output to exactly that many trailing calendar weeks
+// ending at the week that contains today (in `tz`). Buckets are pre-zeroed,
+// so sparse data — including weeks with no usage — renders as empty bars
+// rather than disappearing. Rows whose week falls outside the window are
+// dropped; without this guard `.slice(-weekCount)` on a sparse 180-day
+// aggregate would surface old populated weeks instead of the empty
+// in-range buckets the user asked for (MUL-2382 weekly window scoping).
+// Accepts any row carrying `date` + token counts + the model needed for
+// pricing. Both `RuntimeUsage` (runtime detail) and `DashboardUsageDaily`
+// (workspace dashboard) match this shape — there's no behavioural difference,
+// just slightly different surrounding fields neither aggregator cares about.
+type WeeklyAggregable = Pick<
+  RuntimeUsage,
+  | "date"
+  | "model"
+  | "input_tokens"
+  | "output_tokens"
+  | "cache_read_tokens"
+  | "cache_write_tokens"
+>;
+
+export function aggregateByWeek(
+  usage: readonly WeeklyAggregable[],
+  tz: string,
+  weekCount: number,
+): {
+  weeklyTokens: WeeklyTokenData[];
+  weeklyCostStack: WeeklyCostStackData[];
+} {
+  const count = Math.max(1, Math.floor(weekCount));
+  const today = todayIso(tz);
+  const currentWeekStart = weekStartIso(today);
+  const firstWeekStart = addDaysIso(currentWeekStart, -(count - 1) * 7);
+
+  type TokenAgg = Omit<WeeklyTokenData, "label" | "rangeLabel" | "partial" | "daysCovered" | "weekEnd">;
+  const tokenMap = new Map<string, TokenAgg>();
+  const stackMap = new Map<string, { input: number; output: number; cacheWrite: number }>();
+
+  // Pre-seed every trailing calendar week in the window so sparse / empty
+  // weeks still render as zero bars instead of being dropped.
+  for (let i = 0; i < count; i++) {
+    const wkStart = addDaysIso(firstWeekStart, i * 7);
+    tokenMap.set(wkStart, {
+      weekStart: wkStart,
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    });
+    stackMap.set(wkStart, { input: 0, output: 0, cacheWrite: 0 });
+  }
+
+  for (const u of usage) {
+    const wkStart = weekStartIso(u.date);
+    if (wkStart < firstWeekStart || wkStart > currentWeekStart) continue;
+    const tokens = tokenMap.get(wkStart);
+    if (!tokens) continue;
+    tokens.input += u.input_tokens;
+    tokens.output += u.output_tokens;
+    tokens.cacheRead += u.cache_read_tokens;
+    tokens.cacheWrite += u.cache_write_tokens;
+
+    const breakdown = estimateCostBreakdown(u);
+    const stack = stackMap.get(wkStart);
+    if (!stack) continue;
+    stack.input += breakdown.input;
+    stack.output += breakdown.output;
+    stack.cacheWrite += breakdown.cacheWrite;
+  }
+
+  const decorate = (weekStart: string) => {
+    const weekEnd = addDaysIso(weekStart, 6);
+    const partial = today < weekEnd;
+    // Inclusive count of how many days of this week have actually elapsed.
+    // Sits at 7 for closed weeks, 1..6 for the current week.
+    const elapsedDays = Math.min(
+      7,
+      Math.max(
+        1,
+        // Day index of `today` within [weekStart, weekEnd] + 1.
+        diffDaysIso(weekStart, today < weekStart ? weekStart : today < weekEnd ? today : weekEnd) + 1,
+      ),
+    );
+    return {
+      weekStart,
+      weekEnd,
+      label: formatShortDate(weekStart),
+      rangeLabel: `${formatShortDate(weekStart)} – ${formatShortDate(weekEnd)}`,
+      partial,
+      daysCovered: partial ? elapsedDays : 7,
+    };
+  };
+
+  const weeklyTokens: WeeklyTokenData[] = [...tokenMap.values()]
+    .sort((a, b) => a.weekStart.localeCompare(b.weekStart))
+    .map((t) => ({ ...t, ...decorate(t.weekStart) }));
+
+  const weeklyCostStack: WeeklyCostStackData[] = [...stackMap.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([weekStart, s]) => {
+      const round = (n: number) => Math.round(n * 100) / 100;
+      const input = round(s.input);
+      const output = round(s.output);
+      const cacheWrite = round(s.cacheWrite);
+      return {
+        ...decorate(weekStart),
+        input,
+        output,
+        cacheWrite,
+        total: round(input + output + cacheWrite),
+      };
+    });
+
+  return { weeklyTokens, weeklyCostStack };
+}
+
+// Slice a daily-grain usage series into the user's selected window AND the
+// immediately prior window of equal length. "Today" is read in the runtime's
+// timezone so the cutoff lands on the same calendar boundary the backend
+// used when bucketing rows — without this the browser/runtime tz gap could
+// shift the boundary by a day at the edges (#MUL-2382 sliceWindow tz bug).
+export function sliceWindow(
+  usage: readonly RuntimeUsage[],
+  days: number,
+  tz: string,
+): { filtered: RuntimeUsage[]; prevFiltered: RuntimeUsage[] } {
+  const today = todayIso(tz);
+  const isoCurrent = addDaysIso(today, -days);
+  const isoPrev = addDaysIso(today, -days * 2);
+  return {
+    filtered: usage.filter((u) => u.date >= isoCurrent),
+    prevFiltered: usage.filter(
+      (u) => u.date >= isoPrev && u.date < isoCurrent,
+    ),
+  };
+}
+
+function diffDaysIso(from: string, to: string): number {
+  const [y1, m1, d1] = from.split("-").map(Number);
+  const [y2, m2, d2] = to.split("-").map(Number);
+  const a = Date.UTC(y1 ?? 1970, (m1 ?? 1) - 1, d1 ?? 1);
+  const b = Date.UTC(y2 ?? 1970, (m2 ?? 1) - 1, d2 ?? 1);
+  return Math.round((b - a) / 86_400_000);
+}
+
+// ---------------------------------------------------------------------------
+// Calendar helpers — all date math runs on YYYY-MM-DD strings in the
+// runtime's IANA timezone. The backend already groups daily usage by
+// `start-of-day in runtime tz`, so we keep the entire frontend aggregation
+// on the same axis (Daily / Weekly) to avoid one-day drift when the browser
+// and runtime sit in different time zones.
+// ---------------------------------------------------------------------------
+
+// Today's calendar date (YYYY-MM-DD) in the given IANA timezone. `en-CA`
+// gives ISO-shaped output without us having to assemble Intl parts by hand.
+export function todayIso(tz: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+// Pure date arithmetic on a YYYY-MM-DD string. Uses UTC under the hood so
+// DST transitions never shift the result by an hour and round to a
+// neighbouring day.
+export function addDaysIso(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
+// Monday-of-week as YYYY-MM-DD. ISO 8601 week-start, matching the heatmap
+// and the team's day-to-day "this week" mental model. Pure string math —
+// no `new Date()` reads — so it's stable under any host timezone.
+export function weekStartIso(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1));
+  const day = dt.getUTCDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+  const offset = (day + 6) % 7; // distance back to Monday
+  dt.setUTCDate(dt.getUTCDate() - offset);
+  return dt.toISOString().slice(0, 10);
+}
+
+// "May 12" — short, locale-aware month/day for a YYYY-MM-DD string. Parsing
+// via UTC keeps the displayed day stable regardless of the browser's tz.
+export function formatShortDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1));
+  return dt.toLocaleString("en", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Cost-by-X aggregations
 //
@@ -494,24 +728,6 @@ export function aggregateCostByModel(rows: RuntimeUsage[]): CostByKey[] {
     map.set(key, entry);
   }
   return [...map.values()].sort((a, b) => b.cost - a.cost);
-}
-
-// Per-(hour, model) rows → 24 fixed buckets (0..23). Hours with no activity
-// stay in the list as empty rows so the bar chart axis stays continuous.
-export function aggregateCostByHour(rows: RuntimeUsageByHour[]): CostByKey[] {
-  const buckets = new Map<number, CostByKey>();
-  for (let h = 0; h < 24; h++) {
-    buckets.set(h, { key: String(h), tokens: 0, cost: 0, taskCount: 0 });
-  }
-  for (const r of rows) {
-    const entry = buckets.get(r.hour);
-    if (!entry) continue;
-    entry.tokens +=
-      r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
-    entry.cost += estimateCost(r);
-    entry.taskCount += r.task_count;
-  }
-  return [...buckets.values()];
 }
 
 // "Cost · 30D" KPI hint: percentage delta vs. the immediately prior window

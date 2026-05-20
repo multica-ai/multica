@@ -3,9 +3,10 @@
 /**
  * AttachmentPreviewModal — full-screen inline preview for an attachment.
  *
- * Sibling to the existing `ImageLightbox` (extensions/image-view.tsx) which
- * keeps owning images. This modal handles 6 other PreviewKinds:
+ * Single modal for every previewable kind. Handles 7 PreviewKinds:
  *
+ *   - image : <img className="object-contain"> centered in the modal frame.
+ *             Replaces the previous standalone ImageLightbox.
  *   - pdf   : <iframe src={download_url}> — relies on Chromium's PDFium
  *             plugin. On desktop, requires webPreferences.plugins=true
  *             (see apps/desktop/src/main/index.ts).
@@ -55,6 +56,7 @@ import {
 } from "./utils/preview";
 import { useDownloadAttachment } from "./use-download-attachment";
 import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
+import { withFragmentNavShim } from "./utils/iframe-fragment-nav";
 import { CodeBlockStatic } from "./code-block-static";
 
 // ---------------------------------------------------------------------------
@@ -77,7 +79,7 @@ export type PreviewSource =
 
 // PreviewKinds that can render from a URL-only source. Text-based kinds
 // (markdown / html / text) need the /content proxy which is ID-keyed.
-const URL_ONLY_KINDS = new Set<PreviewKind>(["pdf", "video", "audio"]);
+const URL_ONLY_KINDS = new Set<PreviewKind>(["image", "pdf", "video", "audio"]);
 
 // Normalized view used everywhere downstream of `useAttachmentPreview`.
 // `attachmentId === null` signals URL-only mode (download falls back to
@@ -219,11 +221,12 @@ export function AttachmentPreviewModal({
       : "";
     const path = `${paths.workspace(slug).attachmentPreview(state.attachmentId)}${nameQuery}`;
     if (navigation.openInNewTab) {
-      navigation.openInNewTab(path, state.filename);
-      return;
+      navigation.openInNewTab(path, state.filename, { activate: true });
+    } else {
+      const url = navigation.getShareableUrl(path);
+      window.open(url, "_blank", "noopener,noreferrer");
     }
-    const url = navigation.getShareableUrl(path);
-    window.open(url, "_blank", "noopener,noreferrer");
+    onClose();
   };
 
   if (!open || typeof document === "undefined") return null;
@@ -343,6 +346,16 @@ function PreviewContent({
   }
 
   switch (kind) {
+    case "image":
+      return (
+        <div className="flex h-full w-full items-center justify-center bg-black/40 p-4">
+          <img
+            src={state.mediaUrl}
+            alt={state.filename}
+            className="h-full w-full rounded-lg object-contain"
+          />
+        </div>
+      );
     case "pdf":
       return (
         <iframe
@@ -357,7 +370,7 @@ function PreviewContent({
           <video
             src={state.mediaUrl}
             controls
-            className="max-h-full max-w-full"
+            className="h-full w-full object-contain"
           />
         </div>
       );
@@ -388,7 +401,7 @@ function PreviewContent({
           onDownload={onDownload}
           render={(text) => (
             <iframe
-              srcDoc={text}
+              srcDoc={withFragmentNavShim(text)}
               // `allow-scripts` without `allow-same-origin` — scripts run
               // in an opaque origin and cannot read cookies / localStorage
               // / parent state, nor escape via top-nav / popups / forms.

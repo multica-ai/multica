@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
+  ChartGantt,
   Check,
   ChevronDown,
   CircleDot,
@@ -490,7 +491,13 @@ function LabelSubContent({
 // IssuesHeader
 // ---------------------------------------------------------------------------
 
-export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
+export function IssuesHeader({
+  scopedIssues,
+  allowGantt = false,
+}: {
+  scopedIssues: Issue[];
+  allowGantt?: boolean;
+}) {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
   const setScope = useIssuesScopeStore((s) => s.setScope);
@@ -532,7 +539,7 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
         ))}
       </div>
 
-      <IssueDisplayControls scopedIssues={scopedIssues} />
+      <IssueDisplayControls scopedIssues={scopedIssues} allowGantt={allowGantt} />
     </div>
   );
 }
@@ -540,9 +547,14 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
 export function IssueDisplayControls({
   scopedIssues,
   hideViewToggle = false,
+  allowGantt = false,
 }: {
   scopedIssues: Issue[];
   hideViewToggle?: boolean;
+  // Only Project Detail renders <GanttView>; other surfaces (global /issues,
+  // /my-issues, actor panel) ignore viewMode === "gantt" and would silently
+  // fall back to List if the option were exposed there. Keep Gantt opt-in.
+  allowGantt?: boolean;
 }) {
   const { t } = useT("issues");
   const viewMode = useViewStore((s) => s.viewMode);
@@ -913,7 +925,9 @@ export function IssueDisplayControls({
           </PopoverContent>
         </Popover>
 
-        {/* View toggle */}
+        {/* View toggle. If a store has `viewMode === "gantt"` persisted but
+            this surface doesn't render Gantt, fall back to "list" so the
+            trigger icon matches what's actually on screen. */}
         {!hideViewToggle && (
           <DropdownMenu>
             <Tooltip>
@@ -924,6 +938,8 @@ export function IssueDisplayControls({
                       <Button variant="outline" size="icon-sm" className="text-muted-foreground">
                         {viewMode === "board" ? (
                           <Columns3 className="size-4" />
+                        ) : viewMode === "gantt" && allowGantt ? (
+                          <ChartGantt className="size-4" />
                         ) : (
                           <List className="size-4" />
                         )}
@@ -933,7 +949,11 @@ export function IssueDisplayControls({
                 }
               />
               <TooltipContent side="bottom">
-                {viewMode === "board" ? t(($) => $.view.tooltip_board) : t(($) => $.view.tooltip_list)}
+                {viewMode === "board"
+                  ? t(($) => $.view.tooltip_board)
+                  : viewMode === "gantt" && allowGantt
+                  ? t(($) => $.view.tooltip_gantt)
+                  : t(($) => $.view.tooltip_list)}
               </TooltipContent>
             </Tooltip>
             <DropdownMenuContent align="end" className="w-auto">
@@ -947,6 +967,12 @@ export function IssueDisplayControls({
                   <List />
                   {t(($) => $.view.list)}
                 </DropdownMenuItem>
+                {allowGantt && (
+                  <DropdownMenuItem onClick={() => act.setViewMode("gantt")}>
+                    <ChartGantt />
+                    {t(($) => $.view.gantt)}
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>

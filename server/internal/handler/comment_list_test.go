@@ -559,6 +559,96 @@ func TestListComments_FlagCombinationRules(t *testing.T) {
 	}
 }
 
+// TestListComments_RecentWithSinceFilteredEmptySuppressesCursor pins
+// Elon's nit on PR #2787 / MUL-2340: a `recent + since` page whose every
+// row gets dropped by the `since` filter must NOT emit a next-page cursor.
+//
+// Pagination walks threads in strictly decreasing last_activity_at. If the
+// `since` filter empties this page, every comment in this page is <= since
+// ⇒ head.last_activity_at <= since ⇒ every older thread (strictly less
+// recent than head) also has last_activity_at < since ⇒ guaranteed empty.
+// Emitting a cursor in that case would invite the caller into a wasted
+// walk of pages that can never produce a row.
+func TestListComments_RecentWithSinceFilteredEmptySuppressesCursor(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+
+	// `since` = base + 1h (i.e. AFTER every comment in the fixture, where the
+	// freshest row sits at base + 12m). With recent=1 the page is technically
+	// "full" (1 thread out of 1 requested) so the legacy `len(seen) >= N`
+	// check would emit a cursor — but every row in that page is <= since, so
+	// the body is empty AND no older page can ever yield a >since row.
+	v := url.Values{}
+	v.Set("recent", "1")
+	v.Set("since", fx.Base.Add(1*time.Hour).UTC().Format(time.RFC3339Nano))
+	w, rows := listComments(t, fx.IssueID, v.Encode())
+	if len(rows) != 0 {
+		t.Fatalf("expected empty page after since-filter, got %d rows: %v", len(rows), ids(rows))
+	}
+	nb, nbid := nextThreadCursor(w)
+	if nb != "" || nbid != "" {
+		t.Fatalf("recent+since empty page must NOT emit cursor; got before=%q before_id=%q (this walks the caller into a guaranteed-empty pagination loop)", nb, nbid)
+	}
+}
+
+// TestListComments_RecentWithSinceKeepsCursorWhenPageHasRows is the
+// counterpoint to TestListComments_RecentWithSinceFilteredEmptySuppressesCursor:
+// if the `since` filter leaves at least one row in the page, the cursor must
+// still be emitted (the suppression rule is narrowly scoped to the empty
+// case so it can't accidentally swallow legitimate next-page hints).
+func TestListComments_RecentWithSinceKeepsCursorWhenPageHasRows(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+
+	// since = base + 11m30s drops everything from root1 (last_activity = base+3m)
+	// and from root2 except r2b (base+12m). With recent=1 (the freshest-active
+	// thread, root2), the page keeps r2b and the cursor still points at root2
+	// so the caller can scroll older threads if they want.
+	v := url.Values{}
+	v.Set("recent", "1")
+	v.Set("since", fx.Base.Add(11*time.Minute+30*time.Second).UTC().Format(time.RFC3339Nano))
+	w, rows := listComments(t, fx.IssueID, v.Encode())
+	eqIDs(t, ids(rows), []string{fx.R2b}, "recent=1 + since keeps r2b")
+	nb, nbid := nextThreadCursor(w)
+	if nb == "" || nbid != fx.Root2 {
+		t.Fatalf("non-empty recent+since page must keep cursor; got before=%q before_id=%q want root_id=%q", nb, nbid, fx.Root2)
+	}
+}
+
+// TestListComments_RecentWithSinceSuppressesCursorWhenHeadPastSince covers
+// the mixed case from Elon's #2787 second review: the page is full (so the
+// legacy `len(seen) >= N` check would emit a cursor) AND the `since` filter
+// keeps rows from fresher threads (so the legacy `len(comments) == 0`
+// suppression does NOT trip), but the head (oldest-active) thread already
+// sits at or before `since`. Older pages walk strictly less-recent threads,
+// so none of them can produce a `> since` comment — emitting a cursor here
+// would still drag the caller into a guaranteed-empty next-page fetch.
+//
+// Fixture: root1 last_activity = base+3m, root2 last_activity = base+12m.
+// recent=2 ⇒ both threads on the page, head = root1. since = base+5m drops
+// everything in root1, keeps root2 entirely. Expect body = root2 thread,
+// no cursor.
+func TestListComments_RecentWithSinceSuppressesCursorWhenHeadPastSince(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+
+	v := url.Values{}
+	v.Set("recent", "2")
+	v.Set("since", fx.Base.Add(5*time.Minute).UTC().Format(time.RFC3339Nano))
+	w, rows := listComments(t, fx.IssueID, v.Encode())
+	eqIDs(t, ids(rows), []string{fx.Root2, fx.R2a, fx.R2b}, "recent=2 + since keeps root2 thread")
+	nb, nbid := nextThreadCursor(w)
+	if nb != "" || nbid != "" {
+		t.Fatalf("head thread (root1, last_activity = base+3m) is already <= since (base+5m); older pages can't beat it. cursor must be suppressed, got before=%q before_id=%q", nb, nbid)
+	}
+}
+
 // TestListComments_ThreadWithSinceFiltersWithinThread proves the allowed
 // combination from the rules: `thread + since` returns only comments in
 // that thread newer than `since`. The since filter is applied in-memory

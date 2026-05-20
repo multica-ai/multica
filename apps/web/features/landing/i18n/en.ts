@@ -285,6 +285,61 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.4",
+        date: "2026-05-20",
+        title: "Smarter Autopilots, Agent Controls & Desktop Reliability",
+        changes: [],
+        features: [
+          "Autopilots can assign new work through squads and place created Issues directly into a selected Project",
+          "Agent settings now include per-agent thinking controls for Claude and Codex, with an inspector picker that updates instantly",
+          "Desktop tabs can be pinned so important workspace pages stay parked while new links open in fresh tabs",
+          "User profiles can add requester context, giving coding agents better background for assigned Issues",
+          "Workspace settings now have a dedicated GitHub page, and regular members can see connected GitHub installations without admin controls",
+        ],
+        improvements: [
+          "New users are guided to connect a runtime instead of receiving starter content that may not match their workspace",
+          "Runtime pages are quieter, and desktop keeps the local machine visible after stopping the local service",
+          "Issue breadcrumbs show the Project segment when an Issue belongs to a Project",
+          "HTML previews and attachment previews have roomier, more predictable layouts",
+          "Squad pages show fuller loading states and use a clearer archive confirmation dialog",
+          "Agents now receive parent and sub-issue handoff guidance before running assigned work",
+        ],
+        fixes: [
+          "List editing exits cleanly from an empty top-level item when pressing Enter",
+          "The installer falls back to release binaries when Homebrew setup fails and reports clearer diagnostics",
+          "Retrying an execution log row now reruns the agent that handled that row",
+          "Chat and task-message loading ignore temporary IDs instead of calling invalid task routes",
+          "OpenCode-backed daemon runs no longer enter invisible interactive question prompts",
+          "Gemini runtimes use the correct official icon",
+        ],
+      },
+      {
+        version: "0.3.3",
+        date: "2026-05-19",
+        title: "Project Timelines, Runtime Setup & Clearer Issue Work",
+        changes: [],
+        features: [
+          "Projects now have a Gantt view for scheduled work, with updates that stay in sync as plans change",
+          "Workspace admins can change the issue key prefix from settings",
+          "The CLI can switch between workspaces and show the current workspace",
+          "Agents can read issue threads from the most recent discussion first, making follow-up work easier to route and review",
+          "Usage now includes a one-day view plus weekly trends that respect the selected timezone",
+          "Agent detail pages now work as an issue board for that specific agent",
+        ],
+        improvements: [
+          "The onboarding flow now asks one focused question at a time and can guide runtime setup with fewer manual steps",
+          "My Issues now includes squad-assigned work and labels the team-related tab more clearly",
+          "Agent execution logs can be sorted in either direction when reviewing a run",
+        ],
+        fixes: [
+          "HTML previews open more predictably from desktop, close the full-screen modal when needed, and support in-page links",
+          "HTML source view and attachment previews are easier to inspect, including opening content in a new tab",
+          "Create-issue prompts no longer keep stale manual draft text when switching modes",
+          "Runtime tasks now find the right workspace instructions and skills from the task folder",
+          "Self-hosted teams can set how long auth sessions last",
+        ],
+      },
+      {
         version: "0.3.2",
         date: "2026-05-18",
         title:

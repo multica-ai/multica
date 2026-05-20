@@ -549,6 +549,33 @@ func (q *Queries) ListAgentRuntimesByOwner(ctx context.Context, arg ListAgentRun
 	return items, nil
 }
 
+const listArchivedAgentIDsByRuntime = `-- name: ListArchivedAgentIDsByRuntime :many
+SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL
+`
+
+// Companion to DeleteArchivedAgentsByRuntime: enumerates the archived agents
+// about to be hard-deleted so the runtime teardown can pause autopilots that
+// still point at them. Returns ids only — the caller only needs the set.
+func (q *Queries) ListArchivedAgentIDsByRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listArchivedAgentIDsByRuntime, runtimeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockTaskUsageDailyRollup = `-- name: LockTaskUsageDailyRollup :exec
 SELECT pg_advisory_xact_lock(4242)
 `
@@ -652,6 +679,25 @@ func (q *Queries) MarkRuntimesOfflineByIDs(ctx context.Context, arg MarkRuntimes
 		return nil, err
 	}
 	return items, nil
+}
+
+const pauseAutopilotsByAgentAssignees = `-- name: PauseAutopilotsByAgentAssignees :exec
+UPDATE autopilot
+SET status = 'paused', updated_at = now()
+WHERE status = 'active'
+  AND assignee_type = 'agent'
+  AND assignee_id = ANY($1::uuid[])
+`
+
+// Pauses every active autopilot whose agent assignee is in the supplied list.
+// Called before hard-deleting archived agents on runtime teardown so the rows
+// do not become dangling (autopilot.assignee_id no longer has an agent FK
+// since migration 096). Status='paused' makes the breakage visible in the UI
+// — operators can re-point the autopilot at a live agent or delete it —
+// rather than silently piling skipped runs.
+func (q *Queries) PauseAutopilotsByAgentAssignees(ctx context.Context, assigneeIds []pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, pauseAutopilotsByAgentAssignees, assigneeIds)
+	return err
 }
 
 const reassignAgentsToRuntime = `-- name: ReassignAgentsToRuntime :execrows

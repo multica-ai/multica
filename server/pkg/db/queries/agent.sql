@@ -20,8 +20,8 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
-    instructions, custom_env, custom_args, mcp_config, model
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    instructions, custom_env, custom_args, mcp_config, model, thinking_level
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 RETURNING *;
 
 -- name: UpdateAgent :one
@@ -40,7 +40,16 @@ UPDATE agent SET
     custom_args = COALESCE(sqlc.narg('custom_args'), custom_args),
     mcp_config = COALESCE(sqlc.narg('mcp_config'), mcp_config),
     model = COALESCE(sqlc.narg('model'), model),
+    thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
     updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearAgentThinkingLevel :one
+-- Explicit NULL-clear for thinking_level. COALESCE-based UpdateAgent cannot
+-- set the column back to NULL, so the API layer routes "user picked Default"
+-- through this dedicated query.
+UPDATE agent SET thinking_level = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -108,22 +117,28 @@ WHERE id = $1 AND issue_id IS NULL;
 -- name: CreateRetryTask :one
 -- Clones a parent task into a fresh queued attempt. Carries forward the
 -- agent's resume context (session_id/work_dir) so the child can continue
--- the conversation when the backend supports it. attempt is incremented;
--- max_attempts, trigger_comment_id, and is_leader_task are inherited so
--- the retried task keeps the same squad-role provenance as its parent and
--- the self-trigger guard in shouldEnqueueSquadLeaderOnComment continues to
--- recognise it as a leader task.
+-- the conversation when the backend supports it. Resume-unsafe failures are
+-- retried as fresh sessions so the child does not inherit a stuck agent
+-- conversation. Keep the CASE WHEN predicates in sync with
+-- resumeUnsafeFailureReason and the resume lookup blacklists. attempt is
+-- incremented; max_attempts, trigger_comment_id, and is_leader_task are
+-- inherited so the retried task keeps the same squad-role provenance as its
+-- parent and the self-trigger guard in shouldEnqueueSquadLeaderOnComment
+-- continues to recognise it as a leader task.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, trigger_summary, context,
     session_id, work_dir,
-    attempt, max_attempts, parent_task_id, is_leader_task
+    attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
     'queued', p.priority, p.trigger_comment_id, p.trigger_summary, p.context,
-    p.session_id, p.work_dir,
-    p.attempt + 1, p.max_attempts, p.id, p.is_leader_task
+    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
+    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.work_dir END,
+    p.attempt + 1, p.max_attempts, p.id,
+    p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
+    p.is_leader_task
 FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING *;
@@ -255,9 +270,11 @@ RETURNING *;
 -- Tasks that ended in a known "poisoned" terminal state are also excluded
 -- here so even auto-retry does not inherit the bad session. The daemon
 -- classifies these failures (iteration_limit, agent_fallback_message,
--- api_invalid_request) when it detects either an agent fallback marker in
--- the output or an upstream API 400 that means the conversation history
--- itself is unprocessable (oversized image, malformed base64, etc.).
+-- api_invalid_request, codex_semantic_inactivity) when it detects either an
+-- agent fallback marker in the output, an upstream API 400 that means the
+-- conversation history itself is unprocessable (oversized image, malformed
+-- base64, etc.), or a Codex semantic inactivity timeout whose recorded
+-- session may replay the same stuck state.
 --
 -- The error-text ILIKE clause is defense-in-depth for the api_invalid_request
 -- shape: a legacy row tagged 'agent_error' (pre-MUL-1921), a deploy-window
@@ -273,7 +290,7 @@ WHERE agent_id = $1 AND issue_id = $2
     status = 'completed'
     OR (
       status = 'failed'
-      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request')
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
     )
   )
