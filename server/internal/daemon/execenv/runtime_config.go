@@ -63,7 +63,7 @@ var runtimeGOOS = runtime.GOOS
 //
 // CR/LF and other whitespace control bytes collapse to a single space; other
 // C0 controls and DEL are dropped; markdown structural characters that have
-// meaning in inline context (`*`, `_`, “ ` “, `\`, `[`, `]`, `<`) are
+// meaning in inline context (`*`, `_`, '`', `\`, `[`, `]`, `<`) are
 // backslash-escaped. Trailing whitespace is trimmed.
 func sanitizeNameForBriefMarkdown(name string) string {
 	var b strings.Builder
