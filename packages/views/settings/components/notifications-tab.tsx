@@ -58,6 +58,18 @@ const customWebhookEvents: NotificationEventType[] = [
   "subscribed_issue_updated",
 ];
 
+const dingtalkEvents: NotificationEventType[] = [
+  "mentioned",
+  "task_completed",
+  "task_failed",
+];
+
+const dingtalkEventLabels: Record<string, string> = {
+  mentioned: "被 @提及时",
+  task_completed: "Agent 任务完成时",
+  task_failed: "Agent 任务失败时",
+};
+
 const openclawWeixinEvents: NotificationEventType[] = [
   "task_completed",
   "task_failed",
@@ -534,7 +546,7 @@ export function NotificationsTab() {
           </CardHeader>
           <CardContent className="space-y-4">
             {preferences
-              .filter((pref) => pref.channel !== "custom_webhook" && pref.channel !== "openclaw_weixin")
+              .filter((pref) => pref.channel !== "custom_webhook" && pref.channel !== "openclaw_weixin" && pref.channel !== "dingtalk")
               .map((pref) => {
                 const binding = bindingByProvider.get(pref.channel);
                 const needsBinding = pref.requires_binding && !binding;
@@ -577,9 +589,54 @@ export function NotificationsTab() {
                 );
               })}
 
-            {/* Render mode selector for DingTalk */}
+            {/* DingTalk per-event toggles */}
             {preferences.some((p) => p.channel === "dingtalk") && (
-              <div className="rounded-lg border p-4 space-y-2">
+              <div className="rounded-lg border p-4 space-y-3">
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{channelLabels.dingtalk}</span>
+                    {bindingByProvider.get("dingtalk") ? (
+                      <Badge variant="secondary">{bindingByProvider.get("dingtalk")!.status}</Badge>
+                    ) : (
+                      <Badge variant="outline">not connected</Badge>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {channelDescriptions.dingtalk}
+                  </p>
+                  {!bindingByProvider.get("dingtalk") ? (
+                    <p className="text-xs text-muted-foreground">
+                      Link your account from Profile → Linked Accounts before enabling this channel.
+                    </p>
+                  ) : null}
+                </div>
+                {dingtalkEvents.map((eventType) => {
+                  const pref = preferences.find(
+                    (p) => p.channel === "dingtalk" && p.event_type === eventType,
+                  );
+                  const key = `dingtalk:${eventType}`;
+                  const needsBinding = !bindingByProvider.get("dingtalk");
+                  return (
+                    <div key={key} className="flex items-center justify-between gap-4 pl-2">
+                      <span className="text-sm text-muted-foreground">
+                        {dingtalkEventLabels[eventType] ?? eventType}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {savingKey === key ? (
+                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        ) : null}
+                        <Switch
+                          checked={pref?.enabled ?? false}
+                          disabled={savingKey !== null || needsBinding}
+                          onCheckedChange={(checked) => {
+                            if (pref) void handleToggle(pref, checked);
+                          }}
+                          aria-label={`Toggle ${dingtalkEventLabels[eventType]}`}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-1">
                     <span className="text-sm font-medium">DingTalk 通知样式</span>

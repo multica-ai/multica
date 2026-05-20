@@ -56,6 +56,18 @@ var supportedNotificationPreferences = []notificationPreferenceSpec{
 		RequiresBinding: false,
 	},
 	{
+		Channel:         "dingtalk",
+		EventType:       "task_completed",
+		DefaultEnabled:  false,
+		RequiresBinding: true,
+	},
+	{
+		Channel:         "dingtalk",
+		EventType:       "task_failed",
+		DefaultEnabled:  false,
+		RequiresBinding: true,
+	},
+	{
 		Channel:         "openclaw_weixin",
 		EventType:       "mentioned",
 		DefaultEnabled:  false,

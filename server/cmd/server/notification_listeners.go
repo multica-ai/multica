@@ -376,7 +376,7 @@ func recordMentionDingTalkDelivery(
 
 // recordDingTalkTaskDelivery creates a pending DingTalk delivery for task events
 // (task_completed, task_failed) if the recipient has a dingtalk preference enabled
-// for agent_activity or the specific task event type.
+// for the specific task event type (dingtalk + task_completed / dingtalk + task_failed).
 func recordDingTalkTaskDelivery(
 	ctx context.Context,
 	queries *db.Queries,
@@ -394,15 +394,14 @@ func recordDingTalkTaskDelivery(
 		return
 	}
 
-	// DingTalk task notifications (task_completed, task_failed) reuse the
-	// "dingtalk + mentioned" preference as the activation signal. If the user
-	// has DingTalk enabled for @mentions, task events are also delivered there.
-	// This avoids requiring separate per-event-type DingTalk preferences while
-	// the feature is in its current form.
+	// DingTalk task notifications use independent per-event-type preferences:
+	// "dingtalk + task_completed" or "dingtalk + task_failed".
+	// Determine the event type from the notification event.
+	taskEventType := event.Type // "task_completed" or "task_failed"
 	var dingtalkPref *db.NotificationChannelPreference
 	for i := range prefs {
 		pref := &prefs[i]
-		if pref.Channel == "dingtalk" && pref.EventType == "mentioned" && pref.Enabled {
+		if pref.Channel == "dingtalk" && pref.EventType == taskEventType && pref.Enabled {
 			dingtalkPref = pref
 			break
 		}
@@ -1693,9 +1692,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			}
 		}
 
-		// Get the last agent comment as notification body
-		nCtx := buildNotificationContext(ctx, queries, e.WorkspaceID, issueID, "", "")
+		// Get the last agent comment as notification body and record its ID
 		body := ""
+		lastAgentCommentID := ""
 		comments, err := queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
 			IssueID:     parseUUID(issueID),
 			WorkspaceID: parseUUID(e.WorkspaceID),
@@ -1705,10 +1704,14 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			for i := len(comments) - 1; i >= 0; i-- {
 				if comments[i].AuthorType == "agent" {
 					body = comments[i].Content
+					lastAgentCommentID = util.UUIDToString(comments[i].ID)
 					break
 				}
 			}
 		}
+
+		// Build notification context with comment anchor when available
+		nCtx := buildNotificationContext(ctx, queries, e.WorkspaceID, issueID, lastAgentCommentID, "")
 
 		// If no explicit summary from task payload, extract from body
 		if notificationSummary == "" && body != "" {
@@ -1819,7 +1822,23 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 
 		// Deliver to openclaw_weixin and dingtalk for task_failed (same as task_completed)
 		if recipientID != "" && recipientID != agentID {
-			nCtx := buildNotificationContext(ctx, queries, e.WorkspaceID, issueID, "", "")
+			// Find last agent comment for comment anchor link
+			lastAgentCommentID := ""
+			taskComments, commentErr := queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
+				IssueID:     parseUUID(issueID),
+				WorkspaceID: parseUUID(e.WorkspaceID),
+				Limit:       100,
+			})
+			if commentErr == nil {
+				for i := len(taskComments) - 1; i >= 0; i-- {
+					if taskComments[i].AuthorType == "agent" {
+						lastAgentCommentID = util.UUIDToString(taskComments[i].ID)
+						break
+					}
+				}
+			}
+
+			nCtx := buildNotificationContext(ctx, queries, e.WorkspaceID, issueID, lastAgentCommentID, "")
 			payloadSnapshot, _ := json.Marshal(map[string]any{
 				"type":             "task_failed",
 				"severity":         "action_required",
