@@ -54,9 +54,17 @@ vi.mock("@multica/core/auth", () => ({
     sel({ user: { id: "user-me" } }),
 }));
 
-vi.mock("@multica/core/runtimes", () => ({
-  deriveRuntimeHealth: () => "online",
-}));
+vi.mock("@multica/core/runtimes", async () => {
+  const providerDisplay =
+    await vi.importActual<typeof import("@multica/core/runtimes")>(
+      "@multica/core/runtimes",
+    );
+  return {
+    deriveRuntimeHealth: () => "online",
+    displayProviderName: providerDisplay.displayProviderName,
+    displayRuntimeName: providerDisplay.displayRuntimeName,
+  };
+});
 
 vi.mock("@multica/core/agents", () => ({
   useWorkspacePresenceMap: () => ({ byAgent: new Map() }),
