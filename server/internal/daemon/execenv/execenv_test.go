@@ -266,6 +266,43 @@ func TestProjectReposReplaceWorkspaceReposInMetaSkill(t *testing.T) {
 	}
 }
 
+func TestRepositoryBriefRendersPrecheckedAndFallbackRepos(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	ctx := TaskContextForEnv{
+		IssueID: "11111111-2222-3333-4444-555555555555",
+		Repos: []RepoContextForEnv{
+			{
+				URL:       "https://github.com/org/backend",
+				LocalPath: filepath.Join(dir, "backend"),
+			},
+			{URL: "https://github.com/org/frontend"},
+		},
+	}
+
+	if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(content)
+
+	for _, want := range []string{
+		"https://github.com/org/backend",
+		"already checked out at `" + filepath.Join(dir, "backend") + "`",
+		"https://github.com/org/frontend",
+		"run `multica repo checkout https://github.com/org/frontend`",
+		"Do not use raw `git clone`",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("CLAUDE.md missing %q", want)
+		}
+	}
+}
+
 func TestWriteProjectResourcesSkippedWhenNone(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

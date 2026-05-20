@@ -908,6 +908,71 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 	}
 }
 
+func (d *Daemon) preCheckoutTaskRepos(ctx context.Context, workspaceID, taskID, agentName, workDir string, repos []execenv.RepoContextForEnv) []execenv.RepoContextForEnv {
+	if len(repos) == 0 {
+		return repos
+	}
+
+	logger := d.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	if d.repoCache == nil {
+		logger.Warn("daemon pre-checkout skipped: repo cache not initialized", "workspace_id", workspaceID, "task_id", taskID)
+		return repos
+	}
+
+	result := make([]execenv.RepoContextForEnv, len(repos))
+	copy(result, repos)
+
+	checkedOut := make(map[string]string, len(repos))
+	for i, repo := range result {
+		repoURL := strings.TrimSpace(repo.URL)
+		if repoURL == "" {
+			continue
+		}
+		if localPath, ok := checkedOut[repoURL]; ok {
+			result[i].LocalPath = localPath
+			continue
+		}
+
+		if err := d.ensureRepoReady(ctx, workspaceID, repoURL); err != nil {
+			logger.Warn("daemon pre-checkout failed",
+				"workspace_id", workspaceID,
+				"task_id", taskID,
+				"url", repoURL,
+				"error", err,
+			)
+			checkedOut[repoURL] = ""
+			continue
+		}
+
+		worktree, err := d.repoCache.CreateWorktree(repocache.WorktreeParams{
+			WorkspaceID:         workspaceID,
+			RepoURL:             repoURL,
+			WorkDir:             workDir,
+			AgentName:           agentName,
+			TaskID:              taskID,
+			CoAuthoredByEnabled: d.workspaceCoAuthoredByEnabled(workspaceID),
+		})
+		if err != nil {
+			logger.Warn("daemon pre-checkout failed",
+				"workspace_id", workspaceID,
+				"task_id", taskID,
+				"url", repoURL,
+				"error", err,
+			)
+			checkedOut[repoURL] = ""
+			continue
+		}
+
+		result[i].LocalPath = worktree.Path
+		checkedOut[repoURL] = worktree.Path
+	}
+
+	return result
+}
+
 // waitBackgroundSyncs blocks until every background sync started by
 // registerTaskRepos has finished. Intended for test teardown: tests that
 // hand the daemon a t.TempDir-backed repo cache must call this before
@@ -1004,7 +1069,18 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return nil
 	}
 
-	d.syncWorkspaceRepos(workspaceID, resp.Repos)
+	reposToSync := resp.Repos
+	foundRequestedRepo := false
+	for _, repo := range reposToSync {
+		if strings.TrimSpace(repo.URL) == repoURL {
+			foundRequestedRepo = true
+			break
+		}
+	}
+	if !foundRequestedRepo {
+		reposToSync = append(reposToSync, RepoData{URL: repoURL})
+	}
+	d.syncWorkspaceRepos(workspaceID, reposToSync)
 
 	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
 		return nil
@@ -2109,6 +2185,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	}
 
 	d.reportTaskResult(ctx, task.ID, result, taskLog)
+	d.auditWorkdirForRawClones(result.WorkDir, task.ID)
 
 	// Write GC metadata after the task finishes so the periodic GC loop
 	// can look up the parent record (issue / chat session / autopilot run /
@@ -2156,6 +2233,37 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 		if err := d.client.FailTask(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
 			taskLog.Error("report failed task failed", "error", err)
 		}
+	}
+}
+
+func (d *Daemon) auditWorkdirForRawClones(workDir, taskID string) {
+	if strings.TrimSpace(workDir) == "" {
+		return
+	}
+
+	entries, err := os.ReadDir(workDir)
+	if err != nil {
+		return
+	}
+
+	logger := d.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		repoPath := filepath.Join(workDir, entry.Name())
+		gitDir := filepath.Join(repoPath, ".git")
+		info, err := os.Stat(gitDir)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		logger.Warn("raw git clone detected in task workdir",
+			"task_id", taskID,
+			"path", repoPath,
+		)
 	}
 }
 
@@ -2235,9 +2343,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		instructions = task.Agent.Instructions
 	}
 
-	// Prepare isolated execution environment.
-	// Repos are passed as metadata only — the agent checks them out on demand
-	// via `multica repo checkout <url>`.
+	// Prepare isolated execution environment. Repos start as metadata and are
+	// annotated with local worktree paths after the workdir exists.
 	taskCtx := execenv.TaskContextForEnv{
 		IssueID:                          task.IssueID,
 		TriggerCommentID:                 task.TriggerCommentID,
@@ -2316,6 +2423,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		d.markActiveEnvRoot(env.RootDir)
 		defer d.unmarkActiveEnvRoot(env.RootDir)
 	}
+
+	taskCtx.Repos = d.preCheckoutTaskRepos(ctx, task.WorkspaceID, task.ID, agentName, env.WorkDir, taskCtx.Repos)
 
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
 	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
