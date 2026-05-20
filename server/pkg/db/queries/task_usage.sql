@@ -13,6 +13,48 @@ DO UPDATE SET
     cache_write_tokens = EXCLUDED.cache_write_tokens,
     updated_at = now();
 
+-- name: UpsertLocalCLIUsage :exec
+INSERT INTO local_cli_usage (
+    run_id,
+    workspace_id,
+    issue_id,
+    owner_id,
+    cli_name,
+    provider,
+    model,
+    input_tokens,
+    output_tokens,
+    cache_read_tokens,
+    cache_write_tokens,
+    updated_at
+)
+SELECT
+    lcr.id,
+    lcr.workspace_id,
+    lcr.issue_id,
+    lcr.owner_id,
+    lcr.cli_name,
+    sqlc.arg('provider'),
+    sqlc.arg('model'),
+    sqlc.arg('input_tokens'),
+    sqlc.arg('output_tokens'),
+    sqlc.arg('cache_read_tokens'),
+    sqlc.arg('cache_write_tokens'),
+    now()
+FROM local_cli_run lcr
+WHERE lcr.id = sqlc.arg('run_id')
+ON CONFLICT (run_id, provider, model)
+DO UPDATE SET
+    workspace_id = EXCLUDED.workspace_id,
+    issue_id = EXCLUDED.issue_id,
+    owner_id = EXCLUDED.owner_id,
+    cli_name = EXCLUDED.cli_name,
+    input_tokens = EXCLUDED.input_tokens,
+    output_tokens = EXCLUDED.output_tokens,
+    cache_read_tokens = EXCLUDED.cache_read_tokens,
+    cache_write_tokens = EXCLUDED.cache_write_tokens,
+    updated_at = now();
+
 -- name: GetTaskUsage :many
 SELECT * FROM task_usage
 WHERE task_id = $1
@@ -212,3 +254,41 @@ WHERE a.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
 GROUP BY atq.agent_id
 ORDER BY total_seconds DESC;
+
+-- name: ListDashboardLocalUsageDaily :many
+SELECT
+    DATE(lcu.updated_at) AS date,
+    lcu.model,
+    SUM(lcu.input_tokens)::bigint AS input_tokens,
+    SUM(lcu.output_tokens)::bigint AS output_tokens,
+    SUM(lcu.cache_read_tokens)::bigint AS cache_read_tokens,
+    SUM(lcu.cache_write_tokens)::bigint AS cache_write_tokens,
+    COUNT(DISTINCT lcu.run_id)::int AS task_count
+FROM local_cli_usage lcu
+LEFT JOIN issue i ON i.id = lcu.issue_id
+WHERE lcu.workspace_id = $1
+  AND lcu.updated_at >= DATE_TRUNC('day', @since::timestamptz)
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+GROUP BY DATE(lcu.updated_at), lcu.model
+ORDER BY DATE(lcu.updated_at) DESC, lcu.model;
+
+-- name: ListDashboardLocalUsageByRunner :many
+SELECT
+    lcu.owner_id,
+    (COALESCE(NULLIF(u.name, ''), u.email) || '-local-' || lcu.cli_name)::text AS runner_name,
+    lcu.cli_name,
+    lcu.provider,
+    lcu.model,
+    SUM(lcu.input_tokens)::bigint AS input_tokens,
+    SUM(lcu.output_tokens)::bigint AS output_tokens,
+    SUM(lcu.cache_read_tokens)::bigint AS cache_read_tokens,
+    SUM(lcu.cache_write_tokens)::bigint AS cache_write_tokens,
+    COUNT(DISTINCT lcu.run_id)::int AS task_count
+FROM local_cli_usage lcu
+JOIN "user" u ON u.id = lcu.owner_id
+LEFT JOIN issue i ON i.id = lcu.issue_id
+WHERE lcu.workspace_id = $1
+  AND lcu.updated_at >= DATE_TRUNC('day', @since::timestamptz)
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+GROUP BY lcu.owner_id, runner_name, lcu.cli_name, lcu.provider, lcu.model
+ORDER BY runner_name, lcu.model;

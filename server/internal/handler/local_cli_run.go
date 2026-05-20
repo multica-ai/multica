@@ -60,6 +60,19 @@ type createLocalCLIMessageRequest struct {
 	SourceKey string         `json:"source_key"`
 }
 
+type updateLocalCLIUsageRequest struct {
+	Usage []localCLIUsagePayload `json:"usage"`
+}
+
+type localCLIUsagePayload struct {
+	Provider         string `json:"provider"`
+	Model            string `json:"model"`
+	InputTokens      int64  `json:"input_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+}
+
 type localCLICommentDisplayRow struct {
 	CommentID   pgtype.UUID
 	DisplayName string
@@ -365,6 +378,49 @@ func localCLIMessageIsCommand(req createLocalCLIMessageRequest) bool {
 	}
 	command, _ := req.Input["command"].(bool)
 	return command
+}
+
+func (h *Handler) UpdateLocalCLIUsage(w http.ResponseWriter, r *http.Request) {
+	run, ok := h.loadLocalCLIRunForUser(w, r, chi.URLParam(r, "runId"))
+	if !ok {
+		return
+	}
+
+	var req updateLocalCLIUsageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	for _, u := range req.Usage {
+		provider := strings.ToLower(strings.TrimSpace(u.Provider))
+		if provider != "codex" && provider != "claude" {
+			writeError(w, http.StatusBadRequest, "invalid provider")
+			return
+		}
+		model := strings.TrimSpace(u.Model)
+		if model == "" {
+			model = "unknown"
+		}
+		if u.InputTokens < 0 || u.OutputTokens < 0 || u.CacheReadTokens < 0 || u.CacheWriteTokens < 0 {
+			writeError(w, http.StatusBadRequest, "usage tokens must be non-negative")
+			return
+		}
+		if err := h.Queries.UpsertLocalCLIUsage(r.Context(), db.UpsertLocalCLIUsageParams{
+			RunID:            run.ID,
+			Provider:         provider,
+			Model:            model,
+			InputTokens:      u.InputTokens,
+			OutputTokens:     u.OutputTokens,
+			CacheReadTokens:  u.CacheReadTokens,
+			CacheWriteTokens: u.CacheWriteTokens,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update local run usage")
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) localCLIDisplayName(ctx context.Context, run localCLIRun) string {

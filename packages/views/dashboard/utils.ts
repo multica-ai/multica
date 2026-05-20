@@ -1,6 +1,7 @@
 import type {
   DashboardUsageDaily,
   DashboardUsageByAgent,
+  DashboardLocalUsageByRunner,
   DashboardAgentRunTime,
   DashboardRunTimeDaily,
 } from "@multica/core/types";
@@ -137,6 +138,9 @@ export function computeDailyTotals(usage: DashboardUsageDaily[]): DashboardToken
 
 export interface AgentCostRow {
   agentId: string;
+  source?: "agent" | "local";
+  displayName?: string;
+  ownerId?: string;
   tokens: number;
   cost: number;
   taskCount: number;
@@ -150,6 +154,7 @@ export function aggregateAgentTokens(rows: DashboardUsageByAgent[]): AgentCostRo
   for (const r of rows) {
     const entry = map.get(r.agent_id) ?? {
       agentId: r.agent_id,
+      source: "agent" as const,
       tokens: 0,
       cost: 0,
       taskCount: 0,
@@ -163,8 +168,34 @@ export function aggregateAgentTokens(rows: DashboardUsageByAgent[]): AgentCostRo
   return [...map.values()].sort((a, b) => b.cost - a.cost);
 }
 
+export function aggregateLocalRunnerTokens(
+  rows: DashboardLocalUsageByRunner[],
+): AgentCostRow[] {
+  const map = new Map<string, AgentCostRow>();
+  for (const r of rows) {
+    const runnerId = `local:${r.owner_id}:${r.cli_name}`;
+    const entry = map.get(runnerId) ?? {
+      agentId: runnerId,
+      source: "local" as const,
+      displayName: r.runner_name,
+      ownerId: r.owner_id,
+      tokens: 0,
+      cost: 0,
+      taskCount: 0,
+    };
+    entry.tokens +=
+      r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
+    entry.cost += estimateCost(r);
+    map.set(runnerId, entry);
+  }
+  return [...map.values()].sort((a, b) => b.cost - a.cost);
+}
+
 export interface AgentDashboardRow {
   agentId: string;
+  source: "agent" | "local";
+  displayName?: string;
+  ownerId?: string;
   tokens: number;
   cost: number;
   seconds: number;
@@ -183,6 +214,7 @@ export interface AgentDashboardRow {
 export function mergeAgentDashboardRows(
   tokenRows: AgentCostRow[],
   runTimeRows: DashboardAgentRunTime[],
+  localRows: AgentCostRow[] = [],
 ): AgentDashboardRow[] {
   const runTimeByAgent = new Map(
     runTimeRows.map((r) => [r.agent_id, r] as const),
@@ -192,6 +224,7 @@ export function mergeAgentDashboardRows(
     const rt = runTimeByAgent.get(r.agentId);
     merged.set(r.agentId, {
       agentId: r.agentId,
+      source: "agent",
       tokens: r.tokens,
       cost: r.cost,
       seconds: rt?.total_seconds ?? 0,
@@ -205,10 +238,23 @@ export function mergeAgentDashboardRows(
     if (merged.has(r.agent_id)) continue;
     merged.set(r.agent_id, {
       agentId: r.agent_id,
+      source: "agent",
       tokens: 0,
       cost: 0,
       seconds: r.total_seconds,
       taskCount: r.task_count,
+    });
+  }
+  for (const r of localRows) {
+    merged.set(r.agentId, {
+      agentId: r.agentId,
+      source: "local",
+      displayName: r.displayName,
+      ownerId: r.ownerId,
+      tokens: r.tokens,
+      cost: r.cost,
+      seconds: 0,
+      taskCount: r.taskCount,
     });
   }
   return [...merged.values()].sort((a, b) => {

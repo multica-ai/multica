@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -223,10 +224,17 @@ func (h *Handler) RespondInteraction(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (h *Handler) requireUserTaskAccess(w http.ResponseWriter, r *http.Request, taskID string) bool {
-	task, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskID))
-	if err != nil {
-		writeError(w, http.StatusNotFound, "task not found")
+	taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task_id")
+	if !ok {
 		return false
+	}
+	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
+	if err != nil {
+		if !isNotFound(err) {
+			writeError(w, http.StatusInternalServerError, "failed to load task")
+			return false
+		}
+		return h.requireUserLocalRunAccess(w, r, taskUUID)
 	}
 	wsID := h.TaskService.ResolveTaskWorkspaceID(r.Context(), task)
 	if wsID == "" {
@@ -236,6 +244,32 @@ func (h *Handler) requireUserTaskAccess(w http.ResponseWriter, r *http.Request, 
 	ctxWsID := middleware.WorkspaceIDFromContext(r.Context())
 	if ctxWsID == "" || ctxWsID != wsID {
 		writeError(w, http.StatusForbidden, "no access to this task")
+		return false
+	}
+	return true
+}
+
+func (h *Handler) requireUserLocalRunAccess(w http.ResponseWriter, r *http.Request, runID pgtype.UUID) bool {
+	ctxWsID := middleware.WorkspaceIDFromContext(r.Context())
+	if ctxWsID == "" {
+		writeError(w, http.StatusForbidden, "no access to this task")
+		return false
+	}
+	ctxWsUUID, ok := parseUUIDOrBadRequest(w, ctxWsID, "workspace_id")
+	if !ok {
+		return false
+	}
+	var found bool
+	if err := h.DB.QueryRow(r.Context(), `
+		SELECT true
+		FROM local_cli_run
+		WHERE id = $1 AND workspace_id = $2
+	`, runID, ctxWsUUID).Scan(&found); err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "task not found")
+			return false
+		}
+		writeError(w, http.StatusInternalServerError, "failed to load task")
 		return false
 	}
 	return true

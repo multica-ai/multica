@@ -271,6 +271,140 @@ func (q *Queries) ListDashboardAgentRunTime(ctx context.Context, arg ListDashboa
 	return items, nil
 }
 
+const listDashboardLocalUsageByRunner = `-- name: ListDashboardLocalUsageByRunner :many
+SELECT
+    lcu.owner_id,
+    (COALESCE(NULLIF(u.name, ''), u.email) || '-local-' || lcu.cli_name)::text AS runner_name,
+    lcu.cli_name,
+    lcu.provider,
+    lcu.model,
+    SUM(lcu.input_tokens)::bigint AS input_tokens,
+    SUM(lcu.output_tokens)::bigint AS output_tokens,
+    SUM(lcu.cache_read_tokens)::bigint AS cache_read_tokens,
+    SUM(lcu.cache_write_tokens)::bigint AS cache_write_tokens,
+    COUNT(DISTINCT lcu.run_id)::int AS task_count
+FROM local_cli_usage lcu
+JOIN "user" u ON u.id = lcu.owner_id
+LEFT JOIN issue i ON i.id = lcu.issue_id
+WHERE lcu.workspace_id = $1
+  AND lcu.updated_at >= DATE_TRUNC('day', $2::timestamptz)
+  AND ($3::uuid IS NULL OR i.project_id = $3)
+GROUP BY lcu.owner_id, runner_name, lcu.cli_name, lcu.provider, lcu.model
+ORDER BY runner_name, lcu.model
+`
+
+type ListDashboardLocalUsageByRunnerParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+}
+
+type ListDashboardLocalUsageByRunnerRow struct {
+	OwnerID          pgtype.UUID `json:"owner_id"`
+	RunnerName       string      `json:"runner_name"`
+	CliName          string      `json:"cli_name"`
+	Provider         string      `json:"provider"`
+	Model            string      `json:"model"`
+	InputTokens      int64       `json:"input_tokens"`
+	OutputTokens     int64       `json:"output_tokens"`
+	CacheReadTokens  int64       `json:"cache_read_tokens"`
+	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	TaskCount        int32       `json:"task_count"`
+}
+
+func (q *Queries) ListDashboardLocalUsageByRunner(ctx context.Context, arg ListDashboardLocalUsageByRunnerParams) ([]ListDashboardLocalUsageByRunnerRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardLocalUsageByRunner, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardLocalUsageByRunnerRow{}
+	for rows.Next() {
+		var i ListDashboardLocalUsageByRunnerRow
+		if err := rows.Scan(
+			&i.OwnerID,
+			&i.RunnerName,
+			&i.CliName,
+			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.TaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDashboardLocalUsageDaily = `-- name: ListDashboardLocalUsageDaily :many
+SELECT
+    DATE(lcu.updated_at) AS date,
+    lcu.model,
+    SUM(lcu.input_tokens)::bigint AS input_tokens,
+    SUM(lcu.output_tokens)::bigint AS output_tokens,
+    SUM(lcu.cache_read_tokens)::bigint AS cache_read_tokens,
+    SUM(lcu.cache_write_tokens)::bigint AS cache_write_tokens,
+    COUNT(DISTINCT lcu.run_id)::int AS task_count
+FROM local_cli_usage lcu
+LEFT JOIN issue i ON i.id = lcu.issue_id
+WHERE lcu.workspace_id = $1
+  AND lcu.updated_at >= DATE_TRUNC('day', $2::timestamptz)
+  AND ($3::uuid IS NULL OR i.project_id = $3)
+GROUP BY DATE(lcu.updated_at), lcu.model
+ORDER BY DATE(lcu.updated_at) DESC, lcu.model
+`
+
+type ListDashboardLocalUsageDailyParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+}
+
+type ListDashboardLocalUsageDailyRow struct {
+	Date             pgtype.Date `json:"date"`
+	Model            string      `json:"model"`
+	InputTokens      int64       `json:"input_tokens"`
+	OutputTokens     int64       `json:"output_tokens"`
+	CacheReadTokens  int64       `json:"cache_read_tokens"`
+	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	TaskCount        int32       `json:"task_count"`
+}
+
+func (q *Queries) ListDashboardLocalUsageDaily(ctx context.Context, arg ListDashboardLocalUsageDailyParams) ([]ListDashboardLocalUsageDailyRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardLocalUsageDaily, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardLocalUsageDailyRow{}
+	for rows.Next() {
+		var i ListDashboardLocalUsageDailyRow
+		if err := rows.Scan(
+			&i.Date,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.TaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDashboardRunTimeDaily = `-- name: ListDashboardRunTimeDaily :many
 SELECT
     DATE(atq.completed_at) AS date,
@@ -607,6 +741,72 @@ func (q *Queries) ListDashboardUsageDailyRollup(ctx context.Context, arg ListDas
 		return nil, err
 	}
 	return items, nil
+}
+
+const upsertLocalCLIUsage = `-- name: UpsertLocalCLIUsage :exec
+INSERT INTO local_cli_usage (
+    run_id,
+    workspace_id,
+    issue_id,
+    owner_id,
+    cli_name,
+    provider,
+    model,
+    input_tokens,
+    output_tokens,
+    cache_read_tokens,
+    cache_write_tokens,
+    updated_at
+)
+SELECT
+    lcr.id,
+    lcr.workspace_id,
+    lcr.issue_id,
+    lcr.owner_id,
+    lcr.cli_name,
+    $1,
+    $2,
+    $3,
+    $4,
+    $5,
+    $6,
+    now()
+FROM local_cli_run lcr
+WHERE lcr.id = $7
+ON CONFLICT (run_id, provider, model)
+DO UPDATE SET
+    workspace_id = EXCLUDED.workspace_id,
+    issue_id = EXCLUDED.issue_id,
+    owner_id = EXCLUDED.owner_id,
+    cli_name = EXCLUDED.cli_name,
+    input_tokens = EXCLUDED.input_tokens,
+    output_tokens = EXCLUDED.output_tokens,
+    cache_read_tokens = EXCLUDED.cache_read_tokens,
+    cache_write_tokens = EXCLUDED.cache_write_tokens,
+    updated_at = now()
+`
+
+type UpsertLocalCLIUsageParams struct {
+	Provider         string      `json:"provider"`
+	Model            string      `json:"model"`
+	InputTokens      int64       `json:"input_tokens"`
+	OutputTokens     int64       `json:"output_tokens"`
+	CacheReadTokens  int64       `json:"cache_read_tokens"`
+	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	RunID            pgtype.UUID `json:"run_id"`
+}
+
+func (q *Queries) UpsertLocalCLIUsage(ctx context.Context, arg UpsertLocalCLIUsageParams) error {
+	_, err := q.db.Exec(ctx, upsertLocalCLIUsage,
+		arg.Provider,
+		arg.Model,
+		arg.InputTokens,
+		arg.OutputTokens,
+		arg.CacheReadTokens,
+		arg.CacheWriteTokens,
+		arg.RunID,
+	)
+	return err
 }
 
 const upsertTaskUsage = `-- name: UpsertTaskUsage :exec

@@ -24,7 +24,7 @@ const (
 	codexAppServerStartRetries = 5
 )
 
-func executeCodexRemoteCLI(args []string, cwd string, env localCLIEnv, initialPrompt string, reporter *localRunReporter) (int, error) {
+func executeCodexRemoteCLI(args []string, cwd string, env localCLIEnv, initialPrompt string, reporter *localRunReporter, usageReporter *localRunUsageReporter) (int, error) {
 	if err := validateCodexRemoteArgs(args[1:]); err != nil {
 		return 1, err
 	}
@@ -35,7 +35,7 @@ func executeCodexRemoteCLI(args []string, cwd string, env localCLIEnv, initialPr
 	}
 	defer stopCodexSidecarCommand(appServer)
 
-	proxy, err := newCodexRemoteProxy(upstreamURL, reporter, initialPrompt)
+	proxy, err := newCodexRemoteProxy(upstreamURL, reporter, usageReporter, initialPrompt)
 	if err != nil {
 		return 1, err
 	}
@@ -178,7 +178,7 @@ type codexRemoteProxy struct {
 	wg          sync.WaitGroup
 }
 
-func newCodexRemoteProxy(upstreamURL string, reporter *localRunReporter, bootstrapPrompt string) (*codexRemoteProxy, error) {
+func newCodexRemoteProxy(upstreamURL string, reporter *localRunReporter, usageReporter *localRunUsageReporter, bootstrapPrompt string) (*codexRemoteProxy, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
@@ -186,7 +186,7 @@ func newCodexRemoteProxy(upstreamURL string, reporter *localRunReporter, bootstr
 	p := &codexRemoteProxy{
 		upstreamURL: upstreamURL,
 		listener:    ln,
-		mapper:      newCodexAppServerMapper(reporter, bootstrapPrompt),
+		mapper:      newCodexAppServerMapper(reporter, usageReporter, bootstrapPrompt),
 		conns:       make(map[*websocket.Conn]struct{}),
 	}
 	mux := http.NewServeMux()
@@ -342,10 +342,15 @@ func (p *codexRemoteProxy) copyMessages(src, dst *websocket.Conn, dstWriteMu *sy
 type codexAppServerMapper struct {
 	mu             sync.Mutex
 	reporter       *localRunReporter
+	usageReporter  *localRunUsageReporter
 	bootstrap      string
 	pending        map[string]codexPendingRequest
 	turnComment    map[string]bool
 	deltas         map[string]string
+	turnUsage      map[string]localCLIUsage
+	usageTotals    map[string]localCLIUsage
+	threadModel    map[string]string
+	turnModel      map[string]string
 	activeThreadID string
 	activeTurnID   string
 }
@@ -355,13 +360,18 @@ type codexPendingRequest struct {
 	params map[string]any
 }
 
-func newCodexAppServerMapper(reporter *localRunReporter, bootstrapPrompt string) *codexAppServerMapper {
+func newCodexAppServerMapper(reporter *localRunReporter, usageReporter *localRunUsageReporter, bootstrapPrompt string) *codexAppServerMapper {
 	return &codexAppServerMapper{
-		reporter:    reporter,
-		bootstrap:   bootstrapPrompt,
-		pending:     make(map[string]codexPendingRequest),
-		turnComment: make(map[string]bool),
-		deltas:      make(map[string]string),
+		reporter:      reporter,
+		usageReporter: usageReporter,
+		bootstrap:     bootstrapPrompt,
+		pending:       make(map[string]codexPendingRequest),
+		turnComment:   make(map[string]bool),
+		deltas:        make(map[string]string),
+		turnUsage:     make(map[string]localCLIUsage),
+		usageTotals:   make(map[string]localCLIUsage),
+		threadModel:   make(map[string]string),
+		turnModel:     make(map[string]string),
 	}
 }
 
@@ -436,6 +446,10 @@ func (m *codexAppServerMapper) handleNotification(method string, params map[stri
 	case "turn/completed":
 		m.trackTurn(params)
 		m.recordFailedTurn(params)
+	case "thread/tokenUsage/updated":
+		m.recordThreadTokenUsage(params)
+	case "model/rerouted":
+		m.recordModelReroute(params)
 	case "error":
 		m.recordError(firstString(params, "message", "error"))
 		if errObj := nestedMap(params, "error"); errObj != nil {
@@ -455,7 +469,7 @@ func (m *codexAppServerMapper) handleThreadResult(result map[string]any) {
 	if thread == nil {
 		return
 	}
-	m.setActiveThread(stringValue(thread["id"]))
+	m.setActiveThreadModel(stringValue(thread["id"]), stringValue(result["model"]))
 }
 
 func (m *codexAppServerMapper) trackTurn(params map[string]any) {
@@ -614,6 +628,100 @@ func (m *codexAppServerMapper) recordPatchResult(threadID, turnID, itemID string
 	})
 }
 
+func (m *codexAppServerMapper) recordThreadTokenUsage(params map[string]any) {
+	if m.usageReporter == nil {
+		return
+	}
+	threadID := m.threadID(params)
+	turnID := stringValue(params["turnId"])
+	if turnID == "" {
+		turnID = m.turnID(params)
+	}
+	tokenUsage := nestedMap(params, "tokenUsage")
+	if tokenUsage == nil {
+		return
+	}
+	last := nestedMap(tokenUsage, "last")
+	if last == nil {
+		return
+	}
+	if threadID == "" || turnID == "" {
+		return
+	}
+	model := m.modelForTurn(threadID, turnID)
+	usage := localCLIUsage{
+		Provider:         "codex",
+		Model:            model,
+		InputTokens:      int64Value(firstAny(last, "inputTokens", "input_tokens")),
+		OutputTokens:     int64Value(firstAny(last, "outputTokens", "output_tokens")),
+		CacheReadTokens:  int64Value(firstAny(last, "cachedInputTokens", "cached_input_tokens")),
+		CacheWriteTokens: 0,
+	}
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CacheReadTokens == 0 && usage.CacheWriteTokens == 0 {
+		return
+	}
+	turnKey := threadID + "\x00" + turnID
+	m.mu.Lock()
+	m.turnUsage[turnKey] = usage
+	totals := m.recomputeUsageTotalsLocked()
+	m.mu.Unlock()
+	for _, total := range totals {
+		m.usageReporter.Report(total)
+	}
+}
+
+func (m *codexAppServerMapper) recordModelReroute(params map[string]any) {
+	threadID := m.threadID(params)
+	turnID := stringValue(params["turnId"])
+	model := stringValue(params["toModel"])
+	if threadID == "" || turnID == "" || model == "" {
+		return
+	}
+	m.mu.Lock()
+	m.turnModel[threadID+"\x00"+turnID] = model
+	m.mu.Unlock()
+}
+
+func (m *codexAppServerMapper) modelForTurn(threadID, turnID string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if model := strings.TrimSpace(m.turnModel[threadID+"\x00"+turnID]); model != "" {
+		return model
+	}
+	if model := strings.TrimSpace(m.threadModel[threadID]); model != "" {
+		return model
+	}
+	return "unknown"
+}
+
+func (m *codexAppServerMapper) recomputeUsageTotalsLocked() []localCLIUsage {
+	next := make(map[string]localCLIUsage)
+	for _, usage := range m.turnUsage {
+		key := usage.Provider + "\x00" + usage.Model
+		total := next[key]
+		if total.Provider == "" {
+			total.Provider = usage.Provider
+			total.Model = usage.Model
+		}
+		total.InputTokens += usage.InputTokens
+		total.OutputTokens += usage.OutputTokens
+		total.CacheReadTokens += usage.CacheReadTokens
+		total.CacheWriteTokens += usage.CacheWriteTokens
+		next[key] = total
+	}
+	for key, prev := range m.usageTotals {
+		if _, ok := next[key]; !ok {
+			next[key] = localCLIUsage{Provider: prev.Provider, Model: prev.Model}
+		}
+	}
+	m.usageTotals = next
+	totals := make([]localCLIUsage, 0, len(next))
+	for _, total := range next {
+		totals = append(totals, total)
+	}
+	return totals
+}
+
 func (m *codexAppServerMapper) recordFailedTurn(params map[string]any) {
 	turn := nestedMap(params, "turn")
 	if turn == nil || stringValue(turn["status"]) != "failed" {
@@ -643,6 +751,19 @@ func (m *codexAppServerMapper) setActiveThread(threadID string) {
 	m.mu.Lock()
 	m.activeThreadID = threadID
 	m.activeTurnID = ""
+	m.mu.Unlock()
+}
+
+func (m *codexAppServerMapper) setActiveThreadModel(threadID, model string) {
+	if threadID == "" {
+		return
+	}
+	m.mu.Lock()
+	m.activeThreadID = threadID
+	m.activeTurnID = ""
+	if strings.TrimSpace(model) != "" {
+		m.threadModel[threadID] = strings.TrimSpace(model)
+	}
 	m.mu.Unlock()
 }
 
@@ -713,6 +834,44 @@ func nestedMap(obj map[string]any, key string) map[string]any {
 	}
 	v, _ := obj[key].(map[string]any)
 	return v
+}
+
+func firstNestedMap(obj map[string]any, keys ...string) map[string]any {
+	for _, key := range keys {
+		if m := nestedMap(obj, key); m != nil {
+			return m
+		}
+	}
+	return nil
+}
+
+func firstAny(obj map[string]any, keys ...string) any {
+	for _, key := range keys {
+		if v, ok := obj[key]; ok && v != nil {
+			return v
+		}
+	}
+	return nil
+}
+
+func int64Value(v any) int64 {
+	switch n := v.(type) {
+	case int64:
+		return n
+	case int:
+		return int64(n)
+	case int32:
+		return int64(n)
+	case float64:
+		return int64(n)
+	case float32:
+		return int64(n)
+	case json.Number:
+		i, _ := n.Int64()
+		return i
+	default:
+		return 0
+	}
 }
 
 func codexAppServerItemText(item map[string]any) string {

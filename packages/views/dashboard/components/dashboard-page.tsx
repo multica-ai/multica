@@ -17,6 +17,8 @@ import { projectListOptions } from "@multica/core/projects/queries";
 import {
   dashboardUsageDailyOptions,
   dashboardUsageByAgentOptions,
+  dashboardLocalUsageDailyOptions,
+  dashboardLocalUsageByRunnerOptions,
   dashboardAgentRunTimeOptions,
   dashboardRunTimeDailyOptions,
 } from "@multica/core/dashboard";
@@ -39,6 +41,7 @@ import { formatTokens } from "../../runtimes/utils";
 import { useT } from "../../i18n";
 import {
   aggregateAgentTokens,
+  aggregateLocalRunnerTokens,
   aggregateDailyCost,
   aggregateDailyTasks,
   aggregateDailyTime,
@@ -67,6 +70,7 @@ const ALL_PROJECTS = "__all__";
 // reference-equality dep check and trips the exhaustive-deps lint rule.
 const EMPTY_DAILY: import("@multica/core/types").DashboardUsageDaily[] = [];
 const EMPTY_BY_AGENT: import("@multica/core/types").DashboardUsageByAgent[] = [];
+const EMPTY_LOCAL_BY_RUNNER: import("@multica/core/types").DashboardLocalUsageByRunner[] = [];
 const EMPTY_RUNTIME: import("@multica/core/types").DashboardAgentRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: import("@multica/core/types").DashboardRunTimeDaily[] = [];
 
@@ -149,6 +153,12 @@ export function DashboardPage() {
 
   const dailyQuery = useQuery(dashboardUsageDailyOptions(wsId, days, projectId));
   const byAgentQuery = useQuery(dashboardUsageByAgentOptions(wsId, days, projectId));
+  const localDailyQuery = useQuery(
+    dashboardLocalUsageDailyOptions(wsId, days, projectId),
+  );
+  const localByRunnerQuery = useQuery(
+    dashboardLocalUsageByRunnerOptions(wsId, days, projectId),
+  );
   const runTimeQuery = useQuery(dashboardAgentRunTimeOptions(wsId, days, projectId));
   const runTimeDailyQuery = useQuery(
     dashboardRunTimeDailyOptions(wsId, days, projectId),
@@ -156,12 +166,16 @@ export function DashboardPage() {
 
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
   const byAgentUsage = byAgentQuery.data ?? EMPTY_BY_AGENT;
+  const localDailyUsage = localDailyQuery.data ?? EMPTY_DAILY;
+  const localByRunnerUsage = localByRunnerQuery.data ?? EMPTY_LOCAL_BY_RUNNER;
   const runTimeRows = runTimeQuery.data ?? EMPTY_RUNTIME;
   const runTimeDailyRows = runTimeDailyQuery.data ?? EMPTY_RUNTIME_DAILY;
 
   const isLoading =
     dailyQuery.isLoading ||
     byAgentQuery.isLoading ||
+    localDailyQuery.isLoading ||
+    localByRunnerQuery.isLoading ||
     runTimeQuery.isLoading ||
     runTimeDailyQuery.isLoading;
 
@@ -172,13 +186,25 @@ export function DashboardPage() {
     !isLoading &&
     dailyUsage.length === 0 &&
     byAgentUsage.length === 0 &&
+    localDailyUsage.length === 0 &&
+    localByRunnerUsage.length === 0 &&
     runTimeRows.length === 0 &&
     runTimeDailyRows.length === 0;
 
   // Cost / token math — re-derived when usage, days, or pricings change.
-  const totals = useMemo(() => computeDailyTotals(dailyUsage), [dailyUsage]);
-  const dailyCost = useMemo(() => aggregateDailyCost(dailyUsage), [dailyUsage]);
-  const dailyTokens = useMemo(() => aggregateDailyTokens(dailyUsage), [dailyUsage]);
+  const combinedDailyUsage = useMemo(
+    () => [...dailyUsage, ...localDailyUsage],
+    [dailyUsage, localDailyUsage],
+  );
+  const totals = useMemo(() => computeDailyTotals(combinedDailyUsage), [combinedDailyUsage]);
+  const dailyCost = useMemo(
+    () => aggregateDailyCost(combinedDailyUsage),
+    [combinedDailyUsage],
+  );
+  const dailyTokens = useMemo(
+    () => aggregateDailyTokens(combinedDailyUsage),
+    [combinedDailyUsage],
+  );
   const dailyTime = useMemo(
     () => aggregateDailyTime(runTimeDailyRows),
     [runTimeDailyRows],
@@ -190,6 +216,10 @@ export function DashboardPage() {
   const agentTokenRows = useMemo(
     () => aggregateAgentTokens(byAgentUsage),
     [byAgentUsage],
+  );
+  const localTokenRows = useMemo(
+    () => aggregateLocalRunnerTokens(localByRunnerUsage),
+    [localByRunnerUsage],
   );
 
   // Run-time totals — taskCount + failedCount summed for the KPI row.
@@ -206,8 +236,8 @@ export function DashboardPage() {
   }, [runTimeRows]);
 
   const agentRows = useMemo(
-    () => mergeAgentDashboardRows(agentTokenRows, runTimeRows),
-    [agentTokenRows, runTimeRows],
+    () => mergeAgentDashboardRows(agentTokenRows, runTimeRows, localTokenRows),
+    [agentTokenRows, runTimeRows, localTokenRows],
   );
 
   return (
@@ -545,6 +575,7 @@ function Leaderboard({
               const agent = agents.find((a) => a.id === row.agentId);
               const value = SORT_METRIC[sortBy](row);
               const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
+              const displayName = row.displayName ?? agent?.name ?? row.agentId;
               return (
                 <div
                   key={row.agentId}
@@ -552,13 +583,13 @@ function Leaderboard({
                 >
                   <div className="flex min-w-0 items-center gap-2">
                     <ActorAvatar
-                      actorType="agent"
-                      actorId={row.agentId}
+                      actorType={row.source === "local" ? "member" : "agent"}
+                      actorId={row.source === "local" ? (row.ownerId ?? row.agentId) : row.agentId}
                       size={22}
-                      enableHoverCard
+                      enableHoverCard={row.source === "agent"}
                     />
                     <span className="cursor-pointer truncate text-sm font-medium">
-                      {agent?.name ?? row.agentId}
+                      {displayName}
                     </span>
                   </div>
                   <div className="relative h-2 overflow-hidden rounded-full bg-muted">
