@@ -651,6 +651,68 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 	}
 }
 
+func TestInjectRuntimeConfigIncludesLocalPreviewInstructions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		provider string
+		fileName string
+	}{
+		{name: "codex", provider: "codex", fileName: "AGENTS.md"},
+		{name: "claude", provider: "claude", fileName: "CLAUDE.md"},
+		{name: "gemini", provider: "gemini", fileName: "GEMINI.md"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+
+			if _, err := InjectRuntimeConfig(dir, tt.provider, TaskContextForEnv{IssueID: "issue-1"}); err != nil {
+				t.Fatalf("InjectRuntimeConfig failed: %v", err)
+			}
+
+			content, err := os.ReadFile(filepath.Join(dir, tt.fileName))
+			if err != nil {
+				t.Fatalf("failed to read %s: %v", tt.fileName, err)
+			}
+
+			s := string(content)
+			for _, want := range []string{
+				"## Local Preview",
+				"multica preview start --issue issue-1",
+				"--cwd <project-dir>",
+				"--port <port>",
+				"Preview ID or URL",
+			} {
+				if !strings.Contains(s, want) {
+					t.Errorf("%s missing local preview text %q\n---\n%s", tt.fileName, want, s)
+				}
+			}
+		})
+	}
+}
+
+func TestInjectRuntimeConfigLocalPreviewInstructionsUsePlaceholderWithoutIssueID(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	if _, err := InjectRuntimeConfig(dir, "codex", TaskContextForEnv{}); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
+	if !strings.Contains(s, "multica preview start --issue <issue-id>") {
+		t.Errorf("AGENTS.md missing issue placeholder in local preview instructions\n---\n%s", s)
+	}
+}
+
 func TestInjectRuntimeConfigGemini(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

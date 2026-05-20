@@ -79,6 +79,29 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (strin
 	}
 }
 
+func buildLocalPreviewInstructions(ctx TaskContextForEnv) string {
+	issueID := ctx.IssueID
+	if issueID == "" {
+		issueID = "<issue-id>"
+	}
+
+	var b strings.Builder
+	b.WriteString("## Local Preview\n\n")
+	b.WriteString("When you need to start a long-running local test/dev server for this issue, do not run the server command directly in the background. ")
+	b.WriteString("Start it through `multica preview start` so Multica can attach it to the issue preview.\n\n")
+	b.WriteString("Use this form:\n\n")
+	b.WriteString("```bash\n")
+	fmt.Fprintf(&b, "multica preview start --issue %s --cwd <project-dir> --port <port> -- <start-command...>\n", issueID)
+	b.WriteString("```\n\n")
+	b.WriteString("Examples:\n\n")
+	b.WriteString("```bash\n")
+	fmt.Fprintf(&b, "multica preview start --issue %s --cwd /path/to/app --port 5173 -- npm run dev -- --host 0.0.0.0\n", issueID)
+	fmt.Fprintf(&b, "multica preview start --issue %s --cwd /path/to/app --port 3000 -- pnpm dev --host 0.0.0.0\n", issueID)
+	b.WriteString("```\n\n")
+	b.WriteString("After starting a preview, include the Preview ID or URL in your final issue comment.\n\n")
+	return b.String()
+}
+
 // buildMetaSkillContent generates the meta skill markdown that teaches the agent
 // about the Multica runtime environment and available CLI tools.
 func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
@@ -148,6 +171,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
 		}
 	}
+
+	b.WriteString(buildLocalPreviewInstructions(ctx))
 
 	// Inject available repositories section.
 	if len(ctx.Repos) > 0 {
