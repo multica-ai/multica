@@ -1035,13 +1035,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// CEREBRO-PATCH(cerebro-inbox-unarchive): JEH-1166 — unarchive action from archived view.
 				r.Post("/{id}/unarchive", cerebroInboxHandler.UnarchiveInboxItem)
 
-				// Notifications (route='notifications'). Single-item operations
-				// (mark-read, archive) reuse the inbox endpoints above; only the
-				// list/count/bulk endpoints are split.
-				r.Get("/notifications", h.ListNotifications)
+				// Notifications (route='notifications'). Legacy nested routes
+				// CEREBRO-PATCH(cerebro-notifications-api): keep old list shape for existing clients.
+				r.Get("/notifications", h.ListInboxNotifications)
 				r.Get("/notifications/unread-count", h.CountUnreadNotifications)
 				r.Post("/notifications/mark-all-read", h.MarkAllNotificationsRead)
 				r.Post("/notifications/archive-all", h.ArchiveAllNotifications)
+			})
+
+			// CEREBRO-PATCH(cerebro-notifications-api): top-level REST API with cursor pagination.
+			r.Route("/api/notifications", func(r chi.Router) {
+				r.Get("/", h.ListNotifications)
+				r.Get("/unread-count", h.CountUnreadNotifications)
+				r.Patch("/{id}/read", h.MarkNotificationRead)
+				r.Patch("/read-all", h.MarkAllNotificationsRead)
 			})
 
 			// Notification preferences

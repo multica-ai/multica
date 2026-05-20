@@ -221,6 +221,14 @@
       "gate": "self_only"
     },
     {
+      "id": "PATCH /api/notifications/read-all",
+      "gate": "self_only"
+    },
+    {
+      "id": "PATCH /api/notifications/{id}/read",
+      "gate": "self_only"
+    },
+    {
       "id": "PATCH /api/projects/{id}/access",
       "gate": "project_access"
     },
