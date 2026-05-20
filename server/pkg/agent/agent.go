@@ -35,6 +35,7 @@ type ExecOptions struct {
 	ResumeSessionID           string          // if non-empty, resume a previous agent session
 	ExtraArgs                 []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
 	CustomArgs                []string        // per-agent CLI arguments appended after ExtraArgs
+	AdditionalWritableDirs    []string        // daemon-owned dirs to expose as writable alongside Cwd for sandboxed runtimes
 	McpConfig                 json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
 	// ThinkingLevel is the runtime-native reasoning/effort value (e.g.
 	// Claude's "low|medium|high|xhigh|max", Codex's "none|minimal|low|
