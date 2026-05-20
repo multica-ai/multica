@@ -1062,6 +1062,73 @@ func (h *Handler) GetAutopilotRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, runToResponse(run))
 }
 
+// CancelAutopilotRun cancels a running or pending autopilot run by cancelling
+// the underlying task (or marking the run failed directly if no task exists).
+func (h *Handler) CancelAutopilotRun(w http.ResponseWriter, r *http.Request) {
+	autopilotID := chi.URLParam(r, "id")
+	runID := chi.URLParam(r, "runId")
+	workspaceID := h.resolveWorkspaceID(r)
+
+	autopilot, ok := h.loadAutopilotInWorkspace(w, r, autopilotID, workspaceID)
+	if !ok {
+		return
+	}
+
+	runUUID, ok := parseUUIDOrBadRequest(w, runID, "run id")
+	if !ok {
+		return
+	}
+
+	ctx := r.Context()
+
+	run, err := h.Queries.GetAutopilotRun(ctx, runUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "run not found")
+		return
+	}
+	if uuidToString(run.AutopilotID) != uuidToString(autopilot.ID) {
+		writeError(w, http.StatusNotFound, "run not found")
+		return
+	}
+
+	if run.Status != "running" && run.Status != "pending" {
+		writeError(w, http.StatusBadRequest, "run is not cancellable (status: "+run.Status+")")
+		return
+	}
+
+	// Cancel the underlying task. SyncRunFromTask will update the run status.
+	switch {
+	case run.TaskID.Valid:
+		if _, err := h.TaskService.CancelTask(ctx, run.TaskID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to cancel task: "+err.Error())
+			return
+		}
+	case run.IssueID.Valid:
+		if err := h.TaskService.CancelTasksForIssue(ctx, run.IssueID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to cancel tasks for issue: "+err.Error())
+			return
+		}
+	default:
+		// No task or issue — mark run as failed directly.
+		if _, err := h.Queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
+			ID:            run.ID,
+			FailureReason: pgtype.Text{String: "cancelled by user", Valid: true},
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update run: "+err.Error())
+			return
+		}
+	}
+
+	// Re-fetch to get the latest state.
+	updatedRun, err := h.Queries.GetAutopilotRun(ctx, runUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to fetch updated run")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, runToResponse(updatedRun))
+}
+
 // ── Manual trigger ──────────────────────────────────────────────────────────
 
 func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {

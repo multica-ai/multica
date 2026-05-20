@@ -545,6 +545,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/trigger", h.TriggerAutopilot)
 					r.Get("/runs", h.ListAutopilotRuns)
 					r.Get("/runs/{runId}", h.GetAutopilotRun)
+					r.Post("/runs/{runId}/cancel", h.CancelAutopilotRun)
 					r.Get("/deliveries", h.ListAutopilotDeliveries)
 					r.Get("/deliveries/{deliveryId}", h.GetAutopilotDelivery)
 					r.Post("/deliveries/{deliveryId}/replay", h.ReplayAutopilotDelivery)

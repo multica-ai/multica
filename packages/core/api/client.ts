@@ -2118,6 +2118,12 @@ export class ApiClient {
     return this.fetch(`/api/autopilots/${autopilotId}/runs/${runId}`);
   }
 
+  async cancelAutopilotRun(autopilotId: string, runId: string): Promise<AutopilotRun> {
+    return this.fetch(`/api/autopilots/${autopilotId}/runs/${runId}/cancel`, {
+      method: "POST",
+    });
+  }
+
   async createAutopilotTrigger(autopilotId: string, data: CreateAutopilotTriggerRequest): Promise<AutopilotTrigger> {
     return this.fetch(`/api/autopilots/${autopilotId}/triggers`, {
       method: "POST",

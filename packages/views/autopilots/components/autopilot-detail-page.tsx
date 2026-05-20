@@ -15,6 +15,7 @@ import {
   useCreateAutopilotTrigger,
   useDeleteAutopilotTrigger,
   useRotateAutopilotTriggerWebhookToken,
+  useCancelAutopilotRun,
 } from "@multica/core/autopilots/mutations";
 import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
 import { api } from "@multica/core/api";
@@ -99,6 +100,25 @@ function WebhookPayloadSlot({ autopilotId, runId }: { autopilotId: string; runId
   return <WebhookPayloadPreview payload={data.trigger_payload} />;
 }
 
+function CancelRunButton({ autopilotId, runId }: { autopilotId: string; runId: string }) {
+  const cancelRun = useCancelAutopilotRun();
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="h-6 w-6 shrink-0 text-destructive hover:text-destructive"
+      disabled={cancelRun.isPending}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        cancelRun.mutate({ autopilotId, runId });
+      }}
+    >
+      <Ban className="h-3.5 w-3.5" />
+    </Button>
+  );
+}
+
 function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: string; agentName: string }) {
   const { t } = useT("autopilots");
   const wsPaths = useWorkspacePaths();
@@ -160,6 +180,9 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
             ) : undefined
           }
         />
+      )}
+      {run.status === "running" && (
+        <CancelRunButton autopilotId={run.autopilot_id} runId={run.id} />
       )}
     </>
   );
