@@ -42,6 +42,14 @@ const EventChannelArchived = "cerebro_channel_archived"
 // a channel. Same audience contract as EventChannelArchived.
 const EventChannelUnarchived = "cerebro_channel_unarchived"
 
+// AgentTriggerGateFn gates listen-mode triggered agents through the cerebro
+// group-permission allowlist (JEH-1727). The router wires it to a closure
+// that resolves the comment author's viewer (admin flag + group IDs) and
+// calls grouppermissions.CanUseAgent; nil = no gate (upstream-only fixtures,
+// upstream sync tests). Treat ownerID as optional — pgtype.UUID{} skips the
+// owner-exemption path.
+type AgentTriggerGateFn func(ctx context.Context, workspaceID, userID, agentID, ownerID pgtype.UUID) (bool, error)
+
 // Service ties together the cerebro listen-mode store, the upstream issue/
 // agent/subscriber queries, and the task-enqueue service so the comment
 // handler can dispatch listen-always agents in one call.
@@ -50,6 +58,10 @@ type Service struct {
 	Queries        *db.Queries
 	TaskService    *service.TaskService
 	Bus            *events.Bus
+	// AgentTriggerGate is the cerebro group-permission allowlist applied to
+	// listen-mode triggers. Set by the router after construction. JEH-1727 —
+	// closes the trigger-path hole exposed by the Filip-can-trigger-Mia case.
+	AgentTriggerGate AgentTriggerGateFn
 }
 
 // New constructs a Service. Callers wire it from the router. Registers a
@@ -125,6 +137,12 @@ func (s *Service) EnqueueChannelListenerTasks(
 		return
 	}
 
+	// JEH-1727: parse the author's user UUID once so the gate doesn't re-parse
+	// for every agent in the channel. Empty/invalid stays as zero-value UUID;
+	// the gate refuses on a zero UUID, which is the conservative behaviour for
+	// a comment without a resolvable author.
+	authorUUID, _ := util.ParseUUID(authorID)
+
 	for _, sub := range subs {
 		if sub.UserType != "agent" {
 			continue
@@ -163,6 +181,22 @@ func (s *Service) EnqueueChannelListenerTasks(
 		agent, err := s.Queries.GetAgent(ctx, sub.UserID)
 		if err != nil || agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
 			continue
+		}
+
+		// JEH-1727: cerebro group-permission allowlist. The listen-mode path
+		// used to enqueue every subscribed-always agent without consulting the
+		// commenter's group access, which let Filip wake Mia even when his
+		// effective groups didn't include her. Mirrors the gate in
+		// enqueueMentionedAgentTasks (handler/comment.go).
+		if s.AgentTriggerGate != nil {
+			allowed, err := s.AgentTriggerGate(ctx, issue.WorkspaceID, authorUUID, sub.UserID, agent.OwnerID)
+			if err != nil {
+				slog.Warn("listen-mode: agent gate failed", "channel_id", util.UUIDToString(issue.ID), "agent_id", agentID, "error", err)
+				continue
+			}
+			if !allowed {
+				continue
+			}
 		}
 
 		// Dedup: same as the mention path. Coalesces rapid-fire comments.

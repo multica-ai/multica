@@ -361,3 +361,88 @@ func TestPromoteDMOnMention_InheritsFromParent(t *testing.T) {
 		t.Fatalf("expected promotion via parent inheritance, got kind=%q", after.Kind)
 	}
 }
+
+// TestEnqueueChannelListenerTasks_AgentGateDeniesEnqueue is the JEH-1727
+// regression test for the listen-mode path. When the cerebro
+// AgentTriggerGate denies the comment author against a subscribed agent, the
+// dispatcher must short-circuit before reaching TaskService. The gate is
+// what closes the trigger-path hole Tine's FAIL eval surfaced.
+//
+// Mechanics: testSvc.TaskService is intentionally nil (see TestMain), so the
+// happy-path enqueue call would nil-panic. The deny-gate must run BEFORE the
+// enqueue, so this test completes cleanly iff the gate is wired and consulted.
+// A regression that bypasses the gate would panic and fail the suite.
+func TestEnqueueChannelListenerTasks_AgentGateDeniesEnqueue(t *testing.T) {
+	ctx := context.Background()
+	commenter := createTestUserAndMember(t, "filip-listen-deny")
+	agentID := createTestAgent(t, "mia-listen-deny")
+
+	// Build a channel issue with the agent subscribed (default listen mode = always).
+	q := db.New(testPool)
+	number, err := q.IncrementIssueCounter(ctx, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("increment issue counter: %v", err)
+	}
+	issue, err := q.CreateIssue(ctx, db.CreateIssueParams{
+		WorkspaceID: testWorkspaceID,
+		Title:       "Filip-listen-deny",
+		Status:      "todo",
+		Priority:    "none",
+		CreatorType: "member",
+		CreatorID:   commenter,
+		Position:    0,
+		Number:      number,
+		Kind:        pgtype.Text{String: "channel", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("create channel issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issue.ID)
+	})
+	if err := q.AddIssueSubscriber(ctx, db.AddIssueSubscriberParams{
+		IssueID: issue.ID, UserType: "agent", UserID: agentID, Reason: "creator",
+	}); err != nil {
+		t.Fatalf("subscribe agent: %v", err)
+	}
+
+	prev := testSvc.AgentTriggerGate
+	var gateCalls int
+	testSvc.AgentTriggerGate = func(ctx context.Context, workspaceID, userID, candidateAgentID, ownerID pgtype.UUID) (bool, error) {
+		gateCalls++
+		return false, nil
+	}
+	t.Cleanup(func() { testSvc.AgentTriggerGate = prev })
+
+	comment := db.Comment{
+		ID:         parseUUID("77777777-7777-7777-7777-777777777777"),
+		IssueID:    issue.ID,
+		AuthorType: "member",
+		AuthorID:   commenter,
+		Content:    "just thinking out loud",
+		Type:       "comment",
+	}
+
+	// If the gate were bypassed, the dispatcher would reach the nil TaskService
+	// and panic; recover here so the test reports a clean failure instead.
+	defer func() {
+		if rec := recover(); rec != nil {
+			t.Fatalf("listen-mode dispatcher reached nil TaskService — gate was not consulted: %v", rec)
+		}
+	}()
+	testSvc.EnqueueChannelListenerTasks(ctx, issue, comment, nil, "member", uuidString(commenter))
+
+	if gateCalls != 1 {
+		t.Fatalf("expected exactly 1 gate call for the one subscribed agent, got %d", gateCalls)
+	}
+
+	var taskCount int
+	if err := testPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM agent_task_queue WHERE agent_id = $1`, agentID,
+	).Scan(&taskCount); err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	if taskCount != 0 {
+		t.Fatalf("group-gate denial leaked an enqueued task: got %d", taskCount)
+	}
+}

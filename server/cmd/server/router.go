@@ -224,6 +224,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroGrantsHandler := cerebrogrants.NewHandler(cerebrogrants.New(cerebroQueries, queries, pool, bus)) // CEREBRO-PATCH(cerebro-grants-routes): JEH-1213
 	// CEREBRO-PATCH(router-group-permissions-seam): JEH-1009 wire capability gate into the upstream handler
 	h.GroupPermissions = cerebrogrouppermissions.NewHandlerSeam(cerebroGroupPermissionsHandler.Service)
+	// CEREBRO-PATCH(router-channel-listen-gate): JEH-1727 — gate listen-mode triggers through the group-permission allowlist.
+	channelListenSvc.AgentTriggerGate = newChannelListenAgentGate(queries, cerebroGroupPermissionsHandler.Service)
 	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 workspace accounts handler
 	cerebroAccountHandler := cerebroaccount.New(cerebroQueries, bus)
 	// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196/1197 credential registry handler — cipher loaded from MULTICA_CREDENTIALS_KEY, governance policy wired via newCredentialsPolicy (owner-only when persona env is unset).

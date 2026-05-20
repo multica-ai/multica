@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -492,7 +494,7 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 	if delegationErr != nil {
 		t.Fatalf("member delegation context: %v", delegationErr)
 	}
-	testHandler.enqueueMentionedAgentTasks(ctx, issue, comment, nil, "member", testUserID, delegation, nil)
+	testHandler.enqueueMentionedAgentTasks(ctx, nil, issue, comment, nil, "member", testUserID, delegation, nil)
 
 	var afterCount int
 	if err := testPool.QueryRow(ctx,
@@ -504,5 +506,158 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 	if afterCount != beforeCount {
 		t.Fatalf("foreign agent task count changed: before=%d after=%d — cross-workspace mention was not rejected",
 			beforeCount, afterCount)
+	}
+}
+
+// CEREBRO-PATCH(jeh-1727-mention-gate-test): JEH-1727 — regression test lives next to
+// enqueueMentionedAgentTasks in the upstream-zone handler package because that is the
+// function under test; the gate itself is the inline CEREBRO-PATCH in comment.go.
+//
+// TestEnqueueMentionedAgentTasks_GroupGateDeniesEnqueue is the JEH-1727
+// regression test: when the cerebro group allowlist denies an agent, an
+// @-mention of that agent must NOT enqueue a task. Closes the trigger-path
+// hole exposed by the Filip-can-trigger-Mia case (Tine's FAIL eval).
+//
+// Setup: workspace-visibility agent (so the private-agent gate doesn't
+// pre-empt the test) owned by a plain member; commenter is a separate
+// non-admin member; GroupPermissions stub returns CanUseAgent=false.
+// Expectation: zero new rows in agent_task_queue for the mentioned agent.
+func TestEnqueueMentionedAgentTasks_GroupGateDeniesEnqueue(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentOwnerID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ('Group Gate Owner', 'group-gate-owner@multica.test')
+		RETURNING id
+	`).Scan(&agentOwnerID); err != nil {
+		t.Fatalf("create agent owner: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM "user" WHERE email = 'group-gate-owner@multica.test'`)
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'member')
+	`, testWorkspaceID, agentOwnerID); err != nil {
+		t.Fatalf("add owner as member: %v", err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args
+		)
+		VALUES ($1, 'group-gate-agent', '', 'cloud', '{}'::jsonb,
+		        $2, 'workspace', 1, $3, '', '{}'::jsonb, '[]'::jsonb)
+		RETURNING id
+	`, testWorkspaceID, handlerTestRuntimeID(t), agentOwnerID).Scan(&agentID); err != nil {
+		t.Fatalf("create test agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	var commenterID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ('Group Gate Commenter', 'group-gate-commenter@multica.test')
+		RETURNING id
+	`).Scan(&commenterID); err != nil {
+		t.Fatalf("create commenter: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM "user" WHERE email = 'group-gate-commenter@multica.test'`)
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'member')
+	`, testWorkspaceID, commenterID); err != nil {
+		t.Fatalf("add commenter as member: %v", err)
+	}
+
+	var issueID, commentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number)
+		VALUES ($1, 'group-gate mention test', 'todo', 'medium', 'member', $2,
+		        COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1)
+		RETURNING id
+	`, testWorkspaceID, commenterID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	mention := "[@Mia](mention://agent/" + agentID + ")"
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content)
+		VALUES ($1, $2, 'member', $3, $4)
+		RETURNING id
+	`, testWorkspaceID, issueID, commenterID, mention).Scan(&commentID); err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE id = $1`, commentID)
+	})
+
+	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+	comment, err := testHandler.Queries.GetComment(ctx, util.MustParseUUID(commentID))
+	if err != nil {
+		t.Fatalf("load comment: %v", err)
+	}
+
+	prev := testHandler.GroupPermissions
+	testHandler.GroupPermissions = &stubGroupPermissions{
+		canUseA: func(context.Context, GroupPermissionsViewer, pgtype.UUID) (bool, error) {
+			return false, nil
+		},
+		// owner-exemption: commenter is NOT the agent owner, so create_agent
+		// answer is irrelevant — the gate denies via CanUseAgent and the
+		// commenter !equals(ownerID) check short-circuits before the capability
+		// lookup runs. Stubbed to false to assert that even if it were called,
+		// the test stays deterministic.
+		canAG: func(context.Context, GroupPermissionsViewer, pgtype.UUID) (bool, error) {
+			return false, nil
+		},
+	}
+	t.Cleanup(func() { testHandler.GroupPermissions = prev })
+
+	r := newRequestAs(commenterID, http.MethodPost, "/api/comments", nil)
+	r.Header.Set("X-Workspace-ID", testWorkspaceID)
+
+	delegation, delegationErr := testHandler.TaskService.CommentDelegationContext(ctx, "member", commenterID, "", "comment")
+	if delegationErr != nil {
+		t.Fatalf("commenter delegation context: %v", delegationErr)
+	}
+
+	var beforeCount int
+	if err := testPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM agent_task_queue WHERE agent_id = $1`, agentID,
+	).Scan(&beforeCount); err != nil {
+		t.Fatalf("count tasks before: %v", err)
+	}
+
+	testHandler.enqueueMentionedAgentTasks(ctx, r, issue, comment, nil, "member", commenterID, delegation, nil)
+
+	var afterCount int
+	if err := testPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM agent_task_queue WHERE agent_id = $1`, agentID,
+	).Scan(&afterCount); err != nil {
+		t.Fatalf("count tasks after: %v", err)
+	}
+	if afterCount != beforeCount {
+		t.Fatalf("group-gate denial leaked an enqueued task: before=%d after=%d", beforeCount, afterCount)
 	}
 }
