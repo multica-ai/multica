@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BellRing, Loader2, MessageCircle, Send, Trash2 } from "lucide-react";
+import { BellRing, Copy, Loader2, MessageCircle, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import type {
@@ -107,6 +107,8 @@ const webhookTemplatePlaceholder = `{
     "content": "{{content}}"
   }
 }`;
+
+const openclawWeixinBindPrompt = "帮我绑定 Multica 微信通知";
 
 function preferenceKey(pref: NotificationChannelPreference) {
   return `${pref.channel}:${pref.event_type}`;
@@ -468,6 +470,15 @@ export function NotificationsTab() {
     }
   };
 
+  const handleCopyWeixinBindPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(openclawWeixinBindPrompt);
+      toast.success("已复制");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "复制失败");
+    }
+  };
+
   const handleRenderModeChange = async (channel: NotificationChannel, mode: NotificationRenderMode) => {
     // Update render_mode for all event types under this channel
     const channelPrefs = preferences.filter((p) => p.channel === channel);
@@ -771,12 +782,25 @@ export function NotificationsTab() {
                       <div className="mt-4 space-y-4 border-t pt-4">
                         <Alert>
                           <MessageCircle className="h-4 w-4" />
-                          <AlertTitle>绑定微信通知</AlertTitle>
+                          <AlertTitle>推荐</AlertTitle>
                           <AlertDescription className="space-y-3">
-                            <p className="text-sm">方式一：复制以下内容发送给你的 OpenClaw 助手自动绑定：</p>
-                            <code className="block rounded bg-muted p-2 text-xs">
-                              帮我配置 Multica 微信通知：通过 Multica API 将我的微信 ID 绑定到通知系统。
-                            </code>
+                            <p className="text-sm">发送下面这句话给你的 OpenClaw 助手</p>
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 rounded-md border bg-background px-3 py-2 text-sm">
+                                {openclawWeixinBindPrompt}
+                              </div>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                onClick={() => void handleCopyWeixinBindPrompt()}
+                                aria-label="复制微信绑定指令"
+                                title="复制微信绑定指令"
+                              >
+                                <Copy className="h-4 w-4" />
+                              </Button>
+                            </div>
+                            <p className="text-sm text-muted-foreground">发送后刷新此页面即可看到绑定结果</p>
                             <p className="text-sm">方式二：手动获取微信 ID 后填写：</p>
                             <code className="block rounded bg-muted p-2 text-xs">
                               openclaw whoami --channel weixin

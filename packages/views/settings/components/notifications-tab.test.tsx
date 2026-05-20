@@ -86,6 +86,12 @@ describe("NotificationsTab", () => {
       requires_binding: payload.channel === "dingtalk",
       render_mode: payload.render_mode ?? "auto",
     }));
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      },
+    });
   });
 
   it("shows not connected state for dingtalk and keeps the channel switch disabled", async () => {
@@ -214,6 +220,28 @@ describe("NotificationsTab", () => {
       event_type: "channel_enabled",
       enabled: true,
     });
+  });
+
+  it("copies the concise OpenClaw WeChat bind prompt", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText,
+      },
+    });
+    apiMock.listRuntimes.mockResolvedValue([{ id: "runtime-1", provider: "openclaw", status: "online" }]);
+
+    render(<NotificationsTab />);
+
+    expect(await screen.findByText("发送下面这句话给你的 OpenClaw 助手")).toBeInTheDocument();
+    expect(screen.getByText("帮我绑定 Multica 微信通知")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "复制微信绑定指令" }));
+
+    expect(writeText).toHaveBeenCalledWith("帮我绑定 Multica 微信通知");
+    expect(screen.getByText("发送后刷新此页面即可看到绑定结果")).toBeInTheDocument();
   });
 
   it("creates a webhook with custom payload template and no secret field", async () => {
