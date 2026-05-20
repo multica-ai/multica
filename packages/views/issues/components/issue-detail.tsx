@@ -28,6 +28,7 @@ import {
   Square,
   Terminal,
   Tag,
+  Trash2,
   Users,
 } from "lucide-react";
 import { PageHeader } from "../../layout/page-header";
@@ -47,7 +48,7 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/u
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
+import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay, AttachmentCard, AttachmentDownloadProvider } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -84,7 +85,7 @@ import { collectThreadReplies } from "./thread-utils";
 import { AgentLiveCard } from "./agent-live-card";
 import { ExecutionLogSection } from "./execution-log-section";
 import { PullRequestList } from "./pull-request-list";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -336,6 +337,85 @@ function formatTokenCount(n: number): string {
 // Stable reference for threads with no replies. Inline `[]` would create a
 // new array on every render and bust React.memo on CommentCard / ResolvedThreadBar.
 const EMPTY_REPLIES: TimelineEntry[] = [];
+
+// ---------------------------------------------------------------------------
+// Issue-level attachment list — URL-only filtering, no sibling dedupe.
+// Unlike the comment-card AttachmentList, this only hides attachments whose
+// exact URL appears in the description markdown. Same-name / same-size
+// siblings are NOT collapsed — each attachment is an independent record.
+// ---------------------------------------------------------------------------
+
+function IssueAttachmentList({
+  attachments,
+  content,
+  className,
+  onDelete,
+  onAppendToDesc,
+}: {
+  attachments?: Attachment[];
+  content?: string;
+  className?: string;
+  onDelete?: (id: string) => void;
+  onAppendToDesc?: (a: Attachment) => void;
+}) {
+  if (!attachments?.length) return null;
+  const standalone = content
+    ? attachments.filter((a) => !content.includes(a.url))
+    : attachments;
+  if (!standalone.length) return null;
+
+  return (
+    <AttachmentDownloadProvider attachments={attachments}>
+      <div className={cn("flex flex-col gap-1", className)}>
+        {standalone.map((a) => (
+          <div key={a.id} className="flex items-center gap-1 group">
+            <div className="flex-1 min-w-0">
+              <AttachmentCard
+                filename={a.filename}
+                contentType={a.content_type ?? undefined}
+                attachmentId={a.id}
+                href={a.url}
+                onPreview={() => { window.open(a.url, "_blank"); }}
+                onDownload={() => { window.open(a.url, "_blank"); }}
+              />
+            </div>
+            {(onDelete || onAppendToDesc) && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <button
+                      type="button"
+                      className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-opacity"
+                    >
+                      <MoreHorizontal className="h-3.5 w-3.5" />
+                    </button>
+                  }
+                />
+                <DropdownMenuContent align="end">
+                  {onAppendToDesc && (
+                    <DropdownMenuItem onClick={() => onAppendToDesc(a)}>
+                      引用到描述末尾
+                    </DropdownMenuItem>
+                  )}
+                  {onDelete && onAppendToDesc && <DropdownMenuSeparator />}
+                  {onDelete && (
+                    <DropdownMenuItem
+                      className="text-destructive focus:text-destructive"
+                      onClick={() => onDelete(a.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5 mr-2" />
+                      删除
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+        ))}
+      </div>
+    </AttachmentDownloadProvider>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Sidebar progressive disclosure
@@ -1183,6 +1263,8 @@ export function IssueDetail({
 
   // Token usage
   const { data: usage } = useQuery(issueUsageOptions(resolvedId));
+
+  const queryClient = useQueryClient();
 
   // Attachments uploaded against this issue. Drives the description
   // editor's click-time fresh-sign download.
@@ -2194,6 +2276,19 @@ export function IssueDetail({
             </div>
             {descDragOver && <FileDropOverlay />}
           </div>
+
+          <IssueAttachmentList
+            attachments={issueAttachments}
+            content={issue.description ?? ""}
+            className="mt-3"
+            onDelete={async (attachmentId) => {
+              await api.deleteAttachment(attachmentId);
+              queryClient.invalidateQueries({ queryKey: issueAttachmentsOptions(id).queryKey });
+            }}
+            onAppendToDesc={(a) => {
+              descEditorRef.current?.appendMarkdown(`\n\n[${a.filename}](${a.url})`);
+            }}
+          />
 
           {/* Sub-issues — Linear-style */}
           {childIssues.length === 0 && (
