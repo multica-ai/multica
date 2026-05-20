@@ -241,6 +241,8 @@
     "section_assignee": "Assignee",
     "select_agent": "Select agent",
     "select_assignee": "Select agent or squad",
+    "section_project": "Project",
+    "no_project": "No project",
     "section_output_mode": "Output mode",
     "section_schedule": "Schedule",
     "section_trigger_kind": "Trigger",

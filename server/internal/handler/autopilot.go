@@ -24,10 +24,11 @@ func computeNextRun(cronExpr, timezone string) (time.Time, error) {
 // ── Response types ──────────────────────────────────────────────────────────
 
 type AutopilotResponse struct {
-	ID                 string  `json:"id"`
-	WorkspaceID        string  `json:"workspace_id"`
-	Title              string  `json:"title"`
-	Description        *string `json:"description"`
+	ID          string  `json:"id"`
+	WorkspaceID string  `json:"workspace_id"`
+	Title       string  `json:"title"`
+	Description *string `json:"description"`
+	ProjectID   *string `json:"project_id"`
 	// AssigneeType is "agent" or "squad". Path A from MUL-2429: when set
 	// to "squad", AssigneeID points at squad(id) rather than agent(id) and
 	// dispatch resolves to squad.leader_id at run time.
@@ -110,6 +111,7 @@ func autopilotToResponse(a db.Autopilot) AutopilotResponse {
 		WorkspaceID:        uuidToString(a.WorkspaceID),
 		Title:              a.Title,
 		Description:        textToPtr(a.Description),
+		ProjectID:          uuidToPtr(a.ProjectID),
 		AssigneeType:       assigneeType,
 		AssigneeID:         uuidToString(a.AssigneeID),
 		Status:             a.Status,
@@ -217,8 +219,9 @@ func runToResponseSlim(r db.AutopilotRun) AutopilotRunResponse {
 // ── Request types ───────────────────────────────────────────────────────────
 
 type CreateAutopilotRequest struct {
-	Title              string  `json:"title"`
-	Description        *string `json:"description"`
+	Title       string  `json:"title"`
+	Description *string `json:"description"`
+	ProjectID   *string `json:"project_id"`
 	// AssigneeType is optional and defaults to "agent" — preserves backward
 	// compatibility with desktop clients shipped before MUL-2429.
 	AssigneeType       *string `json:"assignee_type"`
@@ -230,6 +233,7 @@ type CreateAutopilotRequest struct {
 type UpdateAutopilotRequest struct {
 	Title              *string `json:"title"`
 	Description        *string `json:"description"`
+	ProjectID          *string `json:"project_id"`
 	AssigneeType       *string `json:"assignee_type"`
 	AssigneeID         *string `json:"assignee_id"`
 	Status             *string `json:"status"`
@@ -396,6 +400,10 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 	if !h.validateAutopilotAssignee(w, r, assigneeType, assigneeUUID, wsUUID) {
 		return
 	}
+	projectID, ok := h.parseAutopilotProjectID(w, r, req.ProjectID, wsUUID)
+	if !ok {
+		return
+	}
 
 	autopilot, err := h.Queries.CreateAutopilot(r.Context(), db.CreateAutopilotParams{
 		WorkspaceID:        wsUUID,
@@ -408,6 +416,7 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		CreatedByID:        parseUUID(userID),
 		Description:        ptrToText(req.Description),
 		IssueTitleTemplate: ptrToText(req.IssueTitleTemplate),
+		ProjectID:          projectID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create autopilot")
@@ -451,6 +460,7 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		Description:        prev.Description,
 		AssigneeID:         prev.AssigneeID,
 		IssueTitleTemplate: prev.IssueTitleTemplate,
+		ProjectID:          prev.ProjectID,
 	}
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
@@ -472,6 +482,13 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		params.IssueTitleTemplate = ptrToText(req.IssueTitleTemplate)
+	}
+	if _, ok := rawFields["project_id"]; ok {
+		projectID, ok := h.parseAutopilotProjectID(w, r, req.ProjectID, prev.WorkspaceID)
+		if !ok {
+			return
+		}
+		params.ProjectID = projectID
 	}
 	// assignee_type and assignee_id are validated as a pair: switching
 	// between agent and squad without supplying a new id would leave the
@@ -528,6 +545,29 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 	resp := autopilotToResponse(autopilot)
 	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{"autopilot": resp})
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) parseAutopilotProjectID(
+	w http.ResponseWriter,
+	r *http.Request,
+	raw *string,
+	workspaceID pgtype.UUID,
+) (pgtype.UUID, bool) {
+	if raw == nil || *raw == "" {
+		return pgtype.UUID{}, true
+	}
+	projectID, ok := parseUUIDOrBadRequest(w, *raw, "project_id")
+	if !ok {
+		return pgtype.UUID{}, false
+	}
+	if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+		ID:          projectID,
+		WorkspaceID: workspaceID,
+	}); err != nil {
+		writeError(w, http.StatusBadRequest, "project_id must reference a project in this workspace")
+		return pgtype.UUID{}, false
+	}
+	return projectID, true
 }
 
 func (h *Handler) DeleteAutopilot(w http.ResponseWriter, r *http.Request) {

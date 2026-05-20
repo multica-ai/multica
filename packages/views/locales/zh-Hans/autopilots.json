@@ -241,6 +241,8 @@
     "section_assignee": "执行方",
     "select_agent": "选择智能体",
     "select_assignee": "选择智能体或小队",
+    "section_project": "关联项目",
+    "no_project": "不关联项目",
     "section_output_mode": "输出模式",
     "section_schedule": "时间表",
     "section_trigger_kind": "触发方式",
