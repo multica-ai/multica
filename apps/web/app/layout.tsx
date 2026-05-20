@@ -4,10 +4,16 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { WebProviders } from "@/components/web-providers";
+import { resolveBasePath, withBasePath } from "@/config/base-path";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { RESOURCES } from "@multica/views/locales";
 import { getRequestLocale } from "@/lib/request-locale";
 import "./globals.css";
+
+const PUBLIC_BASE_PATH = resolveBasePath({
+  NEXT_PUBLIC_BASE_PATH: process.env.NEXT_PUBLIC_BASE_PATH,
+  BASE_PATH: process.env.BASE_PATH,
+});
 
 // Font stack: Inter for Latin UI text + system CJK fonts for localized content.
 // Desktop app uses the same stack via apps/desktop/src/renderer/src/globals.css —
@@ -79,8 +85,13 @@ export const metadata: Metadata = {
   description:
     "Open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",
   icons: {
-    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
-    shortcut: ["/favicon.svg"],
+    icon: [
+      {
+        url: withBasePath(PUBLIC_BASE_PATH, "/favicon.svg"),
+        type: "image/svg+xml",
+      },
+    ],
+    shortcut: [withBasePath(PUBLIC_BASE_PATH, "/favicon.svg")],
   },
   openGraph: {
     type: "website",

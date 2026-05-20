@@ -12,7 +12,8 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
     { href, children, onClick, onMouseEnter, onFocus, ...props },
     ref,
   ) {
-    const { push, openInNewTab, prefetch } = useNavigation();
+    const { push, openInNewTab, prefetch, getHref } = useNavigation();
+    const resolvedHref = getHref?.(href) ?? href;
 
     const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
       if (e.metaKey || e.ctrlKey || e.shiftKey) {
@@ -43,7 +44,7 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
     return (
       <a
         ref={ref}
-        href={href}
+        href={resolvedHref}
         // Spread props first so that the navigation handlers below cannot be
         // silently overridden by a caller passing onClick/onMouseEnter/onFocus
         // through {...rest}. AppLink owns these three events.
