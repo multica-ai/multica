@@ -79,3 +79,4 @@ server/server
 data/
 .kilo
 .idea
+testcase/report/
