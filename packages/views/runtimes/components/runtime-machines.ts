@@ -1,6 +1,7 @@
 import {
   deriveRuntimeHealth,
   displayProviderName,
+  displayRuntimeName,
   type RuntimeHealth,
 } from "@multica/core/runtimes";
 import type { AgentRuntime } from "@multica/core/types";
@@ -148,6 +149,9 @@ export function filterRuntimeMachines(
       machine.providerNames.join(" "),
       machine.providerNames.map(displayProviderName).join(" "),
       machine.runtimes.map((runtime) => runtime.name).join(" "),
+      machine.runtimes
+        .map((runtime) => displayRuntimeName(runtime.name, runtime.provider))
+        .join(" "),
     ]
       .filter(Boolean)
       .join(" ")

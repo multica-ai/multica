@@ -18,6 +18,8 @@ import type {
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
+  displayProviderName,
+  displayRuntimeName,
   runtimeListOptions,
   runtimeLocalSkillsKeys,
   runtimeLocalSkillsOptions,
@@ -87,7 +89,7 @@ const INITIAL_BULK_STATE: BulkImportState = {
 const IMPORT_CONCURRENCY = 10;
 
 function runtimeLabel(runtime: AgentRuntime): string {
-  return `${runtime.name} (${runtime.provider})`;
+  return `${displayRuntimeName(runtime.name, runtime.provider)} (${displayProviderName(runtime.provider)})`;
 }
 
 // ---------------------------------------------------------------------------

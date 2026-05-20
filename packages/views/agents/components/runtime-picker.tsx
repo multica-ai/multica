@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, Cloud, Loader2, Lock } from "lucide-react";
+import { displayRuntimeName } from "@multica/core/runtimes";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { ActorAvatar } from "../../common/actor-avatar";
 import type { MemberWithUser, RuntimeDevice } from "@multica/core/types";
@@ -128,8 +129,9 @@ export function RuntimePicker({
               <span className="truncate font-medium">
                 {runtimesLoading
                   ? t(($) => $.create_dialog.runtime_loading)
-                  : (selectedRuntime?.name ??
-                    t(($) => $.create_dialog.runtime_none))}
+                  : selectedRuntime
+                    ? displayRuntimeName(selectedRuntime.name, selectedRuntime.provider)
+                    : t(($) => $.create_dialog.runtime_none)}
               </span>
               {selectedRuntime?.runtime_mode === "cloud" && (
                 <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
@@ -185,7 +187,9 @@ export function RuntimePicker({
                 />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate font-medium">{device.name}</span>
+                    <span className="truncate font-medium">
+                      {displayRuntimeName(device.name, device.provider)}
+                    </span>
                     {device.runtime_mode === "cloud" && (
                       <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
                         {t(($) => $.create_dialog.runtime_cloud_badge)}

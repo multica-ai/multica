@@ -15,6 +15,7 @@ import type {
   MemberWithUser,
   SkillSummary,
 } from "@multica/core/types";
+import { displayProviderName, displayRuntimeName } from "@multica/core/runtimes";
 import { useTimeAgo } from "../../i18n";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import {
@@ -196,9 +197,13 @@ function SourceCell({
   if (origin.type === "runtime_local") {
     icon = <HardDrive className="h-3 w-3 shrink-0" />;
     label = runtime
-      ? t(($) => $.table.source_runtime_named, { name: runtime.name })
+      ? t(($) => $.table.source_runtime_named, {
+          name: displayRuntimeName(runtime.name, runtime.provider),
+        })
       : origin.provider
-        ? t(($) => $.table.source_runtime_provider, { provider: origin.provider })
+        ? t(($) => $.table.source_runtime_provider, {
+            provider: displayProviderName(origin.provider),
+          })
         : t(($) => $.table.source_runtime_unknown);
   } else if (origin.type === "clawhub") {
     icon = <Download className="h-3 w-3 shrink-0" />;

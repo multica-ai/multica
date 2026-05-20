@@ -6,6 +6,7 @@ import { useAgentPresenceDetail } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   deriveRuntimeHealth,
+  displayRuntimeName,
   type RuntimeHealth,
 } from "@multica/core/runtimes";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
@@ -173,7 +174,7 @@ function RuntimeRow({
       ? deriveRuntimeHealth(runtime, Date.now())
       : "offline";
   const label =
-    runtime?.name ??
+    (runtime ? displayRuntimeName(runtime.name, runtime.provider) : null) ??
     (isCloud
       ? t(($) => $.row.fallback_runtime_cloud)
       : t(($) => $.profile_card.unknown_runtime));

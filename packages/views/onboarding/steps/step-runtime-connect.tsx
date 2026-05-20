@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, Loader2, RefreshCw } from "lucide-react";
 import { captureEvent, setPersonProperties } from "@multica/core/analytics";
+import { displayRuntimeName } from "@multica/core/runtimes";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
@@ -617,7 +618,7 @@ function RuntimeCard({
       </div>
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium text-foreground">
-          {runtime.name}
+          {displayRuntimeName(runtime.name, runtime.provider)}
         </div>
         <div className="mt-0.5 flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
           <span

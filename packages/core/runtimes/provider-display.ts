@@ -10,3 +10,13 @@ export function displayProviderName(provider: string | null | undefined): string
     `${normalized.slice(0, 1).toUpperCase()}${normalized.slice(1)}`
   );
 }
+
+export function displayRuntimeName(
+  name: string | null | undefined,
+  provider: string | null | undefined,
+): string {
+  const normalized = name?.trim();
+  if (!normalized) return displayProviderName(provider);
+  if (provider?.trim().toLowerCase() !== "gemini") return normalized;
+  return normalized.replace(/^gemini(?=\s*(?:\(|$))/i, "AGY");
+}

@@ -2,6 +2,7 @@
 
 import { Cloud, Lock, Monitor } from "lucide-react";
 import type { ColumnDef } from "@tanstack/react-table";
+import { displayRuntimeName } from "@multica/core/runtimes";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import {
   type AgentActivity,
@@ -313,7 +314,11 @@ function RuntimeCell({ row }: { row: AgentRow }) {
   const { agent, runtime } = row;
   const isCloud = agent.runtime_mode === "cloud";
   const RuntimeIcon = isCloud ? Cloud : Monitor;
-  const runtimeLabel = runtime?.name ?? (isCloud ? t(($) => $.row.fallback_runtime_cloud) : t(($) => $.row.fallback_runtime_local));
+  const runtimeLabel = runtime
+    ? displayRuntimeName(runtime.name, runtime.provider)
+    : isCloud
+      ? t(($) => $.row.fallback_runtime_cloud)
+      : t(($) => $.row.fallback_runtime_local);
 
   return (
     <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
