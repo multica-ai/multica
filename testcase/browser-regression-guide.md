@@ -30,12 +30,14 @@ The login flow is documented in `tc-001-fixed-verification-code-login.md`. Execu
 - DingTalk OAuth login (requires DingTalk sandbox)
 - Google OAuth login (requires Google credentials)
 
-### Notifications (tc-002, tc-003, tc-007, tc-008, tc-037)
+### Notifications (tc-002, tc-003, tc-007, tc-008, tc-037, tc-039, tc-040)
 - Custom webhook create & test
 - Custom webhook channel toggle
 - DingTalk notification binding & delivery
 - Email notification binding & delivery
 - Webhook custom message format
+- Notification render mode Settings controls
+- IM compact task notification delivery for WeChat and DingTalk
 
 ### Agent Management (tc-009 to tc-012, tc-036)
 - Mine/All agent filter
@@ -103,6 +105,7 @@ The login flow is documented in `tc-001-fixed-verification-code-login.md`. Execu
 8. **tc-025 to tc-028** — projects, scroll, auto-status, plan mode
 9. **tc-030 to tc-032** — copy link, auto-block, timeline resilience
 10. **tc-033 to tc-038** — mobile, private chat, CLI, DeepSeek, paste
+11. **tc-039 to tc-040** — notification render mode settings and IM compact task delivery
 
 ## Notes
 
