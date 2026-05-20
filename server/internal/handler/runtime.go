@@ -711,6 +711,13 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Remove squads whose leader is an archived agent on this runtime so the
+	// RESTRICT FK on squad.leader_id won't block the subsequent agent deletion.
+	if err := h.Queries.DeleteSquadsByArchivedAgentsOnRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up orphaned squads")
+		return
+	}
+
 	// Remove archived agents so the FK constraint (ON DELETE RESTRICT) won't block deletion.
 	if err := h.Queries.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
