@@ -68,6 +68,17 @@ services:
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      # Desktop release downloads proxy. Empty DOWNLOADS_OSS_BUCKET
+      # leaves /api/downloads + /api/downloads/<file> returning 503;
+      # set when self-hosting a desktop release pipeline against a
+      # private OSS bucket. See .env.example for the full knob list.
+      DOWNLOADS_OSS_BUCKET: ${DOWNLOADS_OSS_BUCKET:-}
+      DOWNLOADS_OSS_ENDPOINT: ${DOWNLOADS_OSS_ENDPOINT:-}
+      DOWNLOADS_OSS_REGION: ${DOWNLOADS_OSS_REGION:-}
+      DOWNLOADS_OSS_PREFIX: ${DOWNLOADS_OSS_PREFIX:-}
+      DOWNLOADS_OSS_ACCESS_KEY_ID: ${DOWNLOADS_OSS_ACCESS_KEY_ID:-}
+      DOWNLOADS_OSS_ACCESS_KEY_SECRET: ${DOWNLOADS_OSS_ACCESS_KEY_SECRET:-}
+      DOWNLOADS_MANIFEST_TTL_SECONDS: ${DOWNLOADS_MANIFEST_TTL_SECONDS:-}
     restart: unless-stopped
 
   frontend:

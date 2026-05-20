@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -112,6 +113,45 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}
+	// Desktop release artifact proxy. The upstream bucket is private
+	// (no public-read ACL), so the handler talks to OSS via the AWS S3
+	// SDK using Aliyun's S3-compat endpoint. Two routes:
+	//   GET /api/downloads           → s3://<bucket>/<prefix>/version.json
+	//   GET /api/downloads/<file>    → s3://<bucket>/<prefix>/<file>
+	//
+	// Endpoint / region / credentials default to the same AWS_* envs
+	// the attachment storage layer reads (server/internal/storage/s3.go),
+	// since most deployments share a single OSS account between
+	// attachments and downloads. Override with DOWNLOADS_OSS_* if they
+	// need separate buckets/credentials.
+	//
+	// Setting only DOWNLOADS_OSS_BUCKET is the minimal config:
+	//   DOWNLOADS_OSS_BUCKET=lilith-multica
+	if bucket := os.Getenv("DOWNLOADS_OSS_BUCKET"); bucket != "" {
+		ttl := handler.DefaultDownloadsTTL
+		if v := os.Getenv("DOWNLOADS_MANIFEST_TTL_SECONDS"); v != "" {
+			if secs, err := time.ParseDuration(v + "s"); err == nil && secs > 0 {
+				ttl = secs
+			}
+		}
+		downloads, err := handler.NewDownloadsCache(handler.DownloadsCacheConfig{
+			Endpoint:  firstNonEmptyEnv("DOWNLOADS_OSS_ENDPOINT", "AWS_ENDPOINT_URL"),
+			Region:    firstNonEmptyEnv("DOWNLOADS_OSS_REGION", "S3_REGION"),
+			Bucket:    bucket,
+			Prefix:    os.Getenv("DOWNLOADS_OSS_PREFIX"),
+			AccessKey: firstNonEmptyEnv("DOWNLOADS_OSS_ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID"),
+			SecretKey: firstNonEmptyEnv("DOWNLOADS_OSS_ACCESS_KEY_SECRET", "AWS_SECRET_ACCESS_KEY"),
+			TTL:       ttl,
+		})
+		if err != nil {
+			// Don't refuse to start the whole server over a misconfigured
+			// downloads route — log loud and leave the routes returning
+			// 503 so the rest of the API keeps working.
+			slog.Error("downloads: failed to initialize cache", "err", err)
+		} else {
+			h.Downloads = downloads
+		}
+	}
 	// Auth caches: PAT cache is shared between the regular Auth middleware,
 	// the DaemonAuth fallback (mul_) path, and the revoke handler
 	// (invalidate). DaemonTokenCache backs the DaemonAuth mdt_ path. Both
@@ -205,6 +245,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Public API
 	r.Get("/api/config", h.GetConfig)
+
+	// Desktop release manifest + installer streaming. Proxies the OSS
+	// objects that `lilith-desktop-release.yml` publishes under the
+	// configured prefix (see DOWNLOADS_OSS_PREFIX above):
+	//   GET /api/downloads           → ${prefix}/version.json (cached 60s)
+	//   GET /api/downloads/<file>    → ${prefix}/<file>       (streamed)
+	r.Get("/api/downloads", h.GetDownloads)
+	r.Get("/api/downloads/{filename}", h.GetDownloadFile)
 
 	// GitHub App webhook (no Multica auth — requests are authenticated via
 	// HMAC-SHA256 signature in the handler) and post-install setup callback.
@@ -657,6 +705,20 @@ func newStorageFromEnv() storage.Storage {
 		return s3
 	}
 	return storage.NewLocalStorageFromEnv()
+}
+
+// firstNonEmptyEnv returns the value of the first env var in `names`
+// whose value is non-empty. Lets the downloads handler fall back from
+// its DOWNLOADS_OSS_* knobs to the AWS_* counterparts the storage
+// layer already reads, so a deployment can omit the override entirely
+// when the same OSS credentials apply.
+func firstNonEmptyEnv(names ...string) string {
+	for _, n := range names {
+		if v := os.Getenv(n); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func splitAndTrim(s string) []string {

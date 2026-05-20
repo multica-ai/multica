@@ -1,0 +1,328 @@
+name: Lilith desktop release
+
+# Build the desktop installers on tag push, generate the release
+# `version.json` manifest, and atomically publish both to Aliyun OSS.
+#
+# This workflow is the build half of the Lilith CI loop:
+#   Lilith GitLab  ──push-mirror──▶  GitHub (CopilotDemo/multica)
+#                                       │
+#                                       ▼
+#                                   this workflow
+#                                       │
+#                                       ▼
+#                              Aliyun OSS
+#                                       ▲
+#                                       │
+#       Go server `/api/downloads`  ────┘  (proxies version.json,
+#                                           short in-process cache —
+#                                           see server/internal/handler/downloads.go)
+#                                       ▲
+#                                       │
+#                                  desktop client poll
+#
+# The pact with this workflow is: every successful tag push results in
+# (a) installer binaries at versioned URLs under `<bucket>/api/downloads/`
+# and (b) a JSON manifest at `<bucket>/version.json` that names them.
+# The Go server proxies `version.json` through `<apiUrl>/api/downloads`;
+# publishing is therefore just `ossutil cp` on the JSON file.
+
+on:
+  push:
+    tags:
+      # The repo's tag history mixes both shapes: `v0.2.32` (with v)
+      # and `0.2.33` / `0.2.34` (without). Accept either; the guard job
+      # below validates the full shape with a regex.
+      - "v[0-9]*.[0-9]*.[0-9]*"
+      - "[0-9]*.[0-9]*.[0-9]*"
+      # Exclude the dirty-tree marker that `git describe --dirty` adds;
+      # they shouldn't be on origin in the first place but defend anyway.
+      - "!*-dirty*"
+
+# Guard at the workflow level so a fork (other than the Lilith mirror)
+# can't accidentally fire this when someone pushes a vX.Y.Z tag. The
+# upstream `multica-ai` repo already has its own release.yml; this one
+# is for the `CopilotDemo` mirror only.
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - name: Refuse to run on the upstream repo
+        if: github.repository_owner == 'multica-ai'
+        run: |
+          echo "::error::This workflow targets the Lilith mirror; the upstream repo uses release.yml instead."
+          exit 1
+      - name: Validate + extract tag
+        id: meta
+        # The `tags:` filter at the top of the file uses fnmatch globs
+        # which are coarse — `[0-9]*.[0-9]*.[0-9]*` matches things like
+        # `0.foo.bar.baz` too. Tighten with a real regex here, matching
+        # the same shape `.gitlab-ci.yml` and `scripts/mirror-to-github.sh`
+        # accept: optional leading `v`, then bare semver, optional
+        # pre-release suffix.
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release tags must look like vX.Y.Z, X.Y.Z, or X.Y.Z-suffix; got '$tag'."
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: guard
+    strategy:
+      # One platform failing means the manifest would point at a build
+      # that doesn't exist on OSS, which is worse than not releasing at
+      # all. Stop fast and let a human re-trigger.
+      fail-fast: true
+      matrix:
+        include:
+          - { os: macos-latest,   target: mac,   arch: arm64, label: darwin-arm64 }
+          - { os: windows-latest, target: win,   arch: x64,   label: windows-x64 }
+          - { os: ubuntu-latest,  target: linux, arch: x64,   label: linux-x64 }
+    runs-on: ${{ matrix.os }}
+    env:
+      # First-stage rollout: no Apple Developer ID signing, no
+      # notarization, no Windows EV cert. Trust on the client side is
+      # HTTPS-only until those secrets land. See CLAUDE.md
+      # "Desktop Auto-Update → Trust model" for the full justification.
+      #
+      # Without CSC_IDENTITY_AUTO_DISCOVERY=false, electron-builder
+      # searches the runner keychain for any signing identity and aborts
+      # with an opaque error when it doesn't find one. We want the
+      # build to proceed unsigned, falling back to an ad-hoc signature.
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      # Intentionally do NOT set APPLE_TEAM_ID / APPLE_ID — the package
+      # script's `disableMacNotarize` branch keys off APPLE_TEAM_ID, so
+      # omitting it skips the notarize call.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # package.mjs runs `git describe` for version
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Go (needed by apps/desktop/scripts/bundle-cli.mjs)
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Package desktop
+        run: pnpm --filter @multica/desktop package -- --${{ matrix.target }} --${{ matrix.arch }} --publish never
+        shell: bash
+
+      - name: List dist (debug)
+        run: ls -la apps/desktop/dist/
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.label }}
+          path: |
+            apps/desktop/dist/**/multica-desktop-*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: apps/desktop/dist
+          merge-multiple: true
+
+      - name: List collected dist
+        run: ls -la apps/desktop/dist/
+
+      - name: Install ossutil
+        run: |
+          curl -sL https://gosspublic.alicdn.com/ossutil/1.7.18/ossutil64 -o ossutil
+          chmod +x ossutil
+          ./ossutil version
+
+      - name: Configure ossutil
+        env:
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+          OSS_ENDPOINT: ${{ vars.OSS_ENDPOINT }}
+        run: |
+          ./ossutil config \
+            -e "$OSS_ENDPOINT" \
+            -i "$OSS_ACCESS_KEY_ID" \
+            -k "$OSS_ACCESS_KEY_SECRET" \
+            --config-file ./ossutilconfig
+
+      # ─────────────────────────────────────────────────────────────────
+      # OSS layout (single `downloads/` prefix, mirrors what the Go
+      # server's DOWNLOADS_OSS_PREFIX env points at):
+      #
+      #   oss://<bucket>/downloads/version.json                    ← manifest
+      #   oss://<bucket>/downloads/multica-desktop-v…dmg           ← installers
+      #   oss://<bucket>/downloads/multica-desktop-v…exe
+      #   oss://<bucket>/downloads/multica-desktop-v…AppImage
+      #   …
+      #
+      # Atomic publish order (the manifest is the swap point):
+      #   1. Upload every binary to its versioned URL (idempotent — the
+      #      same tag re-pushed overwrites with identical bytes).
+      #   2. Confirm each binary actually landed via `ossutil ls`.
+      #   3. Generate the manifest ONLY NOW, so it can never reference a
+      #      binary that failed to upload. The manifest is the "this
+      #      release is ready" pointer; building it from a half-uploaded
+      #      dist/ would let a partial release leak to clients.
+      #   4. ONLY THEN overwrite `downloads/version.json`. The window
+      #      during which a client could fetch the new manifest and 404
+      #      on a new binary is zero.
+      # The Go server's DownloadsCache has a 60s TTL on top, so a fresh
+      # publish takes at most ~60s to surface through `/api/downloads`.
+      # ─────────────────────────────────────────────────────────────────
+
+      - name: Upload installer binaries to OSS
+        run: |
+          for file in apps/desktop/dist/multica-desktop-*; do
+            [ -f "$file" ] || continue
+            name=$(basename "$file")
+            echo "::group::Uploading $name"
+            ./ossutil --config-file ./ossutilconfig cp -f "$file" \
+              "oss://${{ vars.OSS_BUCKET }}/downloads/$name" \
+              --meta "Cache-Control:max-age=31536000, immutable"
+            echo "::endgroup::"
+          done
+
+      - name: Verify each uploaded binary exists on OSS
+        # Iterate the local dist/ contents and confirm each file landed
+        # in the bucket. Decoupled from the manifest on purpose — we
+        # haven't generated the manifest yet at this point, and the
+        # check should be "did everything in dist/ make it to OSS?",
+        # not "does my pre-baked manifest agree with OSS?".
+        #
+        # We use `ls` (ListObjects) rather than `stat` (HeadObject)
+        # because the upload-side RAM user typically has GetObject /
+        # ListObjects but NOT HeadObject under principle-of-least-
+        # privilege. `ls` returns "Object Number is: 1" when the key
+        # exists, 0 when missing.
+        run: |
+          set -e
+          for file in apps/desktop/dist/multica-desktop-*; do
+            [ -f "$file" ] || continue
+            name=$(basename "$file")
+            ossPath="oss://${{ vars.OSS_BUCKET }}/downloads/$name"
+            out=$(./ossutil --config-file ./ossutilconfig ls "$ossPath")
+            if ! echo "$out" | grep -q "Object Number is: 1"; then
+              echo "::error::MISSING on OSS: $ossPath"
+              echo "$out"
+              exit 1
+            fi
+            echo "  ✓ $name"
+          done
+
+      - name: Generate download manifest from uploaded binaries
+        # `scripts/build-download-manifest.mjs` scans the local dist/
+        # which — at this point — is byte-equal to what's on OSS (the
+        # previous step proved every file landed). The manifest is
+        # therefore a description of OSS state, not of "things we hoped
+        # to upload". If a binary upload had failed silently, the
+        # previous step would have aborted before we generate this.
+        run: node scripts/build-download-manifest.mjs
+        env:
+          # Strict mode: a missing expected platform key fails the job
+          # rather than shipping a half-empty manifest. Adjust
+          # EXPECTED_KEYS in the script when the build matrix changes.
+          STRICT: "1"
+
+      - name: Show manifest (debug)
+        run: cat download-multica.json
+
+      - name: Validate local manifest before upload
+        # `build-download-manifest.mjs` uses JSON.stringify so the file
+        # is well-formed by construction, but this is a one-line
+        # belt-and-suspenders against a future refactor that switches
+        # to a templated/hand-written variant. Without it, a malformed
+        # manifest sneaks onto OSS and every desktop client's poll
+        # returns 502 (the server's JSON sanity check rejects it).
+        run: |
+          node -e "JSON.parse(require('fs').readFileSync('download-multica.json','utf8'))"
+          echo "✅ Local manifest is valid JSON"
+
+      - name: Archive previous manifest for rollback
+        # Best-effort copy of the live manifest to a dated archive
+        # before we overwrite it. If there isn't one yet (very first
+        # release), the cp fails and we move on.
+        continue-on-error: true
+        run: |
+          stamp=$(date -u +%Y%m%dT%H%M%SZ)
+          ./ossutil --config-file ./ossutilconfig cp -f \
+            "oss://${{ vars.OSS_BUCKET }}/downloads/version.json" \
+            "oss://${{ vars.OSS_BUCKET }}/downloads/version-archive/${stamp}.json" \
+            || true
+
+      - name: Publish manifest (atomic swap)
+        # LAST step that mutates user-visible state. Up until this line,
+        # the live manifest still points at the previous release. The
+        # OSS object key here MUST match what the Go server reads —
+        # the server's DOWNLOADS_OSS_PREFIX env value joined with
+        # `/version.json`. See server/internal/handler/downloads.go.
+        #
+        # `#` between meta headers, not `,`: ossutil's --meta uses `#`
+        # as the entry separator (`key:value#key:value`), and a comma
+        # ends up parsed as part of the preceding value. With `, `,
+        # the previous version of this workflow accidentally produced
+        # `Cache-Control: max-age=60, Content-Type:application/json`
+        # as a single Cache-Control header and never set Content-Type
+        # at all.
+        run: |
+          ./ossutil --config-file ./ossutilconfig cp -f \
+            download-multica.json \
+            "oss://${{ vars.OSS_BUCKET }}/downloads/version.json" \
+            --meta "Cache-Control:max-age=60#Content-Type:application/json"
+
+      - name: Verify uploaded manifest round-trip
+        # Pull the manifest back from OSS and diff it byte-for-byte
+        # against the local file. Catches: ossutil cp truncation,
+        # OSS-side mutation, a wrong content-encoding step somewhere
+        # adding a BOM, etc. Also re-parses it to guard against the
+        # specific failure mode we hit in development (a hand-edited
+        # version.json with raw newlines inside string literals — Go's
+        # encoding/json rejects it, every client poll then 502s).
+        run: |
+          ./ossutil --config-file ./ossutilconfig cp -f \
+            "oss://${{ vars.OSS_BUCKET }}/downloads/version.json" \
+            ./version.json.readback
+          diff -u download-multica.json ./version.json.readback
+          node -e "JSON.parse(require('fs').readFileSync('./version.json.readback','utf8'))"
+          echo "✅ Uploaded manifest is byte-identical and parses cleanly"
+
+      - name: Summary
+        run: |
+          echo "### Release ${{ needs.guard.outputs.tag }} published" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Manifest now live at \`<domain>/api/downloads\`:" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat download-multica.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

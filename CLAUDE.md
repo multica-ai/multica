@@ -388,15 +388,105 @@ make check
 
 **Quick iteration:** If you know only TypeScript or Go is affected, run individual checks first for faster feedback, then finish with a full `make check` before marking work complete.
 
-## CLI Release
+## Release (Lilith fork)
 
-**Prerequisite:** A CLI release must accompany every Production deployment.
+Lilith ships only the desktop app; the `multica` CLI is bundled inside
+the desktop binary via `apps/desktop/scripts/bundle-cli.mjs`, so it
+follows the same release tag and isn't published separately.
 
-1. Create a tag on the `main` branch: `git tag v0.x.x`
-2. Push the tag: `git push origin v0.x.x`
-3. GitHub Actions automatically triggers `release.yml`: runs Go tests → GoReleaser builds multi-platform binaries → publishes to GitHub Releases + Homebrew tap
+Lilith ships only the desktop app; the `multica` CLI is bundled inside
+the desktop binary via `apps/desktop/scripts/bundle-cli.mjs`, so it
+follows the same release tag and isn't published separately.
 
-By default, bump the patch version each release (e.g. `v0.1.12` → `v0.1.13`), unless the user specifies a specific version.
+1. On `main`, create a semver tag: `git tag v0.x.x` (or `git tag 0.x.x`
+   — both shapes are accepted by `.gitlab-ci.yml`,
+   `scripts/mirror-to-github.sh`, and the GitHub workflow).
+2. Push to the GitLab origin: `git push origin v0.x.x`
+3. GitLab CI's `mirror-to-github` job (`.gitlab-ci.yml`) force-pushes
+   the current `main` and the new tag to `CopilotDemo/multica` on
+   GitHub. The job authenticates via `GITHUB_MIRROR_DEPLOY_KEY` (see
+   the one-time setup below).
+4. GitHub Actions fires `.github/workflows/lilith-desktop-release.yml`:
+   matrix build on macOS / Windows / Linux runners → upload installer
+   binaries to OSS → `ossutil ls`-verify each landed → generate
+   `download-multica.json` from confirmed-uploaded files → atomic-swap
+   `oss://<bucket>/downloads/version.json` last:
+   - Binaries → `oss://<bucket>/downloads/<filename>`
+   - Manifest → `oss://<bucket>/downloads/version.json`
+5. GitLab CI's `notify-release` job (`.gitlab-ci.yml`) posts a Feishu
+   card. (Runs after `mirror-to-github` succeeds so a Feishu card
+   never claims a release that failed to mirror.)
+
+### One-time GitLab → GitHub mirror setup
+
+Required before `mirror-to-github` can run:
+
+1. Generate a fresh SSH key pair locally:
+   ```
+   ssh-keygen -t ed25519 -N "" -C "gitlab-mirror" -f /tmp/gitlab_mirror_key
+   ```
+2. On `github.com/CopilotDemo/multica` → Settings → Deploy keys →
+   **Add deploy key**: paste `gitlab_mirror_key.pub`, **tick "Allow
+   write access"**.
+3. On GitLab (this repo) → Settings → CI/CD → Variables → **Add
+   variable**:
+   - Key: `GITHUB_MIRROR_DEPLOY_KEY`
+   - Value: contents of `gitlab_mirror_key` (the private half)
+   - **Untick "Masked"** — GitLab can't mask multiline values, and
+     the key body has newlines.
+   - **Tick "Protected"** so the variable is only available on
+     protected tags. Make sure release tags are configured as
+     protected under Settings → Repository → Protected tags
+     (`v?[0-9]+.[0-9]+.[0-9]+` matches both shapes).
+4. Delete the local key copy: `rm /tmp/gitlab_mirror_key*`.
+
+If a "File" type variable is preferred (safer — body never appears in
+logs), point it at the file instead; the mirror script auto-detects
+both shapes.
+
+### Server-side proxy
+
+The Go server exposes two routes (see
+`server/internal/handler/downloads.go`):
+
+| Route | Upstream | Behavior |
+| --- | --- | --- |
+| `GET /api/downloads` | `s3://<bucket>/<prefix>/version.json` | JSON manifest. 60s in-process cache; last-known-good served on upstream failure. |
+| `GET /api/downloads/<file>` | `s3://<bucket>/<prefix>/<file>` | Installer binary, streamed unbuffered (no `io.ReadAll` — installers are 100MB+). Filename validated against path-traversal. Long Cache-Control on response (versioned filenames are immutable). |
+
+The bucket is **private** — the handler authenticates every request
+via the AWS S3 SDK pointed at Aliyun OSS's S3-compatible endpoint
+(same approach as `server/internal/storage/s3.go` uses for
+attachments). Public-read on the bucket is not required and should
+**not** be enabled.
+
+#### Required env
+
+| Var | Default | Notes |
+| --- | --- | --- |
+| `DOWNLOADS_OSS_BUCKET` | _(unset → routes return 503)_ | Bucket name only, no host. |
+| `DOWNLOADS_OSS_ENDPOINT` | falls back to `AWS_ENDPOINT_URL` | Full S3-compat URL, e.g. `https://oss-cn-shanghai.aliyuncs.com`. |
+| `DOWNLOADS_OSS_REGION` | falls back to `S3_REGION`, then `oss-cn-shanghai` | |
+| `DOWNLOADS_OSS_PREFIX` | `downloads` | Directory inside the bucket. |
+| `DOWNLOADS_OSS_ACCESS_KEY_ID` | falls back to `AWS_ACCESS_KEY_ID` | Read-only RAM user recommended. |
+| `DOWNLOADS_OSS_ACCESS_KEY_SECRET` | falls back to `AWS_SECRET_ACCESS_KEY` | |
+| `DOWNLOADS_MANIFEST_TTL_SECONDS` | `60` | Server-side manifest cache lifetime. |
+
+Most deployments only need `DOWNLOADS_OSS_BUCKET` since the AWS SDK
+config + credentials are already set up for attachment storage.
+
+To re-publish without a new build: replace
+`oss://<bucket>/downloads/version.json` directly via `ossutil cp` —
+clients pick up the change at next poll (≤ cache TTL + client poll
+interval).
+
+Bump the patch version by default (`v0.1.12 → v0.1.13`) unless the
+user specifies otherwise.
+
+The client-side auto-update flow (how installed desktop clients
+discover the manifest and consume it) is **not yet implemented** —
+this section will be extended once the renderer hooks up to the
+manifest. For now this pipeline only stages the artifacts.
 
 ## Multi-tenancy
 

@@ -91,6 +91,10 @@ type Handler struct {
 	Analytics             analytics.Client
 	PATCache              *auth.PATCache
 	DaemonTokenCache      *auth.DaemonTokenCache
+	// Downloads, when set, fronts the desktop release manifest on OSS.
+	// Server entrypoint wires this from env (DOWNLOADS_MANIFEST_URL).
+	// Nil → the /api/downloads route replies 503 (configuration error).
+	Downloads             *DownloadsCache
 	cfg                   Config
 }
 
