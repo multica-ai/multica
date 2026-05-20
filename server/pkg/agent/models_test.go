@@ -57,7 +57,7 @@ func TestListModelsCopilotFallsBackToStatic(t *testing.T) {
 func TestGeminiStaticModelsExposesAgyOneCatalog(t *testing.T) {
 	// AGY has no `models list` subcommand, so this hand-maintained
 	// catalog mirrors AGY 1.0.0's model picker. Regression guard:
-	// Multica's dropdown should expose the current cross-provider AGY
+	// Multica's dropdown should expose the current Google-routed AGY
 	// choices, not the old Gemini-only aliases.
 	models := geminiStaticModels()
 	ids := map[string]Model{}
@@ -77,18 +77,9 @@ func TestGeminiStaticModelsExposesAgyOneCatalog(t *testing.T) {
 			t.Errorf("missing expected AGY model %q in: %+v", want, models)
 		}
 	}
-	providers := map[string]string{
-		"gemini-3.5-flash-high":      "google",
-		"gemini-3.5-flash-medium":    "google",
-		"gemini-3.1-pro-high":        "google",
-		"gemini-3.1-pro-low":         "google",
-		"claude-sonnet-4.6-thinking": "anthropic",
-		"claude-opus-4.6-thinking":   "anthropic",
-		"gpt-oss-120b-medium":        "openai",
-	}
 	for _, m := range models {
-		if got, want := m.Provider, providers[m.ID]; got != want {
-			t.Errorf("AGY entry %q provider = %q, want %q", m.ID, got, want)
+		if m.Provider != "google" {
+			t.Errorf("AGY entry %q provider = %q, want google", m.ID, m.Provider)
 		}
 		if m.Default {
 			t.Errorf("AGY entries should not set Default; AGY settings/env/default routing decides. got %+v", m)

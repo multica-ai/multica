@@ -209,16 +209,19 @@ func codexStaticModels() []Model {
 // `models list` command, so this catalog mirrors the current picker
 // labels. Do not mark a static default here: when agent.model is empty
 // Multica omits -m, allowing AGY's own default / GEMINI_MODEL /
-// settings.json model.name resolution to win.
+// settings.json model.name resolution to win. Provider is intentionally
+// "google" for every entry because these choices route through AGY /
+// Antigravity account entitlement even when the underlying model family
+// is Anthropic or OpenAI.
 func geminiStaticModels() []Model {
 	return []Model{
 		{ID: "gemini-3.5-flash-high", Label: "Gemini 3.5 Flash (High)", Provider: "google"},
 		{ID: "gemini-3.5-flash-medium", Label: "Gemini 3.5 Flash (Medium)", Provider: "google"},
 		{ID: "gemini-3.1-pro-high", Label: "Gemini 3.1 Pro (High)", Provider: "google"},
 		{ID: "gemini-3.1-pro-low", Label: "Gemini 3.1 Pro (Low)", Provider: "google"},
-		{ID: "claude-sonnet-4.6-thinking", Label: "Claude Sonnet 4.6 (Thinking)", Provider: "anthropic"},
-		{ID: "claude-opus-4.6-thinking", Label: "Claude Opus 4.6 (Thinking)", Provider: "anthropic"},
-		{ID: "gpt-oss-120b-medium", Label: "GPT-OSS 120B (Medium)", Provider: "openai"},
+		{ID: "claude-sonnet-4.6-thinking", Label: "Claude Sonnet 4.6 (Thinking)", Provider: "google"},
+		{ID: "claude-opus-4.6-thinking", Label: "Claude Opus 4.6 (Thinking)", Provider: "google"},
+		{ID: "gpt-oss-120b-medium", Label: "GPT-OSS 120B (Medium)", Provider: "google"},
 	}
 }
 
