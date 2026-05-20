@@ -75,7 +75,7 @@ import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker
 import { useIssueActions } from "../actions";
 import { IssueActionsMenuItems, dropdownPrimitives } from "../actions/issue-actions-menu-items";
 import { ProjectPicker } from "../../projects/components/project-picker";
-import { CommentCard } from "./comment-card";
+import { CommentCard, AttachmentList } from "./comment-card";
 import { CommentInput, type CommentInputRef } from "./comment-input";
 import type { ReplyInputRef } from "./reply-input";
 import { AgentStreamSidebar } from "./agent-stream-sidebar";
@@ -2194,6 +2194,13 @@ export function IssueDetail({
             </div>
             {descDragOver && <FileDropOverlay />}
           </div>
+
+          {/* Issue-level attachments — independent of description inline refs */}
+          <AttachmentList
+            attachments={issueAttachments}
+            content={issue.description ?? ""}
+            className="mt-3"
+          />
 
           {/* Sub-issues — Linear-style */}
           {childIssues.length === 0 && (
