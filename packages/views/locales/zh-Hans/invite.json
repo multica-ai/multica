@@ -22,6 +22,8 @@
     "fallback_workspace_name": "工作区",
     "invited_role_admin": "邀请你以管理员身份加入。",
     "invited_role_member": "邀请你以成员身份加入。",
+    "invited_shareable_admin": "你被邀请以管理员身份加入。",
+    "invited_shareable_member": "你被邀请以成员身份加入。",
     "already_handled_accepted": "此邀请已被接受。",
     "already_handled_declined": "此邀请已被拒绝。",
     "expired": "此邀请已过期。",

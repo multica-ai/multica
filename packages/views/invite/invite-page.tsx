@@ -203,12 +203,11 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
               })}
             </h2>
             <p className="text-sm text-muted-foreground">
-              {isShareable ? (
-                <>
-                  You&apos;ve been invited to join as{" "}
-                  {invitation.role === "admin" ? "an admin" : "a member"}.
-                </>
-              ) : (
+              {isShareable
+                ? invitation.role === "admin"
+                  ? t(($) => $.main.invited_shareable_admin)
+                  : t(($) => $.main.invited_shareable_member)
+                : (
                 <>
                   <strong>{invitation.inviter_name || invitation.inviter_email}</strong>{" "}
                   {invitation.role === "admin"

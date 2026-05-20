@@ -22,6 +22,8 @@
     "fallback_workspace_name": "workspace",
     "invited_role_admin": "invited you to join as an admin.",
     "invited_role_member": "invited you to join as a member.",
+    "invited_shareable_admin": "You've been invited to join as an admin.",
+    "invited_shareable_member": "You've been invited to join as a member.",
     "already_handled_accepted": "This invitation has already been accepted.",
     "already_handled_declined": "This invitation has already been declined.",
     "expired": "This invitation has expired.",
