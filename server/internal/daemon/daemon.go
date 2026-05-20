@@ -2336,6 +2336,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	prompt := BuildPrompt(task, provider)
 
+	// Resolve the model now (same two-tier rule used for ExecOptions below) so
+	// it can be surfaced to the spawned agent via MULTICA_MODEL. Resolving in
+	// one place keeps the env-var and the CLI flag in sync.
+	resolvedModel := resolveTaskModel(task, entry.Model)
+
 	// Pass the daemon's auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
 	// MULTICA_TASK_SLOT is allocated from the daemon-wide concurrency pool, not
@@ -2350,6 +2355,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"MULTICA_AGENT_ID":     task.AgentID,
 		"MULTICA_TASK_ID":      task.ID,
 		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
+		// Runtime self-introspection: expose the resolved provider, model, and
+		// trigger origin so skills and run-traces no longer need to grep CLI
+		// configs or inspect file markers to know what they are. Autopilot IDs
+		// follow further down for runs that have one.
+		"MULTICA_RUNTIME":        provider,
+		"MULTICA_TRIGGER_SOURCE": triggerSource(task),
+	}
+	if resolvedModel != "" {
+		agentEnv["MULTICA_MODEL"] = resolvedModel
 	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
@@ -2444,14 +2458,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// default, codex app-server's account-scoped default, etc.).
 	// Baking a Go-side "recommended default" here is how the
 	// cursor regression happened — static guesses drift from
-	// whatever the upstream CLI actually accepts.
-	model := ""
-	if task.Agent != nil && task.Agent.Model != "" {
-		model = task.Agent.Model
-	}
-	if model == "" {
-		model = entry.Model
-	}
+	// whatever the upstream CLI actually accepts. Resolved earlier
+	// in this function (resolvedModel) and reused here so the
+	// MULTICA_MODEL env var and the --model flag never diverge.
+	model := resolvedModel
 	execOpts := agent.ExecOptions{
 		Cwd:                       env.WorkDir,
 		Model:                     model,
@@ -3196,6 +3206,45 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	return false
+}
+
+// resolveTaskModel returns the model string the daemon should pass to both
+// the agent CLI (`--model`) and the spawned agent's environment
+// (MULTICA_MODEL). It mirrors the two-tier rule documented at the
+// ExecOptions call-site: an explicit agent.model wins over the daemon-wide
+// MULTICA_<PROVIDER>_MODEL default (which the caller has already resolved
+// into entry.Model). Empty means "let the CLI pick its own default" — the
+// caller MUST treat "" as "don't set the env var" rather than as the
+// literal string.
+func resolveTaskModel(task Task, entryModel string) string {
+	if task.Agent != nil && task.Agent.Model != "" {
+		return task.Agent.Model
+	}
+	return entryModel
+}
+
+// triggerSource derives the MULTICA_TRIGGER_SOURCE value from the task
+// payload. The agent uses this to short-circuit "why am I running?"
+// introspection (autopilot debugging, chat-vs-issue tracing, squad routing
+// audits) without having to grep its own context files.
+//
+// Discrimination order matches the daemon's own dispatch precedence:
+// autopilot > chat > quick_create > squad > manual. The default "manual"
+// covers comment- and assignment-triggered runs where no specialised
+// pathway tagged the task.
+func triggerSource(task Task) string {
+	switch {
+	case task.AutopilotRunID != "":
+		return "autopilot"
+	case task.ChatSessionID != "":
+		return "chat"
+	case task.QuickCreatePrompt != "":
+		return "quick_create"
+	case task.SquadID != "":
+		return "squad"
+	default:
+		return "manual"
+	}
 }
 
 func defaultArgsForProvider(cfg Config, provider string) []string {
