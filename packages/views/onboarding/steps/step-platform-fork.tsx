@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight, Download } from "lucide-react";
 import {
   captureDownloadIntent,
@@ -84,6 +84,30 @@ export function StepPlatformFork({
       /Mac OS X/i.test(navigator.userAgent || ""));
 
   const picker = useRuntimePicker(wsId);
+
+  // Stable ref for `onNext` — ensures the skip handler always calls the
+  // latest version regardless of parent re-renders or closure timing.
+  // This mirrors the `onCompleteRef` pattern in OnboardingFlow.
+  const onNextRef = useRef(onNext);
+  onNextRef.current = onNext;
+
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+
+  // Stable skip handler — identity never changes (empty deps), reads
+  // the latest `onNext` from the ref. Prevents the click handler from
+  // going stale during concurrent re-renders triggered by runtime polling.
+  const handleSkip = useCallback(async () => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      await onNextRef.current(null);
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+  }, []);
 
   const pickDesktop = () => {
     window.open(DOWNLOAD_PAGE_URL, "_blank", "noopener,noreferrer");
@@ -199,7 +223,12 @@ export function StepPlatformFork({
               >
                 {footerHint}
               </span>
-              <Button variant="secondary" onClick={() => onNext(null)}>
+              <Button
+                size="lg"
+                variant="secondary"
+                disabled={submitting}
+                onClick={handleSkip}
+              >
                 {t(($) => $.step_runtime.skip)}
               </Button>
             </div>
