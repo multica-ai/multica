@@ -35,6 +35,15 @@ interface RuntimeMachineOptions {
   localDaemonId?: string | null;
   localMachineName?: string | null;
   workloadByRuntimeId?: Map<string, RuntimeWorkloadSummary>;
+  /**
+   * When true, guarantee that the result contains a machine flagged
+   * `isCurrent`. If no server-side runtime matches the local daemon
+   * (e.g. the daemon is stopped, was never started, or its runtime was
+   * already GC'd), a placeholder local machine is synthesized so the
+   * caller can still attach controls to it (Start button, etc.).
+   * Desktop sets this; web omits it.
+   */
+  ensureLocalMachine?: boolean;
 }
 
 interface RuntimeMachineDraft {
@@ -80,9 +89,40 @@ export function buildRuntimeMachines(
     drafts.set(id, draft);
   }
 
-  return Array.from(drafts.values())
-    .map((draft) => finalizeRuntimeMachine(draft, options))
-    .sort(compareRuntimeMachines);
+  const machines = Array.from(drafts.values()).map((draft) =>
+    finalizeRuntimeMachine(draft, options),
+  );
+
+  if (options.ensureLocalMachine && !machines.some((m) => m.isCurrent)) {
+    machines.push(placeholderLocalMachine(options));
+  }
+
+  return machines.sort(compareRuntimeMachines);
+}
+
+function placeholderLocalMachine(
+  options: RuntimeMachineOptions,
+): RuntimeMachine {
+  const daemonId = options.localDaemonId ?? null;
+  return {
+    id: daemonId ? `local:${daemonId}` : "local:placeholder",
+    daemonId,
+    title: options.localMachineName ?? "This machine",
+    subtitle: null,
+    deviceInfo: null,
+    cliVersion: null,
+    mode: "local",
+    section: "local",
+    isCurrent: true,
+    health: "offline",
+    runtimes: [],
+    onlineCount: 0,
+    issueCount: 0,
+    runningCount: 0,
+    queuedCount: 0,
+    providerNames: [],
+    lastSeenAt: null,
+  };
 }
 
 export function filterRuntimeMachines(

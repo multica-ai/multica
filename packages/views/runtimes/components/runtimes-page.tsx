@@ -51,6 +51,14 @@ interface RuntimesPageProps {
   /** Desktop-only controls shown when the local machine is selected. */
   localMachineActions?: React.ReactNode;
   /**
+   * Desktop-only signal: this host always owns a local machine, even
+   * when no runtime is currently registered (daemon stopped, not yet
+   * started, or runtime GC'd). When true, a placeholder local row is
+   * synthesized so `localMachineActions` (the daemon Start button) is
+   * always reachable. Web omits this.
+   */
+  hasLocalMachine?: boolean;
+  /**
    * Desktop-only signal: the bundled daemon is still booting / hasn't
    * registered with the server yet. Forwarded so the empty state can show
    * a "starting" indicator instead of the static "register a runtime" hint
@@ -74,6 +82,7 @@ export function RuntimesPage({
   localDaemonId,
   localMachineName,
   localMachineActions,
+  hasLocalMachine,
   bootstrapping,
 }: RuntimesPageProps = {}) {
   const isLoading = useAuthStore((s) => s.isLoading);
@@ -125,8 +134,16 @@ export function RuntimesPage({
         localDaemonId,
         localMachineName,
         workloadByRuntimeId: workloadIndex,
+        ensureLocalMachine: hasLocalMachine,
       }),
-    [runtimes, now, localDaemonId, localMachineName, workloadIndex],
+    [
+      runtimes,
+      now,
+      localDaemonId,
+      localMachineName,
+      workloadIndex,
+      hasLocalMachine,
+    ],
   );
 
   const machineCounts = useMemo(() => runtimeMachineCounts(machines), [machines]);
@@ -161,7 +178,9 @@ export function RuntimesPage({
   if (isLoading || fetching) return <RuntimesPageSkeleton />;
 
   const totalCount = runtimes.length;
-  const showEmpty = totalCount === 0 && !bootstrapping;
+  // Desktop always has a synthesized local machine row, so the
+  // "register a runtime" empty state would hide the Start button.
+  const showEmpty = totalCount === 0 && !bootstrapping && !hasLocalMachine;
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
