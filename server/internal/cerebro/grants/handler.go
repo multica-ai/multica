@@ -386,6 +386,10 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	surface := surfaceFromHeader(r.Header.Get("X-Cerebro-Surface"))
 
 	if err := h.Svc.Delete(r.Context(), grantID, workspaceID, member.UserID, "member", surface); err != nil {
+		if errors.Is(err, ErrGrantNotFound) {
+			writeError(w, http.StatusNotFound, "grant not found")
+			return
+		}
 		h.serverError(w, r, "delete grant", err)
 		return
 	}

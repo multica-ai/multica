@@ -375,6 +375,18 @@ func (s *Service) Delete(ctx context.Context, grantID, workspaceID, actorID pgty
 	defer tx.Rollback(ctx)
 	qtx := s.Cerebro.WithTx(tx)
 
+	// Verify the grant exists in this workspace before recording an audit row
+	// or attempting delete — the audit FK would otherwise fail and surface as 500.
+	if _, err := qtx.GetCerebroWorkspaceGrant(ctx, cerebrodb.GetCerebroWorkspaceGrantParams{
+		ID:          grantID,
+		WorkspaceID: workspaceID,
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrGrantNotFound
+		}
+		return err
+	}
+
 	actorTypePG := pgtype.Text{String: actorType, Valid: actorType != ""}
 	if err := qtx.InsertCerebroGrantAudit(ctx, cerebrodb.InsertCerebroGrantAuditParams{
 		WorkspaceID: workspaceID,
