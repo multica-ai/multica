@@ -349,6 +349,50 @@ func TestPrepareOpenclawConfigExpandsTilde(t *testing.T) {
 	}
 }
 
+// TestPrepareOpenclawConfigExpandsTildeWindowsBackslash — `openclaw config file`
+// on Windows reports paths with `~\` (backslash). The expansion logic must
+// handle both `~/` and `~\` prefixes so the `$include` reference is always
+// absolute.
+func TestPrepareOpenclawConfigExpandsTildeWindowsBackslash(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+
+	fakeHome := t.TempDir()
+	t.Setenv("USERPROFILE", fakeHome)
+	os.Setenv("USERPROFILE", fakeHome)
+	t.Cleanup(func() { os.Unsetenv("USERPROFILE") })
+	if err := os.MkdirAll(filepath.Join(fakeHome, ".openclaw"), 0o755); err != nil {
+		t.Fatalf("mkdir home/.openclaw: %v", err)
+	}
+	realPath := filepath.Join(fakeHome, ".openclaw", "openclaw.json")
+	if err := os.WriteFile(realPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file":                   {stdout: "~\\.openclaw\\openclaw.json\n"},
+		"config get agents.list --json": {stdout: "null"},
+	})
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+	cfgPath := result.ConfigPath
+	got := mustReadJSON(t, cfgPath)
+	include := got["$include"].([]any)
+	if include[0] != realPath {
+		t.Errorf("$include[0] = %v, want %q (tilde-backslash must be expanded to absolute)", include[0], realPath)
+	}
+	wantRoot := filepath.Join(fakeHome, ".openclaw")
+	if result.IncludeRoot != wantRoot {
+		t.Errorf("IncludeRoot = %q, want %q (must be expanded absolute dirname)", result.IncludeRoot, wantRoot)
+	}
+}
+
 // TestPrepareOpenclawConfigWrapperLoadableUnderIncludeConfinement is the
 // regression test for the Elon include-confinement blocker. OpenClaw
 // resolves `$include` only inside the wrapper file's own directory unless
