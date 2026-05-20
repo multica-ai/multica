@@ -109,6 +109,9 @@ func (b *geminiBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		} else if waitErr != nil && finalStatus == "completed" {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("agy exited with error: %v", waitErr)
+		} else if authErr := agyAuthError(output.String()); authErr != "" && finalStatus == "completed" {
+			finalStatus = "failed"
+			finalError = authErr
 		}
 
 		b.cfg.Logger.Info("agy finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
@@ -124,6 +127,15 @@ func (b *geminiBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func agyAuthError(output string) string {
+	normalized := strings.ToLower(output)
+	if strings.Contains(normalized, "authentication required") ||
+		strings.Contains(normalized, "authentication timed out") {
+		return "agy authentication required"
+	}
+	return ""
 }
 
 // ── Arg builder ──

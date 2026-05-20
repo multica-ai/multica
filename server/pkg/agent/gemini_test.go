@@ -158,3 +158,20 @@ func TestBuildGeminiArgsFiltersBlockedCustomArgs(t *testing.T) {
 		t.Fatalf("expected --sandbox to pass through, got %v", args)
 	}
 }
+
+func TestAgyAuthErrorDetectsAuthPrompt(t *testing.T) {
+	t.Parallel()
+
+	output := "Authentication required. Please visit the URL to log in:\nError: authentication timed out."
+	if got := agyAuthError(output); got != "agy authentication required" {
+		t.Fatalf("agyAuthError() = %q, want agy authentication required", got)
+	}
+}
+
+func TestAgyAuthErrorIgnoresNormalOutput(t *testing.T) {
+	t.Parallel()
+
+	if got := agyAuthError("completed review"); got != "" {
+		t.Fatalf("agyAuthError() = %q, want empty", got)
+	}
+}
