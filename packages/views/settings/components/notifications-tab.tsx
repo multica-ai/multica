@@ -108,7 +108,7 @@ const webhookTemplatePlaceholder = `{
   }
 }`;
 
-const openclawWeixinBindPrompt = "帮我绑定 Multica 微信通知";
+const openclawWeixinBindPrompt = "将multica cli更新到最新版，然后用 multica notify bind-wechat 绑定微信通知";
 
 function preferenceKey(pref: NotificationChannelPreference) {
   return `${pref.channel}:${pref.event_type}`;
@@ -801,10 +801,6 @@ export function NotificationsTab() {
                               </Button>
                             </div>
                             <p className="text-sm text-muted-foreground">发送后刷新此页面即可看到绑定结果</p>
-                            <p className="text-sm">方式二：手动获取微信 ID 后填写：</p>
-                            <code className="block rounded bg-muted p-2 text-xs">
-                              openclaw whoami --channel weixin
-                            </code>
                           </AlertDescription>
                         </Alert>
                         <div className="flex items-end gap-3">
