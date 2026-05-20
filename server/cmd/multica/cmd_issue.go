@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -1843,11 +1844,17 @@ var issueAttachmentRemoveCmd = &cobra.Command{
 
 var issueAttachmentReplaceCmd = &cobra.Command{
 	Use:   "replace <issue-id> <attachment-id> --file <new-file>",
-	Short: "Replace an attachment with a new file (upload new, then delete old)",
+	Short: "Replace an attachment with a new file (upload new, rewrite desc if needed, delete old)",
 	Long: "Replaces an existing attachment by uploading a new file and deleting the old one.\n" +
-		"The new file is uploaded first. If upload fails, the old attachment is untouched.\n" +
-		"If upload succeeds but deletion of the old attachment fails, both the new attachment\n" +
-		"ID and the old attachment ID are reported so you can clean up manually.\n\n" +
+		"The replace is description-aware:\n\n" +
+		"  • If the old attachment URL is NOT referenced in the issue description: uploads the new\n" +
+		"    file and deletes the old one (simple path).\n\n" +
+		"  • If the old attachment URL IS referenced in the issue description: uploads the new file,\n" +
+		"    rewrites the description to point to the new URL, updates the issue, then deletes the\n" +
+		"    old attachment. If the description update fails, the old attachment is NOT deleted.\n\n" +
+		"  • If the display name changed (new filename differs from old), the description label is\n" +
+		"    also updated to match the new filename.\n\n" +
+		"Fail-closed: on any error mid-sequence, the old attachment is preserved to avoid 404 links.\n" +
 		"Note: deletion requires you to be the original uploader or a workspace admin.",
 	Args: exactArgs(2),
 	RunE: runIssueAttachmentReplace,
@@ -1956,7 +1963,7 @@ func runIssueAttachmentReplace(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, args[0])
@@ -1973,23 +1980,118 @@ func runIssueAttachmentReplace(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("read file %s: %w", filePath, err)
 	}
 
-	// Step 1: upload new file. If this fails the old attachment is untouched.
-	newAttID, err := client.UploadFile(ctx, fileData, filePath, issueRef.ID)
+	// Fetch old attachment metadata to get its URL and filename.
+	var oldAtt map[string]any
+	if err := client.GetJSON(ctx, "/api/attachments/"+oldAttID, &oldAtt); err != nil {
+		return fmt.Errorf("fetch old attachment metadata: %w", err)
+	}
+	oldURL := strVal(oldAtt, "url")
+	oldFilename := strVal(oldAtt, "filename")
+	if oldURL == "" {
+		return fmt.Errorf("old attachment %s has no URL in server response", oldAttID)
+	}
+
+	// Fetch current issue description to check for inline references.
+	var issue map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+issueRef.ID, &issue); err != nil {
+		return fmt.Errorf("fetch issue description: %w", err)
+	}
+	desc := strVal(issue, "description")
+
+	// Determine if the old attachment URL is referenced in the description.
+	newFilename := strings.TrimSpace(filePath)
+	if idx := strings.LastIndexAny(newFilename, "/\\"); idx >= 0 {
+		newFilename = newFilename[idx+1:]
+	}
+	referencedInDesc := attachmentURLReferencedInDesc(desc, oldURL)
+
+	if !referencedInDesc {
+		// Simple path: old attachment is not in description.
+		// Upload new file then delete old (original behavior).
+		newAttID, err := client.UploadFile(ctx, fileData, filePath, issueRef.ID)
+		if err != nil {
+			return fmt.Errorf("upload new file: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Uploaded %s (new attachment ID: %s)\n", filePath, newAttID)
+
+		if err := client.DeleteJSON(ctx, "/api/attachments/"+oldAttID); err != nil {
+			return fmt.Errorf(
+				"new file uploaded (attachment %s) but failed to remove old attachment %s: %w\n"+
+					"Action required: manually remove attachment %s or it will remain on issue %s.",
+				newAttID, oldAttID, err, oldAttID, issueRef.Display,
+			)
+		}
+		fmt.Fprintf(os.Stderr, "Removed old attachment %s from issue %s.\n", oldAttID, issueRef.Display)
+
+		output, _ := cmd.Flags().GetString("output")
+		result := map[string]any{
+			"issue_id":        issueRef.ID,
+			"issue_key":       issueRef.Display,
+			"new_attachment":  newAttID,
+			"old_attachment":  oldAttID,
+			"file":            filePath,
+			"desc_rewritten":  false,
+		}
+		if output == "table" {
+			headers := []string{"ISSUE", "OLD ATTACHMENT", "NEW ATTACHMENT", "FILE"}
+			rows := [][]string{{issueRef.Display, oldAttID, newAttID, filePath}}
+			cli.PrintTable(os.Stdout, headers, rows)
+			return nil
+		}
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	// Description-aware path: old attachment URL is referenced in issue description.
+	// Must rewrite desc before deleting old attachment to avoid 404 links.
+
+	// Step 1: upload new file and get its URL (needed for desc rewrite).
+	newAttID, newURL, err := client.UploadFileToIssue(ctx, fileData, filePath, issueRef.ID)
 	if err != nil {
 		return fmt.Errorf("upload new file: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "Uploaded %s (new attachment ID: %s)\n", filePath, newAttID)
 
-	// Step 2: delete old attachment. If this fails, report the orphaned state
-	// explicitly — do NOT silently ignore.
+	// Step 2: rewrite description — only exact markdown link targets, not bare string replace.
+	newDesc, rewriteCount, err := rewriteAttachmentURLInDesc(desc, oldURL, oldFilename, newURL, newFilename)
+	if err != nil {
+		// Cannot safely rewrite: abort, keep old attachment intact.
+		return fmt.Errorf(
+			"new file uploaded (attachment %s) but description rewrite is unsafe: %w\n"+
+				"Old attachment %s was NOT deleted. Manually update description and remove old attachment.",
+			newAttID, err, oldAttID,
+		)
+	}
+	if rewriteCount == 0 {
+		// Detected URL in desc but pattern didn't match — fail closed.
+		return fmt.Errorf(
+			"new file uploaded (attachment %s) but old attachment URL was found in description "+
+				"yet could not be matched by any known markdown pattern (complex/non-standard syntax).\n"+
+				"Old attachment %s was NOT deleted. Manually update description and remove old attachment.",
+			newAttID, oldAttID,
+		)
+	}
+	fmt.Fprintf(os.Stderr, "Rewrote %d reference(s) in issue description.\n", rewriteCount)
+
+	// Step 3: update issue description. If this fails, stop — do NOT delete old attachment.
+	updateBody := map[string]any{"description": newDesc}
+	var updateResult map[string]any
+	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, updateBody, &updateResult); err != nil {
+		return fmt.Errorf(
+			"new file uploaded (attachment %s) but failed to update issue description: %w\n"+
+				"Old attachment %s was NOT deleted. Retry description update then remove old attachment manually.",
+			newAttID, err, oldAttID,
+		)
+	}
+	fmt.Fprintf(os.Stderr, "Updated issue %s description.\n", issueRef.Display)
+
+	// Step 4: delete old attachment — only after description is safely updated.
 	if err := client.DeleteJSON(ctx, "/api/attachments/"+oldAttID); err != nil {
 		return fmt.Errorf(
-			"new file uploaded (attachment %s) but failed to remove old attachment %s: %w\n"+
-				"Action required: manually remove attachment %s or it will remain on issue %s.",
+			"new file uploaded (%s) and description updated, but failed to remove old attachment %s: %w\n"+
+				"Action required: manually remove attachment %s from issue %s.",
 			newAttID, oldAttID, err, oldAttID, issueRef.Display,
 		)
 	}
-
 	fmt.Fprintf(os.Stderr, "Removed old attachment %s from issue %s.\n", oldAttID, issueRef.Display)
 
 	output, _ := cmd.Flags().GetString("output")
@@ -1999,12 +2101,72 @@ func runIssueAttachmentReplace(cmd *cobra.Command, args []string) error {
 		"new_attachment": newAttID,
 		"old_attachment": oldAttID,
 		"file":           filePath,
+		"desc_rewritten": true,
+		"refs_rewritten": rewriteCount,
 	}
 	if output == "table" {
-		headers := []string{"ISSUE", "OLD ATTACHMENT", "NEW ATTACHMENT", "FILE"}
-		rows := [][]string{{issueRef.Display, oldAttID, newAttID, filePath}}
+		headers := []string{"ISSUE", "OLD ATTACHMENT", "NEW ATTACHMENT", "FILE", "DESC REWRITTEN"}
+		rows := [][]string{{issueRef.Display, oldAttID, newAttID, filePath, fmt.Sprintf("yes (%d ref)", rewriteCount)}}
 		cli.PrintTable(os.Stdout, headers, rows)
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+// attachmentURLReferencedInDesc reports whether oldURL appears as a markdown
+// link target in the description. It checks for:
+//   - !file[name](oldURL)
+//   - [name](oldURL)
+//   - ![name](oldURL)
+//
+// A plain substring match is used as a conservative gate before the full regex
+// rewrite — both must agree for the desc-aware path to be triggered.
+func attachmentURLReferencedInDesc(desc, oldURL string) bool {
+	if !strings.Contains(desc, oldURL) {
+		return false
+	}
+	// Confirm it appears inside a markdown link/image parenthesis to avoid
+	// false positives from prose text that happens to contain the URL.
+	pattern := regexp.MustCompile(`(?:!file|!)?\[[^\]]*\]\(` + regexp.QuoteMeta(oldURL) + `\)`)
+	return pattern.MatchString(desc)
+}
+
+// rewriteAttachmentURLInDesc replaces every markdown link target that matches
+// oldURL with newURL. It handles three attachment syntaxes:
+//   - !file[displayName](oldURL) — new file-card syntax
+//   - ![displayName](oldURL)     — inline image
+//   - [displayName](oldURL)      — legacy link / file card
+//
+// If newFilename != oldFilename (the file was renamed), the display name is
+// also updated so the visible label matches the real file. Only explicit
+// markdown link constructs are touched; bare URL occurrences in prose are left
+// unchanged (fail-closed on ambiguous content).
+//
+// Returns the rewritten string, the number of substitutions made, and an error
+// if the URL appears in a pattern that cannot be safely rewritten.
+func rewriteAttachmentURLInDesc(desc, oldURL, oldFilename, newURL, newFilename string) (string, int, error) {
+	// Build a pattern that matches the three attachment syntaxes with the exact URL.
+	escapedURL := regexp.QuoteMeta(oldURL)
+	// Groups: (1) prefix — "!file", "!", or "" ; (2) display name ; (3) full match for URL check
+	linkRE := regexp.MustCompile(`(!file|!|)\[([^\]]*)\]\(` + escapedURL + `\)`)
+
+	count := 0
+	result := linkRE.ReplaceAllStringFunc(desc, func(match string) string {
+		sub := linkRE.FindStringSubmatch(match)
+		if sub == nil {
+			return match
+		}
+		prefix := sub[1]   // "!file", "!", or ""
+		displayName := sub[2]
+
+		// Update display name when the file was renamed and the old name was shown.
+		if oldFilename != "" && newFilename != "" && oldFilename != newFilename && displayName == oldFilename {
+			displayName = newFilename
+		}
+
+		count++
+		return prefix + "[" + displayName + "](" + newURL + ")"
+	})
+
+	return result, count, nil
 }

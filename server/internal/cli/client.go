@@ -376,6 +376,61 @@ func (c *APIClient) UploadFile(ctx context.Context, fileData []byte, filename st
 	return id, nil
 }
 
+// UploadFileToIssue uploads a file and associates it with an issue.
+// It returns the attachment ID and CDN URL from the server response.
+// Unlike UploadFile, it returns the URL so callers can rewrite description
+// references that point to the old attachment.
+func (c *APIClient) UploadFileToIssue(ctx context.Context, fileData []byte, filename string, issueID string) (string, string, error) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	part, err := writer.CreateFormFile("file", filepath.Base(filename))
+	if err != nil {
+		return "", "", fmt.Errorf("create form file: %w", err)
+	}
+	if _, err := part.Write(fileData); err != nil {
+		return "", "", fmt.Errorf("write file data: %w", err)
+	}
+	if issueID != "" {
+		if err := writer.WriteField("issue_id", issueID); err != nil {
+			return "", "", fmt.Errorf("write issue_id field: %w", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return "", "", fmt.Errorf("close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/upload-file", &body)
+	if err != nil {
+		return "", "", err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	c.setHeaders(req)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respData, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", "", fmt.Errorf("upload file returned %d: %s", resp.StatusCode, strings.TrimSpace(string(respData)))
+	}
+
+	var result AttachmentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", "", fmt.Errorf("decode upload response: %w", err)
+	}
+	if result.URL == "" {
+		return "", "", fmt.Errorf("upload response missing attachment url")
+	}
+	if result.ID == "" {
+		return "", "", fmt.Errorf("upload response missing attachment id")
+	}
+	return result.ID, result.URL, nil
+}
+
 // UploadFileWithURL uploads a file via multipart form to /api/upload-file
 // without associating it with an issue or comment. It decodes the full
 // AttachmentResponse and returns the attachment ID and URL.

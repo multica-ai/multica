@@ -1517,3 +1517,101 @@ func TestValidIssueStatuses(t *testing.T) {
 		t.Errorf("validIssueStatuses has %d entries, expected %d", len(validIssueStatuses), len(expected))
 	}
 }
+
+func TestAttachmentURLReferencedInDesc(t *testing.T) {
+	const oldURL = "https://cdn.example.com/workspaces/ws1/abc123.zip"
+	cases := []struct {
+		name string
+		desc string
+		want bool
+	}{
+		{"not present", "No attachment here.", false},
+		{"bare text URL (no link)", "See https://cdn.example.com/workspaces/ws1/abc123.zip for details.", false},
+		{"new file-card syntax", "!file[report.zip](" + oldURL + ")", true},
+		{"inline image", "![screenshot](" + oldURL + ")", true},
+		{"legacy link on own line", "[report.zip](" + oldURL + ")", true},
+		{"URL in different link", "[other](https://cdn.example.com/other.zip)", false},
+		{"partial URL match only", "[x](https://cdn.example.com/workspaces/ws1/abc123.zip.bak)", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := attachmentURLReferencedInDesc(tc.desc, oldURL)
+			if got != tc.want {
+				t.Errorf("attachmentURLReferencedInDesc(%q) = %v, want %v", tc.desc, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRewriteAttachmentURLInDesc(t *testing.T) {
+	const (
+		oldURL      = "https://cdn.example.com/workspaces/ws1/old.zip"
+		newURL      = "https://cdn.example.com/workspaces/ws1/new.zip"
+		oldFilename = "old.zip"
+		newFilename = "new.zip"
+	)
+
+	cases := []struct {
+		name      string
+		desc      string
+		wantDesc  string
+		wantCount int
+	}{
+		{
+			name:      "new file-card syntax same name",
+			desc:      "!file[old.zip](" + oldURL + ")",
+			wantDesc:  "!file[new.zip](" + newURL + ")",
+			wantCount: 1,
+		},
+		{
+			name:      "new file-card syntax custom label",
+			desc:      "!file[My Report](" + oldURL + ")",
+			wantDesc:  "!file[My Report](" + newURL + ")",
+			wantCount: 1,
+		},
+		{
+			name:      "inline image",
+			desc:      "![screenshot](" + oldURL + ")",
+			wantDesc:  "![screenshot](" + newURL + ")",
+			wantCount: 1,
+		},
+		{
+			name:      "legacy link with old filename label",
+			desc:      "[old.zip](" + oldURL + ")",
+			wantDesc:  "[new.zip](" + newURL + ")",
+			wantCount: 1,
+		},
+		{
+			name:      "multiple references",
+			desc:      "!file[old.zip](" + oldURL + ")\n\nSee also !file[old.zip](" + oldURL + ")",
+			wantDesc:  "!file[new.zip](" + newURL + ")\n\nSee also !file[new.zip](" + newURL + ")",
+			wantCount: 2,
+		},
+		{
+			name:      "other links untouched",
+			desc:      "[other](https://cdn.example.com/other.zip)\n!file[old.zip](" + oldURL + ")",
+			wantDesc:  "[other](https://cdn.example.com/other.zip)\n!file[new.zip](" + newURL + ")",
+			wantCount: 1,
+		},
+		{
+			name:      "no match returns original",
+			desc:      "No attachment here.",
+			wantDesc:  "No attachment here.",
+			wantCount: 0,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotDesc, gotCount, err := rewriteAttachmentURLInDesc(tc.desc, oldURL, oldFilename, newURL, newFilename)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotDesc != tc.wantDesc {
+				t.Errorf("desc:\n  got  %q\n  want %q", gotDesc, tc.wantDesc)
+			}
+			if gotCount != tc.wantCount {
+				t.Errorf("count = %d, want %d", gotCount, tc.wantCount)
+			}
+		})
+	}
+}
