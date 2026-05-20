@@ -77,9 +77,20 @@
   "view": {
     "tooltip_board": "Board view",
     "tooltip_list": "List view",
+    "tooltip_gantt": "Gantt view",
     "section": "View",
     "board": "Board",
-    "list": "List"
+    "list": "List",
+    "gantt": "Gantt"
+  },
+  "gantt": {
+    "header_issue": "Issue",
+    "zoom_day": "Day",
+    "zoom_week": "Week",
+    "zoom_month": "Month",
+    "show_completed": "Show completed",
+    "empty": "No scheduled issues yet — set a start or due date on any issue to see it on the timeline.",
+    "inverted_dates_warning": "Start date is after due date — bar shown from min to max."
   },
   "actor_issues": {
     "scope": {
@@ -101,7 +112,9 @@
         "title": "No created issues",
         "description": "Issues created here will appear in this view."
       }
-    }
+    },
+    "search_placeholder": "Search issues...",
+    "search_empty": "No issues match your search."
   },
   "list": {
     "empty_status": "No issues",

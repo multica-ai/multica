@@ -15,7 +15,6 @@
 
 import { useMemo } from "react";
 import { createLowlight, common } from "lowlight";
-// @ts-expect-error -- hast-util-to-html has no bundled type declarations
 import { toHtml } from "hast-util-to-html";
 import { cn } from "@multica/ui/lib/utils";
 

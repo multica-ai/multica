@@ -169,9 +169,9 @@ type DaemonRegisterRequest struct {
 	// first-time registration; once a user overrides the tz via the web
 	// UI, the upsert query preserves that override on subsequent
 	// daemon reconnects (see UpsertAgentRuntime in runtime.sql).
-	Timezone string `json:"timezone"`
-	HealthPort      int      `json:"health_port"` // local daemon health/trace port
-	Runtimes        []struct {
+	Timezone   string `json:"timezone"`
+	HealthPort int    `json:"health_port"` // local daemon health/trace port
+	Runtimes   []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
@@ -1190,16 +1190,16 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 
 		resp.Agent = &TaskAgentData{
-			ID:           uuidToString(agent.ID),
-			Name:         agent.Name,
-			Visibility:   agent.Visibility,
-			OwnerID:      uuidToString(agent.OwnerID),
-			Instructions: merged.Instructions,
-			Skills:       allSkills,
-			CustomEnv:    merged.CustomEnv,
-			CustomArgs:   merged.CustomArgs,
-			McpConfig:    mcpConfig,
-			Model:        agent.Model.String,
+			ID:            uuidToString(agent.ID),
+			Name:          agent.Name,
+			Visibility:    agent.Visibility,
+			OwnerID:       uuidToString(agent.OwnerID),
+			Instructions:  merged.Instructions,
+			Skills:        allSkills,
+			CustomEnv:     merged.CustomEnv,
+			CustomArgs:    merged.CustomArgs,
+			McpConfig:     mcpConfig,
+			Model:         agent.Model.String,
 			RuntimeConfig: agent.RuntimeConfig,
 		}
 	}
@@ -1655,8 +1655,8 @@ func (h *Handler) ReportTaskProgress(w http.ResponseWriter, r *http.Request) {
 type TaskCompleteRequest struct {
 	PRURL               string `json:"pr_url"`
 	Output              string `json:"output"`
-	SessionID           string `json:"session_id"`            // Claude session ID for future resumption
-	WorkDir             string `json:"work_dir"`              // working directory used during execution
+	SessionID           string `json:"session_id"`                     // Claude session ID for future resumption
+	WorkDir             string `json:"work_dir"`                       // working directory used during execution
 	NotificationSummary string `json:"notification_summary,omitempty"` // agent-provided summary for IM notifications
 }
 

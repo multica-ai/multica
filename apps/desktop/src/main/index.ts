@@ -200,6 +200,57 @@ function createWindow(): void {
     }
   });
 
+  // Dev-mode renderer diagnostics. When the renderer crashes hard enough
+  // that DevTools can't be opened (white screen with no clickable surface),
+  // the only way to recover the actual JS error is to forward it from the
+  // main process to the terminal running `make dev`. Without these, the
+  // user sees only the daemon-manager polling noise (`Render frame was
+  // disposed before WebFrameMain could be accessed`) which is a downstream
+  // symptom, not the cause.
+  //
+  // Gated by `is.dev` to keep production stderr clean — packaged builds
+  // don't have a terminal anyway, and we ship to crash-reporting separately.
+  if (is.dev) {
+    const log = (tag: string, ...args: unknown[]) =>
+      process.stderr.write(`[renderer ${tag}] ${args.map(String).join(" ")}\n`);
+
+    // Forward every renderer-side console.* call. The detail object also
+    // carries source URL + line — included so a thrown stack trace from
+    // window.onerror is traceable back to a file.
+    mainWindow.webContents.on("console-message", (details) => {
+      const { level, message, sourceId, lineNumber } = details;
+      log(level, `${message} (${sourceId}:${lineNumber})`);
+    });
+
+    // Fires when the renderer process dies for any reason (OOM, crash,
+    // killed). `details.reason` is the discriminator: "crashed", "oom",
+    // "killed", "abnormal-exit", "launch-failed", etc.
+    mainWindow.webContents.on("render-process-gone", (_event, details) => {
+      log("process-gone", JSON.stringify(details));
+    });
+
+    // Fires when loadURL / loadFile can't reach its target (dev server
+    // not up yet, network blip, file missing). errorCode is a Chromium
+    // net error number; -3 = ABORTED is normal during HMR and skipped.
+    mainWindow.webContents.on(
+      "did-fail-load",
+      (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+        if (errorCode === -3) return;
+        log(
+          "did-fail-load",
+          `code=${errorCode} desc=${errorDescription} url=${validatedURL} mainFrame=${isMainFrame}`,
+        );
+      },
+    );
+
+    // Fires when the preload script throws before the renderer can boot.
+    // This is the one error class that NEVER reaches DevTools (preload
+    // runs before any window) — without this listener it's invisible.
+    mainWindow.webContents.on("preload-error", (_event, preloadPath, error) => {
+      log("preload-error", `path=${preloadPath} err=${error?.stack ?? error}`);
+    });
+  }
+
   installContextMenu(mainWindow.webContents);
 
   if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {

@@ -6,7 +6,12 @@ import {
   agentTaskSnapshotKeys,
   agentTasksKeys,
 } from "../agents/queries";
-import { onIssueDeleted, onIssueLabelsChanged } from "./ws-updaters";
+import {
+  onIssueCreated,
+  onIssueDeleted,
+  onIssueLabelsChanged,
+  onIssueUpdated,
+} from "./ws-updaters";
 import { issueKeys } from "./queries";
 import { labelKeys } from "../labels/queries";
 import type {
@@ -150,6 +155,25 @@ describe("onIssueLabelsChanged", () => {
 
     const detail = qc.getQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID));
     expect(detail?.labels).toEqual([labelB]);
+  });
+
+  it("patches the Project Gantt cache so label filters react in place", () => {
+    const PROJECT_ID = "project-1";
+    qc.setQueryData<Issue[]>(issueKeys.projectGantt(WS_ID, PROJECT_ID), [
+      baseIssue,
+      otherIssue,
+    ]);
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
+
+    const gantt = qc.getQueryData<Issue[]>(
+      issueKeys.projectGantt(WS_ID, PROJECT_ID),
+    );
+    expect(gantt?.find((i) => i.id === ISSUE_ID)?.labels).toEqual([labelB]);
+    // Other issues in the same cache must not have their labels mutated.
+    expect(gantt?.find((i) => i.id === OTHER_ISSUE_ID)?.labels).toEqual([
+      labelA,
+    ]);
   });
 });
 
@@ -390,5 +414,40 @@ describe("onIssueDeleted", () => {
     expectInvalidated(qc, agentRunCountsKeys.last30d(WS_ID));
     expectInvalidated(qc, agentTasksKeys.detail(WS_ID, AGENT_ID));
     expect(qc.getQueryData(issueKeys.tasks(ISSUE_ID))).toBeUndefined();
+  });
+});
+
+// Regression coverage for the Project Gantt cache. The Gantt view rides its
+// own dedicated cache (server-filtered to `scheduled=true`); every WS-driven
+// path that can shift Gantt membership has to invalidate the prefix or the
+// timeline goes stale.
+describe("project gantt cache invalidation", () => {
+  const PROJECT_ID = "project-1";
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient();
+    qc.setQueryData<Issue[]>(
+      issueKeys.projectGantt(WS_ID, PROJECT_ID),
+      [baseIssue],
+    );
+  });
+
+  it("invalidates the project Gantt cache on issue:created", () => {
+    onIssueCreated(qc, WS_ID, otherIssue);
+    expectInvalidated(qc, issueKeys.projectGantt(WS_ID, PROJECT_ID));
+  });
+
+  it("invalidates the project Gantt cache on issue:updated", () => {
+    onIssueUpdated(qc, WS_ID, {
+      id: ISSUE_ID,
+      start_date: "2026-01-01T00:00:00Z",
+    });
+    expectInvalidated(qc, issueKeys.projectGantt(WS_ID, PROJECT_ID));
+  });
+
+  it("invalidates the project Gantt cache on issue:deleted", () => {
+    onIssueDeleted(qc, WS_ID, ISSUE_ID);
+    expectInvalidated(qc, issueKeys.projectGantt(WS_ID, PROJECT_ID));
   });
 });

@@ -655,8 +655,41 @@ func TestCodexRawItemAgentMessageFinalAnswer(t *testing.T) {
 	if gotText != "Done!" {
 		t.Fatalf("expected text 'Done!', got %q", gotText)
 	}
-	if !turnDone {
-		t.Fatal("expected onTurnDone for final_answer")
+	if turnDone {
+		t.Fatal("final_answer must not complete the turn before turn/completed")
+	}
+}
+
+func TestCodexRawFinalAnswerWaitsForTurnCompleted(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	c.turnStarted = true
+
+	var messages []Message
+	var doneCount int
+	c.onMessage = func(msg Message) {
+		messages = append(messages, msg)
+	}
+	c.onTurnDone = func(aborted bool) {
+		doneCount++
+		if aborted {
+			t.Fatal("expected aborted=false")
+		}
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-1","item":{"type":"agentMessage","id":"msg-1","text":"Done!","phase":"final_answer"}}}`)
+	if doneCount != 0 {
+		t.Fatalf("final_answer must not trigger onTurnDone early, got %d", doneCount)
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-1","turn":{"id":"turn-1","status":"completed"}}}`)
+	if doneCount != 1 {
+		t.Fatalf("turn/completed should trigger onTurnDone exactly once, got %d", doneCount)
+	}
+	if len(messages) != 1 || messages[0].Type != MessageText || messages[0].Content != "Done!" {
+		t.Fatalf("messages = %+v, want preserved final answer text", messages)
 	}
 }
 

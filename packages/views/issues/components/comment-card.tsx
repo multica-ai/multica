@@ -32,7 +32,7 @@ import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-pick
 import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { timeAgo } from "@multica/core/utils";
-import { ContentEditor, type ContentEditorRef, type SelectionQuoteActions, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, useDownloadAttachment, useAttachmentPreview, AttachmentBlock } from "../../editor";
+import { ContentEditor, type ContentEditorRef, type SelectionQuoteActions, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -240,8 +240,6 @@ function ExpandableCommentBody({
 }
 
 export function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
-  const download = useDownloadAttachment();
-  const preview = useAttachmentPreview();
   if (!attachments?.length) return null;
   // Skip attachments whose URL is already referenced in the markdown content,
   // and duplicates of the same file (same name/type/size) that are referenced.
@@ -265,20 +263,16 @@ export function AttachmentList({ attachments, content, className }: { attachment
   if (!standalone.length) return null;
 
   return (
-    <div className={cn("flex flex-col gap-1", className)}>
-      {standalone.map((a) => (
-        <AttachmentBlock
-          key={a.id}
-          filename={a.filename}
-          contentType={a.content_type}
-          attachmentId={a.id}
-          href={a.url}
-          onPreview={() => preview.tryOpen({ kind: "full", attachment: a })}
-          onDownload={() => download(a.id)}
-        />
-      ))}
-      {preview.modal}
-    </div>
+    <AttachmentDownloadProvider attachments={attachments}>
+      <div className={cn("flex flex-col gap-1", className)}>
+        {standalone.map((a) => (
+          <AttachmentRenderer
+            key={a.id}
+            attachment={{ kind: "record", attachment: a }}
+          />
+        ))}
+      </div>
+    </AttachmentDownloadProvider>
   );
 }
 
