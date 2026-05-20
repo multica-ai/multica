@@ -1608,10 +1608,14 @@ func (d *Daemon) runUpdate(targetVersion string) (string, error) {
 		}
 		return out, nil
 	}
-	d.logger.Info("updating CLI via direct download...", "target_version", targetVersion)
-	out, err := cli.UpdateViaDownload(targetVersion)
+	d.logger.Info("updating CLI via manifest download...", "target_version", targetVersion)
+	out, err := cli.UpdateViaManifestDownload(targetVersion)
 	if err != nil {
-		return out, fmt.Errorf("download update failed: %w", err)
+		d.logger.Warn("manifest download failed, falling back to GitHub Release", "error", err)
+		out, err = cli.UpdateViaDownload(targetVersion)
+		if err != nil {
+			return out, fmt.Errorf("download update failed: %w", err)
+		}
 	}
 	return out, nil
 }
@@ -3307,8 +3311,9 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 	result := make([]execenv.SkillContextForEnv, len(skills))
 	for i, s := range skills {
 		result[i] = execenv.SkillContextForEnv{
-			Name:    s.Name,
-			Content: s.Content,
+			Name:        s.Name,
+			Description: s.Description,
+			Content:     s.Content,
 		}
 		for _, f := range s.Files {
 			result[i].Files = append(result[i].Files, execenv.SkillFileContextForEnv{

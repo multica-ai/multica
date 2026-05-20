@@ -52,7 +52,23 @@ export interface ListIssuesParams {
   project_ids?: string[];
   include_no_project?: boolean;
   label_ids?: string[];
+  /**
+   * Widen the assignee filter to issues where the user is the *indirect*
+   * assignee — assignee is one of the user's owned agents, or a squad that
+   * involves the user (human member / leader-via-owned-agent / agent member
+   * owned by the user). Direct member assignment is intentionally excluded:
+   * `involves_user_id` and `assignee_id=<user>` (tab "Assigned to me") produce
+   * disjoint result sets by construction.
+   */
+  involves_user_id?: string;
   open_only?: boolean;
+  /**
+   * Restrict the result to issues with at least one of `start_date` /
+   * `due_date` set. Used by the Project Gantt view so it doesn't have to
+   * page through every issue on the project just to discard the unscheduled
+   * majority on the client.
+   */
+  scheduled?: boolean;
 }
 
 export interface IssueActorRef {
@@ -72,6 +88,8 @@ export interface ListGroupedIssuesParams {
   assignee_ids?: string[];
   creator_id?: string;
   project_id?: string;
+  /** See `ListIssuesParams.involves_user_id` — same semantics. */
+  involves_user_id?: string;
   assignee_filters?: IssueActorRef[];
   include_no_assignee?: boolean;
   creator_filters?: IssueActorRef[];

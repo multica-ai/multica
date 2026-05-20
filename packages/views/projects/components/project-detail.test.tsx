@@ -126,6 +126,7 @@ describe("ProjectIssuesContent", () => {
       <ProjectIssuesContent
         projectId="project-1"
         projectIssues={issues}
+        ganttIssues={[]}
         scope="project:project-1"
         filter={{ project_id: "project-1" }}
       />,
@@ -145,6 +146,7 @@ describe("ProjectIssuesContent", () => {
       <ProjectIssuesContent
         projectId="project-1"
         projectIssues={issues}
+        ganttIssues={[]}
         scope="project:project-1"
         filter={{ project_id: "project-1" }}
       />,
@@ -183,6 +185,7 @@ describe("ProjectIssuesContent", () => {
             priority: "medium",
           }),
         ]}
+        ganttIssues={[]}
         scope="project:project-1"
         filter={{ project_id: "project-1" }}
       />,

@@ -1924,3 +1924,114 @@ func TestNotification_ReplyToAgent_NoNotification(t *testing.T) {
 		}
 	}
 }
+
+// TestNotification_DingTalkTaskCompletedIndependentOfMentioned verifies that
+// enabling dingtalk + task_completed does not depend on dingtalk + mentioned,
+// and toggling task_completed independently creates a DingTalk delivery
+// without affecting the mentioned preference behavior.
+func TestNotification_DingTalkTaskCompletedIndependentOfMentioned(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	recipientEmail := "notif-dt-task-completed@multica.ai"
+	recipientID := createTestUser(t, recipientEmail)
+	t.Cleanup(func() { cleanupTestUser(t, recipientEmail) })
+
+	bindingID := createNotificationBindingForUser(t, recipientID, "dingtalk")
+	// Enable only task_completed for dingtalk — NOT mentioned
+	enableNotificationPreferenceForUser(t, recipientID, "dingtalk", "task_completed", bindingID)
+
+	issueID := createTestIssue(t, testWorkspaceID, recipientID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	agentID := "00000000-0000-0000-0000-aaaaaaaaaaaa"
+	addTestSubscriber(t, issueID, "member", recipientID, "creator")
+	addTestSubscriber(t, issueID, "agent", agentID, "assignee")
+
+	// Publish task:completed
+	bus.Publish(events.Event{
+		Type:        protocol.EventTaskCompleted,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "system",
+		ActorID:     "",
+		Payload: map[string]any{
+			"task_id":  "00000000-0000-0000-0000-bbbbbbbbbbbb",
+			"agent_id": agentID,
+			"issue_id": issueID,
+			"status":   "completed",
+		},
+	})
+
+	// Should have a notification event for the recipient
+	nEvents := notificationEventsForRecipient(t, queries, recipientID)
+	if len(nEvents) == 0 {
+		t.Fatal("expected at least 1 notification event for task_completed dingtalk delivery")
+	}
+
+	// Find DingTalk delivery among all events
+	var foundDingtalk bool
+	for _, ne := range nEvents {
+		deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(ne.ID))
+		for _, d := range deliveries {
+			if d.Channel == "dingtalk" {
+				foundDingtalk = true
+				if d.Status != "pending" {
+					t.Fatalf("expected dingtalk delivery status 'pending', got %q", d.Status)
+				}
+			}
+		}
+	}
+	if !foundDingtalk {
+		t.Fatal("expected a DingTalk delivery record for task_completed, but found none")
+	}
+
+	// Now verify that mentioned preference is NOT enabled (no dingtalk delivery
+	// should be created for a mention event)
+	commentID := "00000000-0000-0000-0000-000000000789"
+	commentContent := "hey [@Recipient](mention://member/" + recipientID + ") check this"
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, commentID, issueID, testWorkspaceID, "member", testUserID, commentContent, "comment"); err != nil {
+		t.Fatalf("insert comment: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), "DELETE FROM comment WHERE id = $1", commentID)
+	})
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         commentID,
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   testUserID,
+				Content:    commentContent,
+				Type:       "comment",
+			},
+			"issue_title":  "dingtalk task pref test",
+			"issue_status": "todo",
+		},
+	})
+
+	// Check that no dingtalk delivery was created for the mentioned event
+	mentionEvents := notificationEventsForRecipient(t, queries, recipientID)
+	for _, ne := range mentionEvents {
+		if ne.Type != "mentioned" {
+			continue
+		}
+		deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(ne.ID))
+		for _, d := range deliveries {
+			if d.Channel == "dingtalk" {
+				t.Fatal("dingtalk delivery should NOT be created for mentioned when only task_completed is enabled")
+			}
+		}
+	}
+}

@@ -1675,7 +1675,7 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 
 	result := make([]AgentSkillData, 0, len(skills))
 	for _, sk := range skills {
-		data := AgentSkillData{Name: sk.Name, Content: sk.Content}
+		data := AgentSkillData{Name: sk.Name, Description: sk.Description, Content: sk.Content}
 		files, _ := s.Queries.ListSkillFiles(ctx, sk.ID)
 		for _, f := range files {
 			data.Files = append(data.Files, AgentSkillFileData{Path: f.Path, Content: f.Content})
@@ -1687,9 +1687,10 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 
 // AgentSkillData represents a skill for task execution responses.
 type AgentSkillData struct {
-	Name    string               `json:"name"`
-	Content string               `json:"content"`
-	Files   []AgentSkillFileData `json:"files,omitempty"`
+	Name        string               `json:"name"`
+	Description string               `json:"description,omitempty"`
+	Content     string               `json:"content"`
+	Files       []AgentSkillFileData `json:"files,omitempty"`
 }
 
 // AgentSkillFileData represents a supporting file within a skill.
@@ -1810,6 +1811,15 @@ func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, 
 	}
 	if task.ChatSessionID.Valid {
 		payload["chat_session_id"] = util.UUIDToString(task.ChatSessionID)
+	}
+	// Include notification_summary from task result for completed/failed events.
+	if (eventType == protocol.EventTaskCompleted || eventType == protocol.EventTaskFailed) && len(task.Result) > 0 {
+		var taskResult map[string]any
+		if err := json.Unmarshal(task.Result, &taskResult); err == nil {
+			if s, ok := taskResult["notification_summary"].(string); ok && s != "" {
+				payload["notification_summary"] = s
+			}
+		}
 	}
 	s.Bus.Publish(events.Event{
 		Type:        eventType,

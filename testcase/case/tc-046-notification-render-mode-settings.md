@@ -1,0 +1,9 @@
+Purpose: Verify that Notification Settings expose independent DingTalk task event toggles and that IM render mode can be saved independently for DingTalk and OpenClaw WeChat.
+
+Preconditions: The Multica web app is reachable. The user is signed in with a fixed-code test account. The user has a DingTalk binding when verifying DingTalk toggles. OpenClaw WeChat settings require an online OpenClaw runtime and an active `openclaw_weixin` binding; if either prerequisite is unavailable, execute the visible Settings assertions that are reachable and mark delivery-only checks blocked.
+
+User flow: Navigate to Settings > Notifications. In the DingTalk section, verify that separate switches are visible for "被 @提及时", "Agent 任务完成时", and "Agent 任务失败时". Toggle "Agent 任务完成时" without changing "被 @提及时", then reload the page and confirm both switch states persist independently. Change the DingTalk notification style selector between "智能模式", "始终简洁", and "始终详细" and save it without changing any event switch. If the OpenClaw WeChat section is visible, repeat the notification style save path there and verify the task completed and task failed switches are still present.
+
+Expected results: DingTalk exposes independent `mentioned`, `task_completed`, and `task_failed` controls. Saving `task_completed` does not alter the `mentioned` switch. Changing the notification style persists after reload and does not return a visible API error. OpenClaw WeChat exposes task completed and task failed controls plus the same notification style selector when the runtime and binding prerequisites are present.
+
+Notes for automation: Locate controls by Settings navigation text, the Notifications tab title, section labels "DingTalk" and "微信（OpenClaw）", switch row labels, and style option text. Network inspection may be used as supporting evidence: render-mode-only saves should call the notification preference API with `render_mode` and should not fail with `enabled is required`.

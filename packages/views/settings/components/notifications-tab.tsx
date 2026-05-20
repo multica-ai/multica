@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BellRing, Loader2, MessageCircle, Send, Trash2 } from "lucide-react";
+import { BellRing, Copy, Loader2, MessageCircle, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import type {
@@ -9,6 +9,7 @@ import type {
   NotificationChannel,
   NotificationChannelPreference,
   NotificationEventType,
+  NotificationRenderMode,
   NotificationWebhook,
 } from "@multica/core/types";
 import type { AgentRuntime } from "@multica/core/types";
@@ -24,11 +25,19 @@ import {
 } from "@multica/ui/components/ui/card";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 
 const channelLabels: Record<NotificationChannel, string> = {
+  notification_trigger: "Notification Triggers",
   inbox: "Inbox",
   dingtalk: "DingTalk",
   email: "Email",
@@ -37,6 +46,7 @@ const channelLabels: Record<NotificationChannel, string> = {
 };
 
 const channelDescriptions: Record<NotificationChannel, string> = {
+  notification_trigger: "Notification scenes that can fan out to enabled delivery channels.",
   inbox: "In-app notification delivered through the existing Inbox and websocket flow.",
   dingtalk: "External notification sent to your linked DingTalk account once that channel is enabled.",
   email: "Email notification sent to your linked email address when you are mentioned.",
@@ -44,24 +54,51 @@ const channelDescriptions: Record<NotificationChannel, string> = {
   openclaw_weixin: "通过 OpenClaw 本地助手将通知发送到你的微信。需要在线的 OpenClaw Runtime。",
 };
 
-const customWebhookEvents: NotificationEventType[] = [
-  "mentioned",
-  "issue_assigned",
-  "subscribed_issue_updated",
-];
-
-const openclawWeixinEvents: NotificationEventType[] = [
-  "task_completed",
-  "task_failed",
+const triggerEvents: NotificationEventType[] = [
   "mentioned",
   "replied",
+  "issue_assigned",
+  "subscribed_issue_updated",
+  "task_completed",
+  "task_failed",
 ];
 
-const openclawWeixinEventLabels: Record<string, string> = {
-  task_completed: "Agent 任务完成时",
-  task_failed: "Agent 任务失败时",
+const triggerEventLabels: Record<NotificationEventType, string> = {
+  channel_enabled: "渠道已开启",
   mentioned: "被 @提及时",
   replied: "被回复时",
+  issue_assigned: "被分配 Issue 时",
+  subscribed_issue_updated: "订阅的 Issue 更新时",
+  task_completed: "Agent 任务完成时",
+  task_failed: "Agent 任务失败时",
+};
+
+const deliveryChannels: Exclude<NotificationChannel, "notification_trigger">[] = [
+  "inbox",
+  "dingtalk",
+  "email",
+  "custom_webhook",
+  "openclaw_weixin",
+];
+
+const channelEvents: Record<Exclude<NotificationChannel, "notification_trigger">, NotificationEventType[]> = {
+  inbox: ["mentioned"],
+  dingtalk: ["mentioned", "task_completed", "task_failed"],
+  email: ["mentioned"],
+  custom_webhook: ["mentioned", "issue_assigned", "subscribed_issue_updated"],
+  openclaw_weixin: ["mentioned", "replied", "task_completed", "task_failed"],
+};
+
+const renderModeLabels: Record<NotificationRenderMode, string> = {
+  auto: "智能模式",
+  compact: "始终简洁",
+  detail: "始终详细",
+};
+
+const renderModeDescriptions: Record<NotificationRenderMode, string> = {
+  auto: "根据内容长度和结构自动选择简洁或详细",
+  compact: "只发送一行摘要和链接",
+  detail: "发送完整通知内容",
 };
 
 const webhookTemplatePlaceholder = `{
@@ -71,8 +108,14 @@ const webhookTemplatePlaceholder = `{
   }
 }`;
 
+const openclawWeixinBindPrompt = "帮我绑定 Multica 微信通知";
+
 function preferenceKey(pref: NotificationChannelPreference) {
   return `${pref.channel}:${pref.event_type}`;
+}
+
+function preferenceTupleKey(channel: NotificationChannel, eventType: NotificationEventType) {
+  return `${channel}:${eventType}`;
 }
 
 export function NotificationsTab() {
@@ -133,77 +176,220 @@ export function NotificationsTab() {
     return next;
   }, [bindings]);
 
-  const handleToggle = async (pref: NotificationChannelPreference, enabled: boolean) => {
-    const key = preferenceKey(pref);
+  const preferenceByKey = useMemo(() => {
+    const next = new Map<string, NotificationChannelPreference>();
+    for (const pref of preferences) {
+      next.set(preferenceKey(pref), pref);
+    }
+    return next;
+  }, [preferences]);
+
+  const updatePreferencesByKey = useCallback((updated: NotificationChannelPreference[]) => {
+    const updatedByKey = new Map(updated.map((pref) => [preferenceKey(pref), pref]));
+    setPreferences((current) =>
+      current.map((candidate) => updatedByKey.get(preferenceKey(candidate)) ?? candidate),
+    );
+  }, []);
+
+  const getPreference = useCallback(
+    (channel: NotificationChannel, eventType: NotificationEventType) => {
+      return preferenceByKey.get(preferenceTupleKey(channel, eventType));
+    },
+    [preferenceByKey],
+  );
+
+  const isTriggerEnabled = useCallback(
+    (eventType: NotificationEventType) => {
+      const pref = getPreference("notification_trigger", eventType);
+      return Boolean(pref?.enabled || deliveryChannels.some((channel) =>
+        channelEvents[channel].includes(eventType) && getPreference(channel, eventType)?.enabled,
+      ));
+    },
+    [getPreference],
+  );
+
+  const isChannelEnabled = useCallback(
+    (channel: Exclude<NotificationChannel, "notification_trigger">) => {
+      const pref = getPreference(channel, "channel_enabled");
+      return Boolean(pref?.enabled || channelEvents[channel].some((eventType) => getPreference(channel, eventType)?.enabled));
+    },
+    [getPreference],
+  );
+
+  const channelNeedsSetup = useCallback(
+    (channel: Exclude<NotificationChannel, "notification_trigger">) => {
+      if (channel === "custom_webhook") return webhooks.length === 0;
+
+      const channelPref = getPreference(channel, "channel_enabled");
+      if (channelPref?.requires_binding && !bindingByProvider.get(channel)) return true;
+
+      return channelEvents[channel].some((eventType) => {
+        const pref = getPreference(channel, eventType);
+        return Boolean(pref?.requires_binding && !bindingByProvider.get(channel));
+      });
+    },
+    [bindingByProvider, getPreference, webhooks.length],
+  );
+
+  const supportedActiveTargets = useCallback(
+    (eventType: NotificationEventType) => {
+      return deliveryChannels.filter(
+        (channel) =>
+          channelEvents[channel].includes(eventType) &&
+          isChannelEnabled(channel) &&
+          !channelNeedsSetup(channel) &&
+          Boolean(getPreference(channel, eventType)),
+      );
+    },
+    [channelNeedsSetup, getPreference, isChannelEnabled],
+  );
+
+  const channelBadgeText = useCallback(
+    (channel: Exclude<NotificationChannel, "notification_trigger">) => {
+      if (channel === "custom_webhook") {
+        return webhooks.length > 0 ? `${webhooks.length} endpoint${webhooks.length > 1 ? "s" : ""}` : "not configured";
+      }
+      return bindingByProvider.get(channel)?.status ?? (channelNeedsSetup(channel) ? "not connected" : null);
+    },
+    [bindingByProvider, channelNeedsSetup, webhooks.length],
+  );
+
+  const syncNotificationPreferenceMatrix = async (
+    triggerState: Map<NotificationEventType, boolean>,
+    channelState: Map<Exclude<NotificationChannel, "notification_trigger">, boolean>,
+  ) => {
+    const updates: Promise<NotificationChannelPreference>[] = [];
+
+    for (const eventType of triggerEvents) {
+      const triggerPref = getPreference("notification_trigger", eventType);
+      if (triggerPref && triggerPref.enabled !== triggerState.get(eventType)) {
+        updates.push(
+          api.updateNotificationPreference({
+            channel: "notification_trigger",
+            event_type: eventType,
+            enabled: triggerState.get(eventType) ?? false,
+          }),
+        );
+      }
+    }
+
+    for (const channel of deliveryChannels) {
+      const channelPref = getPreference(channel, "channel_enabled");
+      if (channelPref && channelPref.enabled !== channelState.get(channel)) {
+        updates.push(
+          api.updateNotificationPreference({
+            channel,
+            event_type: "channel_enabled",
+            enabled: channelState.get(channel) ?? false,
+          }),
+        );
+      }
+
+      const activeChannel = channelState.get(channel) ?? false;
+      const ready = !channelNeedsSetup(channel);
+      for (const eventType of channelEvents[channel]) {
+        const pref = getPreference(channel, eventType);
+        if (!pref) continue;
+
+        const nextEnabled = activeChannel && ready && (triggerState.get(eventType) ?? false);
+        if (pref.enabled !== nextEnabled) {
+          updates.push(
+            api.updateNotificationPreference({
+              channel,
+              event_type: eventType,
+              enabled: nextEnabled,
+            }),
+          );
+        }
+      }
+    }
+
+    if (updates.length === 0) return [];
+    return Promise.all(updates);
+  };
+
+  const handleTriggerToggle = async (eventType: NotificationEventType, enabled: boolean) => {
+    const key = `notification_trigger:${eventType}`;
     const previous = preferences;
+    const triggerState = new Map(
+      triggerEvents.map((triggerEvent) => [
+        triggerEvent,
+        triggerEvent === eventType ? enabled : isTriggerEnabled(triggerEvent),
+      ]),
+    );
+    const channelState = new Map(
+      deliveryChannels.map((channel) => [channel, isChannelEnabled(channel)]),
+    );
+
     setSavingKey(key);
     setPreferences((current) =>
-      current.map((candidate) =>
-        preferenceKey(candidate) === key ? { ...candidate, enabled } : candidate,
-      ),
+      current.map((candidate) => {
+        if (candidate.channel === "notification_trigger" && candidate.event_type === eventType) {
+          return { ...candidate, enabled };
+        }
+        if (
+          candidate.channel !== "notification_trigger" &&
+          candidate.event_type !== "channel_enabled" &&
+          candidate.event_type === eventType
+        ) {
+          const channel = candidate.channel as Exclude<NotificationChannel, "notification_trigger">;
+          return {
+            ...candidate,
+            enabled: enabled && isChannelEnabled(channel) && !channelNeedsSetup(channel),
+          };
+        }
+        return candidate;
+      }),
     );
 
     try {
-      const updated = await api.updateNotificationPreference({
-        channel: pref.channel,
-        event_type: pref.event_type,
-        enabled,
-      });
-      setPreferences((current) =>
-        current.map((candidate) =>
-          preferenceKey(candidate) === key ? updated : candidate,
-        ),
-      );
+      const updated = await syncNotificationPreferenceMatrix(triggerState, channelState);
+      updatePreferencesByKey(updated);
     } catch (err) {
       setPreferences(previous);
-      toast.error(err instanceof Error ? err.message : "Failed to update notification preference");
+      toast.error(err instanceof Error ? err.message : "Failed to update notification triggers");
     } finally {
       setSavingKey(null);
     }
   };
 
-  const handleToggleCustomWebhook = async (enabled: boolean) => {
-    const key = "custom_webhook";
+  const handleChannelToggle = async (
+    channel: Exclude<NotificationChannel, "notification_trigger">,
+    enabled: boolean,
+  ) => {
+    const key = `${channel}:channel_enabled`;
     const previous = preferences;
-    const targets = customWebhookEvents.map((eventType) => {
-      const existing = preferences.find(
-        (pref) => pref.channel === "custom_webhook" && pref.event_type === eventType,
-      );
-      return (
-        existing ?? {
-          channel: "custom_webhook" as const,
-          event_type: eventType,
-          enabled: false,
-          binding_id: null,
-          requires_binding: false,
-        }
-      );
-    });
+    const triggerState = new Map(
+      triggerEvents.map((eventType) => [eventType, isTriggerEnabled(eventType)]),
+    );
+    const channelState = new Map(
+      deliveryChannels.map((candidate) => [
+        candidate,
+        candidate === channel ? enabled : isChannelEnabled(candidate),
+      ]),
+    );
 
     setSavingKey(key);
     setPreferences((current) =>
-      current.map((candidate) =>
-        candidate.channel === "custom_webhook" ? { ...candidate, enabled } : candidate,
-      ),
+      current.map((candidate) => {
+        if (candidate.channel !== channel) return candidate;
+        if (candidate.event_type === "channel_enabled") return { ...candidate, enabled };
+        if (!channelEvents[channel].includes(candidate.event_type)) {
+          return candidate;
+        }
+        return {
+          ...candidate,
+          enabled: enabled && !channelNeedsSetup(channel) && isTriggerEnabled(candidate.event_type),
+        };
+      }),
     );
 
     try {
-      const updated = await Promise.all(
-        targets.map((pref) =>
-          api.updateNotificationPreference({
-            channel: pref.channel,
-            event_type: pref.event_type,
-            enabled,
-          }),
-        ),
-      );
-      const updatedByKey = new Map(updated.map((pref) => [preferenceKey(pref), pref]));
-      setPreferences((current) =>
-        current.map((candidate) => updatedByKey.get(preferenceKey(candidate)) ?? candidate),
-      );
+      const updated = await syncNotificationPreferenceMatrix(triggerState, channelState);
+      updatePreferencesByKey(updated);
     } catch (err) {
       setPreferences(previous);
-      toast.error(err instanceof Error ? err.message : "Failed to update notification preference");
+      toast.error(err instanceof Error ? err.message : "Failed to update notification channel");
     } finally {
       setSavingKey(null);
     }
@@ -284,33 +470,58 @@ export function NotificationsTab() {
     }
   };
 
-  const handleToggleOpenclawWeixin = async (eventType: NotificationEventType, enabled: boolean) => {
-    const key = `openclaw_weixin:${eventType}`;
+  const handleCopyWeixinBindPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(openclawWeixinBindPrompt);
+      toast.success("已复制");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "复制失败");
+    }
+  };
+
+  const handleRenderModeChange = async (channel: NotificationChannel, mode: NotificationRenderMode) => {
+    // Update render_mode for all event types under this channel
+    const channelPrefs = preferences.filter((p) => p.channel === channel);
+    if (channelPrefs.length === 0) return;
+
+    const saveKey = `${channel}:render_mode`;
     const previous = preferences;
-    setSavingKey(key);
+    setSavingKey(saveKey);
+
+    // Optimistic update
     setPreferences((current) =>
-      current.map((candidate) =>
-        preferenceKey(candidate) === key ? { ...candidate, enabled } : candidate,
+      current.map((p) =>
+        p.channel === channel ? { ...p, render_mode: mode } : p,
       ),
     );
 
     try {
-      const updated = await api.updateNotificationPreference({
-        channel: "openclaw_weixin",
-        event_type: eventType,
-        enabled,
-      });
-      setPreferences((current) =>
-        current.map((candidate) =>
-          preferenceKey(candidate) === key ? updated : candidate,
+      // Update each event type's render_mode for this channel
+      const updates = await Promise.all(
+        channelPrefs.map((pref) =>
+          api.updateNotificationPreference({
+            channel: pref.channel,
+            event_type: pref.event_type,
+            render_mode: mode,
+          }),
         ),
+      );
+      const updatedByKey = new Map(updates.map((p) => [preferenceKey(p), p]));
+      setPreferences((current) =>
+        current.map((p) => updatedByKey.get(preferenceKey(p)) ?? p),
       );
     } catch (err) {
       setPreferences(previous);
-      toast.error(err instanceof Error ? err.message : "Failed to update preference");
+      toast.error(err instanceof Error ? err.message : "Failed to update render mode");
     } finally {
       setSavingKey(null);
     }
+  };
+
+  // Get current render_mode for a channel (uses first preference's value since they're synchronized)
+  const getChannelRenderMode = (channel: NotificationChannel): NotificationRenderMode => {
+    const pref = preferences.find((p) => p.channel === channel);
+    return pref?.render_mode ?? "auto";
   };
 
   if (loading) {
@@ -459,195 +670,202 @@ export function NotificationsTab() {
       </section>
 
       <section className="space-y-4">
-        <h3 className="text-sm font-semibold">Channels</h3>
+        <h3 className="text-sm font-semibold">触发场景</h3>
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Delivery channels</CardTitle>
+            <CardTitle className="text-base">何时通知我</CardTitle>
             <CardDescription>
-              Enable notification delivery targets.
+              这些场景独立于具体通知渠道；开启或关闭渠道不会改变这里的勾选。
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {preferences
-              .filter((pref) => pref.channel !== "custom_webhook")
-              .map((pref) => {
-                const binding = bindingByProvider.get(pref.channel);
-                const needsBinding = pref.requires_binding && !binding;
-                const key = preferenceKey(pref);
-
-                return (
-                  <div key={key} className="flex items-start justify-between gap-4 rounded-lg border p-4">
-                    <div className="space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium">{channelLabels[pref.channel]}</span>
-                        {binding ? (
-                          <Badge variant="secondary">{binding.status}</Badge>
-                        ) : pref.requires_binding ? (
-                          <Badge variant="outline">not connected</Badge>
-                        ) : null}
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        {channelDescriptions[pref.channel]}
-                      </p>
-                      {needsBinding ? (
-                        <p className="text-xs text-muted-foreground">
-                          Link your account from Profile → Linked Accounts before enabling this channel.
-                        </p>
-                      ) : null}
-                    </div>
-                    <div className="flex items-center gap-3 pt-1">
-                      {savingKey === key ? (
-                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                      ) : null}
-                      <Switch
-                        checked={pref.enabled}
-                        disabled={savingKey !== null || needsBinding}
-                        onCheckedChange={(checked) => {
-                          void handleToggle(pref, checked);
-                        }}
-                        aria-label={`Toggle ${channelLabels[pref.channel]}`}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            {(() => {
-              const customWebhookPrefs = preferences.filter(
-                (pref) => pref.channel === "custom_webhook",
-              );
-              const needsWebhook = webhooks.length === 0;
-              const enabled =
-                customWebhookPrefs.length > 0 && customWebhookPrefs.every((pref) => pref.enabled);
+          <CardContent className="space-y-3">
+            {triggerEvents.map((eventType) => {
+              const key = `notification_trigger:${eventType}`;
+              const enabled = isTriggerEnabled(eventType);
+              const targets = supportedActiveTargets(eventType);
 
               return (
-                <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
-                  <div className="space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{channelLabels.custom_webhook}</span>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      {channelDescriptions.custom_webhook}
+                <div key={eventType} className="flex items-center justify-between gap-4 rounded-lg border p-4">
+                  <div className="min-w-0 space-y-1">
+                    <span className="text-sm font-medium">
+                      {triggerEventLabels[eventType]}
+                    </span>
+                    <p className="text-xs text-muted-foreground">
+                      {targets.length > 0
+                        ? `当前会发送到：${targets.map((channel) => channelLabels[channel]).join("、")}`
+                        : "可先保留勾选，待任意渠道开启并配置后自动生效。"}
                     </p>
-                    {needsWebhook ? (
-                      <p className="text-xs text-muted-foreground">
-                        Add a webhook endpoint before enabling this channel.
-                      </p>
-                    ) : null}
                   </div>
-                  <div className="flex items-center gap-3 pt-1">
-                    {savingKey === "custom_webhook" ? (
+                  <div className="flex items-center gap-2">
+                    {savingKey === key ? (
                       <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                     ) : null}
                     <Switch
                       checked={enabled}
-                      disabled={savingKey !== null || needsWebhook}
+                      disabled={savingKey !== null}
                       onCheckedChange={(checked) => {
-                        void handleToggleCustomWebhook(checked);
+                        void handleTriggerToggle(eventType, checked);
                       }}
-                      aria-label="Toggle Custom Webhook"
+                      aria-label={`Toggle trigger ${triggerEventLabels[eventType]}`}
                     />
                   </div>
                 </div>
               );
-            })()}
+            })}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="space-y-4">
+        <h3 className="text-sm font-semibold">通知渠道</h3>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">发送到哪里</CardTitle>
+            <CardDescription>
+              渠道开关只决定投递目标；它不会反向修改触发场景。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {deliveryChannels
+              .filter((channel) => channel !== "openclaw_weixin" || hasOpenclawRuntime)
+              .map((channel) => {
+                const key = `${channel}:channel_enabled`;
+                const needsSetup = channelNeedsSetup(channel);
+                const enabled = isChannelEnabled(channel);
+                const badge = channelBadgeText(channel);
+
+                return (
+                  <div key={channel} className="rounded-lg border p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{channelLabels[channel]}</span>
+                          {badge ? (
+                            <Badge variant={needsSetup ? "outline" : "secondary"}>{badge}</Badge>
+                          ) : null}
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          {channelDescriptions[channel]}
+                        </p>
+                        {channel === "dingtalk" && needsSetup ? (
+                          <p className="text-xs text-muted-foreground">
+                            Link your account from Profile → Linked Accounts before enabling this channel.
+                          </p>
+                        ) : null}
+                        {channel === "email" && needsSetup ? (
+                          <p className="text-xs text-muted-foreground">
+                            Link your email from Profile → Linked Accounts before enabling this channel.
+                          </p>
+                        ) : null}
+                        {channel === "custom_webhook" && needsSetup ? (
+                          <p className="text-xs text-muted-foreground">
+                            Add a webhook endpoint before enabling this channel.
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="flex items-center gap-3 pt-1">
+                        {savingKey === key ? (
+                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        ) : null}
+                        <Switch
+                          checked={enabled}
+                          disabled={savingKey !== null || needsSetup}
+                          onCheckedChange={(checked) => {
+                            void handleChannelToggle(channel, checked);
+                          }}
+                          aria-label={`Toggle channel ${channelLabels[channel]}`}
+                        />
+                      </div>
+                    </div>
+
+                    {channel === "openclaw_weixin" && !weixinBinding ? (
+                      <div className="mt-4 space-y-4 border-t pt-4">
+                        <Alert>
+                          <MessageCircle className="h-4 w-4" />
+                          <AlertTitle>推荐</AlertTitle>
+                          <AlertDescription className="space-y-3">
+                            <p className="text-sm">发送下面这句话给你的 OpenClaw 助手</p>
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 rounded-md border bg-background px-3 py-2 text-sm">
+                                {openclawWeixinBindPrompt}
+                              </div>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                onClick={() => void handleCopyWeixinBindPrompt()}
+                                aria-label="复制微信绑定指令"
+                                title="复制微信绑定指令"
+                              >
+                                <Copy className="h-4 w-4" />
+                              </Button>
+                            </div>
+                            <p className="text-sm text-muted-foreground">发送后刷新此页面即可看到绑定结果</p>
+                            <p className="text-sm">方式二：手动获取微信 ID 后填写：</p>
+                            <code className="block rounded bg-muted p-2 text-xs">
+                              openclaw whoami --channel weixin
+                            </code>
+                          </AlertDescription>
+                        </Alert>
+                        <div className="flex items-end gap-3">
+                          <div className="flex-1 space-y-2">
+                            <Label htmlFor="weixin-id">微信 ID</Label>
+                            <Input
+                              id="weixin-id"
+                              value={weixinId}
+                              onChange={(e) => setWeixinId(e.target.value)}
+                              placeholder="o9cq809u...@im.wechat"
+                            />
+                          </div>
+                          <Button
+                            disabled={!weixinId.trim() || bindingWeixin}
+                            onClick={() => void handleBindWeixin()}
+                          >
+                            {bindingWeixin ? <Loader2 className="h-4 w-4 animate-spin" /> : "绑定"}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {(channel === "dingtalk" || channel === "openclaw_weixin") && !needsSetup ? (
+                      <div className="mt-4 flex items-center justify-between gap-4 border-t pt-4">
+                        <div className="space-y-1">
+                          <span className="text-sm font-medium">通知样式</span>
+                          <p className="text-xs text-muted-foreground">
+                            {renderModeDescriptions[getChannelRenderMode(channel)]}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {savingKey === `${channel}:render_mode` ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          ) : null}
+                          <Select
+                            value={getChannelRenderMode(channel)}
+                            onValueChange={(value) => {
+                              void handleRenderModeChange(channel, value as NotificationRenderMode);
+                            }}
+                          >
+                            <SelectTrigger size="sm">
+                              <SelectValue>{() => renderModeLabels[getChannelRenderMode(channel)]}</SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="auto">{renderModeLabels.auto}</SelectItem>
+                              <SelectItem value="compact">{renderModeLabels.compact}</SelectItem>
+                              <SelectItem value="detail">{renderModeLabels.detail}</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
           </CardContent>
         </Card>
         <p className="text-sm text-muted-foreground">
           Manage DingTalk and email account linking from <span className="font-medium">Profile → Linked Accounts</span>.
         </p>
       </section>
-
-      {hasOpenclawRuntime && (
-        <section className="space-y-4">
-          <h3 className="text-sm font-semibold">微信通知（OpenClaw）</h3>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <MessageCircle className="h-4 w-4" />
-                微信通知
-              </CardTitle>
-              <CardDescription>
-                通过 OpenClaw 本地助手将通知发送到你的微信。
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {!weixinBinding ? (
-                <div className="space-y-4">
-                  <Alert>
-                    <AlertTitle>绑定微信通知</AlertTitle>
-                    <AlertDescription className="space-y-3">
-                      <p className="text-sm">方式一：复制以下内容发送给你的 OpenClaw 助手自动绑定：</p>
-                      <code className="block rounded bg-muted p-2 text-xs">
-                        帮我配置 Multica 微信通知：通过 Multica API 将我的微信 ID 绑定到通知系统。
-                      </code>
-                      <p className="text-sm">方式二：手动获取微信 ID 后填写：</p>
-                      <code className="block rounded bg-muted p-2 text-xs">
-                        openclaw whoami --channel weixin
-                      </code>
-                    </AlertDescription>
-                  </Alert>
-                  <div className="flex items-end gap-3">
-                    <div className="flex-1 space-y-2">
-                      <Label htmlFor="weixin-id">微信 ID</Label>
-                      <Input
-                        id="weixin-id"
-                        value={weixinId}
-                        onChange={(e) => setWeixinId(e.target.value)}
-                        placeholder="o9cq809u...@im.wechat"
-                      />
-                    </div>
-                    <Button
-                      disabled={!weixinId.trim() || bindingWeixin}
-                      onClick={() => void handleBindWeixin()}
-                    >
-                      {bindingWeixin ? <Loader2 className="h-4 w-4 animate-spin" /> : "绑定"}
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary">已绑定</Badge>
-                    <span className="text-sm text-muted-foreground">
-                      {weixinBinding.external_user_id}
-                    </span>
-                  </div>
-                  <div className="space-y-3">
-                    {openclawWeixinEvents.map((eventType) => {
-                      const pref = preferences.find(
-                        (p) => p.channel === "openclaw_weixin" && p.event_type === eventType,
-                      );
-                      const key = `openclaw_weixin:${eventType}`;
-                      const enabled = pref?.enabled ?? false;
-
-                      return (
-                        <div key={key} className="flex items-center justify-between gap-4 rounded-lg border p-3">
-                          <span className="text-sm font-medium">
-                            {openclawWeixinEventLabels[eventType] ?? eventType}
-                          </span>
-                          <div className="flex items-center gap-2">
-                            {savingKey === key ? (
-                              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                            ) : null}
-                            <Switch
-                              checked={enabled}
-                              disabled={savingKey !== null}
-                              onCheckedChange={(checked) => {
-                                void handleToggleOpenclawWeixin(eventType, checked);
-                              }}
-                              aria-label={`Toggle ${openclawWeixinEventLabels[eventType]}`}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </section>
-      )}
     </div>
   );
 }

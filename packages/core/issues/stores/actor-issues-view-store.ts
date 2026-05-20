@@ -23,6 +23,8 @@ const _actorIssuesViewStore = createStore<ActorIssuesViewState>()(
   persist(
     (set) => ({
       ...viewStoreSlice(set as unknown as StoreApi<IssueViewState>["setState"]),
+      // Actor tasks panel is list-only; override the slice's "board" default.
+      viewMode: "list",
       scope: "assigned" as ActorIssuesScope,
       setScope: (scope: ActorIssuesScope) => set({ scope }),
     }),

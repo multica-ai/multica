@@ -52,9 +52,13 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 	}
 	targetVersion := latest.Version
 	fmt.Fprintf(os.Stderr, "Downloading %s from configured update manifest...\n", targetVersion)
-	output, err := cli.UpdateViaDownload(targetVersion)
+	output, err := cli.UpdateViaManifestDownload(targetVersion)
 	if err != nil {
-		return fmt.Errorf("update failed: %w", err)
+		fmt.Fprintf(os.Stderr, "Manifest download failed (%v), falling back to GitHub Release...\n", err)
+		output, err = cli.UpdateViaDownload(targetVersion)
+		if err != nil {
+			return fmt.Errorf("update failed: %w", err)
+		}
 	}
 	fmt.Fprintf(os.Stderr, "%s\nUpdate complete.\n", output)
 	return nil

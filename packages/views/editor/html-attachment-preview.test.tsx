@@ -22,10 +22,44 @@ vi.mock("../i18n", () => ({
           preview: "Preview",
           preview_loading: "Loading preview…",
           preview_failed: "Couldn't load preview",
+          open_in_new_tab: "Open in new tab",
         },
       }),
   }),
 }));
+
+// Module-level flag toggled per-test to simulate desktop (openInNewTab
+// present) vs web (omitted) adapters. vi.hoisted so the mock factory can
+// close over it.
+const { openInNewTabMock, getShareableUrlMock, navState } = vi.hoisted(() => ({
+  openInNewTabMock: vi.fn(),
+  getShareableUrlMock: vi.fn((p: string) => `https://app.example${p}`),
+  navState: { hasOpenInNewTab: true },
+}));
+
+vi.mock("../navigation", () => ({
+  useNavigation: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    pathname: "/acme/issues",
+    searchParams: new URLSearchParams(),
+    ...(navState.hasOpenInNewTab ? { openInNewTab: openInNewTabMock } : {}),
+    getShareableUrl: getShareableUrlMock,
+  }),
+}));
+
+// Slug is required for the new-tab path to be built. The component reads
+// it from useWorkspaceSlug() on @multica/core/paths — stub to return a
+// fixed slug so the tests do not need a WorkspaceSlugProvider tree.
+vi.mock("@multica/core/paths", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/paths")>();
+  return {
+    ...actual,
+    useWorkspaceSlug: () => "acme",
+    useWorkspacePaths: () => actual.paths.workspace("acme"),
+  };
+});
 
 import { HtmlAttachmentPreview } from "./html-attachment-preview";
 
@@ -36,7 +70,10 @@ function renderWithQuery(ui: ReactElement) {
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  navState.hasOpenInNewTab = true;
+});
 afterEach(() => vi.restoreAllMocks());
 
 describe("HtmlAttachmentPreview — visual shell (does not use file-card chrome)", () => {
@@ -80,7 +117,11 @@ describe("HtmlAttachmentPreview — visual shell (does not use file-card chrome)
       // Critical: sandbox must not include allow-same-origin, otherwise the
       // sandbox is defeated per the HTML spec.
       expect(frame?.getAttribute("sandbox")).toBe("allow-scripts");
-      expect(frame?.getAttribute("srcdoc")).toBe("<p>chart goes here</p>");
+      // srcdoc carries the original HTML plus the fragment-nav shim
+      // appended at the end (see utils/iframe-fragment-nav.ts).
+      const srcdoc = frame?.getAttribute("srcdoc") ?? "";
+      expect(srcdoc.startsWith("<p>chart goes here</p>")).toBe(true);
+      expect(srcdoc).toContain("scrollIntoView");
     });
   });
 });
@@ -140,6 +181,59 @@ describe("HtmlAttachmentPreview — toolbar actions", () => {
     await waitFor(() => expect(document.querySelector("iframe")).toBeTruthy());
     expect(screen.queryByTitle("Copy code")).toBeNull();
   });
+
+  it("invokes navigation.openInNewTab with the preview path when available (desktop)", async () => {
+    getAttachmentTextContentMock.mockResolvedValueOnce({
+      text: "<p>ok</p>",
+      originalContentType: "text/html",
+    });
+    renderWithQuery(
+      <HtmlAttachmentPreview
+        attachmentId="att-1"
+        filename="report.html"
+        onPreview={() => {}}
+        onDownload={() => {}}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTitle("Open in new tab")).toBeTruthy(),
+    );
+    fireEvent.mouseDown(screen.getByTitle("Open in new tab"));
+    expect(openInNewTabMock).toHaveBeenCalledWith(
+      "/acme/attachments/att-1/preview?name=report.html",
+      "report.html",
+      { activate: true },
+    );
+  });
+
+  it("falls back to window.open against the shareable URL when openInNewTab is absent (web)", async () => {
+    navState.hasOpenInNewTab = false;
+    getAttachmentTextContentMock.mockResolvedValueOnce({
+      text: "<p>ok</p>",
+      originalContentType: "text/html",
+    });
+    const windowOpenSpy = vi
+      .spyOn(window, "open")
+      .mockImplementation(() => null);
+    renderWithQuery(
+      <HtmlAttachmentPreview
+        attachmentId="att-1"
+        filename="report.html"
+        onPreview={() => {}}
+        onDownload={() => {}}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTitle("Open in new tab")).toBeTruthy(),
+    );
+    fireEvent.mouseDown(screen.getByTitle("Open in new tab"));
+    expect(openInNewTabMock).not.toHaveBeenCalled();
+    expect(windowOpenSpy).toHaveBeenCalledWith(
+      "https://app.example/acme/attachments/att-1/preview?name=report.html",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  });
 });
 
 describe("HtmlAttachmentPreview — failure mode does not unmount the toolbar", () => {
@@ -168,8 +262,12 @@ describe("HtmlAttachmentPreview — failure mode does not unmount the toolbar", 
 
     const previewBtn = screen.getByTitle("Preview") as HTMLButtonElement;
     const downloadBtn = screen.getByTitle("Download") as HTMLButtonElement;
+    const openInNewTabBtn = screen.getByTitle(
+      "Open in new tab",
+    ) as HTMLButtonElement;
     expect(previewBtn.disabled).toBe(false);
     expect(downloadBtn.disabled).toBe(false);
+    expect(openInNewTabBtn.disabled).toBe(false);
 
     fireEvent.mouseDown(previewBtn);
     expect(onPreview).toHaveBeenCalled();

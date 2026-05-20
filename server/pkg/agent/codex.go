@@ -1213,12 +1213,6 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 		if text != "" {
 			emitDisplayEvent(c.traceCallback, "assistant_text", "Codex", text, nil)
 		}
-		phase, _ := item["phase"].(string)
-		if phase == "final_answer" && c.turnStarted {
-			if c.onTurnDone != nil {
-				c.onTurnDone(false)
-			}
-		}
 	}
 }
 
