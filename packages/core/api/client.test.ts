@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiClient, ApiError } from "./client";
+import { ApiClient, ApiError, isTransientAuthProbeError, isUnauthorizedError } from "./client";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -723,4 +723,60 @@ describe("ApiClient", () => {
       expect(JSON.parse(fetchMock.mock.calls[1]![1]?.body as string)).toEqual({ content: "again" });
     });
   });
+
+describe("isTransientAuthProbeError", () => {
+  it("returns false for 401 Unauthorized (genuine auth failure)", () => {
+    const err = new ApiError(401, "Unauthorized");
+    expect(isTransientAuthProbeError(err)).toBe(false);
+  });
+
+  it("returns false for 403 Forbidden", () => {
+    const err = new ApiError(403, "Forbidden");
+    expect(isTransientAuthProbeError(err)).toBe(false);
+  });
+
+  it("returns true for 500 Internal Server Error (transient)", () => {
+    const err = new ApiError(500, "Internal Server Error");
+    expect(isTransientAuthProbeError(err)).toBe(true);
+  });
+
+  it("returns true for 503 Service Unavailable (transient)", () => {
+    const err = new ApiError(503, "Service Unavailable");
+    expect(isTransientAuthProbeError(err)).toBe(true);
+  });
+
+  it("returns true for 408 Request Timeout (transient)", () => {
+    const err = new ApiError(408, "Request Timeout");
+    expect(isTransientAuthProbeError(err)).toBe(true);
+  });
+
+  it("returns true for non-ApiError (network error, DNS failure)", () => {
+    const err = new TypeError("Failed to fetch");
+    expect(isTransientAuthProbeError(err)).toBe(true);
+  });
+
+  it("returns true for generic Error (unknown error treated as transient)", () => {
+    const err = new Error("unknown");
+    expect(isTransientAuthProbeError(err)).toBe(true);
+  });
+});
+
+describe("isUnauthorizedError", () => {
+  it("returns true for ApiError with status 401", () => {
+    const err = new ApiError(401, "Unauthorized");
+    expect(isUnauthorizedError(err)).toBe(true);
+  });
+
+  it("returns false for ApiError with status 403", () => {
+    const err = new ApiError(403, "Forbidden");
+    expect(isUnauthorizedError(err)).toBe(false);
+  });
+
+  it("returns false for non-ApiError", () => {
+    expect(isUnauthorizedError(new Error("network error"))).toBe(false);
+    expect(isUnauthorizedError(null)).toBe(false);
+    expect(isUnauthorizedError(undefined)).toBe(false);
+  });
+});
+
 });
