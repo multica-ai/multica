@@ -14,8 +14,6 @@
       "agents_label": "我的智能体和小队",
       "agents_description": "分配给我的智能体的 issue"
     },
-    "working_label": "处理中",
-    "working_description": "只看有智能体正在处理的 issue",
     "filter_button": "筛选",
     "filter_status": "状态",
     "filter_priority": "优先级",

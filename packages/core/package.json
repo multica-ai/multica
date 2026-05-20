@@ -26,7 +26,6 @@
     "./issues": "./issues/index.ts",
     "./issues/queries": "./issues/queries.ts",
     "./issues/mutations": "./issues/mutations.ts",
-    "./issues/active-tasks-by-issue": "./issues/active-tasks-by-issue.ts",
     "./issues/ws-updaters": "./issues/ws-updaters.ts",
     "./issues/config": "./issues/config/index.ts",
     "./issues/config/status": "./issues/config/status.ts",

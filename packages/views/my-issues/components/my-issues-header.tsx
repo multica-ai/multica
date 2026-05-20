@@ -48,10 +48,6 @@ import {
 } from "@multica/core/issues/stores/view-store";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import type { Issue } from "@multica/core/types";
-import type { AgentTask } from "@multica/core/types/agent";
-import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
-import { useActorName } from "@multica/core/workspace/hooks";
-import { cn } from "@multica/ui/lib/utils";
 import { myIssuesViewStore, type MyIssuesScope } from "@multica/core/issues/stores/my-issues-view-store";
 import { useT } from "../../i18n";
 
@@ -109,16 +105,7 @@ function useIssueCounts(allIssues: Issue[]) {
 // MyIssuesHeader
 // ---------------------------------------------------------------------------
 
-export function MyIssuesHeader({
-  allIssues,
-  activeTasksMap,
-}: {
-  allIssues: Issue[];
-  /** Map of issue id → active agent tasks, used to derive the agent avatar
-   *  stack shown next to the Working label. Optional; missing data renders
-   *  the toggle without a stack. */
-  activeTasksMap?: Map<string, AgentTask[]>;
-}) {
+export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
   const { t } = useT("my-issues");
   const SCOPES: { value: MyIssuesScope; label: string; description: string }[] = [
     { value: "assigned", label: t(($) => $.header.scope.assigned_label), description: t(($) => $.header.scope.assigned_description) },
@@ -150,7 +137,7 @@ export function MyIssuesHeader({
 
   return (
     <div className="flex h-12 shrink-0 items-center justify-between px-4">
-      {/* Left: scope buttons + Working toggle */}
+      {/* Left: scope buttons */}
       <div className="flex items-center gap-1">
         {SCOPES.map((s) => (
           <Tooltip key={s.value}>
@@ -173,8 +160,6 @@ export function MyIssuesHeader({
             <TooltipContent side="bottom">{s.description}</TooltipContent>
           </Tooltip>
         ))}
-        <span aria-hidden className="mx-1.5 h-4 w-px bg-border" />
-        <WorkingToggleButton allIssues={allIssues} activeTasksMap={activeTasksMap} />
       </div>
 
       {/* Right: filter + display + view toggle */}
@@ -443,122 +428,5 @@ export function MyIssuesHeader({
         </DropdownMenu>
       </div>
     </div>
-  );
-}
-
-const MAX_VISIBLE_AGENTS = 3;
-const WORKING_AVATAR_SIZE = 18;
-
-function WorkingToggleButton({
-  allIssues,
-  activeTasksMap,
-}: {
-  allIssues: Issue[];
-  activeTasksMap?: Map<string, AgentTask[]>;
-}) {
-  const { t } = useT("my-issues");
-  const workingOnly = useStore(myIssuesViewStore, (s) => s.workingOnly);
-  const toggleWorkingOnly = useStore(
-    myIssuesViewStore,
-    (s) => s.toggleWorkingOnly,
-  );
-  const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
-
-  const workingAgentIds = useMemo<string[]>(() => {
-    if (!activeTasksMap) return [];
-    const firstSeenAt = new Map<string, string>();
-    for (const issue of allIssues) {
-      const tasks = activeTasksMap.get(issue.id);
-      if (!tasks) continue;
-      for (const tk of tasks) {
-        if (!tk.agent_id) continue;
-        const ts = tk.started_at ?? tk.dispatched_at ?? tk.created_at;
-        const prev = firstSeenAt.get(tk.agent_id);
-        if (!prev || ts < prev) firstSeenAt.set(tk.agent_id, ts);
-      }
-    }
-    return [...firstSeenAt.entries()]
-      .sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0))
-      .map(([id]) => id);
-  }, [allIssues, activeTasksMap]);
-
-  const hasWorking = workingAgentIds.length > 0;
-  const visibleAgents = workingAgentIds.slice(0, MAX_VISIBLE_AGENTS);
-  const overflow = workingAgentIds.length - visibleAgents.length;
-  const tooltipDescription = t(($) => $.header.working_description);
-  const tooltipNames =
-    workingAgentIds.length > 0
-      ? workingAgentIds.map((id) => getActorName("agent", id)).join(", ")
-      : "";
-
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            variant="outline"
-            size="sm"
-            aria-pressed={workingOnly}
-            className={cn(
-              "gap-1.5",
-              workingOnly
-                ? "bg-accent text-accent-foreground hover:bg-accent/80"
-                : "text-muted-foreground",
-            )}
-            onClick={() => toggleWorkingOnly()}
-          >
-            <span aria-hidden className="relative inline-flex size-2">
-              {hasWorking && (
-                <span className="absolute inset-0 animate-ping rounded-full bg-brand opacity-60" />
-              )}
-              <span
-                className={cn(
-                  "relative inline-flex size-2 rounded-full",
-                  hasWorking ? "bg-brand" : "bg-muted-foreground/40",
-                )}
-              />
-            </span>
-            <span>{t(($) => $.header.working_label)}</span>
-            {hasWorking && (
-              <span className="ml-0.5 inline-flex items-center -space-x-1.5">
-                {visibleAgents.map((id) => (
-                  <span
-                    key={id}
-                    className="inline-flex rounded-full ring-2 ring-background"
-                  >
-                    <ActorAvatarBase
-                      name={getActorName("agent", id)}
-                      initials={getActorInitials("agent", id)}
-                      avatarUrl={getActorAvatarUrl("agent", id)}
-                      isAgent
-                      size={WORKING_AVATAR_SIZE}
-                    />
-                  </span>
-                ))}
-                {overflow > 0 && (
-                  <span
-                    aria-hidden
-                    className="inline-flex items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground ring-2 ring-background"
-                    style={{ width: WORKING_AVATAR_SIZE, height: WORKING_AVATAR_SIZE }}
-                  >
-                    +{overflow}
-                  </span>
-                )}
-              </span>
-            )}
-          </Button>
-        }
-      />
-      <TooltipContent side="bottom">
-        {tooltipNames ? (
-          <div className="space-y-1">
-            <div>{tooltipDescription}</div>
-            <div className="text-xs text-muted-foreground">{tooltipNames}</div>
-          </div>
-        ) : (
-          tooltipDescription
-        )}
-      </TooltipContent>
-    </Tooltip>
   );
 }

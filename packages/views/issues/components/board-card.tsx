@@ -7,11 +7,9 @@ import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
-import type { AgentTask } from "@multica/core/types/agent";
 import { CalendarClock, CalendarDays } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { WorkingBadge } from "./working-badge";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -62,12 +60,10 @@ export const BoardCardContent = memo(function BoardCardContent({
   issue,
   editable = false,
   childProgress,
-  activeTasks,
 }: {
   issue: Issue;
   editable?: boolean;
   childProgress?: ChildProgress;
-  activeTasks?: AgentTask[];
 }) {
   const { t } = useT("issues");
   const storeProperties = useViewStore((s) => s.cardProperties);
@@ -109,11 +105,8 @@ export const BoardCardContent = memo(function BoardCardContent({
 
   return (
     <div className="rounded-lg border-[0.5px] border-border bg-card py-3 px-2.5 shadow-[0_3px_6px_-2px_rgba(0,0,0,0.02),0_1px_1px_0_rgba(0,0,0,0.04)] transition-colors group-hover/card:border-accent group-hover/card:bg-accent group-data-[popup-open]/card:border-accent group-data-[popup-open]/card:bg-accent">
-      {/* Row 1: Identifier (+ working badge when an agent is active on this issue) */}
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs text-muted-foreground">{issue.identifier}</p>
-        {activeTasks && activeTasks.length > 0 && <WorkingBadge tasks={activeTasks} />}
-      </div>
+      {/* Row 1: Identifier */}
+      <p className="text-xs text-muted-foreground">{issue.identifier}</p>
 
       {/* Row 2: Title */}
       <p className="mt-1 text-sm font-medium leading-snug line-clamp-2">
@@ -271,7 +264,7 @@ const animateLayoutChanges: AnimateLayoutChanges = (args) => {
   return defaultAnimateLayoutChanges(args);
 };
 
-export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, childProgress, activeTasks }: { issue: Issue; childProgress?: ChildProgress; activeTasks?: AgentTask[] }) {
+export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, childProgress }: { issue: Issue; childProgress?: ChildProgress }) {
   const p = useWorkspacePaths();
   const {
     attributes,
@@ -304,7 +297,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, chil
           href={p.issueDetail(issue.id)}
           className={`group block transition-colors ${isDragging ? "pointer-events-none" : ""}`}
         >
-          <BoardCardContent issue={issue} editable childProgress={childProgress} activeTasks={activeTasks} />
+          <BoardCardContent issue={issue} editable childProgress={childProgress} />
         </AppLink>
       </div>
     </IssueActionsContextMenu>

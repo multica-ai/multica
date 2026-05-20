@@ -28,9 +28,7 @@
     "members_label": "Members",
     "members_description": "Issues assigned to team members",
     "agents_label": "Agents",
-    "agents_description": "Issues assigned to AI agents",
-    "working_label": "Working",
-    "working_description": "Show only issues with an active agent task"
+    "agents_description": "Issues assigned to AI agents"
   },
   "filters": {
     "tooltip": "Filter",

@@ -28,9 +28,7 @@
     "members_label": "成员",
     "members_description": "分配给成员的 issue",
     "agents_label": "智能体",
-    "agents_description": "分配给智能体的 issue",
-    "working_label": "处理中",
-    "working_description": "只看有智能体正在处理的 issue"
+    "agents_description": "分配给智能体的 issue"
   },
   "filters": {
     "tooltip": "筛选",

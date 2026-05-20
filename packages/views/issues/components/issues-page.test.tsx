@@ -113,7 +113,6 @@ const mockListSquads = vi.hoisted(() =>
     },
   ]),
 );
-const mockGetAgentTaskSnapshot = vi.hoisted(() => vi.fn().mockResolvedValue([]));
 vi.mock("@multica/core/api", () => ({
   api: {
     listIssues: (...args: any[]) => mockListIssues(...args),
@@ -122,7 +121,6 @@ vi.mock("@multica/core/api", () => ({
     listMembers: (...args: any[]) => mockListMembers(...args),
     listAgents: (...args: any[]) => mockListAgents(...args),
     listSquads: (...args: any[]) => mockListSquads(...args),
-    getAgentTaskSnapshot: (...args: any[]) => mockGetAgentTaskSnapshot(...args),
   },
   getApi: () => ({
     listIssues: (...args: any[]) => mockListIssues(...args),
@@ -131,7 +129,6 @@ vi.mock("@multica/core/api", () => ({
     listMembers: (...args: any[]) => mockListMembers(...args),
     listAgents: (...args: any[]) => mockListAgents(...args),
     listSquads: (...args: any[]) => mockListSquads(...args),
-    getAgentTaskSnapshot: (...args: any[]) => mockGetAgentTaskSnapshot(...args),
   }),
   setApiInstance: vi.fn(),
 }));
@@ -172,7 +169,6 @@ const mockViewState = {
   projectFilters: [] as string[],
   includeNoProject: false,
   labelFilters: [] as string[],
-  workingOnly: false,
   sortBy: "position" as const,
   sortDirection: "asc" as const,
   cardProperties: { priority: true, description: true, assignee: true, dueDate: true, project: true, childProgress: true, labels: true },
@@ -187,7 +183,6 @@ const mockViewState = {
   toggleProjectFilter: vi.fn(),
   toggleNoProject: vi.fn(),
   toggleLabelFilter: vi.fn(),
-  toggleWorkingOnly: vi.fn(),
   hideStatus: vi.fn(),
   showStatus: vi.fn(),
   clearFilters: vi.fn(),
@@ -485,12 +480,10 @@ describe("IssuesPage (shared)", () => {
     vi.clearAllMocks();
     mockListIssues.mockResolvedValue({ issues: [], total: 0 });
     mockListGroupedIssues.mockResolvedValue({ groups: [] });
-    mockGetAgentTaskSnapshot.mockResolvedValue([]);
     mockViewState.viewMode = "board";
     mockViewState.grouping = "status";
     mockViewState.statusFilters = [];
     mockViewState.priorityFilters = [];
-    mockViewState.workingOnly = false;
     mockScope = "all";
   });
 
@@ -624,62 +617,5 @@ describe("IssuesPage (shared)", () => {
     await screen.findByText("Implement auth");
     expect(screen.queryByText("Squad task")).not.toBeInTheDocument();
     expect(screen.queryByText("Design landing page")).not.toBeInTheDocument();
-  });
-
-  // Regression: with Working on + assignee grouping, the column header used
-  // to show the cache's unfiltered group total because
-  // `useLoadMoreByAssigneeGroup` reads from the raw cache. The displayed
-  // count must follow the visible-after-filter set.
-  it("assignee-grouped column header reflects filtered count when Working is on", async () => {
-    mockViewState.viewMode = "board";
-    mockViewState.grouping = "assignee";
-    mockViewState.workingOnly = true;
-
-    // user-1's column has three issues in the workspace cache; only
-    // issue-1 is currently being worked on.
-    const userOneIssues = mockIssues.filter(
-      (i) => i.assignee_type === "member" && i.assignee_id === "user-1",
-    );
-    const padded = [
-      ...userOneIssues,
-      { ...userOneIssues[0]!, id: "extra-1", identifier: "TES-100", title: "Extra one" },
-      { ...userOneIssues[0]!, id: "extra-2", identifier: "TES-101", title: "Extra two" },
-    ];
-    mockListGroupedIssues.mockResolvedValue({
-      groups: [
-        {
-          id: "assignee:member:user-1",
-          assignee_type: "member",
-          assignee_id: "user-1",
-          issues: padded,
-          total: padded.length,
-        },
-      ],
-    });
-    mockGetAgentTaskSnapshot.mockResolvedValue([
-      {
-        id: "task-1",
-        workspace_id: "ws-1",
-        agent_id: "agent-1",
-        issue_id: "issue-1",
-        status: "running",
-        created_at: "2026-01-01T00:00:00Z",
-        updated_at: "2026-01-01T00:00:00Z",
-        started_at: "2026-01-01T00:00:00Z",
-      },
-    ]);
-
-    const { container } = renderWithQuery(<IssuesPage />);
-
-    // Only the working issue stays visible.
-    await screen.findByText("Implement auth");
-    expect(screen.queryByText("Extra one")).not.toBeInTheDocument();
-
-    // Column header count must equal 1, not the cached 4. The badge lives in
-    // `span.tabular-nums` (see `board-column.tsx::BoardGroupHeading`).
-    const countBadges = container.querySelectorAll("span.tabular-nums");
-    const counts = [...countBadges].map((el) => el.textContent);
-    expect(counts).toContain("1");
-    expect(counts).not.toContain("4");
   });
 });

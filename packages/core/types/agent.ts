@@ -40,6 +40,7 @@ export type AgentRuntime = RuntimeDevice;
 export type TaskFailureReason =
   | "agent_error"
   | "timeout"
+  | "codex_semantic_inactivity"
   | "runtime_offline"
   | "runtime_recovery"
   | "manual";

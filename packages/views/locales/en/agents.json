@@ -167,7 +167,6 @@
     "model_managed_by_runtime": "Managed by runtime",
     "model_search_placeholder": "Search or type a model ID",
     "model_discovering": "Discovering models…",
-    "model_default_badge": "default",
     "model_empty": "No models available",
     "model_empty_with_dot": "No models available.",
     "model_custom_tooltip": "Use \"{{value}}\" as a custom model id",

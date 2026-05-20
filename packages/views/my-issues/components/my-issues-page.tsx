@@ -11,7 +11,6 @@ import { useCurrentWorkspace } from "@multica/core/paths";
 import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { useQuery } from "@tanstack/react-query";
 import { filterIssues } from "../../issues/utils/filter";
-import { applyWorkingFilterToGroups } from "../../issues/utils/grouped-issues";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -20,7 +19,6 @@ import { ListView } from "../../issues/components/list-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { activeTasksByIssueOptions, workingIssueIdsOptions } from "@multica/core/issues/active-tasks-by-issue";
 import { myIssueAssigneeGroupsOptions, myIssueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter, type MyIssuesFilter } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-store";
@@ -38,7 +36,6 @@ export function MyIssuesPage() {
   const priorityFilters = useStore(myIssuesViewStore, (s) => s.priorityFilters);
   const scope = useStore(myIssuesViewStore, (s) => s.scope);
   const grouping = useStore(myIssuesViewStore, (s) => s.grouping);
-  const workingOnly = useStore(myIssuesViewStore, (s) => s.workingOnly);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
 
   // Clear filter state when switching between workspaces (URL-driven).
@@ -99,12 +96,7 @@ export function MyIssuesPage() {
     ? assigneeGroupsQuery.isLoading
     : statusIssuesQuery.isLoading;
 
-  // Shared workspace-wide agent task snapshot derivations (one fetch backs
-  // both the per-issue badge and the Working filter membership set).
-  const { data: activeTasksMap } = useQuery(activeTasksByIssueOptions(wsId));
-  const { data: workingIssueIds } = useQuery(workingIssueIdsOptions(wsId));
-
-  // Apply status/priority + Working filters from view store
+  // Apply status/priority filters from view store
   const issues = useMemo(
     () =>
       filterIssues(myIssues, {
@@ -116,22 +108,8 @@ export function MyIssuesPage() {
         projectFilters: [],
         includeNoProject: false,
         labelFilters: [],
-        workingOnly,
-        workingIssueIds,
       }),
-    [myIssues, statusFilters, priorityFilters, workingOnly, workingIssueIds],
-  );
-
-  // Assignee-grouped board bypasses `filterIssues`. Rebuild the groups here
-  // so the Working filter shows up there too AND so the column-header total
-  // numbers stay in sync with the visible card count.
-  const filteredAssigneeGroups = useMemo(
-    () => applyWorkingFilterToGroups(assigneeGroupsQuery.data?.groups, workingOnly, workingIssueIds),
-    [assigneeGroupsQuery.data, workingOnly, workingIssueIds],
-  );
-  const filteredAssigneeIssues = useMemo(
-    () => filteredAssigneeGroups?.flatMap((g) => g.issues) ?? [],
-    [filteredAssigneeGroups],
+    [myIssues, statusFilters, priorityFilters],
   );
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
@@ -217,7 +195,7 @@ export function MyIssuesPage() {
       </PageHeader>
 
       {/* Header: scope tabs (left) + controls (right) */}
-      <MyIssuesHeader allIssues={myIssues} activeTasksMap={activeTasksMap} />
+      <MyIssuesHeader allIssues={myIssues} />
 
       {/* Content: scrollable */}
       <ViewStoreProvider store={myIssuesViewStore}>
@@ -231,15 +209,14 @@ export function MyIssuesPage() {
           <div className="flex flex-col flex-1 min-h-0">
             {viewMode === "board" ? (
               <BoardView
-                issues={usesAssigneeBoard ? filteredAssigneeIssues : issues}
-                assigneeGroups={usesAssigneeBoard ? filteredAssigneeGroups : undefined}
+                issues={usesAssigneeBoard ? myIssues : issues}
+                assigneeGroups={usesAssigneeBoard ? assigneeGroupsQuery.data?.groups : undefined}
                 assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
                 assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
                 visibleStatuses={visibleStatuses}
                 hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
-                activeTasksMap={activeTasksMap}
                 myIssuesScope={scope}
                 myIssuesFilter={filter}
               />
@@ -248,7 +225,6 @@ export function MyIssuesPage() {
                 issues={issues}
                 visibleStatuses={visibleStatuses}
                 childProgressMap={childProgressMap}
-                activeTasksMap={activeTasksMap}
                 myIssuesScope={scope}
                 myIssuesFilter={filter}
               />

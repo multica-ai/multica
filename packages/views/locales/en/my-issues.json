@@ -14,8 +14,6 @@
       "agents_label": "My Agents and Squads",
       "agents_description": "Issues assigned to my agents"
     },
-    "working_label": "Working",
-    "working_description": "Show only issues with an active agent task",
     "filter_button": "Filter",
     "filter_status": "Status",
     "filter_priority": "Priority",

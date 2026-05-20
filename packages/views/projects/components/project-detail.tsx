@@ -30,7 +30,6 @@ import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER } f
 import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { createIssueViewStore } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider, useViewStore } from "@multica/core/issues/stores/view-store-context";
-import { activeTasksByIssueOptions } from "@multica/core/issues/active-tasks-by-issue";
 import { filterIssues } from "../../issues/utils/filter";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -151,11 +150,6 @@ function ProjectIssuesContent({
   );
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
-  // Project detail intentionally does NOT offer the Working toggle (kept out
-  // by `showWorkingToggle={false}` below) and does NOT pipe `workingOnly`
-  // through `filterIssues` — but the per-card badge still renders so users
-  // see which issues have an agent running.
-  const { data: activeTasksMap } = useQuery(activeTasksByIssueOptions(wsId));
 
   const visibleStatuses = useMemo(() => {
     if (statusFilters.length > 0)
@@ -224,7 +218,6 @@ function ProjectIssuesContent({
           hiddenStatuses={hiddenStatuses}
           onMoveIssue={handleMoveIssue}
           childProgressMap={childProgressMap}
-          activeTasksMap={activeTasksMap}
           myIssuesScope={scope}
           myIssuesFilter={filter}
           projectId={projectId}
@@ -235,7 +228,6 @@ function ProjectIssuesContent({
           issues={issues}
           visibleStatuses={visibleStatuses}
           childProgressMap={childProgressMap}
-          activeTasksMap={activeTasksMap}
           myIssuesScope={scope}
           myIssuesFilter={filter}
           projectId={projectId}
@@ -316,7 +308,7 @@ function ProjectIssuesSurface({
 
   return (
     <>
-      <IssuesHeader scopedIssues={projectIssues} allowGantt showWorkingToggle={false} />
+      <IssuesHeader scopedIssues={projectIssues} allowGantt />
       <ProjectIssuesContent
         projectId={projectId}
         projectIssues={projectIssues}

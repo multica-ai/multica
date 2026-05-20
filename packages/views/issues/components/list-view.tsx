@@ -6,7 +6,6 @@ import { Accordion } from "@base-ui/react/accordion";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import type { Issue, IssueStatus } from "@multica/core/types";
-import type { AgentTask } from "@multica/core/types/agent";
 import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
 import type { MyIssuesFilter } from "@multica/core/issues/queries";
 import { useModalStore } from "@multica/core/modals";
@@ -19,13 +18,11 @@ import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 import { useT } from "../../i18n";
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
-const EMPTY_ACTIVE_TASKS_MAP = new Map<string, AgentTask[]>();
 
 export function ListView({
   issues,
   visibleStatuses,
   childProgressMap = EMPTY_PROGRESS_MAP,
-  activeTasksMap = EMPTY_ACTIVE_TASKS_MAP,
   myIssuesScope,
   myIssuesFilter,
   projectId,
@@ -33,8 +30,6 @@ export function ListView({
   issues: Issue[];
   visibleStatuses: IssueStatus[];
   childProgressMap?: Map<string, ChildProgress>;
-  /** Active agent tasks indexed by issue id; drives the "agent working" badge. */
-  activeTasksMap?: Map<string, AgentTask[]>;
   /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
@@ -93,7 +88,6 @@ export function ListView({
             status={status}
             issues={issuesByStatus.get(status) ?? []}
             childProgressMap={childProgressMap}
-            activeTasksMap={activeTasksMap}
             myIssuesOpts={myIssuesOpts}
             projectId={projectId}
           />
@@ -107,14 +101,12 @@ function StatusAccordionItem({
   status,
   issues,
   childProgressMap,
-  activeTasksMap,
   myIssuesOpts,
   projectId,
 }: {
   status: IssueStatus;
   issues: Issue[];
   childProgressMap: Map<string, ChildProgress>;
-  activeTasksMap: Map<string, AgentTask[]>;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
   projectId?: string;
 }) {
@@ -182,12 +174,7 @@ function StatusAccordionItem({
         {issues.length > 0 ? (
           <>
             {issues.map((issue) => (
-              <ListRow
-                key={issue.id}
-                issue={issue}
-                childProgress={childProgressMap.get(issue.id)}
-                activeTasks={activeTasksMap.get(issue.id)}
-              />
+              <ListRow key={issue.id} issue={issue} childProgress={childProgressMap.get(issue.id)} />
             ))}
             {hasMore && (
               <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />

@@ -18,6 +18,7 @@ import { Users, Plus, Trash2, ArrowLeft, ArrowUpRight, Crown, Camera, Loader2, P
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
   Popover,
   PopoverContent,
@@ -116,6 +117,7 @@ export function SquadDetailPage() {
 
   const [showAddMember, setShowAddMember] = useState(false);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
 
   const updateSquadMut = useMutation({
     mutationFn: (data: { name?: string; description?: string; instructions?: string; avatar_url?: string; leader_id?: string }) => api.updateSquad(squadId, data),
@@ -201,7 +203,7 @@ export function SquadDetailPage() {
   };
 
   if (!squad) {
-    return <div className="p-6 text-muted-foreground text-sm">Loading...</div>;
+    return <SquadDetailSkeleton />;
   }
 
   const availableAgents = agents.filter((a: Agent) => !a.archived_at && !members.some((m) => m.member_type === "agent" && m.member_id === a.id));
@@ -225,7 +227,7 @@ export function SquadDetailPage() {
           <SquadHeaderAvatar squad={squad} initials={initials} />
           <h1 className="text-sm font-medium">{squad.name}</h1>
         </div>
-        <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => { if (confirm("Archive this squad? Issues will be transferred to the leader.")) deleteMut.mutate(); }}>
+        <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setConfirmArchive(true)}>
           <Trash2 className="size-3.5 mr-1" />
           {t(($) => $.inspector.archive_button)}
         </Button>
@@ -288,6 +290,70 @@ export function SquadDetailPage() {
           onCreate={handleCreateAgent}
         />
       )}
+
+      {confirmArchive && (
+        <AlertDialog
+          open
+          onOpenChange={(v) => { if (!v && !deleteMut.isPending) setConfirmArchive(false); }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t(($) => $.archive_dialog.title)}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t(($) => $.archive_dialog.description, { name: squad.name })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleteMut.isPending}>
+                {t(($) => $.archive_dialog.cancel)}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => deleteMut.mutate()}
+                disabled={deleteMut.isPending}
+                className="bg-destructive text-white hover:bg-destructive/90"
+              >
+                {deleteMut.isPending
+                  ? t(($) => $.archive_dialog.archiving)
+                  : t(($) => $.archive_dialog.confirm)}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+    </div>
+  );
+}
+
+// Initial-load skeleton — mirrors the two-column layout of the loaded page
+// (left inspector + right tabs panel) so the swap to real content doesn't
+// shift layout. Column widths match the md:/lg: breakpoints used below.
+function SquadDetailSkeleton() {
+  return (
+    <div className="flex flex-1 min-h-0 flex-col">
+      <PageHeader className="px-5">
+        <Skeleton className="h-5 w-48" />
+      </PageHeader>
+      <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[280px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6 lg:grid-cols-[320px_minmax(0,1fr)]">
+        <div className="flex flex-col gap-4 rounded-lg border p-5">
+          <Skeleton className="h-16 w-16 rounded-lg" />
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-3 w-full" />
+          <div className="space-y-2">
+            <Skeleton className="h-3 w-3/4" />
+            <Skeleton className="h-3 w-2/3" />
+            <Skeleton className="h-3 w-1/2" />
+          </div>
+        </div>
+        <div className="flex flex-col gap-4 rounded-lg border p-6">
+          <div className="flex items-center gap-4">
+            <Skeleton className="h-4 w-20" />
+            <Skeleton className="h-4 w-24" />
+          </div>
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-5/6" />
+          <Skeleton className="h-4 w-4/6" />
+        </div>
+      </div>
     </div>
   );
 }

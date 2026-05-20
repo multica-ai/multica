@@ -10,12 +10,6 @@ export interface IssueFilters {
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
-  /** When true, drop issues that have no active agent task. */
-  workingOnly?: boolean;
-  /** Membership set used by the `workingOnly` filter. Undefined while the
-   *  workspace agent-task snapshot is still loading; in that case no issue
-   *  is treated as working so the list collapses rather than flickering. */
-  workingIssueIds?: Set<string>;
 }
 
 /**
@@ -28,13 +22,11 @@ export interface IssueFilters {
  * - When both → show matching assignees + unassigned
  */
 export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
-  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, workingOnly, workingIssueIds } = filters;
+  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters } = filters;
   const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
   const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
 
   return issues.filter((issue) => {
-    if (workingOnly && !workingIssueIds?.has(issue.id)) return false;
-
     if (statusFilters.length > 0 && !statusFilters.includes(issue.status))
       return false;
 

@@ -18,7 +18,6 @@ import type { QueryKey } from "@tanstack/react-query";
 import { arrayMove } from "@dnd-kit/sortable";
 import { Eye, MoreHorizontal } from "lucide-react";
 import type { Issue, IssueAssigneeGroup, IssueAssigneeType, IssueStatus, UpdateIssueRequest } from "@multica/core/types";
-import type { AgentTask } from "@multica/core/types/agent";
 import { Button } from "@multica/ui/components/ui/button";
 import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus } from "@multica/core/issues/mutations";
 import type { AssigneeGroupedIssuesFilter, MyIssuesFilter } from "@multica/core/issues/queries";
@@ -211,7 +210,6 @@ function getMoveUpdates(
 }
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
-const EMPTY_ACTIVE_TASKS_MAP = new Map<string, AgentTask[]>();
 
 export function BoardView({
   issues,
@@ -222,7 +220,6 @@ export function BoardView({
   hiddenStatuses,
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
-  activeTasksMap = EMPTY_ACTIVE_TASKS_MAP,
   myIssuesScope,
   myIssuesFilter,
   projectId,
@@ -235,8 +232,6 @@ export function BoardView({
   hiddenStatuses: IssueStatus[];
   onMoveIssue: (issueId: string, updates: BoardMoveUpdates) => void;
   childProgressMap?: Map<string, ChildProgress>;
-  /** Active agent tasks indexed by issue id; drives the "agent working" badge. */
-  activeTasksMap?: Map<string, AgentTask[]>;
   /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
@@ -247,7 +242,6 @@ export function BoardView({
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const grouping = useViewStore((s) => s.grouping);
-  const workingOnly = useViewStore((s) => s.workingOnly);
   const { getActorName } = useActorName();
   const myIssuesOpts = myIssuesScope
     ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
@@ -487,10 +481,8 @@ export function BoardView({
                 issueIds={columns[group.id] ?? []}
                 issueMap={issueMapRef.current}
                 childProgressMap={childProgressMap}
-                activeTasksMap={activeTasksMap}
                 myIssuesOpts={myIssuesOpts}
                 projectId={projectId}
-                workingOnly={workingOnly}
               />
             ) : (
               assigneeGroupQueryKey && assigneeGroupFilter ? (
@@ -500,11 +492,9 @@ export function BoardView({
                   issueIds={columns[group.id] ?? []}
                   issueMap={issueMapRef.current}
                   childProgressMap={childProgressMap}
-                  activeTasksMap={activeTasksMap}
                   queryKey={assigneeGroupQueryKey}
                   filter={assigneeGroupFilter}
                   projectId={projectId}
-                  workingOnly={workingOnly}
                 />
               ) : (
                 <BoardColumn
@@ -513,7 +503,6 @@ export function BoardView({
                   issueIds={columns[group.id] ?? []}
                   issueMap={issueMapRef.current}
                   childProgressMap={childProgressMap}
-                  activeTasksMap={activeTasksMap}
                   projectId={projectId}
                   totalCount={group.totalCount}
                 />
@@ -533,11 +522,7 @@ export function BoardView({
       <DragOverlay dropAnimation={null}>
         {activeIssue ? (
           <div className="w-[280px] rotate-2 scale-105 cursor-grabbing opacity-90 shadow-lg shadow-black/10">
-            <BoardCardContent
-              issue={activeIssue}
-              childProgress={childProgressMap.get(activeIssue.id)}
-              activeTasks={activeTasksMap.get(activeIssue.id)}
-            />
+            <BoardCardContent issue={activeIssue} childProgress={childProgressMap.get(activeIssue.id)} />
           </div>
         ) : null}
       </DragOverlay>
@@ -550,21 +535,17 @@ function PaginatedAssigneeBoardColumn({
   issueIds,
   issueMap,
   childProgressMap,
-  activeTasksMap,
   queryKey,
   filter,
   projectId,
-  workingOnly,
 }: {
   group: BoardColumnGroup;
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap?: Map<string, ChildProgress>;
-  activeTasksMap?: Map<string, AgentTask[]>;
   queryKey: QueryKey;
   filter: AssigneeGroupedIssuesFilter;
   projectId?: string;
-  workingOnly: boolean;
 }) {
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByAssigneeGroup(
     {
@@ -575,21 +556,13 @@ function PaginatedAssigneeBoardColumn({
     queryKey,
     filter,
   );
-  // The hook's `total` is read from the raw query cache so load-more knows
-  // when the server has more rows. The displayed column count must follow
-  // the visible-after-filter set instead — when the Working filter is on,
-  // `group.totalCount` (set by `applyWorkingFilterToGroups`) is the filtered
-  // count, otherwise it equals the cache total so the user sees the usual
-  // "N total" affordance during paginated loads.
-  const displayCount = workingOnly ? group.totalCount ?? issueIds.length : total;
   return (
     <BoardColumn
       group={group}
       issueIds={issueIds}
       issueMap={issueMap}
       childProgressMap={childProgressMap}
-      activeTasksMap={activeTasksMap}
-      totalCount={displayCount}
+      totalCount={total}
       projectId={projectId}
       footer={
         hasMore ? (
@@ -605,36 +578,27 @@ function PaginatedBoardColumn({
   issueIds,
   issueMap,
   childProgressMap,
-  activeTasksMap,
   myIssuesOpts,
   projectId,
-  workingOnly,
 }: {
   group: BoardColumnGroup & { status: IssueStatus };
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap?: Map<string, ChildProgress>;
-  activeTasksMap?: Map<string, AgentTask[]>;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
   projectId?: string;
-  workingOnly: boolean;
 }) {
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
     group.status,
     myIssuesOpts,
   );
-  // Same split as the assignee-grouped path: the hook keeps using the raw
-  // cache total for pagination, but the column header reflects what the
-  // user actually sees once the Working filter has trimmed the column.
-  const displayCount = workingOnly ? issueIds.length : total;
   return (
     <BoardColumn
       group={group}
       issueIds={issueIds}
       issueMap={issueMap}
       childProgressMap={childProgressMap}
-      activeTasksMap={activeTasksMap}
-      totalCount={displayCount}
+      totalCount={total}
       projectId={projectId}
       footer={
         hasMore ? (
