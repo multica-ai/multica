@@ -224,18 +224,22 @@ jobs:
         # We use `ls` (ListObjects) rather than `stat` (HeadObject)
         # because the upload-side RAM user typically has GetObject /
         # ListObjects but NOT HeadObject under principle-of-least-
-        # privilege. `ls` returns "Object Number is: 1" when the key
-        # exists, 0 when missing.
+        # privilege. `ls` does a *prefix* match, so listing
+        # `…/foo.dmg` also returns `…/foo.dmg.blockmap` — we can't rely
+        # on "Object Number is: 1" as the success signal. Instead pull
+        # out the ObjectName column ($NF) and require an exact line
+        # match against the path we asked for.
         run: |
           set -e
           for file in apps/desktop/dist/multica-desktop-*; do
             [ -f "$file" ] || continue
             name=$(basename "$file")
             ossPath="oss://${{ vars.OSS_BUCKET }}/downloads/$name"
-            out=$(./ossutil --config-file ./ossutilconfig ls "$ossPath")
-            if ! echo "$out" | grep -q "Object Number is: 1"; then
+            if ! ./ossutil --config-file ./ossutilconfig ls "$ossPath" \
+                 | awk '{print $NF}' \
+                 | grep -Fxq "$ossPath"; then
               echo "::error::MISSING on OSS: $ossPath"
-              echo "$out"
+              ./ossutil --config-file ./ossutilconfig ls "$ossPath" || true
               exit 1
             fi
             echo "  ✓ $name"
