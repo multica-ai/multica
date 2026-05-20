@@ -102,6 +102,7 @@ type NotificationPreferenceResponse struct {
 	Enabled         bool    `json:"enabled"`
 	BindingID       *string `json:"binding_id"`
 	RequiresBinding bool    `json:"requires_binding"`
+	RenderMode      string  `json:"render_mode"`
 }
 
 type ListNotificationPreferencesResponse struct {
@@ -109,13 +110,24 @@ type ListNotificationPreferencesResponse struct {
 }
 
 type UpdateNotificationPreferenceRequest struct {
-	Channel   string `json:"channel"`
-	EventType string `json:"event_type"`
-	Enabled   *bool  `json:"enabled"`
+	Channel    string `json:"channel"`
+	EventType  string `json:"event_type"`
+	Enabled    *bool  `json:"enabled"`
+	RenderMode string `json:"render_mode,omitempty"`
 }
 
 func normalizeNotificationPreference(channel, eventType string) (string, string) {
 	return strings.ToLower(strings.TrimSpace(channel)), strings.ToLower(strings.TrimSpace(eventType))
+}
+
+func normalizeRenderMode(mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	switch mode {
+	case "compact", "detail":
+		return mode
+	default:
+		return "auto"
+	}
 }
 
 func findNotificationPreferenceSpec(channel, eventType string) (notificationPreferenceSpec, bool) {
@@ -149,12 +161,17 @@ func notificationBindingsToResponse(bindings []db.ExternalAccountBinding) []Noti
 }
 
 func notificationPreferenceToResponse(pref db.NotificationChannelPreference, spec notificationPreferenceSpec) NotificationPreferenceResponse {
+	renderMode := pref.RenderMode
+	if renderMode == "" {
+		renderMode = "auto"
+	}
 	return NotificationPreferenceResponse{
 		Channel:         pref.Channel,
 		EventType:       pref.EventType,
 		Enabled:         pref.Enabled,
 		BindingID:       uuidToPtr(pref.BindingID),
 		RequiresBinding: spec.RequiresBinding,
+		RenderMode:      renderMode,
 	}
 }
 
@@ -176,6 +193,7 @@ func mergeNotificationPreferences(prefs []db.NotificationChannelPreference) []No
 			Enabled:         spec.DefaultEnabled,
 			BindingID:       nil,
 			RequiresBinding: spec.RequiresBinding,
+			RenderMode:      "auto",
 		})
 	}
 
@@ -307,11 +325,12 @@ func (h *Handler) UpdateMyNotificationPreference(w http.ResponseWriter, r *http.
 	}
 
 	pref, err := h.Queries.UpsertNotificationChannelPreference(r.Context(), db.UpsertNotificationChannelPreferenceParams{
-		UserID:    parseUUID(userID),
-		Channel:   channel,
-		EventType: eventType,
-		Enabled:   *req.Enabled,
-		BindingID: bindingID,
+		UserID:     parseUUID(userID),
+		Channel:    channel,
+		EventType:  eventType,
+		Enabled:    *req.Enabled,
+		BindingID:  bindingID,
+		RenderMode: normalizeRenderMode(req.RenderMode),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update notification preference")

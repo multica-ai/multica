@@ -130,11 +130,13 @@ INSERT INTO notification_channel_preference (
     channel,
     event_type,
     enabled,
-    binding_id
-) VALUES ($1, $2, $3, $4, $5)
+    binding_id,
+    render_mode
+) VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (user_id, channel, event_type)
 DO UPDATE SET
     enabled = EXCLUDED.enabled,
     binding_id = EXCLUDED.binding_id,
+    render_mode = EXCLUDED.render_mode,
     updated_at = now()
 RETURNING *;

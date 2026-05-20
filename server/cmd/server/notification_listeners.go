@@ -212,10 +212,14 @@ func recordNotification(
 		details = emptyDetails
 	}
 
+	// Compute summary for IM compact rendering
+	summary := ExtractSummary("", body, title, defaultIMSummaryMaxChars)
+
 	payloadSnapshot, err := json.Marshal(map[string]any{
 		"type":             eventType,
 		"severity":         severity,
 		"title":            title,
+		"summary":          summary,
 		"body":             body,
 		"link":             link,
 		"issue_id":         issueID,
@@ -224,6 +228,7 @@ func recordNotification(
 		"actor_type":       e.ActorType,
 		"actor_id":         e.ActorID,
 		"actor_name":       actorName,
+		"render_mode":      "auto",
 		"details":          json.RawMessage(details),
 	})
 	if err != nil {
@@ -362,6 +367,89 @@ func recordMentionDingTalkDelivery(
 		SentAt:              pgtype.Timestamptz{},
 	}); err != nil {
 		slog.Error("failed to create dingtalk delivery record for mention notification",
+			"notification_event_id", util.UUIDToString(event.ID),
+			"recipient_id", recipientID,
+			"error", err,
+		)
+	}
+}
+
+// recordDingTalkTaskDelivery creates a pending DingTalk delivery for task events
+// (task_completed, task_failed) if the recipient has a dingtalk preference enabled
+// for agent_activity or the specific task event type.
+func recordDingTalkTaskDelivery(
+	ctx context.Context,
+	queries *db.Queries,
+	recipientID string,
+	event db.NotificationEvent,
+	payloadSnapshot []byte,
+) {
+	prefs, err := queries.ListNotificationChannelPreferencesByUser(ctx, parseUUID(recipientID))
+	if err != nil {
+		slog.Error("failed to load notification preferences for dingtalk task delivery",
+			"recipient_id", recipientID,
+			"notification_event_id", util.UUIDToString(event.ID),
+			"error", err,
+		)
+		return
+	}
+
+	// Check if user has dingtalk enabled for "mentioned" (existing behavior implies
+	// dingtalk is active). This reuses the same dingtalk binding.
+	var dingtalkPref *db.NotificationChannelPreference
+	for i := range prefs {
+		pref := &prefs[i]
+		if pref.Channel == "dingtalk" && pref.EventType == "mentioned" && pref.Enabled {
+			dingtalkPref = pref
+			break
+		}
+	}
+	if dingtalkPref == nil {
+		return
+	}
+
+	bindings, err := queries.ListExternalAccountBindingsByUser(ctx, parseUUID(recipientID))
+	if err != nil {
+		return
+	}
+
+	var binding *db.ExternalAccountBinding
+	for i := range bindings {
+		candidate := &bindings[i]
+		if candidate.Provider != "dingtalk" || candidate.Status != "active" {
+			continue
+		}
+		if dingtalkPref.BindingID.Valid && util.UUIDToString(dingtalkPref.BindingID) != util.UUIDToString(candidate.ID) {
+			continue
+		}
+		binding = candidate
+		break
+	}
+	if binding == nil {
+		return
+	}
+
+	payload := map[string]any{
+		"binding_id":         util.UUIDToString(binding.ID),
+		"provider":           binding.Provider,
+		"external_user_id":   binding.ExternalUserID,
+		"notification_event": json.RawMessage(payloadSnapshot),
+	}
+	dingtalkPayload, err := json.Marshal(payload)
+	if err != nil {
+		dingtalkPayload = payloadSnapshot
+	}
+
+	if _, err := queries.CreateNotificationDelivery(ctx, db.CreateNotificationDeliveryParams{
+		NotificationEventID: event.ID,
+		Channel:             "dingtalk",
+		Status:              "pending",
+		AttemptCount:        0,
+		LastError:           pgtype.Text{},
+		PayloadSnapshot:     dingtalkPayload,
+		SentAt:              pgtype.Timestamptz{},
+	}); err != nil {
+		slog.Error("failed to create dingtalk delivery record for task notification",
 			"notification_event_id", util.UUIDToString(event.ID),
 			"recipient_id", recipientID,
 			"error", err,
@@ -1566,6 +1654,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		}
 		agentID, _ := payload["agent_id"].(string)
 		issueID, _ := payload["issue_id"].(string)
+		taskID, _ := payload["task_id"].(string)
 		if issueID == "" {
 			return
 		}
@@ -1588,6 +1677,19 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			return
 		}
 
+		// Extract notification_summary from task result if available
+		notificationSummary := ""
+		if taskID != "" {
+			if task, err := queries.GetAgentTask(ctx, parseUUID(taskID)); err == nil && len(task.Result) > 0 {
+				var taskResult map[string]any
+				if err := json.Unmarshal(task.Result, &taskResult); err == nil {
+					if s, ok := taskResult["notification_summary"].(string); ok {
+						notificationSummary = s
+					}
+				}
+			}
+		}
+
 		// Get the last agent comment as notification body
 		nCtx := buildNotificationContext(ctx, queries, e.WorkspaceID, issueID, "", "")
 		body := ""
@@ -1605,17 +1707,24 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			}
 		}
 
+		// If no explicit summary from task payload, extract from body
+		if notificationSummary == "" && body != "" {
+			notificationSummary = ExtractSummary("", body, issue.Title, defaultIMSummaryMaxChars)
+		}
+
 		// Create a notification event for openclaw_weixin delivery
 		payloadSnapshot, _ := json.Marshal(map[string]any{
 			"type":             "task_completed",
 			"severity":         "info",
 			"title":            issue.Title,
+			"summary":          notificationSummary,
 			"body":             body,
 			"link":             nCtx.Link,
 			"issue_id":         issueID,
 			"issue_identifier": nCtx.IssueIdentifier,
 			"actor_type":       "agent",
 			"actor_id":         agentID,
+			"render_mode":      "auto",
 			"details":          json.RawMessage(emptyDetails),
 		})
 
@@ -1640,6 +1749,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		}
 
 		recordOpenclawWeixinDelivery(ctx, queries, recipientID, event, payloadSnapshot)
+		recordDingTalkTaskDelivery(ctx, queries, recipientID, event, payloadSnapshot)
 	})
 
 	// task:failed — notify all subscribers except the agent
@@ -1650,6 +1760,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		}
 		agentID, _ := payload["agent_id"].(string)
 		issueID, _ := payload["issue_id"].(string)
+		taskID, _ := payload["task_id"].(string)
 		if issueID == "" {
 			return
 		}
@@ -1658,6 +1769,24 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if err != nil {
 			slog.Error("task:failed notification: failed to get issue", "issue_id", issueID, "error", err)
 			return
+		}
+
+		// Extract failure summary from task error/result
+		failureSummary := ""
+		if taskID != "" {
+			if task, err := queries.GetAgentTask(ctx, parseUUID(taskID)); err == nil {
+				if task.Error.Valid && task.Error.String != "" {
+					failureSummary = ExtractSummary("", task.Error.String, "", defaultIMSummaryMaxChars)
+				}
+				if failureSummary == "" && len(task.Result) > 0 {
+					var taskResult map[string]any
+					if err := json.Unmarshal(task.Result, &taskResult); err == nil {
+						if s, ok := taskResult["notification_summary"].(string); ok {
+							failureSummary = s
+						}
+					}
+				}
+			}
 		}
 
 		exclude := map[string]bool{}
@@ -1673,7 +1802,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				ActorID:     agentID,
 			},
 			exclude, "task_failed", "action_required",
-			issue.Title, "",
+			issue.Title, failureSummary,
 			emptyDetails)
 	})
 }
