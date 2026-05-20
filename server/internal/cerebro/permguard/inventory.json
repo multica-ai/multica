@@ -1477,6 +1477,10 @@
       "gate": "via:PUT /api/artifacts/{id}"
     },
     {
+      "id": "notifications list",
+      "exempt": "read-only — wraps GET /api/notifications"
+    },
+    {
       "id": "issue assign",
       "gate": "via:PUT /api/issues/{id}"
     },
