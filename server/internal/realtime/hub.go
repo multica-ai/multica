@@ -677,24 +677,34 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 	if userID == "" {
 		tokenStr, errMsg := firstMessageAuth(conn)
 		if errMsg != "" {
-			conn.WriteMessage(websocket.TextMessage, []byte(errMsg))
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(errMsg)); err != nil {
+				slog.Warn("ws auth: failed to send firstMessageAuth error", "error", err)
+			}
 			conn.Close()
 			return
 		}
 		uid, errMsg := authenticateToken(tokenStr, pr, r.Context())
 		if errMsg != "" {
-			conn.WriteMessage(websocket.TextMessage, []byte(errMsg))
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(errMsg)); err != nil {
+				slog.Warn("ws auth: failed to send authenticateToken error", "error", err)
+			}
 			conn.Close()
 			return
 		}
 		if !mc.IsMember(r.Context(), uid, workspaceID) {
-			conn.WriteMessage(websocket.TextMessage, []byte(`{"error":"not a member of this workspace"}`))
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"error":"not a member of this workspace"}`)); err != nil {
+				slog.Warn("ws auth: failed to send membership error", "error", err)
+			}
 			conn.Close()
 			return
 		}
 		userID = uid
 
-		conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"auth_ack"}`))
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"auth_ack"}`)); err != nil {
+			slog.Warn("ws auth: failed to send auth_ack", "error", err)
+			conn.Close()
+			return
+		}
 	}
 
 	// Capture client metadata from query params (browsers cannot set custom
