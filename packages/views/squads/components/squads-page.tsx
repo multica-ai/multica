@@ -11,6 +11,7 @@ import { PageHeader } from "../../layout/page-header";
 import { Users, Plus, Search, Bot, User } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { useModalStore } from "@multica/core/modals";
 import type { Agent, Squad } from "@multica/core/types";
@@ -83,7 +84,7 @@ export function SquadsPage() {
 
       <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
         {isLoading ? (
-          <div className="p-6 text-muted-foreground text-sm">Loading...</div>
+          <SquadsListSkeleton />
         ) : squads.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
             <Users className="size-10 text-muted-foreground/50" />
@@ -181,6 +182,30 @@ function ScopeButton({ active, label, count, onClick }: { active: boolean; label
         {count}
       </span>
     </button>
+  );
+}
+
+function SquadsListSkeleton() {
+  return (
+    <>
+      <div className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
+        <Skeleton className="h-8 w-full max-w-sm rounded-md" />
+        <Skeleton className="h-7 w-32 rounded-md" />
+      </div>
+      <div className="flex-1 overflow-y-auto p-4">
+        <div className="grid gap-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 sm:gap-4 rounded-lg border p-3 sm:p-4">
+              <Skeleton className="h-9 w-9 shrink-0 rounded-md" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-4 w-1/3 rounded" />
+                <Skeleton className="h-3 w-2/3 rounded" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
   );
 }
 

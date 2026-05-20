@@ -9,6 +9,13 @@
     "details_section": "Details",
     "archive_button": "Archive"
   },
+  "archive_dialog": {
+    "title": "Archive this squad?",
+    "description": "\"{{name}}\" will be archived. Issues currently assigned to this squad will be transferred to its leader. The squad can be restored later.",
+    "cancel": "Cancel",
+    "confirm": "Archive",
+    "archiving": "Archiving…"
+  },
   "name_editor": {
     "cancel": "Cancel"
   },

@@ -116,6 +116,7 @@ export function SquadDetailPage() {
 
   const [showAddMember, setShowAddMember] = useState(false);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
 
   const updateSquadMut = useMutation({
     mutationFn: (data: { name?: string; description?: string; instructions?: string; avatar_url?: string; leader_id?: string }) => api.updateSquad(squadId, data),
@@ -225,7 +226,7 @@ export function SquadDetailPage() {
           <SquadHeaderAvatar squad={squad} initials={initials} />
           <h1 className="text-sm font-medium">{squad.name}</h1>
         </div>
-        <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => { if (confirm("Archive this squad? Issues will be transferred to the leader.")) deleteMut.mutate(); }}>
+        <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setConfirmArchive(true)}>
           <Trash2 className="size-3.5 mr-1" />
           {t(($) => $.inspector.archive_button)}
         </Button>
@@ -287,6 +288,36 @@ export function SquadDetailPage() {
           onClose={() => setShowCreateAgent(false)}
           onCreate={handleCreateAgent}
         />
+      )}
+
+      {confirmArchive && (
+        <AlertDialog
+          open
+          onOpenChange={(v) => { if (!v && !deleteMut.isPending) setConfirmArchive(false); }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t(($) => $.archive_dialog.title)}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t(($) => $.archive_dialog.description, { name: squad.name })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleteMut.isPending}>
+                {t(($) => $.archive_dialog.cancel)}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => deleteMut.mutate()}
+                disabled={deleteMut.isPending}
+                className="bg-destructive text-white hover:bg-destructive/90"
+              >
+                {deleteMut.isPending
+                  ? t(($) => $.archive_dialog.archiving)
+                  : t(($) => $.archive_dialog.confirm)}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       )}
     </div>
   );
