@@ -20,10 +20,58 @@ type notificationPreferenceSpec struct {
 
 var supportedNotificationPreferences = []notificationPreferenceSpec{
 	{
+		Channel:         "notification_trigger",
+		EventType:       "mentioned",
+		DefaultEnabled:  true,
+		RequiresBinding: false,
+	},
+	{
+		Channel:         "notification_trigger",
+		EventType:       "issue_assigned",
+		DefaultEnabled:  false,
+		RequiresBinding: false,
+	},
+	{
+		Channel:         "notification_trigger",
+		EventType:       "subscribed_issue_updated",
+		DefaultEnabled:  false,
+		RequiresBinding: false,
+	},
+	{
+		Channel:         "notification_trigger",
+		EventType:       "task_completed",
+		DefaultEnabled:  false,
+		RequiresBinding: false,
+	},
+	{
+		Channel:         "notification_trigger",
+		EventType:       "task_failed",
+		DefaultEnabled:  false,
+		RequiresBinding: false,
+	},
+	{
+		Channel:         "notification_trigger",
+		EventType:       "replied",
+		DefaultEnabled:  false,
+		RequiresBinding: false,
+	},
+	{
+		Channel:         "inbox",
+		EventType:       "channel_enabled",
+		DefaultEnabled:  true,
+		RequiresBinding: false,
+	},
+	{
 		Channel:         "inbox",
 		EventType:       "mentioned",
 		DefaultEnabled:  true,
 		RequiresBinding: false,
+	},
+	{
+		Channel:         "dingtalk",
+		EventType:       "channel_enabled",
+		DefaultEnabled:  false,
+		RequiresBinding: true,
 	},
 	{
 		Channel:         "dingtalk",
@@ -33,9 +81,21 @@ var supportedNotificationPreferences = []notificationPreferenceSpec{
 	},
 	{
 		Channel:         "email",
+		EventType:       "channel_enabled",
+		DefaultEnabled:  false,
+		RequiresBinding: true,
+	},
+	{
+		Channel:         "email",
 		EventType:       "mentioned",
 		DefaultEnabled:  false,
 		RequiresBinding: true,
+	},
+	{
+		Channel:         "custom_webhook",
+		EventType:       "channel_enabled",
+		DefaultEnabled:  false,
+		RequiresBinding: false,
 	},
 	{
 		Channel:         "custom_webhook",
@@ -54,6 +114,24 @@ var supportedNotificationPreferences = []notificationPreferenceSpec{
 		EventType:       "subscribed_issue_updated",
 		DefaultEnabled:  false,
 		RequiresBinding: false,
+	},
+	{
+		Channel:         "dingtalk",
+		EventType:       "task_completed",
+		DefaultEnabled:  false,
+		RequiresBinding: true,
+	},
+	{
+		Channel:         "dingtalk",
+		EventType:       "task_failed",
+		DefaultEnabled:  false,
+		RequiresBinding: true,
+	},
+	{
+		Channel:         "openclaw_weixin",
+		EventType:       "channel_enabled",
+		DefaultEnabled:  false,
+		RequiresBinding: true,
 	},
 	{
 		Channel:         "openclaw_weixin",
@@ -102,6 +180,7 @@ type NotificationPreferenceResponse struct {
 	Enabled         bool    `json:"enabled"`
 	BindingID       *string `json:"binding_id"`
 	RequiresBinding bool    `json:"requires_binding"`
+	RenderMode      string  `json:"render_mode"`
 }
 
 type ListNotificationPreferencesResponse struct {
@@ -109,13 +188,24 @@ type ListNotificationPreferencesResponse struct {
 }
 
 type UpdateNotificationPreferenceRequest struct {
-	Channel   string `json:"channel"`
-	EventType string `json:"event_type"`
-	Enabled   *bool  `json:"enabled"`
+	Channel    string `json:"channel"`
+	EventType  string `json:"event_type"`
+	Enabled    *bool  `json:"enabled"`
+	RenderMode string `json:"render_mode,omitempty"`
 }
 
 func normalizeNotificationPreference(channel, eventType string) (string, string) {
 	return strings.ToLower(strings.TrimSpace(channel)), strings.ToLower(strings.TrimSpace(eventType))
+}
+
+func normalizeRenderMode(mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	switch mode {
+	case "compact", "detail":
+		return mode
+	default:
+		return "auto"
+	}
 }
 
 func findNotificationPreferenceSpec(channel, eventType string) (notificationPreferenceSpec, bool) {
@@ -149,12 +239,17 @@ func notificationBindingsToResponse(bindings []db.ExternalAccountBinding) []Noti
 }
 
 func notificationPreferenceToResponse(pref db.NotificationChannelPreference, spec notificationPreferenceSpec) NotificationPreferenceResponse {
+	renderMode := pref.RenderMode
+	if renderMode == "" {
+		renderMode = "auto"
+	}
 	return NotificationPreferenceResponse{
 		Channel:         pref.Channel,
 		EventType:       pref.EventType,
 		Enabled:         pref.Enabled,
 		BindingID:       uuidToPtr(pref.BindingID),
 		RequiresBinding: spec.RequiresBinding,
+		RenderMode:      renderMode,
 	}
 }
 
@@ -176,6 +271,7 @@ func mergeNotificationPreferences(prefs []db.NotificationChannelPreference) []No
 			Enabled:         spec.DefaultEnabled,
 			BindingID:       nil,
 			RequiresBinding: spec.RequiresBinding,
+			RenderMode:      "auto",
 		})
 	}
 
@@ -275,13 +371,45 @@ func (h *Handler) UpdateMyNotificationPreference(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "unsupported notification preference")
 		return
 	}
-	if req.Enabled == nil {
-		writeError(w, http.StatusBadRequest, "enabled is required")
+
+	// Load existing preference (if any) to support partial updates.
+	existingPrefs, err := h.Queries.ListNotificationChannelPreferencesByUser(r.Context(), parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load notification preferences")
 		return
 	}
+	var existing *db.NotificationChannelPreference
+	for i := range existingPrefs {
+		if existingPrefs[i].Channel == channel && existingPrefs[i].EventType == eventType {
+			existing = &existingPrefs[i]
+			break
+		}
+	}
 
+	// Resolve enabled: use request value > existing value > spec default.
+	enabled := spec.DefaultEnabled
+	if existing != nil {
+		enabled = existing.Enabled
+	}
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+
+	// Resolve render_mode: use request value > existing value > "auto".
+	renderMode := "auto"
+	if existing != nil && existing.RenderMode != "" {
+		renderMode = existing.RenderMode
+	}
+	if req.RenderMode != "" {
+		renderMode = normalizeRenderMode(req.RenderMode)
+	}
+
+	// Resolve binding_id: preserve existing if not changing enabled state.
 	bindingID := pgtype.UUID{}
-	if spec.RequiresBinding && *req.Enabled {
+	if existing != nil {
+		bindingID = existing.BindingID
+	}
+	if spec.RequiresBinding && enabled {
 		bindings, err := h.Queries.ListExternalAccountBindingsByUser(r.Context(), parseUUID(userID))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to load notification bindings")
@@ -294,7 +422,7 @@ func (h *Handler) UpdateMyNotificationPreference(w http.ResponseWriter, r *http.
 		}
 		bindingID = binding.ID
 	}
-	if channel == "custom_webhook" && *req.Enabled {
+	if channel == "custom_webhook" && enabled {
 		endpoints, err := h.Queries.ListEnabledNotificationWebhookEndpointsByUser(r.Context(), parseUUID(userID))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to load notification webhooks")
@@ -307,11 +435,12 @@ func (h *Handler) UpdateMyNotificationPreference(w http.ResponseWriter, r *http.
 	}
 
 	pref, err := h.Queries.UpsertNotificationChannelPreference(r.Context(), db.UpsertNotificationChannelPreferenceParams{
-		UserID:    parseUUID(userID),
-		Channel:   channel,
-		EventType: eventType,
-		Enabled:   *req.Enabled,
-		BindingID: bindingID,
+		UserID:     parseUUID(userID),
+		Channel:    channel,
+		EventType:  eventType,
+		Enabled:    enabled,
+		BindingID:  bindingID,
+		RenderMode: renderMode,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update notification preference")

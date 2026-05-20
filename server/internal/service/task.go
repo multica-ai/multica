@@ -1812,6 +1812,15 @@ func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, 
 	if task.ChatSessionID.Valid {
 		payload["chat_session_id"] = util.UUIDToString(task.ChatSessionID)
 	}
+	// Include notification_summary from task result for completed/failed events.
+	if (eventType == protocol.EventTaskCompleted || eventType == protocol.EventTaskFailed) && len(task.Result) > 0 {
+		var taskResult map[string]any
+		if err := json.Unmarshal(task.Result, &taskResult); err == nil {
+			if s, ok := taskResult["notification_summary"].(string); ok && s != "" {
+				payload["notification_summary"] = s
+			}
+		}
+	}
 	s.Bus.Publish(events.Event{
 		Type:        eventType,
 		WorkspaceID: workspaceID,

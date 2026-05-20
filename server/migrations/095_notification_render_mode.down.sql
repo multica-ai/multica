@@ -1,0 +1,1 @@
+ALTER TABLE notification_channel_preference DROP COLUMN render_mode;

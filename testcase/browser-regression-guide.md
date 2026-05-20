@@ -30,12 +30,15 @@ The login flow is documented in `tc-001-fixed-verification-code-login.md`. Execu
 - DingTalk OAuth login (requires DingTalk sandbox)
 - Google OAuth login (requires Google credentials)
 
-### Notifications (tc-002, tc-003, tc-007, tc-008, tc-037)
+### Notifications (tc-002, tc-003, tc-007, tc-008, tc-037, tc-040, tc-046, tc-047)
 - Custom webhook create & test
 - Custom webhook channel toggle
 - DingTalk notification binding & delivery
 - Email notification binding & delivery
 - Webhook custom message format
+- OpenClaw WeChat notification channel binding and per-event toggles
+- Notification render mode Settings controls
+- IM compact task notification delivery for WeChat and DingTalk
 
 ### Agent Management (tc-009 to tc-012, tc-036)
 - Mine/All agent filter
@@ -101,6 +104,10 @@ The login flow is documented in `tc-001-fixed-verification-code-login.md`. Execu
 ### WeChat Notification (tc-040)
 - OpenClaw WeChat notification channel binding and per-event toggles (OPE-544)
 
+### Notification Rendering (tc-046, tc-047)
+- Notification render mode Settings controls
+- IM compact task notification delivery for WeChat and DingTalk
+
 ### Wiki Extended (tc-041)
 - Wiki page creator display and lightweight activity log (OPE-843)
 
@@ -130,6 +137,7 @@ The login flow is documented in `tc-001-fixed-verification-code-login.md`. Execu
 10. **tc-033 to tc-038** — mobile, private chat, CLI manifest update, DeepSeek, paste
 11. **tc-039 to tc-042** — comment collapse, WeChat notification, wiki activity, subscription
 12. **tc-043 to tc-045, tc-057** — mobile issue properties, inbox batch, label filter, mobile comments/timeline
+13. **tc-046 to tc-047** — notification render mode settings and IM compact task delivery
 
 ## Notes
 
