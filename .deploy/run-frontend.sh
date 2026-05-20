@@ -2,6 +2,11 @@
 set -euo pipefail
 
 REPO=/Users/sara/code/firtal-cerebro
+
+LOG_NAME=frontend
+# shellcheck source=_log-rotation.sh
+source "$REPO/.deploy/_log-rotation.sh"
+
 cd "$REPO"
 
 set -a
