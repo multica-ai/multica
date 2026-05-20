@@ -1,0 +1,179 @@
+name: PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: PR analysis & review checklist
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Analyze changed files
+        id: analyze
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          FILES=$(gh pr diff "${{ github.event.pull_request.number }}" --name-only || true)
+          FILE_COUNT=$(echo "$FILES" | grep -c . || echo 0)
+
+          STATS=$(gh pr view "${{ github.event.pull_request.number }}" --json additions,deletions)
+          ADDITIONS=$(echo "$STATS" | jq '.additions')
+          DELETIONS=$(echo "$STATS" | jq '.deletions')
+
+          SECURITY=false
+          if echo "$FILES" | grep -qiE '(auth|crypto|secret|token|password|jwt|oauth|session|permission|rbac|acl|encrypt|hash|salt|certificate|ssl|tls|cors|csrf|middleware.*/auth|security|login|signup)'; then
+            SECURITY=true
+          fi
+
+          MIGRATION=false
+          if echo "$FILES" | grep -qiE '(migration|migrate|\.sql$|schema)'; then
+            MIGRATION=true
+          fi
+
+          INFRA=false
+          if echo "$FILES" | grep -qiE '(Dockerfile|docker-compose|\.github/workflows|terraform|\.env\.|railway|nginx|Procfile)'; then
+            INFRA=true
+          fi
+
+          RISK="low"
+          if [ "$SECURITY" = "true" ] || [ "$MIGRATION" = "true" ]; then
+            RISK="high"
+          elif [ "$ADDITIONS" -gt 500 ] || [ "$FILE_COUNT" -gt 20 ] || [ "$INFRA" = "true" ]; then
+            RISK="medium"
+          fi
+
+          {
+            echo "security=$SECURITY"
+            echo "migration=$MIGRATION"
+            echo "infra=$INFRA"
+            echo "risk=$RISK"
+            echo "additions=$ADDITIONS"
+            echo "deletions=$DELETIONS"
+            echo "file_count=$FILE_COUNT"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Ensure labels exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for label in "risk:low:0e8a16:Low risk PR" "risk:medium:fbca04:Medium risk PR" "risk:high:d93f0b:High risk PR" "needs:security-review:b60205:Requires Security Engineer review"; do
+            IFS=: read -r name color desc <<< "$label"
+            gh label create "$name" --color "$color" --description "$desc" 2>/dev/null || true
+          done
+
+      - name: Apply risk label
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for level in low medium high; do
+            gh pr edit "${{ github.event.pull_request.number }}" --remove-label "risk:${level}" 2>/dev/null || true
+          done
+          gh pr edit "${{ github.event.pull_request.number }}" --add-label "risk:${{ steps.analyze.outputs.risk }}"
+
+          if [ "${{ steps.analyze.outputs.security }}" = "true" ]; then
+            gh pr edit "${{ github.event.pull_request.number }}" --add-label "needs:security-review"
+          fi
+
+      - name: Post review checklist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RISK="${{ steps.analyze.outputs.risk }}"
+          case "$RISK" in
+            high)   RISK_BADGE="🔴 HIGH" ;;
+            medium) RISK_BADGE="🟡 MEDIUM" ;;
+            *)      RISK_BADGE="🟢 LOW" ;;
+          esac
+
+          SECURITY_SECTION=""
+          if [ "${{ steps.analyze.outputs.security }}" = "true" ]; then
+            SECURITY_SECTION="- [ ] ⚠️ **Security-sensitive changes — requires Security Engineer review**"
+          fi
+
+          MIGRATION_SECTION=""
+          if [ "${{ steps.analyze.outputs.migration }}" = "true" ]; then
+            MIGRATION_SECTION=$(cat <<'MIGR'
+
+          ### ⚠️ Database Migration
+          - [ ] Migration is reversible
+          - [ ] Handles large tables safely (no full-table locks)
+          - [ ] Backward compatible with currently running instances
+          MIGR
+          )
+          fi
+
+          INFRA_SECTION=""
+          if [ "${{ steps.analyze.outputs.infra }}" = "true" ]; then
+            INFRA_SECTION=$(cat <<'INFR'
+
+          ### ⚠️ Infrastructure Changes
+          - [ ] Changes tested in staging/preview
+          - [ ] No secrets committed in config files
+          - [ ] Rollback plan identified
+          INFR
+          )
+          fi
+
+          BODY=$(cat <<EOF
+          ## 🔍 PR Review Checklist
+
+          **Risk Level:** ${RISK_BADGE} | **Changes:** +${{ steps.analyze.outputs.additions }} / -${{ steps.analyze.outputs.deletions }} across ${{ steps.analyze.outputs.file_count }} files
+
+          ### Code Quality
+          - [ ] Follows project conventions and style guide
+          - [ ] No unnecessary complexity or dead code
+          - [ ] Clear naming for variables and functions
+          - [ ] No code duplication (DRY)
+
+          ### Testing
+          - [ ] Unit tests added/updated for changed code
+          - [ ] Existing tests still pass
+          - [ ] Edge cases covered
+          - [ ] Test coverage maintained or improved
+
+          ### Security
+          - [ ] No hardcoded secrets, API keys, or credentials
+          - [ ] Input validation present at boundaries
+          - [ ] No SQL injection, XSS, or OWASP Top 10 risks
+          - [ ] Auth/authorization checks where needed
+          ${SECURITY_SECTION}
+
+          ### Performance
+          - [ ] No N+1 queries or unnecessary DB calls
+          - [ ] Large data sets paginated
+          - [ ] No blocking operations on hot paths
+          ${MIGRATION_SECTION}
+          ${INFRA_SECTION}
+
+          ### Documentation
+          - [ ] README/docs updated if public API changed
+          - [ ] CHANGELOG entry for user-facing changes
+
+          ---
+          *Automated by PR Review Bot*
+          EOF
+          )
+
+          EXISTING=$(gh pr view "${{ github.event.pull_request.number }}" --json comments --jq '.comments[] | select(.body | contains("PR Review Checklist")) | .id' | head -1)
+
+          if [ -n "$EXISTING" ]; then
+            gh api repos/${{ github.repository }}/issues/comments/${EXISTING} -X PATCH -f body="$BODY"
+          else
+            gh pr comment "${{ github.event.pull_request.number }}" --body "$BODY"
+          fi
