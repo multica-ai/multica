@@ -49,6 +49,11 @@ export function createRequestId(length = 8): string {
   return createSafeId().replace(/-/g, "").slice(0, length);
 }
 
+export function stripTrailingSlash(s: string | undefined): string {
+  if (!s) return "";
+  return s.endsWith("/") ? s.slice(0, -1) : s;
+}
+
 /**
  * True when the keyboard event fires while an IME is composing a multi-key
  * input (e.g. Chinese pinyin, Japanese kana). The Enter that commits the

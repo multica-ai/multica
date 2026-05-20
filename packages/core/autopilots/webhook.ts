@@ -1,4 +1,5 @@
 import type { AutopilotTrigger } from "../types";
+import { stripTrailingSlash } from "../utils";
 
 /**
  * Compose a usable absolute webhook URL for a webhook trigger.
@@ -35,9 +36,4 @@ export function buildAutopilotWebhookUrl(params: {
   const base = stripTrailingSlash(apiBaseUrl) || stripTrailingSlash(currentOrigin);
   if (!base) return path; // last resort — relative path will still work in-browser
   return base + path;
-}
-
-function stripTrailingSlash(s: string | undefined): string {
-  if (!s) return "";
-  return s.endsWith("/") ? s.slice(0, -1) : s;
 }

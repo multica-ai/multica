@@ -7,6 +7,7 @@ import {
   type RenderMode,
 } from "@multica/ui/markdown";
 import { useConfigStore } from "@multica/core/config";
+import { stripTrailingSlash } from "@multica/core/utils";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import {
@@ -73,9 +74,21 @@ export function Markdown(props: MarkdownProps): React.JSX.Element {
 
   const renderImage = React.useCallback(
     ({ src, alt }: { src: string; alt: string }): React.ReactNode => {
-      // Relative paths (e.g. /uploads/...) must be prefixed with the API base
-      // URL so the desktop app can load them without a browser to resolve them.
-      const resolvedSrc = src.startsWith("/") ? `${apiBaseUrl}${src}` : src;
+      // If the src matches a known attachment record (strict equality on the
+      // stored URL), use the full record so the download/preview chain stays
+      // intact: correct re-signing, desktop-native download, full metadata.
+      const record = attachments?.find((a) => a.url === src);
+      if (record) {
+        return <AttachmentRenderer attachment={{ kind: "record", attachment: record }} />;
+      }
+
+      // No matching record. Prefix server-relative /uploads/ paths with the
+      // API base URL so the desktop app can load them without a browser origin.
+      // Narrowing to /uploads/ avoids accidentally rewriting protocol-relative
+      // URLs (//cdn.host/...) which also start with "/".
+      const resolvedSrc = src.startsWith("/uploads/")
+        ? `${stripTrailingSlash(apiBaseUrl)}${src}`
+        : src;
       return (
         <AttachmentRenderer
           attachment={{
@@ -90,7 +103,7 @@ export function Markdown(props: MarkdownProps): React.JSX.Element {
         />
       );
     },
-    [apiBaseUrl],
+    [apiBaseUrl, attachments],
   );
 
   return (
