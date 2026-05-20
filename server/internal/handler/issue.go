@@ -2223,7 +2223,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// issue is ready for work.
 	if statusChanged && !assigneeChanged && actorType == "member" &&
 		prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
-		if h.isAgentAssigneeReady(r.Context(), issue) {
+		if h.shouldEnqueueAgentTask(r.Context(), issue) {
 			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
 		}
 		if h.isSquadLeaderReady(r.Context(), issue) {
@@ -2236,6 +2236,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// is a user-initiated terminal action that should stop execution.
 	if statusChanged && issue.Status == "cancelled" {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
+	}
+
+	if statusChanged && issue.Status == "done" {
+		h.unblockIssueDependents(r.Context(), issue.ID, actorType, actorID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -2316,10 +2320,72 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 // triggering execution. Moving out of backlog is handled separately in
 // UpdateIssue.
 func (h *Handler) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bool {
-	if issue.Status == "backlog" {
+	if issue.Status == "backlog" || issue.Status == "blocked" {
+		return false
+	}
+	if h.hasUnresolvedIssueDependencies(ctx, issue.ID) {
 		return false
 	}
 	return h.isAgentAssigneeReady(ctx, issue)
+}
+
+func (h *Handler) hasUnresolvedIssueDependencies(ctx context.Context, issueID pgtype.UUID) bool {
+	count, err := h.Queries.CountUnresolvedIssueDependencies(ctx, issueID)
+	if err != nil {
+		slog.Warn("count unresolved issue dependencies failed", "issue_id", util.UUIDToString(issueID), "error", err)
+		return true
+	}
+	return count > 0
+}
+
+func (h *Handler) unblockIssueDependents(ctx context.Context, upstreamID pgtype.UUID, actorType, actorID string) {
+	dependents, err := h.Queries.ListIssuesDependingOn(ctx, upstreamID)
+	if err != nil {
+		slog.Warn("list issue dependents failed", "issue_id", util.UUIDToString(upstreamID), "error", err)
+		return
+	}
+
+	for _, dependent := range dependents {
+		if h.hasUnresolvedIssueDependencies(ctx, dependent.ID) {
+			continue
+		}
+
+		prevStatus := dependent.Status
+		if dependent.Status == "blocked" {
+			updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+				ID:     dependent.ID,
+				Status: "todo",
+			})
+			if err != nil {
+				slog.Warn("unblock dependent issue failed", "issue_id", util.UUIDToString(dependent.ID), "upstream_issue_id", util.UUIDToString(upstreamID), "error", err)
+				continue
+			}
+			dependent = updated
+
+			prefix := h.getIssuePrefix(ctx, dependent.WorkspaceID)
+			h.publish(protocol.EventIssueUpdated, util.UUIDToString(dependent.WorkspaceID), actorType, actorID, map[string]any{
+				"issue":          issueToResponse(dependent, prefix),
+				"status_changed": true,
+				"prev_status":    prevStatus,
+			})
+		}
+
+		if dependent.Status != "todo" || !h.isAgentAssigneeReady(ctx, dependent) {
+			continue
+		}
+
+		hasActive, err := h.Queries.HasActiveTaskForIssue(ctx, dependent.ID)
+		if err != nil {
+			slog.Warn("check active dependent issue task failed", "issue_id", util.UUIDToString(dependent.ID), "error", err)
+			continue
+		}
+		if hasActive {
+			continue
+		}
+		if _, err := h.TaskService.EnqueueTaskForIssue(ctx, dependent); err != nil {
+			slog.Warn("enqueue dependent issue task failed", "issue_id", util.UUIDToString(dependent.ID), "upstream_issue_id", util.UUIDToString(upstreamID), "error", err)
+		}
+	}
 }
 
 // shouldEnqueueOnComment returns true if a member comment on this issue should
@@ -2328,6 +2394,9 @@ func (h *Handler) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bo
 // (e.g. follow-up questions on a done issue).
 func (h *Handler) shouldEnqueueOnComment(ctx context.Context, issue db.Issue) bool {
 	if !h.isAgentAssigneeReady(ctx, issue) {
+		return false
+	}
+	if issue.Status == "blocked" || h.hasUnresolvedIssueDependencies(ctx, issue.ID) {
 		return false
 	}
 	// Coalescing queue: allow enqueue when a task is running (so the agent
@@ -2637,7 +2706,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// Trigger agent when moving out of backlog (batch).
 		if statusChanged && !assigneeChanged && actorType == "member" &&
 			prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
-			if h.isAgentAssigneeReady(r.Context(), issue) {
+			if h.shouldEnqueueAgentTask(r.Context(), issue) {
 				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
 			}
 			if h.isSquadLeaderReady(r.Context(), issue) {
@@ -2648,6 +2717,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// Cancel active tasks when the issue is cancelled by a user.
 		if statusChanged && issue.Status == "cancelled" {
 			h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
+		}
+
+		if statusChanged && issue.Status == "done" {
+			h.unblockIssueDependents(r.Context(), issue.ID, actorType, actorID)
 		}
 
 		updated++

@@ -1061,6 +1061,7 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 		"creator_id":     uuidToString(issue.CreatorID),
 		"source":         "github_pr_merged",
 	})
+	h.unblockIssueDependents(ctx, updated.ID, "system", "")
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
