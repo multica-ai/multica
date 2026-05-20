@@ -285,19 +285,11 @@ If you need full isolation between organizations or accounts — separate tokens
 
 ```bash
 multica workspace list
+multica workspace list --full-id
 multica workspace list --output json
 ```
 
-The current default workspace is marked with `*`.
-
-### Show Current Workspace
-
-```bash
-multica workspace current
-multica workspace current --output json
-```
-
-Prints the workspace that commands without `--workspace-id` and `MULTICA_WORKSPACE_ID` would target.
+The current default workspace is marked with `*`. Table output shows short UUID prefixes — pass `--full-id` when you need the canonical UUIDs.
 
 ### Switch Default Workspace
 
@@ -315,10 +307,12 @@ multica workspace get <workspace-id>
 multica workspace get <workspace-id> --output json
 ```
 
+Passing no `<workspace-id>` resolves to the current default workspace, so `multica workspace get` doubles as "what workspace am I on?".
+
 ### List Members
 
 ```bash
-multica workspace members <workspace-id>
+multica workspace member list <workspace-id>
 ```
 
 ## Issues
@@ -350,7 +344,7 @@ multica issue create --title "Fix login bug" --description "..." --priority high
 multica issue create --title "Fix login bug" --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
 ```
 
-Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assignee` / `--assignee-id`, `--parent`, `--project`, `--due-date`. Pass `--assignee-id <uuid>` (mutually exclusive with `--assignee`) when scripting against the IDs returned by `multica workspace members --output json` / `multica agent list --output json`.
+Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assignee` / `--assignee-id`, `--parent`, `--project`, `--due-date`. Pass `--assignee-id <uuid>` (mutually exclusive with `--assignee`) when scripting against the IDs returned by `multica workspace member list --output json` / `multica agent list --output json`.
 
 ### Update Issue
 

@@ -400,9 +400,10 @@ func (c *Client) Register(ctx context.Context, req map[string]any) (*RegisterRes
 }
 
 type WorkspaceReposResponse struct {
-	WorkspaceID  string     `json:"workspace_id"`
-	Repos        []RepoData `json:"repos"`
-	ReposVersion string     `json:"repos_version"`
+	WorkspaceID  string          `json:"workspace_id"`
+	Repos        []RepoData      `json:"repos"`
+	ReposVersion string          `json:"repos_version"`
+	Settings     json.RawMessage `json:"settings,omitempty"`
 }
 
 func (c *Client) GetWorkspaceRepos(ctx context.Context, workspaceID string) (*WorkspaceReposResponse, error) {

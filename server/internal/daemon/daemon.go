@@ -865,8 +865,13 @@ func (d *Daemon) workspaceLastRepoSyncErr(workspaceID string) string {
 }
 
 // workspaceCoAuthoredByEnabled returns whether the Co-authored-by hook should
-// be installed for the given workspace. Defaults to true when the setting is
-// absent (new workspaces, older servers that don't send settings).
+// be installed for the given workspace. Defaults to true when either setting
+// is absent (new workspaces, older servers that don't send settings).
+//
+// The hook is gated by BOTH the GitHub master switch (`github_enabled`) and
+// the dedicated co-author switch (`co_authored_by_enabled`) so flipping the
+// workspace's master GitHub toggle off also stops new trailers from landing
+// in commits, matching the contract documented in RFC MUL-2414 §4.8.
 func (d *Daemon) workspaceCoAuthoredByEnabled(workspaceID string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -875,9 +880,16 @@ func (d *Daemon) workspaceCoAuthoredByEnabled(workspaceID string) bool {
 		return true // default: enabled
 	}
 	var s struct {
+		GitHubEnabled       *bool `json:"github_enabled"`
 		CoAuthoredByEnabled *bool `json:"co_authored_by_enabled"`
 	}
-	if err := json.Unmarshal(ws.settings, &s); err != nil || s.CoAuthoredByEnabled == nil {
+	if err := json.Unmarshal(ws.settings, &s); err != nil {
+		return true // default: enabled when payload is malformed
+	}
+	if s.GitHubEnabled != nil && !*s.GitHubEnabled {
+		return false
+	}
+	if s.CoAuthoredByEnabled == nil {
 		return true // default: enabled
 	}
 	return *s.CoAuthoredByEnabled
@@ -983,6 +995,12 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 	if ws, ok := d.workspaces[workspaceID]; ok {
 		ws.reposVersion = resp.ReposVersion
 		ws.allowedRepoURLs = repoAllowlist(resp.Repos)
+		// Keep the cached settings in sync with the server. The daemon's
+		// feature gates (e.g. workspaceCoAuthoredByEnabled) read directly from
+		// this field, so toggling a Setting in the web UI must update it here
+		// without requiring a daemon restart. An empty payload from the server
+		// clears the override and falls back to defaults.
+		ws.settings = resp.Settings
 	}
 	d.mu.Unlock()
 
@@ -1003,14 +1021,26 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return fmt.Errorf("workspace is not watched by this daemon: %s", workspaceID)
 	}
 
-	if d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
-		return nil
-	}
+	// Record whether the cache already had this repo before we took the
+	// per-workspace mutex. The two states behave differently below:
+	//
+	//   - cacheHitOnEntry=true: the repo is already cloned; we still must
+	//     refresh `workspaceState.settings` because the /repo/checkout
+	//     handler reads workspaceCoAuthoredByEnabled right after this and
+	//     the 30s workspaceSyncLoop tick is too slow for a freshly-flipped
+	//     GitHub master switch / `co_authored_by_enabled` toggle to feel
+	//     live (RFC MUL-2414 §4.8; PR #2847 review by Emacs).
+	//
+	//   - cacheHitOnEntry=false but cache hit *after* we acquire the mutex:
+	//     a sibling goroutine on a concurrent cold-miss already refreshed
+	//     and populated the cache. We can skip the duplicate refresh — the
+	//     sibling's refresh is fresh enough for our gate read.
+	cacheHitOnEntry := d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != ""
 
 	ws.repoRefreshMu.Lock()
 	defer ws.repoRefreshMu.Unlock()
 
-	if d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
+	if !cacheHitOnEntry && d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
 		return nil
 	}
 
@@ -1021,6 +1051,10 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 
 	if !d.workspaceRepoAllowed(workspaceID, repoURL) {
 		return ErrRepoNotConfigured
+	}
+
+	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
+		return nil
 	}
 
 	d.syncWorkspaceRepos(workspaceID, resp.Repos)
@@ -1086,11 +1120,19 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	var removed int
 	for id, name := range apiIDs {
 		if currentIDs[id] {
-			// Already tracked: only intervene if the workspace lost all of
-			// its runtimes (most commonly because handleRuntimeGone pruned
-			// them and its inline re-register failed). The pointer is not
-			// replaced here either — ensureRepoReady holds repoRefreshMu
-			// from the original pointer.
+			// Already tracked: refresh the cached workspace settings so
+			// feature toggles flipped in the web UI take effect on the next
+			// gated operation without a daemon restart (see RFC MUL-2414 §4.8;
+			// reviewed in PR #2847). refreshWorkspaceRepos covers settings +
+			// repos in a single round trip.
+			if _, err := d.refreshWorkspaceRepos(ctx, id); err != nil {
+				d.logger.Debug("workspace sync: refresh settings failed", "workspace_id", id, "error", err)
+			}
+			// Only intervene further if the workspace lost all of its
+			// runtimes (most commonly because handleRuntimeGone pruned them
+			// and its inline re-register failed). The pointer is not replaced
+			// here either — ensureRepoReady holds repoRefreshMu from the
+			// original pointer.
 			if !d.workspaceNeedsRuntimeRecovery(id) {
 				continue
 			}
@@ -1354,22 +1396,49 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	}
 
 	// Wire format matches handler.ModelEntry. Use a struct (not
-	// map[string]string) so the Default bool round-trips — without
-	// it the UI loses its "default" badge on the advertised pick.
+	// map[string]string) so the Default bool and the per-model
+	// Thinking catalog round-trip — without it the UI loses its
+	// "default" badge on the advertised pick and the thinking-level
+	// picker for claude/codex (MUL-2339).
+	type thinkingLevelWire struct {
+		Value       string `json:"value"`
+		Label       string `json:"label"`
+		Description string `json:"description,omitempty"`
+	}
+	type modelThinkingWire struct {
+		SupportedLevels []thinkingLevelWire `json:"supported_levels"`
+		DefaultLevel    string              `json:"default_level,omitempty"`
+	}
 	type modelWire struct {
-		ID       string `json:"id"`
-		Label    string `json:"label"`
-		Provider string `json:"provider,omitempty"`
-		Default  bool   `json:"default,omitempty"`
+		ID       string             `json:"id"`
+		Label    string             `json:"label"`
+		Provider string             `json:"provider,omitempty"`
+		Default  bool               `json:"default,omitempty"`
+		Thinking *modelThinkingWire `json:"thinking,omitempty"`
 	}
 	wire := make([]modelWire, 0, len(models))
 	for _, m := range models {
-		wire = append(wire, modelWire{
+		entry := modelWire{
 			ID:       m.ID,
 			Label:    m.Label,
 			Provider: m.Provider,
 			Default:  m.Default,
-		})
+		}
+		if m.Thinking != nil {
+			levels := make([]thinkingLevelWire, 0, len(m.Thinking.SupportedLevels))
+			for _, lvl := range m.Thinking.SupportedLevels {
+				levels = append(levels, thinkingLevelWire{
+					Value:       lvl.Value,
+					Label:       lvl.Label,
+					Description: lvl.Description,
+				})
+			}
+			entry.Thinking = &modelThinkingWire{
+				SupportedLevels: levels,
+				DefaultLevel:    m.Thinking.DefaultLevel,
+			}
+		}
+		wire = append(wire, entry)
 	}
 	d.reportModelListResult(ctx, rt, requestID, map[string]any{
 		"status":    "completed",
@@ -2247,6 +2316,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AutopilotTriggerPayload: strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 		QuickCreatePrompt:       task.QuickCreatePrompt,
 		IsSquadLeader:           strings.Contains(instructions, "## Squad Operating Protocol"),
+		RequestingUserName:               task.RequestingUserName,
+		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
 	}
 
 	// Mark candidate env roots as active before any env work so the GC loop
@@ -2450,6 +2521,38 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if model == "" {
 		model = entry.Model
 	}
+	thinkingLevel := ""
+	if task.Agent != nil {
+		thinkingLevel = task.Agent.ThinkingLevel
+	}
+	// Per-model guard: the server validates the literal token against the
+	// provider's enum, but per-model gaps (Claude's `xhigh` on a non-Opus
+	// model, Codex's per-model `supported_reasoning_levels`) only resolve
+	// here, against the daemon's local CLI catalog. Invalid combinations
+	// log a warning and drop the level rather than failing the task, so a
+	// stale persisted value never blocks execution. Empty model is passed
+	// through unchanged — ValidateThinkingLevel resolves it to the
+	// provider's default model internally so default-model tasks aren't
+	// misjudged. Discovery errors fail open: if we can't list models, we
+	// keep the persisted level and let the CLI surface any objection.
+	if thinkingLevel != "" {
+		ok, err := agent.ValidateThinkingLevel(ctx, provider, entry.Path, model, thinkingLevel)
+		if err != nil {
+			taskLog.Warn("thinking_level: catalog lookup failed; passing through",
+				"provider", provider,
+				"model", model,
+				"thinking_level", thinkingLevel,
+				"error", err,
+			)
+		} else if !ok {
+			taskLog.Warn("thinking_level: not valid for this (provider, model); skipping injection",
+				"provider", provider,
+				"model", model,
+				"thinking_level", thinkingLevel,
+			)
+			thinkingLevel = ""
+		}
+	}
 	execOpts := agent.ExecOptions{
 		Cwd:                       env.WorkDir,
 		Model:                     model,
@@ -2459,6 +2562,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ExtraArgs:                 extraArgs,
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
+		ThinkingLevel:             thinkingLevel,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
@@ -2604,13 +2708,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if comment == "" {
 			comment = fmt.Sprintf("%s timed out after %s", provider, d.cfg.AgentTimeout)
 		}
+		failureReason := "timeout"
+		if reason, ok := classifyResumeUnsafeTimeout(provider, comment); ok {
+			taskLog.Warn("agent timed out with resume-unsafe session, classifying as blocked",
+				"failure_reason", reason,
+			)
+			failureReason = reason
+		}
 		return TaskResult{
 			Status:        "blocked",
 			Comment:       comment,
 			SessionID:     result.SessionID,
 			WorkDir:       env.WorkDir,
 			EnvRoot:       env.RootDir,
-			FailureReason: "timeout",
+			FailureReason: failureReason,
 			Usage:         usageEntries,
 		}, nil
 	case "idle_watchdog":

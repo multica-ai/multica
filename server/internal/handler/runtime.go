@@ -692,6 +692,25 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Pause autopilots pointing at the archived agents BEFORE we delete
+	// them. Migration 096 dropped the autopilot.assignee_id agent FK, so a
+	// hard-delete here would otherwise leave dangling rows that subsequent
+	// scheduler ticks would skip with "assignee agent no longer exists" —
+	// quiet, but burning a run record every tick until an operator notices.
+	// Pausing makes the breakage visible in the autopilot list so the owner
+	// can re-point or delete the row instead.
+	archivedAgentIDs, err := h.Queries.ListArchivedAgentIDsByRuntime(r.Context(), rt.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to enumerate archived agents")
+		return
+	}
+	if len(archivedAgentIDs) > 0 {
+		if err := h.Queries.PauseAutopilotsByAgentAssignees(r.Context(), archivedAgentIDs); err != nil {
+			slog.Warn("pause autopilots for archived agents failed",
+				"runtime_id", uuidToString(rt.ID), "error", err)
+		}
+	}
+
 	// Remove archived agents so the FK constraint (ON DELETE RESTRICT) won't block deletion.
 	if err := h.Queries.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")

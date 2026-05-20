@@ -17,8 +17,10 @@ function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
   const alt = (node.attrs.alt as string) || "";
   const uploading = node.attrs.uploading as boolean;
 
+  // <Attachment> emits its own .image-node wrapper, so the NodeViewWrapper
+  // stays unclassed — no double image-node.
   return (
-    <NodeViewWrapper className="image-node">
+    <NodeViewWrapper>
       <Attachment
         attachment={{
           kind: "url",

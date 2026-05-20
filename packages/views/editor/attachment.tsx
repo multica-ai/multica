@@ -215,10 +215,12 @@ export function Attachment({
 // ImageAttachmentView — inline image with hover toolbar
 // ---------------------------------------------------------------------------
 //
-// Self-contained Tailwind: works inside the editor surface (where the legacy
-// `.rich-text-editor .image-figure` CSS in content-editor.css continues to
-// apply for backward compatibility) AND in standalone surfaces (chat
-// messages, comment-card AttachmentList) that don't carry that scope.
+// DOM and styling are intentionally a direct port of the original
+// extensions/image-view.tsx <figure> structure. All visual styles live in
+// content-editor.css under `.image-figure / .image-content / .image-toolbar`
+// — the unification step de-scoped those rules from `.rich-text-editor` so
+// standalone surfaces (chat messages, AttachmentList) get identical visuals
+// without each component carrying its own Tailwind tax.
 
 interface ImageAttachmentViewProps {
   src: string;
@@ -254,83 +256,52 @@ function ImageAttachmentView({
     }
   };
 
-  // Click on figure opens the preview only in non-editor surfaces — inside
-  // the editor we let ProseMirror own the click for selection / cursor
-  // placement and route preview through the explicit Maximize button.
-  const figureOnClick = !editable && !uploading ? onView : undefined;
+  // Click on figure opens the preview only in non-editor / non-uploading
+  // surfaces — inside the editor we let ProseMirror own the click for
+  // selection / cursor placement and route preview through the explicit
+  // Maximize button. The CSS rule `.image-figure[data-clickable="true"] {
+  // cursor: zoom-in }` keys off this same flag for the cursor affordance.
+  const clickable = !editable && !uploading;
 
+  // DOM mirrors the original ReadonlyImage (span-only chain so it stays
+  // valid HTML5 when rendered inside a markdown <p>). In editor surfaces
+  // the NodeViewWrapper still emits its own outer .image-node div around
+  // this — the duplicate `image-node` class is harmless.
   return (
-    <span
-      className={cn(
-        "image-node group/image relative inline-block max-w-full",
-        className,
-      )}
-    >
+    <span className="image-node">
       <span
         className={cn(
-          "image-figure relative inline-block max-w-full rounded-md transition-shadow",
-          selected && editable && "image-selected ring-2 ring-primary",
-          !editable && !uploading && "cursor-zoom-in",
+          "image-figure",
+          selected && editable && "image-selected",
+          className,
         )}
-        onClick={figureOnClick}
+        data-clickable={clickable || undefined}
+        contentEditable={false}
+        onClick={clickable ? onView : undefined}
       >
-        {src ? (
-          <img
-            src={src}
-            alt={alt}
-            className={cn(
-              "image-content block max-w-full rounded-md",
-              uploading && "image-uploading opacity-60",
-            )}
-            draggable={false}
-          />
-        ) : (
-          // Defensive: an image input without a URL is degenerate, but
-          // emitting nothing leaves no anchor for the toolbar. Render a
-          // small placeholder so the surface is still recognizable.
-          <span className="block h-20 w-32 rounded-md bg-muted" />
-        )}
+        <img
+          src={src || undefined}
+          alt={alt}
+          className={cn("image-content", uploading && "image-uploading")}
+          draggable={false}
+        />
         {!uploading && src && (
           <span
-            className="image-toolbar absolute right-2 top-2 flex items-center gap-0.5 rounded-md border border-border bg-background/95 p-0.5 opacity-0 shadow-sm transition-opacity group-hover/image:opacity-100"
+            className="image-toolbar"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
-            <button
-              type="button"
-              className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              title={t(($) => $.image.view)}
-              aria-label={t(($) => $.image.view)}
-              onClick={onView}
-            >
+            <button type="button" onClick={onView} title={t(($) => $.image.view)}>
               <Maximize2 className="size-3.5" />
             </button>
-            <button
-              type="button"
-              className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              title={t(($) => $.image.download)}
-              aria-label={t(($) => $.image.download)}
-              onClick={onDownload}
-            >
+            <button type="button" onClick={onDownload} title={t(($) => $.image.download)}>
               <Download className="size-3.5" />
             </button>
-            <button
-              type="button"
-              className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              title={t(($) => $.image.copy_link)}
-              aria-label={t(($) => $.image.copy_link)}
-              onClick={handleCopyLink}
-            >
+            <button type="button" onClick={handleCopyLink} title={t(($) => $.image.copy_link)}>
               <LinkIcon className="size-3.5" />
             </button>
             {editable && onDelete && (
-              <button
-                type="button"
-                className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                title={t(($) => $.image.delete)}
-                aria-label={t(($) => $.image.delete)}
-                onClick={onDelete}
-              >
+              <button type="button" onClick={onDelete} title={t(($) => $.image.delete)}>
                 <Trash2 className="size-3.5" />
               </button>
             )}

@@ -92,6 +92,14 @@ type TaskContextForEnv struct {
 	AutopilotTriggerPayload string
 	QuickCreatePrompt       string // non-empty for quick-create tasks
 	IsSquadLeader           bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
+	// RequestingUserName + RequestingUserProfileDescription describe the
+	// human the agent is acting on behalf of. v1 sources them from the
+	// runtime owner (the user who registered the daemon). Rendered into the
+	// brief as the `## Requesting User` section only when description is
+	// non-empty — empty means the user opted out of injecting profile
+	// context and the agent stays anonymous-user mode.
+	RequestingUserName               string
+	RequestingUserProfileDescription string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

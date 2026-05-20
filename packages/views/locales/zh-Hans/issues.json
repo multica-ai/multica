@@ -96,11 +96,7 @@
     "zoom_week": "周",
     "zoom_month": "月",
     "show_completed": "显示已完成",
-    "empty": "暂无可展示的 issue。",
-    "no_scheduled": "暂无 issue 设置了开始或截止日期 — 设置后会显示在时间轴上。",
-    "unscheduled_section": "未排期 · {{count}}",
-    "pagination_warning": "还有 {{hidden}} 个 issue 未加载 — 排期可能不完整。",
-    "load_all": "加载全部",
+    "empty": "暂无已排期的 issue — 给任意 issue 设置开始或截止日期，即可显示在时间轴上。",
     "inverted_dates_warning": "开始日期晚于截止日期 — 已按区间最小/最大端绘制。"
   },
   "actor_issues": {
@@ -141,6 +137,7 @@
   },
   "detail": {
     "not_found": "这个 issue 不存在或已在该工作区被删除。",
+    "breadcrumb_project_unknown": "未知项目",
     "back_to_issues": "返回 issue 列表",
     "title_placeholder": "issue 标题",
     "desc_placeholder": "添加描述...",

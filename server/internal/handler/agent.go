@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -45,12 +46,16 @@ type AgentResponse struct {
 	Status             string              `json:"status"`
 	MaxConcurrentTasks int32               `json:"max_concurrent_tasks"`
 	Model              string              `json:"model"`
-	OwnerID            *string             `json:"owner_id"`
-	Skills             []AgentSkillSummary `json:"skills"`
-	CreatedAt          string              `json:"created_at"`
-	UpdatedAt          string              `json:"updated_at"`
-	ArchivedAt         *string             `json:"archived_at"`
-	ArchivedBy         *string             `json:"archived_by"`
+	// ThinkingLevel is the runtime-native reasoning/effort token persisted
+	// for this agent (empty = use runtime default). The picker is per-runtime
+	// per-model; the API never normalizes across providers. See MUL-2339.
+	ThinkingLevel string              `json:"thinking_level"`
+	OwnerID       *string             `json:"owner_id"`
+	Skills        []AgentSkillSummary `json:"skills"`
+	CreatedAt     string              `json:"created_at"`
+	UpdatedAt     string              `json:"updated_at"`
+	ArchivedAt    *string             `json:"archived_at"`
+	ArchivedBy    *string             `json:"archived_by"`
 }
 
 func agentToResponse(a db.Agent) AgentResponse {
@@ -104,6 +109,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		Status:             a.Status,
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
 		Model:              a.Model.String,
+		ThinkingLevel:      a.ThinkingLevel.String,
 		OwnerID:            uuidToPtr(a.OwnerID),
 		Skills:             []AgentSkillSummary{},
 		CreatedAt:          timestampToString(a.CreatedAt),
@@ -176,6 +182,14 @@ type AgentTaskResponse struct {
 	QuickCreatePrompt       string                `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
 	SquadID                 string                `json:"squad_id,omitempty"`                  // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
 	SquadName               string                `json:"squad_name,omitempty"`                // display name for the picker squad
+	// RequestingUserName + RequestingUserProfileDescription mirror the user
+	// the agent is acting on behalf of (see daemon/types.go). v1 sources them
+	// from the runtime owner so they're populated for daemon runtimes and
+	// empty otherwise. The daemon emits both into the brief under
+	// `## Requesting User`; the heading is skipped entirely when description
+	// is empty.
+	RequestingUserName               string `json:"requesting_user_name,omitempty"`
+	RequestingUserProfileDescription string `json:"requesting_user_profile_description,omitempty"`
 	Kind                    string                `json:"kind"`                                // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
 }
 
@@ -194,14 +208,15 @@ type ChatAttachmentMeta struct {
 // TaskAgentData holds agent info included in claim responses so the daemon
 // can set up the execution environment (branch naming, skill files, instructions).
 type TaskAgentData struct {
-	ID           string                   `json:"id"`
-	Name         string                   `json:"name"`
-	Instructions string                   `json:"instructions"`
-	Skills       []service.AgentSkillData `json:"skills,omitempty"`
-	CustomEnv    map[string]string        `json:"custom_env,omitempty"`
-	CustomArgs   []string                 `json:"custom_args,omitempty"`
-	McpConfig    json.RawMessage          `json:"mcp_config,omitempty"`
-	Model        string                   `json:"model,omitempty"`
+	ID            string                   `json:"id"`
+	Name          string                   `json:"name"`
+	Instructions  string                   `json:"instructions"`
+	Skills        []service.AgentSkillData `json:"skills,omitempty"`
+	CustomEnv     map[string]string        `json:"custom_env,omitempty"`
+	CustomArgs    []string                 `json:"custom_args,omitempty"`
+	McpConfig     json.RawMessage          `json:"mcp_config,omitempty"`
+	Model         string                   `json:"model,omitempty"`
+	ThinkingLevel string                   `json:"thinking_level,omitempty"`
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
@@ -392,6 +407,7 @@ type CreateAgentRequest struct {
 	Visibility         string            `json:"visibility"`
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
 	Model              string            `json:"model"`
+	ThinkingLevel      string            `json:"thinking_level"`
 	// Template records which template slug was used to seed this agent
 	// (e.g. "coding" / "planning" / "writing" / "assistant"). Empty when
 	// the caller didn't come from a template picker — the `agent_created`
@@ -482,6 +498,15 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// thinking_level validation: provider-level enum only. Per-model gaps
+	// are enforced by the daemon at execution time (MUL-2339, Trump's
+	// review note — keep API behaviour consistent: literal-invalid →
+	// always 400; combination-invalid → daemon-side task error).
+	if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", req.ThinkingLevel, runtime.Provider))
+		return
+	}
+
 	// Probe workspace agent count BEFORE the insert so the funnel has a
 	// clean "first agent ever in this workspace" signal — Step 4 of
 	// onboarding always lands in this branch. A non-fatal read: if the
@@ -512,7 +537,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		mc = append([]byte(nil), rawMcpConfig...)
 	}
 
-	agent, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
+	created, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:        wsUUID,
 		Name:               req.Name,
 		Description:        req.Description,
@@ -528,6 +553,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		CustomArgs:         ca,
 		McpConfig:          mc,
 		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
+		ThinkingLevel:      pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -541,21 +567,21 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create agent: "+err.Error())
 		return
 	}
-	slog.Info("agent created", append(logger.RequestAttrs(r), "agent_id", uuidToString(agent.ID), "name", agent.Name, "workspace_id", workspaceID)...)
+	slog.Info("agent created", append(logger.RequestAttrs(r), "agent_id", uuidToString(created.ID), "name", created.Name, "workspace_id", workspaceID)...)
 
 	if runtime.Status == "online" {
-		h.TaskService.ReconcileAgentStatus(r.Context(), agent.ID)
-		agent, _ = h.Queries.GetAgent(r.Context(), agent.ID)
+		h.TaskService.ReconcileAgentStatus(r.Context(), created.ID)
+		created, _ = h.Queries.GetAgent(r.Context(), created.ID)
 	}
 
-	resp := agentToResponse(agent)
+	resp := agentToResponse(created)
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": resp})
 
 	h.Analytics.Capture(analytics.AgentCreated(
 		ownerID,
 		workspaceID,
-		uuidToString(agent.ID),
+		uuidToString(created.ID),
 		runtime.Provider,
 		runtime.RuntimeMode,
 		req.Template,
@@ -579,6 +605,13 @@ type UpdateAgentRequest struct {
 	Status             *string            `json:"status"`
 	MaxConcurrentTasks *int32             `json:"max_concurrent_tasks"`
 	Model              *string            `json:"model"`
+	// ThinkingLevel is treated as a tri-state per-MUL-2339:
+	//   - field omitted → no change (leave existing value alone)
+	//   - field present with "" → explicit clear (use runtime default)
+	//   - field present with non-empty value → set (validated server-side)
+	// Distinguishing those modes is why this is a pointer; the raw-fields
+	// map captured at decode time tells us whether the key was sent.
+	ThinkingLevel *string `json:"thinking_level"`
 }
 
 // canViewAgentEnv checks whether the requesting user is allowed to see the
@@ -633,11 +666,11 @@ func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent d
 
 func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	agent, ok := h.loadAgentForUser(w, r, id)
+	existing, ok := h.loadAgentForUser(w, r, id)
 	if !ok {
 		return
 	}
-	if !h.canManageAgent(w, r, agent) {
+	if !h.canManageAgent(w, r, existing) {
 		return
 	}
 
@@ -649,7 +682,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := db.UpdateAgentParams{
-		ID: agent.ID,
+		ID: existing.ID,
 	}
 	if req.Name != nil {
 		params.Name = pgtype.Text{String: *req.Name, Valid: true}
@@ -684,6 +717,12 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if hasMcpConfig && !shouldClearMcpConfig {
 		params.McpConfig = append([]byte(nil), rawMcpConfig...)
 	}
+
+	// Resolve the runtime that will be in force after this update so the
+	// thinking_level validation hits the right provider enum. When the
+	// request doesn't move the agent, we still need to load the *current*
+	// runtime to validate a thinking_level change. Resolve once and reuse.
+	targetRuntimeID := existing.RuntimeID
 	if req.RuntimeID != nil {
 		runtimeUUID, ok := parseUUIDOrBadRequest(w, *req.RuntimeID, "runtime_id")
 		if !ok {
@@ -691,7 +730,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
 			ID:          runtimeUUID,
-			WorkspaceID: agent.WorkspaceID,
+			WorkspaceID: existing.WorkspaceID,
 		})
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid runtime_id")
@@ -700,7 +739,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		// Same gate as CreateAgent — prevents UpdateAgent from being used to
 		// re-bind an agent onto someone else's private runtime, which would
 		// otherwise be a quiet end-run around the CreateAgent check.
-		member, ok := h.workspaceMember(w, r, uuidToString(agent.WorkspaceID))
+		member, ok := h.workspaceMember(w, r, uuidToString(existing.WorkspaceID))
 		if !ok {
 			return
 		}
@@ -710,6 +749,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		params.RuntimeID = runtime.ID
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
+		targetRuntimeID = runtime.ID
 	}
 	if req.Visibility != nil {
 		params.Visibility = pgtype.Text{String: *req.Visibility, Valid: true}
@@ -724,30 +764,108 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.Model = pgtype.Text{String: *req.Model, Valid: true}
 	}
 
-	agent, err = h.Queries.UpdateAgent(r.Context(), params)
+	// thinking_level handling (MUL-2339). Tri-state semantics:
+	//   - field omitted  → leave column alone (COALESCE narg), but if a
+	//     runtime change in this same request would make the *existing*
+	//     value literal-invalid for the new provider, reject 400. This
+	//     closes the gap Elon's review flagged: previously, switching a
+	//     Claude agent storing `max` to a Codex runtime would silently
+	//     keep `max` and forward it to the daemon.
+	//   - field set to "" → explicit clear (run ClearAgentThinkingLevel post-update)
+	//   - field set to value → validate against the target runtime's provider
+	//     enum; reject literal-invalid with 400. Per-model combination checks
+	//     run in the daemon at execution time, not here — see Trump's review
+	//     constraint that API behaviour stays consistent across change paths.
+	shouldClearThinkingLevel := false
+	if req.ThinkingLevel != nil {
+		value := *req.ThinkingLevel
+		if value == "" {
+			shouldClearThinkingLevel = true
+		} else {
+			// Need the target runtime's provider to validate. Re-fetch only when
+			// we haven't already loaded it above (i.e. the request didn't change
+			// runtime_id), to keep the no-change path one DB roundtrip.
+			provider, ok := h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
+			if !ok {
+				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
+				return
+			}
+			if !agent.IsKnownThinkingValue(provider, value) {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", value, provider))
+				return
+			}
+			params.ThinkingLevel = pgtype.Text{String: value, Valid: true}
+		}
+	} else if req.RuntimeID != nil && existing.ThinkingLevel.Valid && existing.ThinkingLevel.String != "" {
+		// Runtime is changing but the caller didn't touch thinking_level.
+		// If the existing value is not in the new provider's enum at all,
+		// preserving it would smuggle a literal-invalid token to the daemon.
+		// Hold the same line as the explicit-set path: always 400 on
+		// literal-invalid, never silently coerce. The caller can either
+		// pass `thinking_level: ""` to clear or pick a value valid for the
+		// new runtime.
+		provider, ok := h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
+		if !ok {
+			writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
+			return
+		}
+		if !agent.IsKnownThinkingValue(provider, existing.ThinkingLevel.String) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf(
+				"existing thinking_level %q is not valid for runtime %q; pass thinking_level=\"\" to clear or set a value valid for the new runtime",
+				existing.ThinkingLevel.String, provider,
+			))
+			return
+		}
+	}
+
+	updated, err := h.Queries.UpdateAgent(r.Context(), params)
 	if err != nil {
 		slog.Warn("update agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to update agent: "+err.Error())
 		return
 	}
 
-	// mcp_config: null in the request means explicitly clear the field.
-	// COALESCE in UpdateAgent cannot set a column to NULL, so we use a dedicated query.
+	// mcp_config / thinking_level: null/empty in the request means explicitly
+	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL,
+	// so we use dedicated clear queries.
 	if shouldClearMcpConfig {
-		agent, err = h.Queries.ClearAgentMcpConfig(r.Context(), agent.ID)
+		updated, err = h.Queries.ClearAgentMcpConfig(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent mcp_config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear mcp_config: "+err.Error())
 			return
 		}
 	}
+	if shouldClearThinkingLevel {
+		updated, err = h.Queries.ClearAgentThinkingLevel(r.Context(), updated.ID)
+		if err != nil {
+			slog.Warn("clear agent thinking_level failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear thinking_level: "+err.Error())
+			return
+		}
+	}
 
-	resp := agentToResponse(agent)
-	slog.Info("agent updated", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", uuidToString(agent.WorkspaceID))...)
+	resp := agentToResponse(updated)
+	slog.Info("agent updated", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", uuidToString(updated.WorkspaceID))...)
 	userID := requestUserID(r)
-	actorType, actorID := h.resolveActor(r, userID, uuidToString(agent.WorkspaceID))
-	h.publish(protocol.EventAgentStatus, uuidToString(agent.WorkspaceID), actorType, actorID, map[string]any{"agent": resp})
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(updated.WorkspaceID))
+	h.publish(protocol.EventAgentStatus, uuidToString(updated.WorkspaceID), actorType, actorID, map[string]any{"agent": resp})
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// resolveAgentProvider returns the provider name for the runtime that
+// will own this agent after the in-flight update applies. Used by the
+// thinking_level validator so a runtime/model swap and a level swap
+// validated in the same request both consult the same provider.
+func (h *Handler) resolveAgentProvider(r *http.Request, workspaceID pgtype.UUID, runtimeID pgtype.UUID) (string, bool) {
+	rt, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+		ID:          runtimeID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return "", false
+	}
+	return rt.Provider, true
 }
 
 func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {

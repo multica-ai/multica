@@ -32,8 +32,13 @@ var workspaceGetCmd = &cobra.Command{
 	RunE:  runWorkspaceGet,
 }
 
-var workspaceMembersCmd = &cobra.Command{
-	Use:   "members [workspace-id]",
+var workspaceMemberCmd = &cobra.Command{
+	Use:   "member",
+	Short: "Manage workspace members",
+}
+
+var workspaceMemberListCmd = &cobra.Command{
+	Use:   "list [workspace-id]",
 	Short: "List workspace members",
 	Args:  cobra.MaximumNArgs(1),
 	RunE:  runWorkspaceMembers,
@@ -60,24 +65,18 @@ var workspaceSwitchCmd = &cobra.Command{
 	RunE: runWorkspaceSwitch,
 }
 
-var workspaceCurrentCmd = &cobra.Command{
-	Use:   "current",
-	Short: "Show the current default workspace",
-	RunE:  runWorkspaceCurrent,
-}
-
 func init() {
 	workspaceCmd.AddCommand(workspaceListCmd)
 	workspaceCmd.AddCommand(workspaceGetCmd)
-	workspaceCmd.AddCommand(workspaceMembersCmd)
+	workspaceCmd.AddCommand(workspaceMemberCmd)
+	workspaceMemberCmd.AddCommand(workspaceMemberListCmd)
 	workspaceCmd.AddCommand(workspaceUpdateCmd)
 	workspaceCmd.AddCommand(workspaceSwitchCmd)
-	workspaceCmd.AddCommand(workspaceCurrentCmd)
 
 	workspaceListCmd.Flags().String("output", "table", "Output format: table or json")
+	workspaceListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 	workspaceGetCmd.Flags().String("output", "json", "Output format: table or json")
-	workspaceMembersCmd.Flags().String("output", "table", "Output format: table or json")
-	workspaceCurrentCmd.Flags().String("output", "table", "Output format: table or json")
+	workspaceMemberListCmd.Flags().String("output", "table", "Output format: table or json")
 
 	workspaceUpdateCmd.Flags().String("name", "", "New workspace name")
 	workspaceUpdateCmd.Flags().String("description", "", "New description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
@@ -89,7 +88,7 @@ func init() {
 }
 
 // workspaceSummary is the subset of fields the CLI needs from /api/workspaces
-// to drive list/switch/current. Keeping it here (instead of using the full
+// to drive list and switch. Keeping it here (instead of using the full
 // WorkspaceResponse) avoids a dependency on the handler package.
 type workspaceSummary struct {
 	ID   string `json:"id"`
@@ -98,8 +97,8 @@ type workspaceSummary struct {
 }
 
 // fetchWorkspaces lists all workspaces the authenticated user belongs to. It
-// is shared by `list`, `switch`, and `current` so all three see the same
-// access-controlled view of workspaces.
+// is shared by `list` and `switch` so both see the same access-controlled view
+// of workspaces.
 func fetchWorkspaces(ctx context.Context, cmd *cobra.Command) ([]workspaceSummary, error) {
 	serverURL := resolveServerURL(cmd)
 	token := resolveToken(cmd)
@@ -135,6 +134,7 @@ func runWorkspaceList(cmd *cobra.Command, _ []string) error {
 	}
 
 	currentID := resolveWorkspaceID(cmd)
+	fullID, _ := cmd.Flags().GetBool("full-id")
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "\tID\tNAME\tSLUG")
 	for _, ws := range workspaces {
@@ -142,7 +142,7 @@ func runWorkspaceList(cmd *cobra.Command, _ []string) error {
 		if ws.ID == currentID {
 			marker = "*"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", marker, ws.ID, ws.Name, ws.Slug)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", marker, displayID(ws.ID, fullID), ws.Name, ws.Slug)
 	}
 	if err := w.Flush(); err != nil {
 		return err
@@ -206,41 +206,6 @@ func runWorkspaceSwitch(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Fprintf(os.Stdout, "Switched to workspace: %s (%s)\n", ws.Name, ws.ID)
-	return nil
-}
-
-func runWorkspaceCurrent(cmd *cobra.Command, _ []string) error {
-	currentID := resolveWorkspaceID(cmd)
-	if currentID == "" {
-		return fmt.Errorf("no default workspace set: use 'multica workspace switch <id|slug>' to pick one")
-	}
-
-	client, err := newAPIClient(cmd)
-	if err != nil {
-		return err
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	var ws map[string]any
-	if err := client.GetJSON(ctx, "/api/workspaces/"+currentID, &ws); err != nil {
-		return fmt.Errorf("get workspace: %w", err)
-	}
-
-	output, _ := cmd.Flags().GetString("output")
-	if output == "json" {
-		return cli.PrintJSON(os.Stdout, ws)
-	}
-
-	headers := []string{"ID", "NAME", "SLUG", "ISSUE PREFIX"}
-	rows := [][]string{{
-		strVal(ws, "id"),
-		strVal(ws, "name"),
-		strVal(ws, "slug"),
-		strVal(ws, "issue_prefix"),
-	}}
-	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
 }
 

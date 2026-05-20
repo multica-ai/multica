@@ -4,7 +4,6 @@ import { api } from "../api";
 import {
   issueKeys,
   ISSUE_PAGE_SIZE,
-  PAGINATED_STATUSES,
   type AssigneeGroupedIssuesFilter,
   type MyIssuesFilter,
 } from "./queries";
@@ -104,75 +103,6 @@ export function useLoadMoreByStatus(
   return { loadMore, hasMore, isLoading, total };
 }
 
-/**
- * Drain every remaining paginated page across all statuses into the cache.
- * Used by surfaces that can't paginate per-column (e.g. the Project Gantt
- * view) and need the full project issue set up-front. Each iteration appends
- * one ISSUE_PAGE_SIZE page per status that still has unfetched rows; loops
- * until the cache totals match the server.
- */
-export function useLoadAllRemaining(
-  myIssues?: { scope: string; filter: MyIssuesFilter },
-) {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  const [isLoading, setIsLoading] = useState(false);
-
-  const queryKey = myIssues
-    ? issueKeys.myList(wsId, myIssues.scope, myIssues.filter)
-    : issueKeys.list(wsId);
-
-  const loadAll = useCallback(async () => {
-    if (isLoading) return;
-    setIsLoading(true);
-    try {
-      // Round-trip the cache rather than caching `loaded` locally so a
-      // concurrent WS-driven update or another loadMore can't make us
-      // re-fetch an already-loaded page.
-      for (;;) {
-        const cache = qc.getQueryData<ListIssuesCache>(queryKey);
-        if (!cache) return;
-        const pending = PAGINATED_STATUSES.filter((status) => {
-          const bucket = cache.byStatus[status];
-          if (!bucket) return false;
-          return bucket.issues.length < bucket.total;
-        });
-        if (pending.length === 0) return;
-        const results = await Promise.all(
-          pending.map((status) =>
-            api
-              .listIssues({
-                status,
-                limit: ISSUE_PAGE_SIZE,
-                offset: cache.byStatus[status]!.issues.length,
-                ...myIssues?.filter,
-              })
-              .then((res) => ({ status, res })),
-          ),
-        );
-        qc.setQueryData<ListIssuesCache>(queryKey, (old) => {
-          if (!old) return old;
-          let next = old;
-          for (const { status, res } of results) {
-            const prev = getBucket(next, status);
-            const existingIds = new Set(prev.issues.map((i) => i.id));
-            const appended = res.issues.filter((i) => !existingIds.has(i.id));
-            next = setBucket(next, status, {
-              issues: [...prev.issues, ...appended],
-              total: res.total,
-            });
-          }
-          return next;
-        });
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isLoading, qc, queryKey, myIssues?.filter]);
-
-  return { loadAll, isLoading };
-}
-
 export function useLoadMoreByAssigneeGroup(
   group: Pick<IssueAssigneeGroup, "id" | "assignee_type" | "assignee_id">,
   queryKey: QueryKey,
@@ -251,6 +181,7 @@ export function useCreateIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
     },
   });
 }
@@ -327,6 +258,7 @@ export function useUpdateIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
       // Refresh the issue's attachments cache when the description editor
       // bound new uploads — the description editor reads `issueAttachments`
       // to resolve text-preview Eye gates, and unlike other mutations this
@@ -410,6 +342,7 @@ export function useDeleteIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
       if (ctx?.metadata) invalidateDeletedIssueParentCaches(qc, wsId, ctx.metadata);
     },
   });
@@ -469,6 +402,7 @@ export function useBatchUpdateIssues() {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
       if (ctx?.affectedParentIds && ctx.affectedParentIds.size > 0) {
         for (const parentId of ctx.affectedParentIds) {
           qc.invalidateQueries({
@@ -571,6 +505,7 @@ export function useBatchDeleteIssues() {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
       if (ctx?.parentIssueIds && ctx.parentIssueIds.size > 0) {
         invalidateDeletedIssueParentCaches(qc, wsId, {
           parentIssueIds: Array.from(ctx.parentIssueIds),

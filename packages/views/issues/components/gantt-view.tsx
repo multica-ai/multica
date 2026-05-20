@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Info, Loader2 } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
@@ -436,59 +435,11 @@ function ScheduledRow({
   );
 }
 
-function UnscheduledRow({ issue }: { issue: Issue }) {
-  const p = useWorkspacePaths();
-  return (
-    <IssueActionsContextMenu issue={issue}>
-      <AppLink
-        href={p.issueDetail(issue.id)}
-        className="sticky left-0 z-[1] flex items-center gap-2 bg-background px-3 py-1.5 text-sm hover:bg-accent/40 transition-colors border-b border-foreground/5"
-        style={{ width: LEFT_COL_WIDTH }}
-      >
-        <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
-        <PriorityIcon priority={issue.priority} />
-        <span className="w-14 shrink-0 text-xs text-muted-foreground tabular-nums truncate">
-          {issue.identifier}
-        </span>
-        <span className="truncate flex-1">{issue.title}</span>
-        {issue.assignee_type && issue.assignee_id && (
-          <ActorAvatar
-            actorType={issue.assignee_type}
-            actorId={issue.assignee_id}
-            size={18}
-            enableHoverCard
-          />
-        )}
-      </AppLink>
-    </IssueActionsContextMenu>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // GanttView — public component
 // ---------------------------------------------------------------------------
 
-/**
- * Pagination meta surfaced by the host so the Gantt can warn the user when
- * the in-memory issue list is incomplete. Unlike Board/List, Gantt has no
- * column-level load-more, so without this it would silently render a
- * partial schedule.
- */
-export interface GanttPaginationProps {
-  loaded: number;
-  total: number;
-  hasMore: boolean;
-  isLoadingMore: boolean;
-  onLoadAll: () => void | Promise<void>;
-}
-
-export function GanttView({
-  issues,
-  pagination,
-}: {
-  issues: Issue[];
-  pagination?: GanttPaginationProps;
-}) {
+export function GanttView({ issues }: { issues: Issue[] }) {
   const { t } = useT("issues");
   const zoom = useViewStore((s) => s.ganttZoom);
   const showCompleted = useViewStore((s) => s.ganttShowCompleted);
@@ -499,24 +450,21 @@ export function GanttView({
   const today = useMemo(() => startOfDayUTC(new Date()), []);
   const dayPx = DAY_PX_BY_ZOOM[zoom];
 
-  const visibleIssues = useMemo(() => {
+  // The data source only delivers scheduled issues (server-side
+  // `scheduled=true`), but a row can still arrive here without a date — for
+  // example, a WS-driven optimistic patch that just cleared start_date /
+  // due_date and is waiting for the cache to refetch. Filter defensively so
+  // the timeline never renders a blank lane in that brief window.
+  const scheduled = useMemo(() => {
+    const dated = issues.filter((i) => i.start_date || i.due_date);
     const filtered = showCompleted
-      ? issues
-      : issues.filter((i) => i.status !== "done" && i.status !== "cancelled");
+      ? dated
+      : dated.filter((i) => i.status !== "done" && i.status !== "cancelled");
     // "position" makes no sense on a gantt — default to start_date asc when
     // the user hasn't picked a more specific sort.
     const sortField = sortBy === "position" ? "start_date" : sortBy;
     return sortIssues(filtered, sortField, sortDirection);
   }, [issues, showCompleted, sortBy, sortDirection]);
-
-  const scheduled = useMemo(
-    () => visibleIssues.filter((i) => i.start_date || i.due_date),
-    [visibleIssues],
-  );
-  const unscheduled = useMemo(
-    () => visibleIssues.filter((i) => !i.start_date && !i.due_date),
-    [visibleIssues],
-  );
 
   const range = useMemo(
     () => computeRange(scheduled, today, zoom),
@@ -534,20 +482,13 @@ export function GanttView({
     el.scrollLeft = target;
   }, [todayOffsetDays, dayPx]);
 
-  const [unscheduledOpen, setUnscheduledOpen] = useState(false);
-
-  if (visibleIssues.length === 0) {
+  if (scheduled.length === 0) {
     return (
       <div className="flex-1 min-h-0 flex items-center justify-center text-sm text-muted-foreground">
         {t(($) => $.gantt.empty)}
       </div>
     );
   }
-
-  const hiddenCount =
-    pagination && pagination.hasMore
-      ? Math.max(0, pagination.total - pagination.loaded)
-      : 0;
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -587,30 +528,6 @@ export function GanttView({
         </Button>
       </div>
 
-      {hiddenCount > 0 && pagination && (
-        <div className="flex shrink-0 items-center gap-2 border-b bg-warning/10 px-3 py-1.5 text-xs">
-          <Info className="size-3.5 shrink-0 text-warning" />
-          <span className="text-muted-foreground">
-            {t(($) => $.gantt.pagination_warning, { hidden: hiddenCount })}
-          </span>
-          <div className="flex-1" />
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-6 text-xs"
-            disabled={pagination.isLoadingMore}
-            onClick={() => {
-              void pagination.onLoadAll();
-            }}
-          >
-            {pagination.isLoadingMore && (
-              <Loader2 className="size-3 animate-spin" />
-            )}
-            {t(($) => $.gantt.load_all)}
-          </Button>
-        </div>
-      )}
-
       {/* Body — single scroll container drives both vertical + horizontal */}
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto">
         <div style={{ minWidth: LEFT_COL_WIDTH + timelineWidth }}>
@@ -634,64 +551,30 @@ export function GanttView({
           </div>
 
           {/* Scheduled rows + background overlay */}
-          {scheduled.length > 0 ? (
-            <div className="relative">
-              {/* Background gridlines + today line spanning all rows. Positioned
-                  starting after the left label column. */}
-              <div
-                className="pointer-events-none absolute top-0"
-                style={{ left: LEFT_COL_WIDTH, width: timelineWidth }}
-              >
-                <BackgroundLayer
-                  range={range}
-                  dayPx={dayPx}
-                  height={scheduled.length * ROW_HEIGHT}
-                  todayOffsetDays={todayOffsetDays}
-                />
-              </div>
-              {scheduled.map((issue) => (
-                <ScheduledRow
-                  key={issue.id}
-                  issue={issue}
-                  range={range}
-                  dayPx={dayPx}
-                  totalDays={totalDays}
-                />
-              ))}
-            </div>
-          ) : (
+          <div className="relative">
+            {/* Background gridlines + today line spanning all rows. Positioned
+                starting after the left label column. */}
             <div
-              className="flex items-center py-10 text-sm text-muted-foreground border-b"
-              style={{ paddingLeft: LEFT_COL_WIDTH + 12 }}
+              className="pointer-events-none absolute top-0"
+              style={{ left: LEFT_COL_WIDTH, width: timelineWidth }}
             >
-              {t(($) => $.gantt.no_scheduled)}
+              <BackgroundLayer
+                range={range}
+                dayPx={dayPx}
+                height={scheduled.length * ROW_HEIGHT}
+                todayOffsetDays={todayOffsetDays}
+              />
             </div>
-          )}
-
-          {/* Unscheduled section */}
-          {unscheduled.length > 0 && (
-            <div className="border-t bg-muted/15">
-              <button
-                className="sticky left-0 z-[1] flex items-center gap-2 px-3 py-2 text-left text-xs font-medium hover:bg-accent/40 transition-colors w-full bg-muted/15"
-                onClick={() => setUnscheduledOpen((v) => !v)}
-                style={{ width: LEFT_COL_WIDTH }}
-              >
-                <ChevronRight
-                  className={cn(
-                    "size-3.5 text-muted-foreground transition-transform",
-                    unscheduledOpen && "rotate-90",
-                  )}
-                />
-                <span className="text-muted-foreground">
-                  {t(($) => $.gantt.unscheduled_section, { count: unscheduled.length })}
-                </span>
-              </button>
-              {unscheduledOpen &&
-                unscheduled.map((issue) => (
-                  <UnscheduledRow key={issue.id} issue={issue} />
-                ))}
-            </div>
-          )}
+            {scheduled.map((issue) => (
+              <ScheduledRow
+                key={issue.id}
+                issue={issue}
+                range={range}
+                dayPx={dayPx}
+                totalDays={totalDays}
+              />
+            ))}
+          </div>
         </div>
       </div>
     </div>

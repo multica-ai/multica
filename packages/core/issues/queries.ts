@@ -28,6 +28,17 @@ export const issueKeys = {
     scope: string,
     filter: AssigneeGroupedIssuesFilter,
   ) => [...issueKeys.myAssigneeGroupsAll(wsId), scope, filter] as const,
+  /** All Project Gantt queries — prefix-match key for cross-project invalidation. */
+  projectGanttAll: (wsId: string) =>
+    [...issueKeys.all(wsId), "project-gantt"] as const,
+  /**
+   * Per-project Gantt issue list (scheduled-only). Uses its own cache key
+   * rather than reusing the bucketed `myList` cache so WS handlers and
+   * cache helpers don't have to special-case a non-bucketed shape under
+   * the `my` prefix.
+   */
+  projectGantt: (wsId: string, projectId: string) =>
+    [...issueKeys.projectGanttAll(wsId), projectId] as const,
   detail: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "detail", id] as const,
   children: (wsId: string, id: string) =>
@@ -77,34 +88,6 @@ export function flattenIssueBuckets(data: ListIssuesCache) {
     if (bucket) out.push(...bucket.issues);
   }
   return out;
-}
-
-export interface IssueListPagination {
-  loaded: number;
-  total: number;
-  hasMore: boolean;
-}
-
-/**
- * Aggregate the bucketed cache totals so non-paginated consumers (e.g. the
- * Gantt view, which doesn't have a per-status load-more affordance) can tell
- * whether the cache is missing pages and warn the user instead of silently
- * rendering an incomplete schedule.
- */
-export function summarizeIssueListPagination(
-  data: ListIssuesCache | undefined,
-): IssueListPagination {
-  if (!data) return { loaded: 0, total: 0, hasMore: false };
-  let loaded = 0;
-  let total = 0;
-  for (const status of PAGINATED_STATUSES) {
-    const bucket = data.byStatus[status];
-    if (bucket) {
-      loaded += bucket.issues.length;
-      total += bucket.total;
-    }
-  }
-  return { loaded, total, hasMore: loaded < total };
 }
 
 async function fetchFirstPages(filter: MyIssuesFilter = {}): Promise<ListIssuesCache> {
@@ -171,20 +154,55 @@ export function myIssueListOptions(
 }
 
 /**
- * Same cache entry as {@link myIssueListOptions} (shared queryKey + queryFn —
- * TanStack Query dedupes), but `select` derives a pagination summary instead
- * of the flat issue list. Use this alongside the list query when a consumer
- * needs to know how many issues live behind unfetched pages.
+ * Page size for the scheduled-issue fetch. The Gantt view always pulls every
+ * scheduled issue (no client pagination), so this is just the chunk size we
+ * use to walk the server's `(limit, offset)` window until we hit `total`.
  */
-export function myIssueListPaginationOptions(
-  wsId: string,
-  scope: string,
-  filter: MyIssuesFilter,
-) {
+export const PROJECT_GANTT_PAGE_LIMIT = 500;
+
+/**
+ * Paranoia cap on the loop in {@link fetchProjectGanttIssues}. Real projects
+ * shouldn't come close to this — a single project carrying 50k scheduled
+ * issues is already a product problem, not a Gantt-rendering one — but the
+ * guard prevents a buggy server `total` from spinning the loop forever.
+ */
+export const PROJECT_GANTT_MAX_ISSUES = 10_000;
+
+async function fetchProjectGanttIssues(projectId: string) {
+  const issues = [];
+  let offset = 0;
+  while (offset < PROJECT_GANTT_MAX_ISSUES) {
+    const res = await api.listIssues({
+      project_id: projectId,
+      scheduled: true,
+      limit: PROJECT_GANTT_PAGE_LIMIT,
+      offset,
+    });
+    issues.push(...res.issues);
+    if (res.issues.length < PROJECT_GANTT_PAGE_LIMIT) break;
+    if (issues.length >= res.total) break;
+    offset += PROJECT_GANTT_PAGE_LIMIT;
+  }
+  return issues;
+}
+
+/**
+ * One-shot fetch of every scheduled issue (`start_date` or `due_date` set)
+ * for a project. The Project Gantt view consumes this directly — no status
+ * bucketing, no client-side pagination, no Load-all affordance — because
+ * the scheduled subset is bounded enough to come back in a small handful of
+ * requests.
+ *
+ * Backed by `GET /api/issues?scheduled=true&project_id=…`; the SQL filter
+ * mirrors the same `(start_date IS NOT NULL OR due_date IS NOT NULL)`
+ * predicate the Gantt view applies on the client. Pages are walked until
+ * `total` is reached so an oversized project can't silently lose bars past
+ * the first page.
+ */
+export function projectGanttIssuesOptions(wsId: string, projectId: string) {
   return queryOptions({
-    queryKey: issueKeys.myList(wsId, scope, filter),
-    queryFn: () => fetchFirstPages(filter),
-    select: summarizeIssueListPagination,
+    queryKey: issueKeys.projectGantt(wsId, projectId),
+    queryFn: () => fetchProjectGanttIssues(projectId),
   });
 }
 

@@ -15,6 +15,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -56,9 +57,16 @@ type UserResponse struct {
 	OnboardedAt             *string         `json:"onboarded_at"`
 	OnboardingQuestionnaire json.RawMessage `json:"onboarding_questionnaire"`
 	StarterContentState     *string         `json:"starter_content_state"`
+	ProfileDescription      string          `json:"profile_description"`
 	CreatedAt               string          `json:"created_at"`
 	UpdatedAt               string          `json:"updated_at"`
 }
+
+// MaxProfileDescriptionLen caps the user-supplied profile_description body.
+// Picked at 2000 chars per MUL-2406: enough room for role / stack / a few
+// preferences, short enough that injecting it into every agent brief
+// doesn't move the needle on prompt cost.
+const MaxProfileDescriptionLen = 2000
 
 func userToResponse(u db.User) UserResponse {
 	// JSONB column is []byte with DEFAULT '{}', so it's never nil at the DB
@@ -77,6 +85,7 @@ func userToResponse(u db.User) UserResponse {
 		OnboardedAt:             timestampToPtr(u.OnboardedAt),
 		OnboardingQuestionnaire: json.RawMessage(q),
 		StarterContentState:     textToPtr(u.StarterContentState),
+		ProfileDescription:      u.ProfileDescription,
 		CreatedAt:               timestampToString(u.CreatedAt),
 		UpdatedAt:               timestampToString(u.UpdatedAt),
 	}
@@ -421,9 +430,10 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateMeRequest struct {
-	Name      *string `json:"name"`
-	AvatarURL *string `json:"avatar_url"`
-	Language  *string `json:"language"`
+	Name               *string `json:"name"`
+	AvatarURL          *string `json:"avatar_url"`
+	Language           *string `json:"language"`
+	ProfileDescription *string `json:"profile_description"`
 }
 
 type GoogleLoginRequest struct {
@@ -667,6 +677,17 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.Language = pgtype.Text{String: lang, Valid: true}
+	}
+	if req.ProfileDescription != nil {
+		// Count runes, not bytes: 2000 chars of Chinese must not be rejected
+		// as ~6000 bytes. utf8.RuneCountInString handles invalid UTF-8 by
+		// counting each bad byte as one rune, which still bounds the column.
+		desc := strings.TrimSpace(*req.ProfileDescription)
+		if utf8.RuneCountInString(desc) > MaxProfileDescriptionLen {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("profile_description exceeds %d characters", MaxProfileDescriptionLen))
+			return
+		}
+		params.ProfileDescription = pgtype.Text{String: desc, Valid: true}
 	}
 
 	updatedUser, err := h.Queries.UpdateUser(r.Context(), params)

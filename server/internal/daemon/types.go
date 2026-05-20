@@ -61,6 +61,14 @@ type Task struct {
 	QuickCreatePrompt       string          `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
 	SquadID                 string          `json:"squad_id,omitempty"`                  // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
 	SquadName               string          `json:"squad_name,omitempty"`                // display name for the picker squad, used in prompt text
+	// RequestingUserName + RequestingUserProfileDescription describe the human
+	// the agent is working on behalf of. v1 sources them from the runtime
+	// owner (the user who registered the daemon). Empty when the runtime has
+	// no owner (cloud / system runtimes) or the user hasn't set a description.
+	// Injected into the brief under `## Requesting User`; omitted entirely
+	// when description is empty so the agent doesn't see a useless heading.
+	RequestingUserName               string `json:"requesting_user_name,omitempty"`
+	RequestingUserProfileDescription string `json:"requesting_user_profile_description,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon
@@ -76,14 +84,15 @@ type ChatAttachmentMeta struct {
 
 // AgentData holds agent details returned by the claim endpoint.
 type AgentData struct {
-	ID           string            `json:"id"`
-	Name         string            `json:"name"`
-	Instructions string            `json:"instructions"`
-	Skills       []SkillData       `json:"skills"`
-	CustomEnv    map[string]string `json:"custom_env,omitempty"`
-	CustomArgs   []string          `json:"custom_args,omitempty"`
-	McpConfig    json.RawMessage   `json:"mcp_config,omitempty"`
-	Model        string            `json:"model,omitempty"`
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	Instructions  string            `json:"instructions"`
+	Skills        []SkillData       `json:"skills"`
+	CustomEnv     map[string]string `json:"custom_env,omitempty"`
+	CustomArgs    []string          `json:"custom_args,omitempty"`
+	McpConfig     json.RawMessage   `json:"mcp_config,omitempty"`
+	Model         string            `json:"model,omitempty"`
+	ThinkingLevel string            `json:"thinking_level,omitempty"`
 }
 
 // SkillData represents a structured skill for task execution.
