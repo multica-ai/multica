@@ -55,8 +55,8 @@ export async function completeOnboarding(
 
 /**
  * Runtime-connected onboarding path. The server creates or reuses the
- * default Multica Helper agent and the single onboarding issue, marks
- * onboarding complete, and suppresses the older starter-content prompt.
+ * default Multica Helper agent and the single onboarding issue, then
+ * marks onboarding complete.
  */
 export async function bootstrapRuntimeOnboarding(
   workspaceId: string,
@@ -72,8 +72,7 @@ export async function bootstrapRuntimeOnboarding(
 
 /**
  * Runtime-skipped onboarding path. The server creates or reuses one
- * self-serve onboarding issue, marks onboarding complete, and suppresses
- * the older starter-content prompt so the user is not flooded with tasks.
+ * install-runtime onboarding issue and marks onboarding complete.
  */
 export async function bootstrapNoRuntimeOnboarding(
   workspaceId: string,

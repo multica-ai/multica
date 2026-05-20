@@ -29,7 +29,7 @@ interface CodeBlockIframeProps {
   /** Iframe title for accessibility. */
   title: string;
   className?: string;
-  /** Tailwind height token; defaults to h-[320px]. */
+  /** Tailwind height token; defaults to h-[480px]. */
   heightClassName?: string;
 }
 
@@ -37,7 +37,7 @@ export function CodeBlockIframe({
   html,
   title,
   className,
-  heightClassName = "h-[320px]",
+  heightClassName = "h-[480px]",
 }: CodeBlockIframeProps) {
   return (
     <iframe

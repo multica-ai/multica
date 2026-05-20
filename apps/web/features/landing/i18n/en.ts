@@ -285,6 +285,35 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.4",
+        date: "2026-05-20",
+        title: "Smarter Autopilots, Agent Controls & Desktop Reliability",
+        changes: [],
+        features: [
+          "Autopilots can assign new work through squads and place created Issues directly into a selected Project",
+          "Agent settings now include per-agent thinking controls for Claude and Codex, with an inspector picker that updates instantly",
+          "Desktop tabs can be pinned so important workspace pages stay parked while new links open in fresh tabs",
+          "User profiles can add requester context, giving coding agents better background for assigned Issues",
+          "Workspace settings now have a dedicated GitHub page, and regular members can see connected GitHub installations without admin controls",
+        ],
+        improvements: [
+          "New users are guided to connect a runtime instead of receiving starter content that may not match their workspace",
+          "Runtime pages are quieter, and desktop keeps the local machine visible after stopping the local service",
+          "Issue breadcrumbs show the Project segment when an Issue belongs to a Project",
+          "HTML previews and attachment previews have roomier, more predictable layouts",
+          "Squad pages show fuller loading states and use a clearer archive confirmation dialog",
+          "Agents now receive parent and sub-issue handoff guidance before running assigned work",
+        ],
+        fixes: [
+          "List editing exits cleanly from an empty top-level item when pressing Enter",
+          "The installer falls back to release binaries when Homebrew setup fails and reports clearer diagnostics",
+          "Retrying an execution log row now reruns the agent that handled that row",
+          "Chat and task-message loading ignore temporary IDs instead of calling invalid task routes",
+          "OpenCode-backed daemon runs no longer enter invisible interactive question prompts",
+          "Gemini runtimes use the correct official icon",
+        ],
+      },
+      {
         version: "0.3.3",
         date: "2026-05-19",
         title: "Project Timelines, Runtime Setup & Clearer Issue Work",

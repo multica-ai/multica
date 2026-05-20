@@ -16,8 +16,7 @@ import { useT } from "../../i18n";
  * Runtime-skipped finalizer. The runtime-connected path now bootstraps one
  * default assistant plus one onboarding issue server-side and routes there
  * directly. This step remains for users who skip runtime connection: it only
- * flips `onboarded_at`, then lands them in the workspace where the self-serve
- * starter-content prompt can run.
+ * flips `onboarded_at` and lands them in the workspace.
  * Two consequences of that move:
  *
  *   1. This step can't fail in user-visible ways any more. `completeOnboarding`

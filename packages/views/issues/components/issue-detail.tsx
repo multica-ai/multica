@@ -85,6 +85,7 @@ import { collectThreadReplies } from "./thread-utils";
 import { AgentLiveCard } from "./agent-live-card";
 import { ExecutionLogSection } from "./execution-log-section";
 import { PullRequestList } from "./pull-request-list";
+import { useGitHubSettings } from "@multica/core/github";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -92,6 +93,8 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { useClearIssueHistory } from "@multica/core/issues/mutations";
+import { projectDetailOptions } from "@multica/core/projects/queries";
+import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
@@ -869,6 +872,7 @@ export function IssueDetail({
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
   const [previewLogs, setPreviewLogs] = useState<{ title: string; logs: string } | null>(null);
+  const githubSettings = useGitHubSettings();
 
   // Per-issue, per-session set of optional properties currently visible in
   // the sidebar Properties section. Seeded on issue switch with whichever
@@ -1276,6 +1280,14 @@ export function IssueDetail({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
     initialData: () => allIssues.find((i) => i.id === parentIssueId),
+  });
+
+  // Project segment in the breadcrumb. The issue's project_id is the source of
+  // truth — same URL renders the same breadcrumb regardless of entry path.
+  const issueProjectId = issue?.project_id;
+  const { data: breadcrumbProject = null, isError: breadcrumbProjectError } = useQuery({
+    ...projectDetailOptions(wsId, issueProjectId ?? ""),
+    enabled: !!issueProjectId,
   });
   const { data: childIssues = [] } = useQuery({
     ...childIssuesOptions(wsId, resolvedId),
@@ -1910,17 +1922,21 @@ export function IssueDetail({
         </div>
       )}
 
-      {/* Pull requests */}
-      <div>
-        <button
-          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${pullRequestsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-          onClick={() => setPullRequestsOpen(!pullRequestsOpen)}
-        >
-          {t(($) => $.detail.section_pull_requests)}
-          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${pullRequestsOpen ? "rotate-90" : ""}`} />
-        </button>
-        {pullRequestsOpen && <div className="pl-2"><PullRequestList issueId={id} /></div>}
-      </div>
+      {/* Pull requests — hidden when the workspace disables the PR sidebar
+          (or the GitHub master switch is off). Backend data is kept either
+          way so re-enabling restores the section instantly. */}
+      {githubSettings.prSidebar && (
+        <div>
+          <button
+            className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${pullRequestsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+            onClick={() => setPullRequestsOpen(!pullRequestsOpen)}
+          >
+            {t(($) => $.detail.section_pull_requests)}
+            <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${pullRequestsOpen ? "rotate-90" : ""}`} />
+          </button>
+          {pullRequestsOpen && <div className="pl-2"><PullRequestList issueId={id} /></div>}
+        </div>
+      )}
 
       {/* Details */}
       <div>
@@ -2080,6 +2096,26 @@ export function IssueDetail({
                 >
                   {workspace.name}
                 </AppLink>
+                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+              </>
+            )}
+            {issueProjectId && (
+              <>
+                {breadcrumbProject ? (
+                  <AppLink
+                    href={paths.projectDetail(breadcrumbProject.id)}
+                    className="flex items-center gap-1 min-w-0 max-w-72 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <ProjectIcon project={breadcrumbProject} size="sm" />
+                    <span className="min-w-0 truncate">{breadcrumbProject.title}</span>
+                  </AppLink>
+                ) : breadcrumbProjectError ? (
+                  <span className="italic text-muted-foreground/70 shrink-0">
+                    {t(($) => $.detail.breadcrumb_project_unknown)}
+                  </span>
+                ) : (
+                  <Skeleton className="h-3.5 w-20 shrink-0" />
+                )}
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}

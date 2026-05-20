@@ -312,6 +312,8 @@ func TestBootstrapOnboardingRuntimeCreatesSingleGuideIssue(t *testing.T) {
 	if onboardedAt == nil {
 		t.Fatal("expected onboarded_at to be set")
 	}
+	// starter_content_state is claimed defensively so older desktop builds
+	// (which still render the legacy import dialog on NULL) don't surface it.
 	if starterContentState == nil || *starterContentState != "imported" {
 		t.Fatalf("starter_content_state = %v, want imported", starterContentState)
 	}

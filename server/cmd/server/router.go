@@ -345,8 +345,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/me/onboarding/runtime-bootstrap", h.BootstrapOnboardingRuntime)
 		r.Post("/api/me/onboarding/no-runtime-bootstrap", h.BootstrapOnboardingNoRuntime)
 		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)
-		r.Post("/api/me/starter-content/import", h.ImportStarterContent)
-		r.Post("/api/me/starter-content/dismiss", h.DismissStarterContent)
 		r.Post("/api/cli-token", h.IssueCliToken)
 		r.Post("/api/upload-file", h.UploadFile)
 		r.Post("/api/feedback", h.CreateFeedback)
@@ -369,6 +367,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/agent-defaults/duplicate/{configId}", h.DuplicateAgentDefaults)
 					r.Get("/instructions-history", h.ListInstructionsHistory)
 					r.Get("/instructions-history/{versionId}", h.GetInstructionsHistory)
+					r.Get("/github/installations", h.ListGitHubInstallations)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -390,12 +389,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/invite-links/{invitationId}", h.RevokeInviteLink)
 				})
 
-				// GitHub integration — admin-only operations live here so the
-				// nesting matches the rest of /api/workspaces/{id}/* routes.
+				// GitHub integration — connect / disconnect remain admin-only;
+				// the read-only list endpoint lives in the member-level group
+				// above so non-admins can see the workspace's connection state.
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Get("/github/connect", h.GitHubConnect)
-					r.Get("/github/installations", h.ListGitHubInstallations)
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
 					// Gitee webhook config
 					r.Post("/gitee/webhook-configs", h.CreateGiteeWebhookConfig)

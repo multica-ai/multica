@@ -130,11 +130,32 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
 
   const handleUpdate = async (id: string, data: Record<string, unknown>) => {
     if (!canEdit.allowed) return;
+    // Optimistic update
+    const queryKey = workspaceKeys.agents(wsId);
+    const prevAgents = qc.getQueryData<Agent[]>(queryKey);
+    const prevAgent = prevAgents?.find((a) => a.id === id);
+    const prevFields: Record<string, unknown> = {};
+    if (prevAgent) {
+      for (const key of Object.keys(data)) {
+        prevFields[key] = (prevAgent as unknown as Record<string, unknown>)[key];
+      }
+    }
+    qc.setQueryData<Agent[]>(queryKey, (old) =>
+      old?.map((a) => (a.id === id ? ({ ...a, ...data } as Agent) : a)),
+    );
     try {
       await api.updateAgent(id, data as UpdateAgentRequest);
-      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      qc.invalidateQueries({ queryKey });
       toast.success(t(($) => $.detail.agent_updated_toast));
     } catch (e) {
+      if (prevAgent) {
+        qc.setQueryData<Agent[]>(queryKey, (old) =>
+          old?.map((a) =>
+            a.id === id ? ({ ...a, ...prevFields } as Agent) : a,
+          ),
+        );
+      }
+      qc.invalidateQueries({ queryKey });
       toast.error(e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast));
       throw e;
     }

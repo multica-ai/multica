@@ -835,9 +835,9 @@ func TestOpencodeWindowsPackageCandidatesAmd64(t *testing.T) {
 
 // fakeOpencodeScript returns a POSIX-sh script that impersonates `opencode`
 // for argv / env capture. It writes the argv (one per line) to
-// $OPENCODE_ARGS_FILE and the resolved PWD to $OPENCODE_PWD_FILE, emits a
-// minimal completed step on stdout so the daemon's event loop terminates,
-// then exits.
+// $OPENCODE_ARGS_FILE, the resolved PWD to $OPENCODE_PWD_FILE, and the
+// permission config to $OPENCODE_PERMISSION_FILE. It emits a minimal completed
+// step on stdout so the daemon's event loop terminates, then exits.
 func fakeOpencodeScript() string {
 	return `#!/bin/sh
 if [ -n "$OPENCODE_ARGS_FILE" ]; then
@@ -848,10 +848,28 @@ fi
 if [ -n "$OPENCODE_PWD_FILE" ]; then
   printf '%s\n' "$PWD" > "$OPENCODE_PWD_FILE"
 fi
+if [ -n "$OPENCODE_PERMISSION_FILE" ]; then
+  printf '%s\n' "$OPENCODE_PERMISSION" > "$OPENCODE_PERMISSION_FILE"
+fi
+if [ -f "$PWD/opencode.json" ] && grep -Eq '"question"[[:space:]]*:[[:space:]]*"allow"' "$PWD/opencode.json"; then
+  if [ "$OPENCODE_PERMISSION" = '{"*":"allow","question":"deny"}' ]; then
+    printf '{"type":"error","timestamp":1,"sessionID":"ses_fake","error":{"name":"PermissionBypass","data":{"message":"question permission bypassed by env wildcard order"}}}\n'
+    exit 0
+  fi
+fi
 printf '{"type":"step_start","timestamp":1,"sessionID":"ses_fake","part":{"type":"step-start"}}\n'
 printf '{"type":"text","timestamp":2,"sessionID":"ses_fake","part":{"type":"text","text":"ok"}}\n'
 printf '{"type":"step_finish","timestamp":3,"sessionID":"ses_fake","part":{"type":"step-finish"}}\n'
 `
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 // TestOpencodeBackendAnchorsDirAndPWD pins the discovery-root fix from
@@ -933,6 +951,106 @@ func TestOpencodeBackendAnchorsDirAndPWD(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(gotPWD)); got != workDir {
 		t.Errorf("child PWD = %q, want %q", got, workDir)
+	}
+}
+
+func TestOpencodeBackendDoesNotUsePermissionEnvOverride(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	permissionFile := filepath.Join(tempDir, "permission.json")
+	fakePath := filepath.Join(tempDir, "opencode")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScript()))
+
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"OPENCODE_PERMISSION_FILE": permissionFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new opencode backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	<-session.Result
+
+	raw, err := os.ReadFile(permissionFile)
+	if err != nil {
+		t.Fatalf("read permission file: %v", err)
+	}
+	if got := strings.TrimSpace(string(raw)); got != "" {
+		t.Fatalf("OPENCODE_PERMISSION = %q, want empty env override", got)
+	}
+}
+
+func TestOpencodeBackendQuestionDenySurvivesUserConfig(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	argsFile := filepath.Join(tempDir, "argv.txt")
+	fakePath := filepath.Join(tempDir, "opencode")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScript()))
+
+	workDir := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(workDir, "opencode.json"),
+		[]byte(`{"permission":{"question":"allow"}}`),
+		0o644,
+	); err != nil {
+		t.Fatalf("write opencode config: %v", err)
+	}
+
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"OPENCODE_ARGS_FILE": argsFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new opencode backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:     workDir,
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("result status = %q, error = %q; want completed", result.Status, result.Error)
+	}
+
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if !containsString(args, "--dangerously-skip-permissions") {
+		t.Fatalf("expected daemon-mode argv to include --dangerously-skip-permissions, got %q", args)
 	}
 }
 

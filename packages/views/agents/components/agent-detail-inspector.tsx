@@ -52,6 +52,7 @@ import {
   StreamPicker,
   type StreamMode,
 } from "./inspector/stream-picker";
+import { ThinkingPropRow } from "./inspector/thinking-prop-row";
 import { VisibilityPicker } from "./inspector/visibility-picker";
 
 interface InspectorProps {
@@ -169,6 +170,14 @@ export function AgentDetailInspector({
             onChange={(m) => update({ model: m })}
           />
         </PropRow>
+        <ThinkingPropRow
+          runtimeId={agent.runtime_id}
+          runtimeOnline={!!isOnline}
+          model={agent.model ?? ""}
+          value={agent.thinking_level ?? ""}
+          canEdit={canEdit}
+          onChange={(v) => update({ thinking_level: v })}
+        />
         <PropRow label={t(($) => $.inspector.prop_visibility)} interactive={false}>
           <VisibilityPicker
             value={agent.visibility}

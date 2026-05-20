@@ -22,7 +22,7 @@ import { useT } from "../i18n";
 import { CodeBlockIframe } from "./code-block-iframe";
 import { CodeBlockStatic } from "./code-block-static";
 
-const CODE_BLOCK_IFRAME_HEIGHT = "h-[320px]";
+const CODE_BLOCK_IFRAME_HEIGHT = "h-[480px]";
 
 // Label shown in the code-block header. Not a translatable string — it's a
 // language identifier (matches the `lang === "html"` token below).

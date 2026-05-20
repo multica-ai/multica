@@ -180,9 +180,10 @@ type DaemonRegisterRequest struct {
 }
 
 type daemonWorkspaceReposResponse struct {
-	WorkspaceID  string     `json:"workspace_id"`
-	Repos        []RepoData `json:"repos"`
-	ReposVersion string     `json:"repos_version"`
+	WorkspaceID  string          `json:"workspace_id"`
+	Repos        []RepoData      `json:"repos"`
+	ReposVersion string          `json:"repos_version"`
+	Settings     json.RawMessage `json:"settings,omitempty"`
 }
 
 // normalizeRuntimeTimezone validates and normalizes the IANA timezone string
@@ -249,13 +250,17 @@ func parseWorkspaceRepos(raw []byte) []RepoData {
 	return normalizeWorkspaceRepos(repos)
 }
 
-func workspaceReposResponse(workspaceID string, raw []byte) daemonWorkspaceReposResponse {
+func workspaceReposResponse(workspaceID string, raw []byte, settingsRaw []byte) daemonWorkspaceReposResponse {
 	repos := parseWorkspaceRepos(raw)
-	return daemonWorkspaceReposResponse{
+	resp := daemonWorkspaceReposResponse{
 		WorkspaceID:  workspaceID,
 		Repos:        repos,
 		ReposVersion: workspaceReposVersion(repos),
 	}
+	if len(settingsRaw) > 0 {
+		resp.Settings = json.RawMessage(settingsRaw)
+	}
+	return resp
 }
 
 func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
@@ -426,20 +431,13 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		"runtimes": resp,
 	})
 
-	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos)
-
-	// Include workspace settings so the daemon can honour feature toggles
-	// (e.g. co_authored_by_enabled for the prepare-commit-msg hook).
-	var settings json.RawMessage
-	if len(ws.Settings) > 0 {
-		settings = json.RawMessage(ws.Settings)
-	}
+	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos, ws.Settings)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"runtimes":      resp,
 		"repos":         repoResp.Repos,
 		"repos_version": repoResp.ReposVersion,
-		"settings":      settings,
+		"settings":      repoResp.Settings,
 	})
 }
 
@@ -537,7 +535,7 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos))
+	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos, ws.Settings))
 }
 
 // DaemonDeregister marks runtimes as offline when the daemon shuts down.
@@ -1200,7 +1198,26 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			CustomArgs:    merged.CustomArgs,
 			McpConfig:     mcpConfig,
 			Model:         agent.Model.String,
+			ThinkingLevel: agent.ThinkingLevel.String,
 			RuntimeConfig: agent.RuntimeConfig,
+	}
+
+	// Resolve the runtime owner's profile description so the daemon can
+	// inject "## Requesting User" into the brief. Empty fields short-circuit
+	// the heading entirely on the daemon side; cloud / system runtimes with
+	// no owner stay anonymous. Failure here must not block claim — the agent
+	// can still run without the user-context section.
+	if runtime.OwnerID.Valid {
+		if owner, err := h.Queries.GetUser(r.Context(), runtime.OwnerID); err == nil {
+			resp.RequestingUserName = owner.Name
+			resp.RequestingUserProfileDescription = owner.ProfileDescription
+		} else {
+			slog.Debug("failed to load runtime owner for brief injection",
+				"runtime_id", runtimeID,
+				"owner_id", uuidToString(runtime.OwnerID),
+				"error", err,
+			)
+		}
 		}
 	}
 
@@ -2093,8 +2110,12 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 // Verifies the task belongs to the caller's workspace.
 func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
+	taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task_id")
+	if !ok {
+		return
+	}
 
-	task, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskID))
+	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
 	if err != nil {
 		runUUID, parseErr := util.ParseUUID(taskID)
 		wsUUID, wsErr := util.ParseUUID(middleware.WorkspaceIDFromContext(r.Context()))
@@ -2134,11 +2155,11 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		messages, queryErr = h.Queries.ListTaskMessagesSince(r.Context(), db.ListTaskMessagesSinceParams{
-			TaskID: parseUUID(taskID),
+			TaskID: taskUUID,
 			Seq:    int32(sinceSeq),
 		})
 	} else {
-		messages, queryErr = h.Queries.ListTaskMessages(r.Context(), parseUUID(taskID))
+		messages, queryErr = h.Queries.ListTaskMessages(r.Context(), taskUUID)
 	}
 	if queryErr != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list task messages")
