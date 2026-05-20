@@ -13,7 +13,7 @@
 #   # Edit .env — change JWT_SECRET at minimum
 #   docker compose -f docker-compose.selfhost.yml up -d
 #
-# Frontend: http://localhost:${FRONTEND_PORT:-3000}
+# Frontend: http://localhost:${FRONTEND_PORT:-3000}${NEXT_PUBLIC_BASE_PATH:-${BASE_PATH:-}}
 # Backend:  http://localhost:${BACKEND_PORT:-8080}
 
 name: multica
@@ -65,7 +65,7 @@ services:
       SMTP_EHLO_NAME: ${SMTP_EHLO_NAME:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3000/auth/callback}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:${FRONTEND_PORT:-3000}${NEXT_PUBLIC_BASE_PATH:-${BASE_PATH:-}}/auth/callback}
       S3_BUCKET: ${S3_BUCKET:-}
       S3_REGION: ${S3_REGION:-us-west-2}
       AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
@@ -79,7 +79,7 @@ services:
       COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
       APP_ENV: ${APP_ENV:-production}
       MULTICA_DEV_VERIFICATION_CODE: ${MULTICA_DEV_VERIFICATION_CODE:-}
-      MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:3000}
+      MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:${FRONTEND_PORT:-3000}${NEXT_PUBLIC_BASE_PATH:-${BASE_PATH:-}}}
       ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}
       ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
