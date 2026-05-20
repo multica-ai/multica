@@ -430,36 +430,52 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("--on-conflict must be one of: fail, overwrite, rename, skip")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(60*time.Second))
-	defer cancel()
-
-	var result map[string]any
+	// Handle file import first
 	if importFile != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(60*time.Second))
+		defer cancel()
+
 		fileData, readErr := os.ReadFile(importFile)
 		if readErr != nil {
 			return fmt.Errorf("read skill archive: %w", readErr)
 		}
+		var result map[string]any
 		if err := client.ImportSkillFile(ctx, fileData, filepath.Base(importFile), onConflict, &result); err != nil {
 			if handledErr := handleSkillImportError(cmd, err); handledErr != nil {
 				return handledErr
 			}
 			return fmt.Errorf("import skill: %w", err)
 		}
-		return printSkillImportResult(cmd, result)
+		return printSkillImportResult(cmd, result, false)
 	}
 
+	// URL import — with batch detection
 	body := map[string]any{
 		"url":         importURL,
 		"on_conflict": onConflict,
 	}
-	if err := client.PostJSON(ctx, "/api/skills/import", body, &result); err != nil {
+
+	isBatch := strings.Contains(importURL, "skills.sh") && strings.Count(strings.TrimSuffix(importURL, "/"), "/") <= 3
+	timeout := 60 * time.Second
+	endpoint := "/api/skills/import"
+
+	if isBatch {
+		endpoint = "/api/skills/import/batch"
+		timeout = 180 * time.Second
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(timeout))
+	defer cancel()
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, endpoint, body, &result); err != nil {
 		if handledErr := handleSkillImportError(cmd, err); handledErr != nil {
 			return handledErr
 		}
 		return fmt.Errorf("import skill: %w", err)
 	}
 
-	return printSkillImportResult(cmd, result)
+	return printSkillImportResult(cmd, result, isBatch)
 }
 
 func validSkillImportConflictStrategy(strategy string) bool {
@@ -487,7 +503,7 @@ func handleSkillImportError(cmd *cobra.Command, err error) error {
 		body = normalizeLegacySkillImportConflict(body)
 	}
 
-	if err := printSkillImportResult(cmd, body); err != nil {
+	if err := printSkillImportResult(cmd, body, false); err != nil {
 		return err
 	}
 	reason := strVal(body, "reason")
@@ -513,10 +529,18 @@ func normalizeLegacySkillImportConflict(body map[string]any) map[string]any {
 	}
 }
 
-func printSkillImportResult(cmd *cobra.Command, result map[string]any) error {
+func printSkillImportResult(cmd *cobra.Command, result map[string]any, isBatch bool) error {
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	if isBatch {
+		imported := int(result["imported"].(float64))
+		skipped := int(result["skipped"].(float64))
+		failed := int(result["failed"].(float64))
+		fmt.Printf("Batch import complete: %d imported, %d skipped, %d failed\n", imported, skipped, failed)
+		return nil
 	}
 
 	status := strVal(result, "status")
@@ -545,6 +569,7 @@ func printSkillImportResult(cmd *cobra.Command, result map[string]any) error {
 	if reason != "" && status != "failed" {
 		fmt.Printf("Reason: %s\n", reason)
 	}
+	return nil
 	return nil
 }
 
