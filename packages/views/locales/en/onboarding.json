@@ -301,6 +301,20 @@
     "stage_stalled_term": "Desktop",
     "stage_stalled_suffix": " is the smoother path — it bundles the daemon. Close this dialog and pick Desktop, or hit Skip to continue."
   },
+  "step_teammate": {
+    "eyebrow": "First teammate",
+    "headline": "Create your first teammate: Multica Helper",
+    "lede": "Multica Helper is a starter agent connected to {{runtime}}. It will open your first guided issue and help you learn the core workflow.",
+    "avatar_label": "Multica Helper avatar",
+    "name": "Multica Helper",
+    "role": "Onboarding guide",
+    "point_issue": "Starts from one onboarding issue",
+    "point_context": "Uses your workspace context and issue details",
+    "point_customize": "You can rename or replace it later",
+    "footer_hint": "We'll create one agent and one onboarding issue.",
+    "create_action": "Create Multica Helper",
+    "create_failed": "Failed to create Multica Helper"
+  },
   "errors": {
     "skip_failed": "Failed to finish onboarding"
   }

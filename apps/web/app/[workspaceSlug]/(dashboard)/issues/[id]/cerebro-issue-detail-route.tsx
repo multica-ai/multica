@@ -16,7 +16,7 @@ import { ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { IssueDetail } from "@multica/views/issues/components";
+import { IssueDetail } from "@multica/views/issues/components/issue-detail";
 import { useT } from "@multica/views/i18n";
 import { useNavigation } from "@multica/views/navigation";
 import { Button } from "@multica/ui/components/ui/button";

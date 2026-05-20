@@ -34,6 +34,7 @@ func seedAutopilot(t *testing.T, queries *db.Queries, title, creatorType string,
 	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
 		WorkspaceID:   parseUUID(testWorkspaceID),
 		Title:         title,
+		AssigneeType:  "agent",
 		AssigneeID:    agentID,
 		Status:        "active",
 		ExecutionMode: "run_only",

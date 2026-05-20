@@ -8,6 +8,7 @@ import type {
   GroupedIssuesResponse,
   ListIssuesResponse,
   TimelineEntry,
+  User,
 } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -258,6 +259,17 @@ export const RuntimeToolGrantsSchema = z.object({
   user_grants: z.array(RuntimeToolUserGrantSchema).default([]),
 }).loose();
 
+export const OnboardingRuntimeBootstrapResponseSchema = z.object({
+  workspace_id: z.string(),
+  agent_id: z.string(),
+  issue_id: z.string(),
+}).loose();
+
+export const OnboardingNoRuntimeBootstrapResponseSchema = z.object({
+  workspace_id: z.string(),
+  issue_id: z.string(),
+}).loose();
+
 // CEREBRO-PATCH(agent-tool-overrides-schema): JEH-1710 bid 4 — per-agent override
 // rows. enabled=true forces the tool on for this agent; enabled=false forces it
 // off; absence of a row means inherit-from-runtime.
@@ -406,4 +418,181 @@ export const EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE: CreateAgentFromTemplateR
   agent: { id: "" } as Agent,
   imported_skill_ids: [],
   reused_skill_ids: [],
+};
+
+// Squad member status — backs the Squad detail page's Members tab. status
+// is `string | null` (not the narrow `SquadMemberStatusValue` union) so a
+// new server-side status doesn't fail the parse; the UI defaults to a
+// neutral pill for unknown values.
+const SquadActiveIssueBriefSchema = z.object({
+  issue_id: z.string(),
+  identifier: z.string(),
+  title: z.string(),
+  issue_status: z.string(),
+}).loose();
+
+const SquadMemberStatusSchema = z.object({
+  member_type: z.string(),
+  member_id: z.string(),
+  status: z.string().nullable().optional().transform((v) => v ?? null),
+  active_issues: z.array(SquadActiveIssueBriefSchema).default([]),
+  last_active_at: z.string().nullable().optional().transform((v) => v ?? null),
+}).loose();
+
+export const SquadMemberStatusListResponseSchema = z.object({
+  members: z.array(SquadMemberStatusSchema).default([]),
+}).loose();
+
+export const EMPTY_SQUAD_MEMBER_STATUS_LIST = { members: [] };
+
+// ---------------------------------------------------------------------------
+// Structured error body — POST /api/workspaces/:wsId/issues 409 conflict.
+//
+// When the server detects an active issue with the same title in the same
+// workspace, it returns `{ code: "active_duplicate_issue", error, issue }`
+// instead of letting the create through. The UI uses the embedded issue ref
+// to offer "view existing" rather than dropping the user into a generic
+// "create failed" toast.
+//
+// Strict guarantees:
+//   - `code` is a literal so a future server rename (e.g. `duplicate_issue`)
+//     fails the parse and falls back to a normal error toast — drift never
+//     ships as a broken duplicate UI.
+//   - `issue` is required; without an id/identifier/title the "view existing"
+//     button has nothing to point at, so we'd rather fall back than guess.
+//   - `issue.status` is intentionally OMITTED: the duplicate toast doesn't
+//     render a StatusIcon (which has no fallback for unknown enum values),
+//     so a future server-side rename of `status` must not knock this branch
+//     out. `.loose()` lets the field pass through unchanged for any other
+//     consumer.
+// ---------------------------------------------------------------------------
+
+export const DuplicateIssueErrorBodySchema = z.object({
+  code: z.literal("active_duplicate_issue"),
+  error: z.string().optional(),
+  issue: z.object({
+    id: z.string(),
+    identifier: z.string(),
+    title: z.string(),
+  }).loose(),
+}).loose();
+
+export interface DuplicateIssueErrorBody {
+  code: "active_duplicate_issue";
+  error?: string;
+  issue: {
+    id: string;
+    identifier: string;
+    title: string;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Webhook delivery schemas — backing the Autopilot Deliveries section. Enums
+// (`status`, `signature_status`, `provider`) are kept as `z.string()` so a
+// future server-side value (e.g. a Stripe provider, a new dedupe state)
+// degrades to a generic UI fallback rather than collapsing the list into
+// the empty array. `.loose()` lets unknown fields pass through, matching
+// the rule used by every other endpoint here.
+// ---------------------------------------------------------------------------
+
+const WebhookDeliverySchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  autopilot_id: z.string(),
+  trigger_id: z.string(),
+  provider: z.string(),
+  event: z.string(),
+  dedupe_key: z.string().nullable(),
+  dedupe_source: z.string().nullable(),
+  signature_status: z.string(),
+  status: z.string(),
+  attempt_count: z.number().default(0),
+  content_type: z.string().nullable(),
+  response_status: z.number().nullable(),
+  autopilot_run_id: z.string().nullable(),
+  replayed_from_delivery_id: z.string().nullable(),
+  error: z.string().nullable(),
+  received_at: z.string(),
+  last_attempt_at: z.string(),
+  created_at: z.string(),
+  // Detail-only fields. The list endpoint omits them; the detail endpoint
+  // populates raw_body / selected_headers / response_body.
+  selected_headers: z.record(z.string(), z.unknown()).nullable().optional(),
+  raw_body: z.string().nullable().optional(),
+  response_body: z.string().nullable().optional(),
+}).loose();
+
+export const ListWebhookDeliveriesResponseSchema = z.object({
+  deliveries: z.array(WebhookDeliverySchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const WebhookDeliveryResponseSchema = WebhookDeliverySchema;
+
+export const EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE = {
+  deliveries: [],
+  total: 0,
+};
+
+export const EMPTY_WEBHOOK_DELIVERY = {
+  id: "",
+  workspace_id: "",
+  autopilot_id: "",
+  trigger_id: "",
+  provider: "",
+  event: "",
+  dedupe_key: null,
+  dedupe_source: null,
+  signature_status: "not_required",
+  status: "queued",
+  attempt_count: 0,
+  content_type: null,
+  response_status: null,
+  autopilot_run_id: null,
+  replayed_from_delivery_id: null,
+  error: null,
+  received_at: "",
+  last_attempt_at: "",
+  created_at: "",
+};
+
+// ---------------------------------------------------------------------------
+// User (`/api/me` GET + PATCH). The auth store and Settings → Account both
+// trust this shape — a drift here would knock both surfaces out. Kept
+// lenient by the same rules as IssueSchema: enums stay `z.string()`,
+// nullable fields are unioned with `null`, unknown server fields pass
+// through via `.loose()`. `profile_description` is the field added in
+// MUL-2406; the server emits `""` when unset (NOT NULL DEFAULT ''), so
+// the schema defaults to `""` too — keeps the type tight without
+// breaking older backends that don't return the column yet.
+// ---------------------------------------------------------------------------
+
+export const UserSchema = z.object({
+  id: z.string(),
+  name: z.string().default(""),
+  email: z.string().default(""),
+  avatar_url: z.string().nullable().default(null),
+  onboarded_at: z.string().nullable().default(null),
+  onboarding_questionnaire: z.record(z.string(), z.unknown()).default({}),
+  starter_content_state: z.string().nullable().default(null),
+  language: z.string().nullable().default(null),
+  profile_description: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_USER: User = {
+  id: "",
+  name: "",
+  email: "",
+  avatar_url: null,
+  preferences: {},
+  onboarded_at: null,
+  onboarding_questionnaire: {},
+  starter_content_state: null,
+  language: null,
+  profile_description: "",
+  created_at: "",
+  updated_at: "",
 };

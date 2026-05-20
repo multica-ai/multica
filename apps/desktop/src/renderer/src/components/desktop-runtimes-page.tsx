@@ -21,8 +21,11 @@ export function DesktopRuntimesPage() {
   const [status, setStatus] = useState<DaemonStatus>({ state: "stopped" });
 
   useEffect(() => {
-    window.daemonAPI.getStatus().then(setStatus);
-    return window.daemonAPI.onStatusChange(setStatus);
+    const apply = (s: DaemonStatus) => {
+      setStatus(s);
+    };
+    window.daemonAPI.getStatus().then(apply);
+    return window.daemonAPI.onStatusChange(apply);
   }, []);
 
   const bootstrapping =

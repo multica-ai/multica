@@ -1,20 +1,7 @@
 import { cookies, headers } from "next/headers";
-import { Instrument_Serif, Noto_Serif_SC } from "next/font/google";
 import { LOCALE_COOKIE } from "@multica/core/i18n";
 import { LocaleProvider } from "@/features/landing/i18n";
 import type { Locale } from "@/features/landing/i18n";
-
-const instrumentSerif = Instrument_Serif({
-  subsets: ["latin"],
-  weight: "400",
-  variable: "--font-serif",
-});
-
-const notoSerifSC = Noto_Serif_SC({
-  subsets: ["latin"],
-  weight: "400",
-  variable: "--font-serif-zh",
-});
 
 const jsonLd = {
   "@context": "https://schema.org",
@@ -68,7 +55,7 @@ export default async function LandingLayout({
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
-      <div className={`${instrumentSerif.variable} ${notoSerifSC.variable} landing-light h-full overflow-x-hidden overflow-y-auto bg-white`}>
+      <div className="landing-light h-full overflow-x-hidden overflow-y-auto bg-white">
         <LocaleProvider initialLocale={initialLocale}>{children}</LocaleProvider>
       </div>
     </>

@@ -5,6 +5,17 @@
 @import "../../../packages/ui/styles/base.css";
 @import "./custom.css";
 
+:root {
+  /* Keep route compilation offline: do not depend on next/font/google fetches. */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
+  --font-serif: "Source Serif 4", "Iowan Old Style", "Apple Garamond",
+    Baskerville, "Times New Roman", serif;
+  --font-serif-zh: "Noto Serif SC", "Songti SC", "SimSun", serif;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @source "../../../packages/ui/**/*.{ts,tsx}";

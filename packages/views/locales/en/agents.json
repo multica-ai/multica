@@ -134,6 +134,7 @@
     "section_skills": "Skills",
     "prop_runtime": "Runtime",
     "prop_model": "Model",
+    "prop_thinking": "Thinking",
     "prop_visibility": "Visibility",
     "prop_concurrency": "Concurrency",
     "prop_owner": "Owner",
@@ -176,7 +177,12 @@
     "model_custom_tooltip": "Use \"{{value}}\" as a custom model id",
     "model_custom_use": "Use \"{{value}}\"",
     "model_clear": "Clear (use provider default)",
-    "model_clear_title": "Clear and fall back to the runtime's provider default"
+    "model_clear_title": "Clear and fall back to the runtime's provider default",
+    "thinking_default": "Default",
+    "thinking_tooltip": "Thinking · {{value}}",
+    "thinking_default_badge": "default",
+    "thinking_clear": "Use model default",
+    "thinking_clear_title": "Clear and fall back to this model's default reasoning level"
   },
   "model_dropdown": {
     "label": "Model",
@@ -432,7 +438,10 @@
     "copy_filtered": "Copy filtered",
     "copied": "Copied",
     "waiting_events": "Waiting for events...",
-    "no_data": "No execution data recorded."
+    "no_data": "No execution data recorded.",
+    "sort_label": "Sort",
+    "sort_chronological": "Oldest first",
+    "sort_newest_first": "Newest first"
   },
   "task_failure": {
     "agent_error": "Agent execution error",

@@ -371,6 +371,13 @@ function PreviewContent({
           )}
         />
       );
+    default:
+      return (
+        <UnsupportedFallback
+          message={t(($) => $.attachment.preview_unsupported)}
+          onDownload={onDownload}
+        />
+      );
   }
 }
 

@@ -78,8 +78,8 @@ type GitHubPullRequestResponse struct {
 }
 
 type GitHubConnectResponse struct {
-	URL       string `json:"url"`
-	Configured bool  `json:"configured"`
+	URL        string `json:"url"`
+	Configured bool   `json:"configured"`
 }
 
 func githubInstallationToResponse(i db.GithubInstallation) GitHubInstallationResponse {
@@ -424,6 +424,7 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	h.ensurePullRequestLinksForIssue(r.Context(), issue)
 	rows, err := h.Queries.ListPullRequestsByIssue(r.Context(), issue.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list pull requests")
@@ -434,6 +435,32 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 		out = append(out, issuePullRequestRowToResponse(row))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"pull_requests": out})
+}
+
+// CEREBRO-PATCH(github-pr-card-self-heal): JEH-1590 recovers issue↔PR links
+// when a mirrored PR row already mentions the issue identifier but the link
+// row was missed by webhook processing.
+func (h *Handler) ensurePullRequestLinksForIssue(ctx context.Context, issue db.Issue) {
+	identifier := h.getIssuePrefix(ctx, issue.WorkspaceID) + "-" + strconv.Itoa(int(issue.Number))
+	matching, err := h.Queries.ListUnlinkedPullRequestsMatchingIssueIdentifier(ctx, db.ListUnlinkedPullRequestsMatchingIssueIdentifierParams{
+		IssueID:         issue.ID,
+		WorkspaceID:     issue.WorkspaceID,
+		IdentifierRegex: identifierBoundaryRegex(identifier),
+	})
+	if err != nil {
+		slog.Warn("github: self-heal pr links failed", "err", err, "issue_id", uuidToString(issue.ID))
+		return
+	}
+	for _, pr := range matching {
+		if err := h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
+			IssueID:       issue.ID,
+			PullRequestID: pr.ID,
+			LinkedByType:  strToText("system"),
+			LinkedByID:    pgtype.UUID{},
+		}); err != nil {
+			slog.Warn("github: self-heal pr link failed", "err", err, "issue_id", uuidToString(issue.ID), "pr_id", uuidToString(pr.ID))
+		}
+	}
 }
 
 // ── Webhook ─────────────────────────────────────────────────────────────────
@@ -588,7 +615,7 @@ type ghPullRequestPayload struct {
 			AvatarURL string `json:"avatar_url"`
 		} `json:"user"`
 	} `json:"pull_request"`
-	Changes *ghPRChanges `json:"changes"`
+	Changes    *ghPRChanges `json:"changes"`
 	Repository struct {
 		Name  string `json:"name"`
 		Owner struct {
@@ -622,27 +649,27 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 	state := derivePRState(p.PullRequest.State, p.PullRequest.Draft, p.PullRequest.Merged)
 	mergeable, clearMergeable := derivePRMergeableState(p.Action, p.PullRequest.MergeableState, baseRefChanged(p.Changes))
 	pr, err := h.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
-		WorkspaceID:           inst.WorkspaceID,
-		InstallationID:        inst.InstallationID,
-		RepoOwner:             p.Repository.Owner.Login,
-		RepoName:              p.Repository.Name,
-		PrNumber:              p.PullRequest.Number,
-		Title:                 p.PullRequest.Title,
-		State:                 state,
-		HtmlUrl:               p.PullRequest.HTMLURL,
-		Branch:                ptrToText(strPtrOrNil(p.PullRequest.Head.Ref)),
-		AuthorLogin:           ptrToText(strPtrOrNil(p.PullRequest.User.Login)),
-		AuthorAvatarUrl:       ptrToText(strPtrOrNil(p.PullRequest.User.AvatarURL)),
-		MergedAt:              parseGHTime(p.PullRequest.MergedAt),
-		ClosedAt:              parseGHTime(p.PullRequest.ClosedAt),
-		PrCreatedAt:           parseGHTimeRequired(p.PullRequest.CreatedAt),
-		PrUpdatedAt:           parseGHTimeRequired(p.PullRequest.UpdatedAt),
-		HeadSha:               p.PullRequest.Head.SHA,
-		MergeableState:        mergeable,
-		ClearMergeableState:   pgtype.Bool{Bool: clearMergeable, Valid: true},
-		Additions:             p.PullRequest.Additions,
-		Deletions:             p.PullRequest.Deletions,
-		ChangedFiles:          p.PullRequest.ChangedFiles,
+		WorkspaceID:         inst.WorkspaceID,
+		InstallationID:      inst.InstallationID,
+		RepoOwner:           p.Repository.Owner.Login,
+		RepoName:            p.Repository.Name,
+		PrNumber:            p.PullRequest.Number,
+		Title:               p.PullRequest.Title,
+		State:               state,
+		HtmlUrl:             p.PullRequest.HTMLURL,
+		Branch:              ptrToText(strPtrOrNil(p.PullRequest.Head.Ref)),
+		AuthorLogin:         ptrToText(strPtrOrNil(p.PullRequest.User.Login)),
+		AuthorAvatarUrl:     ptrToText(strPtrOrNil(p.PullRequest.User.AvatarURL)),
+		MergedAt:            parseGHTime(p.PullRequest.MergedAt),
+		ClosedAt:            parseGHTime(p.PullRequest.ClosedAt),
+		PrCreatedAt:         parseGHTimeRequired(p.PullRequest.CreatedAt),
+		PrUpdatedAt:         parseGHTimeRequired(p.PullRequest.UpdatedAt),
+		HeadSha:             p.PullRequest.Head.SHA,
+		MergeableState:      mergeable,
+		ClearMergeableState: pgtype.Bool{Bool: clearMergeable, Valid: true},
+		Additions:           p.PullRequest.Additions,
+		Deletions:           p.PullRequest.Deletions,
+		ChangedFiles:        p.PullRequest.ChangedFiles,
 	})
 	if err != nil {
 		slog.Warn("github: upsert pr failed", "err", err)
@@ -664,10 +691,10 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 			continue
 		}
 		if err := h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
-			IssueID:        issue.ID,
-			PullRequestID:  pr.ID,
-			LinkedByType:   strToText("system"),
-			LinkedByID:     pgtype.UUID{},
+			IssueID:       issue.ID,
+			PullRequestID: pr.ID,
+			LinkedByType:  strToText("system"),
+			LinkedByID:    pgtype.UUID{},
 		}); err != nil {
 			slog.Warn("github: link failed", "err", err)
 			continue
@@ -702,7 +729,7 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 	// Broadcast PR change to the workspace so any open issue detail page
 	// re-queries its PR list.
 	h.publish(protocol.EventPullRequestUpdated, workspaceID, "system", "", map[string]any{
-		"pull_request": resp,
+		"pull_request":     resp,
 		"linked_issue_ids": linkedIssueIDs,
 	})
 }
@@ -933,6 +960,12 @@ func extractIdentifiers(parts ...string) []string {
 		}
 	}
 	return out
+}
+
+// CEREBRO-PATCH(github-pr-card-self-heal): JEH-1590 boundary matcher used by
+// the PR-card self-heal query.
+func identifierBoundaryRegex(identifier string) string {
+	return `(^|[^[:alnum:]])` + regexp.QuoteMeta(identifier) + `([^[:alnum:]]|$)`
 }
 
 // lookupIssueByIdentifier looks up an issue in the given workspace by its

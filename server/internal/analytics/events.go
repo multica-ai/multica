@@ -74,8 +74,7 @@ const (
 )
 
 // Starter content branches. Matches the server-authoritative decision in
-// ImportStarterContent (hasAgent ? agent_guided : self_serve). DismissStarter
-// carries the same branch so acceptance rates split cleanly.
+// ImportStarterContent (hasAgent ? agent_guided : self_serve).
 const (
 	StarterContentBranchAgentGuided = "agent_guided"
 	StarterContentBranchSelfServe   = "self_serve"
@@ -337,18 +336,29 @@ func AgentTaskCancelled(ctx TaskContext, durationMS int64) Event {
 	})
 }
 
-func AutopilotRunStarted(actorID, workspaceID, autopilotID, runID, agentID, triggerSource string) Event {
-	return autopilotRunEvent(EventAutopilotRunStarted, actorID, workspaceID, autopilotID, runID, agentID, triggerSource, nil)
+// AutopilotAssignee describes the autopilot's configured target. agent_id is
+// always the agent that will actually execute the work (the squad leader for
+// squad autopilots) so funnels grouping by agent stay consistent. assignee_*
+// fields record the original configuration so reports can tell a solo-agent
+// autopilot apart from a squad one without joining back to the autopilot row.
+type AutopilotAssignee struct {
+	AgentID      string // executing agent — leader for squad autopilots
+	AssigneeType string // "agent" or "squad"
+	SquadID      string // empty when AssigneeType != "squad"
 }
 
-func AutopilotRunCompleted(actorID, workspaceID, autopilotID, runID, agentID, triggerSource string, durationMS int64) Event {
-	return autopilotRunEvent(EventAutopilotRunCompleted, actorID, workspaceID, autopilotID, runID, agentID, triggerSource, map[string]any{
+func AutopilotRunStarted(actorID, workspaceID, autopilotID, runID string, assignee AutopilotAssignee, triggerSource string) Event {
+	return autopilotRunEvent(EventAutopilotRunStarted, actorID, workspaceID, autopilotID, runID, assignee, triggerSource, nil)
+}
+
+func AutopilotRunCompleted(actorID, workspaceID, autopilotID, runID string, assignee AutopilotAssignee, triggerSource string, durationMS int64) Event {
+	return autopilotRunEvent(EventAutopilotRunCompleted, actorID, workspaceID, autopilotID, runID, assignee, triggerSource, map[string]any{
 		"duration_ms": durationMS,
 	})
 }
 
-func AutopilotRunFailed(actorID, workspaceID, autopilotID, runID, agentID, triggerSource, failureReason, errorType string, willRetry bool, durationMS int64) Event {
-	return autopilotRunEvent(EventAutopilotRunFailed, actorID, workspaceID, autopilotID, runID, agentID, triggerSource, map[string]any{
+func AutopilotRunFailed(actorID, workspaceID, autopilotID, runID string, assignee AutopilotAssignee, triggerSource, failureReason, errorType string, willRetry bool, durationMS int64) Event {
+	return autopilotRunEvent(EventAutopilotRunFailed, actorID, workspaceID, autopilotID, runID, assignee, triggerSource, map[string]any{
 		"duration_ms":    durationMS,
 		"failure_reason": failureReason,
 		"error_type":     errorType,
@@ -497,9 +507,6 @@ func CloudWaitlistJoined(userID string, hasReason bool) Event {
 
 // StarterContentDecided fires on the atomic NULL -> terminal state
 // transition in both ImportStarterContent and DismissStarterContent.
-// branch carries agent_guided / self_serve for BOTH decisions — the
-// dismiss handler resolves it from the current ListAgents state so
-// acceptance rates split cleanly by branch.
 func StarterContentDecided(userID, workspaceID, decision, branch string) Event {
 	return Event{
 		Name:        EventStarterContentDecided,
@@ -553,7 +560,7 @@ func agentTaskEvent(name string, ctx TaskContext, extra map[string]any) Event {
 	}
 }
 
-func autopilotRunEvent(name, actorID, workspaceID, autopilotID, runID, agentID, triggerSource string, extra map[string]any) Event {
+func autopilotRunEvent(name, actorID, workspaceID, autopilotID, runID string, assignee AutopilotAssignee, triggerSource string, extra map[string]any) Event {
 	if extra == nil {
 		extra = map[string]any{}
 	}
@@ -561,11 +568,17 @@ func autopilotRunEvent(name, actorID, workspaceID, autopilotID, runID, agentID, 
 	props := withCoreProperties(extra, CoreProperties{
 		UserID:         nonAgentUserID(actorID),
 		WorkspaceID:    workspaceID,
-		AgentID:        agentID,
+		AgentID:        assignee.AgentID,
 		AutopilotRunID: runID,
 		Source:         SourceAutopilot,
 	})
 	props["autopilot_id"] = autopilotID
+	if assignee.AssigneeType != "" {
+		props["assignee_type"] = assignee.AssigneeType
+	}
+	if assignee.SquadID != "" {
+		props["squad_id"] = assignee.SquadID
+	}
 	return Event{
 		Name:        name,
 		DistinctID:  actorID,

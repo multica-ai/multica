@@ -269,20 +269,36 @@ Each profile gets its own config directory (`~/.multica/profiles/<name>/`), daem
 
 ## Workspaces
 
+### Working with multiple workspaces
+
+Every command runs against a single workspace. The CLI resolves which one in this order (highest priority first):
+
+1. `--workspace-id <id>` flag on the command
+2. `MULTICA_WORKSPACE_ID` environment variable
+3. The default workspace stored in your current profile (set by `multica workspace switch` or `multica login`)
+
+`multica workspace switch <id|slug>` is the day-to-day way to change the default workspace. For scripting and headless setups where you don't want any stored state, prefer the `--workspace-id` flag or the env variable. `multica config set workspace_id <id>` is the low-level equivalent of `switch` (it writes the same setting but skips the access check).
+
+If you need full isolation between organizations or accounts — separate tokens, separate daemons, separate config dirs — use `--profile <name>` instead. Each profile keeps its own default workspace.
+
 ### List Workspaces
 
 ```bash
 multica workspace list
+multica workspace list --full-id
+multica workspace list --output json
 ```
 
-Watched workspaces are marked with `*`. The daemon only processes tasks for watched workspaces.
+The current default workspace is marked with `*`. Table output shows short UUID prefixes — pass `--full-id` when you need the canonical UUIDs.
 
-### Watch / Unwatch
+### Switch Default Workspace
 
 ```bash
-multica workspace watch <workspace-id>
-multica workspace unwatch <workspace-id>
+multica workspace switch <workspace-id>
+multica workspace switch <slug>
 ```
+
+Verifies you have access to the workspace, then sets it as the default for the current profile. Subsequent commands without `--workspace-id` and `MULTICA_WORKSPACE_ID` target this workspace. Pair `--profile` if you want to change a non-default profile's workspace.
 
 ### Get Details
 
@@ -291,10 +307,12 @@ multica workspace get <workspace-id>
 multica workspace get <workspace-id> --output json
 ```
 
+Passing no `<workspace-id>` resolves to the current default workspace, so `multica workspace get` doubles as "what workspace am I on?".
+
 ### List Members
 
 ```bash
-multica workspace members <workspace-id>
+multica workspace member list <workspace-id>
 ```
 
 ## Issues
@@ -326,7 +344,7 @@ multica issue create --title "Fix login bug" --description "..." --priority high
 multica issue create --title "Fix login bug" --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
 ```
 
-Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assignee` / `--assignee-id`, `--parent`, `--project`, `--due-date`. Pass `--assignee-id <uuid>` (mutually exclusive with `--assignee`) when scripting against the IDs returned by `multica workspace members --output json` / `multica agent list --output json`.
+Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assignee` / `--assignee-id`, `--parent`, `--project`, `--due-date`. Pass `--assignee-id <uuid>` (mutually exclusive with `--assignee`) when scripting against the IDs returned by `multica workspace member list --output json` / `multica agent list --output json`.
 
 ### Update Issue
 
@@ -507,6 +525,8 @@ multica config set server_url https://api.example.com
 multica config set app_url https://app.example.com
 multica config set workspace_id <workspace-id>
 ```
+
+`config set workspace_id <id>` is the low-level interface — it writes the value verbatim without checking that the workspace exists or that you have access. Prefer `multica workspace switch <id|slug>` for day-to-day workspace changes; it does both checks before saving.
 
 ## Autopilot Commands
 

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"regexp"
 	"testing"
 	"time"
 
@@ -61,6 +62,33 @@ func TestExtractIdentifiers(t *testing.T) {
 				t.Errorf("extractIdentifiers() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// CEREBRO-PATCH(github-pr-card-self-heal): JEH-1590 pins exact issue
+// identifier matching for PR-card self-heal.
+func TestIdentifierBoundaryRegex(t *testing.T) {
+	re := regexp.MustCompile(`(?i)` + identifierBoundaryRegex("JEH-1590"))
+	matches := []string{
+		"JEH-1590: Merge upstream/main",
+		"fix/jeh-1590-upstream",
+		"See (JEH-1590)",
+	}
+	for _, input := range matches {
+		if !re.MatchString(input) {
+			t.Errorf("expected %q to match", input)
+		}
+	}
+
+	nonMatches := []string{
+		"JEH-15900",
+		"XJEH-1590",
+		"JEH-1590A",
+	}
+	for _, input := range nonMatches {
+		if re.MatchString(input) {
+			t.Errorf("expected %q not to match", input)
+		}
 	}
 }
 
@@ -716,9 +744,9 @@ func TestAggregateChecksConclusion(t *testing.T) {
 		return *p
 	}
 	cases := []struct {
-		name                            string
+		name                           string
 		failed, passed, pending, total int64
-		want                            string
+		want                           string
 	}{
 		{"no_suites_nil", 0, 0, 0, 0, "<nil>"},
 		{"any_failure_wins", 1, 5, 0, 6, "failed"},

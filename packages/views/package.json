@@ -16,6 +16,8 @@
     "./common/markdown": "./common/markdown.tsx",
     "./editor": "./editor/index.ts",
     "./issues/components": "./issues/components/index.ts",
+    "./issues/components/issues-page": "./issues/components/issues-page.tsx",
+    "./issues/components/issue-detail": "./issues/components/issue-detail.tsx",
     "./issues/hooks": "./issues/hooks/index.ts",
     "./issues/utils/filter": "./issues/utils/filter.ts",
     "./issues/utils/sort": "./issues/utils/sort.ts",

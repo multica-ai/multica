@@ -10,6 +10,7 @@ export {
 } from "./title-editor";
 export { copyMarkdown } from "./utils/clipboard";
 export { ReadonlyContent } from "./readonly-content";
+export { Attachment } from "./attachment";
 export { useFileDropZone } from "./use-file-drop-zone";
 export { FileDropOverlay } from "./file-drop-overlay";
 export { useDownloadAttachment } from "./use-download-attachment";

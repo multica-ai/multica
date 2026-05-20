@@ -62,6 +62,7 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 				WorkspaceID:        parseUUID(testWorkspaceID),
 				Title:              "Run-only listener " + tc.name,
 				Description:        pgtype.Text{String: "Run listener regression test", Valid: true},
+				AssigneeType:       "agent",
 				AssigneeID:         parseUUID(agentID),
 				Status:             "active",
 				ExecutionMode:      "run_only",
@@ -167,6 +168,7 @@ func TestAutopilotDispatchSkipsWhenRuntimeOffline(t *testing.T) {
 		WorkspaceID:        parseUUID(testWorkspaceID),
 		Title:              "Offline-runtime autopilot",
 		Description:        pgtype.Text{String: "MUL-1899 admission test", Valid: true},
+		AssigneeType:       "agent",
 		AssigneeID:         parseUUID(agentID),
 		Status:             "active",
 		ExecutionMode:      "run_only",
@@ -208,5 +210,92 @@ func TestAutopilotDispatchSkipsWhenRuntimeOffline(t *testing.T) {
 	}
 	if taskCount != 0 {
 		t.Fatalf("expected 0 queued tasks for offline-runtime agent, got %d", taskCount)
+	}
+}
+
+// TestManualTriggerDoesNotErrorOnPostAdmissionSkip locks in PR #2888 review
+// fix #2: if the dispatcher decides to skip after the admission gate has
+// already passed (e.g. the leader's runtime went offline between admission
+// and task creation), DispatchAutopilot must return (run, nil) with
+// status='skipped' rather than (nil, err). Without this, manual trigger
+// surfaces a 500 to the user even though the work was correctly suppressed
+// — the same regression Emacs flagged on the original PR.
+//
+// We synthesise the race by:
+//  1. Creating an online runtime + agent so the admission gate passes.
+//  2. Flipping the runtime to offline.
+//  3. Triggering the autopilot. Admission has already loaded the agent +
+//     runtime once with status='online' at row-fetch time, so the second
+//     check inside dispatchRunOnly is what catches the offline state.
+//
+// In this implementation the admission gate also re-reads the runtime, so
+// the same offline state actually fires the admission skip first. That is
+// fine for the assertion we care about: the manual trigger must not 500 and
+// the run must be `skipped`. The post-admission branch is exercised
+// separately by the errDispatchSkipped unwrap unit test in the service
+// package.
+func TestManualTriggerDoesNotErrorOnPostAdmissionSkip(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+		)
+		VALUES ($1, NULL, 'Manual-trigger skip runtime', 'local', 'mul2429_manual_skip_runtime', 'offline', '{}'::jsonb, '{}'::jsonb, now())
+		RETURNING id::text
+	`, parseUUID(testWorkspaceID)).Scan(&runtimeID); err != nil {
+		t.Fatalf("create runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, 'mul2429-manual-skip-agent', '', 'local', '{}'::jsonb, $2, 'workspace', 1, $3)
+		RETURNING id::text
+	`, parseUUID(testWorkspaceID), runtimeID, parseUUID(testUserID)).Scan(&agentID); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:        parseUUID(testWorkspaceID),
+		Title:              "Manual-trigger skip autopilot",
+		Description:        pgtype.Text{String: "PR #2888 review fix #2", Valid: true},
+		AssigneeType:       "agent",
+		AssigneeID:         parseUUID(agentID),
+		Status:             "active",
+		ExecutionMode:      "run_only",
+		IssueTitleTemplate: pgtype.Text{},
+		CreatedByType:      "member",
+		CreatedByID:        parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
+	})
+
+	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("manual DispatchAutopilot returned error (would 500 the handler): %v", err)
+	}
+	if run == nil {
+		t.Fatal("expected a run, got nil")
+	}
+	if run.Status != "skipped" {
+		t.Fatalf("expected run status 'skipped', got %q", run.Status)
 	}
 }

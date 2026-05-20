@@ -1,9 +1,177 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
+
+	"github.com/multica-ai/multica/server/internal/cli"
 )
+
+// newWorkspaceSwitchTestCmd builds a standalone cobra command with the flags
+// runWorkspaceSwitch reads. We can't reuse the real workspaceSwitchCmd because
+// it has no parent root carrying --workspace-id / --profile / --server-url.
+func newWorkspaceSwitchTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "switch"}
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("server-url", "", "")
+	return cmd
+}
+
+func TestRunWorkspaceSwitch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/workspaces" {
+			http.NotFound(w, r)
+			return
+		}
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"id": "11111111-1111-1111-1111-111111111111", "name": "Alpha", "slug": "alpha"},
+			{"id": "22222222-2222-2222-2222-222222222222", "name": "Beta", "slug": "beta"},
+		})
+	}))
+	defer srv.Close()
+
+	// Isolate HOME so the test never touches the developer's ~/.multica.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+
+	t.Run("switches by slug and persists workspace_id", func(t *testing.T) {
+		cmd := newWorkspaceSwitchTestCmd()
+		if err := runWorkspaceSwitch(cmd, []string{"beta"}); err != nil {
+			t.Fatalf("runWorkspaceSwitch: %v", err)
+		}
+		cfg, err := cli.LoadCLIConfig()
+		if err != nil {
+			t.Fatalf("LoadCLIConfig: %v", err)
+		}
+		if cfg.WorkspaceID != "22222222-2222-2222-2222-222222222222" {
+			t.Errorf("workspace_id = %q, want Beta's id", cfg.WorkspaceID)
+		}
+	})
+
+	t.Run("rejects unknown workspace and leaves config untouched", func(t *testing.T) {
+		// Seed a known workspace_id so we can verify it is NOT clobbered on
+		// failure — the issue's acceptance criteria explicitly call this out.
+		if err := cli.SaveCLIConfig(cli.CLIConfig{WorkspaceID: "11111111-1111-1111-1111-111111111111"}); err != nil {
+			t.Fatalf("seed config: %v", err)
+		}
+
+		cmd := newWorkspaceSwitchTestCmd()
+		err := runWorkspaceSwitch(cmd, []string{"does-not-exist"})
+		if err == nil {
+			t.Fatal("expected error for unknown workspace")
+		}
+
+		cfg, _ := cli.LoadCLIConfig()
+		if cfg.WorkspaceID != "11111111-1111-1111-1111-111111111111" {
+			t.Errorf("workspace_id = %q, expected it to stay on Alpha's id when switch fails", cfg.WorkspaceID)
+		}
+	})
+
+	t.Run("isolates by profile", func(t *testing.T) {
+		cmd := newWorkspaceSwitchTestCmd()
+		_ = cmd.Flags().Set("profile", "staging")
+		if err := runWorkspaceSwitch(cmd, []string{"alpha"}); err != nil {
+			t.Fatalf("runWorkspaceSwitch: %v", err)
+		}
+
+		// The staging profile picked up Alpha; the default profile (touched
+		// earlier in this test) must remain unaffected.
+		stagingCfg, err := cli.LoadCLIConfigForProfile("staging")
+		if err != nil {
+			t.Fatalf("load staging config: %v", err)
+		}
+		if stagingCfg.WorkspaceID != "11111111-1111-1111-1111-111111111111" {
+			t.Errorf("staging workspace_id = %q, want Alpha's id", stagingCfg.WorkspaceID)
+		}
+
+		// Verify the staging profile config landed in the expected path.
+		path, _ := cli.CLIConfigPathForProfile("staging")
+		wantSuffix := filepath.Join(".multica", "profiles", "staging", "config.json")
+		if !strings.HasSuffix(path, wantSuffix) {
+			t.Errorf("staging config path = %q, want suffix %q", path, wantSuffix)
+		}
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("expected staging config file at %s, got %v", path, err)
+		}
+	})
+}
+
+func TestResolveWorkspaceByIDOrSlug(t *testing.T) {
+	workspaces := []workspaceSummary{
+		{ID: "11111111-1111-1111-1111-111111111111", Name: "Alpha", Slug: "alpha"},
+		{ID: "22222222-2222-2222-2222-222222222222", Name: "Beta", Slug: "beta"},
+	}
+
+	t.Run("matches by exact UUID", func(t *testing.T) {
+		ws, err := resolveWorkspaceByIDOrSlug(workspaces, "22222222-2222-2222-2222-222222222222")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ws.Name != "Beta" {
+			t.Errorf("got %q, want Beta", ws.Name)
+		}
+	})
+
+	t.Run("matches by slug", func(t *testing.T) {
+		ws, err := resolveWorkspaceByIDOrSlug(workspaces, "alpha")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ws.ID != "11111111-1111-1111-1111-111111111111" {
+			t.Errorf("got id %q, want alpha's id", ws.ID)
+		}
+	})
+
+	t.Run("slug match is case-insensitive", func(t *testing.T) {
+		ws, err := resolveWorkspaceByIDOrSlug(workspaces, "ALPHA")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ws.Slug != "alpha" {
+			t.Errorf("got %q, want alpha", ws.Slug)
+		}
+	})
+
+	t.Run("unknown target returns access-style error", func(t *testing.T) {
+		_, err := resolveWorkspaceByIDOrSlug(workspaces, "gamma")
+		if err == nil {
+			t.Fatal("expected error for unknown workspace")
+		}
+		// The error should hint at running 'workspace list' so the user has an
+		// actionable next step. We treat it as a soft contract because it is
+		// the message users see when they typo a slug.
+		if !strings.Contains(err.Error(), "workspace list") {
+			t.Errorf("error %q should reference 'workspace list'", err)
+		}
+	})
+
+	t.Run("empty target is rejected", func(t *testing.T) {
+		_, err := resolveWorkspaceByIDOrSlug(workspaces, "   ")
+		if err == nil {
+			t.Fatal("expected error for empty target")
+		}
+	})
+
+	t.Run("whitespace-padded target is trimmed", func(t *testing.T) {
+		ws, err := resolveWorkspaceByIDOrSlug(workspaces, "  beta  ")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ws.Name != "Beta" {
+			t.Errorf("got %q, want Beta", ws.Name)
+		}
+	})
+}
 
 // resetWorkspaceUpdateFlags clears every flag on workspaceUpdateCmd and marks
 // each as not-Changed. The cobra.Command instance is a process-wide singleton,

@@ -28,6 +28,17 @@ export const issueKeys = {
     scope: string,
     filter: AssigneeGroupedIssuesFilter,
   ) => [...issueKeys.myAssigneeGroupsAll(wsId), scope, filter] as const,
+  /** All Project Gantt queries — prefix-match key for cross-project invalidation. */
+  projectGanttAll: (wsId: string) =>
+    [...issueKeys.all(wsId), "project-gantt"] as const,
+  /**
+   * Per-project Gantt issue list (scheduled-only). Uses its own cache key
+   * rather than reusing the bucketed `myList` cache so WS handlers and
+   * cache helpers don't have to special-case a non-bucketed shape under
+   * the `my` prefix.
+   */
+  projectGantt: (wsId: string, projectId: string) =>
+    [...issueKeys.projectGanttAll(wsId), projectId] as const,
   detail: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "detail", id] as const,
   children: (wsId: string, id: string) =>
@@ -139,6 +150,59 @@ export function myIssueListOptions(
     queryKey: issueKeys.myList(wsId, scope, filter),
     queryFn: () => fetchFirstPages(filter),
     select: flattenIssueBuckets,
+  });
+}
+
+/**
+ * Page size for the scheduled-issue fetch. The Gantt view always pulls every
+ * scheduled issue (no client pagination), so this is just the chunk size we
+ * use to walk the server's `(limit, offset)` window until we hit `total`.
+ */
+export const PROJECT_GANTT_PAGE_LIMIT = 500;
+
+/**
+ * Paranoia cap on the loop in {@link fetchProjectGanttIssues}. Real projects
+ * shouldn't come close to this — a single project carrying 50k scheduled
+ * issues is already a product problem, not a Gantt-rendering one — but the
+ * guard prevents a buggy server `total` from spinning the loop forever.
+ */
+export const PROJECT_GANTT_MAX_ISSUES = 10_000;
+
+async function fetchProjectGanttIssues(projectId: string) {
+  const issues = [];
+  let offset = 0;
+  while (offset < PROJECT_GANTT_MAX_ISSUES) {
+    const res = await api.listIssues({
+      project_id: projectId,
+      scheduled: true,
+      limit: PROJECT_GANTT_PAGE_LIMIT,
+      offset,
+    });
+    issues.push(...res.issues);
+    if (res.issues.length < PROJECT_GANTT_PAGE_LIMIT) break;
+    if (issues.length >= res.total) break;
+    offset += PROJECT_GANTT_PAGE_LIMIT;
+  }
+  return issues;
+}
+
+/**
+ * One-shot fetch of every scheduled issue (`start_date` or `due_date` set)
+ * for a project. The Project Gantt view consumes this directly — no status
+ * bucketing, no client-side pagination, no Load-all affordance — because
+ * the scheduled subset is bounded enough to come back in a small handful of
+ * requests.
+ *
+ * Backed by `GET /api/issues?scheduled=true&project_id=…`; the SQL filter
+ * mirrors the same `(start_date IS NOT NULL OR due_date IS NOT NULL)`
+ * predicate the Gantt view applies on the client. Pages are walked until
+ * `total` is reached so an oversized project can't silently lose bars past
+ * the first page.
+ */
+export function projectGanttIssuesOptions(wsId: string, projectId: string) {
+  return queryOptions({
+    queryKey: issueKeys.projectGantt(wsId, projectId),
+    queryFn: () => fetchProjectGanttIssues(projectId),
   });
 }
 

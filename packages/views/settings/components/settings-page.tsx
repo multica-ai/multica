@@ -14,6 +14,7 @@ import {
   Bell,
   Sparkles,
   BookText,
+  Plug,
   // CEREBRO-PATCH(settings-page-accounts-icon): Konti tab icon (JEH-999)
   KeyRound,
 } from "lucide-react";
@@ -27,6 +28,7 @@ import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
+import { IntegrationsTab } from "./integrations-tab";
 import { LabsTab } from "./labs-tab";
 // CEREBRO-PATCH(settings-page-notifications): use cerebro notifications-tab (Phase 1b relocation + push UI)
 import { NotificationsTab } from "@multica/cerebro-notifications/views/notifications-tab";
@@ -57,16 +59,18 @@ const AGENT_PROFILE_TAB_VALUE = "agent-profile";
 // CEREBRO-PATCH(settings-page-accounts-key): cerebro Konti tab value (JEH-999)
 const ACCOUNTS_TAB_VALUE = "accounts";
 
-const WORKSPACE_TAB_KEYS = ["general", "repositories", "labs", "members"] as const;
+const WORKSPACE_TAB_KEYS = ["general", "repositories", "integrations", "labs", "members"] as const;
 const WORKSPACE_TAB_VALUES = {
   general: "workspace",
   repositories: "repositories",
+  integrations: "integrations",
   labs: "labs",
   members: "members",
 } as const;
 const WORKSPACE_TAB_ICONS = {
   general: Settings,
   repositories: FolderGit2,
+  integrations: Plug,
   labs: FlaskConical,
   members: Users,
 } as const;
@@ -310,6 +314,7 @@ export function SettingsPage({
             <TabsContent value="tokens"><TokensTab /></TabsContent>
             <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
             <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
+            <TabsContent value="integrations"><IntegrationsTab /></TabsContent>
             <TabsContent value="labs"><LabsTab /></TabsContent>
             {/* CEREBRO-PATCH(settings-page-cerebro-members-extras): JEH-1067 inject Groups column + filter */}
             <TabsContent value="members"><MembersTab cerebroExtras={membersTabCerebroExtras} /></TabsContent>

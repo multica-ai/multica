@@ -3,6 +3,7 @@ export type OnboardingStep =
   | "questionnaire"
   | "workspace"
   | "runtime"
+  | "teammate"
   | "agent"
   | "first_issue";
 

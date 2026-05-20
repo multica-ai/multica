@@ -66,7 +66,10 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
+import { ContentEditor, type ContentEditorRef } from "../../editor/content-editor";
+import { FileDropOverlay } from "../../editor/file-drop-overlay";
+import { TitleEditor } from "../../editor/title-editor";
+import { useFileDropZone } from "../../editor/use-file-drop-zone";
 import { AttachmentList } from "@multica/cerebro-attachments/views";
 import { ArtifactList } from "@multica/cerebro-artifacts/views/components";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
@@ -83,7 +86,9 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
 import type { Issue, IssueStatus, IssuePriority, TimelineEntry, IssueSubscriber, UpdateIssueRequest } from "@multica/core/types";
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
-import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker, canAssignAgent } from ".";
+import { PriorityIcon } from "./priority-icon";
+import { StatusIcon } from "./status-icon";
+import { AssigneePicker, canAssignAgent, DueDatePicker, LabelPicker, PriorityPicker, StartDatePicker, StatusPicker } from "./pickers";
 import { useMoveCommentToSubIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
@@ -903,7 +908,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   // a redacted placeholder so the user knows there IS a parent.
   const parentIsRestricted =
     !!parentIssueId && !parentIssue && parentIssueQuery.isError;
-  const { data: projectForBreadcrumb = null } = useQuery({
+  const {
+    data: projectForBreadcrumb = null,
+    isError: projectForBreadcrumbError,
+  } = useQuery({
     ...projectDetailOptions(wsId, issue?.project_id ?? ""),
     enabled: !!issue?.project_id,
   });
@@ -1512,14 +1520,22 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}
-            {issue.project_id && projectForBreadcrumb && (
+            {issue.project_id && (
               <>
-                <AppLink
-                  href={paths.projectDetail(issue.project_id)}
-                  className="text-muted-foreground hover:text-foreground transition-colors truncate shrink-0"
-                >
-                  {projectForBreadcrumb.title}
-                </AppLink>
+                {projectForBreadcrumb ? (
+                  <AppLink
+                    href={paths.projectDetail(issue.project_id)}
+                    className="text-muted-foreground hover:text-foreground transition-colors truncate shrink-0"
+                  >
+                    {projectForBreadcrumb.title}
+                  </AppLink>
+                ) : projectForBreadcrumbError ? (
+                  <span className="italic text-muted-foreground/70 shrink-0">
+                    {t(($) => $.detail.breadcrumb_project_unknown)}
+                  </span>
+                ) : (
+                  <Skeleton className="h-3.5 w-20 shrink-0" />
+                )}
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}

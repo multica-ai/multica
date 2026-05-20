@@ -467,11 +467,17 @@ func (h *Handler) GetWorkspaceUsageSummary(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// parseSinceParam parses the "days" query parameter and returns a timestamptz.
+// parseSinceParam parses the "days" query parameter and returns a timestamptz
+// anchored to UTC start-of-today, so `days=N` represents N natural calendar
+// days under UTC (today plus N-1 prior full days). `days=1` therefore means
+// "today only" — matching the workspace dashboard's `dailyCutoffIso` axis —
+// rather than the trailing 24-hour window the wall-clock cutoff used to
+// return. The downstream SQL all applies `DATE_TRUNC('day', @since)` so the
+// pre-truncated value below lands on the same boundary regardless.
+//
 // CEREBRO-PATCH(usage-since-calendar-days): workspace/dashboard usage windows align to full UTC calendar days.
 // Use parseSinceParamInTZ when the cutoff must align with a per-runtime
-// calendar boundary (so `days=N` returns N full local days under the runtime's
-// tz instead of UTC calendar days).
+// timezone instead of UTC (runtime-detail pages).
 func parseSinceParam(r *http.Request, defaultDays int) pgtype.Timestamptz {
 	days := defaultDays
 	if d := r.URL.Query().Get("days"); d != "" {
@@ -481,7 +487,7 @@ func parseSinceParam(r *http.Request, defaultDays int) pgtype.Timestamptz {
 	}
 	now := time.Now().UTC()
 	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	cutoff := startOfToday.AddDate(0, 0, -days)
+	cutoff := startOfToday.AddDate(0, 0, -(days - 1))
 	return pgtype.Timestamptz{Time: cutoff, Valid: true}
 }
 
@@ -765,6 +771,25 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	if activeCount > 0 {
 		writeError(w, http.StatusConflict, "cannot delete runtime: it has active agents bound to it. Archive or reassign the agents first.")
 		return
+	}
+
+	// Pause autopilots pointing at the archived agents BEFORE we delete
+	// them. Migration 096 dropped the autopilot.assignee_id agent FK, so a
+	// hard-delete here would otherwise leave dangling rows that subsequent
+	// scheduler ticks would skip with "assignee agent no longer exists" —
+	// quiet, but burning a run record every tick until an operator notices.
+	// Pausing makes the breakage visible in the autopilot list so the owner
+	// can re-point or delete the row instead.
+	archivedAgentIDs, err := h.Queries.ListArchivedAgentIDsByRuntime(r.Context(), rt.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to enumerate archived agents")
+		return
+	}
+	if len(archivedAgentIDs) > 0 {
+		if err := h.Queries.PauseAutopilotsByAgentAssignees(r.Context(), archivedAgentIDs); err != nil {
+			slog.Warn("pause autopilots for archived agents failed",
+				"runtime_id", uuidToString(rt.ID), "error", err)
+		}
 	}
 
 	// Remove archived agents so the FK constraint (ON DELETE RESTRICT) won't block deletion.

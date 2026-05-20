@@ -28,14 +28,19 @@ import {
   DailyTokensChart,
   DailyTimeChart,
   DailyTasksChart,
+  WeeklyCostChart,
+  WeeklyTokensChart,
+  WeeklyTimeChart,
+  WeeklyTasksChart,
 } from "../../runtimes/components/charts";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import {
-  TimezoneSelect,
-  browserTimezone,
-} from "../../common/timezone-select";
-import { formatTokens } from "../../runtimes/utils";
+  addDaysIso,
+  aggregateByWeek,
+  formatTokens,
+  todayIso,
+} from "../../runtimes/utils";
 import { useT } from "../../i18n";
 import {
   aggregateAgentTokens,
@@ -43,20 +48,43 @@ import {
   aggregateDailyTasks,
   aggregateDailyTime,
   aggregateDailyTokens,
+  aggregateWeeklyTasks,
+  aggregateWeeklyTime,
   computeDailyTotals,
   formatDuration,
   mergeAgentDashboardRows,
   type AgentDashboardRow,
 } from "../utils";
 
-// One-place source of truth for the period selector. Matches the runtime
-// detail page so users see the same three options across the dashboards.
+// Period selector — mirrors the runtime detail page so users see the same
+// option set across both dashboards. `dims` declares which dimensions each
+// range is allowed in: 1d / 7d at the weekly grain collapse to a single bar,
+// 180d at the daily grain is 180 unreadable bars, so each end of the range
+// belongs to a single dimension. Switching dimensions resets `days` if the
+// current value isn't in the new dimension's allowed set (see
+// `handleDimChange` below).
+//
+// 1d semantic: "today" (the natural calendar day from 00:00 in UTC, matching
+// the rollup's bucket_date axis), not "the last 24 hours". The client-side
+// `dailyCutoffIso` filter below enforces this even at the midnight edge.
 const TIME_RANGES = [
-  { label: "7d", days: 7 },
-  { label: "30d", days: 30 },
-  { label: "90d", days: 90 },
+  { label: "1d", days: 1, dims: ["daily"] as const },
+  { label: "7d", days: 7, dims: ["daily"] as const },
+  { label: "30d", days: 30, dims: ["daily", "weekly"] as const },
+  { label: "90d", days: 90, dims: ["daily", "weekly"] as const },
+  { label: "180d", days: 180, dims: ["weekly"] as const },
 ] as const;
 type TimeRange = (typeof TIME_RANGES)[number]["days"];
+type Dim = "daily" | "weekly";
+
+const DEFAULT_DAYS_BY_DIM: Record<Dim, TimeRange> = {
+  daily: 30,
+  weekly: 90,
+};
+
+function rangesForDim(dim: Dim) {
+  return TIME_RANGES.filter((r) => (r.dims as readonly string[]).includes(dim));
+}
 
 // Sentinel for "no project filter" — kept distinct from the empty string
 // so it survives a refactor that ever lets a project be slug-keyed.
@@ -74,6 +102,14 @@ function fmtMoney(n: number): string {
   if (n >= 100) return `$${n.toFixed(0)}`;
   return `$${n.toFixed(2)}`;
 }
+
+// Weekly aggregation is locked to UTC: the dashboard daily rollup buckets
+// data by UTC `bucket_date` (and the raw fallback queries by `DATE(...)`,
+// also UTC), so any other zone for client-side week boundaries would put
+// cross-midnight rows into the wrong calendar week. Runtime-detail can use
+// the runtime's IANA tz because its rollup is materialized in that tz; the
+// workspace rollup has no equivalent, so weekly is UTC-only here.
+const WEEK_TZ = "UTC";
 
 // Local segmented control — same visual language the runtime usage section
 // uses for its period / tab toggles. shadcn's Tabs is wired for full tab
@@ -120,14 +156,19 @@ function Segmented<T extends string | number>({
  */
 export function DashboardPage() {
   const { t } = useT("usage");
-  const { t: tRuntimes } = useT("runtimes");
   const wsId = useWorkspaceId();
+  const [dim, setDim] = useState<Dim>("daily");
   const [days, setDays] = useState<TimeRange>(30);
   const [projectValue, setProjectValue] = useState<string>(ALL_PROJECTS);
-  // Default to the browser's resolved zone so day-boundary buckets match the
-  // user's local clock on first render. Pure client-state — the rollup queries
-  // are zone-agnostic today; this is the UI affordance the user can pin.
-  const [timezone, setTimezone] = useState<string>(() => browserTimezone());
+
+  const allowedRanges = rangesForDim(dim);
+  const handleDimChange = (next: Dim) => {
+    setDim(next);
+    const stillAllowed = (rangesForDim(next) as readonly { days: number }[]).some(
+      (r) => r.days === days,
+    );
+    if (!stillAllowed) setDays(DEFAULT_DAYS_BY_DIM[next]);
+  };
 
   // The user can save model prices from the runtimes page; re-render when
   // they do so the dashboard reflects the new rates.
@@ -147,17 +188,48 @@ export function DashboardPage() {
     return projects.some((p) => p.id === projectValue) ? projectValue : null;
   }, [projectValue, projects]);
 
-  const dailyQuery = useQuery(dashboardUsageDailyOptions(wsId, days, projectId));
+  // The weekly chart paints `ceil(days / 7)` trailing calendar weeks anchored
+  // at today-in-UTC. In the worst case (today = Sunday) the leftmost Monday
+  // sits `weekCount * 7 - 1` days back, so a vanilla `days=30` request would
+  // silently truncate the leftmost bucket. Over-fetch the per-date queries
+  // to cover the full first week; the per-agent rollups stay at `days` so
+  // KPI/leaderboard labels (e.g. "Tasks · 30D") keep their advertised window.
+  const weekCount = Math.max(1, Math.ceil(days / 7));
+  const chartFetchDays = dim === "weekly" ? weekCount * 7 : days;
+
+  const dailyQuery = useQuery(
+    dashboardUsageDailyOptions(wsId, chartFetchDays, projectId),
+  );
   const byAgentQuery = useQuery(dashboardUsageByAgentOptions(wsId, days, projectId));
   const runTimeQuery = useQuery(dashboardAgentRunTimeOptions(wsId, days, projectId));
   const runTimeDailyQuery = useQuery(
-    dashboardRunTimeDailyOptions(wsId, days, projectId),
+    dashboardRunTimeDailyOptions(wsId, chartFetchDays, projectId),
   );
 
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
   const byAgentUsage = byAgentQuery.data ?? EMPTY_BY_AGENT;
   const runTimeRows = runTimeQuery.data ?? EMPTY_RUNTIME;
   const runTimeDailyRows = runTimeDailyQuery.data ?? EMPTY_RUNTIME_DAILY;
+
+  // Daily-aggregation surfaces (cost/tokens/time/tasks KPIs and the Daily
+  // trend chart) re-scope to the user-selected `days` even when we
+  // over-fetched for the weekly chart. UTC matches the bucket_date the
+  // backend filters on, so the cutoff lands on the same calendar boundary
+  // the rollup used. Applied in both dims so 1d strictly means "today" even
+  // at the midnight UTC edge where the server's wall-clock cutoff would
+  // otherwise include yesterday.
+  const dailyCutoffIso = useMemo(
+    () => addDaysIso(todayIso(WEEK_TZ), -(days - 1)),
+    [days],
+  );
+  const dailyUsageInWindow = useMemo(
+    () => dailyUsage.filter((u) => u.date >= dailyCutoffIso),
+    [dailyUsage, dailyCutoffIso],
+  );
+  const runTimeDailyInWindow = useMemo(
+    () => runTimeDailyRows.filter((r) => r.date >= dailyCutoffIso),
+    [runTimeDailyRows, dailyCutoffIso],
+  );
 
   const isLoading =
     dailyQuery.isLoading ||
@@ -176,16 +248,46 @@ export function DashboardPage() {
     runTimeDailyRows.length === 0;
 
   // Cost / token math — re-derived when usage, days, or pricings change.
-  const totals = useMemo(() => computeDailyTotals(dailyUsage), [dailyUsage]);
-  const dailyCost = useMemo(() => aggregateDailyCost(dailyUsage), [dailyUsage]);
-  const dailyTokens = useMemo(() => aggregateDailyTokens(dailyUsage), [dailyUsage]);
+  const totals = useMemo(
+    () => computeDailyTotals(dailyUsageInWindow),
+    [dailyUsageInWindow],
+  );
+  const dailyCost = useMemo(
+    () => aggregateDailyCost(dailyUsageInWindow),
+    [dailyUsageInWindow],
+  );
+  const dailyTokens = useMemo(
+    () => aggregateDailyTokens(dailyUsageInWindow),
+    [dailyUsageInWindow],
+  );
   const dailyTime = useMemo(
-    () => aggregateDailyTime(runTimeDailyRows),
-    [runTimeDailyRows],
+    () => aggregateDailyTime(runTimeDailyInWindow),
+    [runTimeDailyInWindow],
   );
   const dailyTasks = useMemo(
-    () => aggregateDailyTasks(runTimeDailyRows),
-    [runTimeDailyRows],
+    () => aggregateDailyTasks(runTimeDailyInWindow),
+    [runTimeDailyInWindow],
+  );
+
+  // Weekly aggregates — built from the over-fetched per-date queries so the
+  // leftmost trailing week always has data even when the user-selected `days`
+  // (e.g. 30D) is shorter than the chart's `weekCount * 7` span. Buckets are
+  // pre-zeroed inside the helpers, so sparse weeks render as empty bars
+  // instead of being dropped (MUL-2382 weekly window scoping). Locked to
+  // UTC so the week boundaries match the backend's UTC `bucket_date`.
+  const weekly = useMemo(
+    () => aggregateByWeek(dailyUsage, WEEK_TZ, weekCount),
+    [dailyUsage, weekCount],
+  );
+  const weeklyCost = weekly.weeklyCostStack;
+  const weeklyTokens = weekly.weeklyTokens;
+  const weeklyTime = useMemo(
+    () => aggregateWeeklyTime(runTimeDailyRows, WEEK_TZ, weekCount),
+    [runTimeDailyRows, weekCount],
+  );
+  const weeklyTasks = useMemo(
+    () => aggregateWeeklyTasks(runTimeDailyRows, WEEK_TZ, weekCount),
+    [runTimeDailyRows, weekCount],
   );
   const agentTokenRows = useMemo(
     () => aggregateAgentTokens(byAgentUsage),
@@ -212,12 +314,10 @@ export function DashboardPage() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* h-auto + min-h-12 + flex-wrap: the toolbar (project filter, range
-          switch, timezone select) overflows the single h-12 row on narrow
-          and medium widths once the timezone picker is added — letting the
-          right cluster wrap underneath keeps every control reachable
-          without an off-screen bleed. Wider viewports still render the
-          original single row. */}
+      {/* h-auto + min-h-12 + flex-wrap: the toolbar (project filter,
+          dimension switch, range switch) wraps on narrow viewports so every
+          control stays reachable. Wider viewports still render the original
+          single row. */}
       <PageHeader className="h-auto min-h-12 flex-wrap justify-between gap-y-1.5 px-5 py-1.5 sm:py-0">
         <div className="flex min-w-0 items-center gap-2">
           <BarChart3 className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -230,15 +330,17 @@ export function DashboardPage() {
             onChange={setProjectValue}
           />
           <Segmented
+            value={dim}
+            onChange={handleDimChange}
+            options={[
+              { label: t(($) => $.dim.daily), value: "daily" as const },
+              { label: t(($) => $.dim.weekly), value: "weekly" as const },
+            ]}
+          />
+          <Segmented
             value={days}
             onChange={setDays}
-            options={TIME_RANGES.map((r) => ({ label: r.label, value: r.days }))}
-          />
-          <TimezoneSelect
-            value={timezone}
-            onValueChange={setTimezone}
-            browserSuffix={tRuntimes(($) => $.detail.timezone_browser_suffix)}
-            triggerClassName="rounded-md font-mono text-xs"
+            options={allowedRanges.map((r) => ({ label: r.label, value: r.days }))}
           />
         </div>
       </PageHeader>
@@ -290,14 +392,21 @@ export function DashboardPage() {
                 />
               </div>
 
-              {/* Daily trend chart — toggle picks Tokens / Cost / Time /
-                  Tasks. All four share the same x-axis (date) so the user
-                  can mentally overlay them by switching the toggle. */}
-              <DailyTrendBlock
+              {/* Trend chart — toggle picks Tokens / Cost / Time / Tasks
+                  and the parent's dim selector decides whether the bars are
+                  per-day or per-calendar-week. All four metrics share the
+                  same x-axis so the user can mentally overlay them by
+                  flipping the toggle. */}
+              <TrendBlock
+                dim={dim}
                 dailyCost={dailyCost}
                 dailyTokens={dailyTokens}
                 dailyTime={dailyTime}
                 dailyTasks={dailyTasks}
+                weeklyCost={weeklyCost}
+                weeklyTokens={weeklyTokens}
+                weeklyTime={weeklyTime}
+                weeklyTasks={weeklyTasks}
                 lessThanMinuteLabel={t(($) => $.duration.less_than_minute)}
               />
 
@@ -375,17 +484,27 @@ function ProjectFilter({
 
 type DailyMetric = "tokens" | "cost" | "time" | "tasks";
 
-function DailyTrendBlock({
+function TrendBlock({
+  dim,
   dailyCost,
   dailyTokens,
   dailyTime,
   dailyTasks,
+  weeklyCost,
+  weeklyTokens,
+  weeklyTime,
+  weeklyTasks,
   lessThanMinuteLabel,
 }: {
+  dim: Dim;
   dailyCost: ReturnType<typeof aggregateDailyCost>;
   dailyTokens: ReturnType<typeof aggregateDailyTokens>;
   dailyTime: ReturnType<typeof aggregateDailyTime>;
   dailyTasks: ReturnType<typeof aggregateDailyTasks>;
+  weeklyCost: ReturnType<typeof aggregateByWeek>["weeklyCostStack"];
+  weeklyTokens: ReturnType<typeof aggregateByWeek>["weeklyTokens"];
+  weeklyTime: ReturnType<typeof aggregateWeeklyTime>;
+  weeklyTasks: ReturnType<typeof aggregateWeeklyTasks>;
   lessThanMinuteLabel: string;
 }) {
   const { t } = useT("usage");
@@ -394,13 +513,18 @@ function DailyTrendBlock({
   // Empty-state is per-metric so each toggle option independently decides
   // whether it has data — e.g. tokens recorded but no terminal runs yet
   // should show Tokens normally while Time / Tasks fall through to empty.
-  const totalCost = dailyCost.reduce((sum, d) => sum + d.total, 0);
-  const totalTokens = dailyTokens.reduce(
+  const costData = dim === "weekly" ? weeklyCost : dailyCost;
+  const tokensData = dim === "weekly" ? weeklyTokens : dailyTokens;
+  const timeData = dim === "weekly" ? weeklyTime : dailyTime;
+  const tasksData = dim === "weekly" ? weeklyTasks : dailyTasks;
+
+  const totalCost = costData.reduce((sum, d) => sum + d.total, 0);
+  const totalTokens = tokensData.reduce(
     (sum, d) => sum + d.input + d.output + d.cacheRead + d.cacheWrite,
     0,
   );
-  const totalSeconds = dailyTime.reduce((sum, d) => sum + d.totalSeconds, 0);
-  const totalTasks = dailyTasks.reduce(
+  const totalSeconds = timeData.reduce((sum, d) => sum + d.totalSeconds, 0);
+  const totalTasks = tasksData.reduce(
     (sum, d) => sum + d.completed + d.failed,
     0,
   );
@@ -414,13 +538,21 @@ function DailyTrendBlock({
           : totalTasks === 0;
 
   const title =
-    metric === "cost"
-      ? t(($) => $.daily.title_cost)
-      : metric === "tokens"
-        ? t(($) => $.daily.title_tokens)
-        : metric === "time"
-          ? t(($) => $.daily.title_time)
-          : t(($) => $.daily.title_tasks);
+    dim === "weekly"
+      ? metric === "cost"
+        ? t(($) => $.weekly.title_cost)
+        : metric === "tokens"
+          ? t(($) => $.weekly.title_tokens)
+          : metric === "time"
+            ? t(($) => $.weekly.title_time)
+            : t(($) => $.weekly.title_tasks)
+      : metric === "cost"
+        ? t(($) => $.daily.title_cost)
+        : metric === "tokens"
+          ? t(($) => $.daily.title_tokens)
+          : metric === "time"
+            ? t(($) => $.daily.title_time)
+            : t(($) => $.daily.title_tasks);
 
   return (
     <div className="rounded-lg border bg-card p-4">
@@ -445,6 +577,20 @@ function DailyTrendBlock({
               {t(($) => $.daily.no_data)}
             </p>
           </div>
+        ) : dim === "weekly" ? (
+          metric === "cost" ? (
+            <WeeklyCostChart data={weeklyCost} />
+          ) : metric === "tokens" ? (
+            <WeeklyTokensChart data={weeklyTokens} />
+          ) : metric === "time" ? (
+            <WeeklyTimeChart
+              data={weeklyTime}
+              formatY={(s) => formatDuration(s, lessThanMinuteLabel)}
+              formatTooltip={(s) => formatDuration(s, lessThanMinuteLabel)}
+            />
+          ) : (
+            <WeeklyTasksChart data={weeklyTasks} />
+          )
         ) : metric === "cost" ? (
           <DailyCostChart data={dailyCost} />
         ) : metric === "tokens" ? (

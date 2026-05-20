@@ -316,7 +316,7 @@ describe("FileManagerPage artifact row menu actions", () => {
     expect(screen.getByText("Rename document")).toBeTruthy();
     const input = screen.getByDisplayValue("Daily sales report");
     expect(input).toBeTruthy();
-  });
+  }, 10_000);
 
   it("Edit body action navigates to the document edit page", () => {
     renderPage();

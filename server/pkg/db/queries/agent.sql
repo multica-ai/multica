@@ -21,8 +21,8 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
-    instructions, custom_env, custom_args, mcp_config, model, persona_sandbox
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+    instructions, custom_env, custom_args, mcp_config, model, persona_sandbox, thinking_level
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 RETURNING *;
 
 -- name: UpdateAgent :one
@@ -42,12 +42,21 @@ UPDATE agent SET
     mcp_config = COALESCE(sqlc.narg('mcp_config'), mcp_config),
     model = COALESCE(sqlc.narg('model'), model),
     persona_sandbox = COALESCE(sqlc.narg('persona_sandbox'), persona_sandbox),
+    thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
 
 -- name: ClearAgentPersonaSandbox :one
 UPDATE agent SET persona_sandbox = NULL, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearAgentThinkingLevel :one
+-- Explicit NULL-clear for thinking_level. COALESCE-based UpdateAgent cannot
+-- set the column back to NULL, so the API layer routes "user picked Default"
+-- through this dedicated query.
+UPDATE agent SET thinking_level = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 

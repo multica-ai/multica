@@ -13,7 +13,9 @@
 
 import { useCallback, useId, useRef, useState } from "react";
 import { ArrowUp, Loader2, Maximize2, Minimize2 } from "lucide-react";
-import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
+import { ContentEditor, type ContentEditorRef } from "../../editor/content-editor";
+import { FileDropOverlay } from "../../editor/file-drop-overlay";
+import { useFileDropZone } from "../../editor/use-file-drop-zone";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";

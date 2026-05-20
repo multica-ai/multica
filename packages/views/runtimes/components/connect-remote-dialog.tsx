@@ -1,16 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Check,
-  ChevronRight,
-  Copy,
-  Loader2,
-  Server,
-  ShieldAlert,
-  Terminal,
-  Wrench,
-} from "lucide-react";
+import { Check, ChevronRight, Copy, Terminal } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { runtimeKeys } from "@multica/core/runtimes/queries";
@@ -28,46 +19,40 @@ import { Button } from "@multica/ui/components/ui/button";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
-type Step = "instructions" | "waiting" | "success";
+type Step = "instructions" | "success";
+
+const INSTALL_CMD =
+  "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
+const SETUP_CMD = "multica setup";
+const TOKEN_CMD = `multica config set server_url https://api.multica.ai
+multica config set app_url https://multica.ai
+multica login --token <YOUR_TOKEN>
+multica daemon start`;
 
 export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState<Step>("instructions");
-  const [copied, setCopied] = useState<string | null>(null);
   const wsId = useWorkspaceId();
   const slug = useWorkspaceSlug();
   const qc = useQueryClient();
   const navigation = useNavigation();
   const newRuntimeIdRef = useRef<string | null>(null);
 
-  // Listen for a new runtime registration while the dialog is open
+  // `multica setup` is one blocking command that handles config + login
+  // + daemon start; the dialog passively listens for the resulting
+  // `daemon:register` WS event and auto-advances to success.
   const handleDaemonRegister = useCallback(
     (payload: unknown) => {
-      if (step === "waiting" || step === "instructions") {
-        qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
-        const p = payload as Record<string, unknown> | null;
-        if (p?.runtime_id && typeof p.runtime_id === "string") {
-          newRuntimeIdRef.current = p.runtime_id;
-        }
-        setStep("success");
+      if (step !== "instructions") return;
+      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+      const p = payload as Record<string, unknown> | null;
+      if (p?.runtime_id && typeof p.runtime_id === "string") {
+        newRuntimeIdRef.current = p.runtime_id;
       }
+      setStep("success");
     },
     [step, qc, wsId],
   );
   useWSEvent("daemon:register", handleDaemonRegister);
-
-  const copyToClipboard = useCallback(
-    (text: string, key: string) => {
-      navigator.clipboard.writeText(text);
-      setCopied(key);
-    },
-    [],
-  );
-
-  useEffect(() => {
-    if (!copied) return;
-    const t = setTimeout(() => setCopied(null), 2000);
-    return () => clearTimeout(t);
-  }, [copied]);
 
   const handleGoToAgents = () => {
     onClose();
@@ -87,18 +72,8 @@ export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-xl">
-        {step === "instructions" && (
-          <InstructionsStep
-            copied={copied}
-            onCopy={copyToClipboard}
-            onNext={() => setStep("waiting")}
-            onClose={onClose}
-          />
-        )}
-        {step === "waiting" && (
-          <WaitingStep onBack={() => setStep("instructions")} />
-        )}
+      <DialogContent className="flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-lg">
+        {step === "instructions" && <InstructionsStep onClose={onClose} />}
         {step === "success" && (
           <SuccessStep
             onGoToAgents={handleGoToAgents}
@@ -113,232 +88,199 @@ export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
-// Step 1: Installation instructions
+// Copy button + code row — mirrors onboarding/CliInstallInstructions
 // ---------------------------------------------------------------------------
 
-const INSTALL_CMD = "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
+function CopyButton({ text, ariaLabel }: { text: string; ariaLabel: string }) {
+  const [copied, setCopied] = useState(false);
 
-const CONFIGURE_CMD = `multica config set server_url https://api.multica.ai
-multica config set app_url https://multica.ai`;
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(t);
+  }, [copied]);
 
-const LOGIN_CMD = "multica login --token <YOUR_TOKEN>";
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+  };
 
-const START_CMD = `multica daemon start --device-name "my-ec2-instance"
-multica daemon status`;
-
-function CodeBlock({
-  code,
-  copyKey,
-  copied,
-  onCopy,
-}: {
-  code: string;
-  copyKey: string;
-  copied: string | null;
-  onCopy: (text: string, key: string) => void;
-}) {
-  const isCopied = copied === copyKey;
   return (
-    <div className="relative rounded-md border bg-muted/50">
-      <pre className="overflow-x-auto p-2.5 pr-10 font-mono text-xs leading-relaxed text-foreground">
-        {code}
-      </pre>
-      <button
-        type="button"
-        onClick={() => onCopy(code, copyKey)}
-        className="absolute top-1.5 right-1.5 flex h-6 w-6 items-center justify-center rounded border bg-background text-muted-foreground transition-colors hover:text-foreground"
-      >
-        {isCopied ? (
-          <Check className="h-3 w-3 text-success" />
-        ) : (
-          <Copy className="h-3 w-3" />
-        )}
-      </button>
+    <button
+      type="button"
+      onClick={handleCopy}
+      aria-label={ariaLabel}
+      className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      {copied ? (
+        <Check className="h-3.5 w-3.5 text-success" aria-hidden />
+      ) : (
+        <Copy className="h-3.5 w-3.5" aria-hidden />
+      )}
+    </button>
+  );
+}
+
+function CommandStep({
+  n,
+  label,
+  cmd,
+  copyAria,
+}: {
+  n: number;
+  label: string;
+  cmd: string;
+  copyAria: string;
+}) {
+  return (
+    <div>
+      <p className="mb-1.5 text-xs font-medium text-foreground">
+        {n}. {label}
+      </p>
+      <div className="flex items-start gap-2 rounded-lg bg-muted px-3 py-2.5 font-mono text-sm">
+        <Terminal
+          className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground"
+          aria-hidden
+        />
+        <code className="min-w-0 flex-1 break-all whitespace-pre-wrap tabular-nums">
+          {cmd}
+        </code>
+        <CopyButton text={cmd} ariaLabel={copyAria} />
+      </div>
     </div>
   );
 }
 
-function InstructionsStep({
-  copied,
-  onCopy,
-  onNext,
-  onClose,
-}: {
-  copied: string | null;
-  onCopy: (text: string, key: string) => void;
-  onNext: () => void;
-  onClose: () => void;
-}) {
+// ---------------------------------------------------------------------------
+// Step 1: Instructions
+// ---------------------------------------------------------------------------
+
+function InstructionsStep({ onClose }: { onClose: () => void }) {
   const { t } = useT("runtimes");
   return (
     <>
-      <DialogHeader>
-        <DialogTitle>{t(($) => $.connect.title)}</DialogTitle>
-        <DialogDescription>
+      <DialogHeader className="px-6 pt-6 pb-2">
+        <DialogTitle className="text-base text-balance">
+          {t(($) => $.connect.title)}
+        </DialogTitle>
+        <DialogDescription className="text-xs text-balance">
           {t(($) => $.connect.description)}
         </DialogDescription>
       </DialogHeader>
 
-      <div className="-mx-4 min-h-0 flex-1 overflow-y-auto px-4">
-        <div className="space-y-3">
-          <div>
-            <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              <Terminal className="h-3.5 w-3.5" />
-              {t(($) => $.connect.step1)}
-            </div>
-            <CodeBlock
-              code={INSTALL_CMD}
-              copyKey="install"
-              copied={copied}
-              onCopy={onCopy}
-            />
-          </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+        <div className="space-y-4">
+          <CommandStep
+            n={1}
+            label={t(($) => $.connect.step1_label)}
+            cmd={INSTALL_CMD}
+            copyAria={t(($) => $.connect.copy_aria)}
+          />
 
           <div>
-            <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              <Server className="h-3.5 w-3.5" />
-              {t(($) => $.connect.step2)}
-            </div>
-            <CodeBlock
-              code={CONFIGURE_CMD}
-              copyKey="config"
-              copied={copied}
-              onCopy={onCopy}
+            <CommandStep
+              n={2}
+              label={t(($) => $.connect.step2_label)}
+              cmd={SETUP_CMD}
+              copyAria={t(($) => $.connect.copy_aria)}
             />
-          </div>
-
-          <div>
-            <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              {t(($) => $.connect.step3)}
-            </div>
-            <CodeBlock
-              code={LOGIN_CMD}
-              copyKey="login"
-              copied={copied}
-              onCopy={onCopy}
-            />
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              {t(($) => $.connect.step3_hint_prefix)}
-              <span className="font-medium text-foreground">
-                {t(($) => $.connect.step3_hint_destination)}
-              </span>
-              {t(($) => $.connect.step3_hint_suffix)}
+            <p className="mt-1.5 text-[11px] leading-[1.55] text-muted-foreground">
+              {t(($) => $.connect.step2_hint)}
             </p>
           </div>
 
-          <div>
-            <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              {t(($) => $.connect.step4)}
-            </div>
-            <CodeBlock
-              code={START_CMD}
-              copyKey="start"
-              copied={copied}
-              onCopy={onCopy}
-            />
-          </div>
+          <LiveListening />
 
-          <div className="rounded-md border border-warning/30 bg-warning/5 p-2.5">
-            <div className="flex items-start gap-2">
-              <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
-              <div className="text-[11px] leading-relaxed text-muted-foreground">
-                <span className="font-medium text-foreground">{t(($) => $.connect.security_label)}</span>
-                {t(($) => $.connect.security_body)}
-                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-                  {"custom_env"}
-                </code>
-                {t(($) => $.connect.security_body_suffix)}
-              </div>
-            </div>
-          </div>
-
-          <details className="group pb-1">
-            <summary className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
-              <Wrench className="h-3.5 w-3.5" />
-              {t(($) => $.connect.troubleshooting)}
-              <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" />
-            </summary>
-            <ul className="mt-1.5 list-disc space-y-0.5 pl-8 text-[11px] text-muted-foreground">
-              <li>
-                {t(($) => $.connect.trouble_check_status)}
-                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-                  {"multica daemon status"}
-                </code>
-              </li>
-              <li>
-                {t(($) => $.connect.trouble_view_logs)}
-                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-                  {"multica daemon logs -f"}
-                </code>
-              </li>
-              <li>
-                {t(($) => $.connect.trouble_verify_provider)}
-                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-                  {"claude --version"}
-                </code>
-              </li>
-              <li>
-                {t(($) => $.connect.trouble_remote_note_prefix)}
-                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-                  {"multica daemon"}
-                </code>
-                {t(($) => $.connect.trouble_remote_note_suffix)}
-              </li>
-            </ul>
-          </details>
+          <TroubleshootingDetails />
         </div>
       </div>
 
-      <DialogFooter>
-        <Button variant="ghost" onClick={onClose}>
+      <DialogFooter className="m-0 rounded-b-xl border-t bg-muted/30 px-6 py-3">
+        <Button variant="outline" size="sm" onClick={onClose}>
           {t(($) => $.connect.cancel)}
         </Button>
-        <Button onClick={onNext}>
-          {t(($) => $.connect.started_daemon)}
-          <ChevronRight className="h-3.5 w-3.5" />
-        </Button>
       </DialogFooter>
     </>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Step 2: Waiting for registration
-// ---------------------------------------------------------------------------
-
-function WaitingStep({ onBack }: { onBack: () => void }) {
+function TroubleshootingDetails() {
   const { t } = useT("runtimes");
   return (
-    <>
-      <DialogHeader>
-        <DialogTitle>{t(($) => $.connect.waiting_title)}</DialogTitle>
-        <DialogDescription>
-          {t(($) => $.connect.waiting_description)}
-        </DialogDescription>
-      </DialogHeader>
-
-      <div className="flex flex-col items-center gap-3 py-8">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">
-          {t(($) => $.connect.waiting_hint_prefix)}
-          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
-            {"multica daemon status"}
-          </code>
-          {t(($) => $.connect.waiting_hint_suffix)}
+    <details className="group rounded-lg border border-dashed">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <ChevronRight
+          className="h-3 w-3 transition-transform group-open:rotate-90"
+          aria-hidden
+        />
+        {t(($) => $.connect.troubleshooting)}
+      </summary>
+      <div className="space-y-2 border-t px-3 pt-2.5 pb-3 text-[11px] leading-[1.55] text-muted-foreground">
+        <p>{t(($) => $.connect.trouble_intro)}</p>
+        <CommandStep
+          n={2}
+          label={t(($) => $.connect.step2_label)}
+          cmd={TOKEN_CMD}
+          copyAria={t(($) => $.connect.copy_aria)}
+        />
+        <p>
+          {t(($) => $.connect.trouble_token_hint_prefix)}
+          <span className="font-medium text-foreground">
+            {t(($) => $.connect.trouble_token_hint_destination)}
+          </span>
+          {t(($) => $.connect.trouble_token_hint_suffix)}
         </p>
+        <ul className="space-y-1">
+          <li className="flex items-center gap-1.5">
+            <span>{t(($) => $.connect.trouble_check_status)}</span>
+            {/* CLI command — literal shell string, not i18n content. */}
+            {/* eslint-disable-next-line i18next/no-literal-string */}
+            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">
+              {"multica daemon status"}
+            </code>
+          </li>
+          <li className="flex items-center gap-1.5">
+            <span>{t(($) => $.connect.trouble_view_logs)}</span>
+            {/* CLI command — literal shell string, not i18n content. */}
+            {/* eslint-disable-next-line i18next/no-literal-string */}
+            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">
+              {"multica daemon logs -f"}
+            </code>
+          </li>
+        </ul>
       </div>
-
-      <DialogFooter>
-        <Button variant="ghost" onClick={onBack}>
-          {t(($) => $.connect.back)}
-        </Button>
-      </DialogFooter>
-    </>
+    </details>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Step 3: Success
+// Live-listening indicator
+// ---------------------------------------------------------------------------
+
+function LiveListening() {
+  const { t } = useT("runtimes");
+  return (
+    <div
+      className="flex items-center gap-2.5 rounded-lg border bg-muted/40 px-3 py-2.5 text-xs"
+      role="status"
+      aria-live="polite"
+    >
+      <span className="relative inline-flex shrink-0" aria-hidden>
+        <span className="absolute inline-flex h-2 w-2 animate-ping rounded-full bg-success opacity-60 motion-reduce:hidden" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
+      </span>
+      <span className="font-medium text-foreground">
+        {t(($) => $.connect.live_listening)}
+      </span>
+      <span className="text-muted-foreground">
+        {t(($) => $.connect.live_listening_hint)}
+      </span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Step 2: Success
 // ---------------------------------------------------------------------------
 
 function SuccessStep({
@@ -351,28 +293,33 @@ function SuccessStep({
   const { t } = useT("runtimes");
   return (
     <>
-      <DialogHeader>
-        <DialogTitle>{t(($) => $.connect.success_title)}</DialogTitle>
-        <DialogDescription>
+      <DialogHeader className="px-6 pt-6 pb-2">
+        <DialogTitle className="text-base text-balance">
+          {t(($) => $.connect.success_title)}
+        </DialogTitle>
+        <DialogDescription className="text-xs text-balance">
           {t(($) => $.connect.success_description)}
         </DialogDescription>
       </DialogHeader>
 
-      <div className="flex flex-col items-center gap-3 py-6">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-success/10">
+      <div className="flex flex-col items-center gap-3 px-6 py-8">
+        <div
+          className="flex h-12 w-12 items-center justify-center rounded-full bg-success/10"
+          aria-hidden
+        >
           <Check className="h-6 w-6 text-success" />
         </div>
       </div>
 
-      <DialogFooter>
+      <DialogFooter className="m-0 rounded-b-xl border-t bg-muted/30 px-6 py-3">
         {onGoToRuntime && (
-          <Button variant="ghost" onClick={onGoToRuntime}>
+          <Button variant="ghost" size="sm" onClick={onGoToRuntime}>
             {t(($) => $.connect.view_runtime)}
           </Button>
         )}
-        <Button onClick={onGoToAgents}>
+        <Button size="sm" onClick={onGoToAgents}>
           {t(($) => $.connect.create_agent)}
-          <ChevronRight className="h-3.5 w-3.5" />
+          <ChevronRight className="h-3.5 w-3.5" aria-hidden />
         </Button>
       </DialogFooter>
     </>

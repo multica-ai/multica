@@ -609,7 +609,7 @@ func (s *AutopilotService) captureAutopilotRunStarted(ap db.Autopilot, run db.Au
 		util.UUIDToString(ap.WorkspaceID),
 		util.UUIDToString(ap.ID),
 		util.UUIDToString(run.ID),
-		util.UUIDToString(ap.AssigneeID),
+		autopilotAssignee(ap),
 		triggerSource,
 	))
 }
@@ -623,7 +623,7 @@ func (s *AutopilotService) captureAutopilotRunCompleted(ap db.Autopilot, run db.
 		util.UUIDToString(ap.WorkspaceID),
 		util.UUIDToString(ap.ID),
 		util.UUIDToString(run.ID),
-		util.UUIDToString(ap.AssigneeID),
+		autopilotAssignee(ap),
 		run.Source,
 		autopilotRunDurationMS(run),
 	))
@@ -641,7 +641,7 @@ func (s *AutopilotService) captureAutopilotRunFailed(ap db.Autopilot, run db.Aut
 		util.UUIDToString(ap.WorkspaceID),
 		util.UUIDToString(ap.ID),
 		util.UUIDToString(run.ID),
-		util.UUIDToString(ap.AssigneeID),
+		autopilotAssignee(ap),
 		triggerSource,
 		reason,
 		autopilotErrorType(reason),
@@ -662,6 +662,20 @@ func autopilotErrorType(reason string) string {
 		return "task_error"
 	default:
 		return "autopilot_error"
+	}
+}
+
+func autopilotAssignee(ap db.Autopilot) analytics.AutopilotAssignee {
+	assigneeID := util.UUIDToString(ap.AssigneeID)
+	if ap.AssigneeType == "squad" {
+		return analytics.AutopilotAssignee{
+			AssigneeType: "squad",
+			SquadID:      assigneeID,
+		}
+	}
+	return analytics.AutopilotAssignee{
+		AgentID:      assigneeID,
+		AssigneeType: "agent",
 	}
 }
 

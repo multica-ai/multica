@@ -895,9 +895,16 @@ func (d *Daemon) workspaceCoAuthoredByEnabled(workspaceID string) bool {
 		return true // default: enabled
 	}
 	var s struct {
+		GitHubEnabled       *bool `json:"github_enabled"`
 		CoAuthoredByEnabled *bool `json:"co_authored_by_enabled"`
 	}
-	if err := json.Unmarshal(ws.settings, &s); err != nil || s.CoAuthoredByEnabled == nil {
+	if err := json.Unmarshal(ws.settings, &s); err != nil {
+		return true // default: enabled
+	}
+	if s.GitHubEnabled != nil && !*s.GitHubEnabled {
+		return false
+	}
+	if s.CoAuthoredByEnabled == nil {
 		return true // default: enabled
 	}
 	return *s.CoAuthoredByEnabled
@@ -1003,6 +1010,7 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 	if ws, ok := d.workspaces[workspaceID]; ok {
 		ws.reposVersion = resp.ReposVersion
 		ws.allowedRepoURLs = repoAllowlist(resp.Repos)
+		ws.settings = resp.Settings
 	}
 	d.mu.Unlock()
 
@@ -1023,14 +1031,12 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return fmt.Errorf("workspace is not watched by this daemon: %s", workspaceID)
 	}
 
-	if d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
-		return nil
-	}
+	cacheHitOnEntry := d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != ""
 
 	ws.repoRefreshMu.Lock()
 	defer ws.repoRefreshMu.Unlock()
 
-	if d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
+	if !cacheHitOnEntry && d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
 		return nil
 	}
 
@@ -1041,6 +1047,10 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 
 	if !d.workspaceRepoAllowed(workspaceID, repoURL) {
 		return ErrRepoNotConfigured
+	}
+
+	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
+		return nil
 	}
 
 	d.syncWorkspaceRepos(workspaceID, resp.Repos)
@@ -1106,11 +1116,13 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	var removed int
 	for id, name := range apiIDs {
 		if currentIDs[id] {
-			// Already tracked: only intervene if the workspace lost all of
-			// its runtimes (most commonly because handleRuntimeGone pruned
-			// them and its inline re-register failed). The pointer is not
-			// replaced here either — ensureRepoReady holds repoRefreshMu
-			// from the original pointer.
+			// CEREBRO-PATCH(daemon-settings-refresh): keep settings live on existing workspaces (JEH-1590).
+			if _, err := d.refreshWorkspaceRepos(ctx, id); err != nil {
+				d.logger.Debug("workspace sync: refresh settings failed", "workspace_id", id, "error", err)
+			}
+			// Already tracked: only intervene if the workspace lost all of its
+			// runtimes. The pointer is not replaced here either — ensureRepoReady
+			// holds repoRefreshMu from the original pointer.
 			if !d.workspaceNeedsRuntimeRecovery(id) {
 				continue
 			}

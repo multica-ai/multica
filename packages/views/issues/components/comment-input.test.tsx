@@ -59,6 +59,28 @@ vi.mock("../../editor", () => {
   };
 });
 
+// CEREBRO-PATCH(editor-direct-path-mocks): cerebro's b787595c moved
+// `comment-input.tsx` from the `../../editor` barrel to direct sub-module
+// imports. Re-export from the barrel mock so the test mocks still apply.
+vi.mock("../../editor/content-editor", async () => {
+  const barrel = await import("../../editor");
+  return {
+    ContentEditor: (barrel as { ContentEditor: unknown }).ContentEditor,
+  };
+});
+vi.mock("../../editor/file-drop-overlay", async () => {
+  const barrel = await import("../../editor");
+  return {
+    FileDropOverlay: (barrel as { FileDropOverlay: unknown }).FileDropOverlay,
+  };
+});
+vi.mock("../../editor/use-file-drop-zone", async () => {
+  const barrel = await import("../../editor");
+  return {
+    useFileDropZone: (barrel as { useFileDropZone: unknown }).useFileDropZone,
+  };
+});
+
 import { CommentInput } from "./comment-input";
 
 beforeEach(() => {

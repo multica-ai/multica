@@ -171,8 +171,8 @@ function FancyView({
   const [waitlistSubmitted, setWaitlistSubmitted] = useState(false);
 
   // Skip is always available — regardless of phase. Hitting Skip routes
-  // the flow through the self-serve branch (agent=null), which still
-  // completes onboarding and seeds a Getting Started project.
+  // through the runtime-less branch, which creates one focused self-serve
+  // onboarding issue instead of seeding the old starter project.
   const handleSkip = async () => {
     if (submitting) return;
     setSubmitting(true);

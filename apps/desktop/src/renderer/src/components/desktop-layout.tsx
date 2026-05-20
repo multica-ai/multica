@@ -12,8 +12,7 @@ import {
 import { ModalRegistry } from "@multica/views/modals/registry";
 import { AppSidebar } from "@multica/views/layout";
 import { SearchCommand, SearchTrigger } from "@multica/views/search";
-import { ChatWindow } from "@multica/views/chat";
-import { StarterContentPrompt } from "@multica/views/onboarding";
+import { ChatFab, ChatWindow } from "@multica/views/chat";
 import { WorkspaceSlugProvider, paths, useCurrentWorkspace } from "@multica/core/paths";
 import { getCurrentSlug, subscribeToCurrentSlug } from "@multica/core/platform";
 import { useDesktopUnreadBadge } from "@multica/views/platform";
@@ -158,17 +157,17 @@ export function DesktopShell() {
             {/* Right side: header + content container */}
             <div className="flex flex-1 min-w-0 flex-col">
               <MainTopBar />
-              {/* Content area with inset styling — relative so ChatWindow is constrained here */}
+              {/* Content area with inset styling — relative so ChatWindow/ChatFab are constrained here */}
               <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden mr-2 mb-2 ml-0.5 rounded-xl shadow-sm bg-background">
                 <TabContent />
                 {slug && <ChatWindow />}
+                {slug && <ChatFab />}
               </div>
             </div>
           </SidebarProvider>
         </div>
         {slug && <ModalRegistry />}
         {slug && <SearchCommand />}
-        {slug && <StarterContentPrompt />}
         <WindowOverlay />
       </WorkspaceSlugProvider>
     </DesktopNavigationProvider>

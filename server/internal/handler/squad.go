@@ -298,6 +298,19 @@ func (h *Handler) DeleteSquad(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("transfer squad assignees failed", "squad_id", uuidToString(squad.ID), "error", err)
 	}
 
+	// Mirror the issue-assignee transfer for autopilots that target this
+	// squad. Without this, autopilot.assignee_id would still point at the
+	// archived squad row and every subsequent dispatch would skip with
+	// "assignee squad is archived" — visible to ops but useless to the
+	// owner. Rewriting to the leader keeps the autopilot semantics
+	// unchanged (Path A from MUL-2429 is leader-only execution anyway).
+	if err := h.Queries.TransferSquadAutopilotsToLeader(r.Context(), db.TransferSquadAutopilotsToLeaderParams{
+		AssigneeID:   squad.ID,
+		AssigneeID_2: squad.LeaderID,
+	}); err != nil {
+		slog.Warn("transfer squad autopilots failed", "squad_id", uuidToString(squad.ID), "error", err)
+	}
+
 	userID := requestUserID(r)
 	userUUID, _ := parseUUIDOrBadRequest(w, userID, "user_id")
 
@@ -705,7 +718,10 @@ func (h *Handler) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db
 }
 
 // isSquadLeaderReady returns true when the issue is assigned to a squad whose
-// leader agent is ready (has a runtime, not archived).
+// leader agent can accept work right now. Readiness criteria (archived,
+// runtime bound, runtime online) are shared with the autopilot admission
+// gate via service.AgentReadiness — both paths must move together or one
+// will start enqueueing tasks the other refuses (MUL-2429 RFC §4.b B4).
 func (h *Handler) isSquadLeaderReady(ctx context.Context, issue db.Issue) bool {
 	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
 		return false
@@ -718,10 +734,16 @@ func (h *Handler) isSquadLeaderReady(ctx context.Context, issue db.Issue) bool {
 		return false
 	}
 	agent, err := h.Queries.GetAgent(ctx, squad.LeaderID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil {
 		return false
 	}
-	return true
+	ready, _, err := service.AgentReadiness(ctx, h.Queries, agent)
+	if err != nil {
+		// Fail closed when we can't tell — same posture as the rest of
+		// this function (any error path returns false).
+		return false
+	}
+	return ready
 }
 
 // CEREBRO-PATCH(task-delegation-context): carries comment delegation provenance into the squad leader enqueue helper.

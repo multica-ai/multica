@@ -299,6 +299,20 @@
     "stage_stalled_term": "桌面端",
     "stage_stalled_suffix": " 更顺手 —— 它内置守护进程。关闭这个对话框选择桌面端，或点跳过继续。"
   },
+  "step_teammate": {
+    "eyebrow": "第一个队友",
+    "headline": "创建你的第一个队友：Multica Helper",
+    "lede": "Multica Helper 是连接到 {{runtime}} 的入门智能体。它会打开一个上手引导 issue，带你走完核心流程。",
+    "avatar_label": "Multica Helper 头像",
+    "name": "Multica Helper",
+    "role": "上手引导",
+    "point_issue": "只从一个上手引导 issue 开始",
+    "point_context": "读取工作区上下文和 issue 详情",
+    "point_customize": "之后可以改名或替换",
+    "footer_hint": "我们会创建一个智能体和一个上手引导 issue。",
+    "create_action": "创建 Multica Helper",
+    "create_failed": "创建 Multica Helper 失败"
+  },
   "errors": {
     "skip_failed": "完成上手引导失败"
   }

@@ -41,6 +41,7 @@ import { createMentionSuggestion } from "./mention-suggestion";
 // extension alongside BaseMentionExtension. Feature-flagged inside the extension.
 import { createSkillMentionExtension } from "@multica/cerebro-skill-mention";
 import { CodeBlockView } from "./code-block-view";
+import { PatchedListItem } from "./list-item";
 import { createMarkdownPasteExtension } from "./markdown-paste";
 import { createMarkdownCopyExtension } from "./markdown-copy";
 import { createSubmitExtension } from "./submit-shortcut";
@@ -113,7 +114,13 @@ export function createEditorExtensions(
       heading: { levels: [1, 2, 3] },
       link: false,
       codeBlock: false,
+      // Disable StarterKit's stock ListItem — its Enter keybind binds only
+      // `splitListItem`, which leaves the user stuck inside an empty top-level
+      // list item (see list-item.ts). PatchedListItem below restores the
+      // standard split → lift fallback chain.
+      listItem: false,
     }),
+    PatchedListItem,
     CodeBlockLowlight.extend({
       addNodeView() {
         return ReactNodeViewRenderer(CodeBlockView);

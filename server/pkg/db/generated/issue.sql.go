@@ -122,9 +122,11 @@ WHERE issue.workspace_id = $1
   AND ($6::uuid IS NULL OR assignee_id = $6)
   AND ($7::uuid[] IS NULL OR assignee_id = ANY($7::uuid[]))
   AND ($8::uuid IS NULL OR creator_id = $8)
+  AND ($9::uuid IS NULL OR project_id = $9)
+  AND ($10::bool IS NULL OR (start_date IS NOT NULL OR due_date IS NOT NULL))
   AND (
-    $9::uuid[] IS NULL
-    OR project_id = ANY($9::uuid[])
+    $11::uuid[] IS NULL
+    OR project_id = ANY($11::uuid[])
   )
 `
 
@@ -137,6 +139,8 @@ type CountIssuesParams struct {
 	AssigneeID  pgtype.UUID   `json:"assignee_id"`
 	AssigneeIds []pgtype.UUID `json:"assignee_ids"`
 	CreatorID   pgtype.UUID   `json:"creator_id"`
+	ProjectID   pgtype.UUID   `json:"project_id"`
+	Scheduled   pgtype.Bool   `json:"scheduled"`
 	ProjectIds  []pgtype.UUID `json:"project_ids"`
 }
 
@@ -151,6 +155,8 @@ func (q *Queries) CountIssues(ctx context.Context, arg CountIssuesParams) (int64
 		arg.AssigneeID,
 		arg.AssigneeIds,
 		arg.CreatorID,
+		arg.ProjectID,
+		arg.Scheduled,
 		arg.ProjectIds,
 	)
 	var count int64
@@ -663,9 +669,11 @@ WHERE i.workspace_id = $1
   AND ($8::uuid IS NULL OR i.assignee_id = $8)
   AND ($9::uuid[] IS NULL OR i.assignee_id = ANY($9::uuid[]))
   AND ($10::uuid IS NULL OR i.creator_id = $10)
+  AND ($11::uuid IS NULL OR i.project_id = $11)
+  AND ($12::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND (
-    $11::uuid[] IS NULL
-    OR i.project_id = ANY($11::uuid[])
+    $13::uuid[] IS NULL
+    OR i.project_id = ANY($13::uuid[])
   )
 ORDER BY i.position ASC, i.created_at DESC
 LIMIT $2 OFFSET $3
@@ -682,6 +690,8 @@ type ListIssuesParams struct {
 	AssigneeID  pgtype.UUID   `json:"assignee_id"`
 	AssigneeIds []pgtype.UUID `json:"assignee_ids"`
 	CreatorID   pgtype.UUID   `json:"creator_id"`
+	ProjectID   pgtype.UUID   `json:"project_id"`
+	Scheduled   pgtype.Bool   `json:"scheduled"`
 	ProjectIds  []pgtype.UUID `json:"project_ids"`
 }
 
@@ -728,6 +738,8 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 		arg.AssigneeID,
 		arg.AssigneeIds,
 		arg.CreatorID,
+		arg.ProjectID,
+		arg.Scheduled,
 		arg.ProjectIds,
 	)
 	if err != nil {

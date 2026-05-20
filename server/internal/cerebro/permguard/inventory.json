@@ -1733,6 +1733,14 @@
       "exempt": "local-only \u2014 replaces the multica binary on disk"
     },
     {
+      "id": "user profile get",
+      "exempt": "read-only \u2014 wraps GET /api/me/profile"
+    },
+    {
+      "id": "user profile update",
+      "gate": "via:PUT /api/me/profile"
+    },
+    {
       "id": "version",
       "exempt": "local-only \u2014 prints build metadata"
     },
@@ -1745,8 +1753,12 @@
       "exempt": "read-only \u2014 wraps GET /api/workspaces/"
     },
     {
-      "id": "workspace members",
+      "id": "workspace member list",
       "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/members"
+    },
+    {
+      "id": "workspace switch",
+      "exempt": "local-only \u2014 changes the active workspace in CLI config"
     },
     {
       "id": "workspace update",

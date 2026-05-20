@@ -12,8 +12,9 @@ import (
 // TestWorkspaceUsage_BucketsByUsageTime mirrors the runtime usage test for
 // the workspace-level aggregations: a task that queues one calendar day and
 // reports usage the next must attribute to the day tokens were produced, and
-// `?days=N` must cover the full earliest day, not a rolling window starting
-// at "now minus N days".
+// `?days=N` must cover N full calendar days anchored at UTC start-of-today
+// (so `days=2` covers today + yesterday), not a rolling window starting at
+// "now minus N days".
 func TestWorkspaceUsage_BucketsByUsageTime(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -73,9 +74,12 @@ func TestWorkspaceUsage_BucketsByUsageTime(t *testing.T) {
 	insertTaskWithUsage(yesterdayLate, todayEarly, 1000)         // cross-midnight
 	insertTaskWithUsage(yesterdayMorning, yesterdayMorning, 2000) // full-day yesterday
 
-	// /api/usage/daily — daily breakdown.
+	// /api/usage/daily — daily breakdown. `days=2` covers today + yesterday
+	// (the two buckets we just populated). Under the old rolling-window
+	// semantics this would have been `days=1` and still incidentally included
+	// both buckets via DATE_TRUNC; that was the bug Emacs flagged on PR 2837.
 	w := httptest.NewRecorder()
-	req := newRequest("GET", "/api/usage/daily?days=1", nil)
+	req := newRequest("GET", "/api/usage/daily?days=2", nil)
 	testHandler.GetWorkspaceUsageByDay(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("GetWorkspaceUsageByDay: expected 200, got %d: %s", w.Code, w.Body.String())
@@ -107,7 +111,7 @@ func TestWorkspaceUsage_BucketsByUsageTime(t *testing.T) {
 	// be included; if the cutoff were a rolling window, yesterday morning's
 	// 2000 would be missing depending on time of day.
 	w = httptest.NewRecorder()
-	req = newRequest("GET", "/api/usage/summary?days=1", nil)
+	req = newRequest("GET", "/api/usage/summary?days=2", nil)
 	testHandler.GetWorkspaceUsageSummary(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("GetWorkspaceUsageSummary: expected 200, got %d: %s", w.Code, w.Body.String())

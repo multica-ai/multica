@@ -446,6 +446,73 @@ func (q *Queries) ListPullRequestsByIssue(ctx context.Context, issueID pgtype.UU
 	return items, nil
 }
 
+const listUnlinkedPullRequestsMatchingIssueIdentifier = `-- name: ListUnlinkedPullRequestsMatchingIssueIdentifier :many
+SELECT pr.id, pr.workspace_id, pr.installation_id, pr.repo_owner, pr.repo_name, pr.pr_number, pr.title, pr.state, pr.html_url, pr.branch, pr.author_login, pr.author_avatar_url, pr.merged_at, pr.closed_at, pr.pr_created_at, pr.pr_updated_at, pr.created_at, pr.updated_at, pr.head_sha, pr.mergeable_state, pr.additions, pr.deletions, pr.changed_files
+FROM github_pull_request pr
+LEFT JOIN issue_pull_request ipr
+    ON ipr.issue_id = $1
+   AND ipr.pull_request_id = pr.id
+WHERE pr.workspace_id = $2
+  AND ipr.issue_id IS NULL
+  AND (
+      pr.title ~* $3
+      OR COALESCE(pr.branch, '') ~* $3
+  )
+ORDER BY pr.pr_created_at DESC
+`
+
+type ListUnlinkedPullRequestsMatchingIssueIdentifierParams struct {
+	IssueID         pgtype.UUID `json:"issue_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	IdentifierRegex string      `json:"identifier_regex"`
+}
+
+// CEREBRO-PATCH(github-pr-card-self-heal): JEH-1590 self-heals missing
+// issue_pull_request rows when a mirrored PR already mentions the issue.
+func (q *Queries) ListUnlinkedPullRequestsMatchingIssueIdentifier(ctx context.Context, arg ListUnlinkedPullRequestsMatchingIssueIdentifierParams) ([]GithubPullRequest, error) {
+	rows, err := q.db.Query(ctx, listUnlinkedPullRequestsMatchingIssueIdentifier, arg.IssueID, arg.WorkspaceID, arg.IdentifierRegex)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GithubPullRequest{}
+	for rows.Next() {
+		var i GithubPullRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.InstallationID,
+			&i.RepoOwner,
+			&i.RepoName,
+			&i.PrNumber,
+			&i.Title,
+			&i.State,
+			&i.HtmlUrl,
+			&i.Branch,
+			&i.AuthorLogin,
+			&i.AuthorAvatarUrl,
+			&i.MergedAt,
+			&i.ClosedAt,
+			&i.PrCreatedAt,
+			&i.PrUpdatedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.HeadSha,
+			&i.MergeableState,
+			&i.Additions,
+			&i.Deletions,
+			&i.ChangedFiles,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const unlinkIssueFromPullRequest = `-- name: UnlinkIssueFromPullRequest :exec
 DELETE FROM issue_pull_request
 WHERE issue_id = $1 AND pull_request_id = $2

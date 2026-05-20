@@ -48,6 +48,13 @@ export interface ListIssuesParams {
   creator_id?: string;
   project_id?: string;
   open_only?: boolean;
+  /**
+   * Restrict the result to issues with at least one of `start_date` /
+   * `due_date` set. Used by the Project Gantt view so it doesn't have to
+   * page through every issue on the project just to discard the unscheduled
+   * majority on the client.
+   */
+  scheduled?: boolean;
 }
 
 export interface IssueActorRef {
@@ -135,6 +142,8 @@ export interface UpdateMeRequest {
   name?: string;
   avatar_url?: string;
   language?: string;
+  /** Free-form self-description (max 2000 chars). Pass "" to clear. */
+  profile_description?: string;
 }
 
 // CEREBRO-PATCH(user-profile-v2-types): JEH-1031 — replace tech_pref with 4

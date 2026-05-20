@@ -142,6 +142,8 @@ The `multica` CLI connects your local machine to Multica — authenticate, manag
 | `multica daemon status` | Check daemon status |
 | `multica setup` | One-command setup for Multica Cloud (configure + login + start daemon) |
 | `multica setup self-host` | Same, but for self-hosted deployments |
+| `multica workspace list` | List your workspaces (current is marked with `*`) |
+| `multica workspace switch <id\|slug>` | Switch the default workspace for this profile |
 | `multica issue list` | List issues in your workspace |
 | `multica issue create` | Create a new issue |
 | `multica update` | Update to the latest version |

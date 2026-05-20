@@ -43,7 +43,7 @@ vi.mock("@multica/views/i18n", () => ({
   }),
 }));
 
-vi.mock("@multica/views/issues/components", () => ({
+vi.mock("@multica/views/issues/components/issue-detail", () => ({
   IssueDetail: ({ issueId }: { issueId: string }) => {
     mockIssueDetailMounted(issueId);
     return <div data-testid="issue-detail">issue: {issueId}</div>;

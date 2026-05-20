@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { IssueDetail } from "@multica/views/issues/components";
+import { IssueDetail } from "@multica/views/issues/components/issue-detail";
 
 // Channels and DMs share the issue detail component — the underlying entity
 // is an issue with kind 'channel' | 'dm'. The component branches on

@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
+	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -48,6 +49,7 @@ type AgentResponse struct {
 	Status             string              `json:"status"`
 	MaxConcurrentTasks int32               `json:"max_concurrent_tasks"`
 	Model              string              `json:"model"`
+	ThinkingLevel      string              `json:"thinking_level"`
 	OwnerID            *string             `json:"owner_id"`
 	Skills             []AgentSkillSummary `json:"skills"`
 	CreatedAt          string              `json:"created_at"`
@@ -118,6 +120,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		Status:             a.Status,
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
 		Model:              a.Model.String,
+		ThinkingLevel:      a.ThinkingLevel.String,
 		OwnerID:            uuidToPtr(a.OwnerID),
 		Skills:             []AgentSkillSummary{},
 		CreatedAt:          timestampToString(a.CreatedAt),
@@ -223,7 +226,7 @@ type AgentTaskResponse struct {
 	// use this sandbox at spawn time and ignore the agent-level value, so
 	// an admin's runtime-wide cap can't be bypassed by an agent owner who
 	// picked a more permissive sandbox on their agent.
-	RuntimePersonaSandbox  string               `json:"runtime_persona_sandbox,omitempty"`
+	RuntimePersonaSandbox string `json:"runtime_persona_sandbox,omitempty"`
 	// CEREBRO-PATCH(runtime-tools-config-claim-resp): runtime-level tools_config surfaced at claim so daemon can merge with agent.mcp_config (9031).
 	RuntimeToolsConfig     json.RawMessage      `json:"runtime_tools_config,omitempty"`
 	ChatMessageAttachments []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"` // attachments on the user message - agent calls `multica attachment download <id>` per entry
@@ -473,6 +476,7 @@ type CreateAgentRequest struct {
 	Visibility         string            `json:"visibility"`
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
 	Model              string            `json:"model"`
+	ThinkingLevel      string            `json:"thinking_level"`
 	// Template records which template slug was used to seed this agent
 	// (e.g. "coding" / "planning" / "writing" / "assistant"). Empty when
 	// the caller didn't come from a template picker — the `agent_created`
@@ -574,6 +578,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can create agents on it")
 		return
 	}
+	if !agentpkg.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", req.ThinkingLevel, runtime.Provider))
+		return
+	}
 
 	// Probe workspace agent count BEFORE the insert so the funnel has a
 	// clean "first agent ever in this workspace" signal — Step 4 of
@@ -621,6 +629,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		CustomArgs:         ca,
 		McpConfig:          mc,
 		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
+		ThinkingLevel:      pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
 		PersonaSandbox:     personaSandboxToText(req.PersonaSandbox),
 	})
 	if err != nil {
@@ -675,6 +684,7 @@ type UpdateAgentRequest struct {
 	Status             *string            `json:"status"`
 	MaxConcurrentTasks *int32             `json:"max_concurrent_tasks"`
 	Model              *string            `json:"model"`
+	ThinkingLevel      *string            `json:"thinking_level"`
 	// PersonaSandbox: empty-string clears the assignment (no persona gating);
 	// "claude-developer" or similar attaches the named sandbox.
 	PersonaSandbox *string `json:"persona_sandbox"`
@@ -809,6 +819,8 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if hasMcpConfig && !shouldClearMcpConfig {
 		params.McpConfig = append([]byte(nil), rawMcpConfig...)
 	}
+	targetRuntimeID := agent.RuntimeID
+	targetRuntimeProvider := ""
 	if req.RuntimeID != nil {
 		runtimeUUID, ok := parseUUIDOrBadRequest(w, *req.RuntimeID, "runtime_id")
 		if !ok {
@@ -833,6 +845,8 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can move agents onto it")
 			return
 		}
+		targetRuntimeID = runtime.ID
+		targetRuntimeProvider = runtime.Provider
 		params.RuntimeID = runtime.ID
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 	}
@@ -847,6 +861,41 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Model != nil {
 		params.Model = pgtype.Text{String: *req.Model, Valid: true}
+	}
+	_, hasThinkingLevel := rawFields["thinking_level"]
+	shouldClearThinkingLevel := hasThinkingLevel && (req.ThinkingLevel == nil || *req.ThinkingLevel == "")
+	if hasThinkingLevel && !shouldClearThinkingLevel {
+		provider := targetRuntimeProvider
+		if provider == "" {
+			var ok bool
+			provider, ok = h.resolveAgentProvider(r, agent.WorkspaceID, targetRuntimeID)
+			if !ok {
+				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
+				return
+			}
+		}
+		if !agentpkg.IsKnownThinkingValue(provider, *req.ThinkingLevel) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", *req.ThinkingLevel, provider))
+			return
+		}
+		params.ThinkingLevel = pgtype.Text{String: *req.ThinkingLevel, Valid: true}
+	} else if req.RuntimeID != nil && !hasThinkingLevel && agent.ThinkingLevel.Valid && agent.ThinkingLevel.String != "" {
+		provider := targetRuntimeProvider
+		if provider == "" {
+			var ok bool
+			provider, ok = h.resolveAgentProvider(r, agent.WorkspaceID, targetRuntimeID)
+			if !ok {
+				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
+				return
+			}
+		}
+		if !agentpkg.IsKnownThinkingValue(provider, agent.ThinkingLevel.String) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf(
+				"existing thinking_level %q is not valid for runtime %q; pass thinking_level=\"\" to clear or set a value valid for the new runtime",
+				agent.ThinkingLevel.String, provider,
+			))
+			return
+		}
 	}
 	// persona_sandbox: nil pointer = leave alone, "" = clear (handled below
 	// because COALESCE can't set NULL), otherwise = update to the named value.
@@ -908,6 +957,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if shouldClearThinkingLevel {
+		agent, err = h.Queries.ClearAgentThinkingLevel(r.Context(), agent.ID)
+		if err != nil {
+			slog.Warn("clear agent thinking_level failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear thinking_level: "+err.Error())
+			return
+		}
+	}
 
 	resp := agentToResponse(agent)
 	// CEREBRO-PATCH(agent-can-trigger): JEH-1066 — surface trigger eligibility.
@@ -917,6 +974,19 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(agent.WorkspaceID))
 	h.publish(protocol.EventAgentStatus, uuidToString(agent.WorkspaceID), actorType, actorID, map[string]any{"agent": resp})
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// resolveAgentProvider returns the provider name for the runtime that will own
+// this agent after the in-flight update applies.
+func (h *Handler) resolveAgentProvider(r *http.Request, workspaceID pgtype.UUID, runtimeID pgtype.UUID) (string, bool) {
+	rt, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+		ID:          runtimeID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return "", false
+	}
+	return rt.Provider, true
 }
 
 func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {

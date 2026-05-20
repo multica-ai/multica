@@ -28,7 +28,7 @@ UPDATE "user"
 SET preferences = $1::jsonb,
     updated_at = now()
 WHERE id = $2
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, preferences
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, preferences
 `
 
 type UpdateUserPreferencesParams struct {
@@ -57,6 +57,7 @@ func (q *Queries) UpdateUserPreferences(ctx context.Context, arg UpdateUserPrefe
 		&i.CloudWaitlistReason,
 		&i.StarterContentState,
 		&i.Language,
+		&i.ProfileDescription,
 		&i.Preferences,
 	)
 	return i, err

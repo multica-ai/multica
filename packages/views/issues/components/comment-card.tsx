@@ -2,8 +2,8 @@
 
 // CEREBRO-PATCH(comment-card-cerebro): cerebro modification of upstream file
 
-import { memo, useCallback, useRef, useState } from "react";
 import { CheckCircle2, ChevronRight, Copy, GitFork, MessageCircleQuestion, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { lazy, memo, Suspense, useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -32,7 +32,10 @@ import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-pick
 import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { timeAgo } from "@multica/core/utils";
-import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay } from "../../editor";
+import { ContentEditor, type ContentEditorRef } from "../../editor/content-editor";
+import { FileDropOverlay } from "../../editor/file-drop-overlay";
+import { copyMarkdown } from "../../editor/utils/clipboard";
+import { useFileDropZone } from "../../editor/use-file-drop-zone";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -41,6 +44,12 @@ import { AttachmentList } from "@multica/cerebro-attachments/views";
 import type { TimelineEntry } from "@multica/core/types";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
+
+const LazyReadonlyContent = lazy(() =>
+  import("../../editor/readonly-content").then((mod) => ({
+    default: mod.ReadonlyContent,
+  })),
+);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -369,7 +378,9 @@ function CommentRow({
       ) : (
         <>
           <div className="mt-1.5 pl-2 sm:pl-8 text-sm leading-relaxed text-foreground/85">
-            <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+            <Suspense fallback={<p className="whitespace-pre-wrap text-sm leading-relaxed">{entry.content ?? ""}</p>}>
+              <LazyReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+            </Suspense>
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-2 sm:pl-8" />
           {!isTemp && (
@@ -681,7 +692,9 @@ function CommentCardImpl({
             ) : (
               <>
                 <div className="pl-2 sm:pl-10 text-sm leading-relaxed text-foreground/85">
-                  <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+                  <Suspense fallback={<p className="whitespace-pre-wrap text-sm leading-relaxed">{entry.content ?? ""}</p>}>
+                    <LazyReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+                  </Suspense>
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-2 sm:pl-10" />
                 {!isTemp && (

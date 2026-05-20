@@ -1158,6 +1158,142 @@ func TestOpenclawProcessOutputModelEmptyWhenAgentMetaOmitsIt(t *testing.T) {
 	}
 }
 
+// TestOpenclawProcessOutputWholeBufferPrettyJSON is the regression test for
+// the WOR-10 follow-up. Before this fix, processOutput scanned line-by-line
+// and only attempted a whole-buffer parse from a fragile fallback path that
+// could fail under partial / chunked reads. This test feeds a heavily
+// pretty-printed result blob (deeply indented, with nested objects and
+// arrays spanning many lines) through processOutput and asserts it parses
+// cleanly via the new whole-buffer fast path.
+func TestOpenclawProcessOutputWholeBufferPrettyJSON(t *testing.T) {
+	t.Parallel()
+
+	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	// Hand-crafted, indented JSON that exercises the multi-line path
+	// every byte: opening brace alone on a line, deeply indented inner
+	// keys, multi-payload array, nested agentMeta with a usage map.
+	input := `{
+  "payloads": [
+    {
+      "text": "Pretty printed answer line 1.\n"
+    },
+    {
+      "text": "Pretty printed answer line 2."
+    }
+  ],
+  "meta": {
+    "durationMs": 9501,
+    "agentMeta": {
+      "sessionId": "ses_pretty_printed",
+      "provider": "openrouter",
+      "model": "anthropic/claude-opus-4.7",
+      "usage": {
+        "input": 414,
+        "output": 163,
+        "cacheRead": 33280,
+        "cacheWrite": 0
+      }
+    }
+  }
+}
+`
+
+	res := b.processOutput(strings.NewReader(input), ch)
+
+	if res.status != "completed" {
+		t.Errorf("status: got %q, want %q", res.status, "completed")
+	}
+	if res.errMsg != "" {
+		t.Errorf("errMsg: got %q, want empty", res.errMsg)
+	}
+	wantOutput := "Pretty printed answer line 1.\nPretty printed answer line 2."
+	if res.output != wantOutput {
+		t.Errorf("output: got %q, want %q", res.output, wantOutput)
+	}
+	if res.sessionID != "ses_pretty_printed" {
+		t.Errorf("sessionID: got %q, want %q", res.sessionID, "ses_pretty_printed")
+	}
+	if res.model != "anthropic/claude-opus-4.7" {
+		t.Errorf("model: got %q, want %q", res.model, "anthropic/claude-opus-4.7")
+	}
+	if res.usage.InputTokens != 414 {
+		t.Errorf("input tokens: got %d, want 414", res.usage.InputTokens)
+	}
+	if res.usage.OutputTokens != 163 {
+		t.Errorf("output tokens: got %d, want 163", res.usage.OutputTokens)
+	}
+	if res.usage.CacheReadTokens != 33280 {
+		t.Errorf("cache read: got %d, want 33280", res.usage.CacheReadTokens)
+	}
+
+	close(ch)
+	var msgs []Message
+	for m := range ch {
+		msgs = append(msgs, m)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 text messages, got %d", len(msgs))
+	}
+}
+
+// TestOpenclawProcessOutputDeeplyIndentedFixture re-runs the recorded
+// stdout fixture from openclaw 2026.5.5 specifically through the
+// whole-buffer fast path. The fixture is 1070 lines of pretty-printed
+// JSON — exactly the shape that misfired in production when the daemon's
+// line-by-line scanner saw partial reads. Asserts the result parses on
+// the first attempt without falling through to NDJSON scanning.
+func TestOpenclawProcessOutputDeeplyIndentedFixture(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile("testdata/openclaw-2026.5.5-stdout.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	// Sanity-check we're actually exercising multi-line input. If someone
+	// rewrites the fixture as a single-line blob, this test stops covering
+	// the bug it was written for.
+	if !strings.Contains(string(data), "\n  ") {
+		t.Fatalf("fixture is not pretty-printed; this test must run against multi-line JSON")
+	}
+
+	result, ok := parseWholeBufferOpenclawResult(data)
+	if !ok {
+		t.Fatalf("parseWholeBufferOpenclawResult failed; the whole-buffer fast path is broken")
+	}
+	if result.Payloads == nil {
+		t.Errorf("expected payloads to populate from whole-buffer parse")
+	}
+	if result.Meta.DurationMs == 0 {
+		t.Errorf("expected meta.durationMs to populate from whole-buffer parse")
+	}
+}
+
+// TestOpenclawProcessOutputEmptyBufferCanonicalError pins the empty-buffer
+// failure path: the canonical "openclaw returned no parseable output"
+// string is preserved verbatim so existing dashboards and log-grep tooling
+// keep matching. Any change to the wording must be coordinated with those
+// consumers (see the openclawNoParseableOutput constant).
+func TestOpenclawProcessOutputEmptyBufferCanonicalError(t *testing.T) {
+	t.Parallel()
+
+	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	res := b.processOutput(strings.NewReader(""), ch)
+
+	if res.status != "failed" {
+		t.Errorf("status: got %q, want %q", res.status, "failed")
+	}
+	if res.errMsg != "openclaw returned no parseable output" {
+		t.Errorf("errMsg: got %q, want canonical empty-buffer message", res.errMsg)
+	}
+
+	close(ch)
+}
+
 func countOccurrences(args []string, s string) int {
 	n := 0
 	for _, a := range args {

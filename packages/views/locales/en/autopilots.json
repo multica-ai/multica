@@ -150,7 +150,9 @@
     "toast_update_partial": "Autopilot updated, but schedule failed to save",
     "toast_update_failed": "Failed to update autopilot",
     "section_agent": "Agent",
+    "section_assignee": "Assignee",
     "select_agent": "Select agent",
+    "select_assignee": "Select agent or squad",
     "section_output_mode": "Output mode",
     "section_schedule": "Schedule",
     "cerebro_model": {
@@ -235,8 +237,11 @@
     }
   },
   "agent_picker": {
-    "filter_placeholder": "Filter agents...",
-    "select_agent": "Select agent"
+    "filter_placeholder": "Filter agents or squads...",
+    "select_agent": "Select agent",
+    "select_assignee": "Select agent or squad",
+    "agents_group": "Agents",
+    "squads_group": "Squads"
   },
   "timezone_picker": {
     "search_placeholder": "Search timezone..."

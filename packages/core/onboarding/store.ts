@@ -53,6 +53,37 @@ export async function completeOnboarding(
 }
 
 /**
+ * Runtime-connected onboarding path. The server creates or reuses the
+ * default Multica Helper agent and the single onboarding issue, then
+ * marks onboarding complete.
+ */
+export async function bootstrapRuntimeOnboarding(
+  workspaceId: string,
+  runtimeId: string,
+): Promise<{ workspace_id: string; agent_id: string; issue_id: string }> {
+  const result = await api.bootstrapOnboardingRuntime({
+    workspace_id: workspaceId,
+    runtime_id: runtimeId,
+  });
+  await useAuthStore.getState().refreshMe();
+  return result;
+}
+
+/**
+ * Runtime-skipped onboarding path. The server creates or reuses one
+ * install-runtime onboarding issue and marks onboarding complete.
+ */
+export async function bootstrapNoRuntimeOnboarding(
+  workspaceId: string,
+): Promise<{ workspace_id: string; issue_id: string }> {
+  const result = await api.bootstrapOnboardingNoRuntime({
+    workspace_id: workspaceId,
+  });
+  await useAuthStore.getState().refreshMe();
+  return result;
+}
+
+/**
  * Records interest in cloud runtimes. Pure side effect — does NOT
  * complete onboarding; the user still has to pick a real Step 3
  * path (CLI with a detected runtime) or Skip to move on.

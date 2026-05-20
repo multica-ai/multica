@@ -2057,7 +2057,8 @@ func TestReuseWritesMissingCodexWorkspaceSkills(t *testing.T) {
 	if err != nil {
 		t.Fatalf("missing reused codex workspace skill: %v", err)
 	}
-	if string(data) != "Write clearly." {
+	// CEREBRO-PATCH(execenv-skill-frontmatter-tests): workspace skill content may be wrapped in runtime frontmatter (JEH-1590).
+	if !strings.Contains(string(data), "Write clearly.") {
 		t.Errorf("skill content = %q", data)
 	}
 	example, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "writing", "examples", "example.md"))
@@ -2116,7 +2117,7 @@ func TestReuseUpdatesCodexWorkspaceSkills(t *testing.T) {
 	if err != nil {
 		t.Fatalf("missing reused codex workspace skill: %v", err)
 	}
-	if string(data) != "Updated writing guidance." {
+	if !strings.Contains(string(data), "Updated writing guidance.") {
 		t.Errorf("skill content = %q", data)
 	}
 	example, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "writing", "examples", "example.md"))
@@ -2236,7 +2237,7 @@ func TestPrepareCodexWorkspaceSkillBeatsUserSkillOnConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workspace skill not written: %v", err)
 	}
-	if string(data) != "workspace writing" {
+	if !strings.Contains(string(data), "workspace writing") {
 		t.Errorf("SKILL.md = %q, want workspace content", data)
 	}
 	// The user's stale support file must not leak through — seeding is
@@ -2434,7 +2435,7 @@ func TestReuseClearsUserSkillResidueOnWorkspaceConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workspace SKILL.md missing after reuse: %v", err)
 	}
-	if string(data) != "workspace writing" {
+	if !strings.Contains(string(data), "workspace writing") {
 		t.Errorf("SKILL.md = %q, want workspace content", data)
 	}
 	if _, err := os.Stat(filepath.Join(reused.CodexHome, "skills", "writing", "drafts", "stale.md")); !os.IsNotExist(err) {

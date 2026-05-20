@@ -9,6 +9,8 @@ export type {
 export {
   saveQuestionnaire,
   completeOnboarding,
+  bootstrapRuntimeOnboarding,
+  bootstrapNoRuntimeOnboarding,
   joinCloudWaitlist,
 } from "./store";
 export { ONBOARDING_STEP_ORDER } from "./step-order";
