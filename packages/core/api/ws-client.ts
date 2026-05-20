@@ -75,7 +75,13 @@ export class WSClient {
     };
 
     this.ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data as string) as WSMessage;
+      let msg: WSMessage;
+      try {
+        msg = JSON.parse(event.data as string) as WSMessage;
+      } catch {
+        this.logger.warn("ws: received unparseable message", event.data);
+        return;
+      }
       if ((msg as any).type === "auth_ack") {
         this.onAuthenticated();
         return;
