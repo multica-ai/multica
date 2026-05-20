@@ -293,13 +293,45 @@ func (h *Handler) UpdateMyNotificationPreference(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "unsupported notification preference")
 		return
 	}
-	if req.Enabled == nil {
-		writeError(w, http.StatusBadRequest, "enabled is required")
+
+	// Load existing preference (if any) to support partial updates.
+	existingPrefs, err := h.Queries.ListNotificationChannelPreferencesByUser(r.Context(), parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load notification preferences")
 		return
 	}
+	var existing *db.NotificationChannelPreference
+	for i := range existingPrefs {
+		if existingPrefs[i].Channel == channel && existingPrefs[i].EventType == eventType {
+			existing = &existingPrefs[i]
+			break
+		}
+	}
 
+	// Resolve enabled: use request value > existing value > spec default.
+	enabled := spec.DefaultEnabled
+	if existing != nil {
+		enabled = existing.Enabled
+	}
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+
+	// Resolve render_mode: use request value > existing value > "auto".
+	renderMode := "auto"
+	if existing != nil && existing.RenderMode != "" {
+		renderMode = existing.RenderMode
+	}
+	if req.RenderMode != "" {
+		renderMode = normalizeRenderMode(req.RenderMode)
+	}
+
+	// Resolve binding_id: preserve existing if not changing enabled state.
 	bindingID := pgtype.UUID{}
-	if spec.RequiresBinding && *req.Enabled {
+	if existing != nil {
+		bindingID = existing.BindingID
+	}
+	if spec.RequiresBinding && enabled {
 		bindings, err := h.Queries.ListExternalAccountBindingsByUser(r.Context(), parseUUID(userID))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to load notification bindings")
@@ -312,7 +344,7 @@ func (h *Handler) UpdateMyNotificationPreference(w http.ResponseWriter, r *http.
 		}
 		bindingID = binding.ID
 	}
-	if channel == "custom_webhook" && *req.Enabled {
+	if channel == "custom_webhook" && enabled {
 		endpoints, err := h.Queries.ListEnabledNotificationWebhookEndpointsByUser(r.Context(), parseUUID(userID))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to load notification webhooks")
@@ -328,9 +360,9 @@ func (h *Handler) UpdateMyNotificationPreference(w http.ResponseWriter, r *http.
 		UserID:     parseUUID(userID),
 		Channel:    channel,
 		EventType:  eventType,
-		Enabled:    *req.Enabled,
+		Enabled:    enabled,
 		BindingID:  bindingID,
-		RenderMode: normalizeRenderMode(req.RenderMode),
+		RenderMode: renderMode,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update notification preference")

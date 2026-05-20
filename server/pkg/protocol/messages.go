@@ -33,9 +33,10 @@ type TaskProgressPayload struct {
 
 // TaskCompletedPayload is sent from daemon to server when a task finishes.
 type TaskCompletedPayload struct {
-	TaskID string `json:"task_id"`
-	PRURL  string `json:"pr_url,omitempty"`
-	Output string `json:"output,omitempty"`
+	TaskID              string `json:"task_id"`
+	PRURL               string `json:"pr_url,omitempty"`
+	Output              string `json:"output,omitempty"`
+	NotificationSummary string `json:"notification_summary,omitempty"`
 }
 
 // TaskMessagePayload represents a single agent execution message (tool call, text, etc.)

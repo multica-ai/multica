@@ -256,3 +256,51 @@ if strings.HasSuffix(got, "https://multica.wujieai.com/openharness/issues/OPE-10
 t.Errorf("should not have bare link at end: %q", got)
 }
 }
+
+// --- notification_summary protocol integration ---
+
+func TestExtractSummary_NotificationSummaryFieldTakesPriority(t *testing.T) {
+	// Simulates the flow: daemon sends notification_summary in TaskCompletedPayload,
+	// server stores it in task result, notification listener reads and uses it.
+	notifSummary := "PR merged, 3 tests added"
+	body := "## 实现完成\n\nVery long body with lots of detail that would normally be extracted..."
+	title := "Some Issue Title"
+
+	got := ExtractSummary(notifSummary, body, title, defaultIMSummaryMaxChars)
+	if got != notifSummary {
+		t.Errorf("expected notification_summary to take priority, got %q", got)
+	}
+}
+
+func TestBuildCompactIMNotification_WithNotificationSummary(t *testing.T) {
+	// End-to-end: notification_summary from task payload flows into compact IM notification
+	summary := "验收 PASS，所有测试通过"
+	got := BuildCompactIMNotification(
+		"task_completed",
+		"guodage_dev_opus4.6",
+		"OPE-544",
+		"https://multica.wujieai.com/openharness/issues/OPE-544",
+		summary,
+	)
+	expected := "[任务完成] guodage_dev_opus4.6 [OPE-544](https://multica.wujieai.com/openharness/issues/OPE-544): 验收 PASS，所有测试通过"
+	if got != expected {
+		t.Errorf("unexpected compact notification with notification_summary:\n  got:  %q\n  want: %q", got, expected)
+	}
+}
+
+func TestBuildCompactIMNotification_TaskFailedWithSummary(t *testing.T) {
+	summary := "构建失败: missing import in auth.go"
+	got := BuildCompactIMNotification(
+		"task_failed",
+		"guodage_dev_opus4.6",
+		"OPE-544",
+		"https://multica.wujieai.com/openharness/issues/OPE-544",
+		summary,
+	)
+	if !strings.HasPrefix(got, "[任务失败]") {
+		t.Errorf("expected [任务失败] prefix, got %q", got)
+	}
+	if !strings.Contains(got, summary) {
+		t.Errorf("expected summary in notification, got %q", got)
+	}
+}

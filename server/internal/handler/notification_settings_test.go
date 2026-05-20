@@ -100,6 +100,78 @@ func TestNotificationPreferences_Defaults(t *testing.T) {
 	}`)
 }
 
+// TestUpdateNotificationPreference_RenderModeOnly verifies that updating only
+// render_mode (without passing enabled) succeeds and preserves the existing enabled value.
+func TestUpdateNotificationPreference_RenderModeOnly(t *testing.T) {
+	cleanupNotificationSettings(t)
+	t.Cleanup(func() { cleanupNotificationSettings(t) })
+
+	// First, create a preference with enabled=true
+	w1 := httptest.NewRecorder()
+	req1 := newRequest(http.MethodPatch, "/api/me/notification-preferences", map[string]any{
+		"channel":    "inbox",
+		"event_type": "mentioned",
+		"enabled":    true,
+	})
+	testHandler.UpdateMyNotificationPreference(w1, req1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("setup: expected 200, got %d: %s", w1.Code, w1.Body.String())
+	}
+
+	// Now update only render_mode — no enabled field
+	w2 := httptest.NewRecorder()
+	req2 := newRequest(http.MethodPatch, "/api/me/notification-preferences", map[string]any{
+		"channel":     "inbox",
+		"event_type":  "mentioned",
+		"render_mode": "compact",
+	})
+	testHandler.UpdateMyNotificationPreference(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("render_mode-only update: expected 200, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	var resp NotificationPreferenceResponse
+	if err := json.NewDecoder(w2.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.RenderMode != "compact" {
+		t.Errorf("expected render_mode 'compact', got %q", resp.RenderMode)
+	}
+	if !resp.Enabled {
+		t.Errorf("expected enabled to remain true after render_mode-only update")
+	}
+}
+
+// TestUpdateNotificationPreference_RenderModeOnly_NoExisting verifies that
+// updating render_mode when no preference exists uses the spec default for enabled.
+func TestUpdateNotificationPreference_RenderModeOnly_NoExisting(t *testing.T) {
+	cleanupNotificationSettings(t)
+	t.Cleanup(func() { cleanupNotificationSettings(t) })
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodPatch, "/api/me/notification-preferences", map[string]any{
+		"channel":     "inbox",
+		"event_type":  "mentioned",
+		"render_mode": "detail",
+	})
+	testHandler.UpdateMyNotificationPreference(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp NotificationPreferenceResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.RenderMode != "detail" {
+		t.Errorf("expected render_mode 'detail', got %q", resp.RenderMode)
+	}
+	// inbox/mentioned spec default is enabled=true
+	if !resp.Enabled {
+		t.Errorf("expected enabled to be spec default (true) for new preference")
+	}
+}
+
 func TestUpdateNotificationPreference_RequiresBinding(t *testing.T) {
 	cleanupNotificationSettings(t)
 	t.Cleanup(func() { cleanupNotificationSettings(t) })
