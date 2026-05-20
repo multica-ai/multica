@@ -1,5 +1,5 @@
-export type NotificationChannel = "inbox" | "dingtalk" | "email" | "custom_webhook" | "openclaw_weixin";
-export type NotificationEventType = "mentioned" | "issue_assigned" | "subscribed_issue_updated" | "task_completed" | "task_failed" | "replied";
+export type NotificationChannel = "notification_trigger" | "inbox" | "dingtalk" | "email" | "custom_webhook" | "openclaw_weixin";
+export type NotificationEventType = "channel_enabled" | "mentioned" | "issue_assigned" | "subscribed_issue_updated" | "task_completed" | "task_failed" | "replied";
 export type NotificationRenderMode = "auto" | "compact" | "detail";
 export type ExternalAccountBindingStatus = "active" | "expired" | "revoked" | "error";
 

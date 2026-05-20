@@ -39,6 +39,34 @@ func createNotificationBinding(t *testing.T, provider string) string {
 	return bindingID
 }
 
+func findNotificationPreferenceResponse(
+	prefs []NotificationPreferenceResponse,
+	channel string,
+	eventType string,
+) (NotificationPreferenceResponse, bool) {
+	for _, pref := range prefs {
+		if pref.Channel == channel && pref.EventType == eventType {
+			return pref, true
+		}
+	}
+	return NotificationPreferenceResponse{}, false
+}
+
+func requireNotificationPreferenceResponse(
+	t *testing.T,
+	prefs []NotificationPreferenceResponse,
+	channel string,
+	eventType string,
+) NotificationPreferenceResponse {
+	t.Helper()
+
+	pref, ok := findNotificationPreferenceResponse(prefs, channel, eventType)
+	if !ok {
+		t.Fatalf("missing notification preference %s:%s", channel, eventType)
+	}
+	return pref
+}
+
 func TestNotificationPreferences_Defaults(t *testing.T) {
 	cleanupNotificationSettings(t)
 	t.Cleanup(func() { cleanupNotificationSettings(t) })
@@ -52,52 +80,29 @@ func TestNotificationPreferences_Defaults(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	assertJSONEqual(t, w.Body.Bytes(), `{
-		"preferences": [
-			{
-				"channel": "inbox",
-				"event_type": "mentioned",
-				"enabled": true,
-				"binding_id": null,
-				"requires_binding": false
-			},
-			{
-				"channel": "dingtalk",
-				"event_type": "mentioned",
-				"enabled": false,
-				"binding_id": null,
-				"requires_binding": true
-			},
-			{
-				"channel": "email",
-				"event_type": "mentioned",
-				"enabled": false,
-				"binding_id": null,
-				"requires_binding": true
-			},
-			{
-				"channel": "custom_webhook",
-				"event_type": "mentioned",
-				"enabled": false,
-				"binding_id": null,
-				"requires_binding": false
-			},
-			{
-				"channel": "custom_webhook",
-				"event_type": "issue_assigned",
-				"enabled": false,
-				"binding_id": null,
-				"requires_binding": false
-			},
-			{
-				"channel": "custom_webhook",
-				"event_type": "subscribed_issue_updated",
-				"enabled": false,
-				"binding_id": null,
-				"requires_binding": false
-			}
-		]
-	}`)
+	var resp ListNotificationPreferencesResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode preferences response: %v", err)
+	}
+	if len(resp.Preferences) != len(supportedNotificationPreferences) {
+		t.Fatalf("expected %d preferences, got %d", len(supportedNotificationPreferences), len(resp.Preferences))
+	}
+
+	if pref := requireNotificationPreferenceResponse(t, resp.Preferences, "notification_trigger", "mentioned"); !pref.Enabled || pref.RequiresBinding {
+		t.Fatalf("expected notification_trigger:mentioned enabled without binding, got %#v", pref)
+	}
+	if pref := requireNotificationPreferenceResponse(t, resp.Preferences, "notification_trigger", "task_completed"); pref.Enabled || pref.RequiresBinding {
+		t.Fatalf("expected notification_trigger:task_completed disabled without binding, got %#v", pref)
+	}
+	if pref := requireNotificationPreferenceResponse(t, resp.Preferences, "inbox", "channel_enabled"); !pref.Enabled || pref.RequiresBinding {
+		t.Fatalf("expected inbox:channel_enabled enabled without binding, got %#v", pref)
+	}
+	if pref := requireNotificationPreferenceResponse(t, resp.Preferences, "dingtalk", "channel_enabled"); pref.Enabled || !pref.RequiresBinding {
+		t.Fatalf("expected dingtalk:channel_enabled disabled and binding-required, got %#v", pref)
+	}
+	if pref := requireNotificationPreferenceResponse(t, resp.Preferences, "openclaw_weixin", "channel_enabled"); pref.Enabled || !pref.RequiresBinding {
+		t.Fatalf("expected openclaw_weixin:channel_enabled disabled and binding-required, got %#v", pref)
+	}
 }
 
 // TestUpdateNotificationPreference_RenderModeOnly verifies that updating only
@@ -258,50 +263,15 @@ func TestNotificationBindingsLifecycle(t *testing.T) {
 	if wPrefs.Code != http.StatusOK {
 		t.Fatalf("GetMyNotificationPreferences: expected 200, got %d: %s", wPrefs.Code, wPrefs.Body.String())
 	}
-	assertJSONEqual(t, wPrefs.Body.Bytes(), `{
-		"preferences": [
-			{
-				"channel": "inbox",
-				"event_type": "mentioned",
-				"enabled": true,
-				"binding_id": null,
-				"requires_binding": false
-			},
-			{
-				"channel": "dingtalk",
-				"event_type": "mentioned",
-				"enabled": false,
-				"binding_id": null,
-				"requires_binding": true
-			},
-			{
-				"channel": "email",
-				"event_type": "mentioned",
-				"enabled": false,
-				"binding_id": null,
-				"requires_binding": true
-			},
-			{
-				"channel": "custom_webhook",
-				"event_type": "mentioned",
-				"enabled": false,
-				"binding_id": null,
-				"requires_binding": false
-			},
-			{
-				"channel": "custom_webhook",
-				"event_type": "issue_assigned",
-				"enabled": false,
-				"binding_id": null,
-				"requires_binding": false
-			},
-			{
-				"channel": "custom_webhook",
-				"event_type": "subscribed_issue_updated",
-				"enabled": false,
-				"binding_id": null,
-				"requires_binding": false
-			}
-		]
-	}`)
+	var prefsResp ListNotificationPreferencesResponse
+	if err := json.NewDecoder(wPrefs.Body).Decode(&prefsResp); err != nil {
+		t.Fatalf("decode preferences response: %v", err)
+	}
+	pref := requireNotificationPreferenceResponse(t, prefsResp.Preferences, "dingtalk", "mentioned")
+	if pref.Enabled {
+		t.Fatal("expected dingtalk mentioned preference to be disabled after binding delete")
+	}
+	if pref.BindingID != nil {
+		t.Fatalf("expected dingtalk mentioned binding_id to be cleared, got %#v", pref.BindingID)
+	}
 }

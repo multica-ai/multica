@@ -20,10 +20,58 @@ type notificationPreferenceSpec struct {
 
 var supportedNotificationPreferences = []notificationPreferenceSpec{
 	{
+		Channel:         "notification_trigger",
+		EventType:       "mentioned",
+		DefaultEnabled:  true,
+		RequiresBinding: false,
+	},
+	{
+		Channel:         "notification_trigger",
+		EventType:       "issue_assigned",
+		DefaultEnabled:  false,
+		RequiresBinding: false,
+	},
+	{
+		Channel:         "notification_trigger",
+		EventType:       "subscribed_issue_updated",
+		DefaultEnabled:  false,
+		RequiresBinding: false,
+	},
+	{
+		Channel:         "notification_trigger",
+		EventType:       "task_completed",
+		DefaultEnabled:  false,
+		RequiresBinding: false,
+	},
+	{
+		Channel:         "notification_trigger",
+		EventType:       "task_failed",
+		DefaultEnabled:  false,
+		RequiresBinding: false,
+	},
+	{
+		Channel:         "notification_trigger",
+		EventType:       "replied",
+		DefaultEnabled:  false,
+		RequiresBinding: false,
+	},
+	{
+		Channel:         "inbox",
+		EventType:       "channel_enabled",
+		DefaultEnabled:  true,
+		RequiresBinding: false,
+	},
+	{
 		Channel:         "inbox",
 		EventType:       "mentioned",
 		DefaultEnabled:  true,
 		RequiresBinding: false,
+	},
+	{
+		Channel:         "dingtalk",
+		EventType:       "channel_enabled",
+		DefaultEnabled:  false,
+		RequiresBinding: true,
 	},
 	{
 		Channel:         "dingtalk",
@@ -33,9 +81,21 @@ var supportedNotificationPreferences = []notificationPreferenceSpec{
 	},
 	{
 		Channel:         "email",
+		EventType:       "channel_enabled",
+		DefaultEnabled:  false,
+		RequiresBinding: true,
+	},
+	{
+		Channel:         "email",
 		EventType:       "mentioned",
 		DefaultEnabled:  false,
 		RequiresBinding: true,
+	},
+	{
+		Channel:         "custom_webhook",
+		EventType:       "channel_enabled",
+		DefaultEnabled:  false,
+		RequiresBinding: false,
 	},
 	{
 		Channel:         "custom_webhook",
@@ -64,6 +124,12 @@ var supportedNotificationPreferences = []notificationPreferenceSpec{
 	{
 		Channel:         "dingtalk",
 		EventType:       "task_failed",
+		DefaultEnabled:  false,
+		RequiresBinding: true,
+	},
+	{
+		Channel:         "openclaw_weixin",
+		EventType:       "channel_enabled",
 		DefaultEnabled:  false,
 		RequiresBinding: true,
 	},
