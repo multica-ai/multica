@@ -13,7 +13,6 @@ func TestBuildGeminiArgsBaseline(t *testing.T) {
 	expected := []string{
 		"-p", "write a haiku",
 		"--dangerously-skip-permissions",
-		"-o", "stream-json",
 	}
 
 	if len(args) != len(expected) {
@@ -26,23 +25,15 @@ func TestBuildGeminiArgsBaseline(t *testing.T) {
 	}
 }
 
-func TestBuildGeminiArgsWithModel(t *testing.T) {
+func TestBuildGeminiArgsIgnoresModel(t *testing.T) {
 	t.Parallel()
 
 	args := buildGeminiArgs("hi", ExecOptions{Model: "gemini-3.5-flash-high"}, slog.Default())
 
-	var foundModel bool
-	for i, a := range args {
-		if a == "-m" {
-			if i+1 >= len(args) || args[i+1] != "gemini-3.5-flash-high" {
-				t.Fatalf("expected -m followed by gemini-3.5-flash-high, got %v", args)
-			}
-			foundModel = true
-			break
+	for _, a := range args {
+		if a == "-m" || a == "gemini-3.5-flash-high" {
+			t.Fatalf("AGY does not expose a model flag; expected model to be omitted, got args=%v", args)
 		}
-	}
-	if !foundModel {
-		t.Fatalf("expected -m flag when Model is set, got args=%v", args)
 	}
 }
 
@@ -53,16 +44,16 @@ func TestBuildGeminiArgsWithResume(t *testing.T) {
 
 	var foundResume bool
 	for i, a := range args {
-		if a == "-r" {
+		if a == "--conversation" {
 			if i+1 >= len(args) || args[i+1] != "3" {
-				t.Fatalf("expected -r followed by session id, got %v", args)
+				t.Fatalf("expected --conversation followed by session id, got %v", args)
 			}
 			foundResume = true
 			break
 		}
 	}
 	if !foundResume {
-		t.Fatalf("expected -r flag when ResumeSessionID is set, got args=%v", args)
+		t.Fatalf("expected --conversation flag when ResumeSessionID is set, got args=%v", args)
 	}
 }
 
@@ -74,8 +65,8 @@ func TestBuildGeminiArgsOmitsModelWhenEmpty(t *testing.T) {
 		if a == "-m" {
 			t.Fatalf("expected no -m flag when Model is empty, got args=%v", args)
 		}
-		if a == "-r" {
-			t.Fatalf("expected no -r flag when ResumeSessionID is empty, got args=%v", args)
+		if a == "--conversation" {
+			t.Fatalf("expected no --conversation flag when ResumeSessionID is empty, got args=%v", args)
 		}
 	}
 }
