@@ -482,7 +482,7 @@ The mobile codebase started with ~15 Modal sheets. They almost all copied the sa
 **Rules for adding a new formSheet route:**
 
 1. **File goes under the parent context** so the URL reads sensibly — issue-detail pickers under `app/(app)/[workspace]/issue/[id]/picker/<field>.tsx`; project pickers under `project/[id]/picker/<field>.tsx`; transient action sheets under `<context>/<noun>/actions.tsx`. The new-issue draft flow has its own `new-issue-picker/<field>.tsx` directory because routes can't share state with the modal that opened them — see the draft-store discussion below.
-2. **Register the Stack.Screen in `app/(app)/[workspace]/_layout.tsx`** using the shared `SHEET_OPTIONS` constant. Do NOT inline the config per screen — every sheet must look and feel identical (grabber, detents, corner radius).
+2. **Register the Stack.Screen in `app/(app)/[workspace]/_layout.tsx`** using the shared `SHEET_OPTIONS` constant. Do NOT inline the config per screen — every picker-row sheet must look and feel identical (grabber, detents, corner radius). Isolated sheets that have no neighbour to be consistent with may override `sheetAllowedDetents` only (e.g. the `menu` sheet uses `"fitToContents"` because it's ≤ 5 fixed actions and the two-snap default would leave 60% blank).
 3. **Self-contained route bodies.** A picker route reads the record it needs from the TanStack Query cache (issue / project / timeline are already cached when the user gets there), calls its own mutation on submit, and `router.back()`s. No callbacks back up to a parent. The only legitimate exception is the new-issue draft flow, which uses `useNewIssueDraftStore` because the issue doesn't exist yet — there's nothing in cache to read.
 4. **Header is drawn inside the body**, not by the Stack. SHEET_OPTIONS sets `headerShown: false`; the body renders its own `<View>` with title + optional right action. The native Stack header on a formSheet creates a layout dance with the grabber that doesn't match iOS sheets.
 
@@ -490,7 +490,7 @@ The mobile codebase started with ~15 Modal sheets. They almost all copied the sa
 
 - `presentation: "formSheet"` — the magic that hands the screen to `UISheetPresentationController`.
 - `sheetGrabberVisible: true` — the iOS native drag handle. Users don't discover the gesture without it.
-- `sheetAllowedDetents: [0.6, 0.95]` — explicit numeric detents. The ergonomic `"fitToContents"` is broken on iOS 26 + Expo 55 (expo/expo#42904 padding inconsistency, #42965 zero-size). Predictable two-snap presentation across every sheet is more important than shrink-wrapping; every formSheet uses these explicit detents.
+- `sheetAllowedDetents: [0.6, 0.95]` — explicit numeric detents. The ergonomic `"fitToContents"` is broken on iOS 26 + Expo 55 (expo/expo#42904 padding inconsistency, #42965 zero-size). Predictable two-snap presentation across every picker-row sheet is more important than shrink-wrapping; every formSheet that lives in a chip row (issue-detail / project-detail AttributeRow) uses these explicit detents so muscle memory carries across the row. Isolated sheets (no chip-row neighbour) override with `"fitToContents"` — see the workspace `menu` sheet for the canonical example.
 - `sheetCornerRadius: 20` — matches RNR card radius. Without this iOS uses a larger system default that's slightly out of sync with the rest of the app.
 - `contentStyle: { height: "100%" }` — safety net against the zero-size class of bugs above. Ensures the sheet body fills the allotted detent height.
 

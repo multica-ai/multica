@@ -27,7 +27,13 @@ import { useChatSessionPickerResetOnWorkspaceChange } from "@/data/stores/chat-s
  *   - `sheetAllowedDetents: [0.6, 0.95]` — explicit numeric detents. The
  *     ergonomic `"fitToContents"` is broken on iOS 26 + Expo 55
  *     (expo/expo#42904 padding inconsistency, expo/expo#42965 zero-size).
- *     Predictable two-snap presentation across every sheet > shrink-wrap.
+ *     Predictable two-snap presentation across every picker-row sheet >
+ *     shrink-wrap; this is the right default for sheets that sit next to
+ *     other sheets in the same chip row (issue / project AttributeRow) so
+ *     the user gets the same gesture regardless of which chip they tap.
+ *     Isolated sheets that have no neighbour to be consistent with (e.g.
+ *     the workspace `menu` sheet) override this with `"fitToContents"`
+ *     to avoid the large blank area below their content.
  *   - `sheetGrabberVisible: true` — surfaces the iOS native drag handle
  *     so users discover the gesture.
  *   - `contentStyle.height: "100%"` — safety net against the same
@@ -154,9 +160,14 @@ export default function WorkspaceLayout() {
             headerLeft: () => <ModalCloseButton />,
           }}
         />
+        {/* Workspace menu sheet — isolated (no neighbour picker chip to
+            stay consistent with), so it overrides the shared
+            `[0.6, 0.95]` detents with `fitToContents`. The menu is short
+            (≤ 5 fixed actions) and the two-snap default would leave the
+            bottom 60% empty. */}
         <Stack.Screen
           name="menu"
-          options={SHEET_OPTIONS}
+          options={{ ...SHEET_OPTIONS, sheetAllowedDetents: "fitToContents" }}
         />
         {/* Issue-detail formSheet pickers. All share the same sheet config:
             explicit numeric detents to dodge expo/expo#42904+#42965 (the
