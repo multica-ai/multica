@@ -46,7 +46,10 @@ export function LabelPickerBody({ attached, onAttach, onDetach }: Props) {
 
   return (
     <View className="flex-1">
-      <View className="px-3 pt-2 pb-2 border-b border-border">
+      <View className="px-4 pt-3 pb-2">
+        <Text className="text-lg font-semibold text-foreground">Labels</Text>
+      </View>
+      <View className="px-3 pb-2 border-b border-border">
         <TextField
           value={query}
           onChangeText={setQuery}

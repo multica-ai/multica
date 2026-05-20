@@ -26,7 +26,10 @@ interface Props {
 export function PriorityPickerBody({ value, onChange }: Props) {
   return (
     <ScrollView showsVerticalScrollIndicator={false}>
-      <View className="px-2 pt-2">
+      <View className="px-4 pt-3 pb-2">
+        <Text className="text-lg font-semibold text-foreground">Priority</Text>
+      </View>
+      <View className="px-2">
         {PRIORITY_OPTIONS.map((v) => {
           const selected = v === value;
           return (
