@@ -165,6 +165,7 @@
     "model_tooltip": "Model · {{value}}",
     "model_managed_by_runtime": "Managed by runtime",
     "model_search_placeholder": "Search or type a model ID",
+    "model_custom_hint": "Type any model ID supported by your runtime",
     "model_discovering": "Discovering models…",
     "model_default_badge": "default",
     "model_empty": "No models available",

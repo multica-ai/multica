@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -56,7 +57,9 @@ const modelCacheTTL = 60 * time.Second
 func ListModels(ctx context.Context, providerType, executablePath string) ([]Model, error) {
 	switch providerType {
 	case "claude":
-		return claudeStaticModels(), nil
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverClaudeModels(), nil
+		})
 	case "codex":
 		return codexStaticModels(), nil
 	case "gemini":
@@ -148,6 +151,94 @@ func claudeStaticModels() []Model {
 		{ID: "claude-opus-4-6", Label: "Claude Opus 4.6", Provider: "anthropic"},
 		{ID: "claude-sonnet-4-5", Label: "Claude Sonnet 4.5", Provider: "anthropic"},
 	}
+}
+
+// discoverClaudeModels returns the static catalog augmented with any
+// custom model IDs found in the user's local Claude Code configuration
+// (~/.claude/settings.json). This lets operators who run non-Anthropic
+// models behind a proxy (e.g. mimo, GLM) see their models in the
+// Multica picker without manual entry.
+//
+// Discovery reads two sources:
+//   - env vars ANTHROPIC_MODEL / ANTHROPIC_DEFAULT_*_MODEL
+//   - top-level "model" field (skipped when it's a well-known alias)
+//
+// The static catalog is always included so official models remain
+// available even when the config file is absent.
+func discoverClaudeModels() []Model {
+	static := claudeStaticModels()
+	extra := readClaudeSettingsModels()
+	if len(extra) == 0 {
+		return static
+	}
+	seen := map[string]bool{}
+	for _, m := range static {
+		seen[m.ID] = true
+	}
+	for _, id := range extra {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		static = append(static, Model{ID: id, Label: id, Provider: "anthropic"})
+	}
+	return static
+}
+
+// claudeModelAliases are short names that the Claude CLI resolves
+// internally. We skip them when reading the top-level "model" field
+// from settings.json because they don't match any real model ID.
+var claudeModelAliases = map[string]bool{
+	"opus": true, "sonnet": true, "haiku": true,
+	"opus-4": true, "sonnet-4": true, "haiku-4": true,
+}
+
+// readClaudeSettingsModels reads ~/.claude/settings.json and extracts
+// model IDs from env vars (ANTHROPIC_MODEL, ANTHROPIC_DEFAULT_*_MODEL)
+// and the top-level "model" field.
+func readClaudeSettingsModels() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	if err != nil {
+		return nil
+	}
+	var cfg struct {
+		Model string            `json:"model"`
+		Env   map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var result []string
+	add := func(id string) {
+		if id == "" || seen[id] {
+			return
+		}
+		seen[id] = true
+		result = append(result, id)
+	}
+	if cfg.Env != nil {
+		if v := cfg.Env["ANTHROPIC_MODEL"]; v != "" {
+			add(v)
+		}
+		for _, key := range []string{
+			"ANTHROPIC_DEFAULT_SONNET_MODEL",
+			"ANTHROPIC_DEFAULT_OPUS_MODEL",
+			"ANTHROPIC_DEFAULT_HAIKU_MODEL",
+		} {
+			if v := cfg.Env[key]; v != "" {
+				add(v)
+			}
+		}
+	}
+	if cfg.Model != "" && !claudeModelAliases[cfg.Model] {
+		add(cfg.Model)
+	}
+	return result
 }
 
 func codexStaticModels() []Model {

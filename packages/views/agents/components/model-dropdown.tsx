@@ -157,6 +157,11 @@ export function ModelDropdown({
               onChange={(e) => setSearch(e.target.value)}
               className="h-8"
             />
+            {!search.trim() && (
+              <p className="mt-1 px-1 text-[11px] text-muted-foreground">
+                {t(($) => $.pickers.model_custom_hint)}
+              </p>
+            )}
           </div>
           <div className="max-h-72 overflow-y-auto p-1">
             {modelsQuery.isLoading && (
