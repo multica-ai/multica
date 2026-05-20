@@ -5,7 +5,8 @@
     "empty": "No projects yet",
     "create_first": "Create your first project",
     "view_compact": "Compact",
-    "view_comfortable": "Comfortable"
+    "view_comfortable": "Comfortable",
+    "search_placeholder": "Search projects..."
   },
   "table": {
     "name": "Name",
