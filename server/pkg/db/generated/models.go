@@ -818,6 +818,19 @@ type Member struct {
 	BudgetEnforcementEnabled bool               `json:"budget_enforcement_enabled"`
 }
 
+type Notification struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	RecipientID   pgtype.UUID        `json:"recipient_id"`
+	RecipientType string             `json:"recipient_type"`
+	Type          string             `json:"type"`
+	ReferenceID   pgtype.UUID        `json:"reference_id"`
+	ReferenceType string             `json:"reference_type"`
+	Metadata      []byte             `json:"metadata"`
+	ReadAt        pgtype.Timestamptz `json:"read_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type NotificationPreference struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

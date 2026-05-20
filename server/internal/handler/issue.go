@@ -19,6 +19,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	cnotifications "github.com/multica-ai/multica/server/internal/cerebro/notifications"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -2086,20 +2087,27 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issue, err := h.Queries.UpdateIssue(r.Context(), params)
+	// Determine actor identity: agent (via X-Agent-ID header) or member.
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+
+	// CEREBRO-PATCH(notification-events): issue update + notification rows commit atomically.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update issue")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	issue, err := qtx.UpdateIssue(r.Context(), params)
 	if err != nil {
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
 		return
 	}
 
-	if len(attachmentIDs) > 0 {
-		h.linkAttachmentsByIssueIDs(r.Context(), issue.ID, issue.WorkspaceID, attachmentIDs)
-	}
-
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
-	slog.Info("issue updated", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
 
 	assigneeChanged := (req.AssigneeType != nil || req.AssigneeID != nil) &&
 		(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
@@ -2114,8 +2122,51 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
 
-	// Determine actor identity: agent (via X-Agent-ID header) or member.
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if statusChanged {
+		subs, err := qtx.ListIssueSubscribers(r.Context(), issue.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create status notifications")
+			return
+		}
+		if err := cnotifications.CreateForRecipients(r.Context(), qtx, cnotifications.Event{
+			WorkspaceID:   issue.WorkspaceID,
+			Type:          "issue.status_changed",
+			ReferenceID:   issue.ID,
+			ReferenceType: "issue",
+			Metadata: cnotifications.IssueMetadata(issue, map[string]any{
+				"status_fra": prevIssue.Status,
+				"status_til": issue.Status,
+			}),
+		}, cnotifications.RecipientsFromSubscribers(subs)); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create status notifications")
+			return
+		}
+	}
+	if assigneeChanged && issue.AssigneeID.Valid && (issue.AssigneeType.String == "member" || issue.AssigneeType.String == "agent") {
+		if err := cnotifications.Create(r.Context(), qtx, cnotifications.Event{
+			WorkspaceID:   issue.WorkspaceID,
+			RecipientType: issue.AssigneeType.String,
+			RecipientID:   issue.AssigneeID,
+			Type:          "issue.assigned",
+			ReferenceID:   issue.ID,
+			ReferenceType: "issue",
+			Metadata:      cnotifications.IssueMetadata(issue, nil),
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create assignment notification")
+			return
+		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update issue")
+		return
+	}
+
+	if len(attachmentIDs) > 0 {
+		h.linkAttachmentsByIssueIDs(r.Context(), issue.ID, issue.WorkspaceID, attachmentIDs)
+	}
+
+	slog.Info("issue updated", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
 
 	h.publishToAudience(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
 		"issue":               resp,

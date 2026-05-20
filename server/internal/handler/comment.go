@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	cnotifications "github.com/multica-ai/multica/server/internal/cerebro/notifications"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/mention"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -254,7 +255,16 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// entity-encode Markdown syntax characters (>, ", &, <) and corrupt the
 	// source. See issue #1303 / discussion in MUL-1119, MUL-1125.
 
-	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
+	// CEREBRO-PATCH(notification-events): comment + mention notifications must commit atomically.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create comment")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	comment, err := qtx.CreateComment(r.Context(), db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
 		AuthorType:  authorType,
@@ -266,6 +276,26 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create comment: "+err.Error())
+		return
+	}
+
+	mentions := util.ParseMentions(comment.Content)
+	if err := cnotifications.CreateForRecipients(r.Context(), qtx, cnotifications.Event{
+		WorkspaceID:   issue.WorkspaceID,
+		Type:          "mention",
+		ReferenceID:   comment.ID,
+		ReferenceType: "comment",
+		Metadata: cnotifications.IssueMetadata(issue, map[string]any{
+			"comment_excerpt": cnotifications.CommentExcerpt(comment.Content),
+		}),
+	}, cnotifications.RecipientsFromMentions(mentions)); err != nil {
+		slog.Warn("create mention notifications failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
+		writeError(w, http.StatusInternalServerError, "failed to create comment notifications")
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create comment")
 		return
 	}
 

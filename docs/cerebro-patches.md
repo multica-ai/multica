@@ -698,6 +698,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `autopilot-detail-nav-state` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | JEH-1766 — remove `editDialogOpen` state; edit button navigates to full-page edit. |
 | `autopilot-detail-nav-edit-button` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | JEH-1766 — Edit button navigates to `/autopilots/:id/edit` instead of opening dialog. |
 | `autopilot-detail-nav-no-dialog` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | JEH-1766 — remove edit dialog render block from detail page. |
+| `notification-events` | server/internal/handler/comment.go<br>server/internal/handler/issue.go<br>server/internal/service/task.go<br>server/pkg/db/queries/notification.sql | ~140 | JEH-1804/JEH-1805 — durable `notifications` rows are inserted in the same transaction as comment mentions, issue status/assignment changes, and terminal agent runs. Metadata is capped to issue title plus short snapshots. |
 | `agent-avatar-generate` | server/internal/cerebro/agent_avatar/handler.go | 174 | JEH-1563 — net-new fork file: POST /api/agents/generate-avatar calls OpenRouter gpt-5-image-mini, uploads PNG to storage, returns URL. |
 | `agent-avatar-generate` | server/cmd/server/router.go | 2 | JEH-1563 — import cerebroagentavatar, instantiate handler with storage, mount POST /api/agents/generate-avatar. |
 | `agent-avatar-generate` | packages/core/api/client.ts | 4 | JEH-1563 — `generateAgentAvatar(agentName, customPrompt?)` method on ApiClient. |

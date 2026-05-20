@@ -18,6 +18,7 @@ import (
 	// CEREBRO-PATCH(task-title-builder): cerebro-owned LLM title generator.
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/cerebro/agent_title"
+	cnotifications "github.com/multica-ai/multica/server/internal/cerebro/notifications"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mention"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -1261,6 +1262,11 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			return fmt.Errorf("revoke task tokens: %w", err)
 		}
 
+		// CEREBRO-PATCH(notification-events): terminal run notification commits with the task transition.
+		if err := s.createRunNotification(ctx, qtx, t, "agent.run_completed", nil); err != nil {
+			return fmt.Errorf("create run completed notification: %w", err)
+		}
+
 		if t.ChatSessionID.Valid {
 			// Pin the chat_session's runtime_id alongside the session_id so the
 			// next claim can apply the runtime-guard. Both fields move together:
@@ -1466,6 +1472,21 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		// Same revoke-on-terminal-state contract as CompleteTask.
 		if err := qtx.RevokeTaskTokensForTask(ctx, taskID); err != nil {
 			return fmt.Errorf("revoke task tokens: %w", err)
+		}
+
+		notificationType := "agent.run_failed"
+		if failureReason != "" {
+			notificationType = "agent.run_blocked"
+		}
+		metadata := map[string]any{}
+		if errMsg != "" {
+			metadata["error_excerpt"] = cnotifications.CommentExcerpt(errMsg)
+		}
+		if failureReason != "" {
+			metadata["failure_reason"] = failureReason
+		}
+		if err := s.createRunNotification(ctx, qtx, t, notificationType, metadata); err != nil {
+			return fmt.Errorf("create run failure notification: %w", err)
 		}
 
 		if t.ChatSessionID.Valid {
@@ -1907,6 +1928,34 @@ func (s *TaskService) runInTx(ctx context.Context, fn func(*db.Queries) error) e
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func (s *TaskService) createRunNotification(ctx context.Context, q *db.Queries, task db.AgentTaskQueue, notificationType string, metadata map[string]any) error {
+	if !task.IssueID.Valid {
+		return nil
+	}
+	issue, err := q.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		return nil
+	}
+	recipients := []cnotifications.Recipient{{Type: "agent", ID: task.AgentID}}
+	subs, err := q.ListIssueSubscribers(ctx, issue.ID)
+	if err != nil {
+		return err
+	}
+	recipients = append(recipients, cnotifications.RecipientsFromSubscribers(subs)...)
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	metadata["task_id"] = util.UUIDToString(task.ID)
+	metadata["agent_id"] = util.UUIDToString(task.AgentID)
+	return cnotifications.CreateForRecipients(ctx, q, cnotifications.Event{
+		WorkspaceID:   issue.WorkspaceID,
+		Type:          notificationType,
+		ReferenceID:   task.ID,
+		ReferenceType: "run",
+		Metadata:      cnotifications.IssueMetadata(issue, metadata),
+	}, recipients)
 }
 
 // ReportProgress broadcasts a progress update via the event bus.

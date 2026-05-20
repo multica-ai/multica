@@ -44,7 +44,6 @@ type BackfillToolMeta struct {
 	Name        string
 	Description string
 }
-
 // SeedCloudToolsForAllRuntimes is the bid 6 data backfill: every existing
 // agent_runtime row gets a cerebro_runtime_tool row for every cloud built-in
 // tool, with enabled=true so admins/owners (who bypass via
@@ -185,4 +184,3 @@ func validateToolsConfig(raw []byte) error {
 	}
 	return nil
 }
-
