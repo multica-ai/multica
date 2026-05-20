@@ -100,7 +100,7 @@ class FakeWebSocket {
   }
 }
 
-describe("WSClient", () => {
+describe("WSClient reconnection and error handling", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();

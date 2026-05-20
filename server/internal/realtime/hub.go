@@ -780,7 +780,9 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 	}
 
 	if cookieAuthErr != "" {
-		conn.WriteMessage(websocket.TextMessage, []byte(cookieAuthErr))
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(cookieAuthErr)); err != nil {
+			slog.Error("ws: failed to send cookie auth error to client", "error", err)
+		}
 		conn.Close()
 		return
 	}
