@@ -72,6 +72,11 @@ vi.mock("@multica/cerebro-notifications/core/queries", () => ({
 vi.mock("@multica/cerebro-notifications/core/mutations", () => ({
   useArchiveAllNotifications: () => ({ mutate: vi.fn(), isPending: false }),
 }));
+// CEREBRO-PATCH(sidebar-notification-bell-mock): JEH-1808 stub the bell so the sidebar test
+// doesn't pull in ActorAvatar / hover-card / dropdown-menu transitive deps.
+vi.mock("@multica/cerebro-notifications/views/components/notification-bell", () => ({
+  NotificationBell: () => <span data-testid="notification-bell" />,
+}));
 vi.mock("../i18n", () => ({
   useT: () => ({
     t: (key: unknown) =>
