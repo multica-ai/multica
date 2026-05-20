@@ -64,10 +64,10 @@ export function crmCommunicationNoteListOptions(wsId: string, accountId: string)
   });
 }
 
-export function crmEmailThreadListOptions(wsId: string, accountId = "") {
+export function crmEmailThreadListOptions(wsId: string, accountId = "", folder = "", mailbox = "") {
   return queryOptions({
-    queryKey: crmKeys.emailThreads(wsId, accountId),
-    queryFn: () => api.listCRMEmailThreads(accountId ? { account_id: accountId } : undefined),
+    queryKey: [...crmKeys.emailThreads(wsId, accountId), folder, mailbox],
+    queryFn: () => api.listCRMEmailThreads({ account_id: accountId || undefined, folder: folder || undefined, mailbox: mailbox || undefined }),
     select: (data) => data.threads,
   });
 }

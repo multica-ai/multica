@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -478,14 +479,55 @@ func crmEmailMessageToResponse(row crmEmailMessageRow) CRMEmailMessageResponse {
 }
 
 type CRMAccountProfileResponse struct {
-	ID          string          `json:"id"`
-	WorkspaceID string          `json:"workspace_id"`
-	AccountID   string          `json:"account_id"`
-	Summary     *string         `json:"summary"`
-	ProfileJSON json.RawMessage `json:"profile_json"`
-	UpdatedBy   *string         `json:"updated_by"`
-	CreatedAt   string          `json:"created_at"`
-	UpdatedAt   string          `json:"updated_at"`
+	ID            string          `json:"id"`
+	WorkspaceID   string          `json:"workspace_id"`
+	AccountID     string          `json:"account_id"`
+	Summary       *string         `json:"summary"`
+	ProfileJSON   json.RawMessage `json:"profile_json"`
+	SourceSummary *string         `json:"source_summary"`
+	UpdatedBy     *string         `json:"updated_by"`
+	CreatedAt     string          `json:"created_at"`
+	UpdatedAt     string          `json:"updated_at"`
+}
+
+func buildCRMProfileSourceSummary(noteSnippets, projectTitles, issueTitles []string) *string {
+	parts := make([]string, 0, 3)
+	if len(noteSnippets) > 0 {
+		parts = append(parts, "notes: "+strings.Join(noteSnippets, " | "))
+	}
+	if len(projectTitles) > 0 {
+		parts = append(parts, "projects: "+strings.Join(projectTitles, ", "))
+	}
+	if len(issueTitles) > 0 {
+		parts = append(parts, "issues: "+strings.Join(issueTitles, ", "))
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	summary := strings.Join(parts, " ; ")
+	return &summary
+}
+
+func trimCRMProfileList(items []string, limit, snippetLimit int) []string {
+	out := make([]string, 0, min(len(items), limit))
+	for i := 0; i < len(items) && i < limit; i++ {
+		item := trimCRMProfileSnippet(items[i], snippetLimit)
+		if item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func trimCRMProfileSnippet(s string, limit int) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if len(s) <= limit {
+		return s
+	}
+	return strings.TrimSpace(s[:limit])
 }
 
 type UpsertCRMAccountProfileRequest struct {
@@ -1456,17 +1498,42 @@ func (h *Handler) ListCRMEmailThreads(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := h.DB.Query(r.Context(), `
+	folder := strings.ToLower(strings.TrimSpace(optionalStringFromQuery(r, "folder")))
+	mailbox := strings.ToLower(strings.TrimSpace(optionalStringFromQuery(r, "mailbox")))
+	where := []string{"t.workspace_id = $1", "($2::uuid IS NULL OR t.account_id = $2)"}
+	args := []any{workspaceID, accountID}
+	if mailbox != "" {
+		args = append(args, mailbox)
+		where = append(where, fmt.Sprintf("EXISTS (SELECT 1 FROM crm_email_message fm WHERE fm.thread_id = t.id AND fm.workspace_id = t.workspace_id AND lower(COALESCE(fm.source_metadata->>'mailbox_email', fm.source_metadata->>'email', t.mailbox, '')) = $%d)", len(args)))
+	}
+	switch folder {
+	case "inbox":
+		where = append(where, "t.status <> 'archived' AND EXISTS (SELECT 1 FROM crm_email_message fm WHERE fm.thread_id = t.id AND fm.workspace_id = t.workspace_id AND lower(fm.folder) IN ('inbox'))")
+	case "sent":
+		where = append(where, "(t.direction = 'outbound' OR EXISTS (SELECT 1 FROM crm_email_message fm WHERE fm.thread_id = t.id AND fm.workspace_id = t.workspace_id AND lower(fm.folder) IN ('sent', 'sent messages', 'sent items')))")
+	case "spam", "junk":
+		where = append(where, "EXISTS (SELECT 1 FROM crm_email_message fm WHERE fm.thread_id = t.id AND fm.workspace_id = t.workspace_id AND lower(fm.folder) IN ('spam', 'junk'))")
+	case "archived", "archive":
+		where = append(where, "(t.status = 'archived' OR EXISTS (SELECT 1 FROM crm_email_message fm WHERE fm.thread_id = t.id AND fm.workspace_id = t.workspace_id AND lower(fm.folder) IN ('archive', 'archived')))")
+	case "starred":
+		where = append(where, "EXISTS (SELECT 1 FROM crm_email_message fm WHERE fm.thread_id = t.id AND fm.workspace_id = t.workspace_id AND fm.is_starred = true)")
+	case "trash", "deleted":
+		where = append(where, "EXISTS (SELECT 1 FROM crm_email_message fm WHERE fm.thread_id = t.id AND fm.workspace_id = t.workspace_id AND lower(fm.folder) IN ('trash', 'deleted messages', 'deleted items'))")
+	case "unlinked":
+		where = append(where, "t.account_id IS NULL")
+	}
+	query := fmt.Sprintf(`
 		SELECT t.id, t.workspace_id, t.account_id, t.contact_id, t.project_id, t.issue_id, t.subject,
 		       t.external_thread_id, t.mailbox, t.direction, t.status, t.last_message_at,
 		       t.created_at, t.updated_at, COUNT(m.id)::bigint AS message_count
 		FROM crm_email_thread t
 		LEFT JOIN crm_email_message m ON m.thread_id = t.id AND m.workspace_id = t.workspace_id
-		WHERE t.workspace_id = $1 AND ($2::uuid IS NULL OR t.account_id = $2)
+		WHERE %s
 		GROUP BY t.id
 		ORDER BY COALESCE(t.last_message_at, t.updated_at) DESC
 		LIMIT 100
-	`, workspaceID, accountID)
+	`, strings.Join(where, " AND "))
+	rows, err := h.DB.Query(r.Context(), query, args...)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list CRM email threads")
 		return
@@ -2335,17 +2402,51 @@ func (h *Handler) regenerateCRMAccountProfile(ctx context.Context, workspaceID, 
 		return CRMAccountProfileResponse{}, err
 	}
 	defer rows.Close()
-	communications := make([]string, 0, 5)
+	noteSnippets := make([]string, 0, 5)
 	for rows.Next() {
 		var channel, direction, subject, body string
 		if err := rows.Scan(&channel, &direction, &subject, &body); err == nil {
-			line := strings.TrimSpace(strings.Join([]string{channel, direction, subject, body}, " "))
-			if len(line) > 220 {
-				line = line[:220]
-			}
-			communications = append(communications, line)
+			noteSnippets = append(noteSnippets, trimCRMProfileSnippet(strings.TrimSpace(strings.Join([]string{channel, direction, subject, body}, " ")), 220))
 		}
 	}
+	rows, err = h.DB.Query(ctx, `SELECT direction, COALESCE(subject,''), COALESCE(body_text,'') FROM crm_email_message WHERE workspace_id=$1 AND account_id=$2 ORDER BY COALESCE(sent_at, received_at, created_at) DESC LIMIT 5`, workspaceID, accountID)
+	if err != nil {
+		return CRMAccountProfileResponse{}, err
+	}
+	defer rows.Close()
+	emailSnippets := make([]string, 0, 5)
+	for rows.Next() {
+		var direction, subject, body string
+		if err := rows.Scan(&direction, &subject, &body); err == nil {
+			emailSnippets = append(emailSnippets, trimCRMProfileSnippet(strings.TrimSpace(strings.Join([]string{"email", direction, subject, body}, " ")), 260))
+		}
+	}
+	rows, err = h.DB.Query(ctx, `SELECT DISTINCT p.title FROM project p JOIN project_resource pr ON pr.project_id=p.id AND pr.workspace_id=p.workspace_id WHERE p.workspace_id=$1 AND pr.resource_type='crm_account' AND pr.resource_ref->>'account_id'=$2 ORDER BY p.title ASC LIMIT 5`, workspaceID, uuidToString(accountID))
+	if err != nil {
+		return CRMAccountProfileResponse{}, err
+	}
+	defer rows.Close()
+	projectTitles := make([]string, 0, 5)
+	for rows.Next() {
+		var title string
+		if err := rows.Scan(&title); err == nil {
+			projectTitles = append(projectTitles, title)
+		}
+	}
+	rows, err = h.DB.Query(ctx, `SELECT DISTINCT COALESCE(i.identifier,''), i.title, i.status, i.priority FROM issue i LEFT JOIN crm_email_thread t ON t.issue_id=i.id AND t.workspace_id=i.workspace_id LEFT JOIN crm_email_thread_issue_link til ON til.issue_id=i.id LEFT JOIN crm_email_thread lt ON lt.id=til.thread_id AND lt.workspace_id=i.workspace_id LEFT JOIN project_resource pr ON pr.project_id=i.project_id AND pr.workspace_id=i.workspace_id AND pr.resource_type='crm_account' AND pr.resource_ref->>'account_id'=$2 WHERE i.workspace_id=$1 AND (t.account_id=$3 OR lt.account_id=$3 OR pr.id IS NOT NULL) ORDER BY i.title ASC LIMIT 5`, workspaceID, uuidToString(accountID), accountID)
+	if err != nil {
+		return CRMAccountProfileResponse{}, err
+	}
+	defer rows.Close()
+	issueTitles := make([]string, 0, 5)
+	for rows.Next() {
+		var identifier, title, issueStatus, issuePriority string
+		if err := rows.Scan(&identifier, &title, &issueStatus, &issuePriority); err == nil {
+			issueTitles = append(issueTitles, strings.TrimSpace(strings.Join([]string{identifier, title, issueStatus, issuePriority}, " ")))
+		}
+	}
+	communicationSnippets := append([]string{}, noteSnippets...)
+	communicationSnippets = append(communicationSnippets, emailSnippets...)
 	country := crmTextValue(countryName)
 	industryValue := crmTextValue(industry)
 	baseParts := []string{name}
@@ -2359,30 +2460,37 @@ func (h *Handler) regenerateCRMAccountProfile(ctx context.Context, workspaceID, 
 	if summary == "" {
 		summary = "CRM customer profile"
 	}
-	if len(communications) > 0 {
-		summary += "。最近往来：" + communications[0]
+	if len(communicationSnippets) > 0 {
+		summary += "。最近往来：" + communicationSnippets[0]
 	}
+	projectSource := strings.Join(trimCRMProfileList(projectTitles, 5, 120), "\n")
+	issueSource := strings.Join(trimCRMProfileList(issueTitles, 5, 160), "\n")
 	profile := map[string]any{
+		"customer_summary":         summary,
 		"business_model":           strings.TrimSpace(strings.Join([]string{industryValue, crmTextValue(website)}, " ")),
-		"main_products":            "根据客户基础信息和往来记录持续更新；请在后续沟通中补充具体产品。",
-		"procurement_needs":        "结合最近往来跟进需求、数量、交期、目标价格和决策人。",
-		"pain_points":              strings.Join(communications, "\n"),
-		"decision_process":         "根据联系人、项目和历史往来持续归纳；优先确认决策链路和采购周期。",
-		"communication_preference": "参考最近往来渠道和回复习惯安排跟进。",
-		"risk_notes":               strings.TrimSpace(strings.Join([]string{crmTextValue(notes), "自动画像由客户信息和历史往来生成；新增往来或修改客户信息会自动刷新。"}, "\n")),
-		"cooperation_history":      strings.Join(communications, "\n"),
+		"main_products":            "根据客户基础信息、往来记录、关联项目和 Issue 持续更新；请在后续沟通中补充具体产品。",
+		"procurement_needs":        "结合最近往来、邮件、项目和 Issue 跟进需求、数量、交期、目标价格和决策人。",
+		"pain_points":              strings.Join(communicationSnippets, "\n"),
+		"decision_process":         "根据联系人、项目、Issue 和历史往来持续归纳；优先确认决策链路和采购周期。",
+		"communication_preference": "参考最近往来渠道、邮件回复习惯和项目协作记录安排跟进。",
+		"recent_progress":          strings.TrimSpace(strings.Join([]string{strings.Join(communicationSnippets, "\n"), projectSource, issueSource}, "\n")),
+		"risk_notes":               strings.TrimSpace(strings.Join([]string{crmTextValue(notes), "自动画像由客户信息、往来记录、邮件、关联项目和 Issue 生成；新增往来或邮件后自动刷新。"}, "\n")),
+		"cooperation_history":      strings.TrimSpace(strings.Join([]string{strings.Join(communicationSnippets, "\n"), projectSource}, "\n")),
+		"next_step_suggestions":    "围绕最近邮件/往来确认采购需求、决策人、目标价格、交期和下一次跟进时间。",
+		"tags":                     []string{status, rating, priority},
 		"rating_hint":              rating,
 		"priority_hint":            priority,
 		"status_hint":              status,
 		"auto_generated":           true,
 	}
 	profileJSON, _ := json.Marshal(profile)
+	var id pgtype.UUID
 	var rawProfile []byte
-	var updatedAt pgtype.Timestamptz
-	if err := h.DB.QueryRow(ctx, `INSERT INTO crm_account_profile (workspace_id, account_id, summary, profile_json, updated_at) VALUES ($1,$2,$3,$4,now()) ON CONFLICT (account_id) DO UPDATE SET summary=EXCLUDED.summary, profile_json=EXCLUDED.profile_json, updated_at=now() RETURNING profile_json, updated_at`, workspaceID, accountID, summary, profileJSON).Scan(&rawProfile, &updatedAt); err != nil {
+	var createdAt, updatedAt pgtype.Timestamptz
+	if err := h.DB.QueryRow(ctx, `INSERT INTO crm_account_profile (workspace_id, account_id, summary, profile_json, updated_at) VALUES ($1,$2,$3,$4,now()) ON CONFLICT (account_id) DO UPDATE SET summary=EXCLUDED.summary, profile_json=EXCLUDED.profile_json, updated_at=now() RETURNING id, profile_json, created_at, updated_at`, workspaceID, accountID, summary, profileJSON).Scan(&id, &rawProfile, &createdAt, &updatedAt); err != nil {
 		return CRMAccountProfileResponse{}, err
 	}
-	return CRMAccountProfileResponse{WorkspaceID: uuidToString(workspaceID), AccountID: uuidToString(accountID), Summary: &summary, ProfileJSON: rawProfile, UpdatedAt: timestampToString(updatedAt)}, nil
+	return CRMAccountProfileResponse{ID: uuidToString(id), WorkspaceID: uuidToString(workspaceID), AccountID: uuidToString(accountID), Summary: &summary, ProfileJSON: rawProfile, SourceSummary: buildCRMProfileSourceSummary(trimCRMProfileList(communicationSnippets, 5, 160), trimCRMProfileList(projectTitles, 5, 120), trimCRMProfileList(issueTitles, 5, 120)), CreatedAt: timestampToString(createdAt), UpdatedAt: timestampToString(updatedAt)}, nil
 }
 
 func (h *Handler) SuggestCRMAccountProfile(w http.ResponseWriter, r *http.Request) {
@@ -2588,6 +2696,9 @@ func (h *Handler) CreateCRMEmailMessage(w http.ResponseWriter, r *http.Request) 
 		SET last_message_at = COALESCE($3, $4, last_message_at, now()), updated_at = now()
 		WHERE id = $1 AND workspace_id = $2
 	`, threadID, workspaceID, sentAt, receivedAt)
+	if accountID.Valid {
+		_, _ = h.regenerateCRMAccountProfile(r.Context(), workspaceID, accountID)
+	}
 	writeJSON(w, http.StatusCreated, crmEmailMessageToResponse(message))
 }
 

@@ -91,6 +91,8 @@
   "profile": {
     "title": "客户画像",
     "summary_title": "画像摘要",
+    "source_summary": "来源摘要",
+    "updated_at": "更新时间",
     "metadata_title": "客户详情",
     "help": "画像会根据客户基本信息和历史往来自动生成；客户信息修改或新增往来后自动刷新，也可手动刷新。",
     "empty": "暂无客户画像。添加画像后，后续跟进会更清晰。",

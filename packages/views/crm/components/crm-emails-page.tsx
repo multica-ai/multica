@@ -104,7 +104,7 @@ export function CRMEmailsPage() {
   const paths = useWorkspacePaths();
   const { t } = useT("crm");
   const [search, setSearch] = useState("");
-  const [activeFolder, setActiveFolder] = useState<"inbox" | "sent" | "drafts" | "archived" | "starred" | "unlinked">("inbox");
+  const [activeFolder, setActiveFolder] = useState<"inbox" | "sent" | "drafts" | "spam" | "archived" | "starred" | "trash" | "unlinked">("inbox");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mailboxDraft, setMailboxDraft] = useState<MailboxDraft>(emptyMailboxDraft);
   const [mailboxStatus, setMailboxStatus] = useState<string | null>(null);
@@ -119,7 +119,7 @@ export function CRMEmailsPage() {
   const openModal = useModalStore((state) => state.open);
   const setIssueDraft = useIssueDraftStore((state) => state.setDraft);
   const clearIssueDraft = useIssueDraftStore((state) => state.clearDraft);
-  const { data: threads = [], isLoading } = useQuery(crmEmailThreadListOptions(wsId));
+  const { data: threads = [], isLoading } = useQuery(crmEmailThreadListOptions(wsId, "", activeFolder));
   const { data: accounts = [] } = useQuery(crmAccountListOptions(wsId, { sort: "name" }));
   const { data: members = [] } = useQuery({ queryKey: ["workspace", wsId, "members", "crm-mailbox"], queryFn: () => api.listMembers(wsId), enabled: Boolean(wsId) });
   const { data: agents = [] } = useQuery({ queryKey: ["agents", wsId, "crm-mailbox"], queryFn: () => api.listAgents({ workspace_id: wsId }), enabled: Boolean(wsId) });
@@ -138,15 +138,7 @@ export function CRMEmailsPage() {
   const emailDrafts = draftsData?.drafts ?? [];
   const syncRuns = syncRunsData?.runs ?? [];
 
-  const folderThreads = useMemo(() => {
-    return threads.filter((thread) => {
-      if (activeFolder === "sent") return thread.direction === "outbound";
-      if (activeFolder === "archived") return thread.status === "archived";
-      if (activeFolder === "starred") return false;
-      if (activeFolder === "unlinked") return !thread.account_id;
-      return thread.status !== "archived" && thread.direction !== "outbound";
-    });
-  }, [activeFolder, threads]);
+  const folderThreads = useMemo(() => threads, [threads]);
 
   const filteredThreads = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -162,10 +154,12 @@ export function CRMEmailsPage() {
     inbox: threads.filter((thread) => thread.status !== "archived" && thread.direction !== "outbound").length,
     sent: threads.filter((thread) => thread.direction === "outbound").length,
     drafts: emailDrafts.filter((draft: any) => draft.status !== "sent" && draft.status !== "discarded").length,
-    archived: threads.filter((thread) => thread.status === "archived").length,
-    starred: 0,
-    unlinked: threads.filter((thread) => !thread.account_id).length,
-  }), [threads, emailDrafts]);
+    spam: activeFolder === "spam" ? threads.length : 0,
+    archived: activeFolder === "archived" ? threads.length : 0,
+    starred: activeFolder === "starred" ? threads.length : 0,
+    trash: activeFolder === "trash" ? threads.length : 0,
+    unlinked: activeFolder === "unlinked" ? threads.length : 0,
+  }), [activeFolder, threads, emailDrafts]);
 
   const saveMailbox = useMutation({
     mutationFn: () => api.upsertCRMIMAPSetting({
@@ -466,8 +460,10 @@ export function CRMEmailsPage() {
               ["inbox", Inbox, t(($) => $.emails.folder_inbox)],
               ["sent", MailOpen, t(($) => $.emails.folder_sent)],
               ["drafts", Send, "Drafts"],
+              ["spam", MailOpen, "Spam"],
               ["archived", Archive, t(($) => $.emails.folder_archived)],
               ["starred", Star, t(($) => $.emails.folder_starred)],
+              ["trash", Archive, "Trash"],
               ["unlinked", Link2, t(($) => $.emails.folder_unlinked)],
             ] as const).map(([folder, Icon, label]) => (
               <button

@@ -91,6 +91,8 @@
   "profile": {
     "title": "Customer profile",
     "summary_title": "Profile summary",
+    "source_summary": "Source summary",
+    "updated_at": "Updated at",
     "metadata_title": "Account details",
     "help": "Auto-generated from customer basics and communication history. It refreshes after customer edits or new communications; use refresh to regenerate now.",
     "empty": "No customer profile yet. Add one to make follow-up easier.",

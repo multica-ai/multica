@@ -797,6 +797,8 @@ export function CRMAccountDetailPage({ accountId }: { accountId: string }) {
               ) : profile ? (
                 <div className="mt-4 space-y-4">
                   <FieldRow label={t(($) => $.profile.summary_title)} value={profile.summary} />
+                  <FieldRow label={t(($) => $.profile.source_summary)} value={profile.source_summary} />
+                  <FieldRow label={t(($) => $.profile.updated_at)} value={profile.updated_at} />
                   <div className="grid gap-3 sm:grid-cols-2">
                     <FieldRow label={t(($) => $.profile.business_model)} value={profileText(profile.profile_json, "business_model")} />
                     <FieldRow label={t(($) => $.profile.main_products)} value={profileText(profile.profile_json, "main_products")} />

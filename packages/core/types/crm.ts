@@ -152,6 +152,7 @@ export interface CRMAccountProfile {
   account_id: string;
   summary?: string | null;
   profile_json: Record<string, unknown>;
+  source_summary?: string | null;
   updated_by?: string | null;
   created_at: string;
   updated_at: string;
