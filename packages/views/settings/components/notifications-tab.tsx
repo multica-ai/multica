@@ -9,6 +9,7 @@ import type {
   NotificationChannel,
   NotificationChannelPreference,
   NotificationEventType,
+  NotificationRenderMode,
   NotificationWebhook,
 } from "@multica/core/types";
 import type { AgentRuntime } from "@multica/core/types";
@@ -24,6 +25,13 @@ import {
 } from "@multica/ui/components/ui/card";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -62,6 +70,18 @@ const openclawWeixinEventLabels: Record<string, string> = {
   task_failed: "Agent 任务失败时",
   mentioned: "被 @提及时",
   replied: "被回复时",
+};
+
+const renderModeLabels: Record<NotificationRenderMode, string> = {
+  auto: "智能模式",
+  compact: "始终简洁",
+  detail: "始终详细",
+};
+
+const renderModeDescriptions: Record<NotificationRenderMode, string> = {
+  auto: "根据内容长度和结构自动选择简洁或详细",
+  compact: "只发送一行摘要和链接",
+  detail: "发送完整通知内容",
 };
 
 const webhookTemplatePlaceholder = `{
@@ -313,6 +333,51 @@ export function NotificationsTab() {
     }
   };
 
+  const handleRenderModeChange = async (channel: NotificationChannel, mode: NotificationRenderMode) => {
+    // Update render_mode for all event types under this channel
+    const channelPrefs = preferences.filter((p) => p.channel === channel);
+    if (channelPrefs.length === 0) return;
+
+    const saveKey = `${channel}:render_mode`;
+    const previous = preferences;
+    setSavingKey(saveKey);
+
+    // Optimistic update
+    setPreferences((current) =>
+      current.map((p) =>
+        p.channel === channel ? { ...p, render_mode: mode } : p,
+      ),
+    );
+
+    try {
+      // Update each event type's render_mode for this channel
+      const updates = await Promise.all(
+        channelPrefs.map((pref) =>
+          api.updateNotificationPreference({
+            channel: pref.channel,
+            event_type: pref.event_type,
+            render_mode: mode,
+          }),
+        ),
+      );
+      const updatedByKey = new Map(updates.map((p) => [preferenceKey(p), p]));
+      setPreferences((current) =>
+        current.map((p) => updatedByKey.get(preferenceKey(p)) ?? p),
+      );
+    } catch (err) {
+      setPreferences(previous);
+      toast.error(err instanceof Error ? err.message : "Failed to update render mode");
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
+  // Get current render_mode for a channel (uses first preference's value since they're synchronized)
+  const getChannelRenderMode = (channel: NotificationChannel): NotificationRenderMode => {
+    const pref = preferences.find((p) => p.channel === channel);
+    return pref?.render_mode ?? "auto";
+  };
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -469,7 +534,7 @@ export function NotificationsTab() {
           </CardHeader>
           <CardContent className="space-y-4">
             {preferences
-              .filter((pref) => pref.channel !== "custom_webhook")
+              .filter((pref) => pref.channel !== "custom_webhook" && pref.channel !== "openclaw_weixin")
               .map((pref) => {
                 const binding = bindingByProvider.get(pref.channel);
                 const needsBinding = pref.requires_binding && !binding;
@@ -511,6 +576,40 @@ export function NotificationsTab() {
                   </div>
                 );
               })}
+
+            {/* Render mode selector for DingTalk */}
+            {preferences.some((p) => p.channel === "dingtalk") && (
+              <div className="rounded-lg border p-4 space-y-2">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <span className="text-sm font-medium">DingTalk 通知样式</span>
+                    <p className="text-xs text-muted-foreground">
+                      {renderModeDescriptions[getChannelRenderMode("dingtalk")]}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {savingKey === "dingtalk:render_mode" ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    ) : null}
+                    <Select
+                      value={getChannelRenderMode("dingtalk")}
+                      onValueChange={(value) => {
+                        void handleRenderModeChange("dingtalk", value as NotificationRenderMode);
+                      }}
+                    >
+                      <SelectTrigger size="sm">
+                        <SelectValue>{() => renderModeLabels[getChannelRenderMode("dingtalk")]}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">{renderModeLabels.auto}</SelectItem>
+                        <SelectItem value="compact">{renderModeLabels.compact}</SelectItem>
+                        <SelectItem value="detail">{renderModeLabels.detail}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            )}
             {(() => {
               const customWebhookPrefs = preferences.filter(
                 (pref) => pref.channel === "custom_webhook",
@@ -641,6 +740,36 @@ export function NotificationsTab() {
                         </div>
                       );
                     })}
+                  </div>
+                  <div className="rounded-lg border p-4 space-y-2">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-1">
+                        <span className="text-sm font-medium">通知样式</span>
+                        <p className="text-xs text-muted-foreground">
+                          {renderModeDescriptions[getChannelRenderMode("openclaw_weixin")]}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {savingKey === "openclaw_weixin:render_mode" ? (
+                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        ) : null}
+                        <Select
+                          value={getChannelRenderMode("openclaw_weixin")}
+                          onValueChange={(value) => {
+                            void handleRenderModeChange("openclaw_weixin", value as NotificationRenderMode);
+                          }}
+                        >
+                          <SelectTrigger size="sm">
+                            <SelectValue>{() => renderModeLabels[getChannelRenderMode("openclaw_weixin")]}</SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="auto">{renderModeLabels.auto}</SelectItem>
+                            <SelectItem value="compact">{renderModeLabels.compact}</SelectItem>
+                            <SelectItem value="detail">{renderModeLabels.detail}</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}

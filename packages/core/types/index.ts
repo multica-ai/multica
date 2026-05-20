@@ -67,6 +67,7 @@ export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser
 export type {
   NotificationChannel,
   NotificationEventType,
+  NotificationRenderMode,
   ExternalAccountBindingStatus,
   ExternalAccountBinding,
   NotificationChannelPreference,

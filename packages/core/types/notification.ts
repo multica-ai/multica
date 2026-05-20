@@ -1,5 +1,6 @@
 export type NotificationChannel = "inbox" | "dingtalk" | "email" | "custom_webhook" | "openclaw_weixin";
 export type NotificationEventType = "mentioned" | "issue_assigned" | "subscribed_issue_updated" | "task_completed" | "task_failed" | "replied";
+export type NotificationRenderMode = "auto" | "compact" | "detail";
 export type ExternalAccountBindingStatus = "active" | "expired" | "revoked" | "error";
 
 export interface ExternalAccountBinding {
@@ -19,6 +20,7 @@ export interface NotificationChannelPreference {
   enabled: boolean;
   binding_id: string | null;
   requires_binding: boolean;
+  render_mode: NotificationRenderMode;
 }
 
 export interface ListNotificationBindingsResponse {
@@ -32,7 +34,8 @@ export interface ListNotificationPreferencesResponse {
 export interface UpdateNotificationPreferenceRequest {
   channel: NotificationChannel;
   event_type: NotificationEventType;
-  enabled: boolean;
+  enabled?: boolean;
+  render_mode?: NotificationRenderMode;
 }
 
 export interface NotificationWebhook {
