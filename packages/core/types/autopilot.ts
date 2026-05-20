@@ -50,6 +50,14 @@ export interface AutopilotTrigger {
   // server-side. Clients fall back to composing from getBaseUrl/origin +
   // webhook_path when this is missing.
   webhook_url?: string | null;
+  // Non-secret URL/path variant keyed by trigger ID. Send the secret in
+  // Authorization: Bearer, X-Multica-Webhook-Secret, or a valid HMAC
+  // signature instead of embedding it in the URL path.
+  webhook_header_path?: string | null;
+  webhook_header_url?: string | null;
+  provider?: string | null;
+  has_signing_secret?: boolean;
+  signing_secret_hint?: string | null;
   label: string | null;
   last_fired_at: string | null;
   created_at: string;

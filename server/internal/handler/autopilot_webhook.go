@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -35,6 +36,11 @@ const maxWebhookBodyBytes = 256 * 1024
 // URL-safe base64 (no padding) is 43 chars, so a full token is "awt_" + 43 = 47
 // chars. URL-safe base64 keeps the token URL-friendly without escaping.
 const webhookTokenPrefix = "awt_"
+
+// Multica's timestamped HMAC scheme accepts five minutes of clock skew.
+// That is wide enough for common self-host VM drift while still preventing
+// captured requests from being replayed long after the original send.
+const webhookSignatureMaxSkew = 5 * time.Minute
 
 // generateWebhookToken returns a cryptographically random bearer token used as
 // the public webhook URL secret. Format: "awt_" + URL-safe base64(32 bytes,
@@ -244,6 +250,12 @@ func verifyWebhookSignatureForProvider(provider, secret string, headers http.Hea
 	if secret == "" {
 		return sigStatusNotRequired
 	}
+	if verifyMulticaSignature(secret, headers, rawBody, time.Now().UTC()) {
+		return sigStatusValid
+	}
+	if headers.Get("X-Multica-Timestamp") != "" || headers.Get("X-Multica-Signature") != "" {
+		return sigStatusInvalid
+	}
 	sig := headers.Get("X-Hub-Signature-256")
 	if sig == "" {
 		return sigStatusMissing
@@ -260,16 +272,53 @@ func verifyWebhookSignatureForProvider(provider, secret string, headers http.Hea
 // comparison is constant-time so partial-prefix attacks cannot leak timing.
 func verifyHubSignature(secret, header string, body []byte) bool {
 	const prefix = "sha256="
-	if !strings.HasPrefix(header, prefix) {
-		return false
-	}
-	want, err := hex.DecodeString(strings.TrimPrefix(header, prefix))
+	want, err := decodeSHA256Signature(header, prefix)
 	if err != nil {
 		return false
 	}
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write(body)
 	return hmac.Equal(mac.Sum(nil), want)
+}
+
+// verifyMulticaSignature implements Multica's replay-resistant HMAC scheme:
+//
+//	X-Multica-Timestamp: <RFC3339 timestamp>
+//	X-Multica-Signature: sha256=<hex(hmac(timestamp + "." + body, secret))>
+//
+// The timestamp is part of the MAC input and must be close to the server clock.
+func verifyMulticaSignature(secret string, headers http.Header, body []byte, now time.Time) bool {
+	timestamp := strings.TrimSpace(headers.Get("X-Multica-Timestamp"))
+	signature := strings.TrimSpace(headers.Get("X-Multica-Signature"))
+	if secret == "" || timestamp == "" || signature == "" {
+		return false
+	}
+	sentAt, err := time.Parse(time.RFC3339, timestamp)
+	if err != nil {
+		sentAt, err = time.Parse(time.RFC3339Nano, timestamp)
+		if err != nil {
+			return false
+		}
+	}
+	if sentAt.Before(now.Add(-webhookSignatureMaxSkew)) || sentAt.After(now.Add(webhookSignatureMaxSkew)) {
+		return false
+	}
+	want, err := decodeSHA256Signature(signature, "sha256=")
+	if err != nil {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(timestamp))
+	mac.Write([]byte("."))
+	mac.Write(body)
+	return hmac.Equal(mac.Sum(nil), want)
+}
+
+func decodeSHA256Signature(header, prefix string) ([]byte, error) {
+	if !strings.HasPrefix(header, prefix) {
+		return nil, fmt.Errorf("missing signature prefix")
+	}
+	return hex.DecodeString(strings.TrimPrefix(header, prefix))
 }
 
 // selectedHeadersJSON returns the small, debugging-friendly subset of request
@@ -292,11 +341,103 @@ func selectedHeadersJSON(headers http.Header) []byte {
 	if v := headers.Get("X-Hub-Signature-256"); v != "" {
 		out["x-hub-signature-256-present"] = true
 	}
+	if v := headers.Get("X-Multica-Timestamp"); v != "" {
+		out["x-multica-timestamp"] = v
+	}
+	if v := headers.Get("X-Multica-Signature"); v != "" {
+		out["x-multica-signature-present"] = true
+	}
+	if v := headers.Get("Authorization"); v != "" {
+		out["authorization-present"] = true
+	}
+	if v := headers.Get("X-Multica-Webhook-Secret"); v != "" {
+		out["x-multica-webhook-secret-present"] = true
+	}
 	b, err := json.Marshal(out)
 	if err != nil {
 		return []byte("{}")
 	}
 	return b
+}
+
+type webhookCredentialMode string
+
+const (
+	webhookCredentialPathToken webhookCredentialMode = "path_token"
+	webhookCredentialTriggerID webhookCredentialMode = "trigger_id"
+)
+
+type webhookTriggerLookupResult struct {
+	Trigger              db.AutopilotTrigger
+	CredentialMode       webhookCredentialMode
+	AutopilotWorkspaceID pgtype.UUID
+}
+
+func (h *Handler) lookupWebhookTriggerByCredential(r *http.Request, credential string) (webhookTriggerLookupResult, error) {
+	if strings.HasPrefix(credential, webhookTokenPrefix) {
+		row, err := h.Queries.GetWebhookTriggerByToken(r.Context(), pgtype.Text{String: credential, Valid: true})
+		if err != nil {
+			return webhookTriggerLookupResult{CredentialMode: webhookCredentialPathToken}, err
+		}
+		return webhookTriggerLookupResult{
+			Trigger:              tokenLookupRowToTrigger(row),
+			CredentialMode:       webhookCredentialPathToken,
+			AutopilotWorkspaceID: row.AutopilotWorkspaceID,
+		}, nil
+	}
+
+	triggerID, err := util.ParseUUID(credential)
+	if err != nil {
+		return webhookTriggerLookupResult{CredentialMode: webhookCredentialTriggerID}, pgx.ErrNoRows
+	}
+	trigger, err := h.Queries.GetAutopilotTrigger(r.Context(), triggerID)
+	if err != nil {
+		return webhookTriggerLookupResult{CredentialMode: webhookCredentialTriggerID}, err
+	}
+	if trigger.Kind != "webhook" {
+		return webhookTriggerLookupResult{CredentialMode: webhookCredentialTriggerID}, pgx.ErrNoRows
+	}
+	return webhookTriggerLookupResult{Trigger: trigger, CredentialMode: webhookCredentialTriggerID}, nil
+}
+
+func tokenLookupRowToTrigger(row db.GetWebhookTriggerByTokenRow) db.AutopilotTrigger {
+	return db.AutopilotTrigger{
+		ID:             row.ID,
+		AutopilotID:    row.AutopilotID,
+		Kind:           row.Kind,
+		Enabled:        row.Enabled,
+		CronExpression: row.CronExpression,
+		Timezone:       row.Timezone,
+		NextRunAt:      row.NextRunAt,
+		WebhookToken:   row.WebhookToken,
+		Label:          row.Label,
+		LastFiredAt:    row.LastFiredAt,
+		CreatedAt:      row.CreatedAt,
+		UpdatedAt:      row.UpdatedAt,
+		Provider:       row.Provider,
+		SigningSecret:  row.SigningSecret,
+	}
+}
+
+func verifyStaticWebhookHeaderSecret(trigger db.AutopilotTrigger, headers http.Header) bool {
+	if !trigger.WebhookToken.Valid || trigger.WebhookToken.String == "" {
+		return false
+	}
+	provided := webhookHeaderSecret(headers)
+	if provided == "" {
+		return false
+	}
+	return hmac.Equal([]byte(provided), []byte(trigger.WebhookToken.String))
+}
+
+func webhookHeaderSecret(headers http.Header) string {
+	if v := strings.TrimSpace(headers.Get("Authorization")); v != "" {
+		parts := strings.Fields(v)
+		if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+			return parts[1]
+		}
+	}
+	return strings.TrimSpace(headers.Get("X-Multica-Webhook-Secret"))
 }
 
 // ── Public ingress ──────────────────────────────────────────────────────────
@@ -340,8 +481,8 @@ func selectedHeadersJSON(headers http.Header) []byte {
 //   - 429 {"error":"rate limit exceeded"}                          — over per-IP/token budget
 //   - 500 {"error":"..."}                                          — internal failure
 func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request) {
-	token := chi.URLParam(r, "token")
-	if token == "" {
+	credential := chi.URLParam(r, "token")
+	if credential == "" {
 		writeError(w, http.StatusNotFound, "webhook not found")
 		return
 	}
@@ -362,7 +503,7 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 	//    to 404 means a transient DB blip silently drops real deliveries
 	//    (providers like GitHub don't retry on 404). For no-row we still
 	//    return a generic message so we don't leak which tokens existed.
-	trigRow, err := h.Queries.GetWebhookTriggerByToken(r.Context(), pgtype.Text{String: token, Valid: true})
+	lookup, err := h.lookupWebhookTriggerByCredential(r, credential)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "webhook not found")
@@ -372,12 +513,14 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	trigRow := lookup.Trigger
+	credentialMode := lookup.CredentialMode
 
 	middleware.SetWebhookTriggerID(r, uuidToString(trigRow.ID))
 
 	// 3. Per-token rate limit.
 	if h.WebhookRateLimiter != nil {
-		if !h.WebhookRateLimiter.Allow(r.Context(), token) {
+		if !h.WebhookRateLimiter.Allow(r.Context(), credential) {
 			writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 			return
 		}
@@ -415,7 +558,8 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	if uuidToString(autopilot.WorkspaceID) != uuidToString(trigRow.AutopilotWorkspaceID) {
+	if lookup.AutopilotWorkspaceID.Valid &&
+		uuidToString(autopilot.WorkspaceID) != uuidToString(lookup.AutopilotWorkspaceID) {
 		slog.Warn("webhook: trigger workspace mismatch",
 			"trigger_id", uuidToString(trigRow.ID),
 			"autopilot_id", uuidToString(autopilot.ID),
@@ -483,7 +627,27 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 9. Signature failure → rejected delivery + 401. No dispatch, no replay.
+	// 9. Trigger-ID paths keep the secret out of the URL. They must prove
+	// possession either with the static webhook token in a header, or with a
+	// valid HMAC signature when a signing secret is configured.
+	if credentialMode == webhookCredentialTriggerID &&
+		sigStatus == sigStatusNotRequired &&
+		!verifyStaticWebhookHeaderSecret(trigRow, r.Header) {
+		reason := "missing_header_secret"
+		if webhookHeaderSecret(r.Header) != "" {
+			reason = "invalid_header_secret"
+		}
+		respBody := map[string]any{
+			"status":      "rejected",
+			"delivery_id": uuidToString(delivery.ID),
+			"reason":      reason,
+		}
+		h.finaliseDeliveryTerminal(r, delivery.ID, deliveryStatusRejected, http.StatusUnauthorized, respBody, reason)
+		writeJSON(w, http.StatusUnauthorized, respBody)
+		return
+	}
+
+	// 10. Signature failure → rejected delivery + 401. No dispatch, no replay.
 	//    Providers will look for 4xx feedback when their secret is wrong.
 	if sigStatus == sigStatusInvalid || sigStatus == sigStatusMissing {
 		reason := "invalid_signature"
