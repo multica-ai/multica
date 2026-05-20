@@ -16,7 +16,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useDeleteRuntime, useUpdateRuntime } from "@multica/core/runtimes/mutations";
-import { deriveRuntimeHealth } from "@multica/core/runtimes";
+import { deriveRuntimeHealth, displayProviderName } from "@multica/core/runtimes";
 import {
   type AgentPresenceDetail,
   useWorkspacePresenceMap,
@@ -325,7 +325,7 @@ function HeroCard({
         <Fact label="Runtime">
           <span className="block truncate text-sm">
             {device?.runtime ?? (
-              <span className="capitalize">{runtime.provider}</span>
+              <span>{displayProviderName(runtime.provider)}</span>
             )}
           </span>
         </Fact>

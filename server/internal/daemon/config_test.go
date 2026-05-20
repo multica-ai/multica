@@ -153,6 +153,15 @@ func TestLoadConfigDetectsAgyAsGeminiProvider(t *testing.T) {
 	}
 }
 
+func TestDisplayNameForProviderShowsAgyForGeminiProvider(t *testing.T) {
+	if got := displayNameForProvider("gemini"); got != "AGY" {
+		t.Fatalf("displayNameForProvider(gemini) = %q, want AGY", got)
+	}
+	if got := displayNameForProvider("codex"); got != "Codex" {
+		t.Fatalf("displayNameForProvider(codex) = %q, want Codex", got)
+	}
+}
+
 // TestResolveAgentsViaLoginShell_ResolvesViaInteractiveShell verifies the
 // motivating bug scenario: a binary that lives in a directory which is NOT on
 // the daemon's PATH but IS added to PATH by the user's interactive shell rc
