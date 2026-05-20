@@ -341,11 +341,21 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 		"url": importURL,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// Detect batch mode (skills.sh/owner/repo)
+	isBatch := strings.Contains(importURL, "skills.sh") && strings.Count(strings.TrimSuffix(importURL, "/"), "/") <= 3
+	timeout := 60 * time.Second
+	endpoint := "/api/skills/import"
+
+	if isBatch {
+		endpoint = "/api/skills/import/batch"
+		timeout = 180 * time.Second // Longer timeout for batch imports
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	var result map[string]any
-	if err := client.PostJSON(ctx, "/api/skills/import", body, &result); err != nil {
+	if err := client.PostJSON(ctx, endpoint, body, &result); err != nil {
 		return fmt.Errorf("import skill: %w", err)
 	}
 
@@ -354,7 +364,14 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 
-	fmt.Printf("Skill imported: %s (%s)\n", strVal(result, "name"), strVal(result, "id"))
+	if isBatch {
+		imported := int(result["imported"].(float64))
+		skipped := int(result["skipped"].(float64))
+		failed := int(result["failed"].(float64))
+		fmt.Printf("Batch import complete: %d imported, %d skipped, %d failed\n", imported, skipped, failed)
+	} else {
+		fmt.Printf("Skill imported: %s (%s)\n", strVal(result, "name"), strVal(result, "id"))
+	}
 	return nil
 }
 

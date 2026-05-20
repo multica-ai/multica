@@ -248,6 +248,19 @@ function detectUrlSource(url: string): DetectedSource {
   return null;
 }
 
+function isBatchUrl(url: string): boolean {
+  // Matches https://skills.sh/owner/repo (2 segments after host)
+  const u = url.trim().toLowerCase();
+  if (!u.includes("skills.sh")) return false;
+  try {
+    const parsed = new URL(u.startsWith("http") ? u : `https://${u}`);
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    return parts.length === 2 && !parts[1].endsWith(".md");
+  } catch {
+    return false;
+  }
+}
+
 function SourceCard({
   label,
   exampleHost,
@@ -300,10 +313,17 @@ function UrlForm({
     setLoading(true);
     setError("");
     try {
-      const skill = await api.importSkill({ url: trimmed });
-      seedAfterCreate(qc, wsId, skill);
-      toast.success(t(($) => $.create.url.toast_imported));
-      onCreated(skill);
+      if (isBatchUrl(trimmed)) {
+        const summary = await api.importSkillsBatch({ url: trimmed });
+        seedAfterCreate(qc, wsId, summary.skills[0]); // Seed cache with first skill
+        toast.success(t(($) => $.create.url.toast_imported_batch, { count: summary.imported }));
+        onCreated(summary.skills[0] ?? ({} as Skill));
+      } else {
+        const skill = await api.importSkill({ url: trimmed });
+        seedAfterCreate(qc, wsId, skill);
+        toast.success(t(($) => $.create.url.toast_imported));
+        onCreated(skill);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t(($) => $.create.url.fallback_error));
       setLoading(false);

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func TestFetchFromSkillsSh_UsesEntryURLForNestedDirectories(t *testing.T) {
@@ -1226,3 +1229,235 @@ func containsString(values []string, want string) bool {
 	}
 	return false
 }
+
+// --- Additional batch import edge-case tests ---
+
+func TestImportAllSkillsFromRepo_TruncatedTreeStillWorks(t *testing.T) {
+	// Even when the tree is truncated, whatever SKILL.md files were found
+	// should still be returned — but the Truncated flag must be set so the
+	// caller can decide whether to reject the partial results.
+	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/large":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/large/git/trees/main":
+				writeJSON(w, http.StatusOK, githubTreeResponse{
+					Tree: []githubTreeEntry{
+						{Path: "skills/alpha/SKILL.md", Type: "blob"},
+					},
+					Truncated: true,
+				})
+			case "/repos/acme/large/contents/skills/alpha":
+				writeJSON(w, http.StatusOK, []githubContentEntry{})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/large/main/skills/alpha/SKILL.md":
+				w.Write([]byte("---\nname: alpha\n---\ncontent"))
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := importAllSkillsFromRepo(client, "acme", "large")
+	if err != nil {
+		t.Fatalf("importAllSkillsFromRepo should succeed even with truncated tree: %v", err)
+	}
+	if !result.Truncated {
+		t.Fatal("expected Truncated=true when GitHub tree is truncated")
+	}
+	if len(result.Skills) != 1 {
+		t.Fatalf("expected 1 skill from partial tree, got %d", len(result.Skills))
+	}
+	if result.Skills[0].name != "alpha" {
+		t.Fatalf("name = %q, want alpha", result.Skills[0].name)
+	}
+}
+
+func TestFetchFromSkillsSh_RejectsBatchURL(t *testing.T) {
+	// fetchFromSkillsSh (the single-skill path) must reject 2-segment URLs
+	// with a clear error directing callers to importAllSkillsFromRepo.
+	_, err := fetchFromSkillsSh(&http.Client{}, "https://skills.sh/everyinc/compound")
+	if err == nil {
+		t.Fatal("expected error for 2-segment URL in single-skill path")
+	}
+	if !strings.Contains(err.Error(), "batch import not supported") {
+		t.Fatalf("error = %q, want 'batch import not supported'", err.Error())
+	}
+}
+
+func TestImportAllSkillsFromRepo_FiltersBinaryFiles(t *testing.T) {
+	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/binary":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/binary/git/trees/main":
+				writeJSON(w, http.StatusOK, githubTreeResponse{
+					Tree: []githubTreeEntry{
+						{Path: "skills/img-skill/SKILL.md", Type: "blob"},
+						{Path: "skills/img-skill/logo.png", Type: "blob"},
+						{Path: "skills/img-skill/guide.md", Type: "blob"},
+					},
+				})
+			case "/repos/acme/binary/contents/skills/img-skill":
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{
+						Name:        "logo.png",
+						Path:        "skills/img-skill/logo.png",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/acme/binary/main/skills/img-skill/logo.png",
+					},
+					{
+						Name:        "guide.md",
+						Path:        "skills/img-skill/guide.md",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/acme/binary/main/skills/img-skill/guide.md",
+					},
+				})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/binary/main/skills/img-skill/SKILL.md":
+				w.Write([]byte("---\nname: img-skill\n---\ncontent"))
+			case "/acme/binary/main/skills/img-skill/logo.png":
+				w.Write([]byte("PNGBYTES"))
+			case "/acme/binary/main/skills/img-skill/guide.md":
+				w.Write([]byte("guide text"))
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := importAllSkillsFromRepo(client, "acme", "binary")
+	if err != nil {
+		t.Fatalf("importAllSkillsFromRepo: %v", err)
+	}
+	if len(result.Skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(result.Skills))
+	}
+
+	gotPaths := importedFilePaths(result.Skills[0].files)
+	// .png is filtered by isLikelyBinaryFilePath
+	wantPaths := []string{"guide.md"}
+	if !equalStrings(gotPaths, wantPaths) {
+		t.Fatalf("files = %v, want %v (png should be filtered)", gotPaths, wantPaths)
+	}
+}
+
+// --- 2-segment skills.sh URL parsing tests ---
+
+func TestParseSkillsShParts_ThreeSegments(t *testing.T) {
+	spec, err := parseSkillsShParts("https://skills.sh/acme/skills/my-skill")
+	if err != nil {
+		t.Fatalf("parseSkillsShParts: %v", err)
+	}
+	if spec.Owner != "acme" || spec.Repo != "skills" || spec.SkillName != "my-skill" {
+		t.Fatalf("got %+v, want Owner=acme Repo=skills SkillName=my-skill", spec)
+	}
+	if spec.BatchMode {
+		t.Fatal("expected BatchMode=false for 3-segment URL")
+	}
+}
+
+func TestParseSkillsShParts_TwoSegments(t *testing.T) {
+	spec, err := parseSkillsShParts("https://skills.sh/acme/skills")
+	if err != nil {
+		t.Fatalf("parseSkillsShParts: %v", err)
+	}
+	if spec.Owner != "acme" || spec.Repo != "skills" {
+		t.Fatalf("got %+v, want Owner=acme Repo=skills", spec)
+	}
+	if !spec.BatchMode {
+		t.Fatal("expected BatchMode=true for 2-segment URL")
+	}
+	if spec.SkillName != "" {
+		t.Fatalf("expected SkillName empty for batch mode, got %q", spec.SkillName)
+	}
+}
+
+func TestParseSkillsShParts_InvalidSegments(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+	}{
+		{"single segment", "https://skills.sh/acme"},
+		{"four segments", "https://skills.sh/a/b/c/d"},
+		{"empty path", "https://skills.sh/"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseSkillsShParts(tc.url)
+			if err == nil {
+				t.Fatalf("expected error for %q", tc.url)
+			}
+		})
+	}
+}
+
+// R1.1: Test the handler-level truncation rejection in importSkillsBatch.
+// If the 4-line "if result.Truncated { ... 502 ... }" block is accidentally
+// removed, this test will fail — unlike TestImportAllSkillsFromRepo_TruncatedTreeStillWorks
+// which only tests the function layer.
+func TestImportSkillsBatch_RejectsTruncatedTree(t *testing.T) {
+	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/large":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/large/git/trees/main":
+				writeJSON(w, http.StatusOK, githubTreeResponse{
+					Tree: []githubTreeEntry{
+						{Path: "skills/alpha/SKILL.md", Type: "blob"},
+					},
+					Truncated: true,
+				})
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	// Handler with nil DB — safe because truncation rejection fires before
+	// any DB operations (resolveActor, createSkillWithFiles).
+	h := &Handler{}
+
+	spec := skillsShSpec{Owner: "acme", Repo: "large", BatchMode: true}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/skills/import/batch", nil)
+
+	h.importSkillsBatch(w, r, spec, client, pgtype.UUID{}, pgtype.UUID{}, "", "")
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("handler returned status %d, want %d (502 BadGateway)\nbody: %s", w.Code, http.StatusBadGateway, w.Body.String())
+	}
+
+	var body map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response is not valid JSON: %v\nraw: %s", err, w.Body.String())
+	}
+	errMsg := body["error"]
+	if !strings.Contains(errMsg, "tree is too large") {
+		t.Fatalf("error message = %q, want it to contain 'tree is too large'", errMsg)
+	}
+	if !strings.Contains(errMsg, "acme/large") {
+		t.Fatalf("error message = %q, want it to contain 'acme/large'", errMsg)
+	}
+}
+
