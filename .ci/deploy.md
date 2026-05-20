@@ -24,7 +24,7 @@
 3. 触发 backend pipeline：触发 `multica-backend-prod-pipeline`，轮询 Jenkins 构建结果，等待 `SUCCESS`
 4. 触发 frontend pipeline：触发 `multica-frontend-prod-pipeline`，轮询 Jenkins 构建结果，等待 `SUCCESS`
 5. 触发 CLI 构建：触发 `Multica-CLI`，轮询 Jenkins 构建结果，等待 `SUCCESS`
-6. Gitee Release：汇总变更，按本文件的 Release 规范创建或更新 Release
+6. Gitee Release：汇总变更，按本文件的 Release 规范创建或更新 Release （注意测试环境发布时不需要Release过程）
 
 ## Release 规范
 
