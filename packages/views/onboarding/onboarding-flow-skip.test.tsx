@@ -87,7 +87,7 @@ vi.mock("@multica/core/issues/queries", () => ({
 
 vi.mock("@multica/core/workspace/mutations", () => ({
   useCreateWorkspace: () => ({
-    mutate: (data: unknown, opts: { onSuccess?: (ws: unknown) => void }) => {
+    mutate: (_data: unknown, opts: { onSuccess?: (ws: unknown) => void }) => {
       const ws = { id: "ws_new", slug: "test-ws", name: "Test Workspace" };
       mocks.workspaces = [ws];
       opts.onSuccess?.(ws);

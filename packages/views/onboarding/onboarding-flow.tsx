@@ -99,10 +99,17 @@ export function OnboardingFlow({
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [runtime, setRuntime] = useState<AgentRuntime | null>(null);
 
-  // Ref mirror of workspace — guarantees handleRuntimeNext always reads
-  // the latest value even if the useCallback closure captured a stale one.
+  // Ref mirrors — guarantee async handlers always read the latest values
+  // regardless of useCallback closure staleness. workspaceRef avoids the
+  // classic stale-closure on workspace state; onCompleteRef avoids
+  // handleRuntimeNext depending on onComplete identity (which may change
+  // on every parent render from workspace-list refetches, making the
+  // callback unstable and exposing a React reconciliation timing window
+  // where the child receives a stale onNext prop).
   const workspaceRef = useRef<Workspace | null>(workspace);
   workspaceRef.current = workspace;
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
 
   // Fetched at Step 0 + Step 2. Step 2 uses it to detect a pre-existing
   // workspace from an earlier abandoned onboarding (so StepWorkspace shows
@@ -191,8 +198,8 @@ export function OnboardingFlow({
       );
       return;
     }
-    onComplete(workspaces[0] ?? undefined);
-  }, [workspaces, onComplete]);
+    onCompleteRef.current(workspaces[0] ?? undefined);
+  }, [workspaces]);
 
   const handleWorkspaceCreated = useCallback(
     (ws: Workspace) => {
@@ -205,11 +212,11 @@ export function OnboardingFlow({
 
   const handleRuntimeNext = useCallback(
     async (rt: AgentRuntime | null) => {
-      // Read from ref to avoid stale-closure on workspace — the inline
-      // onComplete prop in OnboardingPage changes identity on every
-      // parent render, which forces this callback to recreate; but React
-      // may still deliver the PREVIOUS closure instance to a child that
-      // already captured it before the re-render committed.
+      // Read workspace and onComplete from refs — this keeps the callback
+      // identity 100% stable (no deps on workspace state or onComplete
+      // prop). A stable identity means StepPlatformFork's `onNext` prop
+      // never changes, so there's zero risk of React's reconciliation
+      // delivering a click to a stale component instance with an old prop.
       const ws = workspaceRef.current;
       if (!ws) return;
       if (!rt) {
@@ -219,7 +226,7 @@ export function OnboardingFlow({
         try {
           const result = await bootstrapNoRuntimeOnboarding(ws.id);
           await qc.invalidateQueries({ queryKey: issueKeys.all(ws.id) });
-          onComplete(ws, result.issue_id || undefined);
+          onCompleteRef.current(ws, result.issue_id || undefined);
         } catch (err) {
           toast.error(
             err instanceof Error ? err.message : t(($) => $.errors.skip_failed),
@@ -231,7 +238,7 @@ export function OnboardingFlow({
       setRuntime(rt);
       advanceFrom("runtime");
     },
-    [qc, onComplete, t, advanceFrom],
+    [qc, t, advanceFrom],
   );
 
   const handleCreateTeammate = useCallback(async () => {
@@ -244,7 +251,7 @@ export function OnboardingFlow({
         qc.invalidateQueries({ queryKey: workspaceKeys.agents(ws.id) }),
         qc.invalidateQueries({ queryKey: issueKeys.all(ws.id) }),
       ]);
-      onComplete(ws, result.issue_id || undefined);
+      onCompleteRef.current(ws, result.issue_id || undefined);
     } catch (err) {
       toast.error(
         err instanceof Error
@@ -253,7 +260,7 @@ export function OnboardingFlow({
       );
       throw err;
     }
-  }, [runtime, qc, onComplete, t]);
+  }, [runtime, qc, t]);
 
   const handleBack = useCallback((from: OnboardingStep) => {
     const idx = ONBOARDING_STEP_ORDER.indexOf(from);
