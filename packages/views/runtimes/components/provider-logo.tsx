@@ -165,6 +165,27 @@ function KiroLogo({ className }: { className: string }) {
   );
 }
 
+// Gemini (Google) — Gemini CLI sparkle mark.
+function GeminiLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M12 0C12 0 12 8 8 12C12 12 12 12 12 24C12 24 12 16 16 12C12 12 12 12 12 0Z" />
+    </svg>
+  );
+}
+
+// Trae CLI (ByteDance) — official TRAE mark.
+function TraecliLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="M24 20.541H3.428v-3.426H0V3.4h24V20.54zM3.428 17.115h17.144V6.827H3.428v10.288zm8.573-5.196l-2.425 2.424-2.424-2.424 2.424-2.424 2.425 2.424zm6.857-.001l-2.424 2.423-2.425-2.423 2.425-2.425 2.424 2.425z"
+        fill="#32F08C"
+      />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -193,6 +214,11 @@ export function ProviderLogo({
       return <KimiLogo className={className} />;
     case "kiro":
       return <KiroLogo className={className} />;
+    case "traecli":
+      return <TraecliLogo className={className} />;
+    case "gemini":
+    case "google":
+      return <GeminiLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

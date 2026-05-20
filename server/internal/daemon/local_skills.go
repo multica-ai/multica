@@ -78,6 +78,8 @@ func localSkillRootForProvider(provider string) (string, bool, error) {
 		return filepath.Join(home, ".cursor", "skills"), true, nil
 	case "kiro":
 		return filepath.Join(home, ".kiro", "skills"), true, nil
+	case "traecli":
+		return filepath.Join(home, ".trae", "skills"), true, nil
 	default:
 		return "", false, nil
 	}

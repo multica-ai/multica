@@ -135,6 +135,12 @@ Agent-specific overrides:
 | `MULTICA_PI_MODEL` | Override the Pi model used |
 | `MULTICA_CURSOR_PATH` | Custom path to the `cursor-agent` binary |
 | `MULTICA_CURSOR_MODEL` | Override the Cursor Agent model used |
+| `MULTICA_KIMI_PATH` | Custom path to the `kimi` binary |
+| `MULTICA_KIMI_MODEL` | Override the Kimi model used |
+| `MULTICA_KIRO_PATH` | Custom path to the `kiro-cli` binary |
+| `MULTICA_KIRO_MODEL` | Override the Kiro model used |
+| `MULTICA_TRAECLI_PATH` | Custom path to the `trae-cli` binary |
+| `MULTICA_TRAECLI_MODEL` | Override the Trae CLI model used |
 
 ## Database Setup
 

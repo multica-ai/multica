@@ -93,6 +93,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenclawAgents(ctx, executablePath)
 		})
+	case "traecli":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverTraecliModels(ctx, executablePath)
+		})
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q", providerType)
 	}
@@ -455,6 +459,17 @@ func discoverKiroModels(ctx context.Context, executablePath string) ([]Model, er
 	})
 }
 
+// discoverTraecliModels spins up a throwaway `trae-cli acp serve` process and
+// parses the models block Trae CLI returns from session/new.
+func discoverTraecliModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "trae-cli",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-traecli-discovery-",
+		acpArgs:      []string{"acp", "serve"},
+	})
+}
+
 // discoverCopilotModels spins up `copilot --acp` and reads the
 // `availableModels` block from session/new. The catalog is keyed
 // off the user's GitHub account, so this is the only way to know
@@ -514,8 +529,9 @@ type acpDiscoveryProvider struct {
 // implements the standard `initialize` + `session/new` flow and
 // advertises its model catalog in the response under
 // `models.availableModels` / `models.currentModelId`. This covers
-// Hermes and Kimi today; future ACP backends can plug in by adding
-// an acpDiscoveryProvider entry instead of duplicating the loop.
+// Hermes, Kimi, Kiro, and Trae CLI today; future ACP backends can
+// plug in by adding an acpDiscoveryProvider entry instead of
+// duplicating the loop.
 func discoverACPModels(ctx context.Context, executablePath string, p acpDiscoveryProvider) ([]Model, error) {
 	if executablePath == "" {
 		executablePath = p.defaultBin

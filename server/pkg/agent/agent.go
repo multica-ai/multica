@@ -1,6 +1,6 @@
 // Package agent provides a unified interface for executing prompts via
 // coding agents (Claude Code, Codex, Copilot, OpenCode, OpenClaw, Hermes,
-// Gemini, Pi, Cursor, Kimi, Kiro). It mirrors the happy-cli AgentBackend
+// Gemini, Pi, Cursor, Kimi, Kiro, Trae CLI). It mirrors the happy-cli AgentBackend
 // pattern, translated to idiomatic Go.
 package agent
 
@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -92,13 +93,13 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli)
+	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli, trae-cli)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro".
+// Supported types: "claude", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "traecli".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -127,8 +128,10 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &kimiBackend{cfg: cfg}, nil
 	case "kiro":
 		return &kiroBackend{cfg: cfg}, nil
+	case "traecli":
+		return &traecliBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, traecli)", agentType)
 	}
 }
 
@@ -155,6 +158,7 @@ var launchHeaders = map[string]string{
 	"pi":       "pi (json mode)",
 	"kimi":     "kimi acp",
 	"kiro":     "kiro-cli acp",
+	"traecli":  "trae-cli acp",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an
@@ -162,4 +166,47 @@ var launchHeaders = map[string]string{
 // users understand which command their custom_args get appended to.
 func LaunchHeader(agentType string) string {
 	return launchHeaders[agentType]
+}
+
+// acpToolNameFromTitle normalizes the tool title emitted by ACP-speaking
+// backends (Kiro, Trae CLI, etc.) into a stable snake_case identifier.
+// ACP providers return human-readable titles like "Read File" or
+// "Run Shell Command"; we map them to the canonical names the UI expects
+// (read_file, terminal, …). Unknown titles fall through to a
+// space-to-underscore transform.
+func acpToolNameFromTitle(title string) string {
+	t := strings.TrimSpace(title)
+	if t == "" {
+		return ""
+	}
+
+	if idx := strings.Index(t, ":"); idx > 0 {
+		t = strings.TrimSpace(t[:idx])
+	}
+
+	lower := strings.ToLower(t)
+	switch lower {
+	case "read", "read file":
+		return "read_file"
+	case "write", "write file":
+		return "write_file"
+	case "edit", "replace", "patch":
+		return "edit_file"
+	case "shell", "bash", "terminal", "run command", "run shell command":
+		return "terminal"
+	case "grep", "search", "find":
+		return "search_files"
+	case "glob":
+		return "glob"
+	case "code":
+		return "code"
+	case "web search":
+		return "web_search"
+	case "fetch", "web fetch":
+		return "web_fetch"
+	case "todo", "todo write", "todo list", "todo_list":
+		return "todo_write"
+	}
+
+	return strings.ReplaceAll(lower, " ", "_")
 }

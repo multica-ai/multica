@@ -12,36 +12,35 @@ import (
 	"time"
 )
 
-// kiroBlockedArgs are flags hardcoded by the daemon that must not be
-// overridden by user-configured custom_args. `acp` is the protocol subcommand,
-// and --trust-all-tools covers Kiro's CLI-level tool gate while
-// hermesClient handles ACP session/request_permission auto-approval. In Kiro
-// CLI 2.1.1, `-a` is short for --trust-all-tools, not --agent; --agent remains
-// allowed so users can select a custom Kiro agent.
-var kiroBlockedArgs = map[string]blockedArgMode{
-	"acp":               blockedStandalone,
-	"-a":                blockedStandalone,
-	"--trust-all-tools": blockedStandalone,
-	"--trust-tools":     blockedWithValue,
+// traecliBlockedArgs are flags hardcoded by the daemon that must not be
+// overridden by user-configured custom_args. `acp` and `serve` are the
+// protocol subcommands, and --yolo (-y, its short form) covers Trae CLI's
+// tool gate while hermesClient handles ACP session/request_permission
+// auto-approval.
+var traecliBlockedArgs = map[string]blockedArgMode{
+	"acp":    blockedStandalone,
+	"serve":  blockedStandalone,
+	"-y":     blockedStandalone, // short form of --yolo
+	"--yolo": blockedStandalone,
 }
 
-// kiroBackend implements Backend by spawning `kiro-cli acp` and communicating
-// via the standard ACP JSON-RPC 2.0 transport over stdin/stdout.
+// traecliBackend implements Backend by spawning `trae-cli acp serve` and
+// communicating via the standard ACP JSON-RPC 2.0 transport over stdin/stdout.
 //
-// Kiro CLI advertises loadSession, returns models from session/new, and supports
-// session/set_model, so the existing Hermes/Kimi ACP client can drive it with
-// only provider-specific launch and tool-name normalization.
-type kiroBackend struct {
+// Trae CLI advertises loadSession, returns models from session/new, and supports
+// session/set_model, so the existing Hermes/Kimi/Kiro ACP client can drive it
+// with only provider-specific launch and tool-name normalization.
+type traecliBackend struct {
 	cfg Config
 }
 
-func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
+func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
-		execPath = "kiro-cli"
+		execPath = "trae-cli"
 	}
 	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("kiro executable not found at %q: %w", execPath, err)
+		return nil, fmt.Errorf("trae-cli executable not found at %q: %w", execPath, err)
 	}
 
 	timeout := opts.Timeout
@@ -50,10 +49,10 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	kiroArgs := append([]string{"acp", "--trust-all-tools"}, filterCustomArgs(opts.CustomArgs, kiroBlockedArgs, b.cfg.Logger)...)
-	cmd := exec.CommandContext(runCtx, execPath, kiroArgs...)
+	traecliArgs := append([]string{"acp", "serve", "--yolo"}, filterCustomArgs(opts.CustomArgs, traecliBlockedArgs, b.cfg.Logger)...)
+	cmd := exec.CommandContext(runCtx, execPath, traecliArgs...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", kiroArgs)
+	b.cfg.Logger.Info("agent command", "exec", execPath, "args", traecliArgs)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
@@ -62,37 +61,37 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("kiro stdout pipe: %w", err)
+		return nil, fmt.Errorf("trae-cli stdout pipe: %w", err)
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("kiro stdin pipe: %w", err)
+		return nil, fmt.Errorf("trae-cli stdin pipe: %w", err)
 	}
 	// StderrPipe + an explicit copier give us a join point
 	// (`stderrDone`) that fires before the failure-promotion
 	// decision; see the matching comment in hermes.go for why the
 	// io.MultiWriter form races with stopReason=end_turn under load.
-	providerErr := newACPProviderErrorSniffer("kiro")
+	providerErr := newACPProviderErrorSniffer("traecli")
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("kiro stderr pipe: %w", err)
+		return nil, fmt.Errorf("trae-cli stderr pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
 		cancel()
-		return nil, fmt.Errorf("start kiro: %w", err)
+		return nil, fmt.Errorf("start trae-cli: %w", err)
 	}
 
-	stderrSink := io.MultiWriter(newLogWriter(b.cfg.Logger, "[kiro:stderr] "), providerErr)
+	stderrSink := io.MultiWriter(newLogWriter(b.cfg.Logger, "[trae-cli:stderr] "), providerErr)
 	stderrDone := make(chan struct{})
 	go func() {
 		defer close(stderrDone)
 		_, _ = io.Copy(stderrSink, stderr)
 	}()
 
-	b.cfg.Logger.Info("kiro acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
+	b.cfg.Logger.Info("trae-cli acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -148,7 +147,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			}
 			c.handleLine(line)
 		}
-		c.closeAllPending(fmt.Errorf("kiro process exited"))
+		c.closeAllPending(fmt.Errorf("trae-cli process exited"))
 	}()
 
 	go func() {
@@ -175,7 +174,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		})
 		if err != nil {
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("kiro initialize failed: %v", err)
+			finalError = fmt.Sprintf("trae-cli initialize failed: %v", err)
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
@@ -193,23 +192,15 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			})
 			if err != nil {
 				finalStatus = "failed"
-				finalError = fmt.Sprintf("kiro session/load failed: %v", err)
+				finalError = fmt.Sprintf("trae-cli session/load failed: %v", err)
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
-			// Apply the same defensive resolution kimi/hermes use: if
-			// kiro echoes a sessionId in the session/load response, prefer
-			// it (the canonical id the backend is committed to). When the
-			// response is empty or doesn't include sessionId — kiro's
-			// current observed shape — the helper falls back to the
-			// requested id, preserving today's behavior. Fixing this here
-			// too means a future kiro that DOES return a different id on
-			// silent state reset is handled the same way as hermes/kimi.
 			var changed bool
 			sessionID, changed = resolveResumedSessionID(opts.ResumeSessionID, result)
 			if changed {
 				b.cfg.Logger.Warn("agent returned a different session id on resume — original was likely lost; continuing with the new id",
-					"backend", "kiro",
+					"backend", "traecli",
 					"requested", opts.ResumeSessionID,
 					"actual", sessionID,
 				)
@@ -221,30 +212,30 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			})
 			if err != nil {
 				finalStatus = "failed"
-				finalError = fmt.Sprintf("kiro session/new failed: %v", err)
+				finalError = fmt.Sprintf("trae-cli session/new failed: %v", err)
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
 			sessionID = extractACPSessionID(result)
 			if sessionID == "" {
 				finalStatus = "failed"
-				finalError = "kiro session/new returned no session ID"
+				finalError = "trae-cli session/new returned no session ID"
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
 		}
 
 		c.sessionID = sessionID
-		b.cfg.Logger.Info("kiro session created", "session_id", sessionID)
+		b.cfg.Logger.Info("trae-cli session created", "session_id", sessionID)
 
 		if opts.Model != "" {
 			if _, err := c.request(runCtx, "session/set_model", map[string]any{
 				"sessionId": sessionID,
 				"modelId":   opts.Model,
 			}); err != nil {
-				b.cfg.Logger.Warn("kiro set_session_model failed", "error", err, "requested_model", opts.Model)
+				b.cfg.Logger.Warn("trae-cli set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
-				finalError = fmt.Sprintf("kiro could not switch to model %q: %v", opts.Model, err)
+				finalError = fmt.Sprintf("trae-cli could not switch to model %q: %v", opts.Model, err)
 				resCh <- Result{
 					Status:     finalStatus,
 					Error:      finalError,
@@ -253,7 +244,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				}
 				return
 			}
-			b.cfg.Logger.Info("kiro session model set", "model", opts.Model)
+			b.cfg.Logger.Info("trae-cli session model set", "model", opts.Model)
 		}
 
 		userText := prompt
@@ -264,33 +255,28 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		promptBlocks := []map[string]any{
 			{"type": "text", "text": userText},
 		}
-		// Kiro's published docs use `content`, while Kiro CLI 2.1.1 still
-		// requires the standard ACP `prompt` field. Send both so either wire
-		// shape can drive the turn.
-		// TODO: drop one field once Kiro lands on a single canonical payload.
 		streamingCurrentTurn.Store(true)
 		_, err = c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
-			"content":   promptBlocks,
 			"prompt":    promptBlocks,
 		})
 		if err != nil {
 			if runCtx.Err() == context.DeadlineExceeded {
 				finalStatus = "timeout"
-				finalError = fmt.Sprintf("kiro timed out after %s", timeout)
+				finalError = fmt.Sprintf("trae-cli timed out after %s", timeout)
 			} else if runCtx.Err() == context.Canceled {
 				finalStatus = "aborted"
 				finalError = "execution cancelled"
 			} else {
 				finalStatus = "failed"
-				finalError = fmt.Sprintf("kiro session/prompt failed: %v", err)
+				finalError = fmt.Sprintf("trae-cli session/prompt failed: %v", err)
 			}
 		} else {
 			select {
 			case pr := <-promptDone:
 				if pr.stopReason == "cancelled" {
 					finalStatus = "aborted"
-					finalError = "kiro cancelled the prompt"
+					finalError = "trae-cli cancelled the prompt"
 				}
 				c.usageMu.Lock()
 				c.usage.InputTokens += pr.usage.InputTokens
@@ -301,7 +287,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		duration := time.Since(startTime)
-		b.cfg.Logger.Info("kiro finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info("trae-cli finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		stdin.Close()
 		cancel()
@@ -317,10 +303,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 
 		// Promote completed→failed when stderr or the agent text
 		// stream show a terminal upstream-LLM failure (HTTP 4xx /
-		// rate-limit / expired token). See the helper docs for the
-		// full signal set; the key safety property is that transient
-		// per-attempt warnings followed by a successful retry stay
-		// "completed".
+		// rate-limit / expired token).
 		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, finalOutput, providerErr)
 
 		c.usageMu.Lock()
@@ -348,3 +331,4 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
+

@@ -276,6 +276,7 @@ function WelcomeIllustration() {
 type ProviderName =
   | "claude"
   | "codex"
+  | "gemini"
   | "opencode"
   | "openclaw"
   | "hermes"
@@ -283,7 +284,8 @@ type ProviderName =
   | "kiro"
   | "pi"
   | "copilot"
-  | "cursor";
+  | "cursor"
+  | "traecli";
 
 type ActivityActor =
   | { kind: "user"; name: string; initial: string }
