@@ -29,7 +29,9 @@ export type CerebroFlagKey =
   | "cerebro_skill_mention"
   | "cerebro_grants"
   | "cerebro_move_comment_to_subissue"
-  | "cerebro_agent_passes";
+  | "cerebro_agent_passes"
+  // CEREBRO-PATCH(agent-avatar-generate): JEH-1563
+  | "cerebro_agent_avatar";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -63,6 +65,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_grants: false,
   cerebro_move_comment_to_subissue: true,
   cerebro_agent_passes: true,
+  // CEREBRO-PATCH(agent-avatar-generate): JEH-1563
+  cerebro_agent_avatar: true,
 };
 
 export interface CerebroFlagDefinition {
@@ -213,5 +217,12 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Agent passes admin",
     description:
       "Enable the workspace agent-pass admin page at /:workspace/agent-passes — issue, list, and revoke agent passes (machine-readable mandates that scope what an agent may do on an issue). Owner/admin only. JEH-1731.",
+  },
+  // CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation feature flag.
+  {
+    key: "cerebro_agent_avatar",
+    label: "AI agent avatar generation",
+    description:
+      "Show a 'Generate AI avatar' button in the agent creation dialog. Uses OpenRouter gpt-5-image-mini with a Scandinavian-appearance prompt. Requires OPENROUTER_API_KEY.",
   },
 ];

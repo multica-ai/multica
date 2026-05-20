@@ -7,7 +7,8 @@ import { ModelDropdown } from "./model-dropdown";
 import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
 import { InstructionsEditor } from "./instructions-editor";
 import { SkillMultiSelect } from "./skill-multi-select";
-import { AvatarPicker } from "./avatar-picker";
+// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 use cerebro wrapper with AI generation
+import { CerebroAvatarPicker as AvatarPicker } from "./cerebro-avatar-picker";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { workspaceKeys } from "@multica/core/workspace/queries";
@@ -261,7 +262,8 @@ export function CreateAgentDialog({
                 same shape as detail-page header so the affordance is
                 instantly familiar. */}
             <div className="flex items-start gap-4">
-              <AvatarPicker value={avatarUrl} onChange={setAvatarUrl} size={64} />
+              {/* CEREBRO-PATCH(agent-avatar-generate): JEH-1563 agentName prop for auto-prompt colour selection */}
+              <AvatarPicker value={avatarUrl} onChange={setAvatarUrl} agentName={name} size={64} />
               <div className="flex-1 min-w-0 space-y-3">
                 <div>
                   <Label className="text-xs text-muted-foreground">{t(($) => $.create_dialog.name_label)}</Label>

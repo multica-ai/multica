@@ -252,7 +252,13 @@
       "upload_aria": "Upload avatar",
       "remove_aria": "Remove avatar",
       "select_image_toast": "Please select an image file.",
-      "upload_failed_toast": "Avatar upload failed"
+      "upload_failed_toast": "Avatar upload failed",
+      "_comment": "CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation strings.",
+      "generate_ai": "Generate AI",
+      "prompt_placeholder": "Describe the look (optional)",
+      "generate_button": "Generate",
+      "generating": "Generating…",
+      "generate_error": "Avatar generation failed"
     }
   },
   "tab_body": {

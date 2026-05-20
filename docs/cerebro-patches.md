@@ -693,3 +693,10 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `autopilot-detail-nav-state` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | JEH-1766 — remove `editDialogOpen` state; edit button navigates to full-page edit. |
 | `autopilot-detail-nav-edit-button` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | JEH-1766 — Edit button navigates to `/autopilots/:id/edit` instead of opening dialog. |
 | `autopilot-detail-nav-no-dialog` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | JEH-1766 — remove edit dialog render block from detail page. |
+| `agent-avatar-generate` | server/internal/cerebro/agent_avatar/handler.go | 174 | JEH-1563 — net-new fork file: POST /api/agents/generate-avatar calls OpenRouter gpt-5-image-mini, uploads PNG to storage, returns URL. |
+| `agent-avatar-generate` | server/cmd/server/router.go | 2 | JEH-1563 — import cerebroagentavatar, instantiate handler with storage, mount POST /api/agents/generate-avatar. |
+| `agent-avatar-generate` | packages/core/api/client.ts | 4 | JEH-1563 — `generateAgentAvatar(agentName, customPrompt?)` method on ApiClient. |
+| `agent-avatar-generate` | packages/cerebro-feature-flags/registry.ts | 3 | JEH-1563 — `cerebro_agent_avatar` flag (default true). |
+| `agent-avatar-generate` | packages/views/locales/en/agents.json | 5 | JEH-1563 — i18n keys for generate button, prompt placeholder, generating state, error. |
+| `agent-avatar-generate` | packages/views/agents/components/cerebro-avatar-picker.tsx | 100 | JEH-1563 — net-new sibling: CerebroAvatarPicker wraps AvatarPicker and adds AI generate button + optional prompt input. |
+| `agent-avatar-generate` | packages/views/agents/components/create-agent-dialog.tsx | 2 | JEH-1563 — swap AvatarPicker import for CerebroAvatarPicker sibling; add agentName prop. |

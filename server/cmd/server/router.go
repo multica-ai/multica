@@ -51,6 +51,8 @@ import (
 	cerebrosharetoken "github.com/multica-ai/multica/server/internal/cerebro/sharetoken"
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow engine REST handler import
 	cerebroworkflows "github.com/multica-ai/multica/server/internal/cerebro/workflows"
+	// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation handler import
+	cerebroagentavatar "github.com/multica-ai/multica/server/internal/cerebro/agent_avatar"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -280,6 +282,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroShareTokenHandler := cerebrosharetoken.NewHandler(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow handler instance; JEH-1108 PR3 wires the engine Service so the test-only /_test/cron-sweep endpoint can fire the sweeper synchronously.
 	cerebroWorkflowsHandler := cerebroworkflows.NewHandler(cerebroQueries).WithService(opts.WorkflowService)
+	// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation handler instance
+	cerebroAgentAvatarHandler := cerebroagentavatar.New(store)
 
 	r := chi.NewRouter()
 
@@ -824,6 +828,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// workspace (find-or-create by name) and creates the agent
 				// with the template's instructions in one transaction.
 				r.Post("/from-template", h.CreateAgentFromTemplate)
+				// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation endpoint
+				r.Post("/generate-avatar", cerebroAgentAvatarHandler.Generate)
 				r.Route("/{id}", func(r chi.Router) {
 					// GET is registered in the task-allowlist group above
 					// so agents can read their own configuration.

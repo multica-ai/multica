@@ -281,6 +281,10 @@
       "gate": "cerebro_capability:create_agent"
     },
     {
+      "id": "POST /api/agents/generate-avatar",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/agents/{id}/archive",
       "gate": "cerebro_agent_access"
     },
