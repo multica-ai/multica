@@ -1817,3 +1817,194 @@ func runIssueClearHistory(cmd *cobra.Command, args []string) error {
 		result["comments_deleted"], result["tasks_deleted"])
 	return nil
 }
+
+// ---------------------------------------------------------------------------
+// Attachment subcommands (issue attachment list/remove/replace)
+// ---------------------------------------------------------------------------
+
+var issueAttachmentCmd = &cobra.Command{
+	Use:   "attachment",
+	Short: "Manage attachments on an issue",
+}
+
+var issueAttachmentListCmd = &cobra.Command{
+	Use:   "list <issue-id>",
+	Short: "List attachments on an issue",
+	Args:  exactArgs(1),
+	RunE:  runIssueAttachmentList,
+}
+
+var issueAttachmentRemoveCmd = &cobra.Command{
+	Use:   "remove <issue-id> <attachment-id>...",
+	Short: "Remove one or more attachments from an issue",
+	Args:  cobra.MinimumNArgs(2),
+	RunE:  runIssueAttachmentRemove,
+}
+
+var issueAttachmentReplaceCmd = &cobra.Command{
+	Use:   "replace <issue-id> <attachment-id> --file <new-file>",
+	Short: "Replace an attachment with a new file (upload new, then delete old)",
+	Long: "Replaces an existing attachment by uploading a new file and deleting the old one.\n" +
+		"The new file is uploaded first. If upload fails, the old attachment is untouched.\n" +
+		"If upload succeeds but deletion of the old attachment fails, both the new attachment\n" +
+		"ID and the old attachment ID are reported so you can clean up manually.\n\n" +
+		"Note: deletion requires you to be the original uploader or a workspace admin.",
+	Args: exactArgs(2),
+	RunE: runIssueAttachmentReplace,
+}
+
+func init() {
+	issueCmd.AddCommand(issueAttachmentCmd)
+
+	issueAttachmentCmd.AddCommand(issueAttachmentListCmd)
+	issueAttachmentCmd.AddCommand(issueAttachmentRemoveCmd)
+	issueAttachmentCmd.AddCommand(issueAttachmentReplaceCmd)
+
+	// issue attachment list
+	issueAttachmentListCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// issue attachment remove (no extra flags; attachment IDs are positional args)
+
+	// issue attachment replace
+	issueAttachmentReplaceCmd.Flags().String("file", "", "Path to the new file (required)")
+	_ = issueAttachmentReplaceCmd.MarkFlagRequired("file")
+	issueAttachmentReplaceCmd.Flags().String("output", "json", "Output format: table or json")
+}
+
+func runIssueAttachmentList(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	var attachments []map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+issueRef.ID+"/attachments", &attachments); err != nil {
+		return fmt.Errorf("list attachments: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, attachments)
+	}
+
+	headers := []string{"ID", "FILENAME", "CONTENT TYPE", "SIZE", "CREATED"}
+	rows := make([][]string, 0, len(attachments))
+	for _, a := range attachments {
+		size := ""
+		if v, ok := a["size_bytes"]; ok {
+			size = fmt.Sprintf("%v", v)
+		}
+		created := strVal(a, "created_at")
+		if len(created) >= 16 {
+			created = created[:16]
+		}
+		rows = append(rows, []string{
+			strVal(a, "id"),
+			strVal(a, "filename"),
+			strVal(a, "content_type"),
+			size,
+			created,
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runIssueAttachmentRemove(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// args[0] is the issue-id (used for display only; deletions go through /api/attachments/{id})
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	attachmentIDs := args[1:]
+	var firstErr error
+	for _, attID := range attachmentIDs {
+		if err := client.DeleteJSON(ctx, "/api/attachments/"+attID); err != nil {
+			fmt.Fprintf(os.Stderr, "error: remove attachment %s: %v\n", attID, err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "Removed attachment %s from issue %s.\n", attID, issueRef.Display)
+	}
+	return firstErr
+}
+
+func runIssueAttachmentReplace(cmd *cobra.Command, args []string) error {
+	filePath, _ := cmd.Flags().GetString("file")
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+	oldAttID := args[1]
+
+	if isHTTPURL(filePath) {
+		return fmt.Errorf("--file must be a local file path, not a URL")
+	}
+	fileData, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("read file %s: %w", filePath, err)
+	}
+
+	// Step 1: upload new file. If this fails the old attachment is untouched.
+	newAttID, err := client.UploadFile(ctx, fileData, filePath, issueRef.ID)
+	if err != nil {
+		return fmt.Errorf("upload new file: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "Uploaded %s (new attachment ID: %s)\n", filePath, newAttID)
+
+	// Step 2: delete old attachment. If this fails, report the orphaned state
+	// explicitly — do NOT silently ignore.
+	if err := client.DeleteJSON(ctx, "/api/attachments/"+oldAttID); err != nil {
+		return fmt.Errorf(
+			"new file uploaded (attachment %s) but failed to remove old attachment %s: %w\n"+
+				"Action required: manually remove attachment %s or it will remain on issue %s.",
+			newAttID, oldAttID, err, oldAttID, issueRef.Display,
+		)
+	}
+
+	fmt.Fprintf(os.Stderr, "Removed old attachment %s from issue %s.\n", oldAttID, issueRef.Display)
+
+	output, _ := cmd.Flags().GetString("output")
+	result := map[string]any{
+		"issue_id":       issueRef.ID,
+		"issue_key":      issueRef.Display,
+		"new_attachment": newAttID,
+		"old_attachment": oldAttID,
+		"file":           filePath,
+	}
+	if output == "table" {
+		headers := []string{"ISSUE", "OLD ATTACHMENT", "NEW ATTACHMENT", "FILE"}
+		rows := [][]string{{issueRef.Display, oldAttID, newAttID, filePath}}
+		cli.PrintTable(os.Stdout, headers, rows)
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
