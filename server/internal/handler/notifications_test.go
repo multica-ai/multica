@@ -17,12 +17,12 @@ import (
 )
 
 func TestListNotificationsPaginatesAndFiltersPermission(t *testing.T) {
-	viewerID := createNotificationTestMember(t)
+	viewerID := createNotificationAPITestMember(t)
 	projectID := createNotificationTestProject(t, "restricted")
 	hiddenProjectID := createNotificationTestProject(t, "restricted")
 	addNotificationTestProjectMember(t, projectID, viewerID)
-	visibleIssueID := createNotificationTestIssue(t, projectID, viewerID, false)
-	hiddenIssueID := createNotificationTestIssue(t, hiddenProjectID, testUserID, false)
+	visibleIssueID := createNotificationAPITestIssue(t, projectID, viewerID, false)
+	hiddenIssueID := createNotificationAPITestIssue(t, hiddenProjectID, testUserID, false)
 
 	newer := insertNotificationTestItem(t, viewerID, visibleIssueID, "newer visible", false, time.Now().Add(2*time.Minute))
 	insertNotificationTestItem(t, viewerID, visibleIssueID, "older visible", false, time.Now().Add(time.Minute))
@@ -83,10 +83,10 @@ func TestListNotificationsPaginatesAndFiltersPermission(t *testing.T) {
 }
 
 func TestNotificationsUnreadCountFiltersPermission(t *testing.T) {
-	viewerID := createNotificationTestMember(t)
+	viewerID := createNotificationAPITestMember(t)
 	projectID := createNotificationTestProject(t, "restricted")
 	addNotificationTestProjectMember(t, projectID, viewerID)
-	issueID := createNotificationTestIssue(t, projectID, viewerID, false)
+	issueID := createNotificationAPITestIssue(t, projectID, viewerID, false)
 	insertNotificationTestItem(t, viewerID, issueID, "visible unread", false, time.Now())
 
 	req := notificationTestRequest("GET", "/api/notifications/unread-count", nil, viewerID)
@@ -118,10 +118,10 @@ func TestNotificationsUnreadCountFiltersPermission(t *testing.T) {
 }
 
 func TestPatchNotificationReadRequiresNotificationRouteAndAccess(t *testing.T) {
-	viewerID := createNotificationTestMember(t)
+	viewerID := createNotificationAPITestMember(t)
 	projectID := createNotificationTestProject(t, "restricted")
 	addNotificationTestProjectMember(t, projectID, viewerID)
-	issueID := createNotificationTestIssue(t, projectID, viewerID, false)
+	issueID := createNotificationAPITestIssue(t, projectID, viewerID, false)
 	notificationID := insertNotificationTestItem(t, viewerID, issueID, "notification item", false, time.Now())
 	inboxID := insertInboxRouteTestItem(t, viewerID, issueID, "inbox item", false, time.Now())
 
@@ -160,12 +160,12 @@ func TestPatchNotificationReadRequiresNotificationRouteAndAccess(t *testing.T) {
 }
 
 func TestPatchNotificationsReadAllOnlyMarksAccessibleNotifications(t *testing.T) {
-	viewerID := createNotificationTestMember(t)
+	viewerID := createNotificationAPITestMember(t)
 	restrictedProjectID := createNotificationTestProject(t, "restricted")
 	workspaceProjectID := createNotificationTestProject(t, "workspace")
 	addNotificationTestProjectMember(t, restrictedProjectID, viewerID)
-	restrictedIssueID := createNotificationTestIssue(t, restrictedProjectID, viewerID, false)
-	workspaceIssueID := createNotificationTestIssue(t, workspaceProjectID, testUserID, false)
+	restrictedIssueID := createNotificationAPITestIssue(t, restrictedProjectID, viewerID, false)
+	workspaceIssueID := createNotificationAPITestIssue(t, workspaceProjectID, testUserID, false)
 	restrictedNotificationID := insertNotificationTestItem(t, viewerID, restrictedIssueID, "restricted unread", false, time.Now().Add(time.Minute))
 	workspaceNotificationID := insertNotificationTestItem(t, viewerID, workspaceIssueID, "workspace unread", false, time.Now())
 	removeNotificationTestProjectMember(t, restrictedProjectID, viewerID)
@@ -243,7 +243,7 @@ func notificationTestRequest(method, path string, body any, userID string) *http
 	return req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, member))
 }
 
-func createNotificationTestMember(t *testing.T) string {
+func createNotificationAPITestMember(t *testing.T) string {
 	t.Helper()
 	ctx := context.Background()
 	var userID string
@@ -297,8 +297,8 @@ func removeNotificationTestProjectMember(t *testing.T, projectID, userID string)
 	}
 }
 
-// CEREBRO-PATCH(cerebro-notifications-api): direct SQL fixtures must reserve issue numbers through the workspace counter.
-func createNotificationTestIssue(t *testing.T, projectID, creatorID string, private bool) string {
+// CEREBRO-PATCH(cerebro-notifications-api): API notification fixtures must reserve issue numbers through the workspace counter.
+func createNotificationAPITestIssue(t *testing.T, projectID, creatorID string, private bool) string {
 	t.Helper()
 	number, err := testHandler.Queries.IncrementIssueCounter(context.Background(), parseUUID(testWorkspaceID))
 	if err != nil {
