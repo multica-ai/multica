@@ -75,6 +75,7 @@ func TestScopeIndexForBudget_ResultIsSorted(t *testing.T) {
 			t.Fatalf("result not sorted: %s < %s", result[i].Path, result[i-1].Path)
 		}
 	}
+}
 
 // Parent/Sub-issue Protocol — the brief teaches every issue-bound agent two
 // things: when finishing a child issue, tell the parent; and when creating
