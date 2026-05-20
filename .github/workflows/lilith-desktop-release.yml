@@ -163,7 +163,7 @@ jobs:
         run: |
           curl -sL https://gosspublic.alicdn.com/ossutil/1.7.18/ossutil64 -o ossutil
           chmod +x ossutil
-          ./ossutil version
+          ./ossutil --version
 
       - name: Configure ossutil
         env:
