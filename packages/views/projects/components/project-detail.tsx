@@ -12,7 +12,14 @@ import { projectDetailOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
-import { myIssueAssigneeGroupsOptions, myIssueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter, type MyIssuesFilter } from "@multica/core/issues/queries";
+import {
+  myIssueAssigneeGroupsOptions,
+  myIssueListOptions,
+  projectGanttIssuesOptions,
+  childIssueProgressOptions,
+  type AssigneeGroupedIssuesFilter,
+  type MyIssuesFilter,
+} from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useModalStore } from "@multica/core/modals";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
@@ -33,6 +40,7 @@ import { ProjectResourcesSection } from "./project-resources-section";
 import { IssuesHeader } from "../../issues/components/issues-header";
 import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
+import { GanttView } from "../../issues/components/gantt-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -107,6 +115,7 @@ export function ProjectIssuesContent({
   assigneeGroupFilter,
   scope,
   filter,
+  ganttIssues,
 }: {
   projectId: string;
   projectIssues: Issue[];
@@ -115,6 +124,7 @@ export function ProjectIssuesContent({
   assigneeGroupFilter?: AssigneeGroupedIssuesFilter;
   scope: string;
   filter: MyIssuesFilter;
+  ganttIssues: Issue[];
 }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
@@ -150,6 +160,14 @@ export function ProjectIssuesContent({
     return counts;
   }, [hasClientSideFilters, issues]);
 
+  // Gantt rides its own dedicated query (scheduled-only) so it doesn't have
+  // to wait for every status bucket to paginate in. View-store filters still
+  // apply so toggling priority / assignee / label hides the same bars.
+  const filteredGanttIssues = useMemo(
+    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
+    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+  );
+
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
 
   const visibleStatuses = useMemo(() => {
@@ -181,7 +199,12 @@ export function ProjectIssuesContent({
     [updateIssueMutation, t],
   );
 
-  if (projectIssues.length === 0) {
+  // Gantt has its own data source (scheduled-only) and its own empty axis —
+  // we never short-circuit it here, otherwise an unscheduled-but-non-empty
+  // project would surface a misleading "no issues" CTA. For Board/List the
+  // bucketed cache really is the ground truth, so an empty result means an
+  // empty project.
+  if (viewMode !== "gantt" && projectIssues.length === 0) {
     return (
       <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
         <ListTodo className="h-10 w-10 text-muted-foreground/40" />
@@ -204,7 +227,7 @@ export function ProjectIssuesContent({
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      {viewMode === "board" ? (
+      {viewMode === "board" && (
         <BoardView
           issues={assigneeGroups ? projectIssues : issues}
           assigneeGroups={assigneeGroups}
@@ -219,7 +242,8 @@ export function ProjectIssuesContent({
           projectId={projectId}
           columnCounts={filteredBoardCounts}
         />
-      ) : (
+      )}
+      {viewMode === "list" && (
         <ListView
           issues={issues}
           visibleStatuses={visibleStatuses}
@@ -229,6 +253,7 @@ export function ProjectIssuesContent({
           projectId={projectId}
         />
       )}
+      {viewMode === "gantt" && <GanttView issues={filteredGanttIssues} />}
     </div>
   );
 }
@@ -252,6 +277,7 @@ function ProjectIssuesSurface({
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
+  const usesGantt = viewMode === "gantt";
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
     () => ({
       ...filter,
@@ -269,21 +295,40 @@ function ProjectIssuesSurface({
     scope,
     assigneeGroupFilter,
   );
+  // Each view owns exactly one data source. Board/List ride the bucketed
+  // `myIssueListOptions` cache; the assignee-grouped board uses the grouped
+  // endpoint; Gantt has its own scheduled-only fetch. We gate `enabled` on
+  // the current view so switching to Gantt doesn't re-trigger the full
+  // per-status fetch in the background.
   const statusIssuesQuery = useQuery({
     ...myIssueListOptions(wsId, scope, filter),
-    enabled: !usesAssigneeBoard,
+    enabled: !usesAssigneeBoard && !usesGantt,
   });
   const assigneeGroupsQuery = useQuery({
     ...assigneeGroupsOptions,
     enabled: usesAssigneeBoard,
   });
-  const projectIssues = usesAssigneeBoard
+  // Gantt has its own data source — a single (paginated) fetch of every
+  // scheduled issue in the project. Independent from the bucketed Board/List
+  // cache so it isn't bottlenecked by per-status pagination and reacts in
+  // isolation to WS updates that move issues into or out of the scheduled
+  // set.
+  const ganttIssuesQuery = useQuery({
+    ...projectGanttIssuesOptions(wsId, projectId),
+    enabled: usesGantt,
+  });
+  const bucketedIssues = usesAssigneeBoard
     ? (assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [])
     : (statusIssuesQuery.data ?? []);
+  const ganttIssues = ganttIssuesQuery.data ?? [];
+  // What the header empty-state check looks at depends on the view: Gantt
+  // would otherwise be blamed for an empty Board cache, even though it has
+  // its own (potentially non-empty) scheduled cache.
+  const projectIssues = usesGantt ? ganttIssues : bucketedIssues;
 
   return (
     <>
-      <IssuesHeader scopedIssues={projectIssues} />
+      <IssuesHeader scopedIssues={projectIssues} allowGantt />
       <ProjectIssuesContent
         projectId={projectId}
         projectIssues={projectIssues}
@@ -292,6 +337,7 @@ function ProjectIssuesSurface({
         assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
         scope={scope}
         filter={filter}
+        ganttIssues={ganttIssues}
       />
       <BatchActionToolbar />
     </>

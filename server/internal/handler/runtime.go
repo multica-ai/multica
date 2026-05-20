@@ -398,10 +398,16 @@ func (h *Handler) GetWorkspaceUsageSummary(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// parseSinceParam parses the "days" query parameter and returns a timestamptz.
-// Wall-clock window relative to UTC. Use parseSinceParamInTZ when the cutoff
-// must align with a per-runtime calendar boundary (so `days=N` returns N
-// full local days under the runtime's tz instead of N×24h sliding window).
+// parseSinceParam parses the "days" query parameter and returns a timestamptz
+// anchored to UTC start-of-today, so `days=N` represents N natural calendar
+// days under UTC (today plus N-1 prior full days). `days=1` therefore means
+// "today only" — matching the workspace dashboard's `dailyCutoffIso` axis —
+// rather than the trailing 24-hour window the wall-clock cutoff used to
+// return. The downstream SQL all applies `DATE_TRUNC('day', @since)` so the
+// pre-truncated value below lands on the same boundary regardless.
+//
+// Use parseSinceParamInTZ when the cutoff must align with a per-runtime
+// timezone instead of UTC (runtime-detail pages).
 func parseSinceParam(r *http.Request, defaultDays int) pgtype.Timestamptz {
 	days := defaultDays
 	if d := r.URL.Query().Get("days"); d != "" {
@@ -409,8 +415,10 @@ func parseSinceParam(r *http.Request, defaultDays int) pgtype.Timestamptz {
 			days = parsed
 		}
 	}
-	t := time.Now().AddDate(0, 0, -days)
-	return pgtype.Timestamptz{Time: t, Valid: true}
+	now := time.Now().UTC()
+	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	cutoff := startOfToday.AddDate(0, 0, -(days - 1))
+	return pgtype.Timestamptz{Time: cutoff, Valid: true}
 }
 
 // parseSinceParamInTZ is the timezone-aware variant of parseSinceParam.

@@ -214,12 +214,16 @@ function mergeQuestionnaire(
   raw: Record<string, unknown>,
 ): QuestionnaireAnswers {
   const empty: QuestionnaireAnswers = {
-    team_size: null,
-    team_size_other: null,
+    source: null,
+    source_other: null,
+    source_skipped: false,
     role: null,
     role_other: null,
+    role_skipped: false,
     use_case: null,
     use_case_other: null,
+    use_case_skipped: false,
+    version: 2,
   };
   return { ...empty, ...(raw as Partial<QuestionnaireAnswers>) };
 }

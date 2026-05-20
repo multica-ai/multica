@@ -200,6 +200,17 @@ export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
 }).passthrough();
 
+export const OnboardingRuntimeBootstrapResponseSchema = z.object({
+  workspace_id: z.string(),
+  agent_id: z.string(),
+  issue_id: z.string(),
+}).loose();
+
+export const OnboardingNoRuntimeBootstrapResponseSchema = z.object({
+  workspace_id: z.string(),
+  issue_id: z.string(),
+}).loose();
+
 // ---------------------------------------------------------------------------
 // Workspace dashboard schemas
 //

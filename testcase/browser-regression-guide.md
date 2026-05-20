@@ -79,17 +79,42 @@ The login flow is documented in `tc-001-fixed-verification-code-login.md`. Execu
 ### Projects (tc-025)
 - Project sorting
 
-### Mobile (tc-033)
+### Mobile (tc-033, tc-043 to tc-045, tc-057)
 - Core mobile app functionality (login, issues, search, i18n)
+- Mobile issue detail labels/start date/parent issue editing
+- Mobile inbox batch actions
+- Mobile issue list label filtering
+- Mobile issue detail comments and timeline
 
 ### CLI (tc-035)
-- Managed update flow with manifest
+- Managed update flow with OBS manifest `download_url` + `checksum`; GitHub Release is fallback only
 
 ### Plan Mode (tc-028)
 - Native Claude plan mode with approval bridge
 
 ### Editor (tc-038)
 - Paste image upload with error feedback
+
+### Comment UX (tc-039)
+- Comment body collapse/expand for long comments (OPE-700)
+
+### WeChat Notification (tc-040)
+- OpenClaw WeChat notification channel binding and per-event toggles (OPE-544)
+
+### Wiki Extended (tc-041)
+- Wiki page creator display and lightweight activity log (OPE-843)
+
+### Issue Subscription (tc-042)
+- Subscribe/unsubscribe toggle with subscriber list sorted by subscribed-first (OPE-995)
+
+### Mobile — Issue Properties (tc-043)
+- Mobile issue detail: edit labels, start date, parent issue
+
+### Mobile — Inbox Batch (tc-044)
+- Mobile inbox batch mark-as-read and batch archive
+
+### Mobile — Label Filter (tc-045)
+- Mobile issue list label filtering
 
 ## Execution Order
 
@@ -102,7 +127,9 @@ The login flow is documented in `tc-001-fixed-verification-code-login.md`. Execu
 7. **tc-021 to tc-023** — autopilot, chat, skills
 8. **tc-025 to tc-028** — projects, scroll, auto-status, plan mode
 9. **tc-030 to tc-032** — copy link, auto-block, timeline resilience
-10. **tc-033 to tc-038** — mobile, private chat, CLI, DeepSeek, paste
+10. **tc-033 to tc-038** — mobile, private chat, CLI manifest update, DeepSeek, paste
+11. **tc-039 to tc-042** — comment collapse, WeChat notification, wiki activity, subscription
+12. **tc-043 to tc-045, tc-057** — mobile issue properties, inbox batch, label filter, mobile comments/timeline
 
 ## Notes
 

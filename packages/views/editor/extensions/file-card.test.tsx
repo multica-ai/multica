@@ -35,6 +35,29 @@ vi.mock("../attachment-preview-modal", () => ({
   useAttachmentPreview: () => ({ tryOpen: tryOpenMock, open: vi.fn(), modal: null }),
 }));
 
+// HtmlAttachmentPreview (the kind="html" route through AttachmentBlock) now
+// reads useNavigation() + useWorkspaceSlug() for its Open-in-new-tab button.
+// Provide minimal mocks so the component renders without a real provider.
+vi.mock("../../navigation", () => ({
+  useNavigation: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    pathname: "/acme/issues",
+    searchParams: new URLSearchParams(),
+    openInNewTab: vi.fn(),
+    getShareableUrl: (p: string) => `https://app.example${p}`,
+  }),
+}));
+
+vi.mock("@multica/core/paths", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/paths")>();
+  return {
+    ...actual,
+    useWorkspaceSlug: () => "acme",
+  };
+});
+
 vi.mock("../i18n", () => ({
   useT: () => ({
     t: (sel: (s: Record<string, Record<string, string>>) => string) =>
@@ -44,6 +67,7 @@ vi.mock("../i18n", () => ({
           preview: "Preview",
           preview_loading: "Loading preview…",
           preview_failed: "Couldn't load preview",
+          open_in_new_tab: "Open in new tab",
         },
         code_block: { copy_code: "Copy code" },
         file_card: { uploading: "Uploading {{filename}}" },

@@ -4,6 +4,7 @@ package cli
 // This complements the upstream GitHub-release-based update in update.go.
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -129,4 +130,116 @@ func ShouldUpdate(currentVersion string, latest *UpdateManifest) (bool, error) {
 // FetchLatestManifestRelease fetches the latest release info from the configured manifest URL.
 func FetchLatestManifestRelease() (*UpdateManifest, error) {
 	return FetchUpdateManifestFromURL(resolveUpdateManifestURL())
+}
+
+// FindManifestAsset returns the asset matching the current OS/arch from the manifest.
+func FindManifestAsset(manifest *UpdateManifest, goos, goarch string) (*UpdateManifestAsset, error) {
+for i := range manifest.Assets {
+a := &manifest.Assets[i]
+if a.OS == goos && a.Arch == goarch {
+return a, nil
+}
+}
+return nil, fmt.Errorf("no manifest asset for %s/%s", goos, goarch)
+}
+
+// UpdateViaManifestDownload downloads the CLI binary from the OBS manifest's
+// download_url and verifies it with the manifest checksum. This is the primary
+// update path for the Fork distribution; the GitHub Release path in update.go
+// is retained as fallback.
+func UpdateViaManifestDownload(targetVersion string) (string, error) {
+return UpdateViaManifestDownloadWithTimeout(targetVersion, DefaultUpdateDownloadTimeout)
+}
+
+// UpdateViaManifestDownloadWithTimeout is like UpdateViaManifestDownload but
+// accepts a custom download timeout.
+func UpdateViaManifestDownloadWithTimeout(targetVersion string, downloadTimeout time.Duration) (string, error) {
+manifest, err := FetchLatestManifestRelease()
+if err != nil {
+return "", fmt.Errorf("fetch manifest: %w", err)
+}
+
+asset, err := FindManifestAsset(manifest, runtime.GOOS, runtime.GOARCH)
+if err != nil {
+return "", err
+}
+
+if strings.TrimSpace(asset.URL) == "" {
+return "", fmt.Errorf("manifest asset for %s/%s has empty download_url", runtime.GOOS, runtime.GOARCH)
+}
+
+// Determine current binary path.
+exePath, err := os.Executable()
+if err != nil {
+return "", fmt.Errorf("resolve executable path: %w", err)
+}
+exePath, err = filepath.EvalSymlinks(exePath)
+if err != nil {
+return "", fmt.Errorf("resolve symlink: %w", err)
+}
+
+timeout := updateDownloadTimeoutOrDefault(downloadTimeout)
+archiveData, err := fetchURLBytes(asset.URL, timeout)
+if err != nil {
+return "", fmt.Errorf("download from manifest URL failed: %w", err)
+}
+
+// Verify checksum from manifest.
+if strings.TrimSpace(asset.Checksum) == "" {
+return "", fmt.Errorf("manifest asset has empty checksum for %s/%s", runtime.GOOS, runtime.GOARCH)
+}
+archiveName := asset.ArchiveName
+if archiveName == "" {
+archiveName = filepath.Base(asset.URL)
+}
+if err := verifyAssetSHA256(archiveData, asset.Checksum, archiveName); err != nil {
+return "", fmt.Errorf("verify manifest download: %w", err)
+}
+
+// Extract binary.
+binaryName := "multica"
+if runtime.GOOS == "windows" {
+binaryName = "multica.exe"
+}
+var binaryData []byte
+if runtime.GOOS == "windows" {
+binaryData, err = extractBinaryFromZip(bytes.NewReader(archiveData), binaryName)
+} else {
+binaryData, err = extractBinaryFromTarGz(bytes.NewReader(archiveData), binaryName)
+}
+if err != nil {
+return "", fmt.Errorf("extract binary: %w", err)
+}
+
+// Atomic replace.
+dir := filepath.Dir(exePath)
+tmpFile, err := os.CreateTemp(dir, "multica-update-*")
+if err != nil {
+return "", fmt.Errorf("create temp file: %w", err)
+}
+tmpPath := tmpFile.Name()
+
+if _, err := tmpFile.Write(binaryData); err != nil {
+tmpFile.Close()
+os.Remove(tmpPath)
+return "", fmt.Errorf("write temp file: %w", err)
+}
+tmpFile.Close()
+
+info, err := os.Stat(exePath)
+if err != nil {
+os.Remove(tmpPath)
+return "", fmt.Errorf("stat original binary: %w", err)
+}
+if err := os.Chmod(tmpPath, info.Mode()); err != nil {
+os.Remove(tmpPath)
+return "", fmt.Errorf("chmod temp file: %w", err)
+}
+
+if err := replaceBinary(tmpPath, exePath); err != nil {
+os.Remove(tmpPath)
+return "", fmt.Errorf("replace binary: %w", err)
+}
+
+return fmt.Sprintf("Downloaded %s from manifest and replaced %s", archiveName, exePath), nil
 }
