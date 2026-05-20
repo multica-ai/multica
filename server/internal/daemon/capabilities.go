@@ -1,54 +1,24 @@
 // CEREBRO-PATCH(capabilities): persona integration changes.
+// CEREBRO-PATCH(capabilities-shim): delegate to internal/cerebro/capabilities (JEH-978/JEH-1873).
 package daemon
 
-// providerCapabilities returns the static capability snapshot the daemon
-// reports for a given provider type at register time. Persona's UI surfaces
-// this alongside the abstract sandbox so an operator can see "what tools
-// my runtime actually supports" without having to read provider docs.
+import (
+	"github.com/multica-ai/multica/server/internal/cerebro/capabilities"
+)
+
+// providerCapabilities returns the capability snapshot the daemon reports
+// for a given provider type at register time. It is a thin shim over the
+// canonical registry in internal/cerebro/capabilities — see that package
+// for the per-provider declarations and the JEH-1873 design notes.
 //
-// MVP scope: built-in tool list per provider. mcp_servers is empty because
-// MCP config is per-agent in this codebase, not daemon-global; the runtime
-// row therefore can't report a meaningful set. Once daemon-wide MCP lands,
-// this is the function that grows the field.
+// The legacy map[string]any return type is preserved so /api/runtimes/
+// register and persona's actor-attrs push read the same wire shape they
+// always have. New fields (skills, hooks, secret_bindings, cli_binaries,
+// discovery_method) are added by capabilities.AsMap when populated.
 //
-// Conservative defaults: an unknown provider reports an empty payload
-// rather than fabricated tool names, so persona's UI shows "(unknown)"
-// instead of misleading data.
+// Unknown providers receive an empty-but-typed payload with
+// discovery_method="unmapped", so persona's UI shows the runtime as
+// "uncatalogued" instead of fabricating tool names.
 func providerCapabilities(providerType string) map[string]any {
-	switch providerType {
-	case "claude":
-		return map[string]any{
-			"providers": []string{"claude"},
-			"tools": []string{
-				"Bash",
-				"Edit",
-				"Glob",
-				"Grep",
-				"MultiEdit",
-				"NotebookEdit",
-				"Read",
-				"Task",
-				"TodoWrite",
-				"WebFetch",
-				"WebSearch",
-				"Write",
-			},
-			"mcp_servers": []string{},
-		}
-	case "codex":
-		// Codex has its own surface; report what we can and leave the rest
-		// to a future provider expansion. Listed providers stay accurate so
-		// downstream filters ("claude only" / "codex only") work today.
-		return map[string]any{
-			"providers":   []string{"codex"},
-			"tools":       []string{},
-			"mcp_servers": []string{},
-		}
-	default:
-		return map[string]any{
-			"providers":   []string{providerType},
-			"tools":       []string{},
-			"mcp_servers": []string{},
-		}
-	}
+	return capabilities.AsMap(capabilities.For(providerType))
 }
