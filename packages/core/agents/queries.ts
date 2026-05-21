@@ -69,6 +69,12 @@ export const agentTasksKeys = {
     [...agentTasksKeys.all(wsId), agentId] as const,
 };
 
+export const agentRuntimeBindingKeys = {
+  all: (wsId: string) => ["workspaces", wsId, "agent-runtime-bindings"] as const,
+  detail: (wsId: string, agentId: string) =>
+    [...agentRuntimeBindingKeys.all(wsId), agentId] as const,
+};
+
 // All tasks for a single agent (the agent detail page consumer). Powers both
 // the inspector's 7-day throughput stats and the Tasks tab list — shared so
 // they don't fetch twice. WS task events invalidate this via the existing
@@ -80,6 +86,15 @@ export function agentTasksOptions(wsId: string, agentId: string) {
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,
+  });
+}
+
+export function agentRuntimeBindingOptions(wsId: string, agentId: string) {
+  return queryOptions({
+    queryKey: agentRuntimeBindingKeys.detail(wsId, agentId),
+    queryFn: () => api.getAgentRuntimeBinding(agentId),
+    staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000,
   });
 }
 

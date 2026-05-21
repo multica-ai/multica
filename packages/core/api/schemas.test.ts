@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   AppConfigSchema,
+  AgentRuntimeBindingSchema,
   DashboardAgentRunTimeListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
   DuplicateIssueErrorBodySchema,
+  EMPTY_AGENT_RUNTIME_BINDING,
   EMPTY_USER,
   ListIssuesResponseSchema,
   RuntimeHourlyActivityListSchema,
@@ -92,6 +94,44 @@ describe("TimelineEntriesSchema", () => {
     ]);
 
     expect(parsed[0]?.source_task_id).toBe("task-1");
+  });
+});
+
+describe("AgentRuntimeBindingSchema", () => {
+  it("accepts the unbound response shape", () => {
+    const parsed = AgentRuntimeBindingSchema.parse({
+      agent_id: "agent-1",
+      user_id: "user-1",
+      runtime_id: null,
+      effective_runtime_id: "runtime-default",
+      bound: false,
+      created_at: null,
+      updated_at: null,
+      extra: "future-field",
+    });
+
+    expect(parsed.runtime_id).toBeNull();
+    expect(parsed.effective_runtime_id).toBe("runtime-default");
+    expect(parsed.bound).toBe(false);
+  });
+
+  it("falls back when the effective runtime id contract is malformed", () => {
+    const parsed = parseWithFallback(
+      {
+        agent_id: "agent-1",
+        user_id: "user-1",
+        runtime_id: null,
+        effective_runtime_id: null,
+        bound: false,
+        created_at: null,
+        updated_at: null,
+      },
+      AgentRuntimeBindingSchema,
+      EMPTY_AGENT_RUNTIME_BINDING,
+      { endpoint: "GET /api/agents/:id/runtime-binding" },
+    );
+
+    expect(parsed).toBe(EMPTY_AGENT_RUNTIME_BINDING);
   });
 });
 

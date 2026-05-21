@@ -298,6 +298,20 @@ export interface Agent {
   archived_by: string | null;
 }
 
+export interface AgentRuntimeBinding {
+  agent_id: string;
+  user_id: string;
+  runtime_id: string | null;
+  effective_runtime_id: string;
+  bound: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface UpsertAgentRuntimeBindingRequest {
+  runtime_id: string;
+}
+
 /**
  * Minimal skill shape embedded in an Agent payload (`GET /api/agents`,
  * `GET /api/agents/:id`). Only id/name/description are populated — the
