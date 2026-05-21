@@ -157,6 +157,8 @@
     "_comment_name_col": "CEREBRO-PATCH(runtime-name-own-column): col_name for the separate runtime name column (JEH-1520)",
     "col_runtime": "Runtime",
     "col_name": "Name",
+    "_comment_machine_col": "CEREBRO-PATCH(runtime-machine-own-column): col_machine for the hostname column (JEH-1904)",
+    "col_machine": "Machine",
     "col_health": "Health",
     "col_owner": "Owner",
     "col_agents": "Agents",

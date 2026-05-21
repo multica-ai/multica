@@ -70,6 +70,8 @@ const COL_WIDTHS = {
   // CEREBRO-PATCH(runtime-name-own-column): split provider logo into its own narrow column (JEH-1520)
   runtime: 48,
   name: 200,
+  // CEREBRO-PATCH(runtime-machine-own-column): hostname gets its own column (JEH-1904)
+  machine: 140,
   health: 200,
   owner: 60,
   agents: 100,
@@ -114,6 +116,13 @@ export function createRuntimeColumns({
       size: COL_WIDTHS.name,
       meta: { grow: true },
       cell: ({ row }) => <RuntimeNameTextCell runtime={row.original.runtime} />,
+    },
+    // CEREBRO-PATCH(runtime-machine-own-column): hostname column after name (JEH-1904)
+    {
+      id: "machine",
+      header: () => t(($) => $.list.col_machine),
+      size: COL_WIDTHS.machine,
+      cell: ({ row }) => <MachineCell runtime={row.original.runtime} />,
     },
     {
       id: "health",
@@ -246,27 +255,29 @@ function RuntimeProviderCell({ runtime }: { runtime: AgentRuntime }) {
 }
 
 // CEREBRO-PATCH(runtime-name-own-column): name-only cell with hostname tooltip + visibility badge (JEH-1520)
+// CEREBRO-PATCH(runtime-machine-own-column): hostname moved to dedicated MachineCell; base name only here (JEH-1904)
 function RuntimeNameTextCell({ runtime }: { runtime: AgentRuntime }) {
-  const { base: baseName, hostname } = splitRuntimeName(runtime.name);
+  const { base: baseName } = splitRuntimeName(runtime.name);
   return (
     <div className="flex min-w-0 items-center gap-1.5">
       <span className="block min-w-0 shrink truncate text-sm font-medium">
         {baseName}
       </span>
-      {hostname && (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span className="block min-w-0 flex-1 basis-0 truncate text-xs text-muted-foreground/70">
-                ({hostname})
-              </span>
-            }
-          />
-          <TooltipContent>{hostname}</TooltipContent>
-        </Tooltip>
-      )}
       <VisibilityBadge runtime={runtime} />
     </div>
+  );
+}
+
+// CEREBRO-PATCH(runtime-machine-own-column): renders the hostname from runtime.name in its own column (JEH-1904)
+function MachineCell({ runtime }: { runtime: AgentRuntime }) {
+  const { hostname } = splitRuntimeName(runtime.name);
+  if (!hostname) {
+    return <span className="text-xs text-muted-foreground/50">—</span>;
+  }
+  return (
+    <span className="block min-w-0 truncate font-mono text-xs text-muted-foreground">
+      {hostname}
+    </span>
   );
 }
 
