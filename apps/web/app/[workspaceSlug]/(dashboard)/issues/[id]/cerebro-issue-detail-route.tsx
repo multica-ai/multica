@@ -43,11 +43,20 @@ export function CerebroIssueDetailRoute({ id }: { id: string }) {
     staleTime: Infinity,
   });
 
+  // Each branch carries data-testid so QA can wait on a stable post-paint
+  // selector instead of racing waitUntil:networkidle against React's
+  // commit. The loading skeleton's testid is the key addition — without
+  // it, the 12:11 QA was forced to wait on the alert testid, which is
+  // only present after the 4xx response has propagated through useQuery
+  // into a re-render; networkidle can fire inside that gap and snap a
+  // blank frame. With this in place QA can wait for the union selector
+  // [data-testid='issue-detail-loading'], [data-testid='issue-detail-not-found'].
   if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
     return (
       <div
         role="alert"
         data-testid="issue-detail-not-found"
+        data-state="not-found"
         className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-sm text-muted-foreground"
       >
         <p>{t(($) => $.detail.not_found)}</p>
@@ -72,7 +81,11 @@ export function CerebroIssueDetailRoute({ id }: { id: string }) {
 
 function RouteSkeleton() {
   return (
-    <div className="flex flex-1 min-h-0 flex-col">
+    <div
+      data-testid="issue-detail-loading"
+      data-state="loading"
+      className="flex flex-1 min-h-0 flex-col"
+    >
       <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
         <Skeleton className="h-4 w-16" />
         <Skeleton className="h-4 w-4" />

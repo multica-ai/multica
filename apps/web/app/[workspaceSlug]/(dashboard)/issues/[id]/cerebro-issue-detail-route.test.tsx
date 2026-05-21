@@ -131,6 +131,29 @@ describe("<CerebroIssueDetailRoute />", () => {
     expect(mockGetIssue).toHaveBeenCalledTimes(1);
   });
 
+  it("loading state exposes data-testid='issue-detail-loading' so QA can wait on a stable selector before the query settles", async () => {
+    // Reproduces the QA scenario from JEH-1733: at the moment Playwright's
+    // waitUntil:networkidle fires, the 4xx response has arrived but React
+    // has not yet committed the not-found render. Without the loading
+    // testid the only stable selector is the not-found alert, which means
+    // a screenshot in that gap is blank. With the testid here QA can
+    // wait on the union selector ([data-testid='issue-detail-loading'],
+    // [data-testid='issue-detail-not-found']) and a screenshot at any
+    // point after first paint catches visible content.
+    let resolveFetch: ((value: unknown) => void) | undefined;
+    mockGetIssue.mockReturnValue(new Promise((res) => {
+      resolveFetch = res;
+    }));
+
+    renderRoute("pending-id");
+
+    expect(screen.getByTestId("issue-detail-loading")).toBeInTheDocument();
+    expect(screen.queryByTestId("issue-detail-not-found")).not.toBeInTheDocument();
+
+    resolveFetch?.({ id: "pending-id", title: "Hello" });
+    await waitFor(() => expect(screen.getByTestId("issue-detail")).toBeInTheDocument());
+  });
+
   it("reuses the cached 404 across remounts — only one parent fetch per visit", async () => {
     // staleTime: Infinity on the gate's useQuery means a remount within
     // the same QueryClient (back/forward navigation in the SPA) hits
