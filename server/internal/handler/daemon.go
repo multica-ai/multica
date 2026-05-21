@@ -1480,6 +1480,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				if proj, err := h.Queries.GetProject(r.Context(), issue.ProjectID); err == nil {
 					resp.ProjectTitle = proj.Title
 					resp.ProjectDescription = proj.Description.String
+					resp.ProjectWorkdirPolicy = proj.WorkdirPolicy
+					if proj.CanonicalWorkdir.Valid {
+						resp.ProjectCanonicalWorkdir = proj.CanonicalWorkdir.String
+					}
 				}
 				if rows := h.listProjectResourcesForProject(r.Context(), issue.ProjectID); len(rows) > 0 {
 					out := make([]ProjectResourceData, 0, len(rows))
@@ -1777,6 +1781,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					if proj, err := h.Queries.GetProject(r.Context(), projectUUID); err == nil {
 						resp.ProjectTitle = proj.Title
 						resp.ProjectDescription = proj.Description.String
+						resp.ProjectWorkdirPolicy = proj.WorkdirPolicy
+						if proj.CanonicalWorkdir.Valid {
+							resp.ProjectCanonicalWorkdir = proj.CanonicalWorkdir.String
+						}
 					}
 					if rows := h.listProjectResourcesForProject(r.Context(), projectUUID); len(rows) > 0 {
 						out := make([]ProjectResourceData, 0, len(rows))

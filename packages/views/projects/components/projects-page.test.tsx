@@ -186,6 +186,8 @@ const PROJECT: Project = {
   priority: "high",
   lead_type: null,
   lead_id: null,
+  workdir_policy: "none",
+  canonical_workdir: null,
   created_at: "2026-06-01T00:00:00Z",
   updated_at: "2026-06-01T00:00:00Z",
   issue_count: 3,
