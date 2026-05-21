@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 )
 
 // newGCTestDaemon creates a minimal Daemon for GC testing with a mock HTTP server.
@@ -684,6 +685,104 @@ func TestPruneWorktree_RemovesOnlyStaleAgentBranches(t *testing.T) {
 	if !gitRefExists(t, barePath, "refs/heads/"+keepBranch) {
 		t.Fatalf("expected non-agent branch %q to be preserved", keepBranch)
 	}
+}
+
+func TestPruneWorktree_SerializesWithCreateWorktree(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	cache := repocache.New(filepath.Join(d.cfg.WorkspacesRoot, ".repos"), slog.Default())
+	if err := cache.Sync("ws1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("cache sync failed: %v", err)
+	}
+
+	barePath := cache.Lookup("ws1", sourceRepo)
+	if barePath == "" {
+		t.Fatal("expected bare repo to be cached")
+	}
+
+	runGitForGC(t, "", "-C", barePath, "branch", "agent/stale/87654321", "HEAD")
+
+	blockingCache := &blockingRepoCache{
+		inner:   cache,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	d.repoCache = blockingCache
+
+	pruneDone := make(chan struct{})
+	go func() {
+		d.pruneWorktree(barePath)
+		close(pruneDone)
+	}()
+
+	select {
+	case <-blockingCache.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for pruneWorktree to acquire repo lock")
+	}
+
+	createDone := make(chan error, 1)
+	go func() {
+		_, err := blockingCache.CreateWorktree(repocache.WorktreeParams{
+			WorkspaceID: "ws1",
+			RepoURL:     sourceRepo,
+			WorkDir:     t.TempDir(),
+			AgentName:   "tester",
+			TaskID:      "11111111-1111-1111-1111-111111111111",
+		})
+		createDone <- err
+	}()
+
+	select {
+	case err := <-createDone:
+		t.Fatalf("CreateWorktree should wait for GC lock, returned early with err=%v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(blockingCache.release)
+
+	select {
+	case err := <-createDone:
+		if err != nil {
+			t.Fatalf("CreateWorktree failed after GC lock released: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for CreateWorktree after releasing GC lock")
+	}
+
+	select {
+	case <-pruneDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for pruneWorktree to finish")
+	}
+}
+
+type blockingRepoCache struct {
+	inner   *repocache.Cache
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (c *blockingRepoCache) Lookup(workspaceID, url string) string {
+	return c.inner.Lookup(workspaceID, url)
+}
+
+func (c *blockingRepoCache) Sync(workspaceID string, repos []repocache.RepoInfo) error {
+	return c.inner.Sync(workspaceID, repos)
+}
+
+func (c *blockingRepoCache) WithRepoLock(barePath string, fn func() error) error {
+	return c.inner.WithRepoLock(barePath, func() error {
+		close(c.entered)
+		<-c.release
+		return fn()
+	})
+}
+
+func (c *blockingRepoCache) CreateWorktree(params repocache.WorktreeParams) (*repocache.WorktreeResult, error) {
+	return c.inner.CreateWorktree(params)
 }
 
 // TestShouldCleanTaskDir_KindDispatch covers the four GCMeta kinds across

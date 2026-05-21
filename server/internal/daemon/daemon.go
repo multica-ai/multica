@@ -81,6 +81,7 @@ type workspaceState struct {
 type repoCacheBackend interface {
 	Lookup(workspaceID, url string) string
 	Sync(workspaceID string, repos []repocache.RepoInfo) error
+	WithRepoLock(barePath string, fn func() error) error
 	CreateWorktree(params repocache.WorktreeParams) (*repocache.WorktreeResult, error)
 }
 

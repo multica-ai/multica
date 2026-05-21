@@ -597,6 +597,21 @@ func (d *Daemon) pruneRepoWorktrees(workspacesRoot string) {
 }
 
 func (d *Daemon) pruneWorktree(barePath string) {
+	if d.repoCache != nil {
+		if err := d.repoCache.WithRepoLock(barePath, func() error {
+			d.pruneWorktreeLocked(barePath)
+			return nil
+		}); err != nil {
+			d.logger.Warn("gc: repo lock failed", "repo", barePath, "error", err)
+			return
+		}
+		return
+	}
+
+	d.pruneWorktreeLocked(barePath)
+}
+
+func (d *Daemon) pruneWorktreeLocked(barePath string) {
 	if out, err := runGitGCCommand(barePath, "worktree", "prune"); err != nil {
 		d.logger.Warn("gc: worktree prune failed",
 			"repo", barePath,
