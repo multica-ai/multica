@@ -208,3 +208,134 @@ func TestWorkspaceAlwaysRedactEnv(t *testing.T) {
 		})
 	}
 }
+
+func TestGetAgent_AlwaysRedactEnv_OwnerSeesRedacted(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	// Enable always_redact_env on workspace.
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = '{"always_redact_env": true}' WHERE id = $1`, testWorkspaceID); err != nil {
+		t.Fatalf("failed to set workspace settings: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `UPDATE workspace SET settings = NULL WHERE id = $1`, testWorkspaceID)
+	})
+
+	agentID := createHandlerTestAgent(t, "redact-get-test-agent", nil)
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{"SECRET_KEY": "super-secret"}' WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("failed to set custom_env: %v", err)
+	}
+
+	req := newRequest("GET", "/agents/"+agentID, nil)
+	req = withURLParam(req, "id", agentID)
+	w := httptest.NewRecorder()
+	testHandler.GetAgent(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp AgentResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !resp.CustomEnvRedacted {
+		t.Error("expected custom_env_redacted to be true")
+	}
+	if resp.CustomEnvRedactedReason != "policy" {
+		t.Errorf("expected custom_env_redacted_reason to be 'policy', got %q", resp.CustomEnvRedactedReason)
+	}
+	if resp.CustomEnv["SECRET_KEY"] != "****" {
+		t.Errorf("expected SECRET_KEY to be redacted, got %q", resp.CustomEnv["SECRET_KEY"])
+	}
+}
+
+func TestListAgents_AlwaysRedactEnv_OwnerSeesRedacted(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = '{"always_redact_env": true}' WHERE id = $1`, testWorkspaceID); err != nil {
+		t.Fatalf("failed to set workspace settings: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `UPDATE workspace SET settings = NULL WHERE id = $1`, testWorkspaceID)
+	})
+
+	agentName := "redact-list-test-agent"
+	agentID := createHandlerTestAgent(t, agentName, nil)
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{"SECRET_KEY": "super-secret"}' WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("failed to set custom_env: %v", err)
+	}
+
+	req := newRequest("GET", "/agents", nil)
+	w := httptest.NewRecorder()
+	testHandler.ListAgents(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var agents []AgentResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &agents); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	var found *AgentResponse
+	for i := range agents {
+		if agents[i].Name == agentName {
+			found = &agents[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("agent not found in list response")
+	}
+	if !found.CustomEnvRedacted {
+		t.Error("expected custom_env_redacted to be true")
+	}
+	if found.CustomEnvRedactedReason != "policy" {
+		t.Errorf("expected custom_env_redacted_reason to be 'policy', got %q", found.CustomEnvRedactedReason)
+	}
+	if found.CustomEnv["SECRET_KEY"] != "****" {
+		t.Errorf("expected SECRET_KEY to be redacted, got %q", found.CustomEnv["SECRET_KEY"])
+	}
+}
+
+func TestGetAgent_DefaultNoRedactForOwner(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID := createHandlerTestAgent(t, "no-redact-get-test-agent", nil)
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{"SECRET_KEY": "super-secret"}' WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("failed to set custom_env: %v", err)
+	}
+
+	req := newRequest("GET", "/agents/"+agentID, nil)
+	req = withURLParam(req, "id", agentID)
+	w := httptest.NewRecorder()
+	testHandler.GetAgent(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp AgentResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.CustomEnvRedacted {
+		t.Error("expected custom_env_redacted to be false")
+	}
+	if resp.CustomEnvRedactedReason != "" {
+		t.Errorf("expected custom_env_redacted_reason to be empty, got %q", resp.CustomEnvRedactedReason)
+	}
+	if resp.CustomEnv["SECRET_KEY"] != "super-secret" {
+		t.Errorf("expected SECRET_KEY to be visible, got %q", resp.CustomEnv["SECRET_KEY"])
+	}
+}

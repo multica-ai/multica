@@ -126,6 +126,7 @@ export interface Agent {
   custom_env: Record<string, string>;
   custom_args: string[];
   custom_env_redacted: boolean;
+  custom_env_redacted_reason?: 'policy' | 'role';
   visibility: AgentVisibility;
   status: AgentStatus;
   max_concurrent_tasks: number;

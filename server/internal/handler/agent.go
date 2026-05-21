@@ -40,7 +40,8 @@ type AgentResponse struct {
 	CustomEnv          map[string]string   `json:"custom_env"`
 	CustomArgs         []string            `json:"custom_args"`
 	McpConfig          json.RawMessage     `json:"mcp_config"`
-	CustomEnvRedacted  bool                `json:"custom_env_redacted"`
+	CustomEnvRedacted       bool                `json:"custom_env_redacted"`
+	CustomEnvRedactedReason string              `json:"custom_env_redacted_reason,omitempty"`
 	McpConfigRedacted  bool                `json:"mcp_config_redacted"`
 	Visibility         string              `json:"visibility"`
 	Status             string              `json:"status"`
@@ -321,9 +322,13 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 
 	// Check workspace-level always-redact setting.
 	var alwaysRedact bool
-	if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID)); err == nil {
-		alwaysRedact = workspaceAlwaysRedactEnv(ws.Settings)
+	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		slog.Warn("GetWorkspace failed for redact check", "workspace_id", workspaceID, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
 	}
+	alwaysRedact = workspaceAlwaysRedactEnv(ws.Settings)
 
 	// Resolve the request actor once. Agents bypass the private-agent gate
 	// to preserve A2A collaboration; members must be in allowed_principals
@@ -342,9 +347,14 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		}
 		// Redact sensitive fields for users who are not the agent owner or workspace owner/admin,
 		// or unconditionally when the workspace opts into always_redact_env.
-		if alwaysRedact || !canViewAgentEnv(a, userID, member.Role) {
+		if alwaysRedact {
 			redactEnv(&resp)
 			redactMcpConfig(&resp)
+			resp.CustomEnvRedactedReason = "policy"
+		} else if !canViewAgentEnv(a, userID, member.Role) {
+			redactEnv(&resp)
+			redactMcpConfig(&resp)
+			resp.CustomEnvRedactedReason = "role"
 		}
 		visible = append(visible, resp)
 	}
@@ -393,16 +403,22 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	// or unconditionally when the workspace opts into always_redact_env.
 	userID := requestUserID(r)
 	var alwaysRedact bool
-	if ws, err := h.Queries.GetWorkspace(r.Context(), agent.WorkspaceID); err == nil {
-		alwaysRedact = workspaceAlwaysRedactEnv(ws.Settings)
+	ws, err := h.Queries.GetWorkspace(r.Context(), agent.WorkspaceID)
+	if err != nil {
+		slog.Warn("GetWorkspace failed for redact check", "workspace_id", uuidToString(agent.WorkspaceID), "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
 	}
+	alwaysRedact = workspaceAlwaysRedactEnv(ws.Settings)
 	if alwaysRedact {
 		redactEnv(&resp)
 		redactMcpConfig(&resp)
+		resp.CustomEnvRedactedReason = "policy"
 	} else if member, ok := ctxMember(r.Context()); ok {
 		if !canViewAgentEnv(agent, userID, member.Role) {
 			redactEnv(&resp)
 			redactMcpConfig(&resp)
+			resp.CustomEnvRedactedReason = "role"
 		}
 	}
 
