@@ -79,7 +79,10 @@ func truncateForSummary(s string, maxRunes int) string {
 
 const (
 	taskAnalyticsContextCacheMax = 4096
-	claimResponseRecoverySeconds = 45.0
+	// claimResponseRecoveryWindow must exceed daemon client.Timeout for
+	// /tasks/claim (30s) plus /tasks/{id}/start (30s) plus scheduling slack, so
+	// an in-flight StartTask cannot be reclaimed and double-dispatched.
+	claimResponseRecoveryWindow = 90 * time.Second
 )
 
 // buildCommentTriggerSummary fetches the comment content and truncates
@@ -837,7 +840,7 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	// `queued`, so the empty-queued cache cannot represent recoverability.
 	stale, err := s.Queries.ReclaimStaleDispatchedTaskForRuntime(ctx, db.ReclaimStaleDispatchedTaskForRuntimeParams{
 		RuntimeID:         runtimeID,
-		ClaimRecoverySecs: claimResponseRecoverySeconds,
+		ClaimRecoverySecs: claimResponseRecoveryWindow.Seconds(),
 	})
 	if err == nil {
 		outcome = "reclaimed_dispatched"
