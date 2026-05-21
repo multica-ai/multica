@@ -992,7 +992,7 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
     fetchPendingInteractions();
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") fetchPendingInteractions();
-    }, 3000);
+    }, 30_000);
     return () => clearInterval(interval);
   }, [fetchPendingInteractions]);
 
