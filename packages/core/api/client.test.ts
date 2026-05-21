@@ -212,6 +212,31 @@ describe("ApiClient", () => {
     );
   });
 
+  it("falls back when Cloud Runtime node responses drift", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ id: 123 }]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 123 }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.listCloudRuntimeNodes()).resolves.toEqual([]);
+    await expect(
+      client.createCloudRuntimeNode({ instance_type: "g5.xlarge" }),
+    ).resolves.toMatchObject({ id: "", status: "" });
+  });
+
   describe("getAttachment", () => {
     it("returns the parsed attachment for a well-formed response", async () => {
       vi.stubGlobal(

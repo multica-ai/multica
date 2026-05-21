@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import type { FormEvent, HTMLAttributes } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Cloud, Loader2, RefreshCw, Rocket } from "lucide-react";
@@ -32,6 +32,8 @@ const DEFAULT_INSTANCE_TYPE = "g5.xlarge";
 export function CloudRuntimeDialog({ onClose }: { onClose: () => void }) {
   const { t } = useT("runtimes");
   const wsId = useWorkspaceId();
+  const idPrefix = `cloud-runtime-${useId().replace(/:/g, "")}`;
+  const formId = `${idPrefix}-form`;
   const [name, setName] = useState("");
   const [instanceType, setInstanceType] = useState(DEFAULT_INSTANCE_TYPE);
   const [region, setRegion] = useState(DEFAULT_REGION);
@@ -88,7 +90,6 @@ export function CloudRuntimeDialog({ onClose }: { onClose: () => void }) {
       toast.success(t(($) => $.cloud_runtime.toast_created));
       setName("");
       setBootstrapPAT("");
-      void nodesQuery.refetch();
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -113,7 +114,7 @@ export function CloudRuntimeDialog({ onClose }: { onClose: () => void }) {
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
           <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.82fr)]">
-            <form id="cloud-runtime-form" onSubmit={handleSubmit} className="space-y-4">
+            <form id={formId} onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <h3 className="text-sm font-medium">
                   {t(($) => $.cloud_runtime.create_title)}
@@ -125,14 +126,14 @@ export function CloudRuntimeDialog({ onClose }: { onClose: () => void }) {
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <LabeledInput
-                  id="cloud-runtime-name"
+                  id={`${idPrefix}-name`}
                   label={t(($) => $.cloud_runtime.fields.name)}
                   value={name}
                   onChange={setName}
                   placeholder={t(($) => $.cloud_runtime.placeholders.name)}
                 />
                 <LabeledInput
-                  id="cloud-runtime-instance-type"
+                  id={`${idPrefix}-instance-type`}
                   label={t(($) => $.cloud_runtime.fields.instance_type)}
                   value={instanceType}
                   onChange={setInstanceType}
@@ -140,14 +141,14 @@ export function CloudRuntimeDialog({ onClose }: { onClose: () => void }) {
                   required
                 />
                 <LabeledInput
-                  id="cloud-runtime-region"
+                  id={`${idPrefix}-region`}
                   label={t(($) => $.cloud_runtime.fields.region)}
                   value={region}
                   onChange={setRegion}
                   placeholder={DEFAULT_REGION}
                 />
                 <LabeledInput
-                  id="cloud-runtime-disk-size"
+                  id={`${idPrefix}-disk-size`}
                   label={t(($) => $.cloud_runtime.fields.disk_size)}
                   value={diskSizeGB}
                   onChange={setDiskSizeGB}
@@ -155,28 +156,28 @@ export function CloudRuntimeDialog({ onClose }: { onClose: () => void }) {
                   inputMode="numeric"
                 />
                 <LabeledInput
-                  id="cloud-runtime-image-id"
+                  id={`${idPrefix}-image-id`}
                   label={t(($) => $.cloud_runtime.fields.image_id)}
                   value={imageId}
                   onChange={setImageId}
                   placeholder="ami-..."
                 />
                 <LabeledInput
-                  id="cloud-runtime-subnet-id"
+                  id={`${idPrefix}-subnet-id`}
                   label={t(($) => $.cloud_runtime.fields.subnet_id)}
                   value={subnetId}
                   onChange={setSubnetId}
                   placeholder="subnet-..."
                 />
                 <LabeledInput
-                  id="cloud-runtime-key-name"
+                  id={`${idPrefix}-key-name`}
                   label={t(($) => $.cloud_runtime.fields.key_name)}
                   value={keyName}
                   onChange={setKeyName}
                   placeholder={t(($) => $.cloud_runtime.placeholders.key_name)}
                 />
                 <LabeledInput
-                  id="cloud-runtime-bootstrap-pat"
+                  id={`${idPrefix}-bootstrap-pat`}
                   label={t(($) => $.cloud_runtime.fields.bootstrap_pat)}
                   value={bootstrapPAT}
                   onChange={setBootstrapPAT}
@@ -251,7 +252,7 @@ export function CloudRuntimeDialog({ onClose }: { onClose: () => void }) {
           <Button
             type="submit"
             size="sm"
-            form="cloud-runtime-form"
+            form={formId}
             disabled={createNode.isPending}
           >
             {createNode.isPending ? (

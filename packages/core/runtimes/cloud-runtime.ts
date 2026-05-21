@@ -1,6 +1,5 @@
 import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import { runtimeKeys } from "./queries";
 
 export interface CloudRuntimeNode {
   id: string;
@@ -44,6 +43,19 @@ export const cloudRuntimeKeys = {
   nodes: (wsId: string) => [...cloudRuntimeKeys.all(wsId), "nodes"] as const,
 };
 
+const PENDING_NODE_STATUSES = new Set([
+  "launching",
+  "pending",
+  "starting",
+  "stopping",
+  "rebooting",
+  "terminating",
+]);
+
+export function isCloudRuntimeNodePending(status: string): boolean {
+  return PENDING_NODE_STATUSES.has(status.toLowerCase());
+}
+
 export function cloudRuntimeNodeListOptions(
   wsId: string,
   params?: ListCloudRuntimeNodesParams,
@@ -53,6 +65,10 @@ export function cloudRuntimeNodeListOptions(
   return queryOptions({
     queryKey: [...cloudRuntimeKeys.nodes(wsId), { limit, offset }] as const,
     queryFn: () => api.listCloudRuntimeNodes({ limit, offset }),
+    refetchInterval: (query) =>
+      query.state.data?.some((node) => isCloudRuntimeNodePending(node.status))
+        ? 5000
+        : false,
     staleTime: 15 * 1000,
   });
 }
@@ -69,7 +85,6 @@ export function useCreateCloudRuntimeNode(wsId: string) {
     }) => api.createCloudRuntimeNode(data, { userPAT }),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: cloudRuntimeKeys.all(wsId) });
-      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
     },
   });
 }
