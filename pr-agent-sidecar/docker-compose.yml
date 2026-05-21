@@ -1,0 +1,22 @@
+services:
+  pr-agent-sidecar:
+    build: .
+    container_name: pr-agent-sidecar
+    restart: unless-stopped
+    env_file: .env
+    networks: [multica-bridge]
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: pr-agent-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - pr-agent-sidecar
+    networks: [multica-bridge]
+
+networks:
+  multica-bridge:
+    external: true
