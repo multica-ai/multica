@@ -751,6 +751,39 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 	if shouldInheritParentMentions(parentComment, mentions, authorType) {
 		mentions = util.ParseMentions(parentComment.Content)
 	}
+
+	// Cross-squad @-mention gate: on a squad-assigned issue, an agent-authored
+	// comment may only enqueue tasks for agents that belong to the issue's
+	// squad. Catches the failure mode where a squad leader, using the A2A
+	// bypass on `multica agent list`, picks a same-role agent from a
+	// DIFFERENT squad / no squad at all instead of its own roster (see
+	// squadOperatingProtocol's "Squad Roster" rule). Member (human) authors
+	// keep full agency — they may deliberately reach outside the squad.
+	// Squad mentions (`m.Type == "squad"`) are not gated either; they route
+	// to the target squad's leader, who decides whether to accept.
+	var (
+		squadGate      bool
+		squadGateSquad db.Squad
+	)
+	if authorType == "agent" && issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid {
+		if s, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+			ID:          issue.AssigneeID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err == nil {
+			squadGate = true
+			squadGateSquad = s
+		} else {
+			// Squad assignee FK gone (delete race / inconsistent state):
+			// log and skip the gate. Failing open here matches the
+			// posture of the surrounding error paths in this file —
+			// observability is the recovery hook.
+			slog.Warn("cross-squad mention gate disabled: failed to load squad assignee",
+				"issue_id", uuidToString(issue.ID),
+				"squad_id", uuidToString(issue.AssigneeID),
+				"error", err)
+		}
+	}
+
 	for _, m := range mentions {
 		if m.Type == "squad" {
 			// @squad mention → trigger the squad's leader agent.
@@ -819,6 +852,47 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 		// agent→agent always passes).
 		if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, wsID) {
 			continue
+		}
+		// Cross-squad gate: on a squad-assigned issue with an agent author,
+		// drop the @mention when the target agent is neither a squad_member
+		// row nor the squad's LeaderID. The leader fallback covers legacy
+		// squads whose creation path bypassed CreateSquad's auto squad_member
+		// insert — those rows still have a valid LeaderID and should be
+		// reachable.
+		if squadGate {
+			isLeader := uuidToString(squadGateSquad.LeaderID) == uuidToString(agentUUID)
+			isMember := false
+			gateActive := true
+			if !isLeader {
+				ok, memberErr := h.Queries.IsSquadMember(ctx, db.IsSquadMemberParams{
+					SquadID:    squadGateSquad.ID,
+					MemberType: "agent",
+					MemberID:   agentUUID,
+				})
+				if memberErr != nil {
+					// Same posture as the squad-load failure above: log and
+					// fail open for this mention so a transient DB error
+					// cannot wedge legitimate dispatch. The slog warn is
+					// the recovery hook.
+					slog.Warn("cross-squad mention gate: IsSquadMember query failed — allowing mention",
+						"issue_id", uuidToString(issue.ID),
+						"squad_id", uuidToString(squadGateSquad.ID),
+						"mentioned_agent_id", uuidToString(agentUUID),
+						"error", memberErr)
+					gateActive = false
+				}
+				isMember = ok
+			}
+			if gateActive && !isLeader && !isMember {
+				slog.Warn("cross-squad @mention dropped: target agent is not a member of the issue's squad",
+					"issue_id", uuidToString(issue.ID),
+					"squad_id", uuidToString(squadGateSquad.ID),
+					"squad_name", squadGateSquad.Name,
+					"mentioned_agent_id", uuidToString(agentUUID),
+					"mentioned_agent_name", agent.Name,
+					"author_agent_id", authorID)
+				continue
+			}
 		}
 		// Dedup: skip if this agent already has a pending task for this issue.
 		hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{

@@ -114,6 +114,14 @@ func init() {
 	// agent list
 	agentListCmd.Flags().String("output", "table", "Output format: table or json")
 	agentListCmd.Flags().Bool("include-archived", false, "Include archived agents")
+	// --all opts out of the squad-leader scoping. When this CLI is invoked
+	// from inside a daemon-managed agent task that is a squad-leader run
+	// on a squad-assigned issue, `agent list` defaults to listing only that
+	// squad's members + the leader — `--all` returns the workspace-wide list
+	// instead (matching the pre-fix behavior). Has no effect outside a
+	// leader task. See server/internal/handler/agent.go ListAgents +
+	// taskSquadMemberSet for the matching server-side scope.
+	agentListCmd.Flags().Bool("all", false, "Return the full workspace agent list even inside a squad-leader task (default scopes to the squad's roster)")
 
 	// agent get
 	agentGetCmd.Flags().String("output", "json", "Output format: table or json")
@@ -288,6 +296,13 @@ func runAgentList(cmd *cobra.Command, _ []string) error {
 	params.Set("workspace_id", client.WorkspaceID)
 	if v, _ := cmd.Flags().GetBool("include-archived"); v {
 		params.Set("include_archived", "true")
+	}
+	// Squad-leader scoping: inside a daemon-managed agent task, the server
+	// narrows the list to the issue's squad iff the task is a leader task.
+	// Outside such a task the param is a no-op, so always passing it is
+	// safe. `--all` opts out.
+	if allFlag, _ := cmd.Flags().GetBool("all"); !allFlag && inAgentExecutionContext() {
+		params.Set("scope", "task_squad")
 	}
 	path := "/api/agents"
 	if len(params) > 0 {

@@ -81,7 +81,17 @@ Hard rules:
   other suitable members. The squad exists so work is split — bypassing
   it defeats the point.
 - Do NOT @mention members who don't appear in the Squad Roster below;
-  they are not part of this squad.
+  they are not part of this squad. The server enforces this for
+  agent-authored comments on a squad-assigned issue: an out-of-roster
+  agent mention is silently dropped (no task is ever enqueued for it),
+  so picking a same-role agent from outside the roster will look like
+  you delegated but result in nothing happening at all.
+- Do NOT call ` + "`" + `multica agent list` + "`" + ` (or any other
+  workspace-wide listing command) to find collaborators on this issue.
+  The Squad Roster above is authoritative — every UUID you need to
+  paste into a mention link is already there. Reaching outside the
+  roster via the global agent list is how cross-squad mis-dispatch
+  happens.
 - One delegation comment per turn is enough. Avoid spamming multiple
   near-identical comments.
 - If the squad has no member capable of the task, post a comment

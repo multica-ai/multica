@@ -170,6 +170,32 @@ func TestBuildSquadLeaderBriefing_SkipsArchivedAgent(t *testing.T) {
 	}
 }
 
+// TestBuildSquadLeaderBriefing_OutOfRosterGuardClauses pins the wording that
+// tells the leader (a) the server silently drops out-of-roster agent mentions
+// on a squad-assigned issue, and (b) `multica agent list` is off-limits for
+// finding collaborators. Both lines exist because LLM leaders kept reaching
+// outside the roster via the global agent list — see
+// squad_cross_squad_mention_test.go for the matching server-side gate.
+func TestBuildSquadLeaderBriefing_OutOfRosterGuardClauses(t *testing.T) {
+	ctx := context.Background()
+	leaderID, _ := seededLeaderAgent(t)
+	squad := seedSquadForBriefing(t, leaderID, "Guard Clauses", "")
+
+	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad)
+
+	for _, want := range []string{
+		// The server-enforcement disclosure — leader needs to know the
+		// drop is silent so it doesn't waste turns asserting delegation.
+		"silently dropped",
+		// The hard ban on the discovery path that leaks cross-squad agents.
+		"Do NOT call `multica agent list`",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected briefing to contain %q\n--- briefing ---\n%s", want, out)
+		}
+	}
+}
+
 // TestBuildSquadLeaderBriefing_MentionsRoundTrip is the contract test
 // guaranteeing every emitted mention markdown string parses back through
 // util.ParseMentions to its (type, id). If this ever breaks, the leader's

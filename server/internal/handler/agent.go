@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -323,10 +324,31 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	// to preserve A2A collaboration; members must be in allowed_principals
 	// (agent owner or workspace owner/admin) to see private agents.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+
+	// Squad-leader scope. CLI passes ?scope=task_squad by default when
+	// running inside a daemon-managed agent task; --all opts out. The
+	// hint is only honored for agent actors that are actually running a
+	// leader task on a squad-assigned issue — otherwise the param is a
+	// no-op so worker tasks and one-off CLI calls keep their full A2A
+	// view. Pairs with the squad cross-squad mention gate in
+	// enqueueMentionedAgentTasks: list narrows what the leader sees,
+	// the gate hard-rejects what slips through anyway.
+	var squadScopeSet map[string]struct{}
+	if actorType == "agent" && r.URL.Query().Get("scope") == "task_squad" {
+		if set, ok := h.taskSquadMemberSet(r); ok {
+			squadScopeSet = set
+		}
+	}
+
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
 		if a.Visibility == "private" && actorType == "member" {
 			if !memberAllowedForPrivateAgent(a, actorID, member.Role) {
+				continue
+			}
+		}
+		if squadScopeSet != nil {
+			if _, inSquad := squadScopeSet[uuidToString(a.ID)]; !inSquad {
 				continue
 			}
 		}
@@ -343,6 +365,63 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, visible)
+}
+
+// taskSquadMemberSet returns the set of agent UUIDs (as strings) that belong
+// to the squad of the task identified by the X-Task-ID header — the squad's
+// LeaderID plus every squad_member of type "agent". The second return is
+// false when the task is not a leader task on a squad-assigned issue, when
+// the task isn't loadable, or when any of the squad lookups fail; callers
+// treat the false return as "no scoping" and fall through to the unscoped
+// list. The leader is always included even when the squad_member row was
+// not auto-inserted (legacy squads predating CreateSquad's auto-add),
+// matching the leader fallback in the enqueueMentionedAgentTasks gate.
+func (h *Handler) taskSquadMemberSet(r *http.Request) (map[string]struct{}, bool) {
+	taskHeader := r.Header.Get("X-Task-ID")
+	if taskHeader == "" {
+		return nil, false
+	}
+	taskUUID, err := util.ParseUUID(taskHeader)
+	if err != nil {
+		return nil, false
+	}
+	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
+	if err != nil {
+		return nil, false
+	}
+	if !task.IsLeaderTask {
+		return nil, false
+	}
+	if !task.IssueID.Valid {
+		return nil, false
+	}
+	issue, err := h.Queries.GetIssue(r.Context(), task.IssueID)
+	if err != nil {
+		return nil, false
+	}
+	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
+		return nil, false
+	}
+	squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+		ID:          issue.AssigneeID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		return nil, false
+	}
+	members, err := h.Queries.ListSquadMembers(r.Context(), squad.ID)
+	if err != nil {
+		return nil, false
+	}
+	set := make(map[string]struct{}, len(members)+1)
+	set[uuidToString(squad.LeaderID)] = struct{}{}
+	for _, m := range members {
+		if m.MemberType != "agent" {
+			continue
+		}
+		set[uuidToString(m.MemberID)] = struct{}{}
+	}
+	return set, true
 }
 
 func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
