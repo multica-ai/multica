@@ -31,6 +31,7 @@ func testSigner(t *testing.T) *auth.CloudFrontSigner {
 	t.Setenv("CLOUDFRONT_KEY_PAIR_ID", "TESTKEY")
 	t.Setenv("CLOUDFRONT_DOMAIN", "cdn.example.com")
 	t.Setenv("COOKIE_DOMAIN", ".example.com")
+	t.Setenv("CLOUDFRONT_PRIVATE_KEY_SECRET", "")
 	t.Setenv("CLOUDFRONT_PRIVATE_KEY", b64Key)
 
 	signer := auth.NewCloudFrontSignerFromEnv()

@@ -481,7 +481,7 @@ function ActiveRow({
 
 function PastRow({
   task,
-  issueId,
+  issueId: _issueId,
   runIndex,
   colorClass,
   onHighlightComment,
@@ -506,26 +506,27 @@ function PastRow({
       ? `exit ${task.exit_code}`
       : null;
 
-  const [retrying, setRetrying] = useState(false);
+  // const [retrying, setRetrying] = useState(false); // Fork: retry (commented out with button)
 
   const handleTriggerClick =
     task.trigger_comment_id && onHighlightComment
       ? () => onHighlightComment(task.trigger_comment_id!)
       : undefined;
 
-  const canRetry = task.status === "failed" || task.status === "cancelled";
-
-  const handleRetry = async () => {
-    if (retrying) return;
-    setRetrying(true);
-    try {
-      await api.rerunIssue(issueId, task.id);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.retry_failed));
-    } finally {
-      setRetrying(false);
-    }
-  };
+  // Fork: retry support (UI button temporarily removed during upstream merge)
+  // Uncomment when retry button is re-added to the UI:
+  // const canRetry = task.status === "failed" || task.status === "cancelled";
+  // const handleRetry = async () => {
+  //   if (retrying) return;
+  //   setRetrying(true);
+  //   try {
+  //     await api.rerunIssue(issueId, task.id);
+  //   } catch (e) {
+  //     toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.retry_failed));
+  //   } finally {
+  //     setRetrying(false);
+  //   }
+  // };
 
   return (
     <RowShell task={task} runIndex={runIndex} colorClass={colorClass}>

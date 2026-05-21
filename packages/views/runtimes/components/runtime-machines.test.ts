@@ -23,7 +23,6 @@ function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
     metadata: { cli_version: "0.3.0" },
     owner_id: "user-1",
     visibility: "private",
-    timezone: "UTC",
     last_seen_at: new Date(NOW - 10_000).toISOString(),
     created_at: "2026-05-17T11:00:00Z",
     updated_at: "2026-05-17T11:00:00Z",
