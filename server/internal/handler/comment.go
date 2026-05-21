@@ -1024,8 +1024,8 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Content       string   `json:"content"`
-		AttachmentIDs []string `json:"attachment_ids"`
+		Content       string    `json:"content"`
+		AttachmentIDs *[]string `json:"attachment_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1036,9 +1036,14 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
-	if !ok {
-		return
+	var attachmentIDs []pgtype.UUID
+	replaceAttachments := req.AttachmentIDs != nil
+	if replaceAttachments {
+		var ok bool
+		attachmentIDs, ok = parseUUIDSliceOrBadRequest(w, *req.AttachmentIDs, "attachment_ids")
+		if !ok {
+			return
+		}
 	}
 
 	// NOTE: See CreateComment — Markdown is sanitized at render/edit time, not here.
@@ -1053,12 +1058,17 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Bind any newly uploaded attachments referenced in the edited content so
-	// they appear in the timeline's comment.attachments after refresh. Existing
-	// attachments already point at this comment via the upload flow; passing
-	// them again is a no-op at the SQL level.
-	if len(attachmentIDs) > 0 {
-		h.linkAttachmentsByIDs(r.Context(), comment.ID, existing.IssueID, attachmentIDs)
+	// Replace the comment attachment set when a modern client sends
+	// attachment_ids. Older clients omit the field; in that case preserve the
+	// existing attachment links rather than unlinking everything.
+	if replaceAttachments {
+		if err := h.Queries.ReplaceCommentAttachments(r.Context(), db.ReplaceCommentAttachmentsParams{
+			CommentID: comment.ID,
+			IssueID:   existing.IssueID,
+			Column3:   attachmentIDs,
+		}); err != nil {
+			slog.Error("failed to replace comment attachments", "error", err)
+		}
 	}
 
 	// Fetch reactions and attachments for the updated comment.
