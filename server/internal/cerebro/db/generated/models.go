@@ -56,23 +56,21 @@ type AgentBudgetOverride struct {
 }
 
 type AgentRuntime struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	DaemonID       pgtype.Text        `json:"daemon_id"`
-	Name           string             `json:"name"`
-	RuntimeMode    string             `json:"runtime_mode"`
-	Provider       string             `json:"provider"`
-	Status         string             `json:"status"`
-	DeviceInfo     string             `json:"device_info"`
-	Metadata       []byte             `json:"metadata"`
-	LastSeenAt     pgtype.Timestamptz `json:"last_seen_at"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	OwnerID        pgtype.UUID        `json:"owner_id"`
-	LegacyDaemonID pgtype.Text        `json:"legacy_daemon_id"`
-	SandboxEnabled pgtype.Bool        `json:"sandbox_enabled"`
-	// IANA timezone (e.g. 'Asia/Shanghai'). Bucket boundary for per-day and per-hour token usage aggregation. Defaults to UTC for runtimes that existed before MUL-1950; the daemon registration / web UI overwrites this with an operator-detected value going forward.
-	Timezone         string             `json:"timezone"`
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	DaemonID         pgtype.Text        `json:"daemon_id"`
+	Name             string             `json:"name"`
+	RuntimeMode      string             `json:"runtime_mode"`
+	Provider         string             `json:"provider"`
+	Status           string             `json:"status"`
+	DeviceInfo       string             `json:"device_info"`
+	Metadata         []byte             `json:"metadata"`
+	LastSeenAt       pgtype.Timestamptz `json:"last_seen_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	OwnerID          pgtype.UUID        `json:"owner_id"`
+	LegacyDaemonID   pgtype.Text        `json:"legacy_daemon_id"`
+	SandboxEnabled   pgtype.Bool        `json:"sandbox_enabled"`
 	Visibility       string             `json:"visibility"`
 	PausedAt         pgtype.Timestamptz `json:"paused_at"`
 	UnpauseAt        pgtype.Timestamptz `json:"unpause_at"`
@@ -195,6 +193,7 @@ type Autopilot struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	AssigneeType       string             `json:"assignee_type"`
+	ProjectID          pgtype.UUID        `json:"project_id"`
 	Scope              string             `json:"scope"`
 	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
 	GroupID            pgtype.UUID        `json:"group_id"`
@@ -232,6 +231,8 @@ type AutopilotTrigger struct {
 	LastFiredAt    pgtype.Timestamptz `json:"last_fired_at"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	Provider       string             `json:"provider"`
+	SigningSecret  pgtype.Text        `json:"signing_secret"`
 }
 
 type BudgetChangeLog struct {
@@ -761,6 +762,7 @@ type Issue struct {
 	FirstExecutedAt    pgtype.Timestamptz `json:"first_executed_at"`
 	Kind               string             `json:"kind"`
 	StartDate          pgtype.Timestamptz `json:"start_date"`
+	Metadata           []byte             `json:"metadata"`
 	IsPrivate          bool               `json:"is_private"`
 	Classification     string             `json:"classification"`
 }
@@ -1058,34 +1060,13 @@ type TaskUsage struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
-type TaskUsageDaily struct {
-	BucketDate       pgtype.Date        `json:"bucket_date"`
+type TaskUsageHourly struct {
+	BucketHour       pgtype.Timestamptz `json:"bucket_hour"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
 	RuntimeID        pgtype.UUID        `json:"runtime_id"`
-	Provider         string             `json:"provider"`
-	Model            string             `json:"model"`
-	InputTokens      int64              `json:"input_tokens"`
-	OutputTokens     int64              `json:"output_tokens"`
-	CacheReadTokens  int64              `json:"cache_read_tokens"`
-	CacheWriteTokens int64              `json:"cache_write_tokens"`
-	EventCount       int64              `json:"event_count"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-}
-
-type TaskUsageDailyDirty struct {
-	BucketDate  pgtype.Date        `json:"bucket_date"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	RuntimeID   pgtype.UUID        `json:"runtime_id"`
-	Provider    string             `json:"provider"`
-	Model       string             `json:"model"`
-	EnqueuedAt  pgtype.Timestamptz `json:"enqueued_at"`
-}
-
-type TaskUsageDashboardDaily struct {
-	BucketDate       pgtype.Date        `json:"bucket_date"`
-	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
 	AgentID          pgtype.UUID        `json:"agent_id"`
 	ProjectID        pgtype.UUID        `json:"project_id"`
+	Provider         string             `json:"provider"`
 	Model            string             `json:"model"`
 	InputTokens      int64              `json:"input_tokens"`
 	OutputTokens     int64              `json:"output_tokens"`
@@ -1096,25 +1077,18 @@ type TaskUsageDashboardDaily struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
-type TaskUsageDashboardDirty struct {
-	BucketDate  pgtype.Date        `json:"bucket_date"`
+type TaskUsageHourlyDirty struct {
+	BucketHour  pgtype.Timestamptz `json:"bucket_hour"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	RuntimeID   pgtype.UUID        `json:"runtime_id"`
 	AgentID     pgtype.UUID        `json:"agent_id"`
 	ProjectID   pgtype.UUID        `json:"project_id"`
+	Provider    string             `json:"provider"`
 	Model       string             `json:"model"`
 	EnqueuedAt  pgtype.Timestamptz `json:"enqueued_at"`
 }
 
-type TaskUsageDashboardRollupState struct {
-	ID                int16              `json:"id"`
-	WatermarkAt       pgtype.Timestamptz `json:"watermark_at"`
-	LastRunStartedAt  pgtype.Timestamptz `json:"last_run_started_at"`
-	LastRunFinishedAt pgtype.Timestamptz `json:"last_run_finished_at"`
-	LastRunRows       int64              `json:"last_run_rows"`
-	LastError         pgtype.Text        `json:"last_error"`
-}
-
-type TaskUsageRollupState struct {
+type TaskUsageHourlyRollupState struct {
 	ID                int16              `json:"id"`
 	WatermarkAt       pgtype.Timestamptz `json:"watermark_at"`
 	LastRunStartedAt  pgtype.Timestamptz `json:"last_run_started_at"`
@@ -1137,7 +1111,9 @@ type User struct {
 	StarterContentState     pgtype.Text        `json:"starter_content_state"`
 	Language                pgtype.Text        `json:"language"`
 	ProfileDescription      string             `json:"profile_description"`
-	Preferences             []byte             `json:"preferences"`
+	// User-preferred IANA timezone for report rendering (Viewing tz). NULL means "use the browser-detected tz at render time". Affects dashboards, charts, and any "today" label shown to this user. Does not affect data materialisation — all rollups remain in UTC.
+	Timezone    pgtype.Text `json:"timezone"`
+	Preferences []byte      `json:"preferences"`
 }
 
 type UserBudgetOverride struct {
@@ -1174,6 +1150,31 @@ type VerificationCode struct {
 	Used      bool               `json:"used"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	Attempts  int32              `json:"attempts"`
+}
+
+type WebhookDelivery struct {
+	ID                     pgtype.UUID        `json:"id"`
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	AutopilotID            pgtype.UUID        `json:"autopilot_id"`
+	TriggerID              pgtype.UUID        `json:"trigger_id"`
+	Provider               string             `json:"provider"`
+	Event                  string             `json:"event"`
+	DedupeKey              pgtype.Text        `json:"dedupe_key"`
+	DedupeSource           pgtype.Text        `json:"dedupe_source"`
+	SignatureStatus        string             `json:"signature_status"`
+	Status                 string             `json:"status"`
+	AttemptCount           int32              `json:"attempt_count"`
+	SelectedHeaders        []byte             `json:"selected_headers"`
+	ContentType            pgtype.Text        `json:"content_type"`
+	RawBody                []byte             `json:"raw_body"`
+	ResponseStatus         pgtype.Int4        `json:"response_status"`
+	ResponseBody           pgtype.Text        `json:"response_body"`
+	AutopilotRunID         pgtype.UUID        `json:"autopilot_run_id"`
+	ReplayedFromDeliveryID pgtype.UUID        `json:"replayed_from_delivery_id"`
+	Error                  pgtype.Text        `json:"error"`
+	ReceivedAt             pgtype.Timestamptz `json:"received_at"`
+	LastAttemptAt          pgtype.Timestamptz `json:"last_attempt_at"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 }
 
 type WorkSession struct {
