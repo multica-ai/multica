@@ -1,20 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { captureEvent } from "@multica/core/analytics";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
 import {
-  bootstrapNoRuntimeOnboarding,
   completeOnboarding,
   ONBOARDING_STEP_ORDER,
+  recordOnboardingRuntimeChoice,
+  recordOnboardingRuntimeSkipped,
   saveQuestionnaire,
   type OnboardingStep,
   type QuestionnaireAnswers,
 } from "@multica/core/onboarding";
-import { issueKeys } from "@multica/core/issues/queries";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
 import type { AgentRuntime, Workspace } from "@multica/core/types";
 import { StepWelcome } from "./steps/step-welcome";
@@ -99,8 +99,6 @@ export function OnboardingFlow({
   // deliberately not saved, so every entry starts at Welcome.
   const storedQuestionnaire = mergeQuestionnaire(user.onboarding_questionnaire);
   const [answers, setAnswers] = useState<QuestionnaireAnswers>(storedQuestionnaire);
-
-  const qc = useQueryClient();
 
   const [step, setStep] = useState<OnboardingStep>("welcome");
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
@@ -206,35 +204,29 @@ export function OnboardingFlow({
   const handleRuntimeNext = useCallback(
     async (rt: AgentRuntime | null) => {
       if (!workspace) return;
-      if (!rt) {
-        // No runtime -> no agent execution yet. Create one focused
-        // install-runtime onboarding issue so the user lands on a
-        // concrete next step. (This path DOES mark onboarded — the user
-        // explicitly opted out of the runtime branch, so the workspace
-        // OnboardingHelperModal should not pop for them either.)
-        try {
-          const result = await bootstrapNoRuntimeOnboarding(workspace.id);
-          await qc.invalidateQueries({ queryKey: issueKeys.all(workspace.id) });
-          onComplete(workspace, result.issue_id || undefined);
-        } catch (err) {
-          toast.error(
-            err instanceof Error ? err.message : t(($) => $.errors.skip_failed),
-          );
+      // Step 3 is now pure intent capture: PATCH the user's choice into
+      // `users.onboarding_runtime_id` or `users.onboarding_runtime_skipped`,
+      // then navigate. All side effects (creating the Helper agent, seeding
+      // the install-runtime issue, marking onboarded) happen in the workspace
+      // shell via `<WorkspaceOnboardingInit />`, which reads those two fields
+      // off `me` and runs exactly one branch. This is the asymmetric Skip /
+      // Connect split being collapsed — both paths PATCH only, neither calls
+      // bootstrap from here.
+      try {
+        if (rt) {
+          await recordOnboardingRuntimeChoice(rt.id);
+        } else {
+          await recordOnboardingRuntimeSkipped();
         }
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : t(($) => $.errors.skip_failed),
+        );
         return;
       }
-
-      // Runtime picked. Exit the onboarding flow into the workspace
-      // WITHOUT calling bootstrapRuntimeOnboarding — `onboarded_at` stays
-      // NULL so the workspace OnboardingHelperModal fires there. The
-      // modal owns the actual Helper-creation step (with a starter
-      // prompt the user picks from 3 cards), and fetches the workspace
-      // runtime list itself to know which runtime to bootstrap against
-      // — we don't need to thread `rt` through onComplete.
-      void rt;
       onComplete(workspace, undefined);
     },
-    [workspace, qc, onComplete, t],
+    [workspace, onComplete, t],
   );
 
   const handleBack = useCallback((from: OnboardingStep) => {
