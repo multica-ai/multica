@@ -2132,13 +2132,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
 	}
 	if req.Description != nil {
-		// Annotate description with actor attribution when content is appended.
-		newDesc := annotateDescriptionUpdate(
-			prevIssue.Description.String,
-			*req.Description,
-			h.actorDisplayName(r.Context(), actorType, actorID, userID),
-		)
-		params.Description = pgtype.Text{String: newDesc, Valid: true}
+		params.Description = pgtype.Text{String: *req.Description, Valid: true}
 	}
 	if req.Status != nil {
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}
@@ -2960,38 +2954,6 @@ func (h *Handler) ClearIssueHistory(w http.ResponseWriter, r *http.Request) {
 		"tasks_deleted":    resp.TasksDeleted,
 	})
 	writeJSON(w, http.StatusOK, resp)
-}
-
-// annotateDescriptionUpdate injects an attribution divider when the new
-// description extends the old one (i.e. content was appended). If the
-// update is a full replacement or the description was empty before, the
-// new content is returned unchanged — the activity log already tracks
-// the author of the change.
-func annotateDescriptionUpdate(oldDesc, newDesc, actorName string) string {
-	oldTrimmed := strings.TrimRight(oldDesc, " \t\n\r")
-	newTrimmed := strings.TrimRight(newDesc, " \t\n\r")
-
-	// No previous content or descriptions are identical — nothing to annotate.
-	if oldTrimmed == "" || oldTrimmed == newTrimmed {
-		return newDesc
-	}
-
-	// Detect append: new description starts with the old content.
-	if !strings.HasPrefix(newTrimmed, oldTrimmed) {
-		return newDesc // Full replacement — cannot insert attribution at boundary.
-	}
-
-	// Extract the appended portion (everything after the old prefix).
-	appended := newTrimmed[len(oldTrimmed):]
-	if strings.TrimSpace(appended) == "" {
-		return newDesc // Only whitespace was appended — skip annotation.
-	}
-
-	// Build the attribution divider.
-	ts := time.Now().UTC().Format("2006-01-02 15:04")
-	attribution := fmt.Sprintf("\n\n---\n*✏️ Updated by %s — %s (UTC)*\n", actorName, ts)
-
-	return oldTrimmed + attribution + appended
 }
 
 // actorDisplayName returns a human-readable name for the given actor.
