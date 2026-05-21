@@ -43,10 +43,12 @@ type dingtalkDeliveryPayload struct {
 type notificationEventPayload struct {
 	Type            string `json:"type"`
 	Title           string `json:"title"`
+	Summary         string `json:"summary,omitempty"`
 	Body            string `json:"body"`
 	Link            string `json:"link"`
 	IssueIdentifier string `json:"issue_identifier"`
 	ActorName       string `json:"actor_name,omitempty"`
+	RenderMode      string `json:"render_mode,omitempty"`
 }
 
 type dingTalkBindingMetadata struct {
@@ -622,6 +624,34 @@ func buildDingTalkDeliveryText(event notificationEventPayload) string {
 }
 
 func buildDingTalkDeliveryMarkdown(event notificationEventPayload) notifyutil.DingTalkMarkdownMessage {
+	// Resolve render mode: DingTalk defaults to auto (biased compact)
+	renderMode := ResolveRenderMode(RenderMode(event.RenderMode), RenderModeAuto, event.Body)
+
+	if renderMode == RenderModeCompact {
+		// Compact: single-line summary optimized for IM feed
+		summary := ExtractSummary(event.Summary, event.Body, event.Title, defaultIMSummaryMaxChars)
+		link := strings.TrimSpace(event.Link)
+		if link != "" {
+			link = dingtalkExternalBrowserURL(link)
+		}
+		compactText := BuildCompactIMNotification(
+			event.Type,
+			event.ActorName,
+			event.IssueIdentifier,
+			link,
+			summary,
+		)
+		cardTitle := EventTypeLabel(event.Type)
+		if identifier := strings.TrimSpace(event.IssueIdentifier); identifier != "" {
+			cardTitle += " " + identifier
+		}
+		return notifyutil.DingTalkMarkdownMessage{
+			Title: truncateDingTalkCardText(cardTitle, dingTalkMarkdownTitleLimit),
+			Text:  compactText,
+		}
+	}
+
+	// Detail: full rendering (legacy behavior)
 	title := buildDingTalkIssueLabel(event)
 	body := sanitizeDingTalkMessageText(event.Body)
 	link := strings.TrimSpace(event.Link)
@@ -881,19 +911,34 @@ func processOpenclawWeixinDelivery(ctx context.Context, queries *db.Queries, dae
 	body := strings.TrimSpace(eventPayload.Body)
 	link := strings.TrimSpace(eventPayload.Link)
 
-	// Build content: combine title and body for the WeChat message
-	content := ""
-	if title != "" && body != "" {
-		content = fmt.Sprintf("[%s] %s\n\n%s", eventPayload.Type, title, body)
-	} else if title != "" {
-		content = fmt.Sprintf("[%s] %s", eventPayload.Type, title)
-	} else if body != "" {
-		content = body
+	// Resolve render mode: WeChat defaults to auto (biased compact)
+	renderMode := ResolveRenderMode(RenderMode(eventPayload.RenderMode), RenderModeAuto, body)
+
+	var content string
+	if renderMode == RenderModeCompact {
+		// Compact: single-line summary format
+		summary := ExtractSummary(eventPayload.Summary, body, title, defaultIMSummaryMaxChars)
+		content = BuildCompactIMNotification(
+			eventPayload.Type,
+			eventPayload.ActorName,
+			eventPayload.IssueIdentifier,
+			link,
+			summary,
+		)
 	} else {
-		content = fmt.Sprintf("[%s] Notification from Multica", eventPayload.Type)
-	}
-	if link != "" {
-		content += "\n\n" + link
+		// Detail: full body (legacy behavior)
+		if title != "" && body != "" {
+			content = fmt.Sprintf("[%s] %s\n\n%s", eventPayload.Type, title, body)
+		} else if title != "" {
+			content = fmt.Sprintf("[%s] %s", eventPayload.Type, title)
+		} else if body != "" {
+			content = body
+		} else {
+			content = fmt.Sprintf("[%s] Notification from Multica", eventPayload.Type)
+		}
+		if link != "" {
+			content += "\n\n" + link
+		}
 	}
 
 	// Find the recipient user and send via daemon WS

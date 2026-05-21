@@ -417,7 +417,7 @@ func (q *Queries) ListExternalAccountBindingsByUser(ctx context.Context, userID 
 }
 
 const listNotificationChannelPreferencesByUser = `-- name: ListNotificationChannelPreferencesByUser :many
-SELECT id, user_id, channel, event_type, enabled, binding_id, created_at, updated_at FROM notification_channel_preference
+SELECT id, user_id, channel, event_type, enabled, binding_id, created_at, updated_at, render_mode FROM notification_channel_preference
 WHERE user_id = $1
 ORDER BY channel ASC, event_type ASC
 `
@@ -440,6 +440,7 @@ func (q *Queries) ListNotificationChannelPreferencesByUser(ctx context.Context, 
 			&i.BindingID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RenderMode,
 		); err != nil {
 			return nil, err
 		}
@@ -648,22 +649,25 @@ INSERT INTO notification_channel_preference (
     channel,
     event_type,
     enabled,
-    binding_id
-) VALUES ($1, $2, $3, $4, $5)
+    binding_id,
+    render_mode
+) VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (user_id, channel, event_type)
 DO UPDATE SET
     enabled = EXCLUDED.enabled,
     binding_id = EXCLUDED.binding_id,
+    render_mode = EXCLUDED.render_mode,
     updated_at = now()
-RETURNING id, user_id, channel, event_type, enabled, binding_id, created_at, updated_at
+RETURNING id, user_id, channel, event_type, enabled, binding_id, created_at, updated_at, render_mode
 `
 
 type UpsertNotificationChannelPreferenceParams struct {
-	UserID    pgtype.UUID `json:"user_id"`
-	Channel   string      `json:"channel"`
-	EventType string      `json:"event_type"`
-	Enabled   bool        `json:"enabled"`
-	BindingID pgtype.UUID `json:"binding_id"`
+	UserID     pgtype.UUID `json:"user_id"`
+	Channel    string      `json:"channel"`
+	EventType  string      `json:"event_type"`
+	Enabled    bool        `json:"enabled"`
+	BindingID  pgtype.UUID `json:"binding_id"`
+	RenderMode string      `json:"render_mode"`
 }
 
 func (q *Queries) UpsertNotificationChannelPreference(ctx context.Context, arg UpsertNotificationChannelPreferenceParams) (NotificationChannelPreference, error) {
@@ -673,6 +677,7 @@ func (q *Queries) UpsertNotificationChannelPreference(ctx context.Context, arg U
 		arg.EventType,
 		arg.Enabled,
 		arg.BindingID,
+		arg.RenderMode,
 	)
 	var i NotificationChannelPreference
 	err := row.Scan(
@@ -684,6 +689,7 @@ func (q *Queries) UpsertNotificationChannelPreference(ctx context.Context, arg U
 		&i.BindingID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RenderMode,
 	)
 	return i, err
 }

@@ -518,14 +518,15 @@ type MentionFrequency struct {
 }
 
 type NotificationChannelPreference struct {
-	ID        pgtype.UUID        `json:"id"`
-	UserID    pgtype.UUID        `json:"user_id"`
-	Channel   string             `json:"channel"`
-	EventType string             `json:"event_type"`
-	Enabled   bool               `json:"enabled"`
-	BindingID pgtype.UUID        `json:"binding_id"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ID         pgtype.UUID        `json:"id"`
+	UserID     pgtype.UUID        `json:"user_id"`
+	Channel    string             `json:"channel"`
+	EventType  string             `json:"event_type"`
+	Enabled    bool               `json:"enabled"`
+	BindingID  pgtype.UUID        `json:"binding_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	RenderMode string             `json:"render_mode"`
 }
 
 type NotificationDelivery struct {

@@ -66,25 +66,32 @@ export function buildWelcomeIssueText(
   ].join("\n");
 
   switch (q.use_case) {
-    case "coding":
+    case "ship_code":
       return {
         title: "👋 欢迎来到 Multica —— 一起开工",
         description: `${header}你好智能体，这是 ${name} 第一次用 Multica。${name} 主要会让你做 **编码相关的工作**。\n\n${sharedInstructions}`,
       };
-    case "planning":
+    case "manage_team":
+    case "plan_research":
       return {
         title: "👋 欢迎来到 Multica —— 一起开工",
         description: `${header}你好智能体，这是 ${name} 第一次用 Multica。${name} 希望你帮忙做 **规划与拆解工作**。\n\n${sharedInstructions}`,
       };
-    case "writing_research":
+    case "write_publish":
       return {
         title: "👋 欢迎来到 Multica —— 一起开工",
-        description: `${header}你好智能体，这是 ${name} 第一次用 Multica。${name} 会让你做 **调研和写作** —— 起草、摘要、分析。\n\n${sharedInstructions}`,
+        description: `${header}你好智能体，这是 ${name} 第一次用 Multica。${name} 会让你做 **写作、编辑、发布** —— 起草、摘要、分析。\n\n${sharedInstructions}`,
       };
-    case "explore":
+    case "evaluate":
       return {
         title: "👋 欢迎来到 Multica —— 一起开工",
         description: `${header}你好智能体，这是 ${name} 第一次用 Multica。${name} 还在 **探索** Multica 能做什么 —— 暂时没有具体目标。\n\n${exploreInstructions}`,
+      };
+    case "personal_tasks":
+    case "automate_ops":
+      return {
+        title: "👋 欢迎来到 Multica —— 一起开工",
+        description: `${header}你好智能体，这是 ${name} 第一次用 Multica。${name} 希望你帮忙做 **日常任务和自动化**。\n\n${sharedInstructions}`,
       };
     case "other": {
       const customUseCase = (q.use_case_other ?? "").trim();
@@ -188,7 +195,7 @@ export function buildAgentGuidedSubIssues(
 
   const tier2: ImportStarterIssuePayload[] = [];
 
-  if (q.team_size === "team") {
+  if (q.use_case === "manage_team") {
     tier2.push({
       status: "todo",
       priority: "medium",
@@ -211,7 +218,7 @@ export function buildAgentGuidedSubIssues(
     });
   }
 
-  if (q.role === "developer" || q.use_case === "coding") {
+  if (q.role === "engineer" || q.use_case === "ship_code") {
     tier2.push({
       status: "todo",
       priority: "medium",
@@ -492,7 +499,7 @@ export function buildSelfServeSubIssues(
     },
   ];
 
-  if (q.role === "developer" || q.use_case === "coding") {
+  if (q.role === "engineer" || q.use_case === "ship_code") {
     tier3.push({
       status: "backlog",
       priority: "low",
@@ -511,7 +518,7 @@ export function buildSelfServeSubIssues(
     });
   }
 
-  if (q.team_size === "team") {
+  if (q.use_case === "manage_team") {
     tier3.push({
       status: "backlog",
       priority: "low",

@@ -3,9 +3,10 @@
 /**
  * AttachmentPreviewModal — full-screen inline preview for an attachment.
  *
- * Sibling to the existing `ImageLightbox` (extensions/image-view.tsx) which
- * keeps owning images. This modal handles 6 other PreviewKinds:
+ * Single modal for every previewable kind. Handles 7 PreviewKinds:
  *
+ *   - image : <img className="object-contain"> centered in the modal frame.
+ *             Replaces the previous standalone ImageLightbox.
  *   - pdf   : <iframe src={download_url}> — relies on Chromium's PDFium
  *             plugin. On desktop, requires webPreferences.plugins=true
  *             (see apps/desktop/src/main/index.ts).
@@ -41,9 +42,11 @@ import {
   PreviewTooLargeError,
   PreviewUnsupportedError,
 } from "@multica/core/api";
-import { Download, FileText, Loader2, X } from "lucide-react";
+import { Download, ExternalLink, FileText, Loader2, X } from "lucide-react";
 import type { Attachment } from "@multica/core/types";
+import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { useT } from "../i18n";
+import { useNavigation } from "../navigation";
 import { openExternal } from "../platform";
 import { ReadonlyContent } from "./readonly-content";
 import {
@@ -53,6 +56,7 @@ import {
 } from "./utils/preview";
 import { useDownloadAttachment } from "./use-download-attachment";
 import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
+import { withFragmentNavShim } from "./utils/iframe-fragment-nav";
 import { CodeBlockStatic } from "./code-block-static";
 
 // ---------------------------------------------------------------------------
@@ -75,7 +79,7 @@ export type PreviewSource =
 
 // PreviewKinds that can render from a URL-only source. Text-based kinds
 // (markdown / html / text) need the /content proxy which is ID-keyed.
-const URL_ONLY_KINDS = new Set<PreviewKind>(["pdf", "video", "audio"]);
+const URL_ONLY_KINDS = new Set<PreviewKind>(["image", "pdf", "video", "audio"]);
 
 // Normalized view used everywhere downstream of `useAttachmentPreview`.
 // `attachmentId === null` signals URL-only mode (download falls back to
@@ -178,6 +182,10 @@ export function AttachmentPreviewModal({
   const { t } = useT("editor");
   const download = useDownloadAttachment();
   const state = normalize(source);
+  // useWorkspaceSlug (not useWorkspacePaths) — returns null outside a
+  // workspace route instead of throwing, so the new-tab button just hides.
+  const slug = useWorkspaceSlug();
+  const navigation = useNavigation();
 
   useEffect(() => {
     if (!open) return;
@@ -199,6 +207,26 @@ export function AttachmentPreviewModal({
     } else {
       openExternal(state.mediaUrl);
     }
+  };
+
+  // Open-in-new-tab mirrors HtmlAttachmentPreview's inline toolbar: only the
+  // `html` kind has a dedicated full-page route (/attachments/{id}/preview).
+  // Gated on slug + attachmentId for the same reason — URL-only sources
+  // can't address the /content proxy the page relies on.
+  const canOpenInNewTab = kind === "html" && !!slug && !!state.attachmentId;
+  const handleOpenInNewTab = () => {
+    if (!slug || !state.attachmentId) return;
+    const nameQuery = state.filename
+      ? `?name=${encodeURIComponent(state.filename)}`
+      : "";
+    const path = `${paths.workspace(slug).attachmentPreview(state.attachmentId)}${nameQuery}`;
+    if (navigation.openInNewTab) {
+      navigation.openInNewTab(path, state.filename, { activate: true });
+    } else {
+      const url = navigation.getShareableUrl(path);
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+    onClose();
   };
 
   if (!open || typeof document === "undefined") return null;
@@ -226,6 +254,17 @@ export function AttachmentPreviewModal({
             {state.contentType || "—"}
           </span>
           <div className="ml-auto flex items-center gap-1">
+            {canOpenInNewTab && (
+              <button
+                type="button"
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                title={t(($) => $.attachment.open_in_new_tab)}
+                aria-label={t(($) => $.attachment.open_in_new_tab)}
+                onClick={handleOpenInNewTab}
+              >
+                <ExternalLink className="size-4" />
+              </button>
+            )}
             <button
               type="button"
               className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
@@ -307,6 +346,16 @@ function PreviewContent({
   }
 
   switch (kind) {
+    case "image":
+      return (
+        <div className="flex h-full w-full items-center justify-center bg-black/40 p-4">
+          <img
+            src={state.mediaUrl}
+            alt={state.filename}
+            className="max-h-full max-w-full rounded-lg object-contain"
+          />
+        </div>
+      );
     case "pdf":
       return (
         <iframe
@@ -352,7 +401,7 @@ function PreviewContent({
           onDownload={onDownload}
           render={(text) => (
             <iframe
-              srcDoc={text}
+              srcDoc={withFragmentNavShim(text)}
               // `allow-scripts` without `allow-same-origin` — scripts run
               // in an opaque origin and cannot read cookies / localStorage
               // / parent state, nor escape via top-nav / popups / forms.

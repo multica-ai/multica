@@ -94,34 +94,67 @@ func (q *Queries) CountCreatedIssueAssignees(ctx context.Context, arg CountCreat
 }
 
 const countIssues = `-- name: CountIssues :one
-SELECT count(*) FROM issue
-WHERE workspace_id = $1
-  AND ($2::text IS NULL OR status = $2)
-  AND ($3::text IS NULL OR priority = $3)
-  AND (COALESCE(cardinality($4::text[]), 0) = 0 OR priority = ANY($4::text[]))
-  AND ($5::uuid IS NULL OR assignee_id = $5)
-  AND ($6::uuid[] IS NULL OR assignee_id = ANY($6::uuid[]))
+SELECT count(*) FROM issue i
+WHERE i.workspace_id = $1
+  AND ($2::text IS NULL OR i.status = $2)
+  AND ($3::text IS NULL OR i.priority = $3)
+  AND (COALESCE(cardinality($4::text[]), 0) = 0 OR i.priority = ANY($4::text[]))
+  AND ($5::uuid IS NULL OR i.assignee_id = $5)
+  AND ($6::uuid[] IS NULL OR i.assignee_id = ANY($6::uuid[]))
   AND (
     (
       COALESCE(cardinality($7::text[]), 0) = 0
       AND $8::boolean IS NOT TRUE
     )
-    OR ($8::boolean IS TRUE AND assignee_id IS NULL)
-    OR (assignee_id IS NOT NULL AND (assignee_type || ':' || assignee_id::text) = ANY($7::text[]))
+    OR ($8::boolean IS TRUE AND i.assignee_id IS NULL)
+    OR (i.assignee_id IS NOT NULL AND (i.assignee_type || ':' || i.assignee_id::text) = ANY($7::text[]))
   )
-  AND ($9::uuid IS NULL OR creator_id = $9)
+  AND ($9::uuid IS NULL OR i.creator_id = $9)
   AND (
     COALESCE(cardinality($10::text[]), 0) = 0
-    OR (creator_type || ':' || creator_id::text) = ANY($10::text[])
+    OR (i.creator_type || ':' || i.creator_id::text) = ANY($10::text[])
   )
-  AND ($11::uuid IS NULL OR project_id = $11)
+  AND ($11::uuid IS NULL OR i.project_id = $11)
   AND (
     (
       COALESCE(cardinality($12::uuid[]), 0) = 0
       AND $13::boolean IS NOT TRUE
     )
-    OR ($13::boolean IS TRUE AND project_id IS NULL)
-    OR (project_id = ANY($12::uuid[]))
+    OR ($13::boolean IS TRUE AND i.project_id IS NULL)
+    OR (i.project_id = ANY($12::uuid[]))
+  )
+  AND ($14::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
+  AND (
+    $15::uuid IS NULL
+    OR (i.assignee_type = 'agent' AND i.assignee_id IN (
+          SELECT a.id FROM agent a
+           WHERE a.workspace_id = $1
+             AND a.owner_id     = $15::uuid
+    ))
+    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
+          SELECT sm.squad_id
+            FROM squad_member sm
+            JOIN squad s ON s.id = sm.squad_id
+           WHERE s.workspace_id = $1
+             AND sm.member_type = 'member'
+             AND sm.member_id   = $15::uuid
+          UNION
+          SELECT s.id
+            FROM squad s
+            JOIN agent a ON a.id = s.leader_id
+           WHERE s.workspace_id = $1
+             AND a.workspace_id = $1
+             AND a.owner_id     = $15::uuid
+          UNION
+          SELECT sm.squad_id
+            FROM squad_member sm
+            JOIN squad s ON s.id = sm.squad_id
+            JOIN agent a ON a.id = sm.member_id
+           WHERE s.workspace_id = $1
+             AND sm.member_type = 'agent'
+             AND a.workspace_id = $1
+             AND a.owner_id     = $15::uuid
+    ))
   )
 `
 
@@ -139,8 +172,11 @@ type CountIssuesParams struct {
 	ProjectID         pgtype.UUID   `json:"project_id"`
 	ProjectIds        []pgtype.UUID `json:"project_ids"`
 	IncludeNoProject  pgtype.Bool   `json:"include_no_project"`
+	Scheduled         pgtype.Bool   `json:"scheduled"`
+	InvolvesUserID    pgtype.UUID   `json:"involves_user_id"`
 }
 
+// See ListIssues for the semantics of involves_user_id.
 func (q *Queries) CountIssues(ctx context.Context, arg CountIssuesParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countIssues,
 		arg.WorkspaceID,
@@ -156,6 +192,8 @@ func (q *Queries) CountIssues(ctx context.Context, arg CountIssuesParams) (int64
 		arg.ProjectID,
 		arg.ProjectIds,
 		arg.IncludeNoProject,
+		arg.Scheduled,
+		arg.InvolvesUserID,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -339,18 +377,18 @@ LIMIT 1
 `
 
 type FindActiveDuplicateIssueParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Column2     pgtype.UUID `json:"column_2"`
-	Column3     pgtype.UUID `json:"column_3"`
-	Title       string      `json:"title"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	ProjectID       pgtype.UUID `json:"project_id"`
+	ParentIssueID   pgtype.UUID `json:"parent_issue_id"`
+	NormalizedTitle string      `json:"normalized_title"`
 }
 
 func (q *Queries) FindActiveDuplicateIssue(ctx context.Context, arg FindActiveDuplicateIssueParams) (Issue, error) {
 	row := q.db.QueryRow(ctx, findActiveDuplicateIssue,
 		arg.WorkspaceID,
-		arg.Column2,
-		arg.Column3,
-		arg.Title,
+		arg.ProjectID,
+		arg.ParentIssueID,
+		arg.NormalizedTitle,
 	)
 	var i Issue
 	err := row.Scan(
@@ -600,39 +638,72 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 }
 
 const listIssues = `-- name: ListIssues :many
-SELECT id, workspace_id, title, description, status, priority,
-       assignee_type, assignee_id, creator_type, creator_id,
-       parent_issue_id, position, start_date, due_date, created_at, updated_at, number, project_id
-FROM issue
-WHERE workspace_id = $1
-  AND ($4::text IS NULL OR status = $4)
-  AND ($5::text IS NULL OR priority = $5)
-  AND (COALESCE(cardinality($6::text[]), 0) = 0 OR priority = ANY($6::text[]))
-  AND ($7::uuid IS NULL OR assignee_id = $7)
-  AND ($8::uuid[] IS NULL OR assignee_id = ANY($8::uuid[]))
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+       i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id
+FROM issue i
+WHERE i.workspace_id = $1
+  AND ($4::text IS NULL OR i.status = $4)
+  AND ($5::text IS NULL OR i.priority = $5)
+  AND (COALESCE(cardinality($6::text[]), 0) = 0 OR i.priority = ANY($6::text[]))
+  AND ($7::uuid IS NULL OR i.assignee_id = $7)
+  AND ($8::uuid[] IS NULL OR i.assignee_id = ANY($8::uuid[]))
   AND (
     (
       COALESCE(cardinality($9::text[]), 0) = 0
       AND $10::boolean IS NOT TRUE
     )
-    OR ($10::boolean IS TRUE AND assignee_id IS NULL)
-    OR (assignee_id IS NOT NULL AND (assignee_type || ':' || assignee_id::text) = ANY($9::text[]))
+    OR ($10::boolean IS TRUE AND i.assignee_id IS NULL)
+    OR (i.assignee_id IS NOT NULL AND (i.assignee_type || ':' || i.assignee_id::text) = ANY($9::text[]))
   )
-  AND ($11::uuid IS NULL OR creator_id = $11)
+  AND ($11::uuid IS NULL OR i.creator_id = $11)
   AND (
     COALESCE(cardinality($12::text[]), 0) = 0
-    OR (creator_type || ':' || creator_id::text) = ANY($12::text[])
+    OR (i.creator_type || ':' || i.creator_id::text) = ANY($12::text[])
   )
-  AND ($13::uuid IS NULL OR project_id = $13)
+  AND ($13::uuid IS NULL OR i.project_id = $13)
   AND (
     (
       COALESCE(cardinality($14::uuid[]), 0) = 0
       AND $15::boolean IS NOT TRUE
     )
-    OR ($15::boolean IS TRUE AND project_id IS NULL)
-    OR (project_id = ANY($14::uuid[]))
+    OR ($15::boolean IS TRUE AND i.project_id IS NULL)
+    OR (i.project_id = ANY($14::uuid[]))
   )
-ORDER BY position ASC, created_at DESC
+  AND ($16::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
+  AND (
+    $17::uuid IS NULL
+    OR (i.assignee_type = 'agent' AND i.assignee_id IN (
+          SELECT a.id FROM agent a
+           WHERE a.workspace_id = $1
+             AND a.owner_id     = $17::uuid
+    ))
+    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
+          SELECT sm.squad_id
+            FROM squad_member sm
+            JOIN squad s ON s.id = sm.squad_id
+           WHERE s.workspace_id = $1
+             AND sm.member_type = 'member'
+             AND sm.member_id   = $17::uuid
+          UNION
+          SELECT s.id
+            FROM squad s
+            JOIN agent a ON a.id = s.leader_id
+           WHERE s.workspace_id = $1
+             AND a.workspace_id = $1
+             AND a.owner_id     = $17::uuid
+          UNION
+          SELECT sm.squad_id
+            FROM squad_member sm
+            JOIN squad s ON s.id = sm.squad_id
+            JOIN agent a ON a.id = sm.member_id
+           WHERE s.workspace_id = $1
+             AND sm.member_type = 'agent'
+             AND a.workspace_id = $1
+             AND a.owner_id     = $17::uuid
+    ))
+  )
+ORDER BY i.position ASC, i.created_at DESC
 LIMIT $2 OFFSET $3
 `
 
@@ -652,6 +723,8 @@ type ListIssuesParams struct {
 	ProjectID         pgtype.UUID   `json:"project_id"`
 	ProjectIds        []pgtype.UUID `json:"project_ids"`
 	IncludeNoProject  pgtype.Bool   `json:"include_no_project"`
+	Scheduled         pgtype.Bool   `json:"scheduled"`
+	InvolvesUserID    pgtype.UUID   `json:"involves_user_id"`
 }
 
 type ListIssuesRow struct {
@@ -675,6 +748,12 @@ type ListIssuesRow struct {
 	ProjectID     pgtype.UUID        `json:"project_id"`
 }
 
+// involves_user_id widens the assignee filter to surface issues where the user
+// is *indirectly* the assignee — via an owned agent or a squad they belong to /
+// lead / have an agent inside. The semantics intentionally exclude direct
+// member assignment (`assignee_type='member' AND assignee_id=involves_user_id`)
+// because that is already the meaning of the `assignee_id` filter (tab 1
+// "Assigned to me"), and the two filters must produce disjoint result sets.
 func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListIssuesRow, error) {
 	rows, err := q.db.Query(ctx, listIssues,
 		arg.WorkspaceID,
@@ -692,6 +771,8 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 		arg.ProjectID,
 		arg.ProjectIds,
 		arg.IncludeNoProject,
+		arg.Scheduled,
+		arg.InvolvesUserID,
 	)
 	if err != nil {
 		return nil, err
@@ -731,39 +812,71 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 }
 
 const listOpenIssues = `-- name: ListOpenIssues :many
-SELECT id, workspace_id, title, description, status, priority,
-       assignee_type, assignee_id, creator_type, creator_id,
-       parent_issue_id, position, start_date, due_date, created_at, updated_at, number, project_id
-FROM issue
-WHERE workspace_id = $1
-  AND status NOT IN ('done', 'cancelled')
-  AND ($2::text IS NULL OR priority = $2)
-  AND (COALESCE(cardinality($3::text[]), 0) = 0 OR priority = ANY($3::text[]))
-  AND ($4::uuid IS NULL OR assignee_id = $4)
-  AND ($5::uuid[] IS NULL OR assignee_id = ANY($5::uuid[]))
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+       i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id
+FROM issue i
+WHERE i.workspace_id = $1
+  AND i.status NOT IN ('done', 'cancelled')
+  AND ($2::text IS NULL OR i.priority = $2)
+  AND (COALESCE(cardinality($3::text[]), 0) = 0 OR i.priority = ANY($3::text[]))
+  AND ($4::uuid IS NULL OR i.assignee_id = $4)
+  AND ($5::uuid[] IS NULL OR i.assignee_id = ANY($5::uuid[]))
   AND (
     (
       COALESCE(cardinality($6::text[]), 0) = 0
       AND $7::boolean IS NOT TRUE
     )
-    OR ($7::boolean IS TRUE AND assignee_id IS NULL)
-    OR (assignee_id IS NOT NULL AND (assignee_type || ':' || assignee_id::text) = ANY($6::text[]))
+    OR ($7::boolean IS TRUE AND i.assignee_id IS NULL)
+    OR (i.assignee_id IS NOT NULL AND (i.assignee_type || ':' || i.assignee_id::text) = ANY($6::text[]))
   )
-  AND ($8::uuid IS NULL OR creator_id = $8)
+  AND ($8::uuid IS NULL OR i.creator_id = $8)
   AND (
     COALESCE(cardinality($9::text[]), 0) = 0
-    OR (creator_type || ':' || creator_id::text) = ANY($9::text[])
+    OR (i.creator_type || ':' || i.creator_id::text) = ANY($9::text[])
   )
-  AND ($10::uuid IS NULL OR project_id = $10)
+  AND ($10::uuid IS NULL OR i.project_id = $10)
   AND (
     (
       COALESCE(cardinality($11::uuid[]), 0) = 0
       AND $12::boolean IS NOT TRUE
     )
-    OR ($12::boolean IS TRUE AND project_id IS NULL)
-    OR (project_id = ANY($11::uuid[]))
+    OR ($12::boolean IS TRUE AND i.project_id IS NULL)
+    OR (i.project_id = ANY($11::uuid[]))
   )
-ORDER BY position ASC, created_at DESC
+  AND (
+    $13::uuid IS NULL
+    OR (i.assignee_type = 'agent' AND i.assignee_id IN (
+          SELECT a.id FROM agent a
+           WHERE a.workspace_id = $1
+             AND a.owner_id     = $13::uuid
+    ))
+    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
+          SELECT sm.squad_id
+            FROM squad_member sm
+            JOIN squad s ON s.id = sm.squad_id
+           WHERE s.workspace_id = $1
+             AND sm.member_type = 'member'
+             AND sm.member_id   = $13::uuid
+          UNION
+          SELECT s.id
+            FROM squad s
+            JOIN agent a ON a.id = s.leader_id
+           WHERE s.workspace_id = $1
+             AND a.workspace_id = $1
+             AND a.owner_id     = $13::uuid
+          UNION
+          SELECT sm.squad_id
+            FROM squad_member sm
+            JOIN squad s ON s.id = sm.squad_id
+            JOIN agent a ON a.id = sm.member_id
+           WHERE s.workspace_id = $1
+             AND sm.member_type = 'agent'
+             AND a.workspace_id = $1
+             AND a.owner_id     = $13::uuid
+    ))
+  )
+ORDER BY i.position ASC, i.created_at DESC
 `
 
 type ListOpenIssuesParams struct {
@@ -779,6 +892,7 @@ type ListOpenIssuesParams struct {
 	ProjectID         pgtype.UUID   `json:"project_id"`
 	ProjectIds        []pgtype.UUID `json:"project_ids"`
 	IncludeNoProject  pgtype.Bool   `json:"include_no_project"`
+	InvolvesUserID    pgtype.UUID   `json:"involves_user_id"`
 }
 
 type ListOpenIssuesRow struct {
@@ -802,6 +916,8 @@ type ListOpenIssuesRow struct {
 	ProjectID     pgtype.UUID        `json:"project_id"`
 }
 
+// See ListIssues for the semantics of involves_user_id (mirrors the 4-branch
+// filter; member-direct assignment is intentionally excluded).
 func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) ([]ListOpenIssuesRow, error) {
 	rows, err := q.db.Query(ctx, listOpenIssues,
 		arg.WorkspaceID,
@@ -816,6 +932,7 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 		arg.ProjectID,
 		arg.ProjectIds,
 		arg.IncludeNoProject,
+		arg.InvolvesUserID,
 	)
 	if err != nil {
 		return nil, err
