@@ -16,7 +16,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { PriorityIcon } from "./priority-icon";
-import { PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "./pickers";
+import { PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "./pickers";
 import { PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { ProgressRing } from "./progress-ring";
@@ -101,7 +101,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   const showDueDate = storeProperties.dueDate && issue.due_date;
   const showProject = storeProperties.project && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
-  const showLabels = storeProperties.labels && labels.length > 0;
+  const showLabels = storeProperties.labels && (labels.length > 0 || editable);
 
   return (
     <div className="rounded-lg border-[0.5px] border-border bg-card py-3 px-2.5 shadow-[0_3px_6px_-2px_rgba(0,0,0,0.02),0_1px_1px_0_rgba(0,0,0,0.04)] transition-colors group-hover/card:border-accent group-hover/card:bg-accent group-data-[popup-open]/card:border-accent group-data-[popup-open]/card:bg-accent">
@@ -130,9 +130,16 @@ export const BoardCardContent = memo(function BoardCardContent({
               <span className="truncate">{project!.title}</span>
             </span>
           )}
-          {showLabels && labels.map((label) => (
-            <LabelChip key={label.id} label={label} />
-          ))}
+          {showLabels &&
+            (editable ? (
+              <PickerWrapper>
+                <LabelPicker issueId={issue.id} labels={labels} align="start" width="w-72" />
+              </PickerWrapper>
+            ) : (
+              labels.map((label) => (
+                <LabelChip key={label.id} label={label} />
+              ))
+            ))}
         </div>
       )}
 
