@@ -12,9 +12,11 @@ For the list of environment variables referenced below, see [Environment variabl
 
 ## How email + verification code sign-in works
 
-The user enters an email on the sign-in page → the server sends a 6-digit code → the user enters it → the server verifies it → a JWT cookie is issued. Standard flow. It requires [Resend](https://resend.com/) as the email provider:
+The user enters an email on the sign-in page → the server sends a 6-digit code → the user enters it → the server verifies it → a JWT cookie is issued. Standard flow. Two delivery backends are supported — pick whichever fits your deployment:
 
-1. Create a Resend account and verify your domain
+### Option A: Resend (recommended for cloud / public-internet deployments)
+
+1. Create a [Resend](https://resend.com/) account and verify your domain
 2. Create an API key
 3. Set the environment variables:
 
@@ -25,7 +27,22 @@ The user enters an email on the sign-in page → the server sends a 6-digit code
 
 4. Restart the server
 
-**What happens if you don't set `RESEND_API_KEY`**: the server doesn't error, but **every email that should have been sent is written to the server's stdout only**. Handy for local development (copy the code from the logs); in production it's a black hole.
+### Option B: SMTP relay (for self-hosted / on-premise deployments)
+
+Use this when the deployment can't reach `api.resend.com` or you already have an internal mail relay (Exchange, Postfix, on-prem SendGrid, etc.). `SMTP_HOST` takes priority over `RESEND_API_KEY` when both are set.
+
+```bash
+SMTP_HOST=smtp.internal.example.com
+SMTP_PORT=587                  # default 25; use 587 for STARTTLS submission
+SMTP_USERNAME=multica          # leave empty for unauthenticated relay
+SMTP_PASSWORD=...
+SMTP_TLS_INSECURE=false        # set true only for self-signed / private CA
+RESEND_FROM_EMAIL=noreply@yourdomain.com  # reused as the From: header
+```
+
+STARTTLS is upgraded automatically when the server advertises it. Port 465 (SMTPS / implicit TLS) is **not** currently supported — use port 25 or 587.
+
+**What happens if you set neither**: the server doesn't error, but **every email that should have been sent is written to the server's stdout only**. Handy for local development (copy the code from the logs); in production it's a black hole.
 
 ## Fixed local testing codes
 
@@ -34,7 +51,7 @@ The user enters an email on the sign-in page → the server sends a 6-digit code
 
 The old behavior where non-production instances accepted `888888` by default has been removed. Unless you explicitly configure it, typing `888888` is treated like any other wrong code.
 
-Local development without Resend should use the generated code printed in server logs. If you need deterministic local/private automation, set `MULTICA_DEV_VERIFICATION_CODE` to a 6-digit value such as `888888`, and keep `APP_ENV` non-production:
+Local development without any email backend configured (no Resend, no SMTP) should use the generated code printed in server logs. If you need deterministic local/private automation, set `MULTICA_DEV_VERIFICATION_CODE` to a 6-digit value such as `888888`, and keep `APP_ENV` non-production:
 
 ```bash
 APP_ENV=development

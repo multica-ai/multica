@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
+import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   ContentEditor,
   type ContentEditorRef,
@@ -125,7 +126,11 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        <div className="flex items-center justify-end px-4 py-3 border-t shrink-0">
+        <div className="flex items-center justify-between px-4 py-3 border-t shrink-0">
+          <FileUploadButton
+            size="sm"
+            onSelect={(file) => editorRef.current?.uploadFile(file)}
+          />
           <Button size="sm" onClick={handleSubmit} disabled={!canSubmit}>
             {mutation.isPending ? t(($) => $.feedback.sending) : t(($) => $.feedback.send)}
             <kbd className="ml-1 inline-flex h-4 items-center gap-0.5 rounded border border-border/50 bg-background/30 px-1 font-mono text-[10px] leading-none">

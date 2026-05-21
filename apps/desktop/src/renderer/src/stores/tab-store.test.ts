@@ -17,6 +17,7 @@ vi.mock("../routes", () => ({
 import {
   sanitizeTabPath,
   migrateV1ToV2,
+  migrateV2ToV3,
   useTabStore,
 } from "./tab-store";
 
@@ -180,6 +181,61 @@ describe("useTabStore actions", () => {
     expect(s.byWorkspace.acme.tabs[0].id).not.toBe(onlyTabId); // fresh tab
   });
 
+  it("defers disposing the closed tab router until after the store update", () => {
+    vi.useFakeTimers();
+    try {
+      const store = useTabStore.getState();
+      store.switchWorkspace("acme");
+      const closedTabId = store.addTab("/acme/settings", "Settings", "Settings");
+      const closingTab = useTabStore
+        .getState()
+        .byWorkspace.acme.tabs.find((t) => t.id === closedTabId);
+      const dispose = vi.mocked(closingTab!.router.dispose);
+
+      store.closeTab(closedTabId);
+
+      expect(dispose).not.toHaveBeenCalled();
+      expect(
+        useTabStore.getState().byWorkspace.acme.tabs.some((t) => t.id === closedTabId),
+      ).toBe(false);
+
+      vi.runAllTimers();
+
+      expect(dispose).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores router-sync updates from a tab after it has been closed", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const closedTabId = store.addTab("/acme/settings", "Settings", "Settings");
+
+    store.closeTab(closedTabId);
+    const before = useTabStore.getState().byWorkspace.acme;
+
+    store.updateTab(closedTabId, { path: "/acme/runtimes", icon: "Monitor" });
+    store.updateTabHistory(closedTabId, 1, 2);
+
+    expect(useTabStore.getState().byWorkspace.acme).toBe(before);
+    expect(
+      useTabStore.getState().byWorkspace.acme.tabs.some((t) => t.id === closedTabId),
+    ).toBe(false);
+  });
+
+  it("does not replace the tab group for no-op router-sync updates", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tab = useTabStore.getState().byWorkspace.acme.tabs[0];
+    const before = useTabStore.getState().byWorkspace.acme;
+
+    store.updateTab(tab.id, { path: tab.path, icon: tab.icon, title: tab.title });
+    store.updateTabHistory(tab.id, tab.historyIndex, tab.historyLength);
+
+    expect(useTabStore.getState().byWorkspace.acme).toBe(before);
+  });
+
   it("validateWorkspaceSlugs drops groups for slugs not in the valid set and repoints active", () => {
     const store = useTabStore.getState();
     store.switchWorkspace("acme");
@@ -220,5 +276,157 @@ describe("useTabStore actions", () => {
     const acmeTabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
     store.setActiveTab(acmeTabId);
     expect(useTabStore.getState().activeWorkspaceSlug).toBe("acme");
+  });
+});
+
+describe("togglePin", () => {
+  it("flips a tab's pinned state", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    expect(useTabStore.getState().byWorkspace.acme.tabs[0].pinned).toBe(false);
+
+    store.togglePin(tabId);
+    expect(useTabStore.getState().byWorkspace.acme.tabs[0].pinned).toBe(true);
+
+    store.togglePin(tabId);
+    expect(useTabStore.getState().byWorkspace.acme.tabs[0].pinned).toBe(false);
+  });
+
+  it("moves a newly-pinned tab to the start of the pinned zone", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme"); // creates default unpinned tab at index 0
+    store.addTab("/acme/projects", "Projects", "FolderKanban");
+    store.addTab("/acme/agents", "Agents", "Bot");
+    const agentsId = useTabStore.getState().byWorkspace.acme.tabs[2].id;
+
+    store.togglePin(agentsId);
+    const tabs = useTabStore.getState().byWorkspace.acme.tabs;
+    expect(tabs[0].id).toBe(agentsId);
+    expect(tabs[0].pinned).toBe(true);
+    expect(tabs[1].pinned).toBe(false);
+    expect(tabs[2].pinned).toBe(false);
+  });
+
+  it("appends a second pinned tab after the first pinned tab", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.addTab("/acme/projects", "Projects", "FolderKanban");
+    store.addTab("/acme/agents", "Agents", "Bot");
+    const projectsId = useTabStore.getState().byWorkspace.acme.tabs[1].id;
+    const agentsId = useTabStore.getState().byWorkspace.acme.tabs[2].id;
+
+    store.togglePin(agentsId);
+    store.togglePin(projectsId);
+
+    // Both pinned, in the order they were pinned (agents first, projects
+    // second), then the unpinned default tab.
+    const tabs = useTabStore.getState().byWorkspace.acme.tabs;
+    expect(tabs.map((t) => t.id)).toEqual([
+      agentsId,
+      projectsId,
+      tabs[2].id,
+    ]);
+    expect(tabs.map((t) => t.pinned)).toEqual([true, true, false]);
+  });
+
+  it("returns an unpinned tab to the start of the unpinned zone", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.addTab("/acme/projects", "Projects", "FolderKanban");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const projectsId = useTabStore.getState().byWorkspace.acme.tabs[1].id;
+
+    // Pin both, then unpin one.
+    store.togglePin(issuesId);
+    store.togglePin(projectsId);
+    store.togglePin(issuesId);
+
+    const tabs = useTabStore.getState().byWorkspace.acme.tabs;
+    expect(tabs.map((t) => t.id)).toEqual([projectsId, issuesId]);
+    expect(tabs.map((t) => t.pinned)).toEqual([true, false]);
+  });
+});
+
+describe("moveTab boundary clamp", () => {
+  it("clamps a pinned-tab move so it never crosses into the unpinned zone", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.addTab("/acme/projects", "Projects", "FolderKanban");
+    store.addTab("/acme/agents", "Agents", "Bot");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+
+    store.togglePin(issuesId); // [issues(pinned), projects, agents]
+
+    // User tries to drag the pinned tab to index 2 (unpinned zone end).
+    store.moveTab(0, 2);
+    const tabs = useTabStore.getState().byWorkspace.acme.tabs;
+    // It should be clamped to index 0 — the only pinned slot — i.e. unchanged.
+    expect(tabs[0].id).toBe(issuesId);
+    expect(tabs.map((t) => t.pinned)).toEqual([true, false, false]);
+  });
+
+  it("clamps an unpinned-tab move so it never crosses into the pinned zone", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.addTab("/acme/projects", "Projects", "FolderKanban");
+    store.addTab("/acme/agents", "Agents", "Bot");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const agentsId = useTabStore.getState().byWorkspace.acme.tabs[2].id;
+
+    store.togglePin(issuesId); // [issues(pinned), projects, agents]
+
+    // User tries to drag agents (index 2) to index 0 (pinned zone).
+    store.moveTab(2, 0);
+    const tabs = useTabStore.getState().byWorkspace.acme.tabs;
+    // Clamped to index 1 — start of the unpinned zone.
+    expect(tabs[0].id).toBe(issuesId);
+    expect(tabs[1].id).toBe(agentsId);
+    expect(tabs.map((t) => t.pinned)).toEqual([true, false, false]);
+  });
+
+  it("reorders freely within the same zone", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.addTab("/acme/projects", "Projects", "FolderKanban");
+    store.addTab("/acme/agents", "Agents", "Bot");
+
+    // All unpinned; move agents (2) to position 0.
+    store.moveTab(2, 0);
+    const tabs = useTabStore.getState().byWorkspace.acme.tabs;
+    expect(tabs.map((t) => t.path)).toEqual([
+      "/acme/agents",
+      "/acme/issues",
+      "/acme/projects",
+    ]);
+  });
+});
+
+describe("migrateV2ToV3", () => {
+  it("adds pinned=false to every persisted tab", () => {
+    const v2 = {
+      activeWorkspaceSlug: "acme",
+      byWorkspace: {
+        acme: {
+          activeTabId: "t1",
+          tabs: [
+            { id: "t1", path: "/acme/issues", title: "Issues", icon: "ListTodo" },
+            { id: "t2", path: "/acme/projects", title: "Projects", icon: "FolderKanban" },
+          ],
+        },
+      },
+    };
+    const v3 = migrateV2ToV3(v2);
+    expect(v3.activeWorkspaceSlug).toBe("acme");
+    expect(v3.byWorkspace.acme.tabs).toEqual([
+      { id: "t1", path: "/acme/issues", title: "Issues", icon: "ListTodo", pinned: false },
+      { id: "t2", path: "/acme/projects", title: "Projects", icon: "FolderKanban", pinned: false },
+    ]);
+  });
+
+  it("handles missing byWorkspace gracefully", () => {
+    const v3 = migrateV2ToV3({ activeWorkspaceSlug: null } as Parameters<typeof migrateV2ToV3>[0]);
+    expect(v3.byWorkspace).toEqual({});
+    expect(v3.activeWorkspaceSlug).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { RuntimeUsage } from "@multica/core/types";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
-import { estimateCost } from "../../utils";
+import { addDaysIso, estimateCost, todayIso, weekStartIso } from "../../utils";
 import { useT } from "../../../i18n";
 
 // 26 weeks (~6 months) gives the heatmap real presence in the wider chart
@@ -11,8 +11,11 @@ import { useT } from "../../../i18n";
 const HEATMAP_WEEKS = 26;
 const CELL_SIZE = 16;
 const CELL_GAP = 3;
-const DAY_LABELS = ["", "Mon", "", "Wed", "", "Fri", ""];
-const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+// Monday-first row order, matching ISO 8601 and the rest of the Weekly
+// aggregation (see #MUL-2382). Rows labelled Mon / Wed / Fri keep the
+// density readable.
+const DAY_LABELS = ["Mon", "", "Wed", "", "Fri", "", ""];
+const WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 // Cells use the brand-derived chart-1 hue with descending opacity instead
 // of a neutral foreground fade, so the heatmap reads as part of the same
@@ -47,7 +50,13 @@ interface Insights {
   windowDays: number;
 }
 
-export function ActivityHeatmap({ usage }: { usage: RuntimeUsage[] }) {
+export function ActivityHeatmap({
+  usage,
+  tz,
+}: {
+  usage: RuntimeUsage[];
+  tz: string;
+}) {
   const { t } = useT("runtimes");
   // Memo dep — estimateCost (called inside the body below) consults the
   // user-override store, so saving a custom rate must invalidate the cells.
@@ -61,22 +70,32 @@ export function ActivityHeatmap({ usage }: { usage: RuntimeUsage[] }) {
       dateCost.set(u.date, (dateCost.get(u.date) ?? 0) + estimateCost(u));
     }
 
-    const today = new Date();
-    const todayDay = today.getDay();
-    const startOffset = todayDay + (HEATMAP_WEEKS - 1) * 7;
-    const startDate = new Date(today);
-    startDate.setDate(today.getDate() - startOffset);
+    // Anchor the grid on the Monday of the week containing "today" in the
+    // runtime's tz, then walk back HEATMAP_WEEKS-1 weeks. All dates are
+    // string-based YYYY-MM-DD so the host browser's tz can't shift a column.
+    // We stop drawing cells once we pass `today` so the in-progress week is
+    // partial (cells for "tomorrow onward" aren't rendered) — matches the
+    // Weekly chart's partial-week treatment.
+    const today = todayIso(tz);
+    const lastWeekStart = weekStartIso(today);
+    const startDate = addDaysIso(lastWeekStart, -(HEATMAP_WEEKS - 1) * 7);
+    const todayIndex = (HEATMAP_WEEKS - 1) * 7 + ((() => {
+      // Monday-based weekday of `today`: 0 = Mon ... 6 = Sun. Computed via
+      // string subtraction so the host timezone can't shift the value.
+      const [y, m, d] = today.split("-").map(Number);
+      const dt = new Date(Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1));
+      return (dt.getUTCDay() + 6) % 7;
+    })());
 
     const allCells: {
       date: string;
-      dayOfWeek: number;
+      dayOfWeek: number; // 0 = Mon ... 6 = Sun
       week: number;
       cost: number;
     }[] = [];
-    const d = new Date(startDate);
-    for (let i = 0; i <= startOffset; i++) {
-      const dateStr = d.toISOString().slice(0, 10);
-      const dayOfWeek = d.getDay();
+    for (let i = 0; i <= todayIndex; i++) {
+      const dateStr = addDaysIso(startDate, i);
+      const dayOfWeek = i % 7;
       const week = Math.floor(i / 7);
       allCells.push({
         date: dateStr,
@@ -84,7 +103,6 @@ export function ActivityHeatmap({ usage }: { usage: RuntimeUsage[] }) {
         week,
         cost: dateCost.get(dateStr) ?? 0,
       });
-      d.setDate(d.getDate() + 1);
     }
 
     const nonZero = allCells.filter((c) => c.cost > 0).map((c) => c.cost);
@@ -171,7 +189,7 @@ export function ActivityHeatmap({ usage }: { usage: RuntimeUsage[] }) {
     };
 
     return { cells: cellsWithLevel, monthLabels: months, insights };
-  }, [usage, pricings]);
+  }, [usage, pricings, tz]);
 
   const labelWidth = 28;
   const svgWidth = labelWidth + HEATMAP_WEEKS * (CELL_SIZE + CELL_GAP);

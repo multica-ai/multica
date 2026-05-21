@@ -50,6 +50,7 @@ export const ListRow = memo(function ListRow({
   const showProject = storeProperties.project && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showAssignee = storeProperties.assignee && issue.assignee_type && issue.assignee_id;
+  const showStartDate = storeProperties.startDate && issue.start_date;
   const showDueDate = storeProperties.dueDate && issue.due_date;
   const showLabels = storeProperties.labels && labels.length > 0;
 
@@ -108,6 +109,11 @@ export const ListRow = memo(function ListRow({
             <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground max-w-[140px]">
               <ProjectIcon project={project} size="sm" />
               <span className="truncate">{project!.title}</span>
+            </span>
+          )}
+          {showStartDate && (
+            <span className="shrink-0 text-xs text-muted-foreground">
+              {formatDate(issue.start_date!)}
             </span>
           )}
           {showDueDate && (

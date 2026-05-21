@@ -40,6 +40,7 @@ export type AgentRuntime = RuntimeDevice;
 export type TaskFailureReason =
   | "agent_error"
   | "timeout"
+  | "codex_semantic_inactivity"
   | "runtime_offline"
   | "runtime_recovery"
   | "manual";
@@ -130,6 +131,17 @@ export interface Agent {
   status: AgentStatus;
   max_concurrent_tasks: number;
   model: string;
+  /**
+   * Runtime-native reasoning/effort token (e.g. Claude's
+   * `low|medium|high|xhigh|max`, Codex's
+   * `none|minimal|low|medium|high|xhigh`). Empty string means "no
+   * override": the backend omits the effort flag and the upstream CLI
+   * config / built-in default decides at run time. The picker is
+   * per-runtime per-model — the API never normalises across providers.
+   * Older backends omit this field entirely; treat undefined as ""
+   * (MUL-2339).
+   */
+  thinking_level?: string;
   owner_id: string | null;
   skills: AgentSkillSummary[];
   created_at: string;
@@ -163,9 +175,81 @@ export interface CreateAgentRequest {
   visibility?: AgentVisibility;
   max_concurrent_tasks?: number;
   model?: string;
+  /** Optional runtime-native reasoning/effort token. See `Agent.thinking_level`. */
+  thinking_level?: string;
   /** Optional template slug used by the onboarding agent picker. Surfaced
    *  as the `template` property on the `agent_created` PostHog event. */
   template?: string;
+}
+
+/** Agent template summary — fields needed by the picker grid. Does NOT
+ *  include `instructions` to keep the list payload small; the detail
+ *  endpoint or the create flow returns the full template body. */
+export interface AgentTemplateSummary {
+  slug: string;
+  name: string;
+  description: string;
+  /** Optional grouping for the picker UI ("Engineering" / "Writing" / …). */
+  category?: string;
+  /** Optional lucide-react icon name (e.g. "Search"). Frontend falls back
+   *  to a generic icon when empty. */
+  icon?: string;
+  /** Optional semantic color token for the icon badge — one of "info" /
+   *  "success" / "warning" / "primary" / "secondary". Frontend has a
+   *  static class map so Tailwind can JIT-scan all variants. */
+  accent?: string;
+  skills: AgentTemplateSkillRef[];
+}
+
+/** Full agent template — same as `AgentTemplateSummary` plus the
+ *  instructions block. Returned by `GET /api/agent-templates/:slug`. */
+export interface AgentTemplate extends AgentTemplateSummary {
+  instructions: string;
+}
+
+/** Skill reference inside an agent template. `source_url` is the upstream
+ *  GitHub / skills.sh URL fetched on create; `cached_*` mirror the upstream
+ *  frontmatter at template-author time and let the picker render without
+ *  HTTP fetches. */
+export interface AgentTemplateSkillRef {
+  source_url: string;
+  cached_name: string;
+  cached_description: string;
+}
+
+export interface CreateAgentFromTemplateRequest {
+  template_slug: string;
+  name: string;
+  runtime_id: string;
+  model?: string;
+  visibility?: AgentVisibility;
+  max_concurrent_tasks?: number;
+  /** Optional overrides applied to the template before creation. nil/omit
+   *  uses the template's own value. */
+  description?: string;
+  instructions?: string;
+  avatar_url?: string;
+  /** Workspace skill IDs attached **in addition to** the template's
+   *  skills. Server dedupes against template skills automatically. */
+  extra_skill_ids?: string[];
+}
+
+export interface CreateAgentFromTemplateResponse {
+  agent: Agent;
+  /** Skill IDs that were newly created in the workspace from upstream URLs. */
+  imported_skill_ids: string[];
+  /** Skill IDs that already existed in the workspace (same name) and were
+   *  reused rather than re-imported. The UI can surface this as a toast so
+   *  the user knows their pre-existing skill wasn't overwritten. */
+  reused_skill_ids: string[];
+}
+
+/** 422 body returned by `POST /api/agents/from-template` when one or more
+ *  template skill URLs cannot be reached. The transaction is rolled back —
+ *  no partial workspace state. */
+export interface CreateAgentFromTemplateFailure {
+  error: string;
+  failed_urls: string[];
 }
 
 export interface UpdateAgentRequest {
@@ -181,6 +265,15 @@ export interface UpdateAgentRequest {
   status?: AgentStatus;
   max_concurrent_tasks?: number;
   model?: string;
+  /**
+   * Runtime-native reasoning/effort token. Tri-state semantics (MUL-2339):
+   *   - field omitted → no change
+   *   - "" → clear the override; backend omits the effort flag and the
+   *     local CLI config / built-in default decides what the model runs at
+   *   - non-empty → set; validated server-side against the target
+   *     runtime's provider enum, rejected with 400 if not recognised
+   */
+  thinking_level?: string;
 }
 
 // Skills
@@ -289,6 +382,55 @@ export interface RuntimeUsageByHour {
   task_count: number;
 }
 
+// One (date, model) bucket of token usage for the workspace dashboard.
+// Same shape as RuntimeUsage but workspace-scoped (no runtime_id, no
+// provider field on the wire) and optionally narrowed to a single project
+// on the server side. Cost stays client-side via the model pricing table.
+export interface DashboardUsageDaily {
+  date: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  task_count: number;
+}
+
+// Per-(agent, model) token totals for the workspace dashboard. Identical
+// wire shape to RuntimeUsageByAgent — the client folds by agent_id and
+// sums cost.
+export interface DashboardUsageByAgent {
+  agent_id: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  task_count: number;
+}
+
+// Per-agent total terminal-task run-time + counts. Powers the workspace
+// dashboard's "time by agent" list. failed_count is a subset of
+// task_count (failed tasks still contribute to total_seconds because
+// they consumed runtime to fail).
+export interface DashboardAgentRunTime {
+  agent_id: string;
+  total_seconds: number;
+  task_count: number;
+  failed_count: number;
+}
+
+// One (date) bucket of terminal-task run-time + counts for the workspace
+// dashboard. Powers the Time and Tasks metrics on the daily-trend toggle
+// — same toggle as Tokens / Cost, anchored on completed_at so day buckets
+// line up with the per-agent run-time card.
+export interface DashboardRunTimeDaily {
+  date: string;
+  total_seconds: number;
+  task_count: number;
+  failed_count: number;
+}
+
 export type RuntimeUpdateStatus =
   | "pending"
   | "running"
@@ -312,6 +454,34 @@ export interface RuntimeModel {
   label: string;
   provider?: string;
   default?: boolean;
+  /**
+   * Per-model reasoning/effort catalog discovered by the daemon. Currently
+   * populated for claude and codex runtimes only; omitted (or undefined)
+   * for every other provider, which the UI treats as "no thinking-level
+   * picker for this model". See MUL-2339.
+   */
+  thinking?: RuntimeModelThinking;
+}
+
+export interface RuntimeModelThinking {
+  /** Levels the user is allowed to pick for this model. */
+  supported_levels: RuntimeModelThinkingLevel[];
+  /** Informational: the level the upstream CLI documents as its built-in
+   *  default when no `--effort` flag is passed. Surfaced by the daemon
+   *  but not actively rendered today — Multica's empty `thinking_level`
+   *  means "no override; let the local CLI config decide", which may
+   *  itself differ from this value. */
+  default_level?: string;
+}
+
+export interface RuntimeModelThinkingLevel {
+  /** Runtime-native token passed to the CLI; never normalised. */
+  value: string;
+  /** Display label matching each CLI's own UI (`Low`, `Extra high`, …). */
+  label: string;
+  /** Optional helper copy lifted from upstream catalog
+   *  (`codex debug models` emits one per level). */
+  description?: string;
 }
 
 export type RuntimeModelListStatus =

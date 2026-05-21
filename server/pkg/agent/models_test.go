@@ -407,6 +407,26 @@ func TestParseOpenclawAgentsJSONWrapped(t *testing.T) {
 	}
 }
 
+func TestOpenclawEntriesToModelsUsesIDOverName(t *testing.T) {
+	// When both id and name are present, Model.ID should use the id field
+	// because openclaw resolves --agent by id. Names with spaces (e.g.
+	// "Sub2API OPS") would be mangled by openclaw's normalizeAgentId.
+	input := []byte(`[{"id": "sub2api", "name": "Sub2API OPS", "model": "gpt-4o"}]`)
+	models, ok := parseOpenclawAgentsJSON(input)
+	if !ok {
+		t.Fatal("expected parseOpenclawAgentsJSON to accept array")
+	}
+	if len(models) != 1 {
+		t.Fatalf("got %d models, want 1", len(models))
+	}
+	if models[0].ID != "sub2api" {
+		t.Errorf("Model.ID = %q, want %q (should use id, not name)", models[0].ID, "sub2api")
+	}
+	if models[0].Label != "Sub2API OPS (gpt-4o)" {
+		t.Errorf("Model.Label = %q, want %q (should use name for display)", models[0].Label, "Sub2API OPS (gpt-4o)")
+	}
+}
+
 func TestParseOpenclawAgentsJSONRejectsGarbage(t *testing.T) {
 	if _, ok := parseOpenclawAgentsJSON([]byte("not json")); ok {
 		t.Error("expected ok=false for non-JSON")

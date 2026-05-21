@@ -2,13 +2,15 @@ export type {
   OnboardingStep,
   OnboardingCompletionPath,
   QuestionnaireAnswers,
-  TeamSize,
+  Source,
   Role,
   UseCase,
 } from "./types";
 export {
   saveQuestionnaire,
   completeOnboarding,
+  bootstrapRuntimeOnboarding,
+  bootstrapNoRuntimeOnboarding,
   joinCloudWaitlist,
 } from "./store";
 export { ONBOARDING_STEP_ORDER } from "./step-order";

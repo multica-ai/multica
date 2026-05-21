@@ -41,7 +41,7 @@ func (b *geminiBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	cmd.Env = buildGeminiEnv(b.cfg.Env)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -264,4 +264,30 @@ func buildGeminiArgs(prompt string, opts ExecOptions, logger *slog.Logger) []str
 	}
 	args = append(args, filterCustomArgs(opts.CustomArgs, geminiBlockedArgs, logger)...)
 	return args
+}
+
+// buildGeminiEnv wraps buildEnv and defaults GEMINI_CLI_TRUST_WORKSPACE=true so
+// gemini's folder-trust gate doesn't fail every headless daemon invocation with
+// exit code 55 (FatalUntrustedWorkspaceError). When a user has enabled
+// `security.folderTrust.enabled` in `~/.gemini/settings.json` and the daemon
+// spawns gemini in a worktree that isn't pre-listed in `trustedFolders.json`,
+// the CLI throws during startup warnings with no interactive prompt available,
+// so the run fails after ~10s with no useful output (see #2516).
+//
+// The env-var bypass is gemini's own documented escape hatch (mirrors the
+// `--skip-trust` CLI flag) and has been in place for the entire folder-trust
+// feature lifetime, so this works on every gemini version that can produce the
+// crash. If the caller explicitly sets the same key in cfg.Env it wins,
+// preserving the ability to opt back into the check.
+func buildGeminiEnv(extra map[string]string) []string {
+	const trustKey = "GEMINI_CLI_TRUST_WORKSPACE"
+	if _, ok := extra[trustKey]; ok {
+		return buildEnv(extra)
+	}
+	merged := make(map[string]string, len(extra)+1)
+	for k, v := range extra {
+		merged[k] = v
+	}
+	merged[trustKey] = "true"
+	return buildEnv(merged)
 }

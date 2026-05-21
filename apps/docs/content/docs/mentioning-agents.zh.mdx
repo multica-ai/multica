@@ -16,6 +16,10 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 `@mention` 的 Markdown 语法、picker 的用法、`@all` 的语义见 [**评论**](/comments)。
 
+<Callout type="info">
+**`@` 也可以指向 [小队（squad）](/squads)。** picker 里小队和成员、智能体并列；选中后会插入 `[@SquadName](mention://squad/<uuid>)`，触发小队的**队长智能体**来协调响应——assignee 和 status 都不会变。
+</Callout>
+
 ## 和分配的差别
 
 同样是让智能体工作，但机制完全不同：
@@ -53,6 +57,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 下一步
 
+- [**小队**](/squads) —— `@` 一个小队，由队长把问题派给合适的成员
 - [**对话**](/chat) —— 脱离 issue 和智能体一对一聊
 - [**Autopilots**](/autopilots) —— 让智能体定时自动开工
 - [**评论**](/comments) —— `@mention` 的语法、picker、`@all` 的语义

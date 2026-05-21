@@ -74,11 +74,18 @@ type ChatMessagePayload struct {
 	CreatedAt     string `json:"created_at"`
 }
 
-// ChatDonePayload is broadcast when an agent finishes responding to a chat message.
+// ChatDonePayload is broadcast when an agent finishes responding to a chat
+// message. Carries the freshly-persisted assistant ChatMessage so the client
+// can write it into the messages cache inline — avoids a refetch round-trip
+// during the live-timeline → AssistantMessage handoff that previously caused
+// a visible flicker (#2123).
 type ChatDonePayload struct {
 	ChatSessionID string `json:"chat_session_id"`
 	TaskID        string `json:"task_id"`
-	Content       string `json:"content"`
+	MessageID     string `json:"message_id,omitempty"`
+	Content       string `json:"content,omitempty"`
+	ElapsedMs     int64  `json:"elapsed_ms,omitempty"`
+	CreatedAt     string `json:"created_at,omitempty"`
 }
 
 // ChatSessionReadPayload is broadcast when the creator marks a session as read.
@@ -94,12 +101,23 @@ type ChatSessionDeletedPayload struct {
 	ChatSessionID string `json:"chat_session_id"`
 }
 
+// ChatSessionUpdatedPayload is broadcast when a user-editable field on a
+// chat session changes (today: title via inline rename). Other tabs/devices
+// patch the session row in their cached list so the dropdown stays in sync
+// without a full refetch.
+type ChatSessionUpdatedPayload struct {
+	ChatSessionID string `json:"chat_session_id"`
+	Title         string `json:"title"`
+	UpdatedAt     string `json:"updated_at"`
+}
+
 // DaemonHeartbeatRequestPayload is sent from daemon to server over WebSocket
 // to update last_seen_at and pull pending actions for a single runtime.
 // Mirrors the body of POST /api/daemon/heartbeat so both transports share
 // identical semantics.
 type DaemonHeartbeatRequestPayload struct {
-	RuntimeID string `json:"runtime_id"`
+	RuntimeID           string `json:"runtime_id"`
+	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
 }
 
 // DaemonHeartbeatAckPayload is the server's reply to DaemonHeartbeatRequestPayload.
@@ -120,6 +138,11 @@ type DaemonHeartbeatAckPayload struct {
 	PendingModelList        *DaemonHeartbeatPendingModelList        `json:"pending_model_list,omitempty"`
 	PendingLocalSkills      *DaemonHeartbeatPendingLocalSkills      `json:"pending_local_skills,omitempty"`
 	PendingLocalSkillImport *DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_import,omitempty"`
+	// PendingLocalSkillImports carries multiple import requests in a single
+	// heartbeat so the daemon can process them concurrently. Old daemons
+	// that don't know this field silently ignore it (standard JSON behavior)
+	// and fall back to the singular PendingLocalSkillImport above.
+	PendingLocalSkillImports []DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_imports,omitempty"`
 }
 
 // HeartbeatStatusRuntimeGone is the ack Status used when the runtime row no

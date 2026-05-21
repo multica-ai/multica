@@ -39,18 +39,22 @@ export interface User {
    */
   onboarding_questionnaire: Record<string, unknown>;
   /**
-   * Terminal state for the post-onboarding "import starter content" prompt.
-   *   null             → new user, dialog will show on issues-list landing
-   *   'imported'       → accepted, starter project + issues were seeded
-   *   'dismissed'      → declined, never ask again
-   *   'skipped_legacy' → backfilled for users who finished onboarding
-   *                      before this feature shipped
-   * Kept as a generic `string | null` here so future states (e.g.
-   * 'retry_after_error') can be added without churning this type.
+   * Legacy column from the removed starter-content dialog. The column is
+   * still written to (always 'imported' for new accounts after the
+   * mark-onboarded paths run) so older desktop builds — which still render
+   * the dialog on NULL — don't show it to anyone created on a newer server.
+   * Kept as `string | null` for forward compatibility.
    */
   starter_content_state: string | null;
   /** Preferred UI language. null means "follow client/system". */
   language: string | null;
+  /**
+   * Free-form self-description (role, stack, preferences). Injected into
+   * the agent brief so coding agents have cheap, durable context about
+   * who is requesting the work. Server always returns a string —
+   * NOT NULL DEFAULT '' at the column level, empty when unset.
+   */
+  profile_description: string;
   created_at: string;
   updated_at: string;
 }

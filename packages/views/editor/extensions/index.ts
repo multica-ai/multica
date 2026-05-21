@@ -38,6 +38,7 @@ import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { BaseMentionExtension } from "./mention-extension";
 import { createMentionSuggestion } from "./mention-suggestion";
 import { CodeBlockView } from "./code-block-view";
+import { PatchedListItem } from "./list-item";
 import { createMarkdownPasteExtension } from "./markdown-paste";
 import { createMarkdownCopyExtension } from "./markdown-copy";
 import { createSubmitExtension } from "./submit-shortcut";
@@ -86,11 +87,12 @@ export interface EditorExtensionsOptions {
   /** When true, bare Enter also submits (chat-style). Default false. */
   submitOnEnter?: boolean;
   /**
-   * When true, the @mention extension is not registered at all. Use for
-   * editors where mentioning members/agents has no business meaning (e.g.
-   * agent system prompts) — typing `@` becomes inert and any pre-existing
-   * `[@user](mention://...)` markdown renders as plain text instead of being
-   * parsed into a mention node.
+   * When true, the `@` suggestion picker is not attached. The mention node
+   * type is still registered in the schema so any mention pasted in from
+   * another Multica editor renders as the normal mention pill instead of
+   * being silently dropped by ProseMirror's schema check. Use for editors
+   * where *creating* a new mention has no business meaning (e.g. agent
+   * system prompts) but *preserving* an existing one still matters.
    */
   disableMentions?: boolean;
 }
@@ -105,7 +107,13 @@ export function createEditorExtensions(
       heading: { levels: [1, 2, 3] },
       link: false,
       codeBlock: false,
+      // Disable StarterKit's stock ListItem — its Enter keybind binds only
+      // `splitListItem`, which leaves the user stuck inside an empty top-level
+      // list item (see list-item.ts). PatchedListItem below restores the
+      // standard split → lift fallback chain.
+      listItem: false,
     }),
+    PatchedListItem,
     CodeBlockLowlight.extend({
       addNodeView() {
         return ReactNodeViewRenderer(CodeBlockView);
@@ -128,16 +136,14 @@ export function createEditorExtensions(
     // so users can copy rich content out as the original Markdown.
     createMarkdownCopyExtension(),
     FileCardExtension,
-    ...(options.disableMentions
-      ? []
-      : [
-          BaseMentionExtension.configure({
-            HTMLAttributes: { class: "mention" },
-            ...(options.queryClient
-              ? { suggestion: createMentionSuggestion(options.queryClient) }
-              : {}),
-          }),
-        ]),
+    BaseMentionExtension.configure({
+      HTMLAttributes: { class: "mention" },
+      ...(options.disableMentions
+        ? { suggestion: { allow: () => false } }
+        : options.queryClient
+          ? { suggestion: createMentionSuggestion(options.queryClient) }
+          : {}),
+    }),
     Typography,
     Placeholder.configure({ placeholder: placeholderText }),
     createMarkdownPasteExtension(),

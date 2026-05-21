@@ -9,5 +9,12 @@
     "agents_section": "智能体（{{count}}）",
     "detail_link": "详情 →",
     "more_agents_other": "另有 {{count}} 个智能体"
+  },
+  "detail": {
+    "workspace_fallback": "工作区",
+    "members_breadcrumb": "成员",
+    "breadcrumb_fallback": "成员",
+    "not_found_title": "未找到该成员",
+    "not_found_description": "该成员可能已经离开工作区。"
   }
 }

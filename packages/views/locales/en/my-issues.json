@@ -11,7 +11,7 @@
       "assigned_description": "Issues assigned to me",
       "created_label": "Created",
       "created_description": "Issues I created",
-      "agents_label": "My Agents",
+      "agents_label": "My Agents and Squads",
       "agents_description": "Issues assigned to my agents"
     },
     "filter_button": "Filter",
@@ -21,6 +21,9 @@
     "issue_count_other": "{{count}} issues",
     "reset_filters": "Reset all filters",
     "display_settings": "Display settings",
+    "grouping": "Grouping",
+    "group_status": "Status",
+    "group_assignee": "Assignee",
     "ordering": "Ordering",
     "ascending": "Ascending",
     "descending": "Descending",

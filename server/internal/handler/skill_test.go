@@ -384,8 +384,12 @@ func TestFetchFromSkillsSh_ResolvesRootLevelSkillMd(t *testing.T) {
 	if !strings.HasPrefix(result.content, "---\nname: huashu-design") {
 		t.Fatalf("SKILL.md content not populated, got %q", result.content)
 	}
+	// assets/logo.png is intentionally dropped by addFile's binary-extension
+	// guard — PG TEXT columns can't store image bytes, and agents never read
+	// them as text. The directory is still walked (the listing request below
+	// confirms it), but the .png never reaches result.files.
 	gotPaths := importedFilePaths(result.files)
-	wantPaths := []string{"README.md", "assets/logo.png"}
+	wantPaths := []string{"README.md"}
 	if !equalStrings(gotPaths, wantPaths) {
 		t.Fatalf("files = %v, want %v", gotPaths, wantPaths)
 	}

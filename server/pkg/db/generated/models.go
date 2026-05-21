@@ -41,6 +41,7 @@ type Agent struct {
 	CustomArgs         []byte             `json:"custom_args"`
 	McpConfig          []byte             `json:"mcp_config"`
 	Model              pgtype.Text        `json:"model"`
+	ThinkingLevel      pgtype.Text        `json:"thinking_level"`
 }
 
 type AgentRuntime struct {
@@ -94,6 +95,7 @@ type AgentTaskQueue struct {
 	FailureReason     pgtype.Text        `json:"failure_reason"`
 	TriggerSummary    pgtype.Text        `json:"trigger_summary"`
 	ForceFreshSession bool               `json:"force_fresh_session"`
+	IsLeaderTask      bool               `json:"is_leader_task"`
 }
 
 type Attachment struct {
@@ -126,6 +128,8 @@ type Autopilot struct {
 	LastRunAt          pgtype.Timestamptz `json:"last_run_at"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	AssigneeType       string             `json:"assignee_type"`
+	ProjectID          pgtype.UUID        `json:"project_id"`
 }
 
 type AutopilotRun struct {
@@ -142,6 +146,7 @@ type AutopilotRun struct {
 	TriggerPayload []byte             `json:"trigger_payload"`
 	Result         []byte             `json:"result"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	SquadID        pgtype.UUID        `json:"squad_id"`
 }
 
 type AutopilotTrigger struct {
@@ -157,6 +162,8 @@ type AutopilotTrigger struct {
 	LastFiredAt    pgtype.Timestamptz `json:"last_fired_at"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	Provider       string             `json:"provider"`
+	SigningSecret  pgtype.Text        `json:"signing_secret"`
 }
 
 type ChatMessage struct {
@@ -271,6 +278,21 @@ type GithubPullRequest struct {
 	PrUpdatedAt     pgtype.Timestamptz `json:"pr_updated_at"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	HeadSha         string             `json:"head_sha"`
+	MergeableState  pgtype.Text        `json:"mergeable_state"`
+	Additions       int32              `json:"additions"`
+	Deletions       int32              `json:"deletions"`
+	ChangedFiles    int32              `json:"changed_files"`
+}
+
+type GithubPullRequestCheckSuite struct {
+	PrID       pgtype.UUID        `json:"pr_id"`
+	SuiteID    int64              `json:"suite_id"`
+	HeadSha    string             `json:"head_sha"`
+	AppID      int64              `json:"app_id"`
+	Conclusion pgtype.Text        `json:"conclusion"`
+	Status     string             `json:"status"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
 type InboxItem struct {
@@ -314,6 +336,7 @@ type Issue struct {
 	OriginType         pgtype.Text        `json:"origin_type"`
 	OriginID           pgtype.UUID        `json:"origin_id"`
 	FirstExecutedAt    pgtype.Timestamptz `json:"first_executed_at"`
+	StartDate          pgtype.Timestamptz `json:"start_date"`
 }
 
 type IssueDependency struct {
@@ -448,6 +471,30 @@ type SkillFile struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type Squad struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Name         string             `json:"name"`
+	Description  string             `json:"description"`
+	LeaderID     pgtype.UUID        `json:"leader_id"`
+	CreatorID    pgtype.UUID        `json:"creator_id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	ArchivedAt   pgtype.Timestamptz `json:"archived_at"`
+	ArchivedBy   pgtype.UUID        `json:"archived_by"`
+	AvatarUrl    pgtype.Text        `json:"avatar_url"`
+	Instructions string             `json:"instructions"`
+}
+
+type SquadMember struct {
+	ID         pgtype.UUID        `json:"id"`
+	SquadID    pgtype.UUID        `json:"squad_id"`
+	MemberType string             `json:"member_type"`
+	MemberID   pgtype.UUID        `json:"member_id"`
+	Role       string             `json:"role"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
 type TaskMessage struct {
 	ID        pgtype.UUID        `json:"id"`
 	TaskID    pgtype.UUID        `json:"task_id"`
@@ -496,6 +543,39 @@ type TaskUsageDailyDirty struct {
 	EnqueuedAt  pgtype.Timestamptz `json:"enqueued_at"`
 }
 
+type TaskUsageDashboardDaily struct {
+	BucketDate       pgtype.Date        `json:"bucket_date"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	AgentID          pgtype.UUID        `json:"agent_id"`
+	ProjectID        pgtype.UUID        `json:"project_id"`
+	Model            string             `json:"model"`
+	InputTokens      int64              `json:"input_tokens"`
+	OutputTokens     int64              `json:"output_tokens"`
+	CacheReadTokens  int64              `json:"cache_read_tokens"`
+	CacheWriteTokens int64              `json:"cache_write_tokens"`
+	TaskCount        int64              `json:"task_count"`
+	EventCount       int64              `json:"event_count"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type TaskUsageDashboardDirty struct {
+	BucketDate  pgtype.Date        `json:"bucket_date"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	Model       string             `json:"model"`
+	EnqueuedAt  pgtype.Timestamptz `json:"enqueued_at"`
+}
+
+type TaskUsageDashboardRollupState struct {
+	ID                int16              `json:"id"`
+	WatermarkAt       pgtype.Timestamptz `json:"watermark_at"`
+	LastRunStartedAt  pgtype.Timestamptz `json:"last_run_started_at"`
+	LastRunFinishedAt pgtype.Timestamptz `json:"last_run_finished_at"`
+	LastRunRows       int64              `json:"last_run_rows"`
+	LastError         pgtype.Text        `json:"last_error"`
+}
+
 type TaskUsageRollupState struct {
 	ID                int16              `json:"id"`
 	WatermarkAt       pgtype.Timestamptz `json:"watermark_at"`
@@ -518,6 +598,7 @@ type User struct {
 	CloudWaitlistReason     pgtype.Text        `json:"cloud_waitlist_reason"`
 	StarterContentState     pgtype.Text        `json:"starter_content_state"`
 	Language                pgtype.Text        `json:"language"`
+	ProfileDescription      string             `json:"profile_description"`
 }
 
 type VerificationCode struct {
@@ -528,6 +609,31 @@ type VerificationCode struct {
 	Used      bool               `json:"used"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	Attempts  int32              `json:"attempts"`
+}
+
+type WebhookDelivery struct {
+	ID                     pgtype.UUID        `json:"id"`
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	AutopilotID            pgtype.UUID        `json:"autopilot_id"`
+	TriggerID              pgtype.UUID        `json:"trigger_id"`
+	Provider               string             `json:"provider"`
+	Event                  string             `json:"event"`
+	DedupeKey              pgtype.Text        `json:"dedupe_key"`
+	DedupeSource           pgtype.Text        `json:"dedupe_source"`
+	SignatureStatus        string             `json:"signature_status"`
+	Status                 string             `json:"status"`
+	AttemptCount           int32              `json:"attempt_count"`
+	SelectedHeaders        []byte             `json:"selected_headers"`
+	ContentType            pgtype.Text        `json:"content_type"`
+	RawBody                []byte             `json:"raw_body"`
+	ResponseStatus         pgtype.Int4        `json:"response_status"`
+	ResponseBody           pgtype.Text        `json:"response_body"`
+	AutopilotRunID         pgtype.UUID        `json:"autopilot_run_id"`
+	ReplayedFromDeliveryID pgtype.UUID        `json:"replayed_from_delivery_id"`
+	Error                  pgtype.Text        `json:"error"`
+	ReceivedAt             pgtype.Timestamptz `json:"received_at"`
+	LastAttemptAt          pgtype.Timestamptz `json:"last_attempt_at"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 }
 
 type Workspace struct {

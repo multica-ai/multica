@@ -679,7 +679,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
               readOnly={!canEdit}
               onChange={(e) => setName(e.target.value)}
               placeholder={t(($) => $.detail.name_placeholder)}
-              className="h-9 border-0 bg-transparent px-0 text-lg font-semibold shadow-none focus-visible:ring-0 read-only:cursor-default"
+              className="h-9 border-0 bg-transparent px-0 text-lg font-semibold shadow-none focus-visible:ring-0 read-only:cursor-default dark:bg-transparent"
               aria-label={t(($) => $.detail.name_aria)}
             />
             <div className="space-y-1">

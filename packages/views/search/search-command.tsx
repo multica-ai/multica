@@ -5,6 +5,7 @@ import {
   Check,
   Clock,
   Copy,
+  FileText,
   Link2,
   Loader2,
   MessageSquare,
@@ -20,26 +21,34 @@ import {
   Sun,
   BookOpenText,
   Settings,
-  Building2,
   type LucideIcon,
 } from "lucide-react";
 import { Command as CommandPrimitive } from "cmdk";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import type { SearchIssueResult, SearchProjectResult } from "@multica/core/types";
+import type {
+  MemberWithUser,
+  SearchIssueResult,
+  SearchProjectResult,
+} from "@multica/core/types";
 import { api } from "@multica/core/api";
-import { selectRecentIssues, useRecentIssuesStore } from "@multica/core/issues/stores";
+import {
+  openCreateIssueWithPreference,
+  selectRecentIssues,
+  useRecentIssuesStore,
+} from "@multica/core/issues/stores";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useWorkspaceId } from "@multica/core";
-import { paths, useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths } from "@multica/core/paths";
 import type { WorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
-import { workspaceListOptions } from "@multica/core/workspace/queries";
+import { memberListOptions } from "@multica/core/workspace/queries";
 import { StatusIcon } from "../issues/components";
 import { ProjectIcon } from "../projects/components/project-icon";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import type { ProjectStatus } from "@multica/core/types";
+import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import {
   Dialog,
   DialogContent,
@@ -50,13 +59,23 @@ import {
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
+import { matchesPinyin } from "../editor/extensions/pinyin-match";
 import { useSearchStore } from "./search-store";
 
 function HighlightText({ text, query }: { text: string; query: string }) {
   const parts = useMemo(() => {
     if (!query.trim()) return [{ text, highlight: false }];
-    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const regex = new RegExp(`(${escaped})`, "gi");
+    // Build regex that matches the full phrase OR individual terms
+    const terms = query.trim().split(/\s+/).filter(Boolean);
+    const escaped = query.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const patterns: string[] = [escaped];
+    if (terms.length > 1) {
+      for (const term of terms) {
+        const e = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        if (e && !patterns.includes(e)) patterns.push(e);
+      }
+    }
+    const regex = new RegExp(`(${patterns.join("|")})`, "gi");
     const result: { text: string; highlight: boolean }[] = [];
     let lastIndex = 0;
     let match: RegExpExecArray | null;
@@ -110,6 +129,24 @@ interface NavPage {
 
 type ThemeValue = "light" | "dark" | "system";
 
+function memberInitials(name: string) {
+  return name
+    .split(" ")
+    .map((word) => word[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+}
+
+function matchesMember(member: MemberWithUser, query: string) {
+  return (
+    member.name.toLowerCase().includes(query) ||
+    member.email.toLowerCase().includes(query) ||
+    (query.length >= 3 && member.role.startsWith(query)) ||
+    matchesPinyin(member.name, query)
+  );
+}
+
 interface CommandItem {
   key: string;
   label: string;
@@ -143,8 +180,7 @@ export function SearchCommand() {
   const recentItems = useRecentIssuesStore(selectRecentIssues(wsId));
   const p: WorkspacePaths = useWorkspacePaths();
   const { theme, setTheme } = useTheme();
-  const currentWorkspace = useCurrentWorkspace();
-  const { data: workspaces = [] } = useQuery(workspaceListOptions());
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
 
   // Resolve each recent issue via its cached detail entry. Recent items are
   // typically already in the detail cache because the user has opened them;
@@ -203,7 +239,7 @@ export function SearchCommand() {
         icon: Plus,
         keywords: ["new", "issue", "create", "add"],
         onSelect: () => {
-          useModalStore.getState().open("quick-create-issue");
+          openCreateIssueWithPreference();
           setOpen(false);
         },
       },
@@ -299,23 +335,24 @@ export function SearchCommand() {
     );
   }, [commands, query]);
 
-  // Only show workspaces different from the current one, and only after the
-  // user types >=2 chars — one char would match everything (e.g. "w").
-  const filteredWorkspaces = useMemo(() => {
+  const filteredMembers = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return [];
-    const others = workspaces.filter((w) => w.id !== currentWorkspace?.id);
-    const wantsAll =
-      q.length >= 2 && ("workspace".startsWith(q) || "switch".startsWith(q));
-    return others.filter(
-      (w) =>
-        wantsAll ||
-        w.name.toLowerCase().includes(q) ||
-        w.slug.toLowerCase().includes(q),
-    );
-  }, [workspaces, currentWorkspace?.id, query]);
+    const wantsAllMembers =
+      q.length >= 3 &&
+      ("members".startsWith(q) ||
+        "people".startsWith(q) ||
+        "users".startsWith(q) ||
+        "team".startsWith(q));
+    return members
+      .filter((member) => wantsAllMembers || matchesMember(member, q))
+      .slice(0, 10);
+  }, [members, query]);
 
-  const hasResults = results.issues.length > 0 || results.projects.length > 0;
+  const hasResults =
+    results.issues.length > 0 ||
+    results.projects.length > 0 ||
+    filteredMembers.length > 0;
 
   // Global Cmd+K / Ctrl+K shortcut
   useEffect(() => {
@@ -433,12 +470,12 @@ export function SearchCommand() {
     [push, setOpen, p],
   );
 
-  const handleSwitchWorkspace = useCallback(
-    (slug: string) => {
-      push(paths.workspace(slug).issues());
+  const handleMemberSelect = useCallback(
+    (userId: string) => {
+      push(p.memberDetail(userId));
       setOpen(false);
     },
-    [push, setOpen],
+    [push, setOpen, p],
   );
 
   return (
@@ -519,26 +556,32 @@ export function SearchCommand() {
               </CommandPrimitive.Group>
             )}
 
-            {/* Workspaces section — switch to a different workspace, only shown when query matches */}
-            {filteredWorkspaces.length > 0 && (
+            {filteredMembers.length > 0 && (
               <CommandPrimitive.Group className="p-2">
                 <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  {t(($) => $.groups.switch_workspace)}
+                  {t(($) => $.groups.members)}
                 </div>
-                {filteredWorkspaces.map((ws) => (
+                {filteredMembers.map((member) => (
                   <CommandPrimitive.Item
-                    key={ws.id}
-                    value={`workspace:${ws.id}`}
-                    onSelect={() => handleSwitchWorkspace(ws.slug)}
+                    key={member.user_id}
+                    value={`member:${member.user_id}`}
+                    onSelect={() => handleMemberSelect(member.user_id)}
                     className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
                   >
-                    <Building2 className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="truncate">
-                      <HighlightText text={ws.name} query={query} />
-                    </span>
-                    <span className="ml-auto text-xs text-muted-foreground truncate">
-                      {ws.slug}
-                    </span>
+                    <ActorAvatarBase
+                      name={member.name}
+                      initials={memberInitials(member.name)}
+                      avatarUrl={member.avatar_url}
+                      size={22}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate">
+                        <HighlightText text={member.name} query={query} />
+                      </div>
+                      <div className="truncate text-xs text-muted-foreground">
+                        <HighlightText text={member.email} query={query} />
+                      </div>
+                    </div>
                   </CommandPrimitive.Item>
                 ))}
               </CommandPrimitive.Group>
@@ -554,8 +597,7 @@ export function SearchCommand() {
               query.trim() &&
               !hasResults &&
               filteredPages.length === 0 &&
-              filteredCommands.length === 0 &&
-              filteredWorkspaces.length === 0 && (
+              filteredCommands.length === 0 && (
                 <CommandPrimitive.Empty className="py-10 text-center text-sm text-muted-foreground">
                   {t(($) => $.empty.no_results)}
                 </CommandPrimitive.Empty>
@@ -629,18 +671,28 @@ export function SearchCommand() {
                         {STATUS_CONFIG[issue.status].label}
                       </span>
                     </div>
-                    {issue.match_source === "comment" &&
-                      issue.matched_snippet && (
-                        <div className="flex items-start gap-2 pl-[26px]">
-                          <MessageSquare className="size-3 shrink-0 text-muted-foreground mt-0.5" />
-                          <span className="text-xs text-muted-foreground truncate">
-                            <HighlightText
-                              text={issue.matched_snippet}
-                              query={query}
-                            />
-                          </span>
-                        </div>
-                      )}
+                    {issue.matched_description_snippet && (
+                      <div className="flex items-start gap-2 pl-[26px]">
+                        <FileText className="size-3 shrink-0 text-muted-foreground mt-0.5" />
+                        <span className="text-xs text-muted-foreground truncate">
+                          <HighlightText
+                            text={issue.matched_description_snippet}
+                            query={query}
+                          />
+                        </span>
+                      </div>
+                    )}
+                    {issue.matched_comment_snippet && (
+                      <div className="flex items-start gap-2 pl-[26px]">
+                        <MessageSquare className="size-3 shrink-0 text-muted-foreground mt-0.5" />
+                        <span className="text-xs text-muted-foreground truncate">
+                          <HighlightText
+                            text={issue.matched_comment_snippet}
+                            query={query}
+                          />
+                        </span>
+                      </div>
+                    )}
                   </CommandPrimitive.Item>
                 ))}
               </CommandPrimitive.Group>

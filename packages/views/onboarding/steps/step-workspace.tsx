@@ -139,7 +139,11 @@ export function StepWorkspace({
             toast.error(t(($) => $.step_workspace.slug_conflict_toast));
             return;
           }
-          toast.error(t(($) => $.step_workspace.create_failed_toast));
+          toast.error(
+            error instanceof Error && error.message
+              ? error.message
+              : t(($) => $.step_workspace.create_failed_toast),
+          );
         },
       },
     );
@@ -317,18 +321,21 @@ export function StepWorkspace({
                 createFields
               )}
             </div>
+
+            <div className="mt-8 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+              <span
+                aria-live="polite"
+                className="mr-auto text-xs text-muted-foreground"
+              >
+                {hint}
+              </span>
+              <Button size="lg" disabled={continueDisabled} onClick={onContinue}>
+                {continueLabel}
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </main>
-
-        <footer className="flex shrink-0 items-center justify-end gap-4 bg-background px-6 py-4 sm:px-10 md:px-14 lg:px-16">
-          <span aria-live="polite" className="text-xs text-muted-foreground">
-            {hint}
-          </span>
-          <Button size="lg" disabled={continueDisabled} onClick={onContinue}>
-            {continueLabel}
-            <ArrowRight className="h-4 w-4" />
-          </Button>
-        </footer>
       </div>
 
       {/* Right — side panel.

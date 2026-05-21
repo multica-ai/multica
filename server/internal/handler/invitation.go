@@ -438,6 +438,23 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Seed an install-runtime issue if the workspace has no runtime yet, so
+	// the invitee lands on a concrete next step rather than an empty list.
+	// claimStarterContentStateIfUnset keeps older desktop builds from showing
+	// the legacy import dialog (rendered when this column is NULL).
+	seededIssue, seededIssueCreated, err := ensureNoRuntimeOnboardingIssue(
+		r.Context(), qtx, accepted.WorkspaceID, user.ID, onboardedUser.Language,
+	)
+	if err != nil {
+		slog.Warn("accept invitation: ensure install-runtime issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", uuidToString(accepted.WorkspaceID))...)
+		writeError(w, http.StatusInternalServerError, "failed to seed onboarding issue")
+		return
+	}
+	if err := claimStarterContentStateIfUnset(r.Context(), qtx, user.ID, onboardedUser.StarterContentState); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to record starter content state")
+		return
+	}
+
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to accept invitation")
 		return
@@ -460,6 +477,21 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		"invitation_id": uuidToString(accepted.ID),
 		"member":        memberResp,
 	})
+
+	if seededIssueCreated {
+		prefix := h.getIssuePrefix(r.Context(), seededIssue.WorkspaceID)
+		issueResp := issueToResponse(seededIssue, prefix)
+		h.publish(protocol.EventIssueCreated, wsID, "member", userID, map[string]any{"issue": issueResp})
+		h.Analytics.Capture(analytics.IssueCreated(
+			userID,
+			wsID,
+			uuidToString(seededIssue.ID),
+			"",
+			"",
+			"",
+			analytics.SourceOnboarding,
+		))
+	}
 
 	// days_since_invite rounds down to whole days so the funnel segments
 	// "accepted same day" cleanly from "accepted later". inv.CreatedAt is

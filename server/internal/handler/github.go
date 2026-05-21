@@ -22,16 +22,26 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // ── Response shapes ─────────────────────────────────────────────────────────
 
+// GitHubInstallationResponse is the JSON shape returned by the installation
+// list endpoint and broadcast on installation-related WS events.
+//
+// InstallationID is admin-only: the numeric GitHub installation_id is the
+// management handle used by the Connect/Disconnect flows, so non-admin
+// members receive responses with the field omitted. The list handler gates
+// it by role; realtime broadcasts always omit it because the WS fanout has
+// no per-recipient view (admins re-query the list endpoint on invalidation
+// to recover the management handle).
 type GitHubInstallationResponse struct {
 	ID               string  `json:"id"`
 	WorkspaceID      string  `json:"workspace_id"`
-	InstallationID   int64   `json:"installation_id"`
+	InstallationID   *int64  `json:"installation_id,omitempty"`
 	AccountLogin     string  `json:"account_login"`
 	AccountType      string  `json:"account_type"`
 	AccountAvatarURL *string `json:"account_avatar_url"`
@@ -54,6 +64,27 @@ type GitHubPullRequestResponse struct {
 	ClosedAt        *string `json:"closed_at"`
 	PRCreatedAt     string  `json:"pr_created_at"`
 	PRUpdatedAt     string  `json:"pr_updated_at"`
+	// Mergeable state mirrors GitHub's `mergeable_state` field. We only
+	// surface `clean`/`dirty` in the UI today; other values (`blocked`,
+	// `behind`, `unstable`, `unknown`) round-trip but render as unknown.
+	MergeableState *string `json:"mergeable_state"`
+	// ChecksConclusion is the aggregated state of the latest CI check
+	// suites for the PR's current head SHA. One of "passed", "failed",
+	// "pending", or nil when no completed suite has been observed.
+	ChecksConclusion *string `json:"checks_conclusion"`
+	// Per-suite counts that drive the card's segmented progress bar.
+	// Always present on list rows; bare upsert broadcasts default to 0
+	// and the frontend hides the bar when total == 0.
+	ChecksPassed  int64 `json:"checks_passed"`
+	ChecksFailed  int64 `json:"checks_failed"`
+	ChecksPending int64 `json:"checks_pending"`
+	// Diff stats (lines added/removed and file count) sourced from the
+	// `pull_request` webhook payload. Legacy rows that pre-date this
+	// field default to 0; the frontend treats total == 0 as "unknown"
+	// and hides the stats row.
+	Additions    int32 `json:"additions"`
+	Deletions    int32 `json:"deletions"`
+	ChangedFiles int32 `json:"changed_files"`
 }
 
 type GitHubConnectResponse struct {
@@ -62,15 +93,29 @@ type GitHubConnectResponse struct {
 }
 
 func githubInstallationToResponse(i db.GithubInstallation) GitHubInstallationResponse {
+	instID := i.InstallationID
 	return GitHubInstallationResponse{
 		ID:               uuidToString(i.ID),
 		WorkspaceID:      uuidToString(i.WorkspaceID),
-		InstallationID:   i.InstallationID,
+		InstallationID:   &instID,
 		AccountLogin:     i.AccountLogin,
 		AccountType:      i.AccountType,
 		AccountAvatarURL: textToPtr(i.AccountAvatarUrl),
 		CreatedAt:        timestampToString(i.CreatedAt),
 	}
+}
+
+// githubInstallationToBroadcast returns the same shape as the list endpoint's
+// per-role response with the numeric `installation_id` stripped. Realtime
+// events fan out to every WS client subscribed to the workspace, so the
+// payload must match the weakest-role view — admin/owner clients re-query
+// the list endpoint to recover the management handle. The frontend uses
+// these events only to invalidate the installations query, so it does not
+// read `installation_id` off the broadcast.
+func githubInstallationToBroadcast(i db.GithubInstallation) GitHubInstallationResponse {
+	resp := githubInstallationToResponse(i)
+	resp.InstallationID = nil
+	return resp
 }
 
 func githubPullRequestToResponse(p db.GithubPullRequest) GitHubPullRequestResponse {
@@ -90,7 +135,67 @@ func githubPullRequestToResponse(p db.GithubPullRequest) GitHubPullRequestRespon
 		ClosedAt:        timestampToPtr(p.ClosedAt),
 		PRCreatedAt:     timestampToString(p.PrCreatedAt),
 		PRUpdatedAt:     timestampToString(p.PrUpdatedAt),
+		MergeableState:  textToPtr(p.MergeableState),
+		// A bare PR row has no aggregated check counts — webhook
+		// broadcasts of a single PR fall through here and the frontend
+		// re-queries the list for fresh counts.
+		ChecksConclusion: nil,
+		Additions:        p.Additions,
+		Deletions:        p.Deletions,
+		ChangedFiles:     p.ChangedFiles,
 	}
+}
+
+func issuePullRequestRowToResponse(p db.ListPullRequestsByIssueRow) GitHubPullRequestResponse {
+	return GitHubPullRequestResponse{
+		ID:               uuidToString(p.ID),
+		WorkspaceID:      uuidToString(p.WorkspaceID),
+		RepoOwner:        p.RepoOwner,
+		RepoName:         p.RepoName,
+		Number:           p.PrNumber,
+		Title:            p.Title,
+		State:            p.State,
+		HtmlURL:          p.HtmlUrl,
+		Branch:           textToPtr(p.Branch),
+		AuthorLogin:      textToPtr(p.AuthorLogin),
+		AuthorAvatarURL:  textToPtr(p.AuthorAvatarUrl),
+		MergedAt:         timestampToPtr(p.MergedAt),
+		ClosedAt:         timestampToPtr(p.ClosedAt),
+		PRCreatedAt:      timestampToString(p.PrCreatedAt),
+		PRUpdatedAt:      timestampToString(p.PrUpdatedAt),
+		MergeableState:   textToPtr(p.MergeableState),
+		ChecksConclusion: aggregateChecksConclusion(p.ChecksFailed, p.ChecksPassed, p.ChecksPending, p.ChecksTotal),
+		ChecksPassed:     p.ChecksPassed,
+		ChecksFailed:     p.ChecksFailed,
+		ChecksPending:    p.ChecksPending,
+		Additions:        p.Additions,
+		Deletions:        p.Deletions,
+		ChangedFiles:     p.ChangedFiles,
+	}
+}
+
+// aggregateChecksConclusion collapses the per-PR check_suite counts into a
+// single status surfaced to the UI:
+//   - any failed-class suite wins ("failed");
+//   - any not-yet-completed suite makes the PR "pending";
+//   - all completed and in the passed-class is "passed";
+//   - no observed suite at all is nil (rendered as "no checks" / hidden).
+func aggregateChecksConclusion(failed, passed, pending, total int64) *string {
+	if total == 0 {
+		return nil
+	}
+	var v string
+	switch {
+	case failed > 0:
+		v = "failed"
+	case pending > 0:
+		v = "pending"
+	case passed > 0:
+		v = "passed"
+	default:
+		return nil
+	}
+	return &v
 }
 
 // ── Connect / state token ───────────────────────────────────────────────────
@@ -181,7 +286,10 @@ func (h *Handler) GitHubConnect(w http.ResponseWriter, r *http.Request) {
 // sends after a user installs (or re-authorizes) the App. We expect
 // ?installation_id=<id>&state=<signed token>. We persist the installation
 // row (workspace ↔ installation_id mapping), then bounce the user back to
-// the Settings → Integrations page in the web app.
+// the new Settings → GitHub tab in the web app (RFC MUL-2414 §4.1). The
+// previous destination was the catch-all Settings page, which after the
+// GitHub-tab split would land users on the default profile tab instead of
+// the place that shows the connection they just completed.
 func (h *Handler) GitHubSetupCallback(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	installationIDStr := q.Get("installation_id")
@@ -190,25 +298,25 @@ func (h *Handler) GitHubSetupCallback(w http.ResponseWriter, r *http.Request) {
 	if frontend == "" {
 		frontend = "http://localhost:3000"
 	}
-	settingsURL := strings.TrimRight(frontend, "/") + "/settings"
+	settingsURL := strings.TrimRight(frontend, "/") + "/settings?tab=github"
 
 	if installationIDStr == "" || state == "" {
-		http.Redirect(w, r, settingsURL+"?github_error=missing_params", http.StatusFound)
+		http.Redirect(w, r, settingsURL+"&github_error=missing_params", http.StatusFound)
 		return
 	}
 	workspaceID, ok := verifyState(state)
 	if !ok {
-		http.Redirect(w, r, settingsURL+"?github_error=invalid_state", http.StatusFound)
+		http.Redirect(w, r, settingsURL+"&github_error=invalid_state", http.StatusFound)
 		return
 	}
 	installationID, err := strconv.ParseInt(installationIDStr, 10, 64)
 	if err != nil {
-		http.Redirect(w, r, settingsURL+"?github_error=bad_installation_id", http.StatusFound)
+		http.Redirect(w, r, settingsURL+"&github_error=bad_installation_id", http.StatusFound)
 		return
 	}
 	wsUUID, err := parseStrictUUID(workspaceID)
 	if err != nil {
-		http.Redirect(w, r, settingsURL+"?github_error=bad_workspace", http.StatusFound)
+		http.Redirect(w, r, settingsURL+"&github_error=bad_workspace", http.StatusFound)
 		return
 	}
 	// Resolve the installation against GitHub's API to capture display info.
@@ -237,13 +345,13 @@ func (h *Handler) GitHubSetupCallback(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		slog.Error("github: failed to persist installation", "err", err, "installation_id", installationID)
-		http.Redirect(w, r, settingsURL+"?github_error=persist_failed", http.StatusFound)
+		http.Redirect(w, r, settingsURL+"&github_error=persist_failed", http.StatusFound)
 		return
 	}
 	h.publish(protocol.EventGitHubInstallationCreated, workspaceID, "system", "", map[string]any{
-		"installation": githubInstallationToResponse(inst),
+		"installation": githubInstallationToBroadcast(inst),
 	})
-	http.Redirect(w, r, settingsURL+"?github_connected=1", http.StatusFound)
+	http.Redirect(w, r, settingsURL+"&github_connected=1", http.StatusFound)
 }
 
 // fetchInstallationAccount tries to enrich the installation row with the
@@ -294,12 +402,21 @@ func fetchInstallationAccount(ctx context.Context, installationID int64) (login,
 
 // ── Listing / disconnect ────────────────────────────────────────────────────
 
+// ListGitHubInstallations returns the workspace's connected GitHub
+// installations to any workspace member. Connect/disconnect remain
+// admin-only at the router level, so the response carries a `can_manage`
+// hint and strips the numeric `installation_id` for non-admin callers —
+// they get visibility into "is GitHub wired up, and by whom?" without the
+// management handle.
 func (h *Handler) ListGitHubInstallations(w http.ResponseWriter, r *http.Request) {
 	workspaceID := chi.URLParam(r, "id")
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
 		return
 	}
+	member, _ := middleware.MemberFromContext(r.Context())
+	canManage := roleAllowed(member.Role, "owner", "admin")
+
 	rows, err := h.Queries.ListGitHubInstallationsByWorkspace(r.Context(), wsUUID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list installations")
@@ -307,9 +424,17 @@ func (h *Handler) ListGitHubInstallations(w http.ResponseWriter, r *http.Request
 	}
 	out := make([]GitHubInstallationResponse, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, githubInstallationToResponse(row))
+		resp := githubInstallationToResponse(row)
+		if !canManage {
+			resp.InstallationID = nil
+		}
+		out = append(out, resp)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"installations": out, "configured": isGitHubConfigured()})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"installations": out,
+		"configured":    isGitHubConfigured(),
+		"can_manage":    canManage,
+	})
 }
 
 func (h *Handler) DeleteGitHubInstallation(w http.ResponseWriter, r *http.Request) {
@@ -350,7 +475,7 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 	}
 	out := make([]GitHubPullRequestResponse, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, githubPullRequestToResponse(row))
+		out = append(out, issuePullRequestRowToResponse(row))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"pull_requests": out})
 }
@@ -396,6 +521,8 @@ func (h *Handler) HandleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		h.handleInstallationEvent(ctx, body)
 	case "pull_request":
 		h.handlePullRequestEvent(ctx, body)
+	case "check_suite":
+		h.handleCheckSuiteEvent(ctx, body)
 	default:
 		// Acknowledge every event so GitHub doesn't mark the endpoint failing,
 		// but ignore types we don't model.
@@ -450,9 +577,12 @@ func (h *Handler) handleInstallationEvent(ctx context.Context, body []byte) {
 			slog.Warn("github: delete installation failed", "err", err, "installation_id", p.Installation.ID)
 			return
 		}
+		// Broadcast the internal row id only — the numeric installation_id is
+		// a management handle that non-admin members are not allowed to see.
+		// The frontend invalidates the installations query on this event and
+		// does not read the broadcast payload directly.
 		h.publish(protocol.EventGitHubInstallationDeleted, uuidToString(deleted.WorkspaceID), "system", "", map[string]any{
-			"installation_id": p.Installation.ID,
-			"id":              uuidToString(deleted.ID),
+			"id": uuidToString(deleted.ID),
 		})
 	case "created", "new_permissions_accepted", "unsuspend":
 		// We don't know which workspace this maps to from the webhook
@@ -481,25 +611,31 @@ func (h *Handler) handleInstallationEvent(ctx context.Context, body []byte) {
 type ghPullRequestPayload struct {
 	Action      string `json:"action"`
 	PullRequest struct {
-		Number    int32  `json:"number"`
-		HTMLURL   string `json:"html_url"`
-		Title     string `json:"title"`
-		Body      string `json:"body"`
-		State     string `json:"state"`
-		Draft     bool   `json:"draft"`
-		Merged    bool   `json:"merged"`
-		MergedAt  string `json:"merged_at"`
-		ClosedAt  string `json:"closed_at"`
-		CreatedAt string `json:"created_at"`
-		UpdatedAt string `json:"updated_at"`
-		Head      struct {
+		Number         int32  `json:"number"`
+		HTMLURL        string `json:"html_url"`
+		Title          string `json:"title"`
+		Body           string `json:"body"`
+		State          string `json:"state"`
+		Draft          bool   `json:"draft"`
+		Merged         bool   `json:"merged"`
+		MergedAt       string `json:"merged_at"`
+		ClosedAt       string `json:"closed_at"`
+		CreatedAt      string `json:"created_at"`
+		UpdatedAt      string `json:"updated_at"`
+		MergeableState string `json:"mergeable_state"`
+		Additions      int32  `json:"additions"`
+		Deletions      int32  `json:"deletions"`
+		ChangedFiles   int32  `json:"changed_files"`
+		Head           struct {
 			Ref string `json:"ref"`
+			SHA string `json:"sha"`
 		} `json:"head"`
 		User struct {
 			Login     string `json:"login"`
 			AvatarURL string `json:"avatar_url"`
 		} `json:"user"`
 	} `json:"pull_request"`
+	Changes *ghPRChanges `json:"changes"`
 	Repository struct {
 		Name  string `json:"name"`
 		Owner struct {
@@ -531,22 +667,29 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 	}
 
 	state := derivePRState(p.PullRequest.State, p.PullRequest.Draft, p.PullRequest.Merged)
+	mergeable, clearMergeable := derivePRMergeableState(p.Action, p.PullRequest.MergeableState, baseRefChanged(p.Changes))
 	pr, err := h.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
-		WorkspaceID:      inst.WorkspaceID,
-		InstallationID:   inst.InstallationID,
-		RepoOwner:        p.Repository.Owner.Login,
-		RepoName:         p.Repository.Name,
-		PrNumber:         p.PullRequest.Number,
-		Title:            p.PullRequest.Title,
-		State:            state,
-		HtmlUrl:          p.PullRequest.HTMLURL,
-		Branch:           ptrToText(strPtrOrNil(p.PullRequest.Head.Ref)),
-		AuthorLogin:      ptrToText(strPtrOrNil(p.PullRequest.User.Login)),
-		AuthorAvatarUrl:  ptrToText(strPtrOrNil(p.PullRequest.User.AvatarURL)),
-		MergedAt:         parseGHTime(p.PullRequest.MergedAt),
-		ClosedAt:         parseGHTime(p.PullRequest.ClosedAt),
-		PrCreatedAt:      parseGHTimeRequired(p.PullRequest.CreatedAt),
-		PrUpdatedAt:      parseGHTimeRequired(p.PullRequest.UpdatedAt),
+		WorkspaceID:           inst.WorkspaceID,
+		InstallationID:        inst.InstallationID,
+		RepoOwner:             p.Repository.Owner.Login,
+		RepoName:              p.Repository.Name,
+		PrNumber:              p.PullRequest.Number,
+		Title:                 p.PullRequest.Title,
+		State:                 state,
+		HtmlUrl:               p.PullRequest.HTMLURL,
+		Branch:                ptrToText(strPtrOrNil(p.PullRequest.Head.Ref)),
+		AuthorLogin:           ptrToText(strPtrOrNil(p.PullRequest.User.Login)),
+		AuthorAvatarUrl:       ptrToText(strPtrOrNil(p.PullRequest.User.AvatarURL)),
+		MergedAt:              parseGHTime(p.PullRequest.MergedAt),
+		ClosedAt:              parseGHTime(p.PullRequest.ClosedAt),
+		PrCreatedAt:           parseGHTimeRequired(p.PullRequest.CreatedAt),
+		PrUpdatedAt:           parseGHTimeRequired(p.PullRequest.UpdatedAt),
+		HeadSha:               p.PullRequest.Head.SHA,
+		MergeableState:        mergeable,
+		ClearMergeableState:   pgtype.Bool{Bool: clearMergeable, Valid: true},
+		Additions:             p.PullRequest.Additions,
+		Deletions:             p.PullRequest.Deletions,
+		ChangedFiles:          p.PullRequest.ChangedFiles,
 	})
 	if err != nil {
 		slog.Warn("github: upsert pr failed", "err", err)
@@ -559,46 +702,54 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 	// Auto-link: scan title/body/branch for issue identifiers, look them
 	// up in this workspace, attach the link rows. Idempotent (ON CONFLICT
 	// DO NOTHING) so re-firing the webhook doesn't duplicate.
-	idents := extractIdentifiers(p.PullRequest.Title, p.PullRequest.Body, p.PullRequest.Head.Ref)
-	prefix := h.getIssuePrefix(ctx, inst.WorkspaceID)
-	linkedIssueIDs := make([]string, 0, len(idents))
-	for _, id := range idents {
-		issue, ok := h.lookupIssueByIdentifier(ctx, inst.WorkspaceID, prefix, id)
-		if !ok {
-			continue
-		}
-		if err := h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
-			IssueID:        issue.ID,
-			PullRequestID:  pr.ID,
-			LinkedByType:   strToText("system"),
-			LinkedByID:     pgtype.UUID{},
-		}); err != nil {
-			slog.Warn("github: link failed", "err", err)
-			continue
-		}
-		linkedIssueIDs = append(linkedIssueIDs, uuidToString(issue.ID))
-
-		// A terminal PR event (`merged` or `closed`) may be the moment the
-		// last in-flight sibling resolves, so we re-evaluate the issue on
-		// both. We advance the issue to done when:
-		//   1. the issue isn't already terminal (`done` / `cancelled`);
-		//   2. no sibling PR is still `open` / `draft`;
-		//   3. at least one linked PR (this one or a sibling) is `merged`.
-		// Rule (3) prevents an "all closed-without-merge" sequence from
-		// silently auto-closing the issue — if nothing was ever delivered,
-		// the user should decide what to do manually.
-		if (state == "merged" || state == "closed") && issue.Status != "done" && issue.Status != "cancelled" {
-			counts, err := h.Queries.GetSiblingPullRequestStateCountsForIssue(ctx, db.GetSiblingPullRequestStateCountsForIssueParams{
-				IssueID: issue.ID,
-				ID:      pr.ID,
-			})
-			if err != nil {
-				slog.Warn("github: count sibling pr states failed", "err", err, "issue_id", uuidToString(issue.ID))
+	//
+	// RFC MUL-2414 §4.8: the PR mirror upsert above always runs (so re-enabling
+	// GitHub features restores history without backfill), but the link rows
+	// are a "new side-effect" and must be gated by the workspace's auto-link
+	// flag (which itself short-circuits when the master `github_enabled`
+	// switch is off).
+	linkedIssueIDs := make([]string, 0)
+	if h.workspaceAutoLinkPRsEnabled(ctx, inst.WorkspaceID) {
+		idents := extractIdentifiers(p.PullRequest.Title, p.PullRequest.Body, p.PullRequest.Head.Ref)
+		prefix := h.getIssuePrefix(ctx, inst.WorkspaceID)
+		for _, id := range idents {
+			issue, ok := h.lookupIssueByIdentifier(ctx, inst.WorkspaceID, prefix, id)
+			if !ok {
 				continue
 			}
-			anyMerged := state == "merged" || counts.MergedCount > 0
-			if counts.OpenCount == 0 && anyMerged {
-				h.advanceIssueToDone(ctx, issue, workspaceID)
+			if err := h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
+				IssueID:        issue.ID,
+				PullRequestID:  pr.ID,
+				LinkedByType:   strToText("system"),
+				LinkedByID:     pgtype.UUID{},
+			}); err != nil {
+				slog.Warn("github: link failed", "err", err)
+				continue
+			}
+			linkedIssueIDs = append(linkedIssueIDs, uuidToString(issue.ID))
+
+			// A terminal PR event (`merged` or `closed`) may be the moment the
+			// last in-flight sibling resolves, so we re-evaluate the issue on
+			// both. We advance the issue to done when:
+			//   1. the issue isn't already terminal (`done` / `cancelled`);
+			//   2. no sibling PR is still `open` / `draft`;
+			//   3. at least one linked PR (this one or a sibling) is `merged`.
+			// Rule (3) prevents an "all closed-without-merge" sequence from
+			// silently auto-closing the issue — if nothing was ever delivered,
+			// the user should decide what to do manually.
+			if (state == "merged" || state == "closed") && issue.Status != "done" && issue.Status != "cancelled" {
+				counts, err := h.Queries.GetSiblingPullRequestStateCountsForIssue(ctx, db.GetSiblingPullRequestStateCountsForIssueParams{
+					IssueID: issue.ID,
+					ID:      pr.ID,
+				})
+				if err != nil {
+					slog.Warn("github: count sibling pr states failed", "err", err, "issue_id", uuidToString(issue.ID))
+					continue
+				}
+				anyMerged := state == "merged" || counts.MergedCount > 0
+				if counts.OpenCount == 0 && anyMerged {
+					h.advanceIssueToDone(ctx, issue, workspaceID)
+				}
 			}
 		}
 	}
@@ -609,6 +760,184 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 		"pull_request": resp,
 		"linked_issue_ids": linkedIssueIDs,
 	})
+}
+
+// ── check_suite webhook ────────────────────────────────────────────────────
+
+type ghCheckSuitePayload struct {
+	Action     string `json:"action"`
+	CheckSuite struct {
+		ID         int64  `json:"id"`
+		HeadSHA    string `json:"head_sha"`
+		Status     string `json:"status"`
+		Conclusion string `json:"conclusion"`
+		UpdatedAt  string `json:"updated_at"`
+		App        struct {
+			ID int64 `json:"id"`
+		} `json:"app"`
+		PullRequests []struct {
+			Number int32 `json:"number"`
+		} `json:"pull_requests"`
+	} `json:"check_suite"`
+	Repository struct {
+		Name  string `json:"name"`
+		Owner struct {
+			Login string `json:"login"`
+		} `json:"owner"`
+	} `json:"repository"`
+	Installation struct {
+		ID int64 `json:"id"`
+	} `json:"installation"`
+}
+
+// handleCheckSuiteEvent records the CI suite state for each PR the suite
+// references. MVP only persists terminal events (`completed`); GitHub sends
+// `requested`/`rerequested` for some apps but those carry no useful
+// conclusion and the RFC restricts us to suite-level aggregation.
+//
+// The suite payload may reference multiple PRs (e.g. the same head SHA is
+// open against several base branches), so we iterate. A reference whose PR
+// hasn't been mirrored locally is logged and skipped — auto-backfill from
+// GitHub's REST API is a v2 enhancement.
+func (h *Handler) handleCheckSuiteEvent(ctx context.Context, body []byte) {
+	var p ghCheckSuitePayload
+	if err := json.Unmarshal(body, &p); err != nil {
+		slog.Warn("github: bad check_suite payload", "err", err)
+		return
+	}
+	if p.Action != "completed" {
+		// MVP scope: only completed suites carry a conclusion we can
+		// surface. queued / in_progress events would feed a future
+		// "real pending" display path.
+		return
+	}
+	if p.Installation.ID == 0 {
+		return
+	}
+	inst, err := h.Queries.GetGitHubInstallationByInstallationID(ctx, p.Installation.ID)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("github: lookup installation failed", "err", err)
+		}
+		return
+	}
+	if len(p.CheckSuite.PullRequests) == 0 {
+		// Forks emit suites whose `pull_requests` array is empty for
+		// the upstream repo. We have no way to attribute the result
+		// without polling, so drop with a hint.
+		slog.Info("github: check_suite has no associated PRs", "suite_id", p.CheckSuite.ID)
+		return
+	}
+	updatedAt := parseGHTimeRequired(p.CheckSuite.UpdatedAt)
+
+	affectedWorkspaces := map[string]struct{}{}
+	affectedIssues := map[string]struct{}{}
+	for _, prRef := range p.CheckSuite.PullRequests {
+		// Scope the lookup to the installation's workspace. The
+		// (workspace_id, repo_owner, repo_name, pr_number) tuple is the
+		// real uniqueness key: if the same repo lived under a different
+		// workspace historically, a bare (owner, repo, number) lookup
+		// could return either row arbitrarily and land this suite on
+		// the wrong PR (or skip the right one because the installation
+		// ids no longer match).
+		pr, err := h.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
+			WorkspaceID: inst.WorkspaceID,
+			RepoOwner:   p.Repository.Owner.Login,
+			RepoName:    p.Repository.Name,
+			PrNumber:    prRef.Number,
+		})
+		if err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				slog.Warn("github: lookup pr for check_suite failed", "err", err)
+			}
+			slog.Info("github: check_suite for unknown PR — skipping",
+				"repo", p.Repository.Owner.Login+"/"+p.Repository.Name,
+				"pr", prRef.Number,
+				"suite_id", p.CheckSuite.ID,
+			)
+			continue
+		}
+		if err := h.Queries.UpsertPullRequestCheckSuite(ctx, db.UpsertPullRequestCheckSuiteParams{
+			PrID:       pr.ID,
+			SuiteID:    p.CheckSuite.ID,
+			HeadSha:    p.CheckSuite.HeadSHA,
+			AppID:      p.CheckSuite.App.ID,
+			Conclusion: strToText(p.CheckSuite.Conclusion),
+			Status:     p.CheckSuite.Status,
+			UpdatedAt:  updatedAt,
+		}); err != nil {
+			slog.Warn("github: upsert check_suite failed", "err", err, "suite_id", p.CheckSuite.ID)
+			continue
+		}
+		affectedWorkspaces[uuidToString(pr.WorkspaceID)] = struct{}{}
+		issues, err := h.Queries.ListIssueIDsForPullRequest(ctx, pr.ID)
+		if err == nil {
+			for _, id := range issues {
+				affectedIssues[uuidToString(id)] = struct{}{}
+			}
+		}
+	}
+
+	// Broadcast on the existing event so the issue page just re-queries
+	// the PR list. We don't pass a single pull_request payload here
+	// because a suite can touch several and the listener already
+	// invalidates by issue.
+	for ws := range affectedWorkspaces {
+		linked := make([]string, 0, len(affectedIssues))
+		for id := range affectedIssues {
+			linked = append(linked, id)
+		}
+		h.publish(protocol.EventPullRequestUpdated, ws, "system", "", map[string]any{
+			"linked_issue_ids": linked,
+		})
+	}
+}
+
+// derivePRMergeableState resolves the upsert behaviour for the PR row's
+// mergeable_state column on a `pull_request` webhook. It returns three
+// states encoded as (value, clear):
+//
+//   - clear=true → force the column to NULL. State-changing actions (`opened`,
+//     `synchronize`, `reopened`, or a base-branch swap) must blank the value
+//     because GitHub re-computes mergeability asynchronously; the payload may
+//     still carry the previous head's clean/dirty answer, and trusting it
+//     would surface a stale verdict against the new head.
+//   - clear=false, value valid → write the value. The event carried a
+//     concrete verdict we should persist.
+//   - clear=false, value invalid → preserve the existing column. Metadata
+//     events (labeled/assigned/edited-without-base-swap) ship pull_request
+//     payloads with mergeable_state empty even when the previous verdict is
+//     still accurate, and silently overwriting clean/dirty with NULL would
+//     drop information GitHub only refreshes lazily.
+func derivePRMergeableState(action, payload string, baseRefChanged bool) (pgtype.Text, bool) {
+	if action == "opened" || action == "synchronize" || action == "reopened" {
+		return pgtype.Text{}, true
+	}
+	if action == "edited" && baseRefChanged {
+		return pgtype.Text{}, true
+	}
+	if payload == "" {
+		return pgtype.Text{}, false
+	}
+	return pgtype.Text{String: payload, Valid: true}, false
+}
+
+// ghPRChanges captures the only field of `pull_request.edited`'s `changes`
+// payload we care about: a base-branch swap. Everything else (title, body)
+// leaves mergeability intact.
+type ghPRChanges struct {
+	Base *struct {
+		Ref *struct {
+			From string `json:"from"`
+		} `json:"ref"`
+	} `json:"base"`
+}
+
+// baseRefChanged returns true when a pull_request.edited event indicates the
+// PR's base branch was swapped. Only this kind of edit invalidates the
+// existing mergeable_state.
+func baseRefChanged(c *ghPRChanges) bool {
+	return c != nil && c.Base != nil && c.Base.Ref != nil && c.Base.Ref.From != ""
 }
 
 func derivePRState(state string, draft, merged bool) string {
@@ -663,6 +992,32 @@ func extractIdentifiers(parts ...string) []string {
 
 // lookupIssueByIdentifier looks up an issue in the given workspace by its
 // "PREFIX-NUMBER" identifier. Returns the row + true if the prefix matches
+// workspaceAutoLinkPRsEnabled reports whether the workspace allows the
+// GitHub webhook to create issue ↔ PR link rows. Defaults to true so that
+// workspaces predating RFC MUL-2414 keep the historical "auto-link on"
+// behavior, and short-circuits to false whenever the master GitHub switch
+// is explicitly off — mirroring the precedence used on the client side.
+func (h *Handler) workspaceAutoLinkPRsEnabled(ctx context.Context, workspaceID pgtype.UUID) bool {
+	ws, err := h.Queries.GetWorkspace(ctx, workspaceID)
+	if err != nil || len(ws.Settings) == 0 {
+		return true
+	}
+	var s struct {
+		GitHubEnabled            *bool `json:"github_enabled"`
+		GitHubAutoLinkPRsEnabled *bool `json:"github_auto_link_prs_enabled"`
+	}
+	if err := json.Unmarshal(ws.Settings, &s); err != nil {
+		return true
+	}
+	if s.GitHubEnabled != nil && !*s.GitHubEnabled {
+		return false
+	}
+	if s.GitHubAutoLinkPRsEnabled == nil {
+		return true
+	}
+	return *s.GitHubAutoLinkPRsEnabled
+}
+
 // the workspace's configured prefix and the number resolves to a real issue.
 func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtype.UUID, prefix, identifier string) (db.Issue, bool) {
 	idx := strings.LastIndex(identifier, "-")

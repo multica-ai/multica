@@ -128,3 +128,32 @@ export function useDeleteAutopilotTrigger() {
     },
   });
 }
+
+export function useRotateAutopilotTriggerWebhookToken() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ autopilotId, triggerId }: { autopilotId: string; triggerId: string }) =>
+      api.rotateAutopilotTriggerWebhookToken(autopilotId, triggerId),
+    onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: autopilotKeys.detail(wsId, vars.autopilotId) });
+    },
+  });
+}
+
+// Replay re-dispatches a previously-recorded delivery. The server creates
+// a new delivery row (with `replayed_from_delivery_id`) and synchronously
+// kicks off a new autopilot run. We invalidate both deliveries and runs so
+// the new delivery and any resulting run show up immediately.
+export function useReplayAutopilotDelivery() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ autopilotId, deliveryId }: { autopilotId: string; deliveryId: string }) =>
+      api.replayAutopilotDelivery(autopilotId, deliveryId),
+    onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: autopilotKeys.deliveries(wsId, vars.autopilotId) });
+      qc.invalidateQueries({ queryKey: autopilotKeys.runs(wsId, vars.autopilotId) });
+    },
+  });
+}

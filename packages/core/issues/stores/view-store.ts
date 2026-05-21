@@ -9,14 +9,17 @@ import { ALL_STATUSES } from "../config";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
-export type ViewMode = "board" | "list";
-export type SortField = "position" | "priority" | "due_date" | "created_at" | "title";
+export type ViewMode = "board" | "list" | "gantt";
+export type GanttZoom = "day" | "week" | "month";
+export type IssueGrouping = "status" | "assignee";
+export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title";
 export type SortDirection = "asc" | "desc";
 
 export interface CardProperties {
   priority: boolean;
   description: boolean;
   assignee: boolean;
+  startDate: boolean;
   dueDate: boolean;
   project: boolean;
   childProgress: boolean;
@@ -24,22 +27,29 @@ export interface CardProperties {
 }
 
 export interface ActorFilterValue {
-  type: "member" | "agent";
+  type: "member" | "agent" | "squad";
   id: string;
 }
 
 export const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: "position", label: "Manual" },
   { value: "priority", label: "Priority" },
+  { value: "start_date", label: "Start date" },
   { value: "due_date", label: "Due date" },
   { value: "created_at", label: "Created date" },
   { value: "title", label: "Title" },
+];
+
+export const GROUPING_OPTIONS: { value: IssueGrouping; label: string }[] = [
+  { value: "status", label: "Status" },
+  { value: "assignee", label: "Assignee" },
 ];
 
 export const CARD_PROPERTY_OPTIONS: { key: keyof CardProperties; label: string }[] = [
   { key: "priority", label: "Priority" },
   { key: "description", label: "Description" },
   { key: "assignee", label: "Assignee" },
+  { key: "startDate", label: "Start date" },
   { key: "dueDate", label: "Due date" },
   { key: "project", label: "Project" },
   { key: "labels", label: "Labels" },
@@ -48,6 +58,7 @@ export const CARD_PROPERTY_OPTIONS: { key: keyof CardProperties; label: string }
 
 export interface IssueViewState {
   viewMode: ViewMode;
+  grouping: IssueGrouping;
   statusFilters: IssueStatus[];
   priorityFilters: IssuePriority[];
   assigneeFilters: ActorFilterValue[];
@@ -60,7 +71,12 @@ export interface IssueViewState {
   sortDirection: SortDirection;
   cardProperties: CardProperties;
   listCollapsedStatuses: IssueStatus[];
+  ganttZoom: GanttZoom;
+  ganttShowCompleted: boolean;
   setViewMode: (mode: ViewMode) => void;
+  setGanttZoom: (zoom: GanttZoom) => void;
+  toggleGanttShowCompleted: () => void;
+  setGrouping: (grouping: IssueGrouping) => void;
   toggleStatusFilter: (status: IssueStatus) => void;
   togglePriorityFilter: (priority: IssuePriority) => void;
   toggleAssigneeFilter: (value: ActorFilterValue) => void;
@@ -80,6 +96,7 @@ export interface IssueViewState {
 
 export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): IssueViewState => ({
   viewMode: "board",
+  grouping: "status",
   statusFilters: [],
   priorityFilters: [],
   assigneeFilters: [],
@@ -94,14 +111,21 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     priority: true,
     description: true,
     assignee: true,
+    startDate: true,
     dueDate: true,
     project: true,
     childProgress: true,
     labels: true,
   },
   listCollapsedStatuses: [],
+  ganttZoom: "week",
+  ganttShowCompleted: false,
 
   setViewMode: (mode) => set({ viewMode: mode }),
+  setGanttZoom: (zoom) => set({ ganttZoom: zoom }),
+  toggleGanttShowCompleted: () =>
+    set((state) => ({ ganttShowCompleted: !state.ganttShowCompleted })),
+  setGrouping: (grouping) => set({ grouping }),
   toggleStatusFilter: (status) =>
     set((state) => ({
       statusFilters: state.statusFilters.includes(status)
@@ -205,6 +229,7 @@ export const viewStorePersistOptions = (name: string) => ({
   storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
   partialize: (state: IssueViewState) => ({
     viewMode: state.viewMode,
+    grouping: state.grouping,
     statusFilters: state.statusFilters,
     priorityFilters: state.priorityFilters,
     assigneeFilters: state.assigneeFilters,
@@ -217,6 +242,8 @@ export const viewStorePersistOptions = (name: string) => ({
     sortDirection: state.sortDirection,
     cardProperties: state.cardProperties,
     listCollapsedStatuses: state.listCollapsedStatuses,
+    ganttZoom: state.ganttZoom,
+    ganttShowCompleted: state.ganttShowCompleted,
   }),
   // Default Zustand merge is shallow, so a persisted `cardProperties` snapshot
   // saved before a new toggle was introduced wins entirely and the new key is

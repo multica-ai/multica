@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -50,8 +52,16 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	cmd := exec.CommandContext(runCtx, execPath, hermesArgs...)
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", hermesArgs)
+	agentsMDPresent := false
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
+		if _, err := os.Stat(filepath.Join(opts.Cwd, "AGENTS.md")); err == nil {
+			agentsMDPresent = true
+		}
+	}
+	b.cfg.Logger.Info("hermes acp starting", "cwd", opts.Cwd, "agents_md_present", agentsMDPresent)
+	if opts.SystemPrompt != "" {
+		b.cfg.Logger.Debug("hermes ignoring ExecOptions.SystemPrompt; using cwd-scoped context files", "cwd", opts.Cwd)
 	}
 
 	env := buildEnv(b.cfg.Env)
@@ -271,13 +281,13 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			b.cfg.Logger.Info("hermes session model set", "model", opts.Model)
 		}
 
-		// 4. Build the prompt content. If we have a system prompt, prepend it.
-		userText := prompt
-		if opts.SystemPrompt != "" {
-			userText = opts.SystemPrompt + "\n\n---\n\n" + prompt
-		}
-
-		// 5. Send the prompt and wait for PromptResponse. Flip the gate
+		// 4. Send the prompt and wait for PromptResponse.
+		//
+		// Do NOT prepend opts.SystemPrompt here. Hermes ACP loads project/context
+		// files from cwd (AGENTS.md, .agent_context, etc.) itself; duplicating the
+		// full runtime brief in the user prompt makes the request much larger and
+		// has triggered upstream safety filters on otherwise ordinary tasks.
+		// Flip the gate
 		// just before the request so any history replay flushed during
 		// initialize / session setup stays dropped, but every notification
 		// belonging to this turn is processed.
@@ -285,7 +295,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		_, err = c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
 			"prompt": []map[string]any{
-				{"type": "text", "text": userText},
+				{"type": "text", "text": prompt},
 			},
 		})
 		if err != nil {

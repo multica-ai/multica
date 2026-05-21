@@ -68,7 +68,7 @@
     "popover_title": "Attach a GitHub repo",
     "attached_badge": "attached",
     "remove_tooltip": "Remove",
-    "url_placeholder": "https://github.com/owner/repo",
+    "url_placeholder": "https://github.com/owner/repo or git@github.com:owner/repo.git",
     "url_submit": "Add",
     "toast_attached": "Repository attached",
     "toast_attach_failed": "Failed to attach",

@@ -127,6 +127,7 @@ function ChartTooltipContent({
   labelFormatter,
   labelClassName,
   formatter,
+  footer,
   color,
   nameKey,
   labelKey,
@@ -137,6 +138,16 @@ function ChartTooltipContent({
     indicator?: "line" | "dot" | "dashed"
     nameKey?: string
     labelKey?: string
+    footer?:
+      | React.ReactNode
+      | ((
+          payload: NonNullable<
+            RechartsPrimitive.DefaultTooltipContentProps<
+              TooltipValueType,
+              TooltipNameType
+            >["payload"]
+          >,
+        ) => React.ReactNode)
   } & Omit<
     RechartsPrimitive.DefaultTooltipContentProps<
       TooltipValueType,
@@ -266,6 +277,11 @@ function ChartTooltipContent({
             )
           })}
       </div>
+      {footer != null && (
+        <div className="mt-0.5 border-t border-border/50 pt-1.5">
+          {typeof footer === "function" ? footer(payload) : footer}
+        </div>
+      )}
     </div>
   )
 }

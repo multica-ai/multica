@@ -109,6 +109,37 @@ function tryRouteToOtherWorkspace(path: string): boolean {
 }
 
 /**
+ * Intercept pushes originating in a pinned tab and force them into a new
+ * tab. Returns `true` if the navigation was redirected (caller should NOT
+ * proceed). Pathname-only changes (search / hash / same-page state) are
+ * allowed through so pinned filter / drawer / form-state interactions
+ * still work — see RFC §3 D2a (FINAL: any pathname change → new tab) and
+ * D2b (FINAL: same pathname → allowed in pinned tab).
+ *
+ * Dedupe is preserved (D4a): `openTab` activates an existing same-path tab
+ * if one exists, otherwise creates a new one. The newly-focused tab is
+ * activated foreground — a pinned-tab push is an explicit user action, not
+ * a background cmd+click, so the focus follows.
+ */
+function tryRouteToPinnedNewTab(path: string): boolean {
+  const store = useTabStore.getState();
+  const active = getActiveTab(store);
+  if (!active?.pinned) return false;
+
+  // Use the live router pathname rather than `active.path` so query-only
+  // navigations performed via React Router (which only sync pathname back
+  // to the store) still compare correctly.
+  const currentPathname = active.router.state.location.pathname;
+  const newPathname = path.split("?")[0].split("#")[0];
+  if (currentPathname === newPathname) return false;
+
+  const icon = resolveRouteIcon(path);
+  const newId = store.openTab(path, path, icon);
+  if (newId) store.setActiveTab(newId);
+  return true;
+}
+
+/**
  * Root-level navigation provider for components outside the per-tab
  * RouterProviders (sidebar, search dialog, modals, WindowOverlay contents).
  *
@@ -165,6 +196,7 @@ export function DesktopNavigationProvider({
         const active = currentActiveTab();
         if (tryRouteToOverlay(path, active?.router)) return;
         if (tryRouteToOtherWorkspace(path)) return;
+        if (tryRouteToPinnedNewTab(path)) return;
         active?.router.navigate(path);
       },
       replace: (path: string) => {
@@ -178,9 +210,16 @@ export function DesktopNavigationProvider({
       },
       pathname: location.pathname,
       searchParams: new URLSearchParams(location.search),
-      openInNewTab: (path: string, title?: string) => {
+      openInNewTab: (
+        path: string,
+        title?: string,
+        opts?: { activate?: boolean },
+      ) => {
         // Cross-workspace "open in new tab" switches workspace and opens
-        // the path there; same-workspace just adds a tab in the current group.
+        // the path there (focus follows the user); same-workspace defaults
+        // to background tab (browser cmd+click semantics). Callers that
+        // represent an explicit "Open in new tab" CTA pass `activate: true`
+        // to bring the new tab to the foreground.
         const slug = extractWorkspaceSlug(path);
         const store = useTabStore.getState();
         if (slug && slug !== store.activeWorkspaceSlug) {
@@ -188,8 +227,10 @@ export function DesktopNavigationProvider({
           return;
         }
         const icon = resolveRouteIcon(path);
-        const tabId = store.openTab(path, title ?? path, icon);
-        if (tabId) store.setActiveTab(tabId);
+        const newId = store.openTab(path, title ?? path, icon);
+        if (opts?.activate && newId) {
+          store.setActiveTab(newId);
+        }
       },
       getShareableUrl: (path: string) => `${appUrl}${path}`,
     }),
@@ -231,6 +272,7 @@ export function TabNavigationProvider({
       push: (path: string) => {
         if (tryRouteToOverlay(path, router)) return;
         if (tryRouteToOtherWorkspace(path)) return;
+        if (tryRouteToPinnedNewTab(path)) return;
         router.navigate(path);
       },
       replace: (path: string) => {
@@ -241,7 +283,11 @@ export function TabNavigationProvider({
       back: () => router.navigate(-1),
       pathname: location.pathname,
       searchParams: new URLSearchParams(location.search),
-      openInNewTab: (path: string, title?: string) => {
+      openInNewTab: (
+        path: string,
+        title?: string,
+        opts?: { activate?: boolean },
+      ) => {
         const slug = extractWorkspaceSlug(path);
         const store = useTabStore.getState();
         if (slug && slug !== store.activeWorkspaceSlug) {
@@ -249,8 +295,10 @@ export function TabNavigationProvider({
           return;
         }
         const icon = resolveRouteIcon(path);
-        const tabId = store.openTab(path, title ?? path, icon);
-        if (tabId) store.setActiveTab(tabId);
+        const newId = store.openTab(path, title ?? path, icon);
+        if (opts?.activate && newId) {
+          store.setActiveTab(newId);
+        }
       },
       getShareableUrl: (path: string) => `${appUrl}${path}`,
     }),

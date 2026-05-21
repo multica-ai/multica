@@ -5,8 +5,9 @@ import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
-import { openExternalSafely } from "./external-url";
+import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
+import { handleAppShortcut } from "./keyboard-shortcuts";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
@@ -133,6 +134,27 @@ function createWindow(): void {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
       webSecurity: false,
+      // Required for the Chromium PDF viewer (PDFium) to activate inside
+      // iframes — used by the attachment preview modal for application/pdf
+      // files. Default is false in Electron; without it <iframe src=*.pdf>
+      // renders blank.
+      //
+      // Security trade-off, accepted intentionally:
+      //   1. This window already runs with `webSecurity: false` + `sandbox: false`,
+      //      so `plugins: true` does NOT meaningfully widen the renderer's
+      //      attack surface beyond what is already accepted.
+      //   2. The only PDFs that reach an iframe here are signed CloudFront URLs
+      //      we ourselves issued (see useDownloadAttachment); user-supplied URLs
+      //      are routed through `setWindowOpenHandler` → `openExternalSafely` and
+      //      cannot land in this renderer.
+      //   3. Chromium's PDFium plugin is itself sandboxed inside its own process
+      //      and only handles the `application/pdf` MIME — it does not expose
+      //      Flash, Java, or other historical plugin surfaces.
+      //
+      // If we ever tighten `webSecurity` / `sandbox`, revisit this by hosting
+      // the PDF viewer in a dedicated BrowserView with `plugins: true` scoped
+      // to that view, keeping the main renderer plugin-free.
+      plugins: true,
       additionalArguments: [`--multica-locale=${systemLocale}`],
     },
   });
@@ -168,21 +190,66 @@ function createWindow(): void {
     return { action: "deny" };
   });
 
-  // Prevent Cmd+R / Ctrl+R / Shift+Cmd+R / Shift+Ctrl+R / F5 from
-  // reloading the page. In a desktop app an accidental reload destroys
-  // in-memory state (tabs, drafts, WS connections) with no URL bar to
-  // navigate back. DevTools refresh (via the DevTools UI) still works.
-  mainWindow.webContents.on("before-input-event", (_event, input) => {
-    if (input.type !== "keyDown") return;
-    const cmdOrCtrl =
-      process.platform === "darwin" ? input.meta : input.control;
-    if (
-      (cmdOrCtrl && input.key.toLowerCase() === "r") ||
-      input.key === "F5"
-    ) {
-      _event.preventDefault();
+  // Window-level keyboard shortcuts. Calling preventDefault here prevents
+  // both the renderer keydown AND the application menu accelerator, so
+  // anything we own here (reload-block, zoom) is the sole handler for
+  // that combination — no double-fire with the macOS default View menu.
+  mainWindow.webContents.on("before-input-event", (event, input) => {
+    if (handleAppShortcut(input, mainWindow!.webContents)) {
+      event.preventDefault();
     }
   });
+
+  // Dev-mode renderer diagnostics. When the renderer crashes hard enough
+  // that DevTools can't be opened (white screen with no clickable surface),
+  // the only way to recover the actual JS error is to forward it from the
+  // main process to the terminal running `make dev`. Without these, the
+  // user sees only the daemon-manager polling noise (`Render frame was
+  // disposed before WebFrameMain could be accessed`) which is a downstream
+  // symptom, not the cause.
+  //
+  // Gated by `is.dev` to keep production stderr clean — packaged builds
+  // don't have a terminal anyway, and we ship to crash-reporting separately.
+  if (is.dev) {
+    const log = (tag: string, ...args: unknown[]) =>
+      process.stderr.write(`[renderer ${tag}] ${args.map(String).join(" ")}\n`);
+
+    // Forward every renderer-side console.* call. The detail object also
+    // carries source URL + line — included so a thrown stack trace from
+    // window.onerror is traceable back to a file.
+    mainWindow.webContents.on("console-message", (details) => {
+      const { level, message, sourceId, lineNumber } = details;
+      log(level, `${message} (${sourceId}:${lineNumber})`);
+    });
+
+    // Fires when the renderer process dies for any reason (OOM, crash,
+    // killed). `details.reason` is the discriminator: "crashed", "oom",
+    // "killed", "abnormal-exit", "launch-failed", etc.
+    mainWindow.webContents.on("render-process-gone", (_event, details) => {
+      log("process-gone", JSON.stringify(details));
+    });
+
+    // Fires when loadURL / loadFile can't reach its target (dev server
+    // not up yet, network blip, file missing). errorCode is a Chromium
+    // net error number; -3 = ABORTED is normal during HMR and skipped.
+    mainWindow.webContents.on(
+      "did-fail-load",
+      (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+        if (errorCode === -3) return;
+        log(
+          "did-fail-load",
+          `code=${errorCode} desc=${errorDescription} url=${validatedURL} mainFrame=${isMainFrame}`,
+        );
+      },
+    );
+
+    // Fires when the preload script throws before the renderer can boot.
+    // This is the one error class that NEVER reaches DevTools (preload
+    // runs before any window) — without this listener it's invisible.
+    mainWindow.webContents.on("preload-error", (_event, preloadPath, error) => {
+      log("preload-error", `path=${preloadPath} err=${error?.stack ?? error}`);
+    });
+  }
 
   installContextMenu(mainWindow.webContents);
 
@@ -212,6 +279,14 @@ const DEV_APP_NAME = process.env.DESKTOP_APP_SUFFIX
 if (is.dev) {
   app.setName(DEV_APP_NAME);
   app.setPath("userData", join(app.getPath("appData"), DEV_APP_NAME));
+} else {
+  // Pin the production app name in code. Electron's Linux WM_CLASS is set
+  // from app.getName() when the first BrowserWindow is realized; the
+  // packaged ASAR's package.json `productName` already steers app.getName()
+  // to "Multica", but anchoring it here makes WM_CLASS ↔ StartupWMClass
+  // (declared in electron-builder.yml) survive a regression in
+  // productName / the build pipeline. Must run before requestSingleInstanceLock().
+  app.setName("Multica");
 }
 
 // --- Protocol registration -----------------------------------------------
@@ -286,6 +361,14 @@ if (!gotTheLock) {
     // false configuration.
     ipcMain.handle("shell:openExternal", (_event, url: string) => {
       return openExternalSafely(url);
+    });
+
+    ipcMain.handle("file:download-url", (_event, url: string) => {
+      if (!mainWindow) {
+        console.warn("[download] ignored file:download-url — mainWindow torn down");
+        return;
+      }
+      downloadURLSafely(mainWindow, url);
     });
 
     // Sync IPC: app version + normalized OS for preload. Sync (not invoke) so

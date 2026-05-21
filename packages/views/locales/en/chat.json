@@ -37,6 +37,7 @@
       "days": "{{count}}d ago"
     },
     "row_delete_aria": "Delete chat session",
+    "row_rename_aria": "Rename chat session",
     "delete_dialog": {
       "title": "Delete chat session",
       "description_with_title": "\"{{title}}\" and its messages will be permanently removed. This action cannot be undone.",

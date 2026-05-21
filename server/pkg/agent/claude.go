@@ -411,6 +411,13 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 	"--input-format":    blockedWithValue,  // stream-json protocol
 	"--permission-mode": blockedWithValue,  // bypassPermissions for autonomous operation
 	"--mcp-config":      blockedWithValue,  // set by daemon from agent.mcp_config
+	// `--effort` is owned by the per-agent thinking_level picker so a
+	// user-supplied custom_arg cannot silently outvote it. The daemon
+	// injects --effort only when opts.ThinkingLevel is set; if a user
+	// nevertheless writes it in custom_args we drop the duplicate and
+	// log a warning rather than letting the CLI receive two conflicting
+	// --effort values.
+	"--effort": blockedWithValue,
 }
 
 func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
@@ -421,9 +428,23 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		"--verbose",
 		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
+		// AskUserQuestion is Claude Code's built-in interactive question tool.
+		// The daemon runs Claude in non-interactive stream-json mode and has
+		// no UI for the prompt to render in, so a call returns an empty
+		// answer and the agent ends up "inferring" silently — the user
+		// never sees the question (see GitHub #2588). User-facing
+		// clarification belongs in an issue comment instead.
+		"--disallowedTools", "AskUserQuestion",
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
+	}
+	if opts.ThinkingLevel != "" {
+		// Slotted right after --model so the per-session effort runs
+		// against the same model selection the args advertise; the CLI
+		// itself accepts the flag in any order but this ordering makes
+		// the launch line readable in `agent command` logs.
+		args = append(args, "--effort", opts.ThinkingLevel)
 	}
 	if opts.MaxTurns > 0 {
 		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
@@ -581,7 +602,31 @@ func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("detect version for %s: %w", execPath, err)
 	}
-	return strings.TrimSpace(string(data)), nil
+	return extractVersionLine(string(data)), nil
+}
+
+// extractVersionLine pulls the version line out of a `<cli> --version` capture,
+// discarding leading shell noise. On Windows, npm-installed CLI shims (notably
+// gemini's) emit `chcp` output like `Active code page: 65001` before the real
+// version reaches stdout, and the raw concatenation was being persisted as the
+// runtime version (see #2516).
+//
+// The heuristic: return the first non-empty line that contains a semver-shaped
+// token (matches versionRe). Full version strings like "2.1.5 (Claude Code)"
+// or "codex-cli 0.118.0" survive unchanged because the whole matching line is
+// returned. If no line carries a semver token, fall back to the trimmed raw
+// output so unusual version formats aren't silently dropped to empty.
+func extractVersionLine(raw string) string {
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if versionRe.MatchString(line) {
+			return line
+		}
+	}
+	return strings.TrimSpace(raw)
 }
 
 // logWriter adapts a *slog.Logger to an io.Writer for capturing stderr.

@@ -50,7 +50,7 @@
     "linkify-it": "^5.0.0",
     "lowlight": "^3.3.0",
     "lucide-react": "catalog:",
-    "next": "^16.2.3",
+    "next": "^16.2.5",
     "next-themes": "^0.4.6",
     "react": "catalog:",
     "react-day-picker": "^9.14.0",

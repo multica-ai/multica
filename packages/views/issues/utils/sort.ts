@@ -18,6 +18,14 @@ export function sortIssues(
           (PRIORITY_RANK[a.priority] ?? 99) -
           (PRIORITY_RANK[b.priority] ?? 99)
         );
+      case "start_date": {
+        if (!a.start_date && !b.start_date) return 0;
+        if (!a.start_date) return 1;
+        if (!b.start_date) return -1;
+        return (
+          new Date(a.start_date).getTime() - new Date(b.start_date).getTime()
+        );
+      }
       case "due_date": {
         if (!a.due_date && !b.due_date) return 0;
         if (!a.due_date) return 1;

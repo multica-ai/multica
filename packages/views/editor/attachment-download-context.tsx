@@ -9,6 +9,10 @@ interface ResolvedDownload {
   // Returns the attachment id for a URL referenced in the markdown, or
   // `undefined` if it's an external link we don't manage.
   resolveAttachmentId: (url: string) => string | undefined;
+  // Returns the full Attachment record (content_type, filename, download_url,
+  // ...) for a URL referenced in the markdown. NodeView preview triggers use
+  // this to decide whether the type is previewable and to feed the modal.
+  resolveAttachment: (url: string) => Attachment | undefined;
   // Called by NodeView click handlers. Re-signs through `getAttachment` when
   // the URL maps to a known attachment; falls back to `openExternal` for
   // external URLs so Electron still routes through the IPC bridge instead of
@@ -36,12 +40,16 @@ export function AttachmentDownloadProvider({ attachments, children }: ProviderPr
         if (!url || !attachments?.length) return undefined;
         return attachments.find((a) => a.url === url)?.id;
       },
+      resolveAttachment: (url) => {
+        if (!url || !attachments?.length) return undefined;
+        return attachments.find((a) => a.url === url);
+      },
       openByUrl: (url) => {
-        const id = url && attachments?.length
-          ? attachments.find((a) => a.url === url)?.id
+        const att = url && attachments?.length
+          ? attachments.find((a) => a.url === url)
           : undefined;
-        if (id) {
-          download(id);
+        if (att) {
+          download(att.id);
           return;
         }
         if (url) openExternal(url);
@@ -70,6 +78,7 @@ export function useAttachmentDownloadResolver(): ResolvedDownload {
   if (ctx) return ctx;
   return {
     resolveAttachmentId: () => undefined,
+    resolveAttachment: () => undefined,
     openByUrl: (url) => {
       if (url) openExternal(url);
     },

@@ -221,6 +221,8 @@ function activeTimeText(task: AgentTask): string {
 
 // ─── Active row ────────────────────────────────────────────────────────────
 
+import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
+
 function useTriggerText(task: AgentTask): string {
   const { t } = useT("issues");
   const isRetry = !!task.parent_task_id;
@@ -230,7 +232,7 @@ function useTriggerText(task: AgentTask): string {
       : t(($) => $.execution_log.trigger_retry_prefix)
     : "";
 
-  if (task.trigger_summary) return retryPrefix + task.trigger_summary;
+  if (task.trigger_summary) return retryPrefix + stripMentionMarkdown(task.trigger_summary);
   if (isRetry) {
     return task.attempt && task.attempt > 1
       ? t(($) => $.execution_log.trigger_retry_attempt, { attempt: task.attempt })
@@ -345,17 +347,18 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
       ? failureReasonLabel[task.failure_reason as TaskFailureReason]
       : null;
 
-  // Retry only makes sense for terminal-but-not-success rows. The rerun
-  // endpoint creates a fresh task on the issue's current agent assignee
-  // (not necessarily this row's agent) — clicking retry on a row whose
-  // agent has since been reassigned will rerun under the new assignee.
+  // Retry only makes sense for terminal-but-not-success rows. Passing
+  // task.id targets this specific row's agent — without it, the rerun
+  // endpoint would fall back to the issue's current assignee and the
+  // wrong agent would fire on rows whose agent has since been displaced
+  // (e.g. reassignment, squad worker, or a one-off @-mention agent).
   const canRetry = task.status === "failed" || task.status === "cancelled";
 
   const handleRetry = async () => {
     if (retrying) return;
     setRetrying(true);
     try {
-      await api.rerunIssue(issueId);
+      await api.rerunIssue(issueId, task.id);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.retry_failed));
     } finally {

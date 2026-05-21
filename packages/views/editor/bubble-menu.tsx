@@ -406,8 +406,12 @@ function CreateSubIssueButton({
         )
         .run();
       toast.success(t(($) => $.bubble_menu.sub_issue.created, { identifier: newIssue.identifier }));
-    } catch {
-      toast.error(t(($) => $.bubble_menu.sub_issue.create_failed));
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.bubble_menu.sub_issue.create_failed),
+      );
     } finally {
       setPending(false);
     }

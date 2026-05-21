@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -353,6 +354,54 @@ func TestRedisLocalSkillListStore_PopPendingAtomicClaim(t *testing.T) {
 	}
 	if again != nil {
 		t.Fatalf("second pop should be empty, got %+v", again)
+	}
+}
+
+func TestRedisLocalSkillImportStore_PopPendingBatch(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	ctx := context.Background()
+	store := NewRedisLocalSkillImportStore(rdb)
+
+	// Create 5 pending imports.
+	ids := make([]string, 5)
+	for i := range ids {
+		req, err := store.Create(ctx, "runtime-batch", "user-1", fmt.Sprintf("skill-%d", i), nil, nil)
+		if err != nil {
+			t.Fatalf("create %d: %v", i, err)
+		}
+		ids[i] = req.ID
+	}
+
+	// Pop batch of 3 — should return 3 in creation order.
+	batch, err := store.PopPendingBatch(ctx, "runtime-batch", 3)
+	if err != nil {
+		t.Fatalf("pop batch: %v", err)
+	}
+	if len(batch) != 3 {
+		t.Fatalf("expected 3, got %d", len(batch))
+	}
+	for _, req := range batch {
+		if req.Status != RuntimeLocalSkillRunning {
+			t.Fatalf("batch item status = %s, want running", req.Status)
+		}
+	}
+
+	// Pop remaining — should get 2.
+	rest, err := store.PopPendingBatch(ctx, "runtime-batch", 10)
+	if err != nil {
+		t.Fatalf("pop rest: %v", err)
+	}
+	if len(rest) != 2 {
+		t.Fatalf("expected 2 remaining, got %d", len(rest))
+	}
+
+	// Pop again — nothing left.
+	empty, err := store.PopPendingBatch(ctx, "runtime-batch", 10)
+	if err != nil {
+		t.Fatalf("pop empty: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("expected 0, got %d", len(empty))
 	}
 }
 

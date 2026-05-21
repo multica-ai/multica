@@ -61,11 +61,17 @@ function fakeQc(data: {
     visibility?: "workspace" | "private";
     owner_id?: string | null;
   }>;
+  squads?: Array<{
+    id: string;
+    name: string;
+    archived_at: string | null;
+  }>;
   issues?: Array<{ id: string; identifier: string; title: string; status: string }>;
 }): QueryClient {
   const map = new Map<string, unknown>();
   map.set(JSON.stringify(workspaceKeys.members("ws-1")), data.members ?? []);
   map.set(JSON.stringify(workspaceKeys.agents("ws-1")), data.agents ?? []);
+  map.set(JSON.stringify(workspaceKeys.squads("ws-1")), data.squads ?? []);
   const byStatus: ListIssuesCache["byStatus"] = {};
   for (const status of PAGINATED_STATUSES) {
     const bucket = (data.issues ?? []).filter((i) => i.status === status);
@@ -243,5 +249,91 @@ describe("createMentionSuggestion", () => {
 
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "issue" && i.id === "i1")).toBe(true);
+  });
+
+  it("includes all non-archived squads in the mention list", () => {
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      squads: [
+        { id: "s1", name: "Jiayuan's Coding Team", archived_at: null },
+        { id: "s2", name: "独立团", archived_at: null },
+        { id: "s3", name: "Archived Squad", archived_at: "2026-01-01T00:00:00Z" },
+      ],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
+    const result = config.items!({ query: "", editor: {} as never });
+
+    const items = result as MentionItem[];
+    expect(items.filter((i) => i.type === "squad")).toHaveLength(2);
+    expect(items.some((i) => i.type === "squad" && i.label === "Jiayuan's Coding Team")).toBe(true);
+    expect(items.some((i) => i.type === "squad" && i.label === "独立团")).toBe(true);
+    expect(items.some((i) => i.type === "squad" && i.label === "Archived Squad")).toBe(false);
+  });
+
+  it("returns no squads when the squads cache is empty (not yet fetched)", () => {
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      // squads not provided — simulates cache miss
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
+    const result = config.items!({ query: "", editor: {} as never });
+
+    const items = result as MentionItem[];
+    expect(items.filter((i) => i.type === "squad")).toHaveLength(0);
+  });
+
+  it("matches Chinese names by full pinyin", () => {
+    const qc = fakeQc({
+      members: [
+        { user_id: "u1", name: "Alice", role: "member" },
+        { user_id: "u2", name: "李云龙", role: "member" },
+      ],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
+    const result = config.items!({ query: "liyunlong", editor: {} as never });
+
+    const items = result as MentionItem[];
+    expect(items.some((i) => i.type === "member" && i.label === "李云龙")).toBe(true);
+    expect(items.some((i) => i.type === "member" && i.label === "Alice")).toBe(false);
+  });
+
+  it("matches Chinese names by pinyin initials", () => {
+    const qc = fakeQc({
+      members: [
+        { user_id: "u1", name: "Alice", role: "member" },
+        { user_id: "u2", name: "李云龙", role: "member" },
+        { user_id: "u3", name: "张大彪", role: "member" },
+      ],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
+    const result = config.items!({ query: "lyl", editor: {} as never });
+
+    const items = result as MentionItem[];
+    expect(items.some((i) => i.type === "member" && i.label === "李云龙")).toBe(true);
+    expect(items.some((i) => i.type === "member" && i.label === "张大彪")).toBe(false);
+  });
+
+  it("matches Chinese agent names by pinyin", () => {
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [
+        { id: "a1", name: "魏和尚", archived_at: null, visibility: "workspace", owner_id: null },
+      ],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
+    const result = config.items!({ query: "whs", editor: {} as never });
+
+    const items = result as MentionItem[];
+    expect(items.some((i) => i.type === "agent" && i.label === "魏和尚")).toBe(true);
   });
 });

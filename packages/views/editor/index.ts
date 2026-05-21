@@ -14,3 +14,13 @@ export { useFileDropZone } from "./use-file-drop-zone";
 export { FileDropOverlay } from "./file-drop-overlay";
 export { useDownloadAttachment } from "./use-download-attachment";
 export { AttachmentDownloadProvider } from "./attachment-download-context";
+export {
+  AttachmentPreviewModal,
+  useAttachmentPreview,
+  isPreviewable,
+} from "./attachment-preview-modal";
+export type { AttachmentPreviewHandle } from "./attachment-preview-modal";
+export { AttachmentCard } from "./attachment-card";
+export type { AttachmentCardProps } from "./attachment-card";
+export { Attachment } from "./attachment";
+export type { AttachmentInput, AttachmentProps } from "./attachment";

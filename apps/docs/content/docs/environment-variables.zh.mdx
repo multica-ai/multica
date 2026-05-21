@@ -35,14 +35,28 @@ Multica 的 [自部署](/self-host-quickstart) 服务器启动时从环境变量
 
 ## 怎么配邮件
 
-Multica 用 [Resend](https://resend.com/) 发验证码和邀请邮件。
+Multica 支持两种邮件发送通道——[Resend](https://resend.com/) 适合公网部署，SMTP relay 适合内网/自部署。同时设置时 `SMTP_HOST` 优先级高于 `RESEND_API_KEY`。
+
+### Resend
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
 | `RESEND_API_KEY` | 空 | Resend API key |
-| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | 发件地址（必须是 Resend 账号已验证的域名）|
+| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | 发件地址（必须是 Resend 账号已验证的域名；走 SMTP 时同时作为 `From:` 头）|
 
-**不设 `RESEND_API_KEY` 时的行为**：server 不会报错，但所有本该发出去的邮件（验证码、邀请链接）**只打到 server 的 stdout**。本地开发时方便——你从 server 日志里抄验证码；**生产环境忘记设就是黑洞**，用户收不到邮件也没任何错误提示。
+### SMTP relay
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `SMTP_HOST` | 空 | SMTP relay 主机名。设置后即启用 SMTP 模式并覆盖 Resend |
+| `SMTP_PORT` | `25` | SMTP 端口。STARTTLS 提交端口用 `587`；**暂不支持 465（SMTPS / 隐式 TLS）** |
+| `SMTP_USERNAME` | 空 | SMTP 用户名。留空表示未认证 relay |
+| `SMTP_PASSWORD` | 空 | SMTP 密码 |
+| `SMTP_TLS_INSECURE` | `false` | 设为 `true` 跳过 TLS 证书校验（仅限私有 CA / 自签证书）|
+
+服务端 advertise STARTTLS 时会自动升级。dial 超时 10s，整个 SMTP 会话有 30s deadline，避免 relay 黑洞把 auth handler 挂死。
+
+**两种都不设的行为**：server 不会报错，但所有本该发出去的邮件（验证码、邀请链接）**只打到 server 的 stdout**。本地开发方便（你从 server 日志里抄验证码）；**生产环境忘记设就是黑洞**，用户收不到邮件也没任何错误提示。
 
 ## 怎么配 Google OAuth
 
@@ -114,6 +128,25 @@ Multica 存储用户上传的附件（评论里的图片、文件等）。**优�
 
 **邀请流程本身不检查 signup 白名单**——但被邀请人必须先能**登录**才能接受邀请。如果对方已经有 Multica 账号（比如在其他工作区注册过），可以直接接受，不受白名单影响；**如果对方还没注册过**，他们登录的第一步（发送验证码）仍然会过白名单检查，被 `ALLOW_SIGNUP=false` 或 `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS` 拒绝的邮箱**无法完成注册，也就没法接受邀请**。
 
+## 速率限制（可选 Redis）
+
+公开认证端点——`/auth/send-code`、`/auth/verify-code`、`/auth/google`——前面挂了按 IP 的固定窗口限流。限流器后端是 Redis。`REDIS_URL` 不设时中间件**直通**（fail-open），后端启动会打日志 `rate limiting disabled: REDIS_URL not configured`。
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `REDIS_URL` | 空 | Redis 连接 URL（例如 `redis://localhost:6379/0`）。不设时认证端点的限流功能直接关闭。同一个 Redis 也被实时事件 fan-out、PAT 缓存、守护进程 token 缓存复用；不设时这些组件分别回落到内存模式 / 直查 DB |
+| `RATE_LIMIT_AUTH` | `5` | 单 IP 每分钟对 `/auth/send-code` 和 `/auth/google` 的最大请求数 |
+| `RATE_LIMIT_AUTH_VERIFY` | `20` | 单 IP 每分钟对 `/auth/verify-code` 的最大请求数 |
+| `RATE_LIMIT_TRUSTED_PROXIES` | 空 | 逗号分隔的 CIDR 列表，列在内的来源 IP 才允许通过 `X-Forwarded-For` 标识客户端。默认空 = **永不信任 XFF**，限流器只看直连的 `RemoteAddr` |
+
+被限流的请求会返回 `429 Too Many Requests`，带 `Retry-After: 60` 头和 `{"error":"too many requests"}` 响应体。
+
+<Callout type="warning">
+**部署在反向代理后面时必须设 `RATE_LIMIT_TRUSTED_PROXIES`。** 否则在后端看来所有真实用户都共用代理那个 IP，整个部署落到同一个桶里，`/auth/send-code` 会变成全站每分钟只能发 5 次。常见值：本机 Caddy / Nginx 用 `127.0.0.1/32,::1/128`；Cloudflare / ALB / CloudFront 用各家公开的 CDN IP 段。只有 `RemoteAddr` 落在这些 CIDR 内的请求才被允许通过 `X-Forwarded-For` 改写客户端 IP。
+</Callout>
+
+这里的 `RATE_LIMIT_TRUSTED_PROXIES` 和 `MULTICA_TRUSTED_PROXIES` **不是同一个**变量——后者控制的是 autopilot webhook 端点（`/api/webhooks/autopilots/{token}`）的限流器。两个限流器各自读各自的列表，部署在代理后面的实例需要两个都配上。
+
 ## 守护进程的调节参数
 
 守护进程跑在用户本地机器上，配置也是读本地环境变量。常用的几个：
@@ -147,12 +180,12 @@ Multica 存储用户上传的附件（评论里的图片、文件等）。**优�
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
-| `GITHUB_APP_SLUG` | 空 | 你的 GitHub App slug（`https://github.com/apps/<slug>` 的尾部）。Settings → Integrations 里安装按钮的跳转 URL 用它拼 |
+| `GITHUB_APP_SLUG` | 空 | 你的 GitHub App slug（`https://github.com/apps/<slug>` 的尾部）。Settings → GitHub 里安装按钮的跳转 URL 用它拼 |
 | `GITHUB_WEBHOOK_SECRET` | 空 | 你在 GitHub App 上设置的 Webhook secret。每条 `pull_request` / `installation` delivery 都用它做 HMAC-SHA256 校验；同一个值也用作 setup 回调里 state token 的签名密钥 |
 
 **任一变量未设时：**
 
-- Settings → Integrations 里 `Connect GitHub` 按钮 **disable**，对 admin 显示「not configured」提示
+- Settings → GitHub 里 `Connect GitHub` 按钮 **disable**，对 admin 显示「not configured」提示
 - `/api/webhooks/github` 直接返回 **`503 github webhooks not configured`**——secret 没配置时 Multica 拒绝处理任何 webhook 事件，而不是把所有签名当 valid
 
 **注意：** `GITHUB_WEBHOOK_SECRET` 同时被复用为 install 流程里 state token 的签名密钥，所以运维只需要维护一个 secret。它**不是** GitHub App 的 *Client* secret——Client secret 是 OAuth 用的，和本集成无关。完整配置流程见 [GitHub 集成 → Self-Host 配置](/github-integration#self-host-配置)。

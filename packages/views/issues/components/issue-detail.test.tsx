@@ -66,6 +66,10 @@ vi.mock("@multica/core/workspace/queries", () => ({
     queryKey: ["workspaces", "ws-1", "agents"],
     queryFn: () => Promise.resolve([]),
   }),
+  squadListOptions: () => ({
+    queryKey: ["workspaces", "ws-1", "squads"],
+    queryFn: () => Promise.resolve([]),
+  }),
   assigneeFrequencyOptions: () => ({
     queryKey: ["workspaces", "ws-1", "assignee-frequency"],
     queryFn: () => Promise.resolve([]),
@@ -113,6 +117,14 @@ vi.mock("../../editor", () => ({
   // real API singleton; tests that care about download wiring should write
   // dedicated specs against `use-download-attachment.test.tsx`.
   useDownloadAttachment: () => vi.fn(),
+  // Inert preview hook — comment-card's AttachmentList uses it to gate the
+  // Eye button. Dedicated coverage lives in attachment-preview-modal.test.tsx.
+  useAttachmentPreview: () => ({
+    open: vi.fn(),
+    tryOpen: () => false,
+    modal: null,
+  }),
+  isPreviewable: () => false,
   ReadonlyContent: ({ content }: { content: string }) => (
     <div data-testid="readonly-content">{content}</div>
   ),
@@ -207,6 +219,8 @@ const mockApiObj = vi.hoisted(() => ({
   removeCommentReaction: vi.fn(),
   listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
   listAgents: vi.fn().mockResolvedValue([]),
+  getProject: vi.fn(),
+  listProjects: vi.fn().mockResolvedValue({ projects: [] }),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -389,6 +403,7 @@ const mockIssue: Issue = {
   parent_issue_id: null,
   project_id: null,
   position: 0,
+  start_date: null,
   due_date: "2026-06-01T00:00:00Z",
   created_at: "2026-01-15T00:00:00Z",
   updated_at: "2026-01-20T00:00:00Z",
@@ -495,6 +510,9 @@ describe("IssueDetail (shared)", () => {
       { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
     ]);
     mockApiObj.listAgents.mockResolvedValue([]);
+    // Reset project mock — individual tests override per case. Default fixture
+    // has project_id: null so getProject is not invoked.
+    mockApiObj.getProject.mockReset();
   });
 
   it("shows loading skeleton while data is loading", () => {
@@ -530,17 +548,109 @@ describe("IssueDetail (shared)", () => {
     expect(wsLink.closest("a")).toHaveAttribute("href", "/test/issues");
   });
 
-  it("renders properties sidebar with status, priority, assignee, due date", async () => {
+  it("omits the project breadcrumb segment when the issue has no project_id", async () => {
+    // Default fixture has project_id: null.
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Test WS")).toBeInTheDocument();
+    });
+
+    // Project should not have been fetched.
+    expect(mockApiObj.getProject).not.toHaveBeenCalled();
+    expect(screen.queryByText("Unknown project")).not.toBeInTheDocument();
+  });
+
+  it("renders the project breadcrumb segment when the issue belongs to a project", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "p-1" });
+    mockApiObj.getProject.mockResolvedValue({
+      id: "p-1",
+      workspace_id: "ws-1",
+      title: "Marketing site refresh",
+      description: null,
+      icon: "🚀",
+      status: "in_progress",
+      priority: "none",
+      lead_type: null,
+      lead_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      issue_count: 0,
+      done_count: 0,
+      resource_count: 0,
+    });
+
+    renderIssueDetail();
+
+    const projectLink = await screen.findByText("Marketing site refresh");
+    // The whole project segment is a single AppLink pointing at the project
+    // detail route under the active workspace slug.
+    expect(projectLink.closest("a")).toHaveAttribute("href", "/test/projects/p-1");
+  });
+
+  it("shows an Unknown project placeholder when the project query fails", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "p-missing" });
+    mockApiObj.getProject.mockRejectedValue(new Error("not found"));
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Unknown project")).toBeInTheDocument();
+    });
+    // Placeholder is non-interactive — no link wraps the text.
+    const placeholder = screen.getByText("Unknown project");
+    expect(placeholder.closest("a")).toBeNull();
+  });
+
+  it("renders properties sidebar with all core rows plus set optional rows", async () => {
     renderIssueDetail();
 
     await waitFor(() => {
       expect(screen.getByText("Properties")).toBeInTheDocument();
     });
 
+    // Core rows — always rendered regardless of whether the issue has a value.
     expect(screen.getByText("Status")).toBeInTheDocument();
-    expect(screen.getByText("Priority")).toBeInTheDocument();
     expect(screen.getByText("Assignee")).toBeInTheDocument();
+    // "Project" appears twice (row label + picker stub), so disambiguate by id.
+    expect(screen.getByTestId("project-picker")).toBeInTheDocument();
+    // priority="high" + due_date are set in the fixture, so both optional rows show.
+    expect(screen.getByText("Priority")).toBeInTheDocument();
     expect(screen.getByText("Due date")).toBeInTheDocument();
+    // No labels are attached in the fixture — the Labels optional row
+    // must stay hidden by default.
+    expect(screen.queryByText("Labels")).not.toBeInTheDocument();
+    // Parent issue lives in its own section and only renders when the
+    // issue actually has a parent — the fixture has none.
+    expect(screen.queryByText("Parent issue")).not.toBeInTheDocument();
+    // The "+ Add property" affordance is always offered while any
+    // optional field is still hidden.
+    expect(screen.getByText("Add property")).toBeInTheDocument();
+  });
+
+  it("hides every optional property row when none are set", async () => {
+    // Override the default fixture: nothing optional set.
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      priority: "none",
+      start_date: null,
+      due_date: null,
+    });
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Properties")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("Priority")).not.toBeInTheDocument();
+    expect(screen.queryByText("Due date")).not.toBeInTheDocument();
+    expect(screen.queryByText("Labels")).not.toBeInTheDocument();
+    // Project stays as a core row regardless of value.
+    expect(screen.getByTestId("project-picker")).toBeInTheDocument();
+    // No parent → no standalone Parent issue section either.
+    expect(screen.queryByText("Parent issue")).not.toBeInTheDocument();
+    expect(screen.getByText("Add property")).toBeInTheDocument();
   });
 
   it("uses a non-resizable layout with the sidebar sheet closed by default on mobile", async () => {
@@ -606,6 +716,73 @@ describe("IssueDetail (shared)", () => {
     });
 
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
+  });
+
+  it("collapses non-trailing activity blocks and expands the last one by default", async () => {
+    // Timeline shape:
+    //   [activities: status_changed, priority_changed] ← block A (older)
+    //   [comment-1]
+    //   [activities: due_date_changed]                  ← block B (latest)
+    // Block A should be collapsed; block B should be expanded.
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "act-1",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "status_changed",
+        details: { from: "todo", to: "in_progress" },
+        created_at: "2026-01-16T00:00:00Z",
+      },
+      {
+        type: "activity",
+        id: "act-2",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "priority_changed",
+        details: { from: "low", to: "high" },
+        created_at: "2026-01-16T01:00:00Z",
+      },
+      {
+        type: "comment",
+        id: "comment-1",
+        actor_type: "member",
+        actor_id: "user-1",
+        content: "Talking it through",
+        parent_id: null,
+        created_at: "2026-01-17T00:00:00Z",
+        updated_at: "2026-01-17T00:00:00Z",
+        comment_type: "comment",
+      },
+      {
+        type: "activity",
+        id: "act-3",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "due_date_changed",
+        details: { to: "2026-02-01T00:00:00Z" },
+        created_at: "2026-01-18T00:00:00Z",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetail();
+
+    // Latest block (single activity) is expanded — its rendered text is visible.
+    await waitFor(() => {
+      expect(screen.getByText(/set due date to/i)).toBeInTheDocument();
+    });
+
+    // Older block is collapsed: shows the summary, hides the individual entries.
+    expect(screen.getByText("2 activities")).toBeInTheDocument();
+    expect(screen.queryByText(/changed status/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/changed priority/i)).not.toBeInTheDocument();
+
+    // Clicking the summary expands the older block.
+    fireEvent.click(screen.getByText("2 activities"));
+    await waitFor(() => {
+      expect(screen.getByText(/changed status/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/changed priority/i)).toBeInTheDocument();
   });
 
   describe("highlightCommentId scroll-to-comment", () => {

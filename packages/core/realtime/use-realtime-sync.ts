@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { WSClient } from "../api/ws-client";
 import type { StoreApi, UseBoundStore } from "zustand";
 import type { AuthState } from "../auth/store";
@@ -31,12 +31,14 @@ import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueD
 import { inboxKeys } from "../inbox/queries";
 import { notificationPreferenceOptions } from "../notification-preferences/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
+import type { Workspace } from "../types/workspace";
 import { chatKeys } from "../chat/queries";
 import { useChatStore } from "../chat";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
   MemberAddedPayload,
   WorkspaceDeletedPayload,
+  WorkspaceUpdatedPayload,
   MemberRemovedPayload,
   IssueUpdatedPayload,
   IssueCreatedPayload,
@@ -62,6 +64,7 @@ import type {
   TaskFailedPayload,
   TaskCancelledPayload,
   ChatDonePayload,
+  ChatMessage,
   ChatPendingTask,
   InvitationCreatedPayload,
 } from "../types";
@@ -69,6 +72,96 @@ import type {
 const chatWsLogger = createLogger("chat.ws");
 
 const logger = createLogger("realtime-sync");
+
+export function applyChatDoneToCache(
+  qc: QueryClient,
+  payload: ChatDonePayload,
+) {
+  const sessionId = payload.chat_session_id;
+  const taskId = payload.task_id;
+  const messageId = payload.message_id;
+  const content = payload.content;
+  if (messageId && content !== undefined) {
+    qc.setQueryData<ChatMessage[] | undefined>(
+      chatKeys.messages(sessionId),
+      (old) => {
+        if (!old) return old; // first fetch will pick it up
+        // Idempotent against reconnect replay.
+        if (old.some((m) => m.id === messageId)) return old;
+        const assistant: ChatMessage = {
+          id: messageId,
+          chat_session_id: sessionId,
+          role: "assistant",
+          content,
+          task_id: taskId,
+          created_at: payload.created_at ?? new Date().toISOString(),
+          elapsed_ms: payload.elapsed_ms ?? null,
+        };
+        return [...old, assistant];
+      },
+    );
+  }
+  // Replacement is in the messages list now; safe to drop pending.
+  qc.setQueryData(chatKeys.pendingTask(sessionId), {});
+  // Authoritative refetch reconciles redaction / migrations / clients
+  // that took the fallback branch above.
+  qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+  qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
+}
+
+/**
+ * Apply a workspace:updated event to the cache. Always refreshes the
+ * workspace list. If the incoming `issue_prefix` differs from what's
+ * currently cached, also invalidates issueKeys.all for that workspace,
+ * since every issue's rendered identifier (`MUL-123`) is recomputed from
+ * the workspace prefix at read time. Without this, the UI keeps showing
+ * the old `OLD-N` keys until the next hard refresh.
+ *
+ * If the workspace isn't in the cached list (first observation), we
+ * conservatively invalidate — the prefix is effectively "new" relative to
+ * what's cached, so any issues already loaded under the old prefix would
+ * be stale anyway.
+ */
+export function applyWorkspaceUpdatedToCache(
+  qc: QueryClient,
+  payload: WorkspaceUpdatedPayload,
+): void {
+  const next = payload.workspace;
+  if (next?.id) {
+    const cached =
+      qc
+        .getQueryData<Workspace[]>(workspaceKeys.list())
+        ?.find((w) => w.id === next.id) ?? null;
+    if (!cached || cached.issue_prefix !== next.issue_prefix) {
+      qc.invalidateQueries({ queryKey: issueKeys.all(next.id) });
+    }
+  }
+  qc.invalidateQueries({ queryKey: workspaceKeys.list() });
+}
+
+/**
+ * Invalidates all workspace-scoped queries. Used after reconnect and when a
+ * new WSClient instance is detected (workspace switch) to recover events
+ * missed while disconnected.
+ */
+function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
+  const wsId = getCurrentWsId();
+  if (wsId) {
+    qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
+    qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: agentActivityKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
+  }
+  qc.invalidateQueries({ queryKey: workspaceKeys.list() });
+}
 
 export interface RealtimeSyncStores {
   authStore: UseBoundStore<StoreApi<AuthState>>;
@@ -117,12 +210,24 @@ export function useRealtimeSync(
       },
       agent: () => {
         const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+          // Squad members status is derived per agent, so any agent
+          // change (status flip, archive, runtime swap) needs to refresh
+          // the per-squad members-status cache. Prefix-matches both the
+          // squad list and every squadMemberStatus query.
+          qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
+        }
       },
       member: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
       },
+      // workspace:updated is handled by the specific handler below
+      // (compares prefixes to decide whether to also invalidate issues).
+      // This generic fallback still fires for workspace:deleted (paired
+      // with the specific navigation handler) and any future workspace:*
+      // events without dedicated handlers.
       workspace: () => {
         qc.invalidateQueries({ queryKey: workspaceKeys.list() });
       },
@@ -133,6 +238,14 @@ export function useRealtimeSync(
       project: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+      },
+      squad: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
+          // squad:deleted triggers assignee transfer — refresh issues too.
+          qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+        }
       },
       label: () => {
         // label:created/updated/deleted — also refresh issues, since each
@@ -152,7 +265,14 @@ export function useRealtimeSync(
       },
       daemon: () => {
         const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+          // Runtime online/offline transitions move the derived status
+          // for every agent that hosts on this runtime, which shifts the
+          // working/idle/offline pill on the squad page. Same prefix
+          // invalidation pattern as the agent handler above.
+          qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
+        }
       },
       autopilot: () => {
         const wsId = getCurrentWsId();
@@ -194,6 +314,14 @@ export function useRealtimeSync(
         // every list-of-tasks query stale" so cache stays fresh even
         // when the relevant component isn't currently mounted.
         qc.invalidateQueries({ queryKey: ["issues", "tasks"] });
+        // Per-issue token usage card (issue-detail right rail). Same
+        // shape as the tasks invalidation above — any task lifecycle
+        // event shifts the aggregated usage numbers.
+        qc.invalidateQueries({ queryKey: ["issues", "usage"] });
+        // Squad members-status reads the same task lifecycle to flip
+        // working ↔ idle for each agent member. Prefix-matches every
+        // mounted squad-page's members-status query in O(1).
+        qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
       },
     };
 
@@ -212,6 +340,7 @@ export function useRealtimeSync(
 
     // Event types handled by specific handlers below -- skip generic refresh
     const specificEvents = new Set([
+      "workspace:updated",
       "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "comment:resolved", "comment:unresolved",
@@ -222,6 +351,7 @@ export function useRealtimeSync(
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
       "chat:message", "chat:done", "chat:session_read", "chat:session_deleted",
+      "chat:session_updated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -448,6 +578,10 @@ export function useRealtimeSync(
       }
     };
 
+    const unsubWsUpdated = ws.on("workspace:updated", (p) => {
+      applyWorkspaceUpdatedToCache(qc, p as WorkspaceUpdatedPayload);
+    });
+
     const unsubWsDeleted = ws.on("workspace:deleted", (p) => {
       const { workspace_id } = p as WorkspaceDeletedPayload;
       // Event payload has UUID; look up slug from cached workspace list
@@ -568,13 +702,21 @@ export function useRealtimeSync(
       chatWsLogger.info("chat:done (global)", {
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
+        has_message: !!payload.message_id,
       });
-      // Assistant message was just written and task flipped out of 'running'.
-      // Clear pending-task cache immediately so the live-timeline-vs-assistant
-      // race window collapses to zero — the subsequent refetch will confirm.
-      qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
-      qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
-      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      // Inline-insert the assistant message into the messages cache BEFORE
+      // clearing pending-task. Both writes land in the same React render
+      // tick, so ChatMessageList sees `pendingAlreadyPersisted === true`
+      // and the live TimelineView unmounts only after AssistantMessage has
+      // mounted — no flicker window. This applies TkDodo's "combine
+      // setQueryData (active query) + invalidateQueries (others)" pattern
+      // (https://tkdodo.eu/blog/using-web-sockets-with-react-query).
+      //
+      // Falls back to invalidate-only when the server omits the message
+      // payload (older builds). Older clients hitting a newer server also
+      // work: they ignore the extra fields and rely on the invalidate
+      // below, which keeps the old behavior alive.
+      applyChatDoneToCache(qc, payload);
       invalidatePendingAggregate();
       // Assistant message just landed → has_unread may have flipped to true.
       invalidateSessionLists();
@@ -645,9 +787,12 @@ export function useRealtimeSync(
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
       });
-      qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
-      qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
-      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      // `chat:done` (broadcast immediately before this event in CompleteTask)
+      // already wrote the assistant message into the messages cache and
+      // cleared `chatKeys.pendingTask`. This event is now only responsible
+      // for refreshing the per-user cross-session aggregate that drives the
+      // FAB indicator — `chat:done` is per-session and doesn't carry that
+      // information.
       invalidatePendingAggregate();
     });
 
@@ -674,6 +819,33 @@ export function useRealtimeSync(
       const payload = p as { chat_session_id: string };
       chatWsLogger.info("chat:session_read (global)", payload);
       invalidateSessionLists();
+    });
+
+    // chat:session_updated fires after the creator renames a session in
+    // any tab/device. Patch the cached row inline so the dropdown reflects
+    // the new title without a full sessions-list refetch.
+    const unsubChatSessionUpdated = ws.on("chat:session_updated", (p) => {
+      const payload = p as {
+        chat_session_id: string;
+        title?: string;
+        updated_at?: string;
+      };
+      chatWsLogger.info("chat:session_updated (global)", payload);
+      const id = getCurrentWsId();
+      if (!id) return;
+      const patch = (
+        old?: { id: string; title: string; updated_at: string }[],
+      ) =>
+        old?.map((s) =>
+          s.id === payload.chat_session_id
+            ? {
+                ...s,
+                title: payload.title ?? s.title,
+                updated_at: payload.updated_at ?? s.updated_at,
+              }
+            : s,
+        );
+      qc.setQueryData(chatKeys.sessions(id), patch);
     });
 
     // chat:session_deleted fires after a hard delete. The originating tab has
@@ -719,6 +891,7 @@ export function useRealtimeSync(
       unsubIssueReactionRemoved();
       unsubSubscriberAdded();
       unsubSubscriberRemoved();
+      unsubWsUpdated();
       unsubWsDeleted();
       unsubMemberRemoved();
       unsubMemberAdded();
@@ -736,6 +909,7 @@ export function useRealtimeSync(
       unsubTaskFailed();
       unsubChatSessionRead();
       unsubChatSessionDeleted();
+      unsubChatSessionUpdated();
       timers.forEach(clearTimeout);
       timers.clear();
     };
@@ -748,26 +922,30 @@ export function useRealtimeSync(
     const unsub = ws.onReconnect(async () => {
       logger.info("reconnected, refetching all data");
       try {
-        const wsId = getCurrentWsId();
-        if (wsId) {
-          qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-          qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
-          qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-          qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: agentActivityKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
-        }
-        qc.invalidateQueries({ queryKey: workspaceKeys.list() });
+        invalidateWorkspaceScopedQueries(qc);
       } catch (e) {
         logger.error("reconnect refetch failed", e);
       }
     });
 
     return unsub;
+  }, [ws, qc]);
+
+  // New WSClient instance (workspace switch) -> invalidate workspace-scoped
+  // queries to recover events missed while the previous instance was torn down.
+  // Skips the initial assignment to avoid a redundant refetch on first mount.
+  const wsInstanceRef = useRef<WSClient | null>(null);
+  useEffect(() => {
+    if (!ws) return;
+    if (wsInstanceRef.current === null) {
+      // First non-null instance — store and skip invalidation.
+      wsInstanceRef.current = ws;
+      return;
+    }
+    if (wsInstanceRef.current === ws) return;
+    wsInstanceRef.current = ws;
+
+    logger.info("new WSClient instance detected, invalidating workspace queries");
+    invalidateWorkspaceScopedQueries(qc);
   }, [ws, qc]);
 }

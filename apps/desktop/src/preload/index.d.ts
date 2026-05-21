@@ -19,6 +19,9 @@ interface DesktopAPI {
   onInviteOpen: (callback: (invitationId: string) => void) => () => void;
   /** Open a URL in the default browser. */
   openExternal: (url: string) => Promise<void>;
+  /** Download a file by URL through Electron's native download system.
+   *  Shows a native save dialog. On non-desktop platforms this is undefined. */
+  downloadURL: (url: string) => Promise<void>;
   /** Hide macOS traffic lights for full-screen modals; restore when false. */
   setImmersiveMode: (immersive: boolean) => Promise<void>;
   /** Show a native OS notification for a new inbox item. */
@@ -81,7 +84,9 @@ interface DaemonAPI {
 interface UpdaterAPI {
   onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => () => void;
   onDownloadProgress: (callback: (progress: { percent: number }) => void) => () => void;
-  onUpdateDownloaded: (callback: () => void) => () => void;
+  onUpdateDownloaded: (
+    callback: (info: { version: string; releaseNotes?: string }) => void,
+  ) => () => void;
   downloadUpdate: () => Promise<void>;
   installUpdate: () => Promise<void>;
   checkForUpdates: () => Promise<

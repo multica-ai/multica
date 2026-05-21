@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -426,5 +427,86 @@ func TestLocalStorage_Delete_RemovesSidecar(t *testing.T) {
 
 	if _, err := os.Stat(sidecar); !os.IsNotExist(err) {
 		t.Errorf("sidecar should be removed after Delete, got err=%v", err)
+	}
+}
+
+// GetReader returns the uploaded bytes verbatim — used by the preview proxy.
+func TestLocalStorage_GetReader_RoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	ctx := context.Background()
+	key := "preview.md"
+	body := []byte("# hello\nworld\n")
+	if _, err := store.Upload(ctx, key, body, "text/markdown", "preview.md"); err != nil {
+		t.Fatalf("Upload failed: %v", err)
+	}
+
+	rc, err := store.GetReader(ctx, key)
+	if err != nil {
+		t.Fatalf("GetReader: %v", err)
+	}
+	defer rc.Close()
+	got, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("io.ReadAll: %v", err)
+	}
+	if string(got) != string(body) {
+		t.Errorf("body = %q, want %q", got, body)
+	}
+}
+
+// Refuses path traversal at storage layer so callers don't need to defend it.
+func TestLocalStorage_GetReader_RejectsTraversal(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	if rc, err := store.GetReader(context.Background(), "../../../etc/passwd"); err == nil {
+		rc.Close()
+		t.Fatal("GetReader should refuse traversal keys")
+	}
+}
+
+// The sidecar JSON is an internal detail. Allowing /content to read it via a
+// crafted key would expose the original filename + content-type stored next
+// to every upload.
+func TestLocalStorage_GetReader_RejectsSidecarSuffix(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	if rc, err := store.GetReader(context.Background(), "some-key.txt"+metaSuffix); err == nil {
+		rc.Close()
+		t.Fatal("GetReader should refuse sidecar keys")
+	}
+}
+
+// Missing key surfaces as a plain error — the handler maps it to 404.
+func TestLocalStorage_GetReader_MissingKey(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	if rc, err := store.GetReader(context.Background(), "nonexistent.txt"); err == nil {
+		rc.Close()
+		t.Fatal("GetReader should error on missing key")
 	}
 }

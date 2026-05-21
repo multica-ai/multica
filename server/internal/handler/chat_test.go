@@ -107,6 +107,62 @@ func TestSendChatMessage_LinksAttachments(t *testing.T) {
 	}
 }
 
+// TestUpdateChatSession_RenamesTitle confirms PATCH writes the new title,
+// returns the updated row, and the server-side row reflects it.
+func TestUpdateChatSession_RenamesTitle(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "ChatRenameAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	req := newRequest("PATCH", "/api/chat/sessions/"+sessionID, map[string]any{
+		"title": "  Renamed Session  ",
+	})
+	req = withURLParam(req, "sessionId", sessionID)
+	req = withChatTestWorkspaceCtx(t, req)
+	w := httptest.NewRecorder()
+	testHandler.UpdateChatSession(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateChatSession: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp ChatSessionResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode update: %v", err)
+	}
+	if resp.Title != "Renamed Session" {
+		t.Fatalf("response title: want %q, got %q", "Renamed Session", resp.Title)
+	}
+
+	var dbTitle string
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT title FROM chat_session WHERE id = $1`,
+		sessionID,
+	).Scan(&dbTitle); err != nil {
+		t.Fatalf("query chat_session: %v", err)
+	}
+	if dbTitle != "Renamed Session" {
+		t.Fatalf("db title: want %q, got %q", "Renamed Session", dbTitle)
+	}
+}
+
+// TestUpdateChatSession_RejectsBlank refuses an empty/whitespace title with 400.
+// (Untitled is a render-side fallback, not a stored value.)
+func TestUpdateChatSession_RejectsBlank(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "ChatRenameBlankAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	req := newRequest("PATCH", "/api/chat/sessions/"+sessionID, map[string]any{
+		"title": "   ",
+	})
+	req = withURLParam(req, "sessionId", sessionID)
+	req = withChatTestWorkspaceCtx(t, req)
+	w := httptest.NewRecorder()
+	testHandler.UpdateChatSession(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("UpdateChatSession blank: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // TestSendChatMessage_InvalidAttachmentIDs rejects malformed UUIDs in
 // attachment_ids with 400 before any side effects (no message row created).
 func TestSendChatMessage_InvalidAttachmentIDs(t *testing.T) {

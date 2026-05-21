@@ -7,10 +7,10 @@ body:
     id: deployment
     attributes:
       label: Deployment type
-      description: Are you using the hosted version or a self-hosted instance?
+      description: Are you using the Official App (multica.ai) or a self-hosted instance?
       options:
-        - multica.ai (hosted)
-        - Self-hosted
+        - Official App
+        - self-host
     validations:
       required: true
 

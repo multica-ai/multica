@@ -4,6 +4,7 @@ import { useModalStore } from "@multica/core/modals";
 import { CreateWorkspaceModal } from "./create-workspace";
 import { CreateIssueDialog } from "./create-issue-dialog";
 import { CreateProjectModal } from "./create-project";
+import { CreateSquadModal } from "./create-squad";
 import { FeedbackModal } from "./feedback";
 import { SetParentIssueModal } from "./set-parent-issue";
 import { AddChildIssueModal } from "./add-child-issue";
@@ -26,6 +27,8 @@ export function ModalRegistry() {
       return <CreateIssueDialog onClose={close} initialMode="agent" data={data} />;
     case "create-project":
       return <CreateProjectModal onClose={close} />;
+    case "create-squad":
+      return <CreateSquadModal onClose={close} />;
     case "feedback":
       return <FeedbackModal onClose={close} />;
     case "issue-set-parent":

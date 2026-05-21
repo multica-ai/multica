@@ -32,6 +32,8 @@ Multica turns coding agents into real teammates. Assign issues to an agent like 
 
 No more copy-pasting prompts. No more babysitting runs. Your agents show up on the board, participate in conversations, and compound reusable skills over time. Think of it as open-source infrastructure for managed agents — vendor-neutral, self-hosted, and designed for human + AI teams. Works with **Claude Code**, **Codex**, **GitHub Copilot CLI**, **OpenClaw**, **OpenCode**, **Hermes**, **Gemini**, **Pi**, **Cursor Agent**, **Kimi**, and **Kiro CLI**.
 
+For larger teams, Squads add a stable routing layer: assign work to a group led by an agent, and the leader delegates to the right member.
+
 <p align="center">
   <img src="docs/assets/hero-screenshot.png" alt="Multica board view" width="800">
 </p>
@@ -53,6 +55,7 @@ Like Multics before it, the bet is on multiplexing: a small team shouldn't feel 
 Multica manages the full agent lifecycle: from task assignment to execution monitoring to skill reuse.
 
 - **Agents as Teammates** — assign to an agent like you'd assign to a colleague. They have profiles, show up on the board, post comments, create issues, and report blockers proactively.
+- **Squads** — group agents (and humans) under a leader agent and assign work to the *squad*. The leader decides who should pick it up, so routing stays stable as the team grows. `@FrontendTeam` instead of `@alice-or-bob-or-carol`.
 - **Autonomous Execution** — set it and forget it. Full task lifecycle management (enqueue, claim, start, complete/fail) with real-time progress streaming via WebSocket.
 - **Reusable Skills** — every solution becomes a reusable skill for the whole team. Deployments, migrations, code reviews — skills compound your team's capabilities over time.
 - **Unified Runtimes** — one dashboard for all your compute. Local daemons and cloud runtimes, auto-detection of available CLIs, real-time monitoring.
@@ -128,21 +131,6 @@ Create an issue from the board (or via `multica issue create`), then assign it t
 
 ---
 
-## Multica vs Paperclip
-
-| | Multica | Paperclip |
-|---|---------|-----------|
-| **Focus** | Team AI agent collaboration platform | Solo AI agent company simulator |
-| **User model** | Multi-user teams with roles & permissions | Single board operator |
-| **Agent interaction** | Issues + Chat conversations | Issues + Heartbeat |
-| **Deployment** | Cloud-first | Local-first |
-| **Management depth** | Lightweight (Issues / Projects / Labels) | Heavy governance (Org chart / Approvals / Budgets) |
-| **Extensibility** | Skills system | Skills + Plugin system |
-
-**TL;DR — Multica is built for teams that want to collaborate with AI agents on real projects together.**
-
----
-
 ## CLI
 
 The `multica` CLI connects your local machine to Multica — authenticate, manage workspaces, and run the agent daemon.
@@ -154,6 +142,8 @@ The `multica` CLI connects your local machine to Multica — authenticate, manag
 | `multica daemon status` | Check daemon status |
 | `multica setup` | One-command setup for Multica Cloud (configure + login + start daemon) |
 | `multica setup self-host` | Same, but for self-hosted deployments |
+| `multica workspace list` | List your workspaces (current is marked with `*`) |
+| `multica workspace switch <id\|slug>` | Switch the default workspace for this profile |
 | `multica issue list` | List issues in your workspace |
 | `multica issue create` | Create a new issue |
 | `multica update` | Update to the latest version |

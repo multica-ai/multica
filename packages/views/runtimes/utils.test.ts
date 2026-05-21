@@ -1,11 +1,17 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
+import type { RuntimeUsage } from "@multica/core/types";
 
 import {
+  addDaysIso,
+  aggregateByWeek,
   aggregateCostByModel,
   collectUnmappedModels,
   estimateCost,
   isModelPriced,
+  sliceWindow,
+  todayIso,
+  weekStartIso,
 } from "./utils";
 
 afterEach(() => {
@@ -51,6 +57,56 @@ describe("estimateCost", () => {
       input_tokens: 1_000_000,
     });
     expect(cost).toBeCloseTo(1.25, 5);
+  });
+
+  it("prices a Copilot session reporting claude-opus-4.7 at the official Opus rate", () => {
+    // Copilot's `meta.agentMeta.model` is `claude-opus-4.7` (dotted). We
+    // canonicalize to the dashed catalog key so it hits the maintained $5/$25
+    // tier instead of falling through to the custom-pricing dialog.
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "claude-opus-4.7",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(5 + 25, 5);
+  });
+
+  it("prices the provider-prefixed Anthropic form (anthropic/claude-sonnet-4.6)", () => {
+    // openclaw / opencode emit `<provider>/<model>`. Same SKU as the
+    // bare form, must hit the same rate.
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "anthropic/claude-sonnet-4.6",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(3 + 15, 5);
+  });
+
+  it("prices the dated dotted Anthropic form (claude-haiku-4.5-20251001)", () => {
+    // Belt-and-braces: combine all three tolerances (provider prefix not
+    // present, but dot→dash + date strip both apply).
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "claude-haiku-4.5-20251001",
+      input_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(1, 5);
+  });
+
+  it("prices the full provider+dotted+dated form (anthropic/claude-opus-4.7-20251001)", () => {
+    // All three normalization steps must compose: strip `anthropic/`,
+    // dot→dash on the Claude ID, and trim the date stamp. Pins the
+    // combined path so a future change to candidate ordering can't
+    // silently drop one tolerance.
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "anthropic/claude-opus-4.7-20251001",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(5 + 25, 5);
   });
 
   it("prices each dotted Codex catalog SKU at its own tier, not gpt-5", () => {
@@ -128,6 +184,34 @@ describe("isModelPriced", () => {
     expect(isModelPriced("gpt-5-mini")).toBe(true);
     expect(isModelPriced("o3")).toBe(true);
     expect(isModelPriced("totally-made-up-model")).toBe(false);
+  });
+
+  it("recognises dotted Anthropic IDs as the same SKU as their dashed canonical form", () => {
+    // GitHub Copilot reports Claude models with dots (`claude-opus-4.7`)
+    // while Anthropic's own CLIs use dashes (`claude-opus-4-7`). Both must
+    // hit the same catalog row, otherwise Copilot-routed usage gets bucketed
+    // as "unmapped" and the user has to type the price in by hand.
+    expect(isModelPriced("claude-haiku-4.5")).toBe(true);
+    expect(isModelPriced("claude-sonnet-4.5")).toBe(true);
+    expect(isModelPriced("claude-sonnet-4.6")).toBe(true);
+    expect(isModelPriced("claude-opus-4.5")).toBe(true);
+    expect(isModelPriced("claude-opus-4.6")).toBe(true);
+    expect(isModelPriced("claude-opus-4.7")).toBe(true);
+  });
+
+  it("recognises provider-prefixed Anthropic IDs (openclaw / opencode form)", () => {
+    // openclaw / opencode emit `<provider>/<model>` in `meta.agentMeta.model`.
+    // The provider prefix is routing metadata, not part of the SKU.
+    expect(isModelPriced("anthropic/claude-opus-4.7")).toBe(true);
+    expect(isModelPriced("anthropic/claude-sonnet-4-6")).toBe(true);
+  });
+
+  it("still rejects OpenAI dotted variants that don't have their own row", () => {
+    // The Anthropic dot→dash normalization is scoped to `claude-*` IDs.
+    // For OpenAI the separator is semantic — `gpt-5.4` is a different SKU
+    // from a hypothetical `gpt-5-4` — and `gpt-5.5-mini` must still surface
+    // as unmapped because OpenAI hasn't published its rate.
+    expect(isModelPriced("gpt-5.5-mini")).toBe(false);
   });
 });
 
@@ -270,5 +354,252 @@ describe("user-supplied custom pricing", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const after = aggregateCostByModel(rows as any);
     expect(after[0]?.cost).toBeCloseTo(2, 5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Calendar helpers + weekly aggregation. All of these run on YYYY-MM-DD
+// strings (the wire shape of RuntimeUsage.date) and on a runtime-supplied
+// IANA timezone — the host browser's tz should never affect the result.
+// ---------------------------------------------------------------------------
+
+describe("weekStartIso", () => {
+  it("returns the Monday of the same ISO week", () => {
+    // 2026-05-19 is a Tuesday → Monday is 2026-05-18.
+    expect(weekStartIso("2026-05-19")).toBe("2026-05-18");
+  });
+
+  it("treats Monday as the start of its own week (idempotent)", () => {
+    expect(weekStartIso("2026-05-18")).toBe("2026-05-18");
+  });
+
+  it("rolls Sunday back to the previous Monday", () => {
+    // 2026-05-17 is a Sunday → Monday is 2026-05-11.
+    expect(weekStartIso("2026-05-17")).toBe("2026-05-11");
+  });
+
+  it("crosses month and year boundaries", () => {
+    // 2026-01-03 is a Saturday → Monday is 2025-12-29.
+    expect(weekStartIso("2026-01-03")).toBe("2025-12-29");
+  });
+});
+
+describe("addDaysIso", () => {
+  it("adds across month boundary", () => {
+    expect(addDaysIso("2026-05-30", 3)).toBe("2026-06-02");
+  });
+
+  it("subtracts across year boundary", () => {
+    expect(addDaysIso("2026-01-02", -5)).toBe("2025-12-28");
+  });
+});
+
+describe("todayIso", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("uses the runtime's timezone, not the host's, to decide today", () => {
+    // 2026-05-19 16:00 UTC. In Asia/Shanghai (UTC+8) it's already 2026-05-20.
+    // In America/Los_Angeles (UTC-7 on this date) it's still 2026-05-19.
+    vi.setSystemTime(new Date("2026-05-19T16:00:00Z"));
+    expect(todayIso("Asia/Shanghai")).toBe("2026-05-20");
+    expect(todayIso("America/Los_Angeles")).toBe("2026-05-19");
+    expect(todayIso("UTC")).toBe("2026-05-19");
+  });
+});
+
+describe("sliceWindow (timezone-aware)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function makeUsage(date: string): RuntimeUsage {
+    return {
+      runtime_id: "r",
+      date,
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+    };
+  }
+
+  it("cuts the current window at today-in-tz, not today-in-host-utc", () => {
+    // Host clock is 2026-05-19 23:00 UTC → still May 19 in UTC, May 20 in Shanghai.
+    // A daily-usage row dated 2026-05-20 (the runtime's "today" in Shanghai)
+    // should be included in the current window when tz=Asia/Shanghai.
+    vi.setSystemTime(new Date("2026-05-19T23:00:00Z"));
+    const usage = [
+      makeUsage("2026-05-13"),
+      makeUsage("2026-05-19"),
+      makeUsage("2026-05-20"),
+    ];
+    const { filtered } = sliceWindow(usage, 7, "Asia/Shanghai");
+    expect(filtered.map((u) => u.date)).toEqual([
+      "2026-05-13",
+      "2026-05-19",
+      "2026-05-20",
+    ]);
+  });
+
+  it("returns the immediately prior window of equal length", () => {
+    vi.setSystemTime(new Date("2026-05-19T12:00:00Z"));
+    const usage = [
+      makeUsage("2026-05-01"),
+      makeUsage("2026-05-08"),
+      makeUsage("2026-05-15"),
+      makeUsage("2026-05-19"),
+    ];
+    const { filtered, prevFiltered } = sliceWindow(usage, 7, "UTC");
+    expect(filtered.map((u) => u.date)).toEqual(["2026-05-15", "2026-05-19"]);
+    expect(prevFiltered.map((u) => u.date)).toEqual(["2026-05-08"]);
+  });
+});
+
+describe("aggregateByWeek", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function makeUsage(
+    date: string,
+    input: number,
+    output: number,
+  ): RuntimeUsage {
+    return {
+      runtime_id: "r",
+      date,
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      input_tokens: input,
+      output_tokens: output,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+    };
+  }
+
+  it("groups daily rows into Mon-anchored ISO weeks", () => {
+    // 2026-05-24 is Sunday, so the calendar week containing "today" is
+    // Mon=05-18..Sun=05-24. With weekCount=2 the window covers weeks
+    // 2026-05-11 and 2026-05-18 — exactly the two weeks the rows fall in.
+    vi.setSystemTime(new Date("2026-05-24T12:00:00Z"));
+    // 2026-05-11 is Mon; 2026-05-17 is Sun (same week).
+    // 2026-05-18 is Mon (next week).
+    const rows = [
+      makeUsage("2026-05-11", 1_000_000, 0),
+      makeUsage("2026-05-17", 0, 1_000_000),
+      makeUsage("2026-05-18", 2_000_000, 0),
+    ];
+    const { weeklyTokens } = aggregateByWeek(rows, "UTC", 2);
+    expect(weeklyTokens).toHaveLength(2);
+    expect(weeklyTokens[0]).toMatchObject({
+      weekStart: "2026-05-11",
+      weekEnd: "2026-05-17",
+      input: 1_000_000,
+      output: 1_000_000,
+      partial: false,
+      daysCovered: 7,
+    });
+    expect(weeklyTokens[1]).toMatchObject({
+      weekStart: "2026-05-18",
+      weekEnd: "2026-05-24",
+      input: 2_000_000,
+      partial: false,
+      daysCovered: 7,
+    });
+  });
+
+  it("flags the in-progress week as partial with days-elapsed count", () => {
+    // 2026-05-20 is a Wednesday (Mon=05-18, Sun=05-24).
+    vi.setSystemTime(new Date("2026-05-20T08:00:00Z"));
+    const rows = [makeUsage("2026-05-18", 1_000_000, 0)];
+    const { weeklyTokens } = aggregateByWeek(rows, "UTC", 1);
+    expect(weeklyTokens[0]).toMatchObject({
+      weekStart: "2026-05-18",
+      weekEnd: "2026-05-24",
+      partial: true,
+      daysCovered: 3, // Mon, Tue, Wed
+    });
+  });
+
+  it("sums costs per week using the model pricing table", () => {
+    // 2026-05-17 sits in the calendar week of 2026-05-11..2026-05-17, so
+    // weekCount=1 anchors the window on that same week.
+    vi.setSystemTime(new Date("2026-05-17T12:00:00Z"));
+    // 1M input × $3 + 1M output × $15 = $18 per row. Two rows in the same
+    // week (Mon + Wed) → $36 weekly total.
+    const rows = [
+      makeUsage("2026-05-11", 1_000_000, 1_000_000),
+      makeUsage("2026-05-13", 1_000_000, 1_000_000),
+    ];
+    const { weeklyCostStack } = aggregateByWeek(rows, "UTC", 1);
+    expect(weeklyCostStack).toHaveLength(1);
+    expect(weeklyCostStack[0]?.total).toBeCloseTo(36, 2);
+  });
+
+  it("emits trailing calendar weeks pinned to today, dropping older populated weeks", () => {
+    // Regression for MUL-2382 weekly window scoping:
+    // before the fix, aggregateByWeek built buckets only for weeks that had
+    // data and the caller did `.slice(-weekCount)`. With sparse data (an old
+    // populated week far outside the selected window plus an empty stretch
+    // closer to today), that slice would surface the OLD populated week
+    // instead of the trailing in-window weeks. The chart should now show
+    // exactly the trailing calendar weeks, with the empty in-range weeks
+    // present as zero-valued buckets rather than disappearing.
+    vi.setSystemTime(new Date("2026-05-19T12:00:00Z"));
+    // 30-day window @ 2026-05-19 → 5 trailing weeks (Mon=04-20, 04-27,
+    // 05-04, 05-11, 05-18). 2026-04-13 (Mon) is one week earlier — outside
+    // the window. No data in any of the 5 in-range weeks.
+    const rows = [makeUsage("2026-04-13", 1_000_000, 1_000_000)];
+    const { weeklyTokens, weeklyCostStack } = aggregateByWeek(rows, "UTC", 5);
+
+    expect(weeklyTokens.map((w) => w.weekStart)).toEqual([
+      "2026-04-20",
+      "2026-04-27",
+      "2026-05-04",
+      "2026-05-11",
+      "2026-05-18",
+    ]);
+    // Every in-range week is empty — the old populated week was dropped.
+    for (const w of weeklyTokens) {
+      expect(w.input).toBe(0);
+      expect(w.output).toBe(0);
+      expect(w.cacheRead).toBe(0);
+      expect(w.cacheWrite).toBe(0);
+    }
+    for (const w of weeklyCostStack) {
+      expect(w.total).toBe(0);
+    }
+  });
+
+  it("keeps in-window weeks empty when nearby data sits inside the window", () => {
+    // Sparse-but-in-range case: only the oldest in-window week has data;
+    // the remaining trailing weeks must render as empty buckets, not be
+    // collapsed to a single populated bar.
+    vi.setSystemTime(new Date("2026-05-19T12:00:00Z"));
+    const rows = [makeUsage("2026-04-22", 1_000_000, 1_000_000)]; // week of 04-20
+    const { weeklyTokens } = aggregateByWeek(rows, "UTC", 5);
+    expect(weeklyTokens).toHaveLength(5);
+    expect(weeklyTokens[0]).toMatchObject({
+      weekStart: "2026-04-20",
+      input: 1_000_000,
+      output: 1_000_000,
+    });
+    for (const w of weeklyTokens.slice(1)) {
+      expect(w.input).toBe(0);
+      expect(w.output).toBe(0);
+    }
   });
 });

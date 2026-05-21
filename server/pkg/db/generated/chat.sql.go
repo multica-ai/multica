@@ -90,7 +90,7 @@ func (q *Queries) CreateChatSession(ctx context.Context, arg CreateChatSessionPa
 const createChatTask = `-- name: CreateChatTask :one
 INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id)
 VALUES ($1, $2, NULL, 'queued', $3, $4)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task
 `
 
 type CreateChatTaskParams struct {
@@ -133,6 +133,7 @@ func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) 
 		&i.FailureReason,
 		&i.TriggerSummary,
 		&i.ForceFreshSession,
+		&i.IsLeaderTask,
 	)
 	return i, err
 }
@@ -232,7 +233,14 @@ func (q *Queries) GetChatSessionInWorkspace(ctx context.Context, arg GetChatSess
 const getLastChatTaskSession = `-- name: GetLastChatTaskSession :one
 SELECT session_id, work_dir, runtime_id FROM agent_task_queue
 WHERE chat_session_id = $1
-  AND status IN ('completed', 'failed')
+  AND (
+    status = 'completed'
+    OR (
+      status = 'failed'
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity')
+      AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
+    )
+  )
   AND session_id IS NOT NULL
 ORDER BY completed_at DESC
 LIMIT 1
@@ -248,7 +256,9 @@ type GetLastChatTaskSessionRow struct {
 // session_id. Includes both completed and failed tasks: even a failed task
 // may have established a real agent session before failing, and we'd rather
 // resume there than start over and lose conversation memory. Used as a
-// fallback when chat_session.session_id is NULL.
+// fallback when chat_session.session_id is NULL. Resume-unsafe failures are
+// excluded because replaying those sessions deterministically reproduces the
+// same terminal state.
 func (q *Queries) GetLastChatTaskSession(ctx context.Context, chatSessionID pgtype.UUID) (GetLastChatTaskSessionRow, error) {
 	row := q.db.QueryRow(ctx, getLastChatTaskSession, chatSessionID)
 	var i GetLastChatTaskSessionRow

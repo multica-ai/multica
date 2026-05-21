@@ -90,7 +90,7 @@ Every event is assigned to one dashboard category:
 | Category | Events |
 |---|---|
 | `core_loop` | `workspace_created`, `runtime_registered`, `runtime_ready`, `runtime_failed`, `runtime_offline`, `agent_created`, `issue_created`, `chat_message_sent`, `agent_task_queued`, `agent_task_dispatched`, `agent_task_started`, `agent_task_completed`, `agent_task_failed`, `agent_task_cancelled`, `autopilot_run_started`, `autopilot_run_completed`, `autopilot_run_failed` |
-| `onboarding_support` | `onboarding_started`, `onboarding_questionnaire_submitted`, `onboarding_completed`, `onboarding_runtime_path_selected`, `onboarding_runtime_detected`, `starter_content_decided` |
+| `onboarding_support` | `onboarding_started`, `onboarding_questionnaire_submitted`, `onboarding_completed`, `onboarding_runtime_path_selected`, `onboarding_runtime_detected` |
 | `acquisition` | `signup`, `download_intent_expressed`, `download_page_viewed`, `download_initiated`, `cloud_waitlist_joined` |
 | `ops_feedback` | `feedback_opened`, `feedback_submitted` |
 | `system/noise` | `$pageview`, `$set`, `$identify`, `$autocapture`, `$rageclick` |
@@ -469,21 +469,6 @@ in the DB and never broadcast.
 `distinct_id` is the submitter's user id; `workspace_id` is attached from
 the modal's current-workspace context and may be empty when feedback is
 sent from a pre-workspace surface.
-
-### `starter_content_decided`
-
-Fires on the atomic NULL → terminal state transition in both
-ImportStarterContent and DismissStarterContent. The `branch` property
-mirrors what ImportStarterContent would emit for the same workspace,
-so import-vs-dismiss rates split cleanly by branch.
-
-| Property | Type | Description |
-|---|---|---|
-| `decision` | string | `imported` or `dismissed`. |
-| `branch` | string | `agent_guided` (workspace had ≥1 agent at decision time) or `self_serve` (no agents). |
-
-`distinct_id` is the user's id; `workspace_id` is attached from the
-request payload.
 
 ### Frontend-only events
 

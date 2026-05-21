@@ -97,8 +97,10 @@ export function ModelDropdown({
 
   if (!supported && !modelsQuery.isLoading) {
     return (
-      <div className="min-w-0">
-        <Label className="text-xs text-muted-foreground">{t(($) => $.model_dropdown.label)}</Label>
+      <div className="flex flex-col min-w-0">
+        <div className="flex h-6 items-center">
+          <Label className="text-xs text-muted-foreground">{t(($) => $.model_dropdown.label)}</Label>
+        </div>
         <div className="mt-1.5 flex items-start gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground">
           <Info className="mt-0.5 h-4 w-4 shrink-0" />
           <div className="min-w-0">
@@ -113,8 +115,8 @@ export function ModelDropdown({
   }
 
   return (
-    <div className="min-w-0">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col min-w-0">
+      <div className="flex h-6 items-center justify-between">
         <Label className="text-xs text-muted-foreground">{t(($) => $.model_dropdown.label)}</Label>
         {modelsQuery.isError && (
           <span className="text-xs text-muted-foreground">{t(($) => $.model_dropdown.discovery_failed)}</span>
@@ -127,8 +129,11 @@ export function ModelDropdown({
         >
           <Cpu className="h-4 w-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
-            <div className="truncate font-medium">
-              {triggerLabel}
+            {/* Wrapped in flex to mirror RuntimePicker's trigger DOM. The
+                two pickers sit side-by-side; inline-in-flex vs block-line-
+                box height calc would otherwise leave them ~1px misaligned. */}
+            <div className="flex items-center gap-2">
+              <span className="truncate font-medium">{triggerLabel}</span>
             </div>
             {value && (
               <div className="truncate text-xs text-muted-foreground">
@@ -178,14 +183,7 @@ export function ModelDropdown({
                       }`}
                     >
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className="truncate font-medium">{m.label}</span>
-                          {m.default && (
-                            <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
-                              {t(($) => $.pickers.model_default_badge)}
-                            </span>
-                          )}
-                        </div>
+                        <div className="truncate font-medium">{m.label}</div>
                         {m.label !== m.id && (
                           <div className="truncate text-xs text-muted-foreground">
                             {m.id}

@@ -69,8 +69,12 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
     try {
       await deleteResource.mutateAsync(resource.id);
       toast.success(t(($) => $.resources.toast_removed));
-    } catch {
-      toast.error(t(($) => $.resources.toast_remove_failed));
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.resources.toast_remove_failed),
+      );
     }
   };
 
@@ -117,7 +121,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                 {t(($) => $.resources.popover_title)}
               </div>
               {workspace?.repos && workspace.repos.length > 0 && (
-                <div className="space-y-1">
+                <div className="space-y-1 max-h-48 overflow-y-auto">
                   {workspace.repos.map((repo) => {
                     const isAttached = attachedUrls.has(repo.url);
                     const isDisabled = isAttached || createResource.isPending;
@@ -248,7 +252,7 @@ function CustomRepoForm({
   return (
     <form onSubmit={handle} className="flex items-center gap-1.5 pt-1 border-t">
       <input
-        type="url"
+        type="text"
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         placeholder={t(($) => $.resources.url_placeholder)}

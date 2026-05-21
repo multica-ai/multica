@@ -48,10 +48,11 @@ describe("ApiClient", () => {
     await client.getAutopilot("ap-1");
     await client.createAutopilot({
       title: "Daily triage",
+      project_id: "project-1",
       assignee_id: "agent-1",
       execution_mode: "create_issue",
     });
-    await client.updateAutopilot("ap-1", { status: "paused" });
+    await client.updateAutopilot("ap-1", { status: "paused", project_id: null });
     await client.deleteAutopilot("ap-1");
     await client.triggerAutopilot("ap-1");
     await client.listAutopilotRuns("ap-1", { limit: 10, offset: 20 });
@@ -62,6 +63,7 @@ describe("ApiClient", () => {
     });
     await client.updateAutopilotTrigger("ap-1", "tr-1", { enabled: false });
     await client.deleteAutopilotTrigger("ap-1", "tr-1");
+    await client.rotateAutopilotTriggerWebhookToken("ap-1", "tr-1");
 
     const calls = fetchMock.mock.calls.map(([url, init]) => ({
       url,
@@ -77,6 +79,7 @@ describe("ApiClient", () => {
         method: "POST",
         body: JSON.stringify({
           title: "Daily triage",
+          project_id: "project-1",
           assignee_id: "agent-1",
           execution_mode: "create_issue",
         }),
@@ -84,7 +87,7 @@ describe("ApiClient", () => {
       {
         url: "https://api.example.test/api/autopilots/ap-1",
         method: "PATCH",
-        body: JSON.stringify({ status: "paused" }),
+        body: JSON.stringify({ status: "paused", project_id: null }),
       },
       { url: "https://api.example.test/api/autopilots/ap-1", method: "DELETE" },
       { url: "https://api.example.test/api/autopilots/ap-1/trigger", method: "POST" },
@@ -104,6 +107,10 @@ describe("ApiClient", () => {
         body: JSON.stringify({ enabled: false }),
       },
       { url: "https://api.example.test/api/autopilots/ap-1/triggers/tr-1", method: "DELETE" },
+      {
+        url: "https://api.example.test/api/autopilots/ap-1/triggers/tr-1/rotate-webhook-token",
+        method: "POST",
+      },
     ]);
   });
 
@@ -197,6 +204,60 @@ describe("ApiClient", () => {
       // surface a user-facing error instead of opening `undefined`.
       expect(att.id).toBe("");
       expect(att.download_url).toBe("");
+    });
+  });
+
+  describe("getAttachmentTextContent", () => {
+    it("returns body text and the original content type from the X-* header", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response("# heading\n\nbody\n", {
+            status: 200,
+            headers: {
+              "Content-Type": "text/plain; charset=utf-8",
+              "X-Original-Content-Type": "text/markdown",
+            },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const { text, originalContentType } =
+        await client.getAttachmentTextContent("att-1");
+
+      expect(text).toBe("# heading\n\nbody\n");
+      expect(originalContentType).toBe("text/markdown");
+    });
+
+    it("throws PreviewTooLargeError on 413", async () => {
+      const { PreviewTooLargeError } = await import("./client");
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response("", { status: 413, statusText: "Payload Too Large" }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getAttachmentTextContent("att-1")).rejects.toBeInstanceOf(
+        PreviewTooLargeError,
+      );
+    });
+
+    it("throws PreviewUnsupportedError on 415", async () => {
+      const { PreviewUnsupportedError } = await import("./client");
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response("", { status: 415, statusText: "Unsupported Media Type" }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getAttachmentTextContent("att-1")).rejects.toBeInstanceOf(
+        PreviewUnsupportedError,
+      );
     });
   });
 

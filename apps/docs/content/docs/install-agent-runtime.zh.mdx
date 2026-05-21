@@ -1,0 +1,169 @@
+---
+title: 安装一个 Agent 运行时
+description: Multica 驱动本机上已安装的 AI 编程工具。这一页讲清楚怎么安装目前支持的 11 款工具，让守护进程能扫到。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+在 Multica 里，一个**运行时**（runtime）就是你机器上的守护进程，配上守护进程在 `PATH` 里扫到的某一款 AI 编程工具。如果 onboarding 的 "连接运行时" 这一步显示 **未检测到支持的工具**，说明守护进程扫了 `PATH`，但 11 款它认得的工具一个都没找到。装下面任意一款（或几款），回到这一步重新扫描，几秒内运行时就会出现。
+
+这一页是装机的入口，和它配套的是：
+
+- [守护进程与运行时](/zh/daemon-runtimes) — 检测是怎么工作的
+- [AI 编程工具矩阵](/zh/providers) — 每款工具的能力差异（会话续接、MCP、模型选择）
+
+<Callout type="info">
+Multica 服务器从不接触你的 API key，也不接触工具本身。下面这些操作 —— 安装、登录、模型访问 —— 全部发生在你本机。出问题几乎都是本地问题。
+</Callout>
+
+## 开始前
+
+下面每一款工具都有两个共同前提：
+
+1. **Multica 守护进程在运行。** 装完 [Multica CLI](/zh/cli) 后跑 `multica daemon start`；或者用 [Multica 桌面端](/zh/desktop-app)，它启动时自动拉起守护进程。守护进程没起来，就没人去扫工具。
+2. **工具的可执行文件在 `PATH` 上。** 守护进程通过名字 shell out 调起工具（见每一节里 **守护进程扫描** 那行的命令名）。终端里 `which <名字>` 找不到，守护进程也找不到。装完后打开新终端（或者重启守护进程），让新的 `PATH` 生效。
+
+装完一款工具后，重启守护进程：
+
+```bash
+multica daemon restart
+```
+
+桌面端的话，重启 app 即可。守护进程只在启动时扫一次 `PATH`。
+
+## 11 款支持的工具
+
+大致按常见程度排序。挑你已经有账号 / API key 的那几款就行 —— 不需要 11 个全装。
+
+### Claude Code（Anthropic）
+
+集成最完整的一款。会话续接好用，MCP 好用，而且 **11 款里只有它真正会读 agent 配置里的 `mcp_config` 字段**（见[矩阵](/zh/providers)）。
+
+| | |
+|---|---|
+| 守护进程扫描 | `claude` |
+| 安装 | 看官方指引 [claude.com/claude-code](https://www.claude.com/claude-code)。常见装法是 npm 包 `@anthropic-ai/claude-code`（需要 Node.js 18+）。 |
+| 认证 | 跑一次 `claude`，跟着 CLI 里的登录流程走；或者设置 `ANTHROPIC_API_KEY`。 |
+| 备注 | 新用户首选。 |
+
+### Codex（OpenAI）
+
+JSON-RPC 2.0 传输，审批粒度更细。**会话续接的代码在，但调不到** —— 要续接的话选 Claude Code 或 ACP 系列。
+
+| | |
+|---|---|
+| 守护进程扫描 | `codex` |
+| 安装 | 看官方指引 [github.com/openai/codex](https://github.com/openai/codex)。常见装法是 npm 包 `@openai/codex`。 |
+| 认证 | `codex login`（浏览器登录），或 `OPENAI_API_KEY`。 |
+
+### Cursor（Anysphere）
+
+Cursor 编辑器的 CLI 对应物。**会话续接是坏的** —— Cursor CLI 不返回 session id，你传过去的续接 id 永远无效。
+
+| | |
+|---|---|
+| 守护进程扫描 | `cursor-agent` |
+| 安装 | 先装 [Cursor 编辑器](https://cursor.com/)，再按 [docs.cursor.com](https://docs.cursor.com/) 的说明装 CLI。可执行文件叫 `cursor-agent`，不是 `cursor`。 |
+| 认证 | 在 Cursor 编辑器里登录，CLI 复用同一份会话。 |
+
+### GitHub Copilot
+
+模型走的是你 GitHub 账号的 entitlement —— 工具自己不挑模型，GitHub 决定你拿到哪个模型。
+
+| | |
+|---|---|
+| 守护进程扫描 | `copilot` |
+| 安装 | 看 GitHub 的 CLI 文档 [github.com/github/copilot-cli](https://github.com/github/copilot-cli)。 |
+| 认证 | CLI 里走 GitHub 浏览器登录。 |
+| 备注 | 登录账号必须有有效的 GitHub Copilot 订阅。 |
+
+### Gemini（Google）
+
+支持 Gemini 2.5 和 3 系列。没有会话续接，没有 MCP —— 适合一次性、无需上下文记忆的任务。
+
+| | |
+|---|---|
+| 守护进程扫描 | `gemini` |
+| 安装 | 看官方指引 [github.com/google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli)。常见装法是 npm 包 `@google/gemini-cli`。 |
+| 认证 | 跑 `gemini` 会提示 Google 账号登录，或设置 `GEMINI_API_KEY`。 |
+
+### OpenCode（SST）
+
+开源 CLI agent。会从自己的配置文件里动态发现可用模型 —— 适合想自己掌控模型清单的用户。
+
+| | |
+|---|---|
+| 守护进程扫描 | `opencode` |
+| 安装 | 看官方指引 [opencode.ai](https://opencode.ai/) 或仓库 [github.com/sst/opencode](https://github.com/sst/opencode)。一般是装脚本或 npm 包。 |
+| 认证 | 按 OpenCode 的文档配你自己的模型供应商（Anthropic、OpenAI 等）。 |
+
+### Kiro CLI（Amazon）
+
+ACP-over-stdio 传输。会话续接通过 ACP `session/load` 工作；skills 拷到 `.kiro/skills/`。
+
+| | |
+|---|---|
+| 守护进程扫描 | `kiro-cli` |
+| 安装 | 看 Kiro 的文档 [kiro.dev](https://kiro.dev/)。可执行文件叫 `kiro-cli`，不是 `kiro`。 |
+| 认证 | 基于 AWS 账号，按 Kiro 自己的引导走。 |
+
+### Kimi（Moonshot）
+
+ACP 协议 agent，主要面向中国市场。Skills 放在 `.kimi/skills/`（原生发现路径）。
+
+| | |
+|---|---|
+| 守护进程扫描 | `kimi` |
+| 安装 | 看官方指引 [github.com/MoonshotAI/kimi-cli](https://github.com/MoonshotAI/kimi-cli)。 |
+| 认证 | Moonshot API key，按厂商文档配置。 |
+
+### Hermes（Nous Research）
+
+ACP 协议 agent（和 Kimi 共享传输层）。会话续接可用。Skill 注入用的是通用回退路径 `.agent_context/skills/` —— 用之前先验证 skills 真的被加载了。
+
+| | |
+|---|---|
+| 守护进程扫描 | `hermes` |
+| 安装 | 看 Nous Research 的仓库 [github.com/NousResearch](https://github.com/NousResearch) 获取最新 CLI。 |
+| 认证 | 按厂商文档。 |
+
+### OpenClaw
+
+开源 CLI agent 编排器。**模型绑在 agent 层**（`openclaw agents add --model`）—— 不能按任务覆盖，从 Multica 也传不了 `--model` / `--system-prompt`。
+
+| | |
+|---|---|
+| 守护进程扫描 | `openclaw` |
+| 安装 | 看项目 [github.com/openclaw-org/openclaw](https://github.com/openclaw-org/openclaw)（社区维护）。 |
+| 认证 | 按 OpenClaw 的文档配底层模型供应商。 |
+
+### Pi（Inflection AI）
+
+极简风格。**会话续接的方式不太一样** —— resume id 是磁盘上的会话文件路径，不是字符串 id。
+
+| | |
+|---|---|
+| 守护进程扫描 | `pi` |
+| 安装 | 看 Inflection 的 CLI 文档 [pi.ai](https://pi.ai/)。 |
+| 认证 | 按厂商文档。 |
+
+## 装完之后
+
+1. **确认可执行文件在 `PATH` 上。** 开一个新终端，跑 `which <名字>`（比如 `which claude`、`which cursor-agent`、`which kiro-cli`）。打印出路径，守护进程就找得到；什么都不打印，先修 shell 的 `PATH`（最常见原因是 rc 文件没重新加载）。
+2. **重启守护进程。** `multica daemon restart`，或者重启桌面端。守护进程只在启动时扫一次 `PATH`。
+3. **看 Runtimes 页面。** Multica UI 的 **Runtimes** 页应该会出现一行 `(工作区 × 工具)`。如果显示 "offline"，看[守护进程与运行时 → 运行时何时被标记为离线](/zh/daemon-runtimes#运行时何时被标记为离线)。
+4. **回到 onboarding。** "连接运行时" 这一步会一直轮询，几秒内就能扫到新运行时，不需要手动刷新。
+
+## 排错
+
+- **`which` 找得到，但守护进程找不到。** 守护进程是用旧 `PATH` 启的，重启它。
+- **可执行文件在，但启动就失败。** 在终端单独跑一次工具的 `--version` 或 `--help`，绝大多数失败都是登录没做、token 过期、Node.js / 运行时版本不对。
+- **Runtimes 页面看到行，但任务一跑就失败。** 一边触发任务一边跑 `multica daemon logs -f`。守护进程会把工具自己的报错原样吐出来。
+
+更宽的症状看[排错指南](/zh/troubleshooting)。
+
+## 接下来
+
+- [守护进程与运行时](/zh/daemon-runtimes) — 检测、心跳、离线处理
+- [AI 编程工具矩阵](/zh/providers) — 工具连上之后的能力差异
+- [创建并配置智能体](/zh/agents-create) — 给你的 agent 挑一款工具，开始跑任务

@@ -249,6 +249,25 @@ SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL;
 -- name: DeleteArchivedAgentsByRuntime :exec
 DELETE FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL;
 
+-- name: PauseAutopilotsByAgentAssignees :exec
+-- Pauses every active autopilot whose agent assignee is in the supplied list.
+-- Called before hard-deleting archived agents on runtime teardown so the rows
+-- do not become dangling (autopilot.assignee_id no longer has an agent FK
+-- since migration 096). Status='paused' makes the breakage visible in the UI
+-- — operators can re-point the autopilot at a live agent or delete it —
+-- rather than silently piling skipped runs.
+UPDATE autopilot
+SET status = 'paused', updated_at = now()
+WHERE status = 'active'
+  AND assignee_type = 'agent'
+  AND assignee_id = ANY(@assignee_ids::uuid[]);
+
+-- name: ListArchivedAgentIDsByRuntime :many
+-- Companion to DeleteArchivedAgentsByRuntime: enumerates the archived agents
+-- about to be hard-deleted so the runtime teardown can pause autopilots that
+-- still point at them. Returns ids only — the caller only needs the set.
+SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL;
+
 -- name: FindLegacyRuntimesByDaemonID :many
 -- Looks up runtime rows keyed on a prior (hostname-derived) daemon_id. Used
 -- at register-time to find rows owned by the same machine under its old

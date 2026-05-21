@@ -78,6 +78,65 @@ func TestCheckMinCLIVersion(t *testing.T) {
 	}
 }
 
+func TestExtractVersionLine(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "bare semver",
+			raw:  "0.42.0\n",
+			want: "0.42.0",
+		},
+		{
+			name: "claude full string preserved",
+			raw:  "2.1.5 (Claude Code)\n",
+			want: "2.1.5 (Claude Code)",
+		},
+		{
+			name: "codex prefix preserved",
+			raw:  "codex-cli 0.118.0\n",
+			want: "codex-cli 0.118.0",
+		},
+		// Reproduces #2516: gemini's Windows shim emits `chcp` output to stdout
+		// before the real version. The chcp line has no dotted-number form,
+		// so the semver scan skips it and picks up "0.42.0" from the next line.
+		{
+			name: "windows chcp prefix before version",
+			raw:  "Active code page: 65001\n0.42.0\n",
+			want: "0.42.0",
+		},
+		{
+			name: "windows chcp prefix CRLF",
+			raw:  "Active code page: 65001\r\n0.42.0\r\n",
+			want: "0.42.0",
+		},
+		{
+			name: "leading blank lines",
+			raw:  "\n\n  0.42.0\n",
+			want: "0.42.0",
+		},
+		{
+			name: "non-semver output falls back to trimmed raw",
+			raw:  "  some-build-id  \n",
+			want: "some-build-id",
+		},
+		{
+			name: "empty input",
+			raw:  "",
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := extractVersionLine(tt.raw); got != tt.want {
+				t.Errorf("extractVersionLine(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCheckMinVersion(t *testing.T) {
 	tests := []struct {
 		agentType string

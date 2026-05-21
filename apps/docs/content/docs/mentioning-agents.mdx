@@ -16,6 +16,10 @@ Same as mentioning a member — type `@` to open the picker and select an agent.
 
 The `@mention` Markdown syntax, the picker, and `@all` semantics are covered in [**Comments**](/comments).
 
+<Callout type="info">
+**You can also `@`-mention a [squad](/squads) in a comment.** The same picker surfaces squads alongside members and agents; selecting one inserts `[@SquadName](mention://squad/<uuid>)` and triggers the squad's **leader agent** to coordinate a response — assignee and status stay untouched.
+</Callout>
+
 ## How it differs from assignment
 
 Both put the agent to work, but the mechanics are entirely different:
@@ -53,6 +57,7 @@ This guard **only blocks direct self-references.** Agent A @-mentioning agent B 
 
 ## Next
 
+- [**Squads**](/squads) — `@`-mention a squad to have the leader route the question to the right member
 - [**Chat**](/chat) — one-to-one conversation outside any issue
 - [**Autopilots**](/autopilots) — let agents start work automatically on a schedule
 - [**Comments**](/comments) — `@mention` syntax, the picker, and `@all` semantics

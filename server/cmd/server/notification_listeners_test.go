@@ -696,6 +696,66 @@ func TestNotification_DueDateChanged(t *testing.T) {
 	}
 }
 
+// TestNotification_StartDateChanged verifies that subscribers (except the actor)
+// receive a "start_date_changed" notification when an issue start date changes.
+func TestNotification_StartDateChanged(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	sub1Email := "notif-sub1-startdate@multica.ai"
+	sub1ID := createTestUser(t, sub1Email)
+	t.Cleanup(func() { cleanupTestUser(t, sub1Email) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	addTestSubscriber(t, issueID, "member", testUserID, "creator")
+	addTestSubscriber(t, issueID, "member", sub1ID, "assignee")
+
+	startDate := "2026-04-01T00:00:00Z"
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "start date test issue",
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+				StartDate:   &startDate,
+			},
+			"assignee_changed":   false,
+			"status_changed":     false,
+			"start_date_changed": true,
+		},
+	})
+
+	// Actor should NOT get a notification
+	actorItems := inboxItemsForRecipient(t, queries, testUserID)
+	if len(actorItems) != 0 {
+		t.Fatalf("expected 0 inbox items for actor, got %d", len(actorItems))
+	}
+
+	sub1Items := inboxItemsForRecipient(t, queries, sub1ID)
+	if len(sub1Items) != 1 {
+		t.Fatalf("expected 1 inbox item for sub1, got %d", len(sub1Items))
+	}
+	if sub1Items[0].Type != "start_date_changed" {
+		t.Fatalf("expected type 'start_date_changed', got %q", sub1Items[0].Type)
+	}
+	if sub1Items[0].Severity != "info" {
+		t.Fatalf("expected severity 'info', got %q", sub1Items[0].Severity)
+	}
+}
+
 // TestNotification_ParentBubble_StatusChanged verifies that a status_changed
 // event on a sub-issue bubbles to subscribers of the parent issue.
 func TestNotification_ParentBubble_StatusChanged(t *testing.T) {

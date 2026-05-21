@@ -27,6 +27,7 @@ import {
   workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
+import { issueKeys } from "@multica/core/issues/queries";
 import { api } from "@multica/core/api";
 import {
   resolvePostAuthDestination,
@@ -98,6 +99,7 @@ export function WorkspaceTab() {
   const [name, setName] = useState(workspace?.name ?? "");
   const [description, setDescription] = useState(workspace?.description ?? "");
   const [context, setContext] = useState(workspace?.context ?? "");
+  const [issuePrefix, setIssuePrefix] = useState(workspace?.issue_prefix ?? "");
   const [saving, setSaving] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -123,9 +125,21 @@ export function WorkspaceTab() {
     setName(workspace?.name ?? "");
     setDescription(workspace?.description ?? "");
     setContext(workspace?.context ?? "");
+    setIssuePrefix(workspace?.issue_prefix ?? "");
   }, [workspace]);
 
-  const handleSave = async () => {
+  // Letters + digits only, uppercase, capped at 10 chars. The backend
+  // uppercases and trims on its side too — this is purely a UX guardrail
+  // so the value the user sees in the input matches what gets persisted.
+  const normalizePrefix = (raw: string) =>
+    raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+
+  const normalizedPrefix = normalizePrefix(issuePrefix);
+  const prefixChanged =
+    !!workspace && normalizedPrefix !== workspace.issue_prefix;
+  const prefixInvalid = normalizedPrefix.length === 0;
+
+  const performSave = async (includePrefix: boolean) => {
     if (!workspace) return;
     setSaving(true);
     try {
@@ -133,16 +147,42 @@ export function WorkspaceTab() {
         name,
         description,
         context,
+        ...(includePrefix ? { issue_prefix: normalizedPrefix } : {}),
       });
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((ws) => (ws.id === updated.id ? updated : ws)),
       );
+      // Issue identifiers (`MUL-123`) are computed from `issue_prefix` at
+      // read time, not stored on each issue row. When the prefix changes,
+      // every cached issue's rendered identifier is stale until refetched.
+      // Limit invalidation to the prefix-changed branch so unrelated saves
+      // (name / description / context) stay cheap.
+      if (includePrefix) {
+        qc.invalidateQueries({ queryKey: issueKeys.all(updated.id) });
+      }
       toast.success(t(($) => $.workspace.toast_saved));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.workspace.toast_save_failed));
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSave = () => {
+    if (!workspace || prefixInvalid) return;
+    if (prefixChanged) {
+      setConfirmAction({
+        title: t(($) => $.workspace.prefix_confirm_title),
+        description: t(($) => $.workspace.prefix_confirm_description, {
+          oldPrefix: workspace.issue_prefix,
+          newPrefix: normalizedPrefix,
+        }),
+        variant: "destructive",
+        onConfirm: () => performSave(true),
+      });
+      return;
+    }
+    void performSave(false);
   };
 
   const handleLeaveWorkspace = () => {
@@ -231,11 +271,28 @@ export function WorkspaceTab() {
                 {workspace.slug}
               </div>
             </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">{t(($) => $.workspace.issue_prefix_label)}</Label>
+              <Input
+                type="text"
+                value={issuePrefix}
+                onChange={(e) => setIssuePrefix(normalizePrefix(e.target.value))}
+                disabled={!canManageWorkspace}
+                maxLength={10}
+                className="mt-1 font-mono uppercase"
+                placeholder={workspace.issue_prefix}
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t(($) => $.workspace.issue_prefix_hint, {
+                  example: `${normalizedPrefix || workspace.issue_prefix}-123`,
+                })}
+              </p>
+            </div>
             <div className="flex items-center justify-end gap-2 pt-1">
               <Button
                 size="sm"
                 onClick={handleSave}
-                disabled={saving || !name.trim() || !canManageWorkspace}
+                disabled={saving || !name.trim() || prefixInvalid || !canManageWorkspace}
               >
                 <Save className="h-3 w-3" />
                 {saving ? t(($) => $.workspace.saving) : t(($) => $.workspace.save)}

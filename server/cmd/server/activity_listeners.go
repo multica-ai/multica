@@ -142,6 +142,35 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 			}
 		}
 
+		if startDateChanged, _ := payload["start_date_changed"].(bool); startDateChanged {
+			prevStartDate := ""
+			if v, ok := payload["prev_start_date"].(*string); ok && v != nil {
+				prevStartDate = *v
+			}
+			newStartDate := ""
+			if issue.StartDate != nil {
+				newStartDate = *issue.StartDate
+			}
+			details, _ := json.Marshal(map[string]string{
+				"from": prevStartDate,
+				"to":   newStartDate,
+			})
+			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+				WorkspaceID: parseUUID(issue.WorkspaceID),
+				IssueID:     parseUUID(issue.ID),
+				ActorType:   util.StrToText(e.ActorType),
+				ActorID:     optionalUUID(e.ActorID),
+				Action:      "start_date_changed",
+				Details:     details,
+			})
+			if err != nil {
+				slog.Error("activity: failed to record start date change",
+					"issue_id", issue.ID, "error", err)
+			} else {
+				publishActivityEvent(bus, e, activity)
+			}
+		}
+
 		if dueDateChanged, _ := payload["due_date_changed"].(bool); dueDateChanged {
 			prevDueDate := ""
 			if v, ok := payload["prev_due_date"].(*string); ok && v != nil {

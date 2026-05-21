@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/netip"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -57,6 +58,35 @@ type Config struct {
 	//   2) backfill_task_usage_daily ran successfully,
 	//   3) cron job scheduled and task_usage_rollup_lag_seconds() < 900.
 	UseDailyRollupForRuntimeUsage bool
+	// UseDailyRollupForDashboard routes the workspace `/dashboard` page's
+	// token-aggregation reads to `task_usage_dashboard_daily` (migration
+	// 084). Mirrors UseDailyRollupForRuntimeUsage above with the same
+	// fail-safe default (false → raw scan). Operators flip per
+	// environment AFTER:
+	//   1) migration 084 applied,
+	//   2) `backfill_task_usage_dashboard_daily` succeeded and stamped
+	//      the dashboard rollup watermark,
+	//   3) cron job scheduled (`rollup_task_usage_dashboard_daily`) and
+	//      `task_usage_dashboard_rollup_lag_seconds()` < 900.
+	UseDailyRollupForDashboard bool
+	// PublicURL is the absolute base URL the API is reachable at from the
+	// public internet, with no trailing slash (e.g. "https://app.multica.ai").
+	// Used only to build webhook_url responses for autopilot webhook triggers
+	// — never for auth, routing, or workspace resolution. Empty when unset,
+	// in which case clients fall back to webhook_path + their own origin.
+	// Reading the public host from request headers (Host / X-Forwarded-Host)
+	// is intentionally avoided so a misconfigured reverse proxy cannot trick
+	// the server into minting webhook URLs pointing at an attacker-controlled
+	// host.
+	PublicURL string
+	// TrustedProxies are CIDRs whose source IP we trust to set
+	// X-Forwarded-For / X-Real-IP. Empty means "trust nothing": the rate
+	// limiter uses r.RemoteAddr exclusively. Populated via the
+	// MULTICA_TRUSTED_PROXIES env var (comma-separated CIDRs, e.g.
+	// "10.0.0.0/8,127.0.0.1/32"). This is specifically to keep the per-IP
+	// webhook limiter from being bypassed by a spoofed XFF on deployments
+	// without a header-stripping reverse proxy in front.
+	TrustedProxies []netip.Prefix
 }
 
 type Handler struct {
@@ -80,6 +110,9 @@ type Handler struct {
 	Analytics             analytics.Client
 	PATCache              *auth.PATCache
 	DaemonTokenCache      *auth.DaemonTokenCache
+	MembershipCache       *auth.MembershipCache
+	WebhookRateLimiter    WebhookRateLimiter
+	WebhookIPRateLimiter  WebhookRateLimiter
 	cfg                   Config
 }
 
@@ -119,6 +152,8 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		Storage:               store,
 		CFSigner:              cfSigner,
 		Analytics:             analyticsClient,
+		WebhookRateLimiter:    NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
+		WebhookIPRateLimiter:  NewMemoryWebhookIPRateLimiter(DefaultWebhookIPRateLimit()),
 		cfg:                   cfg,
 	}
 }

@@ -5,6 +5,7 @@ import { SidebarProvider, SidebarInset } from "@multica/ui/components/ui/sidebar
 import { ModalRegistry } from "../modals/registry";
 import { AppSidebar } from "./app-sidebar";
 import { DashboardGuard } from "./dashboard-guard";
+import { NavigationProgress } from "./navigation-progress";
 import { WorkspacePresencePrefetch } from "./workspace-presence-prefetch";
 
 interface DashboardLayoutProps {
@@ -35,6 +36,7 @@ export function DashboardLayout({
         <WorkspacePresencePrefetch />
         <AppSidebar searchSlot={searchSlot} />
         <SidebarInset className="relative overflow-hidden">
+          <NavigationProgress />
           {children}
           <ModalRegistry />
           {extra}

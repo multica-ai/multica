@@ -5,7 +5,7 @@ description: 一次性连接 GitHub App，之后 PR 的分支名、标题或正�
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-在 **Settings → Integrations** 里一次性连一个 GitHub 账号或组织。之后任何 PR 只要分支名、标题或正文里出现 issue 编号（例如 `MUL-123`），就会**自动关联**到那个 [issue](/issues)，出现在 issue 详情页右侧的 **Pull requests** 区块里——PR 合并时，issue 自动转 **Done**。
+在 **Settings → GitHub** 里一次性连一个 GitHub 账号或组织。之后任何 PR 只要分支名、标题或正文里出现 issue 编号（例如 `MUL-123`），就会**自动关联**到那个 [issue](/issues)，出现在 issue 详情页右侧的 **Pull requests** 区块里——PR 合并时，issue 自动转 **Done**。
 
 没有 per-issue 的配置，整个流程是「编号驱动」的。
 
@@ -13,7 +13,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 | 出现位置 | 行为 |
 |---|---|
-| **Settings → Integrations** | 工作区 owner / admin 看到一个 GitHub 卡片，里面有 **Connect GitHub** 按钮。点击会打开 GitHub 的 App 安装页；装好后跳回 Settings。 |
+| **Settings → GitHub** | 工作区 owner / admin 看到 GitHub 这个 tab，里面有主开关、**Connect GitHub** 按钮，以及功能开关（PR 侧栏、Co-authored-by、auto-link）。点 Connect 会打开 GitHub 的 App 安装页；装好后跳回 GitHub tab。 |
 | **Issue 详情侧栏 → Pull requests** | 列出所有自动关联到该 issue 的 PR，含标题、仓库、状态（`Open` / `Draft` / `Merged` / `Closed`）和作者。点一行跳到 GitHub。 |
 | **Webhook（后台）** | 每次 `pull_request` 事件触发：upsert PR 行 → 扫描里面的 issue 编号 →（重新）建立 link。幂等——重投 delivery 不会产生重复记录。 |
 | **Merge 自动改 status** | PR 转 `merged` 时，所有已关联且状态不是 `Done` / `Cancelled` 的 issue 会被推到 `Done`。时间线里以 source 为 `github_pr_merged` 记录。 |
@@ -56,10 +56,10 @@ PR **关闭但没合并**——只更新 PR 卡片的状态为 `Closed`，issue 
 
 ## 断开连接
 
-**Settings → Integrations** 里没有 installation 列表——现有 installation 直接到 GitHub 上管理：
+**Settings → GitHub** 里没有 installation 列表——现有 installation 直接到 GitHub 上管理：
 
 - **从 GitHub 卸载** —— 个人在 `https://github.com/settings/installations`、组织在 `https://github.com/organizations/<org>/settings/installations` 卸载 Multica App。Multica 收到 `installation.deleted` webhook 后立刻删行；任何已打开的 Settings tab 实时更新，不用刷新
-- **Multica 这边的断开是 admin only** —— 卡片对非 admin 不显示连接操作
+- **Multica 这边的断开是 admin only** —— GitHub tab 上的 Disconnect 控件对非 admin 不显示；主开关关掉时 Disconnect 仍然可用，方便 admin 一键关闭功能后再单独清理已连接的 installation
 
 断开之后，已经镜像的 PR 行保留在数据库里——历史 issue 侧栏仍能显示当时关联的 PR，但来自这个 installation 的新 webhook 事件不再被接受。
 
@@ -111,7 +111,7 @@ Self-Host 需要：建一个 GitHub App、指向你的 server、设两个环境�
 
 API server 上：
 
-```env
+```dotenv
 GITHUB_APP_SLUG=multica-acme
 GITHUB_WEBHOOK_SECRET=<你刚生成的 webhook secret>
 ```
@@ -121,7 +121,7 @@ GITHUB_WEBHOOK_SECRET=<你刚生成的 webhook secret>
 - Settings 里 `Connect GitHub` 按钮会被 **disable**，并显示「not configured」提示
 - `/api/webhooks/github` 直接返回 **`503 github webhooks not configured`**——Multica 在 secret 没配置时拒绝处理事件，不会出现「没 secret 也接受 webhook」的安全坑
 
-`FRONTEND_ORIGIN` 也必须设置（任何生产 self-host 都已经设了）——setup 回调结束后用它把用户跳回 `<FRONTEND_ORIGIN>/settings`。
+`FRONTEND_ORIGIN` 也必须设置（任何生产 self-host 都已经设了）——setup 回调结束后用它把用户跳回 `<FRONTEND_ORIGIN>/settings?tab=github`。
 
 设完 env 重启 API。
 
@@ -139,10 +139,10 @@ make migrate-up
 
 到 Multica：
 
-1. 以 owner 或 admin 身份打开 **Settings → Integrations**
+1. 以 owner 或 admin 身份打开 **Settings → GitHub**
 2. 点 **Connect GitHub**，GitHub 在新 tab 打开
 3. 选择要授权的仓库，点 **Install**
-4. GitHub 跳回 `<api-host>/api/github/setup`，落库后再跳到 `<FRONTEND_ORIGIN>/settings?github_connected=1`
+4. GitHub 跳回 `<api-host>/api/github/setup`，落库后再跳到 `<FRONTEND_ORIGIN>/settings?tab=github&github_connected=1`
 
 之后在任意一个仓库开一个分支 / 标题 / 正文带本工作区 issue 编号的 PR——几秒内对应 issue 的详情页上就能看到 Pull requests 区块。
 

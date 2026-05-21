@@ -1,11 +1,11 @@
 {
   "title": "Search",
-  "description": "Search pages, issues, and projects",
+  "description": "Search pages, issues, projects, and members",
   "placeholder": "Type a command or search...",
   "groups": {
     "pages": "Pages",
     "commands": "Commands",
-    "switch_workspace": "Switch Workspace",
+    "members": "Members",
     "projects": "Projects",
     "issues": "Issues",
     "recent": "Recent"

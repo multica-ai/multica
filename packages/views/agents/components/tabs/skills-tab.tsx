@@ -24,16 +24,15 @@ export function SkillsTab({
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   // Same query the SkillAddDialog uses (TanStack Query dedupes by key, so
-  // this isn't an extra request) — used here only to grey out the "Add skill"
-  // button when there's nothing left to attach.
+  // this isn't an extra request) — used here only to grey out the "Add
+  // skill" button when the workspace has zero skills total. When skills
+  // exist but are all already attached, we still open the dialog: it
+  // filters out attached skills and renders a localised "no more skills
+  // to add" empty state, which is more useful than a mysterious
+  // greyed-out button.
   const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
   const [removing, setRemoving] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
-
-  const agentSkillIds = new Set(agent.skills.map((s) => s.id));
-  const availableCount = workspaceSkills.filter(
-    (s) => !agentSkillIds.has(s.id),
-  ).length;
 
   const handleRemove = async (skillId: string) => {
     setRemoving(true);
@@ -60,7 +59,7 @@ export function SkillsTab({
           variant="outline"
           size="sm"
           onClick={() => setShowAdd(true)}
-          disabled={availableCount === 0}
+          disabled={workspaceSkills.length === 0}
           className="shrink-0"
         >
           <Plus className="h-3 w-3" />
@@ -84,7 +83,7 @@ export function SkillsTab({
           <p className="mt-1 max-w-xs text-center text-xs text-muted-foreground">
             {t(($) => $.tab_body.skills.empty_hint)}
           </p>
-          {availableCount > 0 && (
+          {workspaceSkills.length > 0 && (
             <Button
               onClick={() => setShowAdd(true)}
               size="sm"

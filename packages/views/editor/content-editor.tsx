@@ -89,9 +89,11 @@ interface ContentEditorProps {
    */
   currentIssueId?: string;
   /**
-   * When true, the @mention extension is not registered. Use for editors
-   * where mentioning members/agents has no business meaning (e.g. agent
-   * system prompts, where the content is fed to an LLM as plain text).
+   * When true, the `@` suggestion picker is disabled but the mention node
+   * type remains in the schema, so existing mentions pasted in from other
+   * Multica editors still render as the normal pill. Use for editors where
+   * *creating* a new mention has no business meaning (e.g. agent system
+   * prompts) but *preserving* an existing one still matters.
    */
   disableMentions?: boolean;
   /**
@@ -222,6 +224,59 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         if (debounceRef.current) clearTimeout(debounceRef.current);
       };
     }, []);
+
+    // Sync external `defaultValue` changes into the editor.
+    // Tiptap v3 `useEditor` reads `content` only at mount (ueberdosis/tiptap#5831);
+    // without this effect, a WS-driven description update keeps the editor
+    // showing stale content until the issue is closed and reopened.
+    useEffect(() => {
+      if (!editor || editor.isDestroyed) return;
+
+      const current = stripBlobUrls(editor.getMarkdown()).trimEnd();
+      // "Dirty" = user has local edits not yet flushed through the debounced
+      // `onUpdate`. `lastEmittedRef` is advanced only after a debounce fire,
+      // so a divergence means the editor holds unsaved bytes.
+      const isDirty =
+        lastEmittedRef.current !== null && current !== lastEmittedRef.current;
+
+      // Guard 1: focused AND dirty — protect bytes the user is actively
+      // typing. Focused-but-clean falls through: applying setContent is safe
+      // (no user input to lose) and necessary, because onBlur has no replay
+      // mechanism and a focused clean editor would otherwise drop this sync
+      // permanently.
+      if (editor.isFocused && isDirty) return;
+
+      // Guard 2: unfocused-but-dirty — blur happened but the debounce window
+      // (debounceMs, 1500ms for description) hasn't flushed yet. The pending
+      // onUpdate will reach the server and the cache will reconcile; skipping
+      // here avoids overwriting unsaved local edits.
+      if (isDirty) return;
+
+      const incoming = defaultValue ? preprocessMarkdown(defaultValue) : "";
+      const incomingNormalized = stripBlobUrls(incoming).trimEnd();
+      // Guard 3: normalized-equal short-circuit. Avoids a no-op transaction
+      // when the cache reflects a write this same editor just emitted.
+      if (incomingNormalized === current) return;
+
+      // Guard 4: `emitUpdate: false`. Tiptap v3's setContent defaults to
+      // `emitUpdate: true`; without this we would re-trigger onUpdate →
+      // server save → self-write loop.
+      const { from, to } = editor.state.selection;
+      editor.commands.setContent(incoming, {
+        emitUpdate: false,
+        contentType: "markdown",
+      });
+
+      // Clamp prior selection to the new doc size so the caret doesn't snap
+      // to position 0 after ProseMirror replaces the document.
+      const docSize = editor.state.doc.content.size;
+      editor.commands.setTextSelection({
+        from: Math.min(from, docSize),
+        to: Math.min(to, docSize),
+      });
+
+      lastEmittedRef.current = stripBlobUrls(editor.getMarkdown()).trimEnd();
+    }, [defaultValue, editor]);
 
     useImperativeHandle(ref, () => ({
       getMarkdown: () => stripBlobUrls(editor?.getMarkdown() ?? ""),

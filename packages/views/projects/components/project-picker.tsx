@@ -20,11 +20,15 @@ export function ProjectPicker({
   onUpdate,
   triggerRender,
   align = "start",
+  defaultOpen = false,
 }: {
   projectId: string | null;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   triggerRender?: React.ReactElement;
   align?: "start" | "center" | "end";
+  /** Open the dropdown on first mount. Used by progressive-disclosure
+   *  sidebars so a newly-added field immediately enters edit state. */
+  defaultOpen?: boolean;
 }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
@@ -32,7 +36,7 @@ export function ProjectPicker({
   const current = projects.find((p) => p.id === projectId);
 
   return (
-    <DropdownMenu>
+    <DropdownMenu defaultOpen={defaultOpen}>
       <DropdownMenuTrigger
         className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
         render={triggerRender}

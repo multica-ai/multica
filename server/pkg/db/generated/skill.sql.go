@@ -115,6 +115,37 @@ func (q *Queries) GetSkill(ctx context.Context, id pgtype.UUID) (Skill, error) {
 	return i, err
 }
 
+const getSkillByWorkspaceAndName = `-- name: GetSkillByWorkspaceAndName :one
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+WHERE workspace_id = $1 AND name = $2
+`
+
+type GetSkillByWorkspaceAndNameParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Name        string      `json:"name"`
+}
+
+// Used by agent-template materialization to implement find-or-create: when a
+// template references a skill by name that already exists in the workspace,
+// reuse the existing skill_id rather than INSERT (which would fail the
+// UNIQUE(workspace_id, name) constraint from migration 008).
+func (q *Queries) GetSkillByWorkspaceAndName(ctx context.Context, arg GetSkillByWorkspaceAndNameParams) (Skill, error) {
+	row := q.db.QueryRow(ctx, getSkillByWorkspaceAndName, arg.WorkspaceID, arg.Name)
+	var i Skill
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Config,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getSkillFile = `-- name: GetSkillFile :one
 SELECT id, skill_id, path, content, created_at, updated_at FROM skill_file
 WHERE id = $1

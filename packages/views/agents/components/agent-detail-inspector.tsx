@@ -43,6 +43,7 @@ import { ConcurrencyPicker } from "./inspector/concurrency-picker";
 import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { SkillAttach } from "./inspector/skill-attach";
+import { ThinkingPropRow } from "./inspector/thinking-prop-row";
 import { VisibilityPicker } from "./inspector/visibility-picker";
 
 interface InspectorProps {
@@ -130,6 +131,14 @@ export function AgentDetailInspector({
             onChange={(m) => update({ model: m })}
           />
         </PropRow>
+        <ThinkingPropRow
+          runtimeId={agent.runtime_id}
+          runtimeOnline={!!isOnline}
+          model={agent.model ?? ""}
+          value={agent.thinking_level ?? ""}
+          canEdit={canEdit}
+          onChange={(v) => update({ thinking_level: v })}
+        />
         <PropRow label={t(($) => $.inspector.prop_visibility)} interactive={false}>
           <VisibilityPicker
             value={agent.visibility}
@@ -240,7 +249,7 @@ function AvatarEditor({
 
   if (!canEdit) {
     return (
-      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted">
+      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg">
         <ActorAvatar
           actorType="agent"
           actorId={agent.id}
@@ -271,7 +280,7 @@ function AvatarEditor({
         type="button"
         // rounded-lg matches the standard agent avatar treatment used in
         // list rows. Avoid rounded-full — circles are reserved for humans.
-        className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onClick={() => fileInputRef.current?.click()}
         disabled={uploading}
         aria-label={t(($) => $.inspector.change_avatar_aria)}

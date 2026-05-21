@@ -5,8 +5,8 @@ import {
   addIssueToBuckets,
   findIssueLocation,
   patchIssueInBuckets,
-  removeIssueFromBuckets,
 } from "./cache-helpers";
+import { cleanupDeletedIssueCaches } from "./delete-cache";
 import type { Issue, IssueLabelsResponse, Label } from "../types";
 import type { ListIssuesCache } from "../types";
 
@@ -19,6 +19,13 @@ export function onIssueCreated(
     old ? addIssueToBuckets(old, issue) : old,
   );
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+  // Refresh every Project Gantt cache that might be observing this issue.
+  // We invalidate the whole prefix rather than the issue's own project
+  // because a fresh issue isn't necessarily scheduled yet; the active Gantt
+  // page (if any) will refetch and pick it up if it qualifies.
+  qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
   if (issue.parent_issue_id) {
     qc.invalidateQueries({ queryKey: issueKeys.children(wsId, issue.parent_issue_id) });
     qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
@@ -48,6 +55,14 @@ export function onIssueUpdated(
     old ? patchIssueInBuckets(old, issue.id, issue) : old,
   );
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+  // Any field change can shift Gantt membership — start_date / due_date may
+  // have moved in or out of the `scheduled` set, project_id may have
+  // changed, or the row that is in the cache may need to mirror updated
+  // metadata (title, status, assignee). Cheaper to invalidate the prefix
+  // than to mirror the server filter here.
+  qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issue.id), (old) =>
     old ? { ...old, ...issue } : old,
   );
@@ -99,7 +114,23 @@ export function onIssueLabelsChanged(
   qc.setQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId), (old) =>
     old ? { ...old, labels } : old,
   );
+  // Patch the Project Gantt caches in-place: the Gantt view applies
+  // `labelFilters` to the row data, so a stale `labels` array would silently
+  // hide or surface bars after another tab/agent attached or detached a
+  // label. Mutating in place (instead of invalidating) avoids a refetch of
+  // the entire scheduled set on every label toggle.
+  for (const [key, data] of qc.getQueriesData<Issue[]>({
+    queryKey: issueKeys.projectGanttAll(wsId),
+  })) {
+    if (!data) continue;
+    const next = data.map((issue) =>
+      issue.id === issueId ? { ...issue, labels } : issue,
+    );
+    qc.setQueryData<Issue[]>(key, next);
+  }
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
 }
 
 export function onIssueDeleted(
@@ -107,21 +138,7 @@ export function onIssueDeleted(
   wsId: string,
   issueId: string,
 ) {
-  // Look up the issue before removing it to check for parent_issue_id
-  const listData = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
-  const deleted = listData ? findIssueLocation(listData, issueId)?.issue : undefined;
-
-  qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
-    old ? removeIssueFromBuckets(old, issueId) : old,
-  );
-  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
-  qc.removeQueries({ queryKey: issueKeys.detail(wsId, issueId) });
-  qc.removeQueries({ queryKey: issueKeys.timeline(issueId) });
-  qc.removeQueries({ queryKey: issueKeys.reactions(issueId) });
-  qc.removeQueries({ queryKey: issueKeys.subscribers(issueId) });
-  qc.removeQueries({ queryKey: issueKeys.children(wsId, issueId) });
-  if (deleted?.parent_issue_id) {
-    qc.invalidateQueries({ queryKey: issueKeys.children(wsId, deleted.parent_issue_id) });
-    qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
-  }
+  cleanupDeletedIssueCaches(qc, wsId, issueId);
+  qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
 }
