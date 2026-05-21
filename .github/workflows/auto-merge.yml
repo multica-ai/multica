@@ -1,0 +1,83 @@
+name: Auto-merge low-risk PRs
+
+on:
+  pull_request_review:
+    types: [submitted]
+  check_suite:
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    name: Evaluate auto-merge eligibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: >-
+      github.event.pull_request.draft == false ||
+      github.event_name == 'check_suite'
+    steps:
+      - name: Check auto-merge criteria
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request_review" ]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          else
+            PR_NUMBER=$(gh pr list --repo "${{ github.repository }}" --state open --json number,labels --jq '
+              .[] | select(.labels | map(.name) | index("risk:low")) | .number
+            ' | head -1)
+            if [ -z "$PR_NUMBER" ]; then
+              echo "No eligible low-risk PRs found"
+              exit 0
+            fi
+          fi
+
+          PR_DATA=$(gh pr view "$PR_NUMBER" --json labels,reviews,statusCheckRollup,mergeable,isDraft)
+
+          IS_DRAFT=$(echo "$PR_DATA" | jq -r '.isDraft')
+          if [ "$IS_DRAFT" = "true" ]; then
+            echo "PR is draft — skipping"
+            exit 0
+          fi
+
+          IS_LOW_RISK=$(echo "$PR_DATA" | jq '[.labels[].name] | index("risk:low") != null')
+          if [ "$IS_LOW_RISK" != "true" ]; then
+            echo "PR is not labeled risk:low — skipping auto-merge"
+            exit 0
+          fi
+
+          NEEDS_SECURITY=$(echo "$PR_DATA" | jq '[.labels[].name] | index("needs:security-review") != null')
+          if [ "$NEEDS_SECURITY" = "true" ]; then
+            echo "PR needs security review — skipping auto-merge"
+            exit 0
+          fi
+
+          APPROVED=$(echo "$PR_DATA" | jq '[.reviews[] | select(.state == "APPROVED")] | length > 0')
+          if [ "$APPROVED" != "true" ]; then
+            echo "PR not yet approved — skipping auto-merge"
+            exit 0
+          fi
+
+          ALL_CHECKS_PASS=$(echo "$PR_DATA" | jq '
+            .statusCheckRollup | if . == null then false
+            else [.[]] | all(.conclusion == "SUCCESS" or .conclusion == "SKIPPED" or .conclusion == "NEUTRAL")
+            end
+          ')
+          if [ "$ALL_CHECKS_PASS" != "true" ]; then
+            echo "Not all checks passing — skipping auto-merge"
+            exit 0
+          fi
+
+          MERGEABLE=$(echo "$PR_DATA" | jq -r '.mergeable')
+          if [ "$MERGEABLE" != "MERGEABLE" ]; then
+            echo "PR has conflicts — skipping auto-merge"
+            exit 0
+          fi
+
+          echo "All criteria met — enabling auto-merge"
+          gh pr merge "$PR_NUMBER" --auto --squash --repo "${{ github.repository }}"
