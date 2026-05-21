@@ -1,0 +1,112 @@
+# Tailscale overlay — run alongside the base docker-compose.yml
+#
+# Usage:
+#   1. Generate a Tailscale auth key at https://login.tailscale.com/admin/settings/keys
+#      (check "Reusable" for convenience)
+#   2. Add to your .env:
+#        TS_AUTHKEY=tskey-auth-...
+#        TS_HOSTNAME=hub           # pick any name — this is how it appears on your tailnet
+#   3. (Optional) To advertise Tailscale tags, first define them in your ACL policy
+#      (https://login.tailscale.com/admin/acls), then set in .env:
+#        TS_EXTRA_ARGS=--advertise-tags=tag:container
+#   4. Start:
+#        docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d
+#   5. Access from any Tailscale device:
+#        https://<TS_HOSTNAME>.<tailnet>.ts.net  (HTTPS, auto-cert via Tailscale Serve)
+#
+# Security:
+#   - Only your Tailscale devices can reach this. It is invisible to the public internet.
+#   - HTTPS is enabled via Tailscale Serve with auto-provisioned TLS certificates.
+#   - The hostname is configurable so it's not obvious what the service is.
+
+services:
+  tailscale:
+    image: tailscale/tailscale:latest
+    hostname: ${TS_HOSTNAME:-hub}
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_EXTRA_ARGS: ${TS_EXTRA_ARGS:-}
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - ./docker/tailscale-serve.json:/config/serve.json:ro
+      - ./docker/webhook-proxy/enable-funnel.sh:/config/enable-funnel.sh:ro
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - net_admin
+    healthcheck:
+      test: ["CMD-SHELL", "tailscale status >/dev/null 2>&1 && (tailscale funnel status 2>&1 | grep -q '8443 (Funnel on)' || sh /config/enable-funnel.sh)"]
+      interval: 60s
+      timeout: 20s
+      start_period: 15s
+      retries: 5
+    restart: unless-stopped
+
+  # Webhook-only reverse proxy. Funneled to the public internet but only
+  # accepts /{slug}/webhooks/{provider} paths — everything else is 403.
+  webhook-proxy:
+    image: nginx:alpine
+    network_mode: service:tailscale
+    volumes:
+      - ./docker/webhook-proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - tailscale
+      - backend
+    restart: unless-stopped
+
+  # Override backend to share Tailscale's network instead of exposing host ports.
+  # Internal ports: backend listens on 4900, frontend on 4800 (non-standard).
+  backend:
+    network_mode: service:tailscale
+    ports: !reset []
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      tailscale:
+        condition: service_started
+    environment:
+      PORT: 4900
+      DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET}
+      MULTICA_LOCAL_MODE: ${MULTICA_LOCAL_MODE:-false}
+      MULTICA_LOCAL_EMAIL: ${MULTICA_LOCAL_EMAIL:-local@localhost}
+      FRONTEND_ORIGIN: ${TS_SCHEME:-https}://${TS_HOSTNAME:-hub}.${TS_TAILNET:-tail8d788f.ts.net}
+      CORS_ALLOWED_ORIGINS: ${TS_SCHEME:-https}://${TS_HOSTNAME:-hub}.${TS_TAILNET:-tail8d788f.ts.net}
+      MULTICA_APP_URL: ${TS_SCHEME:-https}://${TS_HOSTNAME:-hub}.${TS_TAILNET:-tail8d788f.ts.net}
+      MULTICA_SERVER_URL: ${TS_WS_SCHEME:-wss}://${TS_HOSTNAME:-hub}.${TS_TAILNET:-tail8d788f.ts.net}/ws
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4900/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+
+  # Override frontend to share Tailscale's network
+  frontend:
+    network_mode: service:tailscale
+    ports: !reset []
+    depends_on:
+      backend:
+        condition: service_healthy
+      tailscale:
+        condition: service_started
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        REMOTE_API_URL: http://127.0.0.1:4900
+        NEXT_PUBLIC_API_URL: ""
+        NEXT_PUBLIC_WS_URL: ""
+        NEXT_PUBLIC_LOCAL_MODE: ${NEXT_PUBLIC_LOCAL_MODE:-false}
+    environment:
+      REMOTE_API_URL: http://127.0.0.1:4900
+      PORT: 4800
+      NEXT_PUBLIC_LOCAL_MODE: ${NEXT_PUBLIC_LOCAL_MODE:-false}
+
+volumes:
+  tailscale-state:

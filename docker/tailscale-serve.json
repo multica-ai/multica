@@ -1,0 +1,63 @@
+{
+  "TCP": {
+    "443": {
+      "HTTPS": true
+    },
+    "80": {
+      "HTTP": true
+    },
+    "8443": {
+      "HTTPS": true
+    }
+  },
+  "Web": {
+    "${TS_CERT_DOMAIN}:443": {
+      "Handlers": {
+        "/api/": {
+          "Proxy": "http://127.0.0.1:4900/api/"
+        },
+        "/auth/": {
+          "Proxy": "http://127.0.0.1:4900/auth/"
+        },
+        "/ws": {
+          "Proxy": "http://127.0.0.1:4900/ws"
+        },
+        "/health": {
+          "Proxy": "http://127.0.0.1:4900/health"
+        },
+        "/": {
+          "Proxy": "http://127.0.0.1:4800"
+        }
+      }
+    },
+    "${TS_CERT_DOMAIN}:80": {
+      "Handlers": {
+        "/api/": {
+          "Proxy": "http://127.0.0.1:4900/api/"
+        },
+        "/auth/": {
+          "Proxy": "http://127.0.0.1:4900/auth/"
+        },
+        "/ws": {
+          "Proxy": "http://127.0.0.1:4900/ws"
+        },
+        "/health": {
+          "Proxy": "http://127.0.0.1:4900/health"
+        },
+        "/": {
+          "Proxy": "http://127.0.0.1:4800"
+        }
+      }
+    },
+    "${TS_CERT_DOMAIN}:8443": {
+      "Handlers": {
+        "/": {
+          "Proxy": "http://127.0.0.1:4901"
+        }
+      }
+    }
+  },
+  "AllowFunnel": {
+    "8443": true
+  }
+}

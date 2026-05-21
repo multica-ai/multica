@@ -58,3 +58,6 @@ server/server
 data/
 .kilo
 .idea
+
+# Sensitive exports — never commit
+multica-export/

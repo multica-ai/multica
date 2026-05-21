@@ -1,0 +1,1 @@
+ALTER TABLE agent_runtime ADD COLUMN IF NOT EXISTS available_models JSONB NOT NULL DEFAULT '[]';
