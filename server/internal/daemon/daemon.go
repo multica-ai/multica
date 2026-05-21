@@ -2297,6 +2297,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
 	}
+	if task.IssueID != "" {
+		taskCtx.IssueSharedDir = execenv.PredictIssueSharedDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.IssueID)
+	}
 
 	// Mark candidate env roots as active before any env work so the GC loop
 	// can't reclaim artifacts inside them mid-execution. We mark both the
@@ -2322,11 +2325,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	if task.PriorWorkDir != "" {
 		env = execenv.Reuse(execenv.ReuseParams{
-			WorkDir:      task.PriorWorkDir,
-			Provider:     provider,
-			CodexVersion: codexVersion,
-			OpenclawBin:  openclawBin,
-			Task:         taskCtx,
+			WorkspacesRoot: d.cfg.WorkspacesRoot,
+			WorkspaceID:    task.WorkspaceID,
+			WorkDir:        task.PriorWorkDir,
+			Provider:       provider,
+			CodexVersion:   codexVersion,
+			OpenclawBin:    openclawBin,
+			Task:           taskCtx,
 		}, d.logger)
 	}
 	if env == nil {
@@ -2390,6 +2395,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// deterministically (see GetIssueByOrigin).
 	if task.QuickCreatePrompt != "" {
 		agentEnv["MULTICA_QUICK_CREATE_TASK_ID"] = task.ID
+	}
+	if env.IssueSharedDir != "" {
+		agentEnv["MULTICA_ISSUE_SHARED_DIR"] = env.IssueSharedDir
 	}
 	// Ensure the multica CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not

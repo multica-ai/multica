@@ -236,6 +236,13 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\nThe checkout command creates a git worktree with a dedicated branch. You can check out one or more repos as needed, and can pass `--ref` for review/QA on a non-default branch or commit.\n\n")
 	}
 
+	if ctx.IssueSharedDir != "" {
+		b.WriteString("## Squad Shared Directory\n\n")
+		b.WriteString("This issue has a shared directory that all squad members can read and write. Use it to pass artifacts, notes, or partial work between agents without committing to git.\n\n")
+		fmt.Fprintf(&b, "**Path:** `%s`\n\n", ctx.IssueSharedDir)
+		b.WriteString("Your private working directory is separate from this shared space. Files under your repo checkout are not visible to other squad members until you commit and push, or copy them into the shared directory.\n\n")
+	}
+
 	// Inject project-scoped context (resources attached to the issue's project).
 	// The full structured payload is also available at .multica/project/resources.json
 	// so skills can consume it programmatically.

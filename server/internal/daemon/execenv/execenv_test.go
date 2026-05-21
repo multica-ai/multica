@@ -94,6 +94,33 @@ func TestRepoNameFromURL(t *testing.T) {
 	}
 }
 
+func TestPrepareCreatesIssueSharedDir(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	issueID := "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-001",
+		TaskID:         "task-001",
+		Task: TaskContextForEnv{
+			IssueID: issueID,
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	expectedShared := filepath.Join(workspacesRoot, "ws-001", ".issues", "a1b2c3d4", "shared")
+	if env.IssueSharedDir != expectedShared {
+		t.Fatalf("IssueSharedDir = %q, want %q", env.IssueSharedDir, expectedShared)
+	}
+	if _, err := os.Stat(expectedShared); os.IsNotExist(err) {
+		t.Fatalf("expected shared dir to exist: %s", expectedShared)
+	}
+}
+
 func TestPrepareDirectoryMode(t *testing.T) {
 	t.Parallel()
 	workspacesRoot := t.TempDir()
