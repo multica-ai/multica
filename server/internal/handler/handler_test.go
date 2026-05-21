@@ -1170,6 +1170,79 @@ func TestAutopilotCreatedIssueCreatorIsAssigneeAgent(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(autopilot-squad-dispatch-test): squad autopilot smoke coverage keeps issue assignment on the squad while dispatching the leader task (JEH-1916).
+func TestAutopilotCreateIssueWithSquadAssigneeCreatesSquadIssue(t *testing.T) {
+	ctx := context.Background()
+	leaderID := createHandlerTestAgent(t, "Squad Autopilot Leader", nil)
+	title := fmt.Sprintf("Squad autopilot issue %d", time.Now().UnixNano())
+
+	var squadID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO squad (workspace_id, name, leader_id, creator_id)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, testWorkspaceID, "Squad Autopilot Smoke", leaderID, testUserID).Scan(&squadID); err != nil {
+		t.Fatalf("create squad: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":                "Squad autopilot dispatch",
+		"assignee_type":        "squad",
+		"assignee_id":          squadID,
+		"execution_mode":       "create_issue",
+		"issue_title_template": title,
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var autopilot AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
+		t.Fatalf("decode autopilot: %v", err)
+	}
+
+	ap, err := db.New(testPool).GetAutopilot(ctx, parseUUID(autopilot.ID))
+	if err != nil {
+		t.Fatalf("GetAutopilot: %v", err)
+	}
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot create_issue: %v", err)
+	}
+	if !run.IssueID.Valid {
+		t.Fatalf("run issue_id not set")
+	}
+
+	issue, err := db.New(testPool).GetIssue(ctx, run.IssueID)
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" {
+		t.Fatalf("issue assignee_type = %#v, want squad", issue.AssigneeType)
+	}
+	if uuidToString(issue.AssigneeID) != squadID {
+		t.Fatalf("issue assignee_id = %s, want squad %s", uuidToString(issue.AssigneeID), squadID)
+	}
+
+	var taskAgentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT agent_id
+		FROM agent_task_queue
+		WHERE issue_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, run.IssueID).Scan(&taskAgentID); err != nil {
+		t.Fatalf("load queued task: %v", err)
+	}
+	if taskAgentID != leaderID {
+		t.Fatalf("task agent_id = %s, want leader %s", taskAgentID, leaderID)
+	}
+}
+
 // CEREBRO-PATCH(private-autopilot-tests): JEH-1749 owner-only autopilot visibility, audit, and inherited private issue coverage.
 func TestPrivateAutopilotVisibilityAuditAndCreatedIssuePrivacy(t *testing.T) {
 	ctx := context.Background()

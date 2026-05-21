@@ -16,6 +16,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/autopilotmodel"
 	// CEREBRO-PATCH(autopilot-recovery-preflight): Firtal issue-recovery autopilots get platform-generated worklists; title templates support Firtal's Go-style date tokens.
 	cerebroautopilot "github.com/multica-ai/multica/server/internal/cerebro/autopilotutil"
+	// CEREBRO-PATCH(autopilot-squad-dispatch): resolve squad autopilots to their leader for dispatch while keeping issues squad-assigned (JEH-1916).
+	"github.com/multica-ai/multica/server/internal/cerebro/autopilotsquad"
 	issuerecovery "github.com/multica-ai/multica/server/internal/cerebro/issue_recovery"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issueguard"
@@ -72,6 +74,8 @@ func (s *AutopilotService) DispatchAutopilot(
 		Source:         source,
 		Status:         initialStatus,
 		TriggerPayload: payload,
+		// CEREBRO-PATCH(autopilot-squad-run-attribution): preserve squad attribution on runs (JEH-1916).
+		SquadID: autopilotSquadID(autopilot),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
@@ -151,17 +155,24 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("increment issue counter: %w", err)
 	}
 
+	// CEREBRO-PATCH(autopilot-squad-create-issue-assignee): squad autopilots create squad-assigned issues and dispatch the leader task (JEH-1916).
+	dispatchAssignee, err := autopilotsquad.ResolveDispatchAssignee(ctx, qtx, ap)
+	if err != nil {
+		return fmt.Errorf("resolve dispatch assignee: %w", err)
+	}
+	creatorType := autopilotIssueCreatorType(ap)
+	creatorID := autopilotIssueCreatorID(ap, dispatchAssignee.Agent.ID)
 	issue, err := qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
 		WorkspaceID:  ap.WorkspaceID,
 		Title:        title,
 		Description:  description,
 		Status:       "todo",
 		Priority:     "none",
-		AssigneeType: pgtype.Text{String: "agent", Valid: true},
-		AssigneeID:   ap.AssigneeID,
+		AssigneeType: pgtype.Text{String: dispatchAssignee.IssueAssigneeType, Valid: true},
+		AssigneeID:   dispatchAssignee.IssueAssigneeID,
 		// CEREBRO-PATCH(private-autopilot-issue-owner): private autopilot output is owned by the configuring member (JEH-1749).
-		CreatorType:   autopilotIssueCreatorType(ap),
-		CreatorID:     autopilotIssueCreatorID(ap),
+		CreatorType:   creatorType,
+		CreatorID:     creatorID,
 		ParentIssueID: pgtype.UUID{},
 		Position:      0,
 		StartDate:     pgtype.Timestamptz{},
@@ -198,8 +209,8 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		Type:        protocol.EventIssueCreated,
 		WorkspaceID: util.UUIDToString(ap.WorkspaceID),
 		// CEREBRO-PATCH(private-autopilot-issue-event-owner): event actor mirrors created issue owner (JEH-1749).
-		ActorType: autopilotIssueCreatorType(ap),
-		ActorID:   util.UUIDToString(autopilotIssueCreatorID(ap)),
+		ActorType: creatorType,
+		ActorID:   util.UUIDToString(creatorID),
 		Payload: map[string]any{
 			"issue": issueToMap(issue, prefix),
 		},
@@ -208,7 +219,13 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 
 	// Enqueue agent task via the existing flow.
 	// CEREBRO-PATCH(autopilot-handoff-provenance): propagate autopilot human origin so create-issue agent handoffs trigger (JEH-1518).
-	task, err := s.TaskSvc.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, autopilotDelegationContext(ap))
+	var task db.AgentTaskQueue
+	if dispatchAssignee.IssueAssigneeType == "squad" {
+		// CEREBRO-PATCH(autopilot-squad-leader-task): squad-created issues enqueue the squad leader role task (JEH-1916).
+		task, err = s.TaskSvc.EnqueueTaskForSquadLeaderFromComment(ctx, issue, dispatchAssignee.Agent.ID, pgtype.UUID{}, autopilotDelegationContext(ap))
+	} else {
+		task, err = s.TaskSvc.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, autopilotDelegationContext(ap))
+	}
 	if err != nil {
 		return fmt.Errorf("enqueue task for issue: %w", err)
 	}
@@ -227,10 +244,12 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 
 // dispatchRunOnly enqueues a direct agent task without creating an issue.
 func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun) error {
-	agent, err := s.Queries.GetAgent(ctx, ap.AssigneeID)
+	// CEREBRO-PATCH(autopilot-squad-run-only-assignee): run-only squad autopilots execute on the squad leader (JEH-1916).
+	dispatchAssignee, err := autopilotsquad.ResolveDispatchAssignee(ctx, s.Queries, ap)
 	if err != nil {
-		return fmt.Errorf("load agent: %w", err)
+		return fmt.Errorf("resolve dispatch assignee: %w", err)
 	}
+	agent := dispatchAssignee.Agent
 	if agent.ArchivedAt.Valid {
 		return fmt.Errorf("agent is archived")
 	}
@@ -240,7 +259,7 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 
 	delegation := autopilotDelegationContext(ap)
 	task, err := s.Queries.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{
-		AgentID:        ap.AssigneeID,
+		AgentID:        agent.ID,
 		RuntimeID:      agent.RuntimeID,
 		Priority:       0,
 		AutopilotRunID: run.ID,
@@ -306,11 +325,11 @@ func autopilotIssueCreatorType(ap db.Autopilot) string {
 	return "agent"
 }
 
-func autopilotIssueCreatorID(ap db.Autopilot) pgtype.UUID {
+func autopilotIssueCreatorID(ap db.Autopilot, dispatchAgentID pgtype.UUID) pgtype.UUID {
 	if ap.IsPrivate && ap.CreatedByType == "member" && ap.CreatedByID.Valid {
 		return ap.CreatedByID
 	}
-	return ap.AssigneeID
+	return dispatchAgentID
 }
 
 // SyncRunFromIssue updates the autopilot run when its linked issue reaches a terminal status.
@@ -466,21 +485,21 @@ func (s *AutopilotService) skipDuplicateRun(
 // task — i.e. the assignee agent is gone, archived, has no runtime bound, or
 // its runtime is not currently online. Returns ("", false) on the happy path.
 //
-// Errors loading the agent / runtime are logged but treated as "do not skip"
-// so a transient DB hiccup never silently swallows a scheduled run.
+// Assignee resolution errors are recorded as skipped runs because dispatch has
+// no safe execution target; runtime load errors still fall through to dispatch.
 func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopilot) (string, bool) {
-	if !ap.AssigneeID.Valid {
-		return "autopilot has no assignee", true
-	}
-	agent, err := s.Queries.GetAgent(ctx, ap.AssigneeID)
+	// CEREBRO-PATCH(autopilot-squad-admission): admission checks the executing agent, i.e. squad leader for squad autopilots (JEH-1916).
+	dispatchAssignee, err := autopilotsquad.ResolveDispatchAssignee(ctx, s.Queries, ap)
 	if err != nil {
-		slog.Warn("autopilot admission: failed to load assignee agent",
+		slog.Warn("autopilot admission: failed to resolve assignee",
 			"autopilot_id", util.UUIDToString(ap.ID),
-			"agent_id", util.UUIDToString(ap.AssigneeID),
+			"assignee_type", ap.AssigneeType,
+			"assignee_id", util.UUIDToString(ap.AssigneeID),
 			"error", err,
 		)
-		return "", false
+		return err.Error(), true
 	}
+	agent := dispatchAssignee.Agent
 	if agent.ArchivedAt.Valid {
 		return "assignee agent is archived", true
 	}
@@ -521,6 +540,13 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 		}
 	}
 	return "", false
+}
+
+func autopilotSquadID(ap db.Autopilot) pgtype.UUID {
+	if ap.AssigneeType == "squad" {
+		return ap.AssigneeID
+	}
+	return pgtype.UUID{}
 }
 
 // recordSkippedRun persists a `skipped` autopilot_run with the given reason

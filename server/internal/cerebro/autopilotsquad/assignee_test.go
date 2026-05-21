@@ -107,6 +107,47 @@ func TestApplyUpdateAcceptsSquadWithActiveLeader(t *testing.T) {
 	}
 }
 
+func TestResolveDispatchAssigneeKeepsSquadIssueAndExecutesLeader(t *testing.T) {
+	leaderID := util.MustParseUUID(testLeaderID)
+	squadID := util.MustParseUUID(testSquadID)
+
+	resolved, err := ResolveDispatchAssignee(context.Background(), fakeStore{
+		agents: map[string]db.Agent{
+			testLeaderID: {
+				ID:          leaderID,
+				WorkspaceID: util.MustParseUUID(testWorkspaceID),
+			},
+		},
+		squads: map[string]db.Squad{
+			testSquadID: {
+				ID:          squadID,
+				WorkspaceID: util.MustParseUUID(testWorkspaceID),
+				LeaderID:    leaderID,
+			},
+		},
+	}, db.Autopilot{
+		WorkspaceID:  util.MustParseUUID(testWorkspaceID),
+		AssigneeType: "squad",
+		AssigneeID:   squadID,
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resolved.IssueAssigneeType != "squad" {
+		t.Fatalf("issue assignee type = %q, want squad", resolved.IssueAssigneeType)
+	}
+	if util.UUIDToString(resolved.IssueAssigneeID) != testSquadID {
+		t.Fatalf("issue assignee id = %s, want %s", util.UUIDToString(resolved.IssueAssigneeID), testSquadID)
+	}
+	if util.UUIDToString(resolved.Agent.ID) != testLeaderID {
+		t.Fatalf("execution agent id = %s, want %s", util.UUIDToString(resolved.Agent.ID), testLeaderID)
+	}
+	if util.UUIDToString(resolved.SquadID) != testSquadID {
+		t.Fatalf("squad id = %s, want %s", util.UUIDToString(resolved.SquadID), testSquadID)
+	}
+}
+
 type fakeStore struct {
 	agents map[string]db.Agent
 	squads map[string]db.Squad
@@ -118,6 +159,14 @@ func (s fakeStore) GetAgent(_ context.Context, id pgtype.UUID) (db.Agent, error)
 		return db.Agent{}, errors.New("agent not found")
 	}
 	return agent, nil
+}
+
+func (s fakeStore) GetSquad(_ context.Context, id pgtype.UUID) (db.Squad, error) {
+	squad, ok := s.squads[util.UUIDToString(id)]
+	if !ok {
+		return db.Squad{}, errors.New("squad not found")
+	}
+	return squad, nil
 }
 
 func (s fakeStore) GetAgentInWorkspace(_ context.Context, arg db.GetAgentInWorkspaceParams) (db.Agent, error) {
