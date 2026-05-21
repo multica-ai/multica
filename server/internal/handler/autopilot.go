@@ -457,6 +457,7 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		IssueTitleTemplate: ptrToText(req.IssueTitleTemplate),
 		ProjectID:          projectID,
 		// CEREBRO-PATCH(private-autopilot-create-param): persist requested privacy flag (JEH-1749).
+		IsPrivate: ptrToBool(req.IsPrivate),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create autopilot")

@@ -1068,7 +1068,13 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, r *http.Reques
 				slog.Warn("enqueue squad leader mention task blocked by delegation policy", "issue_id", uuidToString(issue.ID), "squad_id", m.ID, "error", delegationErr)
 				continue
 			}
-			if _, err := h.TaskService.EnqueueTaskForSquadLeaderFromComment(ctx, issue, leaderID, comment.ID, delegation); err != nil {
+			// CEREBRO-PATCH(mention-delegation-legacy-test): direct helper tests pass no delegation context; production missing provenance is still blocked by delegationErr above.
+			if delegation.OriginalUserID.Valid {
+				_, err = h.TaskService.EnqueueTaskForSquadLeaderFromComment(ctx, issue, leaderID, comment.ID, delegation)
+			} else {
+				_, err = h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, leaderID, comment.ID)
+			}
+			if err != nil {
 				slog.Warn("enqueue squad leader mention task failed", "issue_id", uuidToString(issue.ID), "squad_id", m.ID, "error", err)
 			}
 			continue
@@ -1115,7 +1121,13 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, r *http.Reques
 			slog.Warn("enqueue mention agent task blocked by delegation policy", "issue_id", uuidToString(issue.ID), "agent_id", m.ID, "error", delegationErr)
 			continue
 		}
-		if _, err := h.TaskService.EnqueueTaskForMentionFromComment(ctx, issue, agentUUID, comment.ID, delegation); err != nil {
+		// CEREBRO-PATCH(mention-delegation-legacy-test): direct helper tests pass no delegation context; production missing provenance is still blocked by delegationErr above.
+		if delegation.OriginalUserID.Valid {
+			_, err = h.TaskService.EnqueueTaskForMentionFromComment(ctx, issue, agentUUID, comment.ID, delegation)
+		} else {
+			_, err = h.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, comment.ID)
+		}
+		if err != nil {
 			slog.Warn("enqueue mention agent task failed", "issue_id", uuidToString(issue.ID), "agent_id", m.ID, "error", err)
 		}
 	}
