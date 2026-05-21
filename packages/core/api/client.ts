@@ -53,6 +53,8 @@ import type {
   RuntimeUsageByHour,
   DashboardUsageDaily,
   DashboardUsageByAgent,
+  DashboardLocalUsageByRunner,
+  DashboardLocalRunTimeByRunner,
   DashboardAgentRunTime,
   DashboardRunTimeDaily,
   RuntimeUpdate,
@@ -159,6 +161,8 @@ import {
   CreateAgentFromTemplateResponseSchema,
   DashboardAgentRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
+  DashboardLocalRunTimeByRunnerListSchema,
+  DashboardLocalUsageByRunnerListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
   EMPTY_AGENT_TEMPLATE_DETAIL,
@@ -1289,6 +1293,66 @@ export class ApiClient {
       DashboardUsageByAgentListSchema,
       [],
       { endpoint: "GET /api/dashboard/usage/by-agent" },
+    );
+  }
+
+  async getDashboardLocalUsageDaily(
+    params: { days?: number; project_id?: string | null },
+  ): Promise<DashboardUsageDaily[]> {
+    const search = new URLSearchParams();
+    if (params.days) search.set("days", String(params.days));
+    if (params.project_id) search.set("project_id", params.project_id);
+    const raw = await this.fetch<unknown>(`/api/dashboard/local-usage/daily?${search}`);
+    return parseWithFallback<DashboardUsageDaily[]>(
+      raw,
+      DashboardUsageDailyListSchema,
+      [],
+      { endpoint: "GET /api/dashboard/local-usage/daily" },
+    );
+  }
+
+  async getDashboardLocalUsageByRunner(
+    params: { days?: number; project_id?: string | null },
+  ): Promise<DashboardLocalUsageByRunner[]> {
+    const search = new URLSearchParams();
+    if (params.days) search.set("days", String(params.days));
+    if (params.project_id) search.set("project_id", params.project_id);
+    const raw = await this.fetch<unknown>(`/api/dashboard/local-usage/by-runner?${search}`);
+    return parseWithFallback<DashboardLocalUsageByRunner[]>(
+      raw,
+      DashboardLocalUsageByRunnerListSchema,
+      [],
+      { endpoint: "GET /api/dashboard/local-usage/by-runner" },
+    );
+  }
+
+  async getDashboardLocalRunTimeByRunner(
+    params: { days?: number; project_id?: string | null },
+  ): Promise<DashboardLocalRunTimeByRunner[]> {
+    const search = new URLSearchParams();
+    if (params.days) search.set("days", String(params.days));
+    if (params.project_id) search.set("project_id", params.project_id);
+    const raw = await this.fetch<unknown>(`/api/dashboard/local-runtime/by-runner?${search}`);
+    return parseWithFallback<DashboardLocalRunTimeByRunner[]>(
+      raw,
+      DashboardLocalRunTimeByRunnerListSchema,
+      [],
+      { endpoint: "GET /api/dashboard/local-runtime/by-runner" },
+    );
+  }
+
+  async getDashboardLocalRunTimeDaily(
+    params: { days?: number; project_id?: string | null },
+  ): Promise<DashboardRunTimeDaily[]> {
+    const search = new URLSearchParams();
+    if (params.days) search.set("days", String(params.days));
+    if (params.project_id) search.set("project_id", params.project_id);
+    const raw = await this.fetch<unknown>(`/api/dashboard/local-runtime/daily?${search}`);
+    return parseWithFallback<DashboardRunTimeDaily[]>(
+      raw,
+      DashboardRunTimeDailyListSchema,
+      [],
+      { endpoint: "GET /api/dashboard/local-runtime/daily" },
     );
   }
 

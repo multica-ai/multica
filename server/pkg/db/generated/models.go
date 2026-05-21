@@ -472,6 +472,23 @@ type LocalCliRun struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type LocalCliUsage struct {
+	ID               pgtype.UUID        `json:"id"`
+	RunID            pgtype.UUID        `json:"run_id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	OwnerID          pgtype.UUID        `json:"owner_id"`
+	CliName          string             `json:"cli_name"`
+	Provider         string             `json:"provider"`
+	Model            string             `json:"model"`
+	InputTokens      int64              `json:"input_tokens"`
+	OutputTokens     int64              `json:"output_tokens"`
+	CacheReadTokens  int64              `json:"cache_read_tokens"`
+	CacheWriteTokens int64              `json:"cache_write_tokens"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Member struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

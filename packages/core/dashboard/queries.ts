@@ -20,6 +20,14 @@ export const dashboardKeys = {
     [...dashboardKeys.all(wsId), "daily", days, projectId] as const,
   byAgent: (wsId: string, days: number, projectId: string | null) =>
     [...dashboardKeys.all(wsId), "by-agent", days, projectId] as const,
+  localDaily: (wsId: string, days: number, projectId: string | null) =>
+    [...dashboardKeys.all(wsId), "local-daily", days, projectId] as const,
+  localByRunner: (wsId: string, days: number, projectId: string | null) =>
+    [...dashboardKeys.all(wsId), "local-by-runner", days, projectId] as const,
+  localRunTimeByRunner: (wsId: string, days: number, projectId: string | null) =>
+    [...dashboardKeys.all(wsId), "local-runtime-by-runner", days, projectId] as const,
+  localRunTimeDaily: (wsId: string, days: number, projectId: string | null) =>
+    [...dashboardKeys.all(wsId), "local-runtime-daily", days, projectId] as const,
   agentRuntime: (wsId: string, days: number, projectId: string | null) =>
     [...dashboardKeys.all(wsId), "agent-runtime", days, projectId] as const,
   runTimeDaily: (wsId: string, days: number, projectId: string | null) =>
@@ -54,6 +62,62 @@ export function dashboardUsageByAgentOptions(
     queryKey: dashboardKeys.byAgent(wsId, days, projectId),
     queryFn: () =>
       api.getDashboardUsageByAgent({ days, project_id: projectId ?? undefined }),
+    enabled: !!wsId,
+    staleTime: STALE_TIME,
+  });
+}
+
+export function dashboardLocalUsageDailyOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+) {
+  return queryOptions({
+    queryKey: dashboardKeys.localDaily(wsId, days, projectId),
+    queryFn: () =>
+      api.getDashboardLocalUsageDaily({ days, project_id: projectId ?? undefined }),
+    enabled: !!wsId,
+    staleTime: STALE_TIME,
+  });
+}
+
+export function dashboardLocalUsageByRunnerOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+) {
+  return queryOptions({
+    queryKey: dashboardKeys.localByRunner(wsId, days, projectId),
+    queryFn: () =>
+      api.getDashboardLocalUsageByRunner({ days, project_id: projectId ?? undefined }),
+    enabled: !!wsId,
+    staleTime: STALE_TIME,
+  });
+}
+
+export function dashboardLocalRunTimeByRunnerOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+) {
+  return queryOptions({
+    queryKey: dashboardKeys.localRunTimeByRunner(wsId, days, projectId),
+    queryFn: () =>
+      api.getDashboardLocalRunTimeByRunner({ days, project_id: projectId ?? undefined }),
+    enabled: !!wsId,
+    staleTime: STALE_TIME,
+  });
+}
+
+export function dashboardLocalRunTimeDailyOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+) {
+  return queryOptions({
+    queryKey: dashboardKeys.localRunTimeDaily(wsId, days, projectId),
+    queryFn: () =>
+      api.getDashboardLocalRunTimeDaily({ days, project_id: projectId ?? undefined }),
     enabled: !!wsId,
     staleTime: STALE_TIME,
   });

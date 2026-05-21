@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -426,6 +427,58 @@ func TestUpdateLocalCLIRunStoresTerminalStatusAndExitCode(t *testing.T) {
 	payload := event.Payload.(map[string]any)
 	if payload["status"] != "failed" || payload["issue_id"] != issue.ID {
 		t.Fatalf("failed payload = %+v", payload)
+	}
+}
+
+func TestUpdateLocalCLIUsageUpsertsTotals(t *testing.T) {
+	ctx := context.Background()
+	issue := createIssueForLocalRunTest(t, "in_progress")
+	run := createLocalRunForTest(t, issue.ID, map[string]any{"cli_name": "codex"})
+	runID := run["id"].(string)
+
+	putUsage := func(inputTokens int64) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("PUT", "/api/local-runs/"+runID+"/usage", map[string]any{
+			"usage": []map[string]any{{
+				"provider":           "codex",
+				"model":              "gpt-5.1-codex",
+				"input_tokens":       inputTokens,
+				"output_tokens":      20,
+				"cache_read_tokens":  3,
+				"cache_write_tokens": 4,
+			}},
+		})
+		req = withLocalRunWorkspace(req)
+		req = withURLParam(req, "runId", runID)
+		testHandler.UpdateLocalCLIUsage(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("UpdateLocalCLIUsage: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	putUsage(10)
+	putUsage(15)
+
+	var count int
+	var inputTokens, outputTokens, cacheRead, cacheWrite int64
+	var runtimeID *string
+	if err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*), COALESCE(MAX(input_tokens), 0), COALESCE(MAX(output_tokens), 0),
+		       COALESCE(MAX(cache_read_tokens), 0), COALESCE(MAX(cache_write_tokens), 0)
+		FROM local_cli_usage
+		WHERE run_id = $1 AND provider = 'codex' AND model = 'gpt-5.1-codex'
+	`, runID).Scan(&count, &inputTokens, &outputTokens, &cacheRead, &cacheWrite); err != nil {
+		t.Fatalf("read local_cli_usage: %v", err)
+	}
+	if count != 1 || inputTokens != 15 || outputTokens != 20 || cacheRead != 3 || cacheWrite != 4 {
+		t.Fatalf("usage row = count %d tokens %d/%d/%d/%d, want overwritten totals", count, inputTokens, outputTokens, cacheRead, cacheWrite)
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT column_name FROM information_schema.columns
+		WHERE table_name = 'local_cli_usage' AND column_name = 'runtime_id'
+	`).Scan(&runtimeID); err != pgx.ErrNoRows {
+		t.Fatalf("local_cli_usage must not contain runtime_id, got runtimeID=%v err=%v", runtimeID, err)
 	}
 }
 

@@ -245,6 +245,36 @@ const DashboardUsageByAgentSchema = z.object({
 
 export const DashboardUsageByAgentListSchema = z.array(DashboardUsageByAgentSchema);
 
+const DashboardLocalUsageByRunnerSchema = z.object({
+  owner_id: z.string(),
+  runner_name: z.string(),
+  cli_name: z.string(),
+  provider: z.string(),
+  model: z.string(),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+  task_count: z.number().default(0),
+}).passthrough();
+
+export const DashboardLocalUsageByRunnerListSchema = z.array(
+  DashboardLocalUsageByRunnerSchema,
+);
+
+const DashboardLocalRunTimeByRunnerSchema = z.object({
+  owner_id: z.string(),
+  runner_name: z.string(),
+  cli_name: z.string(),
+  total_seconds: z.number().default(0),
+  task_count: z.number().default(0),
+  failed_count: z.number().default(0),
+}).passthrough();
+
+export const DashboardLocalRunTimeByRunnerListSchema = z.array(
+  DashboardLocalRunTimeByRunnerSchema,
+);
+
 const DashboardAgentRunTimeSchema = z.object({
   agent_id: z.string(),
   total_seconds: z.number().default(0),

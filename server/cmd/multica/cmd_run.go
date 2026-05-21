@@ -49,8 +49,18 @@ type localCLIMessage struct {
 	SourceKey string         `json:"source_key,omitempty"`
 }
 
+type localCLIUsage struct {
+	Provider         string `json:"provider"`
+	Model            string `json:"model"`
+	InputTokens      int64  `json:"input_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+}
+
 const invalidLocalRunMulticaToken = "multica-local-run-token-disabled"
 const localRunHeartbeatInterval = 30 * time.Second
+const localRunUsageDebounce = 2 * time.Second
 
 var executeLocalCLIForRun = executeLocalCLI
 
@@ -114,13 +124,15 @@ func runLocalCLI(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "Multica local run %s started.\n", run.ID)
 	reporter := newLocalRunReporter(client, run.ID)
+	usageReporter := newLocalRunUsageReporter(client, run.ID, localRunUsageDebounce)
 	stopHeartbeat := startLocalRunHeartbeat(client, run.ID, localRunHeartbeatInterval)
 	exitCode, runErr := executeLocalCLIForRun(childArgs, cwd, cliName, localCLIEnv{
 		RunID:     run.ID,
 		IssueID:   issueRef.ID,
 		ServerURL: resolveServerURL(cmd),
 		Token:     resolveToken(cmd),
-	}, localRunPrompt(issueRef.ID), reporter)
+	}, localRunPrompt(issueRef.ID), reporter, usageReporter)
+	usageReporter.Close()
 	reporter.Close()
 	stopHeartbeat()
 	status := "completed"
@@ -197,6 +209,10 @@ type localRunMessagePoster interface {
 
 type localRunStatusPatcher interface {
 	PatchJSON(ctx context.Context, path string, body any, out any) error
+}
+
+type localRunUsagePutter interface {
+	PutJSON(ctx context.Context, path string, body any, out any) error
 }
 
 func startLocalRunHeartbeat(client localRunStatusPatcher, runID string, interval time.Duration) func() {
@@ -290,6 +306,148 @@ func (r *localRunReporter) loop() {
 	}
 }
 
+type localRunUsageReporter struct {
+	client   localRunUsagePutter
+	runID    string
+	debounce time.Duration
+	wake     chan struct{}
+	done     chan struct{}
+	mu       sync.Mutex
+	closed   bool
+	dirty    bool
+	usage    map[string]localCLIUsage
+}
+
+func newLocalRunUsageReporter(client localRunUsagePutter, runID string, debounce time.Duration) *localRunUsageReporter {
+	if debounce <= 0 {
+		debounce = localRunUsageDebounce
+	}
+	r := &localRunUsageReporter{
+		client:   client,
+		runID:    runID,
+		debounce: debounce,
+		wake:     make(chan struct{}, 1),
+		done:     make(chan struct{}),
+		usage:    make(map[string]localCLIUsage),
+	}
+	go r.loop()
+	return r
+}
+
+func (r *localRunUsageReporter) Report(u localCLIUsage) {
+	if r == nil {
+		return
+	}
+	u.Provider = strings.ToLower(strings.TrimSpace(u.Provider))
+	u.Model = strings.TrimSpace(u.Model)
+	if u.Model == "" {
+		u.Model = "unknown"
+	}
+	if u.Provider == "" {
+		return
+	}
+	if u.InputTokens < 0 || u.OutputTokens < 0 || u.CacheReadTokens < 0 || u.CacheWriteTokens < 0 {
+		return
+	}
+	key := u.Provider + "\x00" + u.Model
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return
+	}
+	r.usage[key] = u
+	r.dirty = true
+	r.mu.Unlock()
+	select {
+	case r.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (r *localRunUsageReporter) Close() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		<-r.done
+		return
+	}
+	r.closed = true
+	r.mu.Unlock()
+	select {
+	case r.wake <- struct{}{}:
+	default:
+	}
+	<-r.done
+}
+
+func (r *localRunUsageReporter) loop() {
+	defer close(r.done)
+	var timer *time.Timer
+	var timerC <-chan time.Time
+	for {
+		select {
+		case <-r.wake:
+			r.mu.Lock()
+			closed := r.closed
+			r.mu.Unlock()
+			if closed {
+				if timer != nil {
+					timer.Stop()
+				}
+				r.flush()
+				return
+			}
+			if timer == nil {
+				timer = time.NewTimer(r.debounce)
+				timerC = timer.C
+			} else {
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(r.debounce)
+			}
+		case <-timerC:
+			r.flush()
+			timerC = nil
+			timer = nil
+		}
+	}
+}
+
+func (r *localRunUsageReporter) flush() {
+	if r.client == nil || r.runID == "" {
+		return
+	}
+	r.mu.Lock()
+	if !r.dirty || len(r.usage) == 0 {
+		r.mu.Unlock()
+		return
+	}
+	rows := make([]localCLIUsage, 0, len(r.usage))
+	for _, u := range r.usage {
+		rows = append(rows, u)
+	}
+	r.dirty = false
+	r.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	path := "/api/local-runs/" + url.PathEscape(r.runID) + "/usage"
+	if err := r.client.PutJSON(ctx, path, map[string]any{"usage": rows}, nil); err != nil {
+		r.mu.Lock()
+		if !r.closed {
+			r.dirty = true
+		}
+		r.mu.Unlock()
+	}
+}
+
 func redactInputMap(m map[string]any) map[string]any {
 	if m == nil {
 		return nil
@@ -312,12 +470,12 @@ type localCLIEnv struct {
 	Token     string
 }
 
-func executeLocalCLI(args []string, cwd, cliName string, env localCLIEnv, initialPrompt string, reporter *localRunReporter) (int, error) {
+func executeLocalCLI(args []string, cwd, cliName string, env localCLIEnv, initialPrompt string, reporter *localRunReporter, usageReporter *localRunUsageReporter) (int, error) {
 	provider, ok := localRunProviderForCLI(cliName)
 	if !ok {
 		return 1, fmt.Errorf("unsupported local CLI provider %q", cliName)
 	}
-	return provider.Run(args, cwd, env, initialPrompt, reporter)
+	return provider.Run(args, cwd, env, initialPrompt, reporter, usageReporter)
 }
 
 type localRunPTYOptions struct {

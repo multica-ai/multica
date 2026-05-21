@@ -66,6 +66,50 @@ func createTestTask(t *testing.T) string {
 	return taskID
 }
 
+func createTestLocalRun(t *testing.T) string {
+	t.Helper()
+
+	var projectID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, 'interaction-local-run-proj')
+		RETURNING id
+	`, testWorkspaceID).Scan(&projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO issue (workspace_id, project_id, title, status, priority, creator_type, creator_id, number, position)
+		VALUES ($1, $2, 'interaction local run issue', 'todo', 'medium', 'member', $3,
+			COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1, 0)
+		RETURNING id
+	`, testWorkspaceID, projectID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	var runID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO local_cli_run (workspace_id, issue_id, owner_id, cli_name, status)
+		VALUES ($1, $2, $3, 'codex', 'running')
+		RETURNING id
+	`, testWorkspaceID, issueID, testUserID).Scan(&runID); err != nil {
+		t.Fatalf("create local run: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM local_cli_run WHERE id = $1`, runID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID)
+		testPool.Exec(context.Background(), `
+			UPDATE workspace SET issue_counter = COALESCE(
+				(SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0)
+			WHERE id = $1`, testWorkspaceID)
+	})
+
+	return runID
+}
+
 func cleanInteraction(t *testing.T, id string) {
 	t.Helper()
 	t.Cleanup(func() {
@@ -265,6 +309,31 @@ func TestListTaskInteractions_UserSuccess(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&dtos)
 	if len(dtos) != 2 {
 		t.Errorf("expected 2 interactions, got %d", len(dtos))
+	}
+}
+
+func TestListTaskInteractions_LocalRunReturnsEmpty(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runID := createTestLocalRun(t)
+	req := newRequest("GET", "/api/tasks/"+runID+"/interactions?status=pending", nil)
+	req = withUserTaskContext(req, runID, testWorkspaceID)
+
+	w := httptest.NewRecorder()
+	testHandler.ListTaskInteractions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var dtos []InteractionDTO
+	if err := json.NewDecoder(w.Body).Decode(&dtos); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(dtos) != 0 {
+		t.Fatalf("expected no local run interactions, got %+v", dtos)
 	}
 }
 
