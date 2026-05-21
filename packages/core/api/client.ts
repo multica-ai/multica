@@ -948,24 +948,9 @@ export class ApiClient {
     });
   }
 
-  // CEREBRO-PATCH(cerebro-agent-passes-client): JEH-1731 agent-pass admin API.
-  //   GET    /api/cerebro/agent-passes              — list all passes in workspace
-  //   POST   /api/cerebro/agent-passes              — issue a new pass (422 on scope widening)
-  //   DELETE /api/cerebro/agent-passes/{passId}     — revoke an active pass
-  async listCerebroAgentPasses<T = unknown>(): Promise<T> {
-    return this.fetch<T>("/api/cerebro/agent-passes");
-  }
-  async createCerebroAgentPass<T = unknown>(payload: unknown): Promise<T> {
-    return this.fetch<T>("/api/cerebro/agent-passes", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-  }
-  async revokeCerebroAgentPass<T = unknown>(passId: string, payload?: { reason?: string }): Promise<T> {
-    return this.fetch<T>(`/api/cerebro/agent-passes/${passId}`, {
-      method: "DELETE",
-      body: payload ? JSON.stringify(payload) : undefined,
-    });
+  // CEREBRO-PATCH(cerebro-api-request): authenticated request primitive for cerebro packages.
+  async cerebroRequest<T = unknown>(path: string, init?: RequestInit): Promise<T> {
+    return this.fetch<T>(path, init);
   }
 
   // CEREBRO-PATCH(cerebro-persona-grants-client): JEH-1180 Persona grant
