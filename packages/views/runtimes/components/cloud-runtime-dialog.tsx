@@ -74,11 +74,9 @@ export function CloudRuntimeDialog({ onClose }: { onClose: () => void }) {
 
     try {
       await createNode.mutateAsync({
-        data: {
-          instance_type: instanceType,
-          name: valueOrUndefined(name),
-          disk_size_gb: diskSize,
-        },
+        instance_type: instanceType,
+        name: valueOrUndefined(name),
+        disk_size_gb: diskSize,
       });
       toast.success(t(($) => $.cloud_runtime.toast_created));
       setName("");

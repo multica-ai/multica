@@ -188,7 +188,6 @@ describe("ApiClient", () => {
     await client.listCloudRuntimeNodes({ limit: 20, offset: 5 });
     await client.createCloudRuntimeNode(
       { instance_type: "g5.xlarge", name: "gpu-dev-01" },
-      { userPAT: "mul_cloud_bootstrap_pat" },
     );
 
     const listCall = fetchMock.mock.calls[0]!;
@@ -207,9 +206,7 @@ describe("ApiClient", () => {
         name: "gpu-dev-01",
       }),
     });
-    expect((createCall[1]!.headers as Record<string, string>)["X-User-PAT"]).toBe(
-      "mul_cloud_bootstrap_pat",
-    );
+    expect((createCall[1]!.headers as Record<string, string>)["X-User-PAT"]).toBeUndefined();
   });
 
   it("falls back when Cloud Runtime node responses drift", async () => {

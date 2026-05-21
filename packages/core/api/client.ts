@@ -103,7 +103,6 @@ import type {
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
   CloudRuntimeNode,
-  CreateCloudRuntimeNodeOptions,
   CreateCloudRuntimeNodeRequest,
   ListCloudRuntimeNodesParams,
 } from "../runtimes/cloud-runtime";
@@ -855,17 +854,11 @@ export class ApiClient {
 
   async createCloudRuntimeNode(
     data: CreateCloudRuntimeNodeRequest,
-    options?: CreateCloudRuntimeNodeOptions,
   ): Promise<CloudRuntimeNode> {
-    const extraHeaders: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    const userPAT = options?.userPAT?.trim();
-    if (userPAT) extraHeaders["X-User-PAT"] = userPAT;
     const res = await this.fetchRaw("/api/cloud-runtime/nodes", {
       method: "POST",
       body: JSON.stringify(data),
-      extraHeaders,
+      extraHeaders: { "Content-Type": "application/json" },
     });
     const raw = await res.json() as unknown;
     return parseWithFallback(

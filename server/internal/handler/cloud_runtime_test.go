@@ -169,6 +169,38 @@ func TestCreateCloudRuntimeNodeRejectsExpiredPAT(t *testing.T) {
 	}
 }
 
+func TestCreateCloudRuntimeNodeAutoGeneratesPAT(t *testing.T) {
+	proxy := &fakeCloudRuntimeProxy{
+		enabled: true,
+		resp: &cloudruntime.Response{
+			StatusCode: http.StatusCreated,
+			Header:     http.Header{},
+			Body:       []byte(`{"status":"launching"}`),
+		},
+	}
+	useCloudRuntimeProxy(t, proxy)
+
+	req := newRequest(http.MethodPost, "/api/cloud-runtime/nodes", map[string]any{
+		"instance_type": "g5.xlarge",
+	})
+	// No X-User-PAT header set — should auto-generate.
+	w := httptest.NewRecorder()
+
+	testHandler.CreateCloudRuntimeNode(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if !proxy.called {
+		t.Fatal("cloud runtime proxy was not called")
+	}
+	if !strings.HasPrefix(proxy.req.UserPAT, "mul_") {
+		t.Fatalf("expected auto-generated PAT with mul_ prefix, got %q", proxy.req.UserPAT)
+	}
+	// Clean up the auto-generated PAT.
+	_, _ = testPool.Exec(context.Background(), `DELETE FROM personal_access_token WHERE token_hash = $1`, auth.HashToken(proxy.req.UserPAT))
+}
+
 func TestCloudRuntimeDisabledReturnsUnavailable(t *testing.T) {
 	useCloudRuntimeProxy(t, &fakeCloudRuntimeProxy{enabled: false})
 
