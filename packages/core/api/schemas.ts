@@ -216,13 +216,14 @@ export const OnboardingNoRuntimeBootstrapResponseSchema = z.object({
 // The dashboard hits three independent rollup endpoints. Each returns a flat
 // array, and every field is consumed by chart / KPI math — a missing number
 // silently degrades to NaN downstream, so we coerce missing numbers to 0.
-// String fields stay lenient (no enum narrowing) to survive future model /
-// agent ID drift.
+// String fields default to "" (no enum narrowing) to survive future model /
+// agent ID drift, and so a single null from tz-aware SQL bucketing fails
+// only that row instead of dropping the whole array to the `[]` fallback.
 // ---------------------------------------------------------------------------
 
 const DashboardUsageDailySchema = z.object({
-  date: z.string(),
-  model: z.string(),
+  date: z.string().default(""),
+  model: z.string().default(""),
   input_tokens: z.number().default(0),
   output_tokens: z.number().default(0),
   cache_read_tokens: z.number().default(0),
@@ -233,8 +234,8 @@ const DashboardUsageDailySchema = z.object({
 export const DashboardUsageDailyListSchema = z.array(DashboardUsageDailySchema);
 
 const DashboardUsageByAgentSchema = z.object({
-  agent_id: z.string(),
-  model: z.string(),
+  agent_id: z.string().default(""),
+  model: z.string().default(""),
   input_tokens: z.number().default(0),
   output_tokens: z.number().default(0),
   cache_read_tokens: z.number().default(0),
@@ -245,7 +246,7 @@ const DashboardUsageByAgentSchema = z.object({
 export const DashboardUsageByAgentListSchema = z.array(DashboardUsageByAgentSchema);
 
 const DashboardAgentRunTimeSchema = z.object({
-  agent_id: z.string(),
+  agent_id: z.string().default(""),
   total_seconds: z.number().default(0),
   task_count: z.number().default(0),
   failed_count: z.number().default(0),
@@ -254,13 +255,64 @@ const DashboardAgentRunTimeSchema = z.object({
 export const DashboardAgentRunTimeListSchema = z.array(DashboardAgentRunTimeSchema);
 
 const DashboardRunTimeDailySchema = z.object({
-  date: z.string(),
+  date: z.string().default(""),
   total_seconds: z.number().default(0),
   task_count: z.number().default(0),
   failed_count: z.number().default(0),
 }).loose();
 
 export const DashboardRunTimeDailyListSchema = z.array(DashboardRunTimeDailySchema);
+
+// ---------------------------------------------------------------------------
+// Runtime usage schemas — the runtime-detail page's four usage endpoints
+// (`/api/runtimes/:id/usage*`). Same leniency rules as the dashboard
+// schemas above: numbers default to 0, strings to "", `.loose()` passes
+// unknown fields.
+// ---------------------------------------------------------------------------
+
+const RuntimeUsageSchema = z.object({
+  runtime_id: z.string().default(""),
+  date: z.string().default(""),
+  provider: z.string().default(""),
+  model: z.string().default(""),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+}).loose();
+
+export const RuntimeUsageListSchema = z.array(RuntimeUsageSchema);
+
+const RuntimeHourlyActivitySchema = z.object({
+  hour: z.number().default(0),
+  count: z.number().default(0),
+}).loose();
+
+export const RuntimeHourlyActivityListSchema = z.array(RuntimeHourlyActivitySchema);
+
+const RuntimeUsageByAgentSchema = z.object({
+  agent_id: z.string().default(""),
+  model: z.string().default(""),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+  task_count: z.number().default(0),
+}).loose();
+
+export const RuntimeUsageByAgentListSchema = z.array(RuntimeUsageByAgentSchema);
+
+const RuntimeUsageByHourSchema = z.object({
+  hour: z.number().default(0),
+  model: z.string().default(""),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+  task_count: z.number().default(0),
+}).loose();
+
+export const RuntimeUsageByHourListSchema = z.array(RuntimeUsageByHourSchema);
 
 // ---------------------------------------------------------------------------
 // Agent template catalog — `/api/agent-templates*` and the
@@ -506,6 +558,7 @@ export const UserSchema = z.object({
   starter_content_state: z.string().nullable().default(null),
   language: z.string().nullable().default(null),
   profile_description: z.string().default(""),
+  timezone: z.string().nullable().default(null),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();
@@ -520,6 +573,7 @@ export const EMPTY_USER: User = {
   starter_content_state: null,
   language: null,
   profile_description: "",
+  timezone: null,
   created_at: "",
   updated_at: "",
 };

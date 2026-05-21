@@ -132,6 +132,10 @@ import {
   ListWebhookDeliveriesResponseSchema,
   OnboardingNoRuntimeBootstrapResponseSchema,
   OnboardingRuntimeBootstrapResponseSchema,
+  RuntimeHourlyActivityListSchema,
+  RuntimeUsageByAgentListSchema,
+  RuntimeUsageByHourListSchema,
+  RuntimeUsageListSchema,
   SquadMemberStatusListResponseSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
@@ -393,9 +397,12 @@ export class ApiClient {
     completion_path?: OnboardingCompletionPath;
     workspace_id?: string;
   }): Promise<User> {
-    return this.fetch("/api/me/onboarding/complete", {
+    const raw = await this.fetch<unknown>("/api/me/onboarding/complete", {
       method: "POST",
       body: payload ? JSON.stringify(payload) : undefined,
+    });
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "POST /api/me/onboarding/complete",
     });
   }
 
@@ -440,18 +447,24 @@ export class ApiClient {
     email: string;
     reason?: string;
   }): Promise<User> {
-    return this.fetch("/api/me/onboarding/cloud-waitlist", {
+    const raw = await this.fetch<unknown>("/api/me/onboarding/cloud-waitlist", {
       method: "POST",
       body: JSON.stringify(payload),
+    });
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "POST /api/me/onboarding/cloud-waitlist",
     });
   }
 
   async patchOnboarding(payload: {
     questionnaire?: Record<string, unknown>;
   }): Promise<User> {
-    return this.fetch("/api/me/onboarding", {
+    const raw = await this.fetch<unknown>("/api/me/onboarding", {
       method: "PATCH",
       body: JSON.stringify(payload),
+    });
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "PATCH /api/me/onboarding",
     });
   }
 
@@ -812,7 +825,7 @@ export class ApiClient {
 
   async updateRuntime(
     runtimeId: string,
-    patch: { timezone?: string; visibility?: "private" | "public" },
+    patch: { visibility?: "private" | "public" },
   ): Promise<AgentRuntime> {
     return this.fetch(`/api/runtimes/${runtimeId}`, {
       method: "PATCH",
@@ -820,32 +833,77 @@ export class ApiClient {
     });
   }
 
-  async getRuntimeUsage(runtimeId: string, params?: { days?: number }): Promise<RuntimeUsage[]> {
+  async getRuntimeUsage(
+    runtimeId: string,
+    params?: { days?: number; tz?: string },
+  ): Promise<RuntimeUsage[]> {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));
-    return this.fetch(`/api/runtimes/${runtimeId}/usage?${search}`);
+    // `tz` drives the calendar-day boundary for the trend chart (Viewing
+    // layer). Caller-supplied; the backend falls back to user.timezone /
+    // UTC if omitted.
+    if (params?.tz) search.set("tz", params.tz);
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/usage?${search}`,
+    );
+    return parseWithFallback<RuntimeUsage[]>(raw, RuntimeUsageListSchema, [], {
+      endpoint: "GET /api/runtimes/:id/usage",
+    });
   }
 
-  async getRuntimeTaskActivity(runtimeId: string): Promise<RuntimeHourlyActivity[]> {
-    return this.fetch(`/api/runtimes/${runtimeId}/activity`);
+  async getRuntimeTaskActivity(
+    runtimeId: string,
+    params?: { tz?: string },
+  ): Promise<RuntimeHourlyActivity[]> {
+    // Hour-of-day heatmap follows the viewer's tz, like the other reports on
+    // this page. Pass the viewer's IANA zone so the server buckets correctly.
+    const search = new URLSearchParams();
+    if (params?.tz) search.set("tz", params.tz);
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/activity?${search}`,
+    );
+    return parseWithFallback<RuntimeHourlyActivity[]>(
+      raw,
+      RuntimeHourlyActivityListSchema,
+      [],
+      { endpoint: "GET /api/runtimes/:id/activity" },
+    );
   }
 
   async getRuntimeUsageByAgent(
     runtimeId: string,
-    params?: { days?: number },
+    params?: { days?: number; tz?: string },
   ): Promise<RuntimeUsageByAgent[]> {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));
-    return this.fetch(`/api/runtimes/${runtimeId}/usage/by-agent?${search}`);
+    if (params?.tz) search.set("tz", params.tz);
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/usage/by-agent?${search}`,
+    );
+    return parseWithFallback<RuntimeUsageByAgent[]>(
+      raw,
+      RuntimeUsageByAgentListSchema,
+      [],
+      { endpoint: "GET /api/runtimes/:id/usage/by-agent" },
+    );
   }
 
   async getRuntimeUsageByHour(
     runtimeId: string,
-    params?: { days?: number },
+    params?: { days?: number; tz?: string },
   ): Promise<RuntimeUsageByHour[]> {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));
-    return this.fetch(`/api/runtimes/${runtimeId}/usage/by-hour?${search}`);
+    if (params?.tz) search.set("tz", params.tz);
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/usage/by-hour?${search}`,
+    );
+    return parseWithFallback<RuntimeUsageByHour[]>(
+      raw,
+      RuntimeUsageByHourListSchema,
+      [],
+      { endpoint: "GET /api/runtimes/:id/usage/by-hour" },
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -856,11 +914,12 @@ export class ApiClient {
   // ---------------------------------------------------------------------------
 
   async getDashboardUsageDaily(
-    params: { days?: number; project_id?: string | null },
+    params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardUsageDaily[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
+    if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/usage/daily?${search}`);
     return parseWithFallback<DashboardUsageDaily[]>(
       raw,
@@ -871,11 +930,12 @@ export class ApiClient {
   }
 
   async getDashboardUsageByAgent(
-    params: { days?: number; project_id?: string | null },
+    params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardUsageByAgent[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
+    if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/usage/by-agent?${search}`);
     return parseWithFallback<DashboardUsageByAgent[]>(
       raw,
@@ -886,11 +946,14 @@ export class ApiClient {
   }
 
   async getDashboardAgentRunTime(
-    params: { days?: number; project_id?: string | null },
+    params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardAgentRunTime[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
+    // `tz` aligns the "last N days" cutoff with the viewer's calendar,
+    // matching the per-agent token card.
+    if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/agent-runtime?${search}`);
     return parseWithFallback<DashboardAgentRunTime[]>(
       raw,
@@ -901,11 +964,14 @@ export class ApiClient {
   }
 
   async getDashboardRunTimeDaily(
-    params: { days?: number; project_id?: string | null },
+    params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardRunTimeDaily[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
+    // `tz` cuts the day buckets in the viewer's calendar so Time / Tasks
+    // align with the Cost / Tokens charts.
+    if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/runtime/daily?${search}`);
     return parseWithFallback<DashboardRunTimeDaily[]>(
       raw,

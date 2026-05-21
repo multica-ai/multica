@@ -155,6 +155,8 @@ export interface UpdateMeRequest {
   language?: string;
   /** Free-form self-description (max 2000 chars). Pass "" to clear. */
   profile_description?: string;
+  /** IANA tz to pin; "" clears back to browser-tz; undefined leaves untouched. */
+  timezone?: string;
 }
 
 export interface CreateMemberRequest {
