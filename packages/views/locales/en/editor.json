@@ -59,7 +59,8 @@
   "code_block": {
     "copy_code": "Copy code",
     "show_preview": "Show preview",
-    "show_source": "Show source"
+    "show_source": "Show source",
+    "fullscreen": "Fullscreen"
   },
   "file_card": {
     "uploading": "Uploading {{filename}}"

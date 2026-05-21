@@ -393,16 +393,29 @@ func TeamInviteAccepted(inviteeID, workspaceID string, daysSinceInvite int64) Ev
 // The handler drives this transition — we emit from PatchOnboarding so
 // the single emission site stays honest even if the frontend retries.
 //
+// `source` and `useCase` are multi-select (users can pick several);
+// `role` stays single-select. Empty slice = no answer (skip is
+// captured separately via the *Skipped booleans).
+//
 // The three answers are also mirrored into person properties via $set
 // so cohorting by source / role / use_case works across every event
-// on the same user without re-joining back to the DB.
+// on the same user without re-joining back to the DB. PostHog accepts
+// array property values; breakdowns on a multi-value property treat
+// each element as a separate group.
 //
-// `*Skipped` booleans capture per-question skip intent (the new v2
-// signal). `*HasOther` are presence booleans for the free-text "other"
-// override; the free-text content is kept in the DB for product
-// research but not broadcast via analytics (PII risk + low cardinality
-// ask).
-func OnboardingQuestionnaireSubmitted(userID, source, role, useCase string, sourceSkipped, roleSkipped, useCaseSkipped, sourceHasOther, roleHasOther, useCaseHasOther bool) Event {
+// `*Skipped` booleans capture per-question skip intent. `*HasOther`
+// are presence booleans for the free-text "other" override; the
+// free-text content is kept in the DB for product research but not
+// broadcast via analytics (PII risk + low cardinality ask).
+func OnboardingQuestionnaireSubmitted(userID string, source []string, role string, useCase []string, sourceSkipped, roleSkipped, useCaseSkipped, sourceHasOther, roleHasOther, useCaseHasOther bool) Event {
+	// Normalize nil slices to [] so PostHog property values are stable
+	// (avoids null vs [] mixing in property type inference).
+	if source == nil {
+		source = []string{}
+	}
+	if useCase == nil {
+		useCase = []string{}
+	}
 	return Event{
 		Name:       EventOnboardingQuestionnaireSubmit,
 		DistinctID: userID,

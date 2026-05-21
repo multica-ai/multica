@@ -259,6 +259,7 @@ func init() {
 	issueListCmd.Flags().String("assignee", "", "Filter by assignee name (member, agent, or squad; fuzzy match)")
 	issueListCmd.Flags().String("assignee-id", "", "Filter by assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueListCmd.Flags().String("project", "", "Filter by project ID")
+	issueListCmd.Flags().StringSlice("metadata", nil, "Filter by metadata key=value (repeatable; combined with AND). Value is JSON-parsed: 'true'/'false' → bool, numbers → number, otherwise string. Wrap as '\"42\"' to force a string when the value would otherwise sniff as a number.")
 	issueListCmd.Flags().Int("limit", 50, "Maximum number of issues to return")
 	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination)")
 
@@ -310,9 +311,10 @@ func init() {
 	issueCommentListCmd.Flags().String("output", "table", "Output format: table or json")
 	issueCommentListCmd.Flags().String("since", "", "Only return comments created after this timestamp (RFC3339)")
 	issueCommentListCmd.Flags().String("thread", "", "Comment UUID — return the thread containing this comment (root + every descendant). May be a root or a reply id.")
+	issueCommentListCmd.Flags().Int("tail", 0, "Only valid with --thread. Cap reply count to the N most recent replies; the thread root is always included (even with --tail 0). Use --before/--before-id to scroll to older replies.")
 	issueCommentListCmd.Flags().Int("recent", 0, "Return the N most recently active threads (root + descendants per thread). Use --before/--before-id from the previous response to scroll to older threads.")
-	issueCommentListCmd.Flags().String("before", "", "Thread cursor: last_activity_at (RFC3339Nano). Read from the X-Multica-Next-Before response header; must be paired with --before-id.")
-	issueCommentListCmd.Flags().String("before-id", "", "Thread cursor: root comment UUID. Read from the X-Multica-Next-Before-Id response header; must be paired with --before.")
+	issueCommentListCmd.Flags().String("before", "", "Cursor (RFC3339Nano timestamp). With --recent: thread cursor (last_activity_at). With --thread + --tail: reply cursor (reply created_at). Read from the X-Multica-Next-Before response header; must be paired with --before-id.")
+	issueCommentListCmd.Flags().String("before-id", "", "Cursor UUID. With --recent: thread root UUID. With --thread + --tail: oldest reply UUID. Read from the X-Multica-Next-Before-Id response header; must be paired with --before.")
 
 	// issue runs
 	issueRunsCmd.Flags().String("output", "table", "Output format: table or json")
@@ -401,6 +403,13 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 		params.Set("project_id", project.ID)
+	}
+	if mdFlags, _ := cmd.Flags().GetStringSlice("metadata"); len(mdFlags) > 0 {
+		filter, err := buildMetadataFilterQueryParam(mdFlags)
+		if err != nil {
+			return err
+		}
+		params.Set("metadata", filter)
 	}
 
 	path := "/api/issues"
@@ -928,13 +937,16 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	since, _ := cmd.Flags().GetString("since")
 	thread, _ := cmd.Flags().GetString("thread")
 	recent, _ := cmd.Flags().GetInt("recent")
+	tail, _ := cmd.Flags().GetInt("tail")
 	// Flags().Changed distinguishes "user did not pass --recent" from
 	// "user explicitly passed --recent 0" (or a negative value). The
 	// GetInt zero-value collapses both cases, which would otherwise
 	// cause us to silently drop an invalid value and fall back to the
 	// default unparameterized list — exactly the drift Elon flagged in
-	// the PR #2787 second review.
+	// the PR #2787 second review. --tail follows the same pattern, and
+	// also keeps "--tail 0" (root-only) distinguishable from "no --tail".
 	recentSet := cmd.Flags().Changed("recent")
+	tailSet := cmd.Flags().Changed("tail")
 	before, _ := cmd.Flags().GetString("before")
 	beforeID, _ := cmd.Flags().GetString("before-id")
 
@@ -944,17 +956,20 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	if recentSet && recent <= 0 {
 		return fmt.Errorf("--recent must be a positive integer")
 	}
+	if tailSet && tail < 0 {
+		return fmt.Errorf("--tail must be a non-negative integer (0 returns just the thread root)")
+	}
 	if thread != "" && recentSet {
 		return fmt.Errorf("--thread and --recent are mutually exclusive")
 	}
-	if thread != "" && (before != "" || beforeID != "") {
-		return fmt.Errorf("--thread cannot be combined with --before / --before-id")
+	if tailSet && thread == "" {
+		return fmt.Errorf("--tail requires --thread (it is a thread-scoped limit)")
 	}
 	if (before == "") != (beforeID == "") {
 		return fmt.Errorf("--before and --before-id must be set together (composite cursor for stable pagination)")
 	}
-	if before != "" && !recentSet {
-		return fmt.Errorf("--before / --before-id require --recent (cursor scrolls within a recent window)")
+	if before != "" && !recentSet && !(thread != "" && tailSet) {
+		return fmt.Errorf("--before / --before-id require --recent (thread cursor) or --thread + --tail (reply cursor)")
 	}
 
 	params := url.Values{}
@@ -963,6 +978,9 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	}
 	if thread != "" {
 		params.Set("thread", thread)
+	}
+	if tailSet {
+		params.Set("tail", fmt.Sprintf("%d", tail))
 	}
 	if recentSet {
 		params.Set("recent", fmt.Sprintf("%d", recent))
@@ -983,13 +1001,19 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("list comments: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "Showing %d comments.\n", len(comments))
-	// Under --recent the server emits a thread cursor in headers when there
-	// is likely an older page. Surface it on stderr so an operator (and the
-	// agent prompt update that follows this PR) can scroll deeper without
-	// having to dig into the raw HTTP response.
+	// The server emits the next-page cursor in headers when there is likely
+	// an older page. Surface it on stderr so an operator (and the agent
+	// prompt update that follows this PR) can scroll deeper without having
+	// to dig into the raw HTTP response. Label depends on which paging mode
+	// the caller is in — under --recent the cursor is a thread cursor;
+	// under --thread + --tail it is a reply cursor inside that thread.
 	if nb := respHeaders.Get("X-Multica-Next-Before"); nb != "" {
 		if nbid := respHeaders.Get("X-Multica-Next-Before-Id"); nbid != "" {
-			fmt.Fprintf(os.Stderr, "Next thread cursor: --before %s --before-id %s\n", nb, nbid)
+			label := "Next thread cursor"
+			if thread != "" && tailSet {
+				label = "Next reply cursor"
+			}
+			fmt.Fprintf(os.Stderr, "%s: --before %s --before-id %s\n", label, nb, nbid)
 		}
 	}
 

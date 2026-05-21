@@ -141,6 +141,7 @@
     "section_properties": "属性",
     "section_parent_issue": "父 issue",
     "section_pull_requests": "Pull Request",
+    "section_metadata": "元数据",
     "section_details": "详情",
     "section_token_usage": "Token 用量",
     "pull_requests_loading": "加载中…",

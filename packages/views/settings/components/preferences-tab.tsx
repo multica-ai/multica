@@ -1,6 +1,14 @@
 "use client";
 
+import { useMemo } from "react";
 import { toast } from "sonner";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -11,6 +19,7 @@ import {
 import { useLocaleAdapter } from "@multica/core/i18n/react";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
+import { browserTimezone, timezoneOptions } from "../../common/timezone-select";
 import { useT } from "../../i18n";
 
 const LIGHT_COLORS = {
@@ -227,6 +236,82 @@ export function PreferencesTab() {
           })}
         </div>
       </section>
+
+      <TimezoneSection />
     </div>
+  );
+}
+
+// Base UI rejects "" as a SelectItem value, so route the "no preference"
+// state through this sentinel and translate at the wire boundary.
+const BROWSER_TZ_VALUE = "__browser__";
+
+function TimezoneSection() {
+  const { t } = useT("settings");
+  const user = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
+  const stored = user?.timezone ?? null;
+  const browser = browserTimezone();
+  const value = stored ?? BROWSER_TZ_VALUE;
+
+  // Full IANA list (from timezoneOptions in common/timezone-select) so a
+  // user needing a non-curated zone isn't stuck with ~18 common ones.
+  // Memoized — timezoneOptions enumerates ~600 IANA zones per call.
+  const options = useMemo(
+    () => timezoneOptions(stored ?? browser),
+    [stored, browser],
+  );
+
+  const handleChange = async (next: string) => {
+    if (next === value) return;
+    const payload = next === BROWSER_TZ_VALUE ? "" : next;
+    try {
+      const updated = await api.updateMe({ timezone: payload });
+      setUser(updated);
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.preferences.timezone.sync_failed),
+      );
+    }
+  };
+
+  const formatTZLabel = (tz: string) => {
+    if (tz === BROWSER_TZ_VALUE) {
+      return `${browser}${t(($) => $.preferences.timezone.browser_suffix)}`;
+    }
+    return tz;
+  };
+
+  return (
+    <section className="space-y-2">
+      <h2 className="text-sm font-semibold">
+        {t(($) => $.preferences.timezone.title)}
+      </h2>
+      <Select
+        value={value}
+        onValueChange={(next) => {
+          if (next) handleChange(next);
+        }}
+      >
+        <SelectTrigger size="sm" className="w-72 rounded-md font-mono text-xs">
+          <SelectValue>{formatTZLabel(value)}</SelectValue>
+        </SelectTrigger>
+        <SelectContent align="start" className="max-h-72">
+          <SelectItem value={BROWSER_TZ_VALUE} className="font-mono text-xs">
+            {formatTZLabel(BROWSER_TZ_VALUE)}
+          </SelectItem>
+          {options.map((tz) => (
+            <SelectItem key={tz} value={tz} className="font-mono text-xs">
+              {formatTZLabel(tz)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-[11px] leading-snug text-muted-foreground">
+        {t(($) => $.preferences.timezone.hint)}
+      </p>
+    </section>
   );
 }

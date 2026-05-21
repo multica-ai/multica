@@ -239,6 +239,26 @@ WHERE id = (
 )
 RETURNING *;
 
+-- name: ReclaimStaleDispatchedTaskForRuntime :one
+-- Re-delivers a task whose previous claim likely succeeded server-side but
+-- whose response never reached the daemon. The task is still in `dispatched`
+-- with no `started_at`, so the daemon has not acknowledged it via StartTask.
+-- Refresh dispatched_at so the server-side dispatch timeout measures from the
+-- recovered delivery attempt.
+UPDATE agent_task_queue
+SET dispatched_at = now()
+WHERE id = (
+    SELECT atq.id FROM agent_task_queue atq
+    WHERE atq.runtime_id = $1
+      AND atq.status = 'dispatched'
+      AND atq.started_at IS NULL
+      AND atq.dispatched_at < now() - make_interval(secs => @claim_recovery_secs::double precision)
+    ORDER BY atq.priority DESC, atq.dispatched_at ASC
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING *;
+
 -- name: StartAgentTask :one
 UPDATE agent_task_queue
 SET status = 'running', started_at = now()

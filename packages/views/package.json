@@ -35,6 +35,7 @@
     "./workspace/create-workspace-form": "./workspace/create-workspace-form.tsx",
     "./workspace/no-access-page": "./workspace/no-access-page.tsx",
     "./workspace/new-workspace-page": "./workspace/new-workspace-page.tsx",
+    "./workspace/welcome-after-onboarding": "./workspace/welcome-after-onboarding.tsx",
     "./workspace/use-workspace-seen": "./workspace/use-workspace-seen.ts",
     "./layout": "./layout/index.ts",
     "./auth": "./auth/index.ts",

@@ -178,36 +178,6 @@ func (q *Queries) DeleteStaleOfflineRuntimes(ctx context.Context, staleSeconds f
 	return items, nil
 }
 
-const deleteTaskUsageDailyDirtyForRuntime = `-- name: DeleteTaskUsageDailyDirtyForRuntime :execrows
-DELETE FROM task_usage_daily_dirty
-WHERE runtime_id = $1
-`
-
-// Drop queued dirty keys computed under the old timezone; the ordered rebuild
-// in the same transaction will write the current aggregate instead.
-func (q *Queries) DeleteTaskUsageDailyDirtyForRuntime(ctx context.Context, runtimeID pgtype.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteTaskUsageDailyDirtyForRuntime, runtimeID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const deleteTaskUsageDailyForRuntime = `-- name: DeleteTaskUsageDailyForRuntime :execrows
-DELETE FROM task_usage_daily
-WHERE runtime_id = $1
-`
-
-// First step of an explicit user timezone edit rebuild. Delete old materialized
-// rows before re-inserting under the runtime's new timezone.
-func (q *Queries) DeleteTaskUsageDailyForRuntime(ctx context.Context, runtimeID pgtype.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteTaskUsageDailyForRuntime, runtimeID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const failTasksForOfflineRuntimes = `-- name: FailTasksForOfflineRuntimes :many
 UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'runtime went offline',
@@ -268,7 +238,7 @@ func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context) ([]AgentTaskQ
 }
 
 const findLegacyRuntimesByDaemonID = `-- name: FindLegacyRuntimesByDaemonID :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, timezone, visibility FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility FROM agent_runtime
 WHERE workspace_id = $1
   AND provider = $2
   AND LOWER(daemon_id) = LOWER($3)
@@ -319,7 +289,6 @@ func (q *Queries) FindLegacyRuntimesByDaemonID(ctx context.Context, arg FindLega
 			&i.UpdatedAt,
 			&i.OwnerID,
 			&i.LegacyDaemonID,
-			&i.Timezone,
 			&i.Visibility,
 		); err != nil {
 			return nil, err
@@ -380,7 +349,7 @@ func (q *Queries) ForceOfflineRuntimesByIDs(ctx context.Context, runtimeIds []pg
 }
 
 const getAgentRuntime = `-- name: GetAgentRuntime :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, timezone, visibility FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility FROM agent_runtime
 WHERE id = $1
 `
 
@@ -402,14 +371,13 @@ func (q *Queries) GetAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRun
 		&i.UpdatedAt,
 		&i.OwnerID,
 		&i.LegacyDaemonID,
-		&i.Timezone,
 		&i.Visibility,
 	)
 	return i, err
 }
 
 const getAgentRuntimeForWorkspace = `-- name: GetAgentRuntimeForWorkspace :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, timezone, visibility FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility FROM agent_runtime
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -436,59 +404,13 @@ func (q *Queries) GetAgentRuntimeForWorkspace(ctx context.Context, arg GetAgentR
 		&i.UpdatedAt,
 		&i.OwnerID,
 		&i.LegacyDaemonID,
-		&i.Timezone,
 		&i.Visibility,
 	)
 	return i, err
 }
 
-const insertTaskUsageDailyForRuntime = `-- name: InsertTaskUsageDailyForRuntime :execrows
-INSERT INTO task_usage_daily AS d (
-    bucket_date, workspace_id, runtime_id, provider, model,
-    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-    event_count
-)
-SELECT
-    DATE(tu.created_at AT TIME ZONE rt.timezone) AS bucket_date,
-    a.workspace_id,
-    atq.runtime_id,
-    tu.provider,
-    tu.model,
-    SUM(tu.input_tokens)::bigint       AS input_tokens,
-    SUM(tu.output_tokens)::bigint      AS output_tokens,
-    SUM(tu.cache_read_tokens)::bigint  AS cache_read_tokens,
-    SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens,
-    COUNT(*)::bigint                   AS event_count
-  FROM task_usage tu
-  JOIN agent_task_queue atq ON atq.id = tu.task_id
-  JOIN agent            a   ON a.id = atq.agent_id
-  JOIN agent_runtime    rt  ON rt.id = atq.runtime_id
- WHERE atq.runtime_id = $1
- GROUP BY 1, 2, 3, 4, 5
-ON CONFLICT (bucket_date, workspace_id, runtime_id, provider, model) DO UPDATE
-    SET input_tokens       = EXCLUDED.input_tokens,
-        output_tokens      = EXCLUDED.output_tokens,
-        cache_read_tokens  = EXCLUDED.cache_read_tokens,
-        cache_write_tokens = EXCLUDED.cache_write_tokens,
-        event_count        = EXCLUDED.event_count,
-        updated_at         = now()
-`
-
-// Final step of an explicit user timezone edit rebuild. This is intentionally
-// called only for user edits, not by the migration itself: deploys do not
-// backfill history, but a user-driven change must not leave old UTC rows next
-// to newly computed local rows. This scans all history for the edited runtime;
-// timezone edits are owner/admin operations and are expected to be rare.
-func (q *Queries) InsertTaskUsageDailyForRuntime(ctx context.Context, runtimeID pgtype.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, insertTaskUsageDailyForRuntime, runtimeID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const listAgentRuntimes = `-- name: ListAgentRuntimes :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, timezone, visibility FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility FROM agent_runtime
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -517,7 +439,6 @@ func (q *Queries) ListAgentRuntimes(ctx context.Context, workspaceID pgtype.UUID
 			&i.UpdatedAt,
 			&i.OwnerID,
 			&i.LegacyDaemonID,
-			&i.Timezone,
 			&i.Visibility,
 		); err != nil {
 			return nil, err
@@ -531,7 +452,7 @@ func (q *Queries) ListAgentRuntimes(ctx context.Context, workspaceID pgtype.UUID
 }
 
 const listAgentRuntimesByOwner = `-- name: ListAgentRuntimesByOwner :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, timezone, visibility FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility FROM agent_runtime
 WHERE workspace_id = $1 AND owner_id = $2
 ORDER BY created_at ASC
 `
@@ -565,7 +486,6 @@ func (q *Queries) ListAgentRuntimesByOwner(ctx context.Context, arg ListAgentRun
 			&i.UpdatedAt,
 			&i.OwnerID,
 			&i.LegacyDaemonID,
-			&i.Timezone,
 			&i.Visibility,
 		); err != nil {
 			return nil, err
@@ -605,23 +525,11 @@ func (q *Queries) ListArchivedAgentIDsByRuntime(ctx context.Context, runtimeID p
 	return items, nil
 }
 
-const lockTaskUsageDailyRollup = `-- name: LockTaskUsageDailyRollup :exec
-SELECT pg_advisory_xact_lock(4242)
-`
-
-// Serialize explicit timezone rebuilds with rollup_task_usage_daily(), which
-// uses the same advisory key in migration 073. This prevents cron from
-// writing old-timezone buckets while PATCH is deleting/rebuilding rows.
-func (q *Queries) LockTaskUsageDailyRollup(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, lockTaskUsageDailyRollup)
-	return err
-}
-
 const markAgentRuntimeOnline = `-- name: MarkAgentRuntimeOnline :one
 UPDATE agent_runtime
 SET status = 'online', last_seen_at = now(), updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, timezone, visibility
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility
 `
 
 // Used on the offline→online transition (and on first heartbeat after
@@ -645,7 +553,6 @@ func (q *Queries) MarkAgentRuntimeOnline(ctx context.Context, id pgtype.UUID) (A
 		&i.UpdatedAt,
 		&i.OwnerID,
 		&i.LegacyDaemonID,
-		&i.Timezone,
 		&i.Visibility,
 	)
 	return i, err
@@ -895,48 +802,11 @@ func (q *Queries) TouchAgentRuntimesLastSeenBatch(ctx context.Context, ids []pgt
 	return result.RowsAffected(), nil
 }
 
-const updateAgentRuntimeTimezone = `-- name: UpdateAgentRuntimeTimezone :one
-UPDATE agent_runtime
-SET timezone = $1, updated_at = now()
-WHERE id = $2
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, timezone, visibility
-`
-
-type UpdateAgentRuntimeTimezoneParams struct {
-	Timezone string      `json:"timezone"`
-	ID       pgtype.UUID `json:"id"`
-}
-
-// Operator-driven override of the runtime's reporting timezone (MUL-1950).
-func (q *Queries) UpdateAgentRuntimeTimezone(ctx context.Context, arg UpdateAgentRuntimeTimezoneParams) (AgentRuntime, error) {
-	row := q.db.QueryRow(ctx, updateAgentRuntimeTimezone, arg.Timezone, arg.ID)
-	var i AgentRuntime
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.DaemonID,
-		&i.Name,
-		&i.RuntimeMode,
-		&i.Provider,
-		&i.Status,
-		&i.DeviceInfo,
-		&i.Metadata,
-		&i.LastSeenAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.OwnerID,
-		&i.LegacyDaemonID,
-		&i.Timezone,
-		&i.Visibility,
-	)
-	return i, err
-}
-
 const updateAgentRuntimeVisibility = `-- name: UpdateAgentRuntimeVisibility :one
 UPDATE agent_runtime
 SET visibility = $1, updated_at = now()
 WHERE id = $2
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, timezone, visibility
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility
 `
 
 type UpdateAgentRuntimeVisibilityParams struct {
@@ -966,7 +836,6 @@ func (q *Queries) UpdateAgentRuntimeVisibility(ctx context.Context, arg UpdateAg
 		&i.UpdatedAt,
 		&i.OwnerID,
 		&i.LegacyDaemonID,
-		&i.Timezone,
 		&i.Visibility,
 	)
 	return i, err
@@ -983,9 +852,8 @@ INSERT INTO agent_runtime (
     device_info,
     metadata,
     owner_id,
-    timezone,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
 ON CONFLICT (workspace_id, daemon_id, provider)
 DO UPDATE SET
     name = EXCLUDED.name,
@@ -996,7 +864,7 @@ DO UPDATE SET
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, timezone, visibility, (xmax = 0) AS inserted
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, (xmax = 0) AS inserted
 `
 
 type UpsertAgentRuntimeParams struct {
@@ -1009,7 +877,6 @@ type UpsertAgentRuntimeParams struct {
 	DeviceInfo  string      `json:"device_info"`
 	Metadata    []byte      `json:"metadata"`
 	OwnerID     pgtype.UUID `json:"owner_id"`
-	Timezone    string      `json:"timezone"`
 }
 
 type UpsertAgentRuntimeRow struct {
@@ -1027,7 +894,6 @@ type UpsertAgentRuntimeRow struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 	OwnerID        pgtype.UUID        `json:"owner_id"`
 	LegacyDaemonID pgtype.Text        `json:"legacy_daemon_id"`
-	Timezone       string             `json:"timezone"`
 	Visibility     string             `json:"visibility"`
 	Inserted       bool               `json:"inserted"`
 }
@@ -1035,12 +901,6 @@ type UpsertAgentRuntimeRow struct {
 // (xmax = 0) AS inserted distinguishes a fresh insert (true) from an upsert
 // that updated an existing row (false). Analytics reads this to fire
 // runtime_registered/runtime_ready only on first-time registration.
-//
-// @timezone is set on INSERT only. On conflict we deliberately KEEP the
-// existing agent_runtime.timezone — once an operator overrides the tz via
-// the web UI we don't want a daemon reconnect (which sends its own system
-// tz) to silently revert it. Daemons can still set the initial value when
-// they're the first to register a brand-new runtime row.
 func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntimeParams) (UpsertAgentRuntimeRow, error) {
 	row := q.db.QueryRow(ctx, upsertAgentRuntime,
 		arg.WorkspaceID,
@@ -1052,7 +912,6 @@ func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntime
 		arg.DeviceInfo,
 		arg.Metadata,
 		arg.OwnerID,
-		arg.Timezone,
 	)
 	var i UpsertAgentRuntimeRow
 	err := row.Scan(
@@ -1070,7 +929,6 @@ func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntime
 		&i.UpdatedAt,
 		&i.OwnerID,
 		&i.LegacyDaemonID,
-		&i.Timezone,
 		&i.Visibility,
 		&i.Inserted,
 	)

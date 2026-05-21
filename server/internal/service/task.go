@@ -77,7 +77,13 @@ func truncateForSummary(s string, maxRunes int) string {
 	return string(rs[:maxRunes]) + "…"
 }
 
-const taskAnalyticsContextCacheMax = 4096
+const (
+	taskAnalyticsContextCacheMax = 4096
+	// claimResponseRecoveryWindow must exceed daemon client.Timeout for
+	// /tasks/claim (30s) plus /tasks/{id}/start (30s) plus scheduling slack, so
+	// an in-flight StartTask cannot be reclaimed and double-dispatched.
+	claimResponseRecoveryWindow = 90 * time.Second
+)
 
 // buildCommentTriggerSummary fetches the comment content and truncates
 // it for storage on the task row. Returns an invalid pgtype.Text when
@@ -831,6 +837,27 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	}()
 
 	runtimeKey := util.UUIDToString(runtimeID)
+	// Check this before EmptyClaim: a lost claim response moves the task out of
+	// `queued`, so the empty-queued cache cannot represent recoverability.
+	stale, err := s.Queries.ReclaimStaleDispatchedTaskForRuntime(ctx, db.ReclaimStaleDispatchedTaskForRuntimeParams{
+		RuntimeID:         runtimeID,
+		ClaimRecoverySecs: claimResponseRecoveryWindow.Seconds(),
+	})
+	if err == nil {
+		outcome = "reclaimed_dispatched"
+		claimedFlag = true
+		slog.Info("stale dispatched task reclaimed",
+			"task_id", util.UUIDToString(stale.ID),
+			"runtime_id", runtimeKey,
+			"agent_id", util.UUIDToString(stale.AgentID),
+		)
+		return &stale, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		outcome = "error_reclaim_dispatched"
+		return nil, fmt.Errorf("reclaim stale dispatched task: %w", err)
+	}
+
 	if s.EmptyClaim.IsEmpty(ctx, runtimeKey) {
 		outcome = "empty_cache_hit"
 		return nil, nil

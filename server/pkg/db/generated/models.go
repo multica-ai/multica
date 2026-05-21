@@ -59,9 +59,7 @@ type AgentRuntime struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 	OwnerID        pgtype.UUID        `json:"owner_id"`
 	LegacyDaemonID pgtype.Text        `json:"legacy_daemon_id"`
-	// IANA timezone (e.g. 'Asia/Shanghai'). Bucket boundary for per-day and per-hour token usage aggregation. Defaults to UTC for runtimes that existed before MUL-1950; the daemon registration / web UI overwrites this with an operator-detected value going forward.
-	Timezone   string `json:"timezone"`
-	Visibility string `json:"visibility"`
+	Visibility     string             `json:"visibility"`
 }
 
 type AgentSkill struct {
@@ -337,6 +335,7 @@ type Issue struct {
 	OriginID           pgtype.UUID        `json:"origin_id"`
 	FirstExecutedAt    pgtype.Timestamptz `json:"first_executed_at"`
 	StartDate          pgtype.Timestamptz `json:"start_date"`
+	Metadata           []byte             `json:"metadata"`
 }
 
 type IssueDependency struct {
@@ -520,34 +519,13 @@ type TaskUsage struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
-type TaskUsageDaily struct {
-	BucketDate       pgtype.Date        `json:"bucket_date"`
+type TaskUsageHourly struct {
+	BucketHour       pgtype.Timestamptz `json:"bucket_hour"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
 	RuntimeID        pgtype.UUID        `json:"runtime_id"`
-	Provider         string             `json:"provider"`
-	Model            string             `json:"model"`
-	InputTokens      int64              `json:"input_tokens"`
-	OutputTokens     int64              `json:"output_tokens"`
-	CacheReadTokens  int64              `json:"cache_read_tokens"`
-	CacheWriteTokens int64              `json:"cache_write_tokens"`
-	EventCount       int64              `json:"event_count"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-}
-
-type TaskUsageDailyDirty struct {
-	BucketDate  pgtype.Date        `json:"bucket_date"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	RuntimeID   pgtype.UUID        `json:"runtime_id"`
-	Provider    string             `json:"provider"`
-	Model       string             `json:"model"`
-	EnqueuedAt  pgtype.Timestamptz `json:"enqueued_at"`
-}
-
-type TaskUsageDashboardDaily struct {
-	BucketDate       pgtype.Date        `json:"bucket_date"`
-	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
 	AgentID          pgtype.UUID        `json:"agent_id"`
 	ProjectID        pgtype.UUID        `json:"project_id"`
+	Provider         string             `json:"provider"`
 	Model            string             `json:"model"`
 	InputTokens      int64              `json:"input_tokens"`
 	OutputTokens     int64              `json:"output_tokens"`
@@ -558,25 +536,18 @@ type TaskUsageDashboardDaily struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
-type TaskUsageDashboardDirty struct {
-	BucketDate  pgtype.Date        `json:"bucket_date"`
+type TaskUsageHourlyDirty struct {
+	BucketHour  pgtype.Timestamptz `json:"bucket_hour"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	RuntimeID   pgtype.UUID        `json:"runtime_id"`
 	AgentID     pgtype.UUID        `json:"agent_id"`
 	ProjectID   pgtype.UUID        `json:"project_id"`
+	Provider    string             `json:"provider"`
 	Model       string             `json:"model"`
 	EnqueuedAt  pgtype.Timestamptz `json:"enqueued_at"`
 }
 
-type TaskUsageDashboardRollupState struct {
-	ID                int16              `json:"id"`
-	WatermarkAt       pgtype.Timestamptz `json:"watermark_at"`
-	LastRunStartedAt  pgtype.Timestamptz `json:"last_run_started_at"`
-	LastRunFinishedAt pgtype.Timestamptz `json:"last_run_finished_at"`
-	LastRunRows       int64              `json:"last_run_rows"`
-	LastError         pgtype.Text        `json:"last_error"`
-}
-
-type TaskUsageRollupState struct {
+type TaskUsageHourlyRollupState struct {
 	ID                int16              `json:"id"`
 	WatermarkAt       pgtype.Timestamptz `json:"watermark_at"`
 	LastRunStartedAt  pgtype.Timestamptz `json:"last_run_started_at"`
@@ -599,6 +570,8 @@ type User struct {
 	StarterContentState     pgtype.Text        `json:"starter_content_state"`
 	Language                pgtype.Text        `json:"language"`
 	ProfileDescription      string             `json:"profile_description"`
+	// User-preferred IANA timezone for report rendering (Viewing tz). NULL means "use the browser-detected tz at render time". Affects dashboards, charts, and any "today" label shown to this user. Does not affect data materialisation — all rollups remain in UTC.
+	Timezone pgtype.Text `json:"timezone"`
 }
 
 type VerificationCode struct {

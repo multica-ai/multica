@@ -11,6 +11,12 @@
       "english": "English",
       "chinese": "中文",
       "sync_failed": "语言已在本设备保存，但同步到账号失败。其他设备可能仍显示旧语言。"
+    },
+    "timezone": {
+      "title": "查看时区",
+      "browser_suffix": "（浏览器）",
+      "hint": "用于仪表盘、图表和「今天」标签。这是个人偏好，在你的所有工作区中通用。",
+      "sync_failed": "保存时区偏好失败。"
     }
   },
   "page": {
