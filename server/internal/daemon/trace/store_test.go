@@ -2,6 +2,8 @@ package trace
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -227,6 +229,79 @@ func TestTruncate(t *testing.T) {
 	}
 	if lines[1].Truncated {
 		t.Fatal("short line should not be truncated")
+	}
+}
+
+func TestTruncateRawPayload(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	defer store.Close()
+
+	// A line with an oversized RawPayload must be stored and read back without
+	// error, with RawPayload truncated to MaxContentLen.
+	longPayload := strings.Repeat("x", MaxContentLen+1)
+	line := TraceLine{
+		TaskID:     "task-rp",
+		RunID:      "run-rp",
+		Channel:    ChannelProviderEvent,
+		RawPayload: longPayload,
+	}
+	if _, err := store.Append(ctx, line); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	lines, err := store.ListSince(ctx, "task-rp", "run-rp", 0)
+	if err != nil {
+		t.Fatalf("ListSince: %v", err)
+	}
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 line, got %d", len(lines))
+	}
+	if !lines[0].Truncated {
+		t.Fatal("expected Truncated=true for oversized RawPayload")
+	}
+	if len(lines[0].RawPayload) != MaxContentLen {
+		t.Fatalf("expected raw_payload length %d, got %d", MaxContentLen, len(lines[0].RawPayload))
+	}
+}
+
+func TestReadLargeLineDoesNotError(t *testing.T) {
+	// Write a JSONL file with a line that exceeds the old bufio.Scanner limit
+	// (MaxContentLen*2) to verify that readAll handles it without returning an
+	// error. This simulates a file written before the RawPayload truncation fix.
+	root := t.TempDir()
+	store, err := NewJSONLStore(root)
+	if err != nil {
+		t.Fatalf("NewJSONLStore: %v", err)
+	}
+	defer store.Close()
+
+	// Bypass truncation by writing the oversized line directly to the JSONL file.
+	taskDir := root + "/task-large"
+	if err := os.MkdirAll(taskDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	line := TraceLine{
+		Seq:        1,
+		TaskID:     "task-large",
+		RunID:      "run-large",
+		Channel:    ChannelProviderEvent,
+		Content:    strings.Repeat("c", MaxContentLen),
+		RawPayload: strings.Repeat("r", MaxContentLen),
+	}
+	raw, _ := json.Marshal(line)
+	raw = append(raw, '\n')
+	if err := os.WriteFile(taskDir+"/run-large.jsonl", raw, 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	ctx := context.Background()
+	lines, err := store.ListSince(ctx, "task-large", "run-large", 0)
+	if err != nil {
+		t.Fatalf("ListSince returned error for large line: %v", err)
+	}
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 line, got %d", len(lines))
 	}
 }
 
