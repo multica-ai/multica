@@ -18,9 +18,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   Agent,
   AgentRuntime,
+  AgentRuntimeBinding,
   UpdateAgentRequest,
 } from "@multica/core/types";
 import {
+  agentRuntimeBindingKeys,
+  agentRuntimeBindingOptions,
   type AgentPresenceDetail,
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
@@ -89,6 +92,10 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const agent = agents.find((a) => a.id === agentId) ?? null;
   const presence: AgentPresenceDetail | null =
     agent ? presenceMap.get(agent.id) ?? null : null;
+  const { data: runtimeBinding = null } = useQuery({
+    ...agentRuntimeBindingOptions(wsId ?? "", agentId),
+    enabled: !!wsId && !!agent && !!currentUser?.id,
+  });
 
   // Fallback fetch: when the agent is missing from the workspace list, hit
   // GET /api/agents/{id} directly to disambiguate "doesn't exist" (404) from
@@ -159,6 +166,31 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
       }
       qc.invalidateQueries({ queryKey });
       toast.error(e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast));
+      throw e;
+    }
+  };
+
+  const invalidateRuntimeBinding = (id: string) =>
+    qc.invalidateQueries({ queryKey: agentRuntimeBindingKeys.detail(wsId ?? "", id) });
+
+  const handleRuntimeBindingChange = async (id: string, runtimeId: string): Promise<void> => {
+    try {
+      await api.upsertAgentRuntimeBinding(id, { runtime_id: runtimeId });
+      await invalidateRuntimeBinding(id);
+      toast.success(t(($) => $.detail.runtime_binding_updated_toast));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.detail.runtime_binding_failed_toast));
+      throw e;
+    }
+  };
+
+  const handleRuntimeBindingClear = async (id: string): Promise<void> => {
+    try {
+      await api.deleteAgentRuntimeBinding(id);
+      await invalidateRuntimeBinding(id);
+      toast.success(t(($) => $.detail.runtime_binding_cleared_toast));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.detail.runtime_binding_failed_toast));
       throw e;
     }
   };
@@ -324,12 +356,15 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         <AgentOverviewPane
           agent={agent}
           runtime={runtime}
+          runtimeBinding={runtimeBinding as AgentRuntimeBinding | null}
           owner={owner}
           runtimes={runtimes}
           members={members}
           onUpdate={handleUpdate}
           currentUserId={currentUser?.id ?? null}
           canEdit={canEdit.allowed}
+          onRuntimeBindingChange={handleRuntimeBindingChange}
+          onRuntimeBindingClear={handleRuntimeBindingClear}
           navIntent={tabNavIntent}
           onNavIntentHandled={() => setTabNavIntent(null)}
         />

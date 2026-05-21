@@ -1222,6 +1222,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// internal/handler/agent_env.go.
 					r.Get("/env", h.GetAgentEnv)
 					r.Put("/env", h.UpdateAgentEnv)
+					r.Get("/runtime-binding", h.GetMyAgentRuntimeBinding)
+					r.Put("/runtime-binding", h.UpsertMyAgentRuntimeBinding)
+					r.Delete("/runtime-binding", h.DeleteMyAgentRuntimeBinding)
 				})
 			})
 
