@@ -174,9 +174,6 @@ func cloudRuntimeRequestID(r *http.Request) string {
 	if id := r.Header.Get("X-Request-ID"); id != "" {
 		return id
 	}
-	if id := r.Header.Get("X-Request-Id"); id != "" {
-		return id
-	}
 	return chimw.GetReqID(r.Context())
 }
 
@@ -201,10 +198,11 @@ func (h *Handler) cloudRuntimeUserPAT(w http.ResponseWriter, r *http.Request, us
 		return pat, true
 	}
 
-	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
 	const prefix = "Bearer "
-	if strings.HasPrefix(auth, prefix+"mul_") {
-		return strings.TrimPrefix(auth, prefix), true
+	if strings.HasPrefix(authHeader, prefix+"mul_") {
+		// Safe: auth middleware has already verified this PAT and set X-User-ID to its owner.
+		return strings.TrimPrefix(authHeader, prefix), true
 	}
 	return "", true
 }
