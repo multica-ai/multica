@@ -397,6 +397,38 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 	return s.enqueueIssueTask(ctx, issue, commentID, false)
 }
 
+func (s *TaskService) resolveAgentRuntimeForRequester(ctx context.Context, agent db.Agent, requesterID pgtype.UUID) (pgtype.UUID, error) {
+	if !agent.RuntimeID.Valid {
+		return pgtype.UUID{}, fmt.Errorf("agent has no runtime")
+	}
+	if !requesterID.Valid {
+		return agent.RuntimeID, nil
+	}
+
+	binding, err := s.Queries.GetAgentRuntimeBinding(ctx, db.GetAgentRuntimeBindingParams{
+		AgentID: agent.ID,
+		UserID:  requesterID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return agent.RuntimeID, nil
+		}
+		return pgtype.UUID{}, fmt.Errorf("load agent runtime binding: %w", err)
+	}
+	return binding.RuntimeID, nil
+}
+
+func (s *TaskService) requesterIDFromTriggerComment(ctx context.Context, commentID pgtype.UUID) pgtype.UUID {
+	if !commentID.Valid {
+		return pgtype.UUID{}
+	}
+	comment, err := s.Queries.GetComment(ctx, commentID)
+	if err != nil || comment.AuthorType != "member" {
+		return pgtype.UUID{}
+	}
+	return comment.AuthorID
+}
+
 // enqueueIssueTask is the shared implementation behind EnqueueTaskForIssue
 // and the manual rerun path. forceFreshSession=true marks the task so the
 // daemon claim handler skips the (agent_id, issue_id) resume lookup — the
@@ -421,10 +453,16 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "agent has no runtime")
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	requesterID := s.requesterIDFromTriggerComment(ctx, triggerCommentID)
+	runtimeID, err := s.resolveAgentRuntimeForRequester(ctx, agent, requesterID)
+	if err != nil {
+		slog.Error("task enqueue failed: resolve runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agent.ID), "error", err)
+		return db.AgentTaskQueue{}, err
+	}
 
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:           issue.AssigneeID,
-		RuntimeID:         agent.RuntimeID,
+		RuntimeID:         runtimeID,
 		IssueID:           issue.ID,
 		Priority:          priorityToInt(issue.Priority),
 		TriggerCommentID:  triggerCommentID,
@@ -440,6 +478,7 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		"task_id", util.UUIDToString(task.ID),
 		"issue_id", util.UUIDToString(issue.ID),
 		"agent_id", util.UUIDToString(issue.AssigneeID),
+		"runtime_id", util.UUIDToString(runtimeID),
 		"force_fresh_session", forceFreshSession,
 	)
 	// Order matters: broadcast first, notify daemon second. notifyTaskAvailable
@@ -484,10 +523,16 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 		slog.Error("mention task enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	requesterID := s.requesterIDFromTriggerComment(ctx, triggerCommentID)
+	runtimeID, err := s.resolveAgentRuntimeForRequester(ctx, agent, requesterID)
+	if err != nil {
+		slog.Error("mention task enqueue failed: resolve runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
+		return db.AgentTaskQueue{}, err
+	}
 
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:           agentID,
-		RuntimeID:         agent.RuntimeID,
+		RuntimeID:         runtimeID,
 		IssueID:           issue.ID,
 		Priority:          priorityToInt(issue.Priority),
 		TriggerCommentID:  triggerCommentID,
@@ -500,7 +545,7 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
 	}
 
-	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "is_leader_task", isLeader)
+	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "runtime_id", util.UUIDToString(runtimeID), "is_leader_task", isLeader)
 	// See EnqueueTaskForIssue for ordering rationale.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
@@ -572,6 +617,10 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	if !agent.RuntimeID.Valid {
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	runtimeID, err := s.resolveAgentRuntimeForRequester(ctx, agent, requesterID)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 
 	payload := QuickCreateContext{
 		Type:        QuickCreateContextType,
@@ -595,7 +644,7 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 
 	task, err := s.Queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
 		AgentID:   agentID,
-		RuntimeID: agent.RuntimeID,
+		RuntimeID: runtimeID,
 		Priority:  priorityToInt("high"),
 		Context:   contextJSON,
 	})
@@ -607,6 +656,7 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 		"task_id", util.UUIDToString(task.ID),
 		"agent_id", util.UUIDToString(agentID),
 		"squad_id", payload.SquadID,
+		"runtime_id", util.UUIDToString(runtimeID),
 		"requester_id", util.UUIDToString(requesterID),
 		"workspace_id", util.UUIDToString(workspaceID),
 		"project_id", payload.ProjectID,
@@ -635,10 +685,14 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	if !agent.RuntimeID.Valid {
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	runtimeID, err := s.resolveAgentRuntimeForRequester(ctx, agent, chatSession.CreatorID)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 
 	task, err := s.Queries.CreateChatTask(ctx, db.CreateChatTaskParams{
 		AgentID:       chatSession.AgentID,
-		RuntimeID:     agent.RuntimeID,
+		RuntimeID:     runtimeID,
 		Priority:      2, // medium priority for chat
 		ChatSessionID: chatSession.ID,
 	})
@@ -647,7 +701,7 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 		return db.AgentTaskQueue{}, fmt.Errorf("create chat task: %w", err)
 	}
 
-	slog.Info("chat task enqueued", "task_id", util.UUIDToString(task.ID), "chat_session_id", util.UUIDToString(chatSession.ID), "agent_id", util.UUIDToString(chatSession.AgentID))
+	slog.Info("chat task enqueued", "task_id", util.UUIDToString(task.ID), "chat_session_id", util.UUIDToString(chatSession.ID), "agent_id", util.UUIDToString(chatSession.AgentID), "runtime_id", util.UUIDToString(runtimeID))
 	// See EnqueueTaskForIssue for ordering rationale.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)

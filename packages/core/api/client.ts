@@ -20,10 +20,12 @@ import type {
   UpdateAgentRequest,
   AgentEnvResponse,
   UpdateAgentEnvRequest,
+  UpsertAgentRuntimeBindingRequest,
   AgentTask,
   AgentActivityBucket,
   AgentRunCount,
   AgentRuntime,
+  AgentRuntimeBinding,
   InboxItem,
   IssueSubscriber,
   Comment,
@@ -796,6 +798,24 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify(data),
     });
+  }
+
+  async getAgentRuntimeBinding(id: string): Promise<AgentRuntimeBinding> {
+    return this.fetch(`/api/agents/${id}/runtime-binding`);
+  }
+
+  async upsertAgentRuntimeBinding(
+    id: string,
+    data: UpsertAgentRuntimeBindingRequest,
+  ): Promise<AgentRuntimeBinding> {
+    return this.fetch(`/api/agents/${id}/runtime-binding`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteAgentRuntimeBinding(id: string): Promise<AgentRuntimeBinding> {
+    return this.fetch(`/api/agents/${id}/runtime-binding`, { method: "DELETE" });
   }
 
   async archiveAgent(id: string): Promise<Agent> {

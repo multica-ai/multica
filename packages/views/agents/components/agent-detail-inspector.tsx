@@ -6,11 +6,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Camera, Loader2, Pencil } from "lucide-react";
+import { Camera, Loader2, Pencil, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import type {
   Agent,
   AgentRuntime,
+  AgentRuntimeBinding,
   MemberWithUser,
 } from "@multica/core/types";
 import {
@@ -50,6 +51,7 @@ import { VisibilityPicker } from "./inspector/visibility-picker";
 interface InspectorProps {
   agent: Agent;
   runtime: AgentRuntime | null;
+  runtimeBinding: AgentRuntimeBinding | null;
   owner: MemberWithUser | null;
   presence: AgentPresenceDetail | null | undefined;
   // Below: needed for inline edit. The inspector now owns the editing surface
@@ -68,6 +70,8 @@ interface InspectorProps {
    */
   canEdit: boolean;
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
+  onRuntimeBindingChange: (id: string, runtimeId: string) => Promise<void>;
+  onRuntimeBindingClear: (id: string) => Promise<void>;
 }
 
 /**
@@ -84,6 +88,7 @@ interface InspectorProps {
 export function AgentDetailInspector({
   agent,
   runtime,
+  runtimeBinding,
   owner,
   presence,
   runtimes,
@@ -91,11 +96,16 @@ export function AgentDetailInspector({
   currentUserId,
   canEdit,
   onUpdate,
+  onRuntimeBindingChange,
+  onRuntimeBindingClear,
 }: InspectorProps) {
   const { t } = useT("agents");
   const timeAgo = useTimeAgo();
   const update = (data: Record<string, unknown>) => onUpdate(agent.id, data);
   const isOnline = runtime?.status === "online";
+  const effectiveRuntimeID =
+    runtimeBinding?.effective_runtime_id || agent.runtime_id;
+  const canBindRuntime = !!currentUserId && !agent.archived_at;
 
   return (
     <aside className="flex w-full flex-col rounded-lg border bg-background md:h-full md:min-h-0 md:overflow-y-auto">
@@ -123,6 +133,31 @@ export function AgentDetailInspector({
             canEdit={canEdit}
             onChange={(id) => update({ runtime_id: id })}
           />
+        </PropRow>
+        <PropRow label={t(($) => $.inspector.prop_my_runtime)} interactive={false}>
+          <div className="flex min-w-0 items-center gap-1">
+            <RuntimePicker
+              value={effectiveRuntimeID}
+              runtimes={runtimes}
+              members={members}
+              currentUserId={currentUserId}
+              canEdit={canBindRuntime}
+              onChange={(id) => onRuntimeBindingChange(agent.id, id)}
+            />
+            {runtimeBinding?.bound && canBindRuntime && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 shrink-0"
+                aria-label={t(($) => $.inspector.reset_my_runtime_aria)}
+                title={t(($) => $.inspector.reset_my_runtime_aria)}
+                onClick={() => onRuntimeBindingClear(agent.id)}
+              >
+                <RotateCcw className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
         </PropRow>
         <PropRow label={t(($) => $.inspector.prop_model)} interactive={false}>
           <ModelPicker
