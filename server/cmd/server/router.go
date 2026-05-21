@@ -468,6 +468,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
 			r.Route("/api/local-runs/{runId}", func(r chi.Router) {
 				r.Patch("/", h.UpdateLocalCLIRun)
+				r.Put("/usage", h.UpdateLocalCLIUsage)
 				r.Get("/messages", h.ListLocalCLIMessages)
 				r.Post("/messages", h.CreateLocalCLIMessage)
 			})
@@ -643,6 +644,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/dashboard", func(r chi.Router) {
 				r.Get("/usage/daily", h.GetDashboardUsageDaily)
 				r.Get("/usage/by-agent", h.GetDashboardUsageByAgent)
+				r.Get("/local-usage/daily", h.GetDashboardLocalUsageDaily)
+				r.Get("/local-usage/by-runner", h.GetDashboardLocalUsageByRunner)
+				r.Get("/local-runtime/daily", h.GetDashboardLocalRunTimeDaily)
+				r.Get("/local-runtime/by-runner", h.GetDashboardLocalRunTimeByRunner)
 				r.Get("/agent-runtime", h.GetDashboardAgentRunTime)
 				r.Get("/runtime/daily", h.GetDashboardRunTimeDaily)
 			})

@@ -142,7 +142,7 @@ export function CreateIssueScreen({ navigation, route }: Props) {
     try {
       result = await DocumentPicker.getDocumentAsync({
         copyToCacheDirectory: true,
-        multiple: false,
+        multiple: true,
         base64: false,
       });
     } catch (err) {
@@ -151,31 +151,32 @@ export function CreateIssueScreen({ navigation, route }: Props) {
     }
 
     if (result.canceled) return;
-    const asset = result.assets[0];
-    if (!asset) return;
-    addAttachment({
-      uri: asset.uri,
-      name: asset.name,
-      mimeType: asset.mimeType,
-      size: asset.size,
-    });
+    for (const asset of result.assets) {
+      addAttachment({
+        uri: asset.uri,
+        name: asset.name,
+        mimeType: asset.mimeType,
+        size: asset.size,
+      });
+    }
   }
 
   async function pickImage() {
     setError(null);
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
+      allowsMultipleSelection: true,
       quality: 1,
     });
     if (result.canceled) return;
-    const asset = result.assets[0];
-    if (!asset) return;
-    addAttachment({
-      uri: asset.uri,
-      name: asset.fileName ?? "image",
-      mimeType: asset.mimeType,
-      size: asset.fileSize,
-    });
+    for (const asset of result.assets) {
+      addAttachment({
+        uri: asset.uri,
+        name: asset.fileName ?? "image",
+        mimeType: asset.mimeType,
+        size: asset.fileSize,
+      });
+    }
   }
 
   return (

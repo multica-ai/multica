@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -312,6 +313,120 @@ func TestCreateLocalCLIMessage_CommandUserInputStoresTranscriptOnly(t *testing.T
 	}
 }
 
+func TestCreateLocalCLIMessage_CodexProposedPlanCreatesLocalDisplayReply(t *testing.T) {
+	ctx := context.Background()
+	issue := createIssueForLocalRunTest(t, "in_progress")
+	run := createLocalRunForTest(t, issue.ID, map[string]any{
+		"cli_name":      "codex",
+		"work_dir":      "/tmp/project",
+		"comments_mode": "thread",
+	})
+	runID := run["id"].(string)
+	topCommentID := run["top_comment_id"].(string)
+
+	content := "Proposed Plan\n\n1. Inspect localrun sync\n2. Persist the proposed plan"
+	body := map[string]any{
+		"type":    "text",
+		"content": content,
+		"input": map[string]any{
+			"kind":        "codex_proposed_plan",
+			"question_id": "q1",
+		},
+		"source":     "codex-app-server",
+		"source_key": "thread:thread-1:turn:turn-1:request:23",
+	}
+	for i := 0; i < 2; i++ {
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/local-runs/"+runID+"/messages", body)
+		req = withLocalRunWorkspace(req)
+		req = withURLParam(req, "runId", runID)
+		testHandler.CreateLocalCLIMessage(w, req)
+		if i == 0 && w.Code != http.StatusCreated {
+			t.Fatalf("first CreateLocalCLIMessage: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		if i == 1 && w.Code != http.StatusOK {
+			t.Fatalf("duplicate CreateLocalCLIMessage: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	var messageCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM local_cli_message WHERE run_id = $1 AND type = 'text'
+	`, runID).Scan(&messageCount); err != nil {
+		t.Fatalf("count proposed plan messages: %v", err)
+	}
+	if messageCount != 1 {
+		t.Fatalf("proposed plan messages = %d, want 1", messageCount)
+	}
+
+	var replyID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM comment WHERE issue_id = $1 AND parent_id = $2 AND content = $3
+	`, issue.ID, topCommentID, content).Scan(&replyID); err != nil {
+		t.Fatalf("load proposed plan reply: %v", err)
+	}
+
+	commentsW := httptest.NewRecorder()
+	commentsReq := newRequest("GET", "/api/issues/"+issue.ID+"/comments", nil)
+	commentsReq = withURLParam(commentsReq, "id", issue.ID)
+	testHandler.ListComments(commentsW, commentsReq)
+	if commentsW.Code != http.StatusOK {
+		t.Fatalf("ListComments: expected 200, got %d: %s", commentsW.Code, commentsW.Body.String())
+	}
+	var comments []CommentResponse
+	if err := json.NewDecoder(commentsW.Body).Decode(&comments); err != nil {
+		t.Fatalf("decode comments: %v", err)
+	}
+	for _, c := range comments {
+		if c.ID != replyID {
+			continue
+		}
+		wantDisplay := handlerTestName + "-local-codex"
+		if c.AuthorDisplayName == nil || *c.AuthorDisplayName != wantDisplay {
+			t.Fatalf("author_display_name = %v, want %q", c.AuthorDisplayName, wantDisplay)
+		}
+		return
+	}
+	t.Fatalf("proposed plan reply %s not found in comments: %+v", replyID, comments)
+}
+
+func TestCreateLocalCLIMessage_TextWithoutPlanMetadataStoresTranscriptOnly(t *testing.T) {
+	ctx := context.Background()
+	issue := createIssueForLocalRunTest(t, "in_progress")
+	run := createLocalRunForTest(t, issue.ID, map[string]any{
+		"cli_name":      "codex",
+		"work_dir":      "/tmp/project",
+		"comments_mode": "thread",
+	})
+	runID := run["id"].(string)
+	topCommentID := run["top_comment_id"].(string)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/local-runs/"+runID+"/messages", map[string]any{
+		"type":    "text",
+		"content": "ordinary assistant text",
+		"input": map[string]any{
+			"kind": "user_input_request",
+		},
+	})
+	req = withLocalRunWorkspace(req)
+	req = withURLParam(req, "runId", runID)
+	testHandler.CreateLocalCLIMessage(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateLocalCLIMessage: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var replyCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM comment WHERE issue_id = $1 AND parent_id = $2
+	`, issue.ID, topCommentID).Scan(&replyCount); err != nil {
+		t.Fatalf("count replies: %v", err)
+	}
+	if replyCount != 0 {
+		t.Fatalf("reply comments = %d, want 0", replyCount)
+	}
+}
+
 func TestCreateLocalCLIMessage_SourceKeyDedupesTranscriptAndComment(t *testing.T) {
 	ctx := context.Background()
 	issue := createIssueForLocalRunTest(t, "in_progress")
@@ -391,6 +506,37 @@ func TestCreateLocalCLIMessage_CommentsOffDoesNotCreateReply(t *testing.T) {
 	}
 }
 
+func TestCreateLocalCLIMessage_CodexProposedPlanCommentsOffDoesNotCreateReply(t *testing.T) {
+	issue := createIssueForLocalRunTest(t, "in_progress")
+	run := createLocalRunForTest(t, issue.ID, map[string]any{
+		"cli_name":      "codex",
+		"comments_mode": "off",
+	})
+	runID := run["id"].(string)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/local-runs/"+runID+"/messages", map[string]any{
+		"type":    "text",
+		"content": "Proposed Plan\n\n1. Inspect localrun sync",
+		"input": map[string]any{
+			"kind": "codex_proposed_plan",
+		},
+	})
+	req = withLocalRunWorkspace(req)
+	req = withURLParam(req, "runId", runID)
+	testHandler.CreateLocalCLIMessage(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateLocalCLIMessage: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var count int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM comment WHERE issue_id = $1`, issue.ID).Scan(&count); err != nil {
+		t.Fatalf("count comments: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("comments = %d, want 0", count)
+	}
+}
+
 func TestUpdateLocalCLIRunStoresTerminalStatusAndExitCode(t *testing.T) {
 	issue := createIssueForLocalRunTest(t, "in_progress")
 	run := createLocalRunForTest(t, issue.ID, map[string]any{"cli_name": "codex"})
@@ -426,6 +572,58 @@ func TestUpdateLocalCLIRunStoresTerminalStatusAndExitCode(t *testing.T) {
 	payload := event.Payload.(map[string]any)
 	if payload["status"] != "failed" || payload["issue_id"] != issue.ID {
 		t.Fatalf("failed payload = %+v", payload)
+	}
+}
+
+func TestUpdateLocalCLIUsageUpsertsTotals(t *testing.T) {
+	ctx := context.Background()
+	issue := createIssueForLocalRunTest(t, "in_progress")
+	run := createLocalRunForTest(t, issue.ID, map[string]any{"cli_name": "codex"})
+	runID := run["id"].(string)
+
+	putUsage := func(inputTokens int64) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("PUT", "/api/local-runs/"+runID+"/usage", map[string]any{
+			"usage": []map[string]any{{
+				"provider":           "codex",
+				"model":              "gpt-5.1-codex",
+				"input_tokens":       inputTokens,
+				"output_tokens":      20,
+				"cache_read_tokens":  3,
+				"cache_write_tokens": 4,
+			}},
+		})
+		req = withLocalRunWorkspace(req)
+		req = withURLParam(req, "runId", runID)
+		testHandler.UpdateLocalCLIUsage(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("UpdateLocalCLIUsage: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	putUsage(10)
+	putUsage(15)
+
+	var count int
+	var inputTokens, outputTokens, cacheRead, cacheWrite int64
+	var runtimeID *string
+	if err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*), COALESCE(MAX(input_tokens), 0), COALESCE(MAX(output_tokens), 0),
+		       COALESCE(MAX(cache_read_tokens), 0), COALESCE(MAX(cache_write_tokens), 0)
+		FROM local_cli_usage
+		WHERE run_id = $1 AND provider = 'codex' AND model = 'gpt-5.1-codex'
+	`, runID).Scan(&count, &inputTokens, &outputTokens, &cacheRead, &cacheWrite); err != nil {
+		t.Fatalf("read local_cli_usage: %v", err)
+	}
+	if count != 1 || inputTokens != 15 || outputTokens != 20 || cacheRead != 3 || cacheWrite != 4 {
+		t.Fatalf("usage row = count %d tokens %d/%d/%d/%d, want overwritten totals", count, inputTokens, outputTokens, cacheRead, cacheWrite)
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT column_name FROM information_schema.columns
+		WHERE table_name = 'local_cli_usage' AND column_name = 'runtime_id'
+	`).Scan(&runtimeID); err != pgx.ErrNoRows {
+		t.Fatalf("local_cli_usage must not contain runtime_id, got runtimeID=%v err=%v", runtimeID, err)
 	}
 }
 

@@ -17,6 +17,10 @@ import { projectListOptions } from "@multica/core/projects/queries";
 import {
   dashboardUsageDailyOptions,
   dashboardUsageByAgentOptions,
+  dashboardLocalUsageDailyOptions,
+  dashboardLocalUsageByRunnerOptions,
+  dashboardLocalRunTimeByRunnerOptions,
+  dashboardLocalRunTimeDailyOptions,
   dashboardAgentRunTimeOptions,
   dashboardRunTimeDailyOptions,
 } from "@multica/core/dashboard";
@@ -44,6 +48,7 @@ import {
 import { useT } from "../../i18n";
 import {
   aggregateAgentTokens,
+  aggregateLocalRunnerTokens,
   aggregateDailyCost,
   aggregateDailyTasks,
   aggregateDailyTime,
@@ -52,6 +57,7 @@ import {
   aggregateWeeklyTime,
   computeDailyTotals,
   formatDuration,
+  mergeDailyRunTimeRows,
   mergeAgentDashboardRows,
   type AgentDashboardRow,
 } from "../utils";
@@ -95,6 +101,8 @@ const ALL_PROJECTS = "__all__";
 // reference-equality dep check and trips the exhaustive-deps lint rule.
 const EMPTY_DAILY: import("@multica/core/types").DashboardUsageDaily[] = [];
 const EMPTY_BY_AGENT: import("@multica/core/types").DashboardUsageByAgent[] = [];
+const EMPTY_LOCAL_BY_RUNNER: import("@multica/core/types").DashboardLocalUsageByRunner[] = [];
+const EMPTY_LOCAL_RUNTIME_BY_RUNNER: import("@multica/core/types").DashboardLocalRunTimeByRunner[] = [];
 const EMPTY_RUNTIME: import("@multica/core/types").DashboardAgentRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: import("@multica/core/types").DashboardRunTimeDaily[] = [];
 
@@ -201,6 +209,18 @@ export function DashboardPage() {
     dashboardUsageDailyOptions(wsId, chartFetchDays, projectId),
   );
   const byAgentQuery = useQuery(dashboardUsageByAgentOptions(wsId, days, projectId));
+  const localDailyQuery = useQuery(
+    dashboardLocalUsageDailyOptions(wsId, chartFetchDays, projectId),
+  );
+  const localByRunnerQuery = useQuery(
+    dashboardLocalUsageByRunnerOptions(wsId, days, projectId),
+  );
+  const localRunTimeByRunnerQuery = useQuery(
+    dashboardLocalRunTimeByRunnerOptions(wsId, days, projectId),
+  );
+  const localRunTimeDailyQuery = useQuery(
+    dashboardLocalRunTimeDailyOptions(wsId, chartFetchDays, projectId),
+  );
   const runTimeQuery = useQuery(dashboardAgentRunTimeOptions(wsId, days, projectId));
   const runTimeDailyQuery = useQuery(
     dashboardRunTimeDailyOptions(wsId, chartFetchDays, projectId),
@@ -208,6 +228,12 @@ export function DashboardPage() {
 
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
   const byAgentUsage = byAgentQuery.data ?? EMPTY_BY_AGENT;
+  const localDailyUsage = localDailyQuery.data ?? EMPTY_DAILY;
+  const localByRunnerUsage = localByRunnerQuery.data ?? EMPTY_LOCAL_BY_RUNNER;
+  const localRunTimeByRunnerRows =
+    localRunTimeByRunnerQuery.data ?? EMPTY_LOCAL_RUNTIME_BY_RUNNER;
+  const localRunTimeDailyRows =
+    localRunTimeDailyQuery.data ?? EMPTY_RUNTIME_DAILY;
   const runTimeRows = runTimeQuery.data ?? EMPTY_RUNTIME;
   const runTimeDailyRows = runTimeDailyQuery.data ?? EMPTY_RUNTIME_DAILY;
 
@@ -222,18 +248,13 @@ export function DashboardPage() {
     () => addDaysIso(todayIso(WEEK_TZ), -(days - 1)),
     [days],
   );
-  const dailyUsageInWindow = useMemo(
-    () => dailyUsage.filter((u) => u.date >= dailyCutoffIso),
-    [dailyUsage, dailyCutoffIso],
-  );
-  const runTimeDailyInWindow = useMemo(
-    () => runTimeDailyRows.filter((r) => r.date >= dailyCutoffIso),
-    [runTimeDailyRows, dailyCutoffIso],
-  );
-
   const isLoading =
     dailyQuery.isLoading ||
     byAgentQuery.isLoading ||
+    localDailyQuery.isLoading ||
+    localByRunnerQuery.isLoading ||
+    localRunTimeByRunnerQuery.isLoading ||
+    localRunTimeDailyQuery.isLoading ||
     runTimeQuery.isLoading ||
     runTimeDailyQuery.isLoading;
 
@@ -244,10 +265,30 @@ export function DashboardPage() {
     !isLoading &&
     dailyUsage.length === 0 &&
     byAgentUsage.length === 0 &&
+    localDailyUsage.length === 0 &&
+    localByRunnerUsage.length === 0 &&
+    localRunTimeByRunnerRows.length === 0 &&
+    localRunTimeDailyRows.length === 0 &&
     runTimeRows.length === 0 &&
     runTimeDailyRows.length === 0;
 
   // Cost / token math — re-derived when usage, days, or pricings change.
+  const combinedDailyUsage = useMemo(
+    () => [...dailyUsage, ...localDailyUsage],
+    [dailyUsage, localDailyUsage],
+  );
+  const dailyUsageInWindow = useMemo(
+    () => combinedDailyUsage.filter((u) => u.date >= dailyCutoffIso),
+    [combinedDailyUsage, dailyCutoffIso],
+  );
+  const combinedRunTimeDailyRows = useMemo(
+    () => mergeDailyRunTimeRows(runTimeDailyRows, localRunTimeDailyRows),
+    [runTimeDailyRows, localRunTimeDailyRows],
+  );
+  const runTimeDailyInWindow = useMemo(
+    () => combinedRunTimeDailyRows.filter((r) => r.date >= dailyCutoffIso),
+    [combinedRunTimeDailyRows, dailyCutoffIso],
+  );
   const totals = useMemo(
     () => computeDailyTotals(dailyUsageInWindow),
     [dailyUsageInWindow],
@@ -276,22 +317,26 @@ export function DashboardPage() {
   // instead of being dropped (MUL-2382 weekly window scoping). Locked to
   // UTC so the week boundaries match the backend's UTC `bucket_date`.
   const weekly = useMemo(
-    () => aggregateByWeek(dailyUsage, WEEK_TZ, weekCount),
-    [dailyUsage, weekCount],
+    () => aggregateByWeek(combinedDailyUsage, WEEK_TZ, weekCount),
+    [combinedDailyUsage, weekCount],
   );
   const weeklyCost = weekly.weeklyCostStack;
   const weeklyTokens = weekly.weeklyTokens;
   const weeklyTime = useMemo(
-    () => aggregateWeeklyTime(runTimeDailyRows, WEEK_TZ, weekCount),
-    [runTimeDailyRows, weekCount],
+    () => aggregateWeeklyTime(combinedRunTimeDailyRows, WEEK_TZ, weekCount),
+    [combinedRunTimeDailyRows, weekCount],
   );
   const weeklyTasks = useMemo(
-    () => aggregateWeeklyTasks(runTimeDailyRows, WEEK_TZ, weekCount),
-    [runTimeDailyRows, weekCount],
+    () => aggregateWeeklyTasks(combinedRunTimeDailyRows, WEEK_TZ, weekCount),
+    [combinedRunTimeDailyRows, weekCount],
   );
   const agentTokenRows = useMemo(
     () => aggregateAgentTokens(byAgentUsage),
     [byAgentUsage],
+  );
+  const localTokenRows = useMemo(
+    () => aggregateLocalRunnerTokens(localByRunnerUsage),
+    [localByRunnerUsage],
   );
 
   // Run-time totals — taskCount + failedCount summed for the KPI row.
@@ -299,17 +344,23 @@ export function DashboardPage() {
     let totalSeconds = 0;
     let taskCount = 0;
     let failedCount = 0;
-    for (const r of runTimeRows) {
+    for (const r of [...runTimeRows, ...localRunTimeByRunnerRows]) {
       totalSeconds += r.total_seconds;
       taskCount += r.task_count;
       failedCount += r.failed_count;
     }
     return { totalSeconds, taskCount, failedCount };
-  }, [runTimeRows]);
+  }, [runTimeRows, localRunTimeByRunnerRows]);
 
   const agentRows = useMemo(
-    () => mergeAgentDashboardRows(agentTokenRows, runTimeRows),
-    [agentTokenRows, runTimeRows],
+    () =>
+      mergeAgentDashboardRows(
+        agentTokenRows,
+        runTimeRows,
+        localTokenRows,
+        localRunTimeByRunnerRows,
+      ),
+    [agentTokenRows, runTimeRows, localTokenRows, localRunTimeByRunnerRows],
   );
 
   return (
@@ -691,6 +742,7 @@ function Leaderboard({
               const agent = agents.find((a) => a.id === row.agentId);
               const value = SORT_METRIC[sortBy](row);
               const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
+              const displayName = row.displayName ?? agent?.name ?? row.agentId;
               return (
                 <div
                   key={row.agentId}
@@ -698,13 +750,13 @@ function Leaderboard({
                 >
                   <div className="flex min-w-0 items-center gap-2">
                     <ActorAvatar
-                      actorType="agent"
-                      actorId={row.agentId}
+                      actorType={row.source === "local" ? "member" : "agent"}
+                      actorId={row.source === "local" ? (row.ownerId ?? row.agentId) : row.agentId}
                       size={22}
-                      enableHoverCard
+                      enableHoverCard={row.source === "agent"}
                     />
                     <span className="cursor-pointer truncate text-sm font-medium">
-                      {agent?.name ?? row.agentId}
+                      {displayName}
                     </span>
                   </div>
                   <div className="relative h-2 overflow-hidden rounded-full bg-muted">

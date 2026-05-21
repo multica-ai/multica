@@ -1372,7 +1372,7 @@ export function IssueDetail({
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
-    onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
+    onDrop: (files) => descEditorRef.current?.uploadFiles(files),
   });
   // Pending uploads in the description editor. We don't pass `issueId` on
   // upload (to avoid orphaning attachments when the user deletes the file
@@ -2271,7 +2271,9 @@ export function IssueDetail({
               />
               <FileUploadButton
                 size="sm"
+                multiple
                 onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+                onSelectMany={(files) => descEditorRef.current?.uploadFiles(files)}
               />
             </div>
             {descDragOver && <FileDropOverlay />}

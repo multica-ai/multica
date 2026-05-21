@@ -60,6 +60,19 @@ type createLocalCLIMessageRequest struct {
 	SourceKey string         `json:"source_key"`
 }
 
+type updateLocalCLIUsageRequest struct {
+	Usage []localCLIUsagePayload `json:"usage"`
+}
+
+type localCLIUsagePayload struct {
+	Provider         string `json:"provider"`
+	Model            string `json:"model"`
+	InputTokens      int64  `json:"input_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+}
+
 type localCLICommentDisplayRow struct {
 	CommentID   pgtype.UUID
 	DisplayName string
@@ -301,7 +314,7 @@ func (h *Handler) CreateLocalCLIMessage(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var commentID pgtype.UUID
-	createsReply := (req.Type == "final" || (req.Type == "user_input" && !localCLIMessageIsCommand(req))) &&
+	createsReply := (req.Type == "final" || (req.Type == "user_input" && !localCLIMessageIsCommand(req)) || localCLIMessageIsCodexProposedPlan(req)) &&
 		run.CommentsMode == "thread" &&
 		run.TopCommentID.Valid &&
 		strings.TrimSpace(req.Content) != ""
@@ -321,7 +334,7 @@ func (h *Handler) CreateLocalCLIMessage(w http.ResponseWriter, r *http.Request) 
 		}
 		commentID = comment.ID
 		var displayName *string
-		if req.Type == "final" {
+		if req.Type == "final" || localCLIMessageIsCodexProposedPlan(req) {
 			name := h.localCLIDisplayName(r.Context(), run)
 			displayName = &name
 		}
@@ -367,6 +380,57 @@ func localCLIMessageIsCommand(req createLocalCLIMessageRequest) bool {
 	return command
 }
 
+func localCLIMessageIsCodexProposedPlan(req createLocalCLIMessageRequest) bool {
+	if req.Type != "text" || req.Input == nil {
+		return false
+	}
+	kind, _ := req.Input["kind"].(string)
+	return kind == "codex_proposed_plan"
+}
+
+func (h *Handler) UpdateLocalCLIUsage(w http.ResponseWriter, r *http.Request) {
+	run, ok := h.loadLocalCLIRunForUser(w, r, chi.URLParam(r, "runId"))
+	if !ok {
+		return
+	}
+
+	var req updateLocalCLIUsageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	for _, u := range req.Usage {
+		provider := strings.ToLower(strings.TrimSpace(u.Provider))
+		if provider != "codex" && provider != "claude" {
+			writeError(w, http.StatusBadRequest, "invalid provider")
+			return
+		}
+		model := strings.TrimSpace(u.Model)
+		if model == "" {
+			model = "unknown"
+		}
+		if u.InputTokens < 0 || u.OutputTokens < 0 || u.CacheReadTokens < 0 || u.CacheWriteTokens < 0 {
+			writeError(w, http.StatusBadRequest, "usage tokens must be non-negative")
+			return
+		}
+		if err := h.Queries.UpsertLocalCLIUsage(r.Context(), db.UpsertLocalCLIUsageParams{
+			RunID:            run.ID,
+			Provider:         provider,
+			Model:            model,
+			InputTokens:      u.InputTokens,
+			OutputTokens:     u.OutputTokens,
+			CacheReadTokens:  u.CacheReadTokens,
+			CacheWriteTokens: u.CacheWriteTokens,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update local run usage")
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 func (h *Handler) localCLIDisplayName(ctx context.Context, run localCLIRun) string {
 	if user, err := h.Queries.GetUser(ctx, run.OwnerID); err == nil {
 		name := strings.TrimSpace(user.Name)
@@ -389,7 +453,11 @@ func (h *Handler) localCLICommentDisplayNames(ctx context.Context, commentIDs []
 		FROM local_cli_message lcm
 		JOIN local_cli_run lcr ON lcr.id = lcm.run_id
 		JOIN "user" u ON u.id = lcr.owner_id
-		WHERE lcm.comment_id = ANY($1) AND lcm.type = 'final'
+		WHERE lcm.comment_id = ANY($1)
+			AND (
+				lcm.type = 'final'
+				OR (lcm.type = 'text' AND lcm.input->>'kind' = 'codex_proposed_plan')
+			)
 	`, commentIDs)
 	if err != nil {
 		return nil

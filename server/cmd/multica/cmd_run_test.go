@@ -27,7 +27,7 @@ func TestRunLocalCLIEndToEndWithFakeAPI(t *testing.T) {
 		t.Fatalf("symlink codex shim: %v", err)
 	}
 	origExecute := executeLocalCLIForRun
-	executeLocalCLIForRun = func(args []string, cwd, cliName string, env localCLIEnv, initialPrompt string, reporter *localRunReporter) (int, error) {
+	executeLocalCLIForRun = func(args []string, cwd, cliName string, env localCLIEnv, initialPrompt string, reporter *localRunReporter, usageReporter *localRunUsageReporter) (int, error) {
 		if cliName != "codex" {
 			t.Fatalf("cliName = %q, want codex", cliName)
 		}
@@ -333,7 +333,7 @@ func TestValidateCodexRemoteArgsRejectsManagedFlags(t *testing.T) {
 func TestCodexAppServerMapperMapsUserAndFinal(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	mapper := newCodexAppServerMapper(reporter, "bootstrap prompt")
+	mapper := newCodexAppServerMapper(reporter, nil, "bootstrap prompt")
 
 	mapper.Observe(false, []byte(`{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"user-1","type":"userMessage","content":[{"type":"text","text":"你好"}]}}}`))
 	mapper.Observe(false, []byte(`{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"agent-1","delta":"你好"}}`))
@@ -359,7 +359,7 @@ func TestCodexAppServerMapperMapsUserAndFinal(t *testing.T) {
 func TestCodexAppServerMapperSkipsBootstrapComments(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	mapper := newCodexAppServerMapper(reporter, "bootstrap prompt")
+	mapper := newCodexAppServerMapper(reporter, nil, "bootstrap prompt")
 
 	mapper.Observe(false, []byte(`{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"user-1","type":"userMessage","text":"bootstrap prompt"}}}`))
 	mapper.Observe(false, []byte(`{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"agent-1","type":"agentMessage","phase":"final_answer","text":"should stay silent"}}}`))
@@ -376,7 +376,7 @@ func TestCodexAppServerMapperSkipsBootstrapComments(t *testing.T) {
 func TestCodexAppServerMapperMapsCommandExecution(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	mapper := newCodexAppServerMapper(reporter, "")
+	mapper := newCodexAppServerMapper(reporter, nil, "")
 
 	mapper.Observe(false, []byte(`{"method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"cmd-1","type":"commandExecution","command":"go test ./cmd/multica"}}}`))
 	mapper.Observe(false, []byte(`{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"cmd-1","type":"commandExecution","aggregatedOutput":"ok\n"}}}`))
@@ -396,7 +396,7 @@ func TestCodexAppServerMapperMapsCommandExecution(t *testing.T) {
 func TestCodexAppServerMapperMapsFileChange(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	mapper := newCodexAppServerMapper(reporter, "")
+	mapper := newCodexAppServerMapper(reporter, nil, "")
 
 	mapper.Observe(false, []byte(`{"method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"patch-1","type":"fileChange"}}}`))
 	mapper.Observe(false, []byte(`{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"patch-1","type":"fileChange"}}}`))
@@ -413,10 +413,54 @@ func TestCodexAppServerMapperMapsFileChange(t *testing.T) {
 	}
 }
 
+func TestCodexAppServerMapperMapsProposedPlanRequest(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	mapper := newCodexAppServerMapper(reporter, nil, "")
+
+	mapper.Observe(false, []byte(`{"method":"turn/started","params":{"threadId":"thread-1","turn":{"id":"turn-1"}}}`))
+	mapper.Observe(false, []byte(`{"jsonrpc":"2.0","id":23,"method":"item/tool/requestUserInput","params":{"itemId":"item-1","threadId":"thread-1","turnId":"turn-1","questions":[{"id":"q1","header":"Proposed Plan","question":"1. Inspect localrun sync\n2. Persist the proposed plan","options":[{"label":"Approve plan","description":"Continue"},{"label":"Edit plan","description":"Revise"},{"label":"Cancel","description":"Stop"}]}]}}`))
+	reporter.Close()
+
+	texts := localMessagesByType(poster.messages(), "text")
+	if len(texts) != 1 || texts[0].Content != "Proposed Plan\n\n1. Inspect localrun sync\n2. Persist the proposed plan" {
+		t.Fatalf("texts = %+v, want proposed plan request recorded", texts)
+	}
+	if texts[0].SourceKey != "thread:thread-1:turn:turn-1:request:23" {
+		t.Fatalf("source key = %q, want turn-scoped request source key", texts[0].SourceKey)
+	}
+	if texts[0].Input["kind"] != codexProposedPlanInputKind || texts[0].Input["question_id"] != "q1" {
+		t.Fatalf("input = %+v, want user input metadata", texts[0].Input)
+	}
+}
+
+func TestCodexAppServerMapperMapsProposedPlanItem(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	mapper := newCodexAppServerMapper(reporter, nil, "")
+
+	mapper.Observe(false, []byte(`{"method":"turn/started","params":{"threadId":"thread-1","turn":{"id":"turn-1"}}}`))
+	mapper.Observe(false, []byte(`{"method":"item/plan/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"plan-1","delta":"1. Inspect localrun sync\n"}}`))
+	mapper.Observe(false, []byte(`{"method":"item/plan/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"plan-1","delta":"2. Persist the proposed plan"}}`))
+	mapper.Observe(false, []byte(`{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"plan-1","type":"plan","text":"1. Inspect localrun sync\n2. Persist the proposed plan"}}}`))
+	reporter.Close()
+
+	texts := localMessagesByType(poster.messages(), "text")
+	if len(texts) != 1 || texts[0].Content != "Proposed Plan\n\n1. Inspect localrun sync\n2. Persist the proposed plan" {
+		t.Fatalf("texts = %+v, want proposed plan item recorded", texts)
+	}
+	if texts[0].SourceKey != "thread:thread-1:turn:turn-1:plan:plan-1" {
+		t.Fatalf("source key = %q, want turn-scoped plan source key", texts[0].SourceKey)
+	}
+	if texts[0].Input["kind"] != codexProposedPlanInputKind || texts[0].Input["item_id"] != "plan-1" {
+		t.Fatalf("input = %+v, want proposed plan metadata", texts[0].Input)
+	}
+}
+
 func TestCodexAppServerMapperMapsErrors(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	mapper := newCodexAppServerMapper(reporter, "")
+	mapper := newCodexAppServerMapper(reporter, nil, "")
 
 	mapper.Observe(false, []byte(`{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"failed","error":{"message":"unexpected status 401 Unauthorized"}}}}`))
 	mapper.Observe(false, []byte(`{"method":"error","params":{"error":{"message":"websocket closed"}}}`))
@@ -428,10 +472,80 @@ func TestCodexAppServerMapperMapsErrors(t *testing.T) {
 	}
 }
 
+func TestCodexAppServerMapperReportsUsage(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	usageReporter := newLocalRunUsageReporter(poster, "run-1", time.Hour)
+	mapper := newCodexAppServerMapper(reporter, usageReporter, "")
+
+	mapper.Observe(true, []byte(`{"id":1,"method":"thread/start","params":{}}`))
+	mapper.Observe(false, []byte(`{"id":1,"result":{"thread":{"id":"thread-1"},"model":"gpt-5.5"}}`))
+	mapper.Observe(false, []byte(`{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"last":{"totalTokens":18,"inputTokens":11,"cachedInputTokens":3,"outputTokens":7,"reasoningOutputTokens":0},"total":{"totalTokens":18,"inputTokens":11,"cachedInputTokens":3,"outputTokens":7,"reasoningOutputTokens":0},"modelContextWindow":258400}}}`))
+	mapper.Observe(false, []byte(`{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"last":{"totalTokens":24,"inputTokens":13,"cachedInputTokens":4,"outputTokens":11,"reasoningOutputTokens":0},"total":{"totalTokens":24,"inputTokens":13,"cachedInputTokens":4,"outputTokens":11,"reasoningOutputTokens":0},"modelContextWindow":258400}}}`))
+	mapper.Observe(false, []byte(`{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-2","tokenUsage":{"last":{"totalTokens":10,"inputTokens":6,"cachedInputTokens":2,"outputTokens":4,"reasoningOutputTokens":0},"total":{"totalTokens":34,"inputTokens":19,"cachedInputTokens":6,"outputTokens":15,"reasoningOutputTokens":0},"modelContextWindow":258400}}}`))
+	usageReporter.Close()
+	reporter.Close()
+
+	rows := poster.usageRows()
+	row, ok := usageRowByModel(rows, "gpt-5.5")
+	if !ok || row.Provider != "codex" || row.InputTokens != 19 || row.OutputTokens != 15 || row.CacheReadTokens != 6 || row.CacheWriteTokens != 0 {
+		t.Fatalf("usage rows = %+v, want app-server token usage totals", rows)
+	}
+}
+
+func TestCodexAppServerMapperReportsUsageAcrossClearAndResume(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	usageReporter := newLocalRunUsageReporter(poster, "run-1", time.Hour)
+	mapper := newCodexAppServerMapper(reporter, usageReporter, "")
+
+	mapper.Observe(true, []byte(`{"id":9,"method":"thread/start","params":{"sessionStartSource":"clear"}}`))
+	mapper.Observe(false, []byte(`{"id":9,"result":{"thread":{"id":"thread-clear"},"model":"gpt-5.5"}}`))
+	mapper.Observe(false, []byte(`{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-clear","turnId":"turn-clear","tokenUsage":{"last":{"totalTokens":15,"inputTokens":10,"cachedInputTokens":4,"outputTokens":5,"reasoningOutputTokens":0},"total":{"totalTokens":15,"inputTokens":10,"cachedInputTokens":4,"outputTokens":5,"reasoningOutputTokens":0},"modelContextWindow":258400}}}`))
+	mapper.Observe(true, []byte(`{"id":13,"method":"thread/resume","params":{"threadId":"thread-old"}}`))
+	mapper.Observe(false, []byte(`{"id":13,"result":{"thread":{"id":"thread-old"},"model":"gpt-5.4"}}`))
+	mapper.Observe(false, []byte(`{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-old","turnId":"turn-old","tokenUsage":{"last":{"totalTokens":28,"inputTokens":20,"cachedInputTokens":8,"outputTokens":8,"reasoningOutputTokens":0},"total":{"totalTokens":28,"inputTokens":20,"cachedInputTokens":8,"outputTokens":8,"reasoningOutputTokens":0},"modelContextWindow":258400}}}`))
+	usageReporter.Close()
+	reporter.Close()
+
+	rows := poster.usageRows()
+	clearRow, clearOK := usageRowByModel(rows, "gpt-5.5")
+	resumeRow, resumeOK := usageRowByModel(rows, "gpt-5.4")
+	if !clearOK || clearRow.InputTokens != 10 || clearRow.OutputTokens != 5 || clearRow.CacheReadTokens != 4 {
+		t.Fatalf("usage rows = %+v, want clear thread usage under gpt-5.5", rows)
+	}
+	if !resumeOK || resumeRow.InputTokens != 20 || resumeRow.OutputTokens != 8 || resumeRow.CacheReadTokens != 8 {
+		t.Fatalf("usage rows = %+v, want resumed thread usage under gpt-5.4", rows)
+	}
+}
+
+func TestCodexAppServerMapperReportsReroutedUsageModel(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	usageReporter := newLocalRunUsageReporter(poster, "run-1", time.Hour)
+	mapper := newCodexAppServerMapper(reporter, usageReporter, "")
+
+	mapper.Observe(true, []byte(`{"id":1,"method":"thread/start","params":{}}`))
+	mapper.Observe(false, []byte(`{"id":1,"result":{"thread":{"id":"thread-1"},"model":"gpt-5.4"}}`))
+	mapper.Observe(false, []byte(`{"method":"model/rerouted","params":{"threadId":"thread-1","turnId":"turn-1","fromModel":"gpt-5.4","toModel":"gpt-5.5","reason":{"type":"server"}}}`))
+	mapper.Observe(false, []byte(`{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"last":{"totalTokens":12,"inputTokens":9,"cachedInputTokens":3,"outputTokens":3,"reasoningOutputTokens":0},"total":{"totalTokens":12,"inputTokens":9,"cachedInputTokens":3,"outputTokens":3,"reasoningOutputTokens":0},"modelContextWindow":258400}}}`))
+	usageReporter.Close()
+	reporter.Close()
+
+	rows := poster.usageRows()
+	if _, ok := usageRowByModel(rows, "gpt-5.4"); ok {
+		t.Fatalf("usage rows = %+v, want rerouted usage excluded from original model", rows)
+	}
+	row, ok := usageRowByModel(rows, "gpt-5.5")
+	if !ok || row.InputTokens != 9 || row.OutputTokens != 3 || row.CacheReadTokens != 3 {
+		t.Fatalf("usage rows = %+v, want rerouted usage under gpt-5.5", rows)
+	}
+}
+
 func TestCodexAppServerMapperSkipsLifecycleMessages(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	mapper := newCodexAppServerMapper(reporter, "")
+	mapper := newCodexAppServerMapper(reporter, nil, "")
 
 	mapper.Observe(true, []byte(`{"id":9,"method":"thread/start","params":{"sessionStartSource":"clear"}}`))
 	mapper.Observe(false, []byte(`{"id":9,"result":{"thread":{"id":"thread-clear","sessionId":"thread-clear","path":"/tmp/clear.jsonl","cwd":"/tmp"}}}`))
@@ -448,7 +562,7 @@ func TestCodexAppServerMapperSkipsLifecycleMessages(t *testing.T) {
 func TestCodexAppServerMapperTracksClearAndResumeThreadsForComments(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	mapper := newCodexAppServerMapper(reporter, "")
+	mapper := newCodexAppServerMapper(reporter, nil, "")
 
 	mapper.Observe(true, []byte(`{"id":9,"method":"thread/start","params":{"sessionStartSource":"clear"}}`))
 	mapper.Observe(false, []byte(`{"id":9,"result":{"thread":{"id":"thread-clear","sessionId":"thread-clear","path":"/tmp/clear.jsonl","cwd":"/tmp"}}}`))
@@ -501,7 +615,7 @@ func TestCodexRemoteProxyCloseClosesActiveWebSockets(t *testing.T) {
 
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	proxy, err := newCodexRemoteProxy("ws://"+upstreamListener.Addr().String(), reporter, "")
+	proxy, err := newCodexRemoteProxy("ws://"+upstreamListener.Addr().String(), reporter, nil, "")
 	if err != nil {
 		t.Fatalf("newCodexRemoteProxy: %v", err)
 	}
@@ -675,7 +789,7 @@ func TestClaudeTranscriptTrackerMapsUserToolResultAndFinal(t *testing.T) {
 	}
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	tracker := newClaudeTranscriptTracker(reporter, tmp, "bootstrap prompt", time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
+	tracker := newClaudeTranscriptTracker(reporter, nil, tmp, "bootstrap prompt", time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
 	tracker.ObserveSessionHook(claudeSessionHookPayload{SessionID: "sess-1", TranscriptPath: sessionPath, Cwd: tmp})
 
 	writeClaudeJSONLLines(t, sessionPath, []string{
@@ -710,6 +824,32 @@ func TestClaudeTranscriptTrackerMapsUserToolResultAndFinal(t *testing.T) {
 	}
 }
 
+func TestClaudeTranscriptTrackerReportsUsage(t *testing.T) {
+	tmp := t.TempDir()
+	sessionPath := filepath.Join(tmp, "sess-usage.jsonl")
+	if err := os.WriteFile(sessionPath, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	usageReporter := newLocalRunUsageReporter(poster, "run-1", time.Hour)
+	tracker := newClaudeTranscriptTracker(reporter, usageReporter, tmp, "", time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
+	tracker.ObserveSessionHook(claudeSessionHookPayload{SessionID: "sess-usage", TranscriptPath: sessionPath, Cwd: tmp})
+
+	writeClaudeJSONLLines(t, sessionPath, []string{
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-05-14T12:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4-6","usage":{"input_tokens":9,"output_tokens":4,"cache_read_input_tokens":2,"cache_creation_input_tokens":1},"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}}`,
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-05-14T12:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4-6","usage":{"input_tokens":9,"output_tokens":4,"cache_read_input_tokens":2,"cache_creation_input_tokens":1},"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}}`,
+	})
+	tracker.Sync()
+	usageReporter.Close()
+	reporter.Close()
+
+	rows := poster.usageRows()
+	if len(rows) != 1 || rows[0].Provider != "claude" || rows[0].Model != "claude-sonnet-4-6" || rows[0].InputTokens != 9 || rows[0].OutputTokens != 4 || rows[0].CacheReadTokens != 2 || rows[0].CacheWriteTokens != 1 {
+		t.Fatalf("usage rows = %+v, want one de-duplicated Claude total", rows)
+	}
+}
+
 func TestClaudeTranscriptTrackerFinalUsesEndTurnAssistantText(t *testing.T) {
 	tmp := t.TempDir()
 	sessionPath := filepath.Join(tmp, "sess-1.jsonl")
@@ -718,7 +858,7 @@ func TestClaudeTranscriptTrackerFinalUsesEndTurnAssistantText(t *testing.T) {
 	}
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	tracker := newClaudeTranscriptTracker(reporter, tmp, "", time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
+	tracker := newClaudeTranscriptTracker(reporter, nil, tmp, "", time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
 	tracker.ObserveSessionHook(claudeSessionHookPayload{SessionID: "sess-1", TranscriptPath: sessionPath, Cwd: tmp})
 
 	writeClaudeJSONLLines(t, sessionPath, []string{
@@ -749,7 +889,7 @@ func TestClaudeTranscriptTrackerSkipsLocalCommandPseudoUserLines(t *testing.T) {
 	}
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	tracker := newClaudeTranscriptTracker(reporter, tmp, "", time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
+	tracker := newClaudeTranscriptTracker(reporter, nil, tmp, "", time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
 	tracker.ObserveSessionHook(claudeSessionHookPayload{SessionID: "sess-1", TranscriptPath: sessionPath, Cwd: tmp})
 
 	writeClaudeJSONLLines(t, sessionPath, []string{
@@ -773,7 +913,7 @@ func TestClaudeTranscriptTrackerPreservesStructuredToolResultContent(t *testing.
 	}
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	tracker := newClaudeTranscriptTracker(reporter, tmp, "", time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
+	tracker := newClaudeTranscriptTracker(reporter, nil, tmp, "", time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
 	tracker.ObserveSessionHook(claudeSessionHookPayload{SessionID: "sess-1", TranscriptPath: sessionPath, Cwd: tmp})
 
 	writeClaudeJSONLLines(t, sessionPath, []string{
@@ -799,7 +939,7 @@ func TestClaudeTranscriptTrackerSkipsBootstrapAndHistoricalLines(t *testing.T) {
 	})
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	tracker := newClaudeTranscriptTracker(reporter, tmp, bootstrap, time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
+	tracker := newClaudeTranscriptTracker(reporter, nil, tmp, bootstrap, time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
 	tracker.ObserveSessionHook(claudeSessionHookPayload{SessionID: "sess-1", TranscriptPath: sessionPath, Cwd: tmp})
 
 	writeClaudeJSONLLines(t, sessionPath, []string{
@@ -868,8 +1008,9 @@ func TestLocalCLIProcessEnvRemovesParentWorkspaceAndToken(t *testing.T) {
 }
 
 type fakeLocalRunPoster struct {
-	mu   sync.Mutex
-	msgs []localCLIMessage
+	mu    sync.Mutex
+	msgs  []localCLIMessage
+	usage []localCLIUsage
 }
 
 type fakeLocalRunPatcher struct {
@@ -889,10 +1030,34 @@ func (f *fakeLocalRunPoster) PostJSON(_ context.Context, _ string, body any, _ a
 	return nil
 }
 
+func (f *fakeLocalRunPoster) PutJSON(_ context.Context, _ string, body any, _ any) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	payload, _ := body.(map[string]any)
+	rows, _ := payload["usage"].([]localCLIUsage)
+	f.usage = append([]localCLIUsage(nil), rows...)
+	return nil
+}
+
 func (f *fakeLocalRunPoster) messages() []localCLIMessage {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]localCLIMessage(nil), f.msgs...)
+}
+
+func (f *fakeLocalRunPoster) usageRows() []localCLIUsage {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]localCLIUsage(nil), f.usage...)
+}
+
+func usageRowByModel(rows []localCLIUsage, model string) (localCLIUsage, bool) {
+	for _, row := range rows {
+		if row.Model == model {
+			return row, true
+		}
+	}
+	return localCLIUsage{}, false
 }
 
 func (f *fakeLocalRunPatcher) PatchJSON(_ context.Context, path string, body any, _ any) error {
@@ -901,6 +1066,34 @@ func (f *fakeLocalRunPatcher) PatchJSON(_ context.Context, path string, body any
 	status, _ := body.(map[string]any)["status"].(string)
 	f.patches = append(f.patches, localRunPatch{path: path, status: status})
 	return nil
+}
+
+func TestLocalRunUsageReporterFlushesLatestTotalsOnClose(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunUsageReporter(poster, "run-1", time.Hour)
+	reporter.Report(localCLIUsage{
+		Provider:     "codex",
+		Model:        "gpt-5.1-codex",
+		InputTokens:  10,
+		OutputTokens: 5,
+	})
+	reporter.Report(localCLIUsage{
+		Provider:        "codex",
+		Model:           "gpt-5.1-codex",
+		InputTokens:     20,
+		OutputTokens:    8,
+		CacheReadTokens: 3,
+	})
+	reporter.Close()
+
+	rows := poster.usageRows()
+	if len(rows) != 1 {
+		t.Fatalf("usage rows = %+v, want one latest total", rows)
+	}
+	row := rows[0]
+	if row.Provider != "codex" || row.Model != "gpt-5.1-codex" || row.InputTokens != 20 || row.OutputTokens != 8 || row.CacheReadTokens != 3 {
+		t.Fatalf("usage row = %+v, want latest cumulative totals", row)
+	}
 }
 
 func (f *fakeLocalRunPatcher) count() int {

@@ -27,12 +27,12 @@ var extContentTypes = map[string]string{
 	".wasm": "application/wasm",
 }
 
-const maxUploadSize = 100 << 20 // 100 MB
+const maxUploadSize = 500 << 20 // 500 MB
 
 // maxPreviewTextSize caps the body the preview proxy will load into memory
 // for text-based types. Anything larger returns 413 and the UI falls back
 // to "please download". Sized so a typical README/source-file fits but a
-// 100 MB log dump can't blow up the renderer.
+// 500 MB log dump can't blow up the renderer.
 const maxPreviewTextSize = 2 << 20 // 2 MB
 
 // ---------------------------------------------------------------------------

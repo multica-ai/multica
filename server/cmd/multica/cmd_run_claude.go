@@ -37,7 +37,7 @@ func init() {
 	claudeSessionHookCmd.Flags().IntVar(&claudeSessionHookPort, "port", 0, "Claude hook receiver port")
 }
 
-func (claudeLocalRunProvider) Run(args []string, cwd string, env localCLIEnv, _ string, reporter *localRunReporter) (int, error) {
+func (claudeLocalRunProvider) Run(args []string, cwd string, env localCLIEnv, _ string, reporter *localRunReporter, usageReporter *localRunUsageReporter) (int, error) {
 	if len(args) == 0 {
 		return 1, fmt.Errorf("missing Claude command")
 	}
@@ -45,7 +45,7 @@ func (claudeLocalRunProvider) Run(args []string, cwd string, env localCLIEnv, _ 
 		return 1, err
 	}
 
-	tracker := newClaudeTranscriptTracker(reporter, cwd, "", time.Now())
+	tracker := newClaudeTranscriptTracker(reporter, usageReporter, cwd, "", time.Now())
 	tracker.Start()
 	defer tracker.Close()
 
@@ -257,6 +257,7 @@ func shellQuote(s string) string {
 
 type claudeTranscriptTracker struct {
 	reporter         *localRunReporter
+	usageReporter    *localRunUsageReporter
 	cwd              string
 	bootstrap        string
 	startedAt        time.Time
@@ -264,6 +265,8 @@ type claudeTranscriptTracker struct {
 	mu               sync.Mutex
 	sessions         map[string]*claudeTrackedSession
 	seen             map[string]bool
+	usageSeen        map[string]bool
+	usageTotals      map[string]localCLIUsage
 	toolByID         map[string]string
 	currentTurnReply bool
 	done             chan struct{}
@@ -278,15 +281,18 @@ type claudeTrackedSession struct {
 	baselineLines int
 }
 
-func newClaudeTranscriptTracker(reporter *localRunReporter, cwd, bootstrapPrompt string, startedAt time.Time) *claudeTranscriptTracker {
+func newClaudeTranscriptTracker(reporter *localRunReporter, usageReporter *localRunUsageReporter, cwd, bootstrapPrompt string, startedAt time.Time) *claudeTranscriptTracker {
 	return &claudeTranscriptTracker{
 		reporter:       reporter,
+		usageReporter:  usageReporter,
 		cwd:            cwd,
 		bootstrap:      bootstrapPrompt,
 		startedAt:      startedAt,
 		tickerInterval: 500 * time.Millisecond,
 		sessions:       make(map[string]*claudeTrackedSession),
 		seen:           make(map[string]bool),
+		usageSeen:      make(map[string]bool),
+		usageTotals:    make(map[string]localCLIUsage),
 		toolByID:       make(map[string]string),
 		done:           make(chan struct{}),
 		stopped:        make(chan struct{}),
@@ -463,6 +469,7 @@ func (t *claudeTranscriptTracker) recordClaudeUserPromptLocked(session *claudeTr
 
 func (t *claudeTranscriptTracker) mapAssistantLineLocked(session *claudeTrackedSession, raw map[string]any, key string) {
 	msg := nestedMap(raw, "message")
+	t.recordClaudeUsageLocked(session, msg, key)
 	var textParts []string
 	for idx, block := range claudeContentBlocks(msg["content"]) {
 		switch stringValue(block["type"]) {
@@ -512,6 +519,51 @@ func (t *claudeTranscriptTracker) mapAssistantLineLocked(session *claudeTrackedS
 		})
 		t.currentTurnReply = false
 	}
+}
+
+func (t *claudeTranscriptTracker) recordClaudeUsageLocked(session *claudeTrackedSession, msg map[string]any, key string) {
+	if t.usageReporter == nil || msg == nil {
+		return
+	}
+	usageObj := firstNestedMap(msg, "usage", "usage_metadata", "usageMetadata")
+	if usageObj == nil {
+		return
+	}
+	model := firstString(msg, "model", "model_name", "modelName")
+	if model == "" {
+		model = firstString(usageObj, "model", "model_name", "modelName")
+	}
+	if model == "" {
+		model = "unknown"
+	}
+	usage := localCLIUsage{
+		Provider:         "claude",
+		Model:            model,
+		InputTokens:      int64Value(firstAny(usageObj, "input_tokens", "inputTokens")),
+		OutputTokens:     int64Value(firstAny(usageObj, "output_tokens", "outputTokens")),
+		CacheReadTokens:  int64Value(firstAny(usageObj, "cache_read_input_tokens", "cacheReadInputTokens", "cache_read_tokens", "cacheReadTokens")),
+		CacheWriteTokens: int64Value(firstAny(usageObj, "cache_creation_input_tokens", "cacheCreationInputTokens", "cache_write_tokens", "cacheWriteTokens")),
+	}
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CacheReadTokens == 0 && usage.CacheWriteTokens == 0 {
+		return
+	}
+	eventKey := t.sourceKey(session, key, "usage:"+model)
+	if t.usageSeen[eventKey] {
+		return
+	}
+	t.usageSeen[eventKey] = true
+	totalKey := usage.Provider + "\x00" + usage.Model
+	total := t.usageTotals[totalKey]
+	if total.Provider == "" {
+		total.Provider = usage.Provider
+		total.Model = usage.Model
+	}
+	total.InputTokens += usage.InputTokens
+	total.OutputTokens += usage.OutputTokens
+	total.CacheReadTokens += usage.CacheReadTokens
+	total.CacheWriteTokens += usage.CacheWriteTokens
+	t.usageTotals[totalKey] = total
+	t.usageReporter.Report(total)
 }
 
 func isClaudeLocalCommandUserContent(content string) bool {
