@@ -15,6 +15,7 @@
     "status": "Status",
     "progress": "Progress",
     "lead": "Lead",
+    "workdir": "Workdir",
     "created": "Created"
   },
   "status": {
@@ -79,6 +80,15 @@
     "toast_attach_failed": "Failed to attach",
     "toast_removed": "Resource removed",
     "toast_remove_failed": "Failed to remove resource"
+  },
+  "workdir": {
+    "not_set": "Not set",
+    "advisory_badge": "Advisory",
+    "title": "Preferred workdir",
+    "description": "Agents receive this as an advisory project path. It does not enforce a filesystem sandbox.",
+    "placeholder": "/Users/name/code/project",
+    "clear": "Clear",
+    "save": "Save"
   },
   "delete_dialog": {
     "title": "Delete project",

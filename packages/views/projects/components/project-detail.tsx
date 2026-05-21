@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Plus, Trash2, UserMinus } from "lucide-react";
+import { Check, ChevronRight, FolderOpen, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Plus, Trash2, UserMinus } from "lucide-react";
 import { useQuery, type QueryKey } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
@@ -386,9 +386,15 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   // Lead popover
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadFilter, setLeadFilter] = useState("");
+  const [workdirOpen, setWorkdirOpen] = useState(false);
+  const [workdirDraft, setWorkdirDraft] = useState("");
   const leadQuery = leadFilter.toLowerCase();
   const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery) || matchesPinyin(m.name, leadQuery));
   const filteredAgents = agents.filter((a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)));
+
+  useEffect(() => {
+    setWorkdirDraft(project?.canonical_workdir ?? "");
+  }, [project?.canonical_workdir]);
 
   const handleUpdateField = useCallback(
     (data: Parameters<typeof updateProject.mutate>[0] extends { id: string } & infer R ? R : never) => {
@@ -407,6 +413,23 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       },
     });
   }, [project, deleteProject, router, wsPaths, t]);
+
+  const handleSaveWorkdir = useCallback(() => {
+    if (!project) return;
+    const trimmed = workdirDraft.trim();
+    handleUpdateField({
+      canonical_workdir: trimmed || null,
+      workdir_policy: trimmed ? "advisory" : "none",
+    });
+    setWorkdirOpen(false);
+  }, [handleUpdateField, project, workdirDraft]);
+
+  const handleClearWorkdir = useCallback(() => {
+    if (!project) return;
+    setWorkdirDraft("");
+    handleUpdateField({ canonical_workdir: null, workdir_policy: "none" });
+    setWorkdirOpen(false);
+  }, [handleUpdateField, project]);
 
   if (isLoading) {
     return (
@@ -585,6 +608,48 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   {filteredMembers.length === 0 && filteredAgents.length === 0 && leadFilter && (
                     <div className="px-2 py-3 text-center text-sm text-muted-foreground">{t(($) => $.lead.no_results)}</div>
                   )}
+                </div>
+              </PopoverContent>
+            </Popover>
+          </PropRow>
+          <PropRow label={t(($) => $.table.workdir)}>
+            <Popover open={workdirOpen} onOpenChange={setWorkdirOpen}>
+              <PopoverTrigger
+                render={
+                  <button type="button" className="inline-flex min-w-0 max-w-full items-center gap-1.5 text-xs hover:text-foreground transition-colors">
+                    <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className={cn("truncate", !project.canonical_workdir && "text-muted-foreground")}>
+                      {project.canonical_workdir || t(($) => $.workdir.not_set)}
+                    </span>
+                    {project.workdir_policy === "advisory" && project.canonical_workdir && (
+                      <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+                        {t(($) => $.workdir.advisory_badge)}
+                      </span>
+                    )}
+                  </button>
+                }
+              />
+              <PopoverContent align="start" className="w-80 space-y-3">
+                <div className="space-y-1">
+                  <div className="text-sm font-medium">{t(($) => $.workdir.title)}</div>
+                  <p className="text-xs text-muted-foreground">
+                    {t(($) => $.workdir.description)}
+                  </p>
+                </div>
+                <input
+                  type="text"
+                  value={workdirDraft}
+                  onChange={(e) => setWorkdirDraft(e.target.value)}
+                  placeholder={t(($) => $.workdir.placeholder)}
+                  className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+                <div className="flex justify-end gap-2">
+                  <Button type="button" variant="ghost" size="sm" onClick={handleClearWorkdir}>
+                    {t(($) => $.workdir.clear)}
+                  </Button>
+                  <Button type="button" size="sm" onClick={handleSaveWorkdir}>
+                    {t(($) => $.workdir.save)}
+                  </Button>
                 </div>
               </PopoverContent>
             </Popover>

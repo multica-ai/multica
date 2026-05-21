@@ -69,6 +69,7 @@ export type {
   Project,
   ProjectStatus,
   ProjectPriority,
+  ProjectWorkdirPolicy,
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
