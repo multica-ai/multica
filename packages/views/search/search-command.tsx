@@ -6,6 +6,7 @@ import {
   Check,
   Clock,
   Copy,
+  FileText,
   Link2,
   Loader2,
   MessageSquare,
@@ -67,8 +68,17 @@ import { useSearchStore } from "./search-store";
 function HighlightText({ text, query }: { text: string; query: string }) {
   const parts = useMemo(() => {
     if (!query.trim()) return [{ text, highlight: false }];
-    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const regex = new RegExp(`(${escaped})`, "gi");
+    // Build regex that matches the full phrase OR individual terms
+    const terms = query.trim().split(/\s+/).filter(Boolean);
+    const escaped = query.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const patterns: string[] = [escaped];
+    if (terms.length > 1) {
+      for (const term of terms) {
+        const e = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        if (e && !patterns.includes(e)) patterns.push(e);
+      }
+    }
+    const regex = new RegExp(`(${patterns.join("|")})`, "gi");
     const result: { text: string; highlight: boolean }[] = [];
     let lastIndex = 0;
     let match: RegExpExecArray | null;
@@ -469,24 +479,8 @@ export function SearchCommand() {
       setOpen(false);
     },
     [push, setOpen, p],
-  );
-
   // CEREBRO-PATCH(search-page-1326): JEH-1326 — "open page" action carries query to /search
-  const handleOpenSearchPage = useCallback(() => {
-    const q = query.trim();
-    setOpen(false);
-    push(q ? `${p.search()}?q=${encodeURIComponent(q)}` : p.search());
-  }, [p, push, query, setOpen]);
-
   // CEREBRO-PATCH(search-page-enter-1326): JEH-1326 — Enter in the palette search input opens the full search page.
-  const handleInputKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLInputElement>) => {
-      if (event.key !== "Enter") return;
-      event.preventDefault();
-      event.stopPropagation();
-      handleOpenSearchPage();
-    },
-    [handleOpenSearchPage],
   );
 
   return (
@@ -693,18 +687,28 @@ export function SearchCommand() {
                         {STATUS_CONFIG[issue.status].label}
                       </span>
                     </div>
-                    {issue.match_source === "comment" &&
-                      issue.matched_snippet && (
-                        <div className="flex items-start gap-2 pl-[26px]">
-                          <MessageSquare className="size-3 shrink-0 text-muted-foreground mt-0.5" />
-                          <span className="text-xs text-muted-foreground truncate">
-                            <HighlightText
-                              text={issue.matched_snippet}
-                              query={query}
-                            />
-                          </span>
-                        </div>
-                      )}
+                    {issue.matched_description_snippet && (
+                      <div className="flex items-start gap-2 pl-[26px]">
+                        <FileText className="size-3 shrink-0 text-muted-foreground mt-0.5" />
+                        <span className="text-xs text-muted-foreground truncate">
+                          <HighlightText
+                            text={issue.matched_description_snippet}
+                            query={query}
+                          />
+                        </span>
+                      </div>
+                    )}
+                    {issue.matched_comment_snippet && (
+                      <div className="flex items-start gap-2 pl-[26px]">
+                        <MessageSquare className="size-3 shrink-0 text-muted-foreground mt-0.5" />
+                        <span className="text-xs text-muted-foreground truncate">
+                          <HighlightText
+                            text={issue.matched_comment_snippet}
+                            query={query}
+                          />
+                        </span>
+                      </div>
+                    )}
                   </CommandPrimitive.Item>
                 ))}
               </CommandPrimitive.Group>

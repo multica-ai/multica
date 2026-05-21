@@ -39,7 +39,12 @@ export function NotificationsTab() {
       delete updated[key];
     }
     mutation.mutate(updated, {
-      onError: () => toast.error(t(($) => $.notifications.toast_failed)),
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.notifications.toast_failed),
+        ),
     });
   };
 

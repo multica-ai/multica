@@ -150,9 +150,8 @@ func TestHeartbeatRoundTrip(t *testing.T) {
 
 	hub := NewHub()
 	var calls atomic.Int32
+	hub.SetHeartbeatHandler(func(_ context.Context, identity ClientIdentity, runtimeID string, _ bool) (*protocol.DaemonHeartbeatAckPayload, error) {
 	// CEREBRO-PATCH(daemonws-heartbeat-payload-test): JEH-997 — handler now receives
-	// the full HeartbeatRequest payload (account fields) instead of bare runtimeID.
-	hub.SetHeartbeatHandler(func(_ context.Context, identity ClientIdentity, payload protocol.DaemonHeartbeatRequestPayload) (*protocol.DaemonHeartbeatAckPayload, error) {
 		calls.Add(1)
 		if identity.WorkspaceID != "ws-1" {
 			t.Errorf("identity workspace = %q, want ws-1", identity.WorkspaceID)
@@ -234,7 +233,7 @@ func TestHeartbeatHandlerCtxNotTimeBounded(t *testing.T) {
 
 	hub := NewHub()
 	const stall = 250 * time.Millisecond
-	hub.SetHeartbeatHandler(func(ctx context.Context, _ ClientIdentity, payload protocol.DaemonHeartbeatRequestPayload) (*protocol.DaemonHeartbeatAckPayload, error) {
+	hub.SetHeartbeatHandler(func(ctx context.Context, _ ClientIdentity, runtimeID string, _ bool) (*protocol.DaemonHeartbeatAckPayload, error) {
 		select {
 		case <-time.After(stall):
 		case <-ctx.Done():
@@ -295,7 +294,7 @@ func TestHeartbeatRejectsUnauthorizedRuntime(t *testing.T) {
 
 	hub := NewHub()
 	var called atomic.Bool
-	hub.SetHeartbeatHandler(func(context.Context, ClientIdentity, protocol.DaemonHeartbeatRequestPayload) (*protocol.DaemonHeartbeatAckPayload, error) {
+	hub.SetHeartbeatHandler(func(context.Context, ClientIdentity, string, bool) (*protocol.DaemonHeartbeatAckPayload, error) {
 		called.Store(true)
 		return &protocol.DaemonHeartbeatAckPayload{Status: "ok"}, nil
 	})

@@ -3,6 +3,17 @@ import { type Logger, noopLogger } from "../logger";
 
 type EventHandler = (payload: unknown, actorId?: string, actorType?: string) => void;
 
+// Cap how much of an unparseable frame we put into the log. A malformed or
+// rogue server can stream arbitrarily large garbage, and the warn handler may
+// be a console / IPC bridge whose buffers we don't want to blow.
+const UNPARSEABLE_LOG_MAX_CHARS = 200;
+
+function summarizeUnparseable(data: unknown): string {
+  const text = typeof data === "string" ? data : String(data);
+  if (text.length <= UNPARSEABLE_LOG_MAX_CHARS) return text;
+  return `${text.slice(0, UNPARSEABLE_LOG_MAX_CHARS)}… (truncated, ${text.length} chars total)`;
+}
+
 /** Identifies the WS client to the server. Sent as `client_platform`,
  *  `client_version`, and `client_os` query parameters on the upgrade URL —
  *  browsers cannot set custom headers on WebSocket handshakes, so query
@@ -12,16 +23,6 @@ export interface WSClientIdentity {
   version?: string;
   os?: string;
 }
-
-// The browser does not surface WebSocket-level ping/pong frames to JS, so a
-// silently dropped TCP connection (proxy timeout, NAT, iOS PWA suspended in
-// background) leaves `readyState` stuck on OPEN with no events firing. The
-// server emits a JSON `server:ping` every appPingPeriod (~25s); the client
-// treats the absence of any inbound message for STALE_THRESHOLD_MS as a dead
-// socket, force-closes it, and lets the existing reconnect path run — which
-// fires the onReconnect callbacks that invalidate the Query cache.
-const STALE_THRESHOLD_MS = 50_000;
-const STALE_CHECK_INTERVAL_MS = 10_000;
 
 export class WSClient {
   private ws: WebSocket | null = null;
@@ -36,10 +37,6 @@ export class WSClient {
   private onReconnectCallbacks = new Set<() => void>();
   private anyHandlers = new Set<(msg: WSMessage) => void>();
   private logger: Logger;
-
-  private lastMessageAt = 0;
-  private staleCheckTimer: ReturnType<typeof setInterval> | null = null;
-  private visibilityHandler: (() => void) | null = null;
 
   constructor(
     url: string,
@@ -76,7 +73,6 @@ export class WSClient {
       url.searchParams.set("client_os", this.identity.os);
 
     this.ws = new WebSocket(url.toString());
-    this.lastMessageAt = Date.now();
 
     this.ws.onopen = () => {
       if (!this.cookieAuth && this.token) {
@@ -90,11 +86,16 @@ export class WSClient {
     };
 
     this.ws.onmessage = (event) => {
-      // Update before parsing/dispatch: every observed frame — including
-      // server:ping — is evidence the connection is still alive.
-      this.lastMessageAt = Date.now();
-
-      const msg = JSON.parse(event.data as string) as WSMessage;
+      let msg: WSMessage;
+      try {
+        msg = JSON.parse(event.data as string) as WSMessage;
+      } catch {
+        this.logger.warn(
+          "ws: received unparseable message",
+          summarizeUnparseable(event.data),
+        );
+        return;
+      }
       if ((msg as any).type === "auth_ack") {
         this.onAuthenticated();
         return;
@@ -120,13 +121,10 @@ export class WSClient {
       // Suppress — onclose handles reconnect; errors during StrictMode
       // double-fire are expected in dev and harmless.
     };
-
-    this.startLivenessMonitor();
   }
 
   private onAuthenticated() {
     this.logger.info("connected");
-    this.lastMessageAt = Date.now();
     if (this.hasConnectedBefore) {
       for (const cb of this.onReconnectCallbacks) {
         try {
@@ -139,83 +137,11 @@ export class WSClient {
     this.hasConnectedBefore = true;
   }
 
-  /**
-   * Start periodic staleness checks plus a visibilitychange listener that
-   * checks immediately when a tab returns to the foreground. Idempotent —
-   * called on every connect() but only installs handlers once.
-   */
-  private startLivenessMonitor() {
-    if (!this.staleCheckTimer) {
-      this.staleCheckTimer = setInterval(
-        () => this.checkLiveness(),
-        STALE_CHECK_INTERVAL_MS,
-      );
-    }
-    if (
-      typeof document !== "undefined" &&
-      this.visibilityHandler === null
-    ) {
-      this.visibilityHandler = () => {
-        // setInterval is paused while a page is hidden (and fully suspended
-        // when iOS backgrounds a PWA), so the resume transition is the only
-        // reliable signal we have to recheck liveness immediately.
-        if (document.visibilityState === "visible") this.checkLiveness();
-      };
-      document.addEventListener("visibilitychange", this.visibilityHandler);
-    }
-  }
-
-  private stopLivenessMonitor() {
-    if (this.staleCheckTimer) {
-      clearInterval(this.staleCheckTimer);
-      this.staleCheckTimer = null;
-    }
-    if (this.visibilityHandler && typeof document !== "undefined") {
-      document.removeEventListener("visibilitychange", this.visibilityHandler);
-    }
-    this.visibilityHandler = null;
-  }
-
-  private checkLiveness() {
-    if (this.ws?.readyState !== WebSocket.OPEN) return;
-    const elapsed = Date.now() - this.lastMessageAt;
-    if (elapsed > STALE_THRESHOLD_MS) {
-      this.logger.warn(
-        `stale connection (${elapsed}ms since last message), forcing reconnect`,
-      );
-      this.forceReconnect();
-    }
-  }
-
-  /**
-   * Tear down the current socket and reconnect immediately, bypassing the
-   * 3-second backoff used for unexpected drops. We strip handlers first so
-   * the dying socket's onclose does not race the new connect attempt.
-   */
-  private forceReconnect() {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    if (this.ws) {
-      this.ws.onclose = null;
-      this.ws.onerror = null;
-      try {
-        this.ws.close();
-      } catch {
-        // ignore — already closed
-      }
-      this.ws = null;
-    }
-    this.connect();
-  }
-
   disconnect() {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    this.stopLivenessMonitor();
     if (this.ws) {
       // Remove handlers before close to prevent onclose from scheduling a reconnect
       this.ws.onclose = null;

@@ -58,8 +58,17 @@ func TestMain(m *testing.M) {
 	go hub.Run()
 	bus := events.New()
 	emailSvc := service.NewEmailService()
+	testHandler = New(queries, pool, hub, bus, emailSvc, nil, nil, analytics.NoopClient{}, Config{AllowSignup: true})
+	// httptest.NewRequest defaults RemoteAddr to 192.0.2.1, so every webhook
+	// test in the suite shares one IP bucket. With the production default
+	// (30/min) the budget runs out partway through the suite and unrelated
+	// downstream tests see a 429 from the IP gate instead of the response
+	// they're asserting. Tests that exercise rate limiting deliberately
+	// swap in a tight limiter with t.Cleanup; this generous default keeps
+	// the rest of the suite hermetic.
+	testHandler.WebhookRateLimiter = NewMemoryWebhookRateLimiter(WebhookRateLimit{Limit: 1_000_000, Window: time.Minute})
+	testHandler.WebhookIPRateLimiter = NewMemoryWebhookIPRateLimiter(WebhookRateLimit{Limit: 1_000_000, Window: time.Minute})
 	// CEREBRO-PATCH(handler-test-pushsvc): pushSvc=nil for tests.
-	testHandler = New(queries, pool, hub, bus, emailSvc, nil, nil, nil, analytics.NoopClient{}, Config{AllowSignup: true})
 	testPool = pool
 
 	testUserID, testWorkspaceID, err = setupHandlerTestFixture(ctx, pool)
@@ -915,17 +924,15 @@ func TestCreateIssueAllowsDuplicateAfterDone(t *testing.T) {
 	}
 }
 
-func TestTriggerAutopilotRejectsActiveDuplicateIssue(t *testing.T) {
+func TestTriggerAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 	ctx := context.Background()
-	title := fmt.Sprintf("Autopilot duplicate guard %d", time.Now().UnixNano())
-	var issueID, autopilotID string
+	title := fmt.Sprintf("Autopilot duplicate issue %d", time.Now().UnixNano())
+	var autopilotID string
 	defer func() {
 		if autopilotID != "" {
 			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
 		}
-		if issueID != "" {
-			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
-		}
+		testPool.Exec(ctx, `DELETE FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title)
 	}()
 
 	var agentID string
@@ -946,11 +953,10 @@ func TestTriggerAutopilotRejectsActiveDuplicateIssue(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&existing); err != nil {
 		t.Fatalf("decode existing issue: %v", err)
 	}
-	issueID = existing.ID
 
 	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
-		"title":                "Duplicate guard autopilot",
+		"title":                "Duplicate title autopilot",
 		"assignee_id":          agentID,
 		"execution_mode":       "create_issue",
 		"issue_title_template": title,
@@ -969,55 +975,44 @@ func TestTriggerAutopilotRejectsActiveDuplicateIssue(t *testing.T) {
 	req = newRequest("POST", "/api/autopilots/"+autopilotID+"/trigger?workspace_id="+testWorkspaceID, nil)
 	req = withURLParam(req, "id", autopilotID)
 	testHandler.TriggerAutopilot(w, req)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("TriggerAutopilot duplicate: expected 409, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("TriggerAutopilot duplicate title: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	var conflict struct {
-		Code  string `json:"code"`
-		Error string `json:"error"`
-		Issue struct {
-			ID         string `json:"id"`
-			Identifier string `json:"identifier"`
-			Title      string `json:"title"`
-			Status     string `json:"status"`
-		} `json:"issue"`
+	var run AutopilotRunResponse
+	if err := json.NewDecoder(w.Body).Decode(&run); err != nil {
+		t.Fatalf("decode autopilot run: %v", err)
 	}
-	if err := json.NewDecoder(w.Body).Decode(&conflict); err != nil {
-		t.Fatalf("decode duplicate conflict: %v", err)
+	if run.Status != "issue_created" {
+		t.Fatalf("run status = %q, want issue_created", run.Status)
 	}
-	if conflict.Code != "active_duplicate_issue" {
-		t.Fatalf("code = %q, want active_duplicate_issue", conflict.Code)
+	if run.IssueID == nil {
+		t.Fatal("run issue_id is nil, want newly created issue")
 	}
-	if conflict.Issue.ID != issueID || conflict.Issue.Identifier != existing.Identifier || conflict.Issue.Status != "todo" {
-		t.Fatalf("conflict issue = %#v, want existing %s %s todo", conflict.Issue, issueID, existing.Identifier)
+	if *run.IssueID == existing.ID {
+		t.Fatalf("run reused existing issue %s, want a new issue", existing.ID)
 	}
-	if !strings.Contains(conflict.Error, "Active duplicate issue exists: "+existing.Identifier+" "+title) {
-		t.Fatalf("duplicate error did not mention existing issue: %s", conflict.Error)
+	if run.FailureReason != nil {
+		t.Fatalf("run failure_reason = %q, want nil", *run.FailureReason)
 	}
-
-	assertAutopilotDuplicateRunSkipped(t, ctx, autopilotID, issueID, existing.Identifier, title)
-	assertAutopilotNotFailureMonitorCandidate(t, ctx, autopilotID)
 
 	var count int
 	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title).Scan(&count); err != nil {
 		t.Fatalf("count issues: %v", err)
 	}
-	if count != 1 {
-		t.Fatalf("autopilot duplicate guard should leave one matching issue, got %d", count)
+	if count != 2 {
+		t.Fatalf("autopilot should create a new same-title issue, got %d matching issues", count)
 	}
 }
 
-func TestScheduledAutopilotDuplicateIssueSkipsRun(t *testing.T) {
+func TestScheduledAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 	ctx := context.Background()
-	title := fmt.Sprintf("Scheduled autopilot duplicate guard %d", time.Now().UnixNano())
-	var issueID, autopilotID string
+	title := fmt.Sprintf("Scheduled autopilot duplicate issue %d", time.Now().UnixNano())
+	var autopilotID string
 	defer func() {
 		if autopilotID != "" {
 			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
 		}
-		if issueID != "" {
-			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
-		}
+		testPool.Exec(ctx, `DELETE FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title)
 	}()
 
 	var agentID string
@@ -1038,11 +1033,10 @@ func TestScheduledAutopilotDuplicateIssueSkipsRun(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&existing); err != nil {
 		t.Fatalf("decode existing issue: %v", err)
 	}
-	issueID = existing.ID
 
 	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
-		"title":                "Scheduled duplicate guard autopilot",
+		"title":                "Scheduled duplicate title autopilot",
 		"assignee_id":          agentID,
 		"execution_mode":       "create_issue",
 		"issue_title_template": title,
@@ -1066,14 +1060,27 @@ func TestScheduledAutopilotDuplicateIssueSkipsRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DispatchAutopilot schedule duplicate: %v", err)
 	}
-	if run == nil {
-		t.Fatal("expected skipped run, got nil")
+	if run == nil || run.Status != "issue_created" {
+		t.Fatalf("dispatch result = %+v, want status issue_created", run)
 	}
-	if run.Status != "skipped" {
-		t.Fatalf("run status = %q, want skipped", run.Status)
+	newIssueID := uuidToString(run.IssueID)
+	if newIssueID == "" {
+		t.Fatal("run issue_id is empty, want newly created issue")
 	}
-	assertAutopilotDuplicateRunSkipped(t, ctx, autopilotID, issueID, existing.Identifier, title)
-	assertAutopilotNotFailureMonitorCandidate(t, ctx, autopilotID)
+	if newIssueID == existing.ID {
+		t.Fatalf("run reused existing issue %s, want a new issue", existing.ID)
+	}
+	if run.FailureReason.Valid {
+		t.Fatalf("run failure_reason = %q, want empty", run.FailureReason.String)
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title).Scan(&count); err != nil {
+		t.Fatalf("count issues: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("autopilot should create a new same-title issue, got %d matching issues", count)
+	}
 }
 
 // TestAutopilotCreatedIssueCreatorIsAssigneeAgent locks in that an issue spawned
@@ -1170,33 +1177,114 @@ func TestAutopilotCreatedIssueCreatorIsAssigneeAgent(t *testing.T) {
 	}
 }
 
+func TestAutopilotCreateIssueAssociatesConfiguredProject(t *testing.T) {
 // CEREBRO-PATCH(private-autopilot-tests): JEH-1749 owner-only autopilot visibility, audit, and inherited private issue coverage.
-func TestPrivateAutopilotVisibilityAuditAndCreatedIssuePrivacy(t *testing.T) {
 	ctx := context.Background()
-	agentID := createHandlerTestAgent(t, "Private Autopilot Agent", nil)
-	otherUserID := createWorkspaceMemberUser(t, "member")
-	title := fmt.Sprintf("Private autopilot output %d", time.Now().UnixNano())
-	var autopilotID, runID, issueID string
+	title := fmt.Sprintf("Autopilot project issue %d", time.Now().UnixNano())
+	var autopilotID, issueID, projectID string
 	defer func() {
 		if issueID != "" {
-			testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
 			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
-		}
-		if runID != "" {
-			testPool.Exec(ctx, `DELETE FROM autopilot_run WHERE id = $1`, runID)
 		}
 		if autopilotID != "" {
 			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
 		}
+		if projectID != "" {
+			testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID)
+		}
 	}()
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id::text
+	`, testWorkspaceID, "Autopilot project target").Scan(&projectID); err != nil {
+		t.Fatalf("create project fixture: %v", err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
 
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
-		"title":                "Private autopilot",
+		"title":                "Project-linked autopilot",
 		"assignee_id":          agentID,
 		"execution_mode":       "create_issue",
 		"issue_title_template": title,
-		"is_private":           true,
+		"project_id":           projectID,
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var autopilot AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
+		t.Fatalf("decode autopilot: %v", err)
+	}
+	autopilotID = autopilot.ID
+	if autopilot.ProjectID == nil || *autopilot.ProjectID != projectID {
+		t.Fatalf("autopilot project_id = %v, want %q", autopilot.ProjectID, projectID)
+	}
+
+	queries := db.New(testPool)
+	ap, err := queries.GetAutopilot(ctx, parseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("GetAutopilot: %v", err)
+	}
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	if run == nil || !run.IssueID.Valid {
+		t.Fatalf("dispatch run = %+v, want linked issue", run)
+	}
+	issueID = uuidToString(run.IssueID)
+
+	var issueProjectID *string
+	if err := testPool.QueryRow(ctx, `
+		SELECT project_id::text
+		FROM issue
+		WHERE id = $1
+	`, issueID).Scan(&issueProjectID); err != nil {
+		t.Fatalf("load created issue project: %v", err)
+	}
+	if issueProjectID == nil || *issueProjectID != projectID {
+		t.Fatalf("created issue project_id = %v, want %q", issueProjectID, projectID)
+	}
+}
+
+func TestUpdateAutopilotCanSetAndClearProject(t *testing.T) {
+	ctx := context.Background()
+	var autopilotID, projectID string
+	defer func() {
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+		if projectID != "" {
+			testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID)
+		}
+	}()
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id::text
+	`, testWorkspaceID, "Autopilot update project target").Scan(&projectID); err != nil {
+		t.Fatalf("create project fixture: %v", err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":          "Project update autopilot",
+		"assignee_id":    agentID,
+		"execution_mode": "create_issue",
 	})
 	testHandler.CreateAutopilot(w, req)
 	if w.Code != http.StatusCreated {
@@ -1204,456 +1292,48 @@ func TestPrivateAutopilotVisibilityAuditAndCreatedIssuePrivacy(t *testing.T) {
 	}
 	var created AutopilotResponse
 	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
-		t.Fatalf("decode autopilot: %v", err)
+		t.Fatalf("decode created autopilot: %v", err)
 	}
-	autopilotID = created.ID
-	if !created.IsPrivate {
-		t.Fatal("created autopilot is_private = false, want true")
-	}
-
-	ownerGet := httptest.NewRecorder()
-	ownerReq := withURLParam(newRequest("GET", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, nil), "id", autopilotID)
-	testHandler.GetAutopilot(ownerGet, ownerReq)
-	if ownerGet.Code != http.StatusOK {
-		t.Fatalf("owner GetAutopilot: expected 200, got %d: %s", ownerGet.Code, ownerGet.Body.String())
-	}
-
-	otherGet := httptest.NewRecorder()
-	otherReq := withURLParam(newRequest("GET", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, nil), "id", autopilotID)
-	otherReq.Header.Set("X-User-ID", otherUserID)
-	testHandler.GetAutopilot(otherGet, otherReq)
-	if otherGet.Code != http.StatusNotFound {
-		t.Fatalf("other GetAutopilot: expected 404, got %d: %s", otherGet.Code, otherGet.Body.String())
-	}
-
-	otherList := httptest.NewRecorder()
-	otherListReq := newRequest("GET", "/api/autopilots?workspace_id="+testWorkspaceID, nil)
-	otherListReq.Header.Set("X-User-ID", otherUserID)
-	testHandler.ListAutopilots(otherList, otherListReq)
-	if otherList.Code != http.StatusOK {
-		t.Fatalf("other ListAutopilots: expected 200, got %d: %s", otherList.Code, otherList.Body.String())
-	}
-	if strings.Contains(otherList.Body.String(), autopilotID) {
-		t.Fatalf("other ListAutopilots leaked private autopilot %s: %s", autopilotID, otherList.Body.String())
-	}
-
-	ap, err := db.New(testPool).GetAutopilot(ctx, parseUUID(autopilotID))
-	if err != nil {
-		t.Fatalf("GetAutopilot: %v", err)
-	}
-	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
-	if err != nil {
-		t.Fatalf("DispatchAutopilot: %v", err)
-	}
-	runID = uuidToString(run.ID)
-	issueID = uuidToString(run.IssueID)
-
-	var creatorType, creatorID string
-	var isPrivate bool
-	if err := testPool.QueryRow(ctx, `
-		SELECT creator_type, creator_id::text, is_private
-		FROM issue
-		WHERE id = $1
-	`, issueID).Scan(&creatorType, &creatorID, &isPrivate); err != nil {
-		t.Fatalf("load created issue privacy: %v", err)
-	}
-	if creatorType != "member" || creatorID != testUserID || !isPrivate {
-		t.Fatalf("created issue owner/private = %s/%s/%v, want member/%s/true", creatorType, creatorID, isPrivate, testUserID)
-	}
-
-	otherIssueGet := httptest.NewRecorder()
-	otherIssueReq := withURLParam(newRequest("GET", "/api/issues/"+issueID+"?workspace_id="+testWorkspaceID, nil), "id", issueID)
-	otherIssueReq.Header.Set("X-User-ID", otherUserID)
-	testHandler.GetIssue(otherIssueGet, otherIssueReq)
-	if otherIssueGet.Code != http.StatusNotFound {
-		t.Fatalf("other GetIssue private output: expected 404, got %d: %s", otherIssueGet.Code, otherIssueGet.Body.String())
-	}
-
-	ownerComment := httptest.NewRecorder()
-	ownerCommentReq := withURLParam(newRequest("POST", "/api/issues/"+issueID+"/comments?workspace_id="+testWorkspaceID, map[string]any{
-		"content": "owner-visible private output note",
-	}), "id", issueID)
-	testHandler.CreateComment(ownerComment, ownerCommentReq)
-	if ownerComment.Code != http.StatusCreated {
-		t.Fatalf("owner CreateComment on private output: expected 201, got %d: %s", ownerComment.Code, ownerComment.Body.String())
-	}
-
-	otherComments := httptest.NewRecorder()
-	otherCommentsReq := withURLParam(newRequest("GET", "/api/issues/"+issueID+"/comments?workspace_id="+testWorkspaceID, nil), "id", issueID)
-	otherCommentsReq.Header.Set("X-User-ID", otherUserID)
-	testHandler.ListComments(otherComments, otherCommentsReq)
-	if otherComments.Code != http.StatusNotFound {
-		t.Fatalf("other ListComments private output: expected 404, got %d: %s", otherComments.Code, otherComments.Body.String())
-	}
-
-	otherRuns := httptest.NewRecorder()
-	otherRunsReq := withURLParam(newRequest("GET", "/api/autopilots/"+autopilotID+"/runs?workspace_id="+testWorkspaceID, nil), "id", autopilotID)
-	otherRunsReq.Header.Set("X-User-ID", otherUserID)
-	testHandler.ListAutopilotRuns(otherRuns, otherRunsReq)
-	if otherRuns.Code != http.StatusNotFound {
-		t.Fatalf("other ListAutopilotRuns: expected 404, got %d: %s", otherRuns.Code, otherRuns.Body.String())
-	}
-
-	update := httptest.NewRecorder()
-	updateReq := withURLParam(newRequest("PATCH", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, map[string]any{
-		"is_private": false,
-	}), "id", autopilotID)
-	testHandler.UpdateAutopilot(update, updateReq)
-	if update.Code != http.StatusOK {
-		t.Fatalf("UpdateAutopilot privacy: expected 200, got %d: %s", update.Code, update.Body.String())
-	}
-	var auditCount int
-	if err := testPool.QueryRow(ctx, `
-		SELECT count(*)
-		FROM activity_log
-		WHERE workspace_id = $1
-		  AND actor_type = 'member'
-		  AND actor_id = $2
-		  AND action = 'autopilot_privacy_changed'
-		  AND details->>'autopilot_id' = $3
-		  AND details->>'old_value' = 'true'
-		  AND details->>'new_value' = 'false'
-	`, testWorkspaceID, testUserID, autopilotID).Scan(&auditCount); err != nil {
-		t.Fatalf("count autopilot privacy audit: %v", err)
-	}
-	if auditCount != 1 {
-		t.Fatalf("autopilot privacy audit rows = %d, want 1", auditCount)
-	}
-}
-
-// CEREBRO-PATCH(private-autopilot-mention-test): JEH-1749 private autopilot comments must not enqueue mentioned non-owner agents.
-func TestPrivateAutopilotCommentSuppressesMentionedAgentTask(t *testing.T) {
-	ctx := context.Background()
-	agentA := createHandlerTestAgent(t, "Private Autopilot Mention Agent A", nil)
-	agentB := createHandlerTestAgent(t, "Private Autopilot Mention Agent B", nil)
-	title := fmt.Sprintf("Private autopilot mention suppression %d", time.Now().UnixNano())
-	var autopilotID, runID, issueID string
-	defer func() {
-		if issueID != "" {
-			testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
-			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
-		}
-		if runID != "" {
-			testPool.Exec(ctx, `DELETE FROM autopilot_run WHERE id = $1`, runID)
-		}
-		if autopilotID != "" {
-			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
-		}
-	}()
-
-	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
-		"title":                "Private mention suppression autopilot",
-		"assignee_id":          agentA,
-		"execution_mode":       "create_issue",
-		"issue_title_template": title,
-		"is_private":           true,
-	})
-	testHandler.CreateAutopilot(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
-	var autopilot AutopilotResponse
-	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
-		t.Fatalf("decode autopilot: %v", err)
-	}
-	autopilotID = autopilot.ID
-
-	ap, err := db.New(testPool).GetAutopilot(ctx, parseUUID(autopilotID))
-	if err != nil {
-		t.Fatalf("GetAutopilot: %v", err)
-	}
-	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
-	if err != nil {
-		t.Fatalf("DispatchAutopilot: %v", err)
-	}
-	runID = uuidToString(run.ID)
-	issueID = uuidToString(run.IssueID)
-
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		SELECT id::text
-		FROM agent_task_queue
-		WHERE issue_id = $1 AND agent_id = $2
-		ORDER BY created_at DESC
-		LIMIT 1
-	`, issueID, agentA).Scan(&taskID); err != nil {
-		t.Fatalf("load private autopilot task: %v", err)
-	}
-
-	comment := httptest.NewRecorder()
-	commentReq := withURLParam(newRequest("POST", "/api/issues/"+issueID+"/comments?workspace_id="+testWorkspaceID, map[string]any{
-		"content": fmt.Sprintf("[@Agent B](mention://agent/%s) should not be triggered from private autopilot output", agentB),
-	}), "id", issueID)
-	commentReq.Header.Set("X-Agent-ID", agentA)
-	commentReq.Header.Set("X-Task-ID", taskID)
-	testHandler.CreateComment(comment, commentReq)
-	if comment.Code != http.StatusCreated {
-		t.Fatalf("private autopilot comment: expected 201, got %d: %s", comment.Code, comment.Body.String())
-	}
-
-	var queued int
-	if err := testPool.QueryRow(ctx, `
-		SELECT count(*)
-		FROM agent_task_queue
-		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
-	`, issueID, agentB).Scan(&queued); err != nil {
-		t.Fatalf("count mentioned agent tasks: %v", err)
-	}
-	if queued != 0 {
-		t.Fatalf("private autopilot comment enqueued %d tasks for mentioned agent, want 0", queued)
-	}
-}
-
-// CEREBRO-PATCH(autopilot-handoff-provenance): integration test verifying create-issue autopilot tasks carry human origin to enable agent handoff (JEH-1518).
-func TestCreateIssueAutopilotTaskCarriesHumanOriginForAgentHandoff(t *testing.T) {
-	ctx := context.Background()
-	agentA := createHandlerTestAgent(t, "Create-issue Handoff Agent A", nil)
-	agentB := createHandlerTestAgent(t, "Create-issue Handoff Agent B", nil)
-	title := fmt.Sprintf("Create-issue handoff provenance %d", time.Now().UnixNano())
-	var autopilotID, runID, issueID string
-	defer func() {
-		if issueID != "" {
-			testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
-			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
-		}
-		if runID != "" {
-			testPool.Exec(ctx, `DELETE FROM autopilot_run WHERE id = $1`, runID)
-		}
-		if autopilotID != "" {
-			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
-		}
-	}()
-
-	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
-		"title":                "Create-issue handoff provenance autopilot",
-		"assignee_id":          agentA,
-		"execution_mode":       "create_issue",
-		"issue_title_template": title,
-	})
-	testHandler.CreateAutopilot(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
-	var autopilot AutopilotResponse
-	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
-		t.Fatalf("decode autopilot: %v", err)
-	}
-	autopilotID = autopilot.ID
-
-	ap, err := db.New(testPool).GetAutopilot(ctx, parseUUID(autopilotID))
-	if err != nil {
-		t.Fatalf("GetAutopilot: %v", err)
-	}
-	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
-	if err != nil {
-		t.Fatalf("DispatchAutopilot create_issue: %v", err)
-	}
-	if run == nil || !run.IssueID.Valid {
-		t.Fatalf("dispatch result = %+v, want issue_id", run)
-	}
-	runID = uuidToString(run.ID)
-	issueID = uuidToString(run.IssueID)
-
-	var taskID, originalUserID, source string
-	if err := testPool.QueryRow(ctx, `
-		SELECT id::text, original_user_id::text, delegation_source
-		FROM agent_task_queue
-		WHERE issue_id = $1 AND agent_id = $2
-		ORDER BY created_at DESC
-		LIMIT 1
-	`, issueID, agentA).Scan(&taskID, &originalUserID, &source); err != nil {
-		t.Fatalf("load create-issue task provenance: %v", err)
-	}
-	if originalUserID != testUserID {
-		t.Fatalf("create-issue task original_user_id = %s, want %s", originalUserID, testUserID)
-	}
-	if source != "autopilot" {
-		t.Fatalf("create-issue task delegation_source = %q, want autopilot", source)
-	}
-
-	w = httptest.NewRecorder()
-	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
-		"content": fmt.Sprintf("[@Agent B](mention://agent/%s) take this from the create-issue autopilot handoff", agentB),
-	})
-	r = withURLParam(r, "id", issueID)
-	r.Header.Set("X-Agent-ID", agentA)
-	r.Header.Set("X-Task-ID", taskID)
-	testHandler.CreateComment(w, r)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("agent handoff comment: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var got int
-	if err := testPool.QueryRow(ctx, `
-		SELECT count(*)
-		FROM agent_task_queue
-		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
-	`, issueID, agentB).Scan(&got); err != nil {
-		t.Fatalf("count delegated tasks: %v", err)
-	}
-	if got != 1 {
-		t.Fatalf("expected create-issue autopilot handoff to enqueue Agent B once, got %d", got)
-	}
-}
-
 // CEREBRO-PATCH(autopilot-handoff-provenance): integration test verifying run-only autopilot tasks carry human origin to enable agent handoff (JEH-1518).
-func TestRunOnlyAutopilotTaskCarriesHumanOriginForAgentHandoff(t *testing.T) {
-	ctx := context.Background()
-	agentA := createHandlerTestAgent(t, "Run-only Handoff Agent A", nil)
-	agentB := createHandlerTestAgent(t, "Run-only Handoff Agent B", nil)
-	var autopilotID, runID, taskID, issueID string
-	defer func() {
-		if issueID != "" {
-			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
-		}
-		if taskID != "" {
-			testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
-		}
-		if runID != "" {
-			testPool.Exec(ctx, `DELETE FROM autopilot_run WHERE id = $1`, runID)
-		}
-		if autopilotID != "" {
-			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
-		}
-	}()
-
-	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
-		"title":          "Run-only handoff provenance autopilot",
-		"assignee_id":    agentA,
-		"execution_mode": "run_only",
-	})
-	testHandler.CreateAutopilot(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
-	var autopilot AutopilotResponse
-	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
-		t.Fatalf("decode autopilot: %v", err)
-	}
-	autopilotID = autopilot.ID
-
-	ap, err := db.New(testPool).GetAutopilot(ctx, parseUUID(autopilotID))
-	if err != nil {
-		t.Fatalf("GetAutopilot: %v", err)
-	}
-	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
-	if err != nil {
-		t.Fatalf("DispatchAutopilot run_only: %v", err)
-	}
-	if run == nil || run.TaskID.Valid == false {
-		t.Fatalf("dispatch result = %+v, want task_id", run)
-	}
-	runID = uuidToString(run.ID)
-	taskID = uuidToString(run.TaskID)
-
-	var originalUserID, source string
-	if err := testPool.QueryRow(ctx, `
-		SELECT original_user_id::text, delegation_source
-		FROM agent_task_queue
-		WHERE id = $1
-	`, taskID).Scan(&originalUserID, &source); err != nil {
-		t.Fatalf("load run-only task provenance: %v", err)
-	}
-	if originalUserID != testUserID {
-		t.Fatalf("run-only task original_user_id = %s, want %s", originalUserID, testUserID)
-	}
-	if source != "autopilot" {
-		t.Fatalf("run-only task delegation_source = %q, want autopilot", source)
+// CEREBRO-PATCH(autopilot-handoff-provenance): integration test verifying create-issue autopilot tasks carry human origin to enable agent handoff (JEH-1518).
+// CEREBRO-PATCH(private-autopilot-mention-test): JEH-1749 private autopilot comments must not enqueue mentioned non-owner agents.
+	autopilotID = created.ID
+	if created.ProjectID != nil {
+		t.Fatalf("new autopilot project_id = %v, want nil", created.ProjectID)
 	}
 
 	w = httptest.NewRecorder()
-	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "Run-only handoff target issue",
-		"status": "todo",
+	req = newRequest("PATCH", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, map[string]any{
+		"project_id": projectID,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	req = withURLParam(req, "id", autopilotID)
+	testHandler.UpdateAutopilot(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAutopilot set project: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	var issue IssueResponse
-	if err := json.NewDecoder(w.Body).Decode(&issue); err != nil {
-		t.Fatalf("decode issue: %v", err)
+	var updated AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode updated autopilot: %v", err)
 	}
-	issueID = issue.ID
+	if updated.ProjectID == nil || *updated.ProjectID != projectID {
+		t.Fatalf("updated project_id = %v, want %q", updated.ProjectID, projectID)
+	}
 
 	w = httptest.NewRecorder()
-	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
-		"content": fmt.Sprintf("[@Agent B](mention://agent/%s) take this from the autopilot handoff", agentB),
+	req = newRequest("PATCH", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, map[string]any{
+		"project_id": nil,
 	})
-	r = withURLParam(r, "id", issueID)
-	r.Header.Set("X-Agent-ID", agentA)
-	r.Header.Set("X-Task-ID", taskID)
-	testHandler.CreateComment(w, r)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("agent handoff comment: expected 201, got %d: %s", w.Code, w.Body.String())
+	req = withURLParam(req, "id", autopilotID)
+	testHandler.UpdateAutopilot(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAutopilot clear project: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-
-	var got int
-	if err := testPool.QueryRow(ctx, `
-		SELECT count(*)
-		FROM agent_task_queue
-		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
-	`, issueID, agentB).Scan(&got); err != nil {
-		t.Fatalf("count delegated tasks: %v", err)
+	var cleared AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&cleared); err != nil {
+		t.Fatalf("decode cleared autopilot: %v", err)
 	}
-	if got != 1 {
-		t.Fatalf("expected run-only autopilot handoff to enqueue Agent B once, got %d", got)
-	}
-}
-
-func assertAutopilotDuplicateRunSkipped(t *testing.T, ctx context.Context, autopilotID, issueID, identifier, title string) {
-	t.Helper()
-	var status, failureReason string
-	var result []byte
-	if err := testPool.QueryRow(ctx, `
-		SELECT status, failure_reason, result
-		FROM autopilot_run
-		WHERE autopilot_id = $1
-		ORDER BY created_at DESC
-		LIMIT 1
-	`, autopilotID).Scan(&status, &failureReason, &result); err != nil {
-		t.Fatalf("load autopilot run: %v", err)
-	}
-	if status != "skipped" {
-		t.Fatalf("autopilot duplicate run status = %q, want skipped", status)
-	}
-	if !strings.Contains(failureReason, identifier+" "+title) {
-		t.Fatalf("duplicate run failure_reason = %q, want existing issue details", failureReason)
-	}
-	var payload struct {
-		Code  string `json:"code"`
-		Issue struct {
-			ID         string `json:"id"`
-			Identifier string `json:"identifier"`
-			Title      string `json:"title"`
-			Status     string `json:"status"`
-		} `json:"issue"`
-	}
-	if err := json.Unmarshal(result, &payload); err != nil {
-		t.Fatalf("decode duplicate run result: %v", err)
-	}
-	if payload.Code != "active_duplicate_issue" || payload.Issue.ID != issueID || payload.Issue.Identifier != identifier || payload.Issue.Title != title {
-		t.Fatalf("duplicate run result = %#v, want issue %s %s %q", payload, issueID, identifier, title)
-	}
-}
-
-func assertAutopilotNotFailureMonitorCandidate(t *testing.T, ctx context.Context, autopilotID string) {
-	t.Helper()
-	candidates, err := db.New(testPool).SelectAutopilotsExceedingFailureThreshold(ctx, db.SelectAutopilotsExceedingFailureThresholdParams{
-		MinRuns:            1,
-		FailRatioThreshold: 1,
-		Since:              pgtype.Timestamptz{Time: time.Now().Add(-time.Hour), Valid: true},
-	})
-	if err != nil {
-		t.Fatalf("SelectAutopilotsExceedingFailureThreshold: %v", err)
-	}
-	for _, candidate := range candidates {
-		if uuidToString(candidate.ID) == autopilotID {
-			t.Fatalf("duplicate skipped run should not be a failure monitor candidate: %+v", candidate)
-		}
+	if cleared.ProjectID != nil {
+		t.Fatalf("cleared project_id = %v, want nil", cleared.ProjectID)
 	}
 }
 

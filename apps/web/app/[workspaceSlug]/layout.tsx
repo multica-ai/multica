@@ -8,6 +8,7 @@ import { workspaceBySlugOptions } from "@multica/core/workspace";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
 import { NoAccessPage } from "@multica/views/workspace/no-access-page";
+import { WelcomeAfterOnboarding } from "@multica/views/workspace/welcome-after-onboarding";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { useWorkspaceSeen } from "@multica/views/workspace/use-workspace-seen";
 import { CerebroOpenInAppBanner } from "@/components/cerebro-open-in-app-banner";
@@ -31,6 +32,18 @@ export default function WorkspaceLayout({
   useEffect(() => {
     if (!isAuthLoading && !user) router.replace(paths.login());
   }, [isAuthLoading, user, router]);
+
+  // Hard onboarding gate. Authenticated user but onboarded_at NULL means
+  // they bypassed /onboarding (typed the URL, deeplink, etc.). Redirect
+  // back so the questionnaire + Step 3 finish. The reverse gate lives in
+  // `apps/web/app/(auth)/onboarding/page.tsx` — onboarded users hitting
+  // /onboarding bounce out to their workspace. Together those two effects
+  // make `onboarded_at` the single source of truth for "may access /<slug>/*".
+  useEffect(() => {
+    if (user && user.onboarded_at == null) {
+      router.replace(paths.onboarding());
+    }
+  }, [user, router]);
 
   // Resolve workspace by slug from the React Query list cache.
   // Enabled only when user is authenticated — otherwise the list query isn't seeded.
@@ -88,6 +101,11 @@ export default function WorkspaceLayout({
     <WorkspaceSlugProvider slug={workspaceSlug}>
       <CerebroOpenInAppBanner />
       {children}
+      {/* Reads the welcome-store transient signal parked by
+       *  OnboardingFlow.handleRuntimeNext. Runtime path → loading veil →
+       *  blocking Modal with Helper + starter cards. Skip path → Modal
+       *  with two seeded issues. No signal → null. */}
+      <WelcomeAfterOnboarding />
     </WorkspaceSlugProvider>
   );
 }

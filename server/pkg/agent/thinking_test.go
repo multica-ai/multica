@@ -279,6 +279,8 @@ func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fake binary requires a POSIX shell")
 	}
+	t.Parallel()
+
 	// We need a `claude` whose --help advertises the full superset
 	// (low/medium/high/xhigh/max) so per-model projection actually has
 	// something to filter. A non-existent path falls back to a conservative
@@ -332,6 +334,7 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fake binary requires a POSIX shell")
 	}
+	t.Parallel()
 	fakeClaude := writeFakeClaudeHelpBinary(t)
 	resetThinkingCacheForTests()
 	defer resetThinkingCacheForTests()
@@ -390,6 +393,7 @@ func writeFakeClaudeHelpBinary(t *testing.T) string {
 // ── Cache key invalidation ───────────────────────────────────────────
 
 func TestThinkingCacheKeyDistinct(t *testing.T) {
+	t.Parallel()
 	resetThinkingCacheForTests()
 	defer resetThinkingCacheForTests()
 
@@ -643,3 +647,4 @@ func argIndexOf(slice []string, target string) int {
 	}
 	return -1
 }
+

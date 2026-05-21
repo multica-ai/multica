@@ -319,7 +319,10 @@ func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string, opts SendH
 		Capabilities: opts.Capabilities,
 	}
 	var resp HeartbeatResponse
-	if err := c.postJSON(ctx, "/api/daemon/heartbeat", body, &resp); err != nil {
+	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
+		"runtime_id":             runtimeID,
+		"supports_batch_import":  true,
+	}, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil

@@ -39,7 +39,6 @@ export interface RuntimeDevice {
   capabilities: Record<string, unknown>;
   /** Defaults to "private" when the backend predates the visibility flag. */
   visibility: RuntimeVisibility;
-  timezone: string;
   last_seen_at: string | null;
   // CEREBRO-PATCH(runtime-pause-fields): pause fields surfaced by the
   // cerebro pause/auto-pause feature (server side: 9016_cerebro_runtime_pause
@@ -62,6 +61,7 @@ export type AgentRuntime = RuntimeDevice;
 export type TaskFailureReason =
   | "agent_error"
   | "timeout"
+  | "codex_semantic_inactivity"
   | "runtime_offline"
   | "runtime_recovery"
   | "manual";
@@ -182,10 +182,12 @@ export interface Agent {
   /**
    * Runtime-native reasoning/effort token (e.g. Claude's
    * `low|medium|high|xhigh|max`, Codex's
-   * `none|minimal|low|medium|high|xhigh`). Empty string means "use the
-   * runtime/model default". The picker is per-runtime per-model — the
-   * API never normalises across providers. Older backends omit this
-   * field entirely; treat undefined as "" (MUL-2339).
+   * `none|minimal|low|medium|high|xhigh`). Empty string means "no
+   * override": the backend omits the effort flag and the upstream CLI
+   * config / built-in default decides at run time. The picker is
+   * per-runtime per-model — the API never normalises across providers.
+   * Older backends omit this field entirely; treat undefined as ""
+   * (MUL-2339).
    */
   thinking_level?: string;
   owner_id: string | null;
@@ -330,14 +332,10 @@ export interface UpdateAgentRequest {
   max_concurrent_tasks?: number;
   model?: string;
   /**
-   * Persona sandbox name (e.g. "claude-developer"). Empty string clears
-   * the assignment; omit the field to leave it unchanged.
-   */
-  persona_sandbox?: string;
-  /**
    * Runtime-native reasoning/effort token. Tri-state semantics (MUL-2339):
    *   - field omitted → no change
-   *   - "" → explicit clear (use runtime default)
+   *   - "" → clear the override; backend omits the effort flag and the
+   *     local CLI config / built-in default decides what the model runs at
    *   - non-empty → set; validated server-side against the target
    *     runtime's provider enum, rejected with 400 if not recognised
    */
@@ -615,8 +613,11 @@ export interface RuntimeModel {
 export interface RuntimeModelThinking {
   /** Levels the user is allowed to pick for this model. */
   supported_levels: RuntimeModelThinkingLevel[];
-  /** The level the runtime defaults to when no override is sent. The UI
-   *  uses this to badge the default and prefill new agents. */
+  /** Informational: the level the upstream CLI documents as its built-in
+   *  default when no `--effort` flag is passed. Surfaced by the daemon
+   *  but not actively rendered today — Multica's empty `thinking_level`
+   *  means "no override; let the local CLI config decide", which may
+   *  itself differ from this value. */
   default_level?: string;
 }
 

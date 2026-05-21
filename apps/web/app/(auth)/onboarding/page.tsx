@@ -17,8 +17,9 @@ import { CliInstallInstructions, OnboardingFlow } from "@multica/views/onboardin
  * web (matching `WindowOverlay` on desktop); content is the shared
  * `<OnboardingFlow />`. Kept minimal — guard on auth, render, exit.
  *
- * On complete: land on the workspace issues list, or root if the flow never
- * produced a workspace. Starter content is offered after landing.
+ * On complete: runtime-connected onboarding may provide a guide issue id;
+ * navigate there. Otherwise land on the workspace issues list, or root if
+ * the flow never produced a workspace.
  *
  * `CliInstallInstructions` is passed in as the `runtimeInstructions`
  * slot so the flow can render it inside the CLI dialog. The commands it
@@ -70,11 +71,14 @@ export default function OnboardingPage() {
   return (
     <div className="h-full overflow-y-auto bg-background">
       <OnboardingFlow
-        onComplete={(ws) => {
-          // Runtime-connected onboarding no longer creates a welcome issue.
-          // Skip/runtime-less exits all land on the workspace issues list.
+        onComplete={(ws, issueId) => {
+          // Runtime-connected onboarding now creates one focused
+          // onboarding issue. Skip/runtime-less exits still land on the
+          // workspace issues list.
           completingRef.current = true;
-          if (ws) {
+          if (ws && issueId) {
+            router.push(paths.workspace(ws.slug).issueDetail(issueId));
+          } else if (ws) {
             router.push(paths.workspace(ws.slug).issues());
           } else {
             router.push(paths.root());

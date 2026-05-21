@@ -28,6 +28,7 @@ import {
   onIssueUpdated,
   onIssueDeleted,
   onIssueLabelsChanged,
+  onIssueMetadataChanged,
 } from "../issues/ws-updaters";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted } from "../inbox/ws-updaters";
 import { inboxKeys } from "../inbox/queries";
@@ -47,6 +48,7 @@ import type {
   IssueCreatedPayload,
   IssueDeletedPayload,
   IssueLabelsChangedPayload,
+  IssueMetadataChangedPayload,
   InboxNewPayload,
   CommentCreatedPayload,
   CommentUpdatedPayload,
@@ -155,6 +157,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
@@ -166,16 +169,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
-export function invalidateTaskLifecycleQueries(qc: QueryClient, wsId: string) {
   // CEREBRO-PATCH(inbox-active-run-realtime): task lifecycle events also drive inbox run pips (JEH-1425).
-  qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
-  qc.invalidateQueries({ queryKey: agentActivityKeys.last30d(wsId) });
-  qc.invalidateQueries({ queryKey: agentRunCountsKeys.last30d(wsId) });
-  qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
-  qc.invalidateQueries({ queryKey: ["issues", "tasks"] });
-  qc.invalidateQueries({ queryKey: inboxKeys.activeIssueTasks(wsId) });
-}
-
 export interface RealtimeSyncStores {
   authStore: UseBoundStore<StoreApi<AuthState>>;
 }
@@ -223,7 +217,14 @@ export function useRealtimeSync(
       },
       agent: () => {
         const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+          // Squad members status is derived per agent, so any agent
+          // change (status flip, archive, runtime swap) needs to refresh
+          // the per-squad members-status cache. Prefix-matches both the
+          // squad list and every squadMemberStatus query.
+          qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
+        }
       },
       member: () => {
         const wsId = getCurrentWsId();
@@ -271,7 +272,14 @@ export function useRealtimeSync(
       },
       daemon: () => {
         const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+          // Runtime online/offline transitions move the derived status
+          // for every agent that hosts on this runtime, which shifts the
+          // working/idle/offline pill on the squad page. Same prefix
+          // invalidation pattern as the agent handler above.
+          qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
+        }
       },
       autopilot: () => {
         const wsId = getCurrentWsId();
@@ -294,11 +302,33 @@ export function useRealtimeSync(
       task: () => {
         const wsId = getCurrentWsId();
         if (!wsId) return;
-        invalidateTaskLifecycleQueries(qc, wsId);
+        qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
+        // 30d activity series shares the same lifecycle signal — any task
+        // completion / failure shifts the histogram. (Dispatch alone
+        // doesn't change a completed_at-anchored series, but invalidating
+        // here keeps the WS-handler shape uniform; the resulting refetch
+        // is cheap.) Both the list (trailing 7d slice) and the detail
+        // panel read off this single cache.
+        qc.invalidateQueries({ queryKey: agentActivityKeys.last30d(wsId) });
+        // 30-day run count likewise increments per task lifecycle event.
+        qc.invalidateQueries({ queryKey: agentRunCountsKeys.last30d(wsId) });
+        // Per-agent task list (Activity tab "Recent work"). Prefix match
+        // catches every agent's list — the per-agent detail key sits
+        // under agentTasks/<wsId>/<agentId>.
+        qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
+        // Per-issue task list (issue-detail Execution log). Prefix match
+        // across all issues — keeps the contract "any task: event makes
+        // every list-of-tasks query stale" so cache stays fresh even
+        // when the relevant component isn't currently mounted.
+        qc.invalidateQueries({ queryKey: ["issues", "tasks"] });
         // Per-issue token usage card (issue-detail right rail). Same
         // shape as the tasks invalidation above — any task lifecycle
         // event shifts the aggregated usage numbers.
         qc.invalidateQueries({ queryKey: ["issues", "usage"] });
+        // Squad members-status reads the same task lifecycle to flip
+        // working ↔ idle for each agent member. Prefix-matches every
+        // mounted squad-page's members-status query in O(1).
+        qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
       },
     };
 
@@ -318,7 +348,7 @@ export function useRealtimeSync(
     // Event types handled by specific handlers below -- skip generic refresh
     const specificEvents = new Set([
       "workspace:updated",
-      "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "inbox:new",
+      "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "issue_metadata:changed", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "comment:resolved", "comment:unresolved",
       "activity:created",
@@ -387,6 +417,13 @@ export function useRealtimeSync(
       if (!issue_id) return;
       const wsId = getCurrentWsId();
       if (wsId) onIssueLabelsChanged(qc, wsId, issue_id, labels ?? []);
+    });
+
+    const unsubIssueMetadataChanged = ws.on("issue_metadata:changed", (p) => {
+      const { issue_id, metadata } = p as IssueMetadataChangedPayload;
+      if (!issue_id) return;
+      const wsId = getCurrentWsId();
+      if (wsId) onIssueMetadataChanged(qc, wsId, issue_id, metadata ?? {});
     });
 
     const unsubInboxNew = ws.on("inbox:new", async (p) => {
@@ -870,6 +907,7 @@ export function useRealtimeSync(
       unsubIssueCreated();
       unsubIssueDeleted();
       unsubIssueLabelsChanged();
+      unsubIssueMetadataChanged();
       unsubInboxNew();
       unsubCommentCreated();
       unsubCommentUpdated();

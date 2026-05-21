@@ -30,6 +30,10 @@ const (
 	defaultCodexSemanticInactivityTimeout = 10 * time.Minute
 )
 
+// CodexSemanticInactivityMarker prefixes timeout errors emitted when Codex
+// stops making semantic progress while the process is still alive.
+const CodexSemanticInactivityMarker = "codex semantic inactivity timeout"
+
 // codexBackend implements Backend by spawning `codex app-server --listen stdio://`
 // and communicating via JSON-RPC 2.0 over stdin/stdout.
 type codexBackend struct {
@@ -262,8 +266,8 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			case <-semanticTimer.C:
 				waitingForTurn = false
 				finalStatus = "timeout"
-				finalError = fmt.Sprintf("codex semantic inactivity timeout after %s without agent progress (last activity: %s)", semanticInactivityTimeout, lastSemanticActivityDescription)
-				b.cfg.Logger.Warn("codex semantic inactivity timeout",
+				finalError = fmt.Sprintf("%s after %s without agent progress (last activity: %s)", CodexSemanticInactivityMarker, semanticInactivityTimeout, lastSemanticActivityDescription)
+				b.cfg.Logger.Warn(CodexSemanticInactivityMarker,
 					"pid", cmd.Process.Pid,
 					"thread_id", threadID,
 					"turn_id", c.turnID,

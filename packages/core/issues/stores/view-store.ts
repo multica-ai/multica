@@ -74,7 +74,6 @@ export interface IssueViewState {
   sortDirection: SortDirection;
   cardProperties: CardProperties;
   listCollapsedStatuses: IssueStatus[];
-  subIssueDisplay: SubIssueDisplay;
   ganttZoom: GanttZoom;
   ganttShowCompleted: boolean;
   setViewMode: (mode: ViewMode) => void;
@@ -123,7 +122,6 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     labels: true,
   },
   listCollapsedStatuses: [],
-  subIssueDisplay: "standalone",
   ganttZoom: "week",
   ganttShowCompleted: false,
 
@@ -249,7 +247,6 @@ export const viewStorePersistOptions = (name: string) => ({
     sortDirection: state.sortDirection,
     cardProperties: state.cardProperties,
     listCollapsedStatuses: state.listCollapsedStatuses,
-    subIssueDisplay: state.subIssueDisplay,
     ganttZoom: state.ganttZoom,
     ganttShowCompleted: state.ganttShowCompleted,
   }),

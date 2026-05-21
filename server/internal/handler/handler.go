@@ -10,6 +10,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -18,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -50,32 +52,35 @@ type Config struct {
 	AllowSignup         bool
 	AllowedEmails       []string
 	AllowedEmailDomains []string
-	// UseDailyRollupForRuntimeUsage routes ListRuntimeUsage to the
-	// task_usage_daily rollup table when true. Default false: the read
-	// path stays on the raw task_usage stream so rollup-related issues
-	// (pg_cron not running, backfill not yet performed, watermark stuck)
-	// can never make the dashboard return empty/stale data. Operators
-	// flip this on per environment AFTER:
-	//   1) migrations 072..076 applied,
-	//   2) backfill_task_usage_daily ran successfully,
-	//   3) cron job scheduled and task_usage_rollup_lag_seconds() < 900.
-	UseDailyRollupForRuntimeUsage bool
-	// ScannerDiscoveryToken protects the cross-workspace
+	// PublicURL is the absolute base URL the API is reachable at from the
+	// public internet, with no trailing slash (e.g. "https://app.multica.ai").
+	// Used only to build webhook_url responses for autopilot webhook triggers
+	// — never for auth, routing, or workspace resolution. Empty when unset,
+	// in which case clients fall back to webhook_path + their own origin.
+	// Reading the public host from request headers (Host / X-Forwarded-Host)
+	// is intentionally avoided so a misconfigured reverse proxy cannot trick
+	// the server into minting webhook URLs pointing at an attacker-controlled
+	// host.
+	PublicURL string
+	// TrustedProxies are CIDRs whose source IP we trust to set
+	// X-Forwarded-For / X-Real-IP. Empty means "trust nothing": the rate
+	// limiter uses r.RemoteAddr exclusively. Populated via the
+	// MULTICA_TRUSTED_PROXIES env var (comma-separated CIDRs, e.g.
+	// "10.0.0.0/8,127.0.0.1/32"). This is specifically to keep the per-IP
+	// webhook limiter from being bypassed by a spoofed XFF on deployments
+	// without a header-stripping reverse proxy in front.
+	TrustedProxies []netip.Prefix
+	// CloudRuntimeFleetURL enables the SaaS-only remote Fleet adapter when set.
+	// Empty keeps self-hosted deployments explicit: cloud runtime endpoints
+	// return 503 instead of attempting to dial a hard-coded private service.
+	CloudRuntimeFleetURL     string
+	CloudRuntimeFleetTimeout time.Duration
+}
+
+type cloudRuntimeProxy interface {
+	Enabled() bool
+	Do(ctx context.Context, req cloudruntime.Request) (*cloudruntime.Response, error)
 	// CEREBRO-PATCH(handler): persona integration additions.
-	// /api/scanner-discovery/runtimes endpoint consumed by persona's scanner.
-	// Empty disables the endpoint entirely.
-	ScannerDiscoveryToken string
-	// UseDailyRollupForDashboard routes the workspace `/dashboard` page's
-	// token-aggregation reads to `task_usage_dashboard_daily` (migration
-	// 084). Mirrors UseDailyRollupForRuntimeUsage above with the same
-	// fail-safe default (false → raw scan). Operators flip per
-	// environment AFTER:
-	//   1) migration 084 applied,
-	//   2) `backfill_task_usage_dashboard_daily` succeeded and stamped
-	//      the dashboard rollup watermark,
-	//   3) cron job scheduled (`rollup_task_usage_dashboard_daily`) and
-	//      `task_usage_dashboard_rollup_lag_seconds()` < 900.
-	UseDailyRollupForDashboard bool
 }
 
 type Handler struct {
@@ -99,41 +104,22 @@ type Handler struct {
 	Analytics             analytics.Client
 	PATCache              *auth.PATCache
 	DaemonTokenCache      *auth.DaemonTokenCache
+	MembershipCache       *auth.MembershipCache
+	WebhookRateLimiter    WebhookRateLimiter
+	WebhookIPRateLimiter  WebhookRateLimiter
+	CloudRuntime          cloudRuntimeProxy
+	cfg                   Config
 	// CEREBRO-PATCH(handler-cerebro-fields): cerebro budget guard, web push,
-	// and daemon ping state.
-	BudgetService *service.BudgetService
-	PushService   *service.PushService
-	PingStore     *PingStore
 	// CEREBRO-PATCH(handler-channel-listen): channel-listener (per-(channel,agent)
-	// listen-mode) service. Set by the router after construction so the upstream
-	// handler.New signature stays unchanged.
-	ChannelListen ChannelListenInvoker
 	// CEREBRO-PATCH(handler-runtime-pause): cerebro runtime pause/unpause service.
-	RuntimePause RuntimePauseInvoker
 	// CEREBRO-PATCH(handler-group-permissions): cerebro group-permission gate.
-	GroupPermissions GroupPermissionsInvoker
 	// CEREBRO-PATCH(handler-runtime-account): cerebro daemon-driven account
-	// registration service. Wired by the router after construction.
-	RuntimeAccount RuntimeAccountInvoker
 	// CEREBRO-PATCH(handler-persona-mask): JEH-1079 mask checker. Wired by
-	// the router after construction; nil = persona not configured (no redaction).
-	PersonaMask PersonaMaskInvoker
 	// CEREBRO-PATCH(handler-persona-mask-audit): JEH-1173 redaction ledger.
-	// Wired by the router after construction; nil = no audit row written.
-	PersonaMaskAudit PersonaMaskAuditWriter
 	// CEREBRO-PATCH(handler-tool-meta): JEH-1353 — ordered list of registered
-	// tools and name→description lookup for the tool grant admin API.
-	cerebroToolItems  []CerebroToolItem
-	cerebroToolDesc   map[string]string
 	cerebroToolStatus map[string]string // CEREBRO-PATCH(handler-tool-status): reject stale grants for excluded tools.
 	// CEREBRO-PATCH(handler-runtime-tools-admin): JEH-1710 unified runtime
-	// tool inventory + access-control admin service. Wired by router after
-	// handler.New().
-	runtimeToolsAdmin RuntimeToolsAdminService
 	// CEREBRO-PATCH(handler-runtime-tools-scan): JEH-1710 daemon-side ingest
-	// for the periodic MCP tools/list scan. Wired by router after handler.New().
-	runtimeToolsScan RuntimeToolsScanService
-	cfg              Config
 }
 
 // RuntimePauseInvoker is the upstream-side seam that the cerebro runtime
@@ -219,12 +205,14 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		Storage:               store,
 		CFSigner:              cfSigner,
 		Analytics:             analyticsClient,
+		WebhookRateLimiter:    NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
+		WebhookIPRateLimiter:  NewMemoryWebhookIPRateLimiter(DefaultWebhookIPRateLimit()),
+		CloudRuntime: cloudruntime.NewClient(cloudruntime.Config{
+			BaseURL: cfg.CloudRuntimeFleetURL,
+			Timeout: cfg.CloudRuntimeFleetTimeout,
+		}),
+		cfg: cfg,
 		// CEREBRO-PATCH(handler-cerebro-init): cerebro budget guard, web push,
-		// and daemon ping state.
-		BudgetService: service.NewBudgetService(queries),
-		PushService:   pushService,
-		PingStore:     NewPingStore(),
-		cfg:           cfg,
 	}
 }
 
@@ -351,6 +339,14 @@ func isNotFound(err error) bool {
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// isCheckViolation reports whether err is a PostgreSQL CHECK constraint
+// violation (SQLSTATE 23514). Used to translate column-level CHECK failures
+// into a 4xx instead of a generic 500.
+func isCheckViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23514"
 }
 
 func requestUserID(r *http.Request) string {

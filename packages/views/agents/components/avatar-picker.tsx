@@ -73,7 +73,7 @@ export function AvatarPicker({ value, onChange, size = 56 }: AvatarPickerProps) 
           "group relative h-full w-full overflow-hidden rounded-lg outline-none transition-colors",
           "focus-visible:ring-2 focus-visible:ring-ring",
           hasValue
-            ? "border bg-muted"
+            ? "border"
             : "border border-dashed bg-muted/40 hover:bg-muted",
         )}
         aria-label={

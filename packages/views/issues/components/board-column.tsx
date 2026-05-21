@@ -104,9 +104,7 @@ export function BoardColumn({
                   className="rounded-full text-muted-foreground"
                   onClick={() => {
                     const data = {
-                      ...(status ? { status } : {}),
                       ...(group.createData ?? {}),
-                      ...(createIssueData ?? {}),
                       ...(projectId ? { project_id: projectId } : {}),
                     };
                     useModalStore.getState().open("create-issue", data);

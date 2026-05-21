@@ -40,7 +40,7 @@ WHERE t.autopilot_id = a.id
   AND t.next_run_at IS NOT NULL
   AND t.next_run_at <= now()
   AND a.status = 'active'
-RETURNING t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, a.workspace_id AS autopilot_workspace_id
+RETURNING t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, a.workspace_id AS autopilot_workspace_id
 `
 
 type ClaimDueScheduleTriggersRow struct {
@@ -56,6 +56,8 @@ type ClaimDueScheduleTriggersRow struct {
 	LastFiredAt          pgtype.Timestamptz `json:"last_fired_at"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	Provider             string             `json:"provider"`
+	SigningSecret        pgtype.Text        `json:"signing_secret"`
 	AutopilotWorkspaceID pgtype.UUID        `json:"autopilot_workspace_id"`
 }
 
@@ -86,6 +88,8 @@ func (q *Queries) ClaimDueScheduleTriggers(ctx context.Context) ([]ClaimDueSched
 			&i.LastFiredAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Provider,
+			&i.SigningSecret,
 			&i.AutopilotWorkspaceID,
 		); err != nil {
 			return nil, err
@@ -101,13 +105,13 @@ func (q *Queries) ClaimDueScheduleTriggers(ctx context.Context) ([]ClaimDueSched
 const createAutopilot = `-- name: CreateAutopilot :one
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_type, assignee_id,
-    status, execution_mode, issue_title_template,
+    status, execution_mode, issue_title_template, project_id,
     created_by_type, created_by_id, is_private
 ) VALUES (
     $1, $2, $9, $3, $4,
-    $5, $6, $10,
-    $7, $8, COALESCE($11::boolean, FALSE)
-) RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, scope, owner_user_id, group_id, model, is_private
+    $5, $6, $10, $11,
+    $7, $8, COALESCE($12::boolean, FALSE)
+) RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, scope, owner_user_id, group_id, model, is_private
 `
 
 type CreateAutopilotParams struct {
@@ -121,6 +125,7 @@ type CreateAutopilotParams struct {
 	CreatedByID        pgtype.UUID `json:"created_by_id"`
 	Description        pgtype.Text `json:"description"`
 	IssueTitleTemplate pgtype.Text `json:"issue_title_template"`
+	ProjectID          pgtype.UUID `json:"project_id"`
 	IsPrivate          pgtype.Bool `json:"is_private"`
 }
 
@@ -136,6 +141,7 @@ func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams
 		arg.CreatedByID,
 		arg.Description,
 		arg.IssueTitleTemplate,
+		arg.ProjectID,
 		arg.IsPrivate,
 	)
 	var i Autopilot
@@ -154,6 +160,7 @@ func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AssigneeType,
+		&i.ProjectID,
 		&i.Scope,
 		&i.OwnerUserID,
 		&i.GroupID,
@@ -295,11 +302,12 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 const createAutopilotTrigger = `-- name: CreateAutopilotTrigger :one
 INSERT INTO autopilot_trigger (
     autopilot_id, kind, enabled, cron_expression, timezone,
-    next_run_at, webhook_token, label
+    next_run_at, webhook_token, label, provider
 ) VALUES (
     $1, $2, $3, $4, $5,
-    $6, $7, $8
-) RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at
+    $6, $7, $8,
+    COALESCE($9::text, 'generic')
+) RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret
 `
 
 type CreateAutopilotTriggerParams struct {
@@ -311,6 +319,7 @@ type CreateAutopilotTriggerParams struct {
 	NextRunAt      pgtype.Timestamptz `json:"next_run_at"`
 	WebhookToken   pgtype.Text        `json:"webhook_token"`
 	Label          pgtype.Text        `json:"label"`
+	Provider       pgtype.Text        `json:"provider"`
 }
 
 func (q *Queries) CreateAutopilotTrigger(ctx context.Context, arg CreateAutopilotTriggerParams) (AutopilotTrigger, error) {
@@ -323,6 +332,7 @@ func (q *Queries) CreateAutopilotTrigger(ctx context.Context, arg CreateAutopilo
 		arg.NextRunAt,
 		arg.WebhookToken,
 		arg.Label,
+		arg.Provider,
 	)
 	var i AutopilotTrigger
 	err := row.Scan(
@@ -338,6 +348,8 @@ func (q *Queries) CreateAutopilotTrigger(ctx context.Context, arg CreateAutopilo
 		&i.LastFiredAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Provider,
+		&i.SigningSecret,
 	)
 	return i, err
 }
@@ -375,7 +387,7 @@ func (q *Queries) FailAutopilotRunsByIssue(ctx context.Context, issueID pgtype.U
 }
 
 const getAutopilot = `-- name: GetAutopilot :one
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, scope, owner_user_id, group_id, model, is_private FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, scope, owner_user_id, group_id, model, is_private FROM autopilot
 WHERE id = $1
 `
 
@@ -397,6 +409,7 @@ func (q *Queries) GetAutopilot(ctx context.Context, id pgtype.UUID) (Autopilot, 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AssigneeType,
+		&i.ProjectID,
 		&i.Scope,
 		&i.OwnerUserID,
 		&i.GroupID,
@@ -407,7 +420,7 @@ func (q *Queries) GetAutopilot(ctx context.Context, id pgtype.UUID) (Autopilot, 
 }
 
 const getAutopilotInWorkspace = `-- name: GetAutopilotInWorkspace :one
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, scope, owner_user_id, group_id, model, is_private FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, scope, owner_user_id, group_id, model, is_private FROM autopilot
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -434,6 +447,7 @@ func (q *Queries) GetAutopilotInWorkspace(ctx context.Context, arg GetAutopilotI
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AssigneeType,
+		&i.ProjectID,
 		&i.Scope,
 		&i.OwnerUserID,
 		&i.GroupID,
@@ -503,7 +517,7 @@ func (q *Queries) GetAutopilotRunByIssue(ctx context.Context, issueID pgtype.UUI
 }
 
 const getAutopilotTrigger = `-- name: GetAutopilotTrigger :one
-SELECT id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at FROM autopilot_trigger
+SELECT id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret FROM autopilot_trigger
 WHERE id = $1
 `
 
@@ -523,6 +537,62 @@ func (q *Queries) GetAutopilotTrigger(ctx context.Context, id pgtype.UUID) (Auto
 		&i.LastFiredAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Provider,
+		&i.SigningSecret,
+	)
+	return i, err
+}
+
+const getWebhookTriggerByToken = `-- name: GetWebhookTriggerByToken :one
+SELECT t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, a.workspace_id AS autopilot_workspace_id
+FROM autopilot_trigger t
+JOIN autopilot a ON a.id = t.autopilot_id
+WHERE t.kind = 'webhook'
+  AND t.webhook_token = $1
+`
+
+type GetWebhookTriggerByTokenRow struct {
+	ID                   pgtype.UUID        `json:"id"`
+	AutopilotID          pgtype.UUID        `json:"autopilot_id"`
+	Kind                 string             `json:"kind"`
+	Enabled              bool               `json:"enabled"`
+	CronExpression       pgtype.Text        `json:"cron_expression"`
+	Timezone             pgtype.Text        `json:"timezone"`
+	NextRunAt            pgtype.Timestamptz `json:"next_run_at"`
+	WebhookToken         pgtype.Text        `json:"webhook_token"`
+	Label                pgtype.Text        `json:"label"`
+	LastFiredAt          pgtype.Timestamptz `json:"last_fired_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	Provider             string             `json:"provider"`
+	SigningSecret        pgtype.Text        `json:"signing_secret"`
+	AutopilotWorkspaceID pgtype.UUID        `json:"autopilot_workspace_id"`
+}
+
+// Look up a webhook trigger by its public bearer token. Joined to autopilot
+// so the webhook handler can derive the workspace from the trigger's parent
+// without trusting any request header. The handler still re-loads the
+// Autopilot via GetAutopilot and cross-checks WorkspaceID matches the row's
+// autopilot_workspace_id.
+func (q *Queries) GetWebhookTriggerByToken(ctx context.Context, webhookToken pgtype.Text) (GetWebhookTriggerByTokenRow, error) {
+	row := q.db.QueryRow(ctx, getWebhookTriggerByToken, webhookToken)
+	var i GetWebhookTriggerByTokenRow
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.Kind,
+		&i.Enabled,
+		&i.CronExpression,
+		&i.Timezone,
+		&i.NextRunAt,
+		&i.WebhookToken,
+		&i.Label,
+		&i.LastFiredAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Provider,
+		&i.SigningSecret,
+		&i.AutopilotWorkspaceID,
 	)
 	return i, err
 }
@@ -577,7 +647,7 @@ func (q *Queries) ListAutopilotRuns(ctx context.Context, arg ListAutopilotRunsPa
 
 const listAutopilotTriggers = `-- name: ListAutopilotTriggers :many
 
-SELECT id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at FROM autopilot_trigger
+SELECT id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret FROM autopilot_trigger
 WHERE autopilot_id = $1
 ORDER BY created_at ASC
 `
@@ -607,6 +677,8 @@ func (q *Queries) ListAutopilotTriggers(ctx context.Context, autopilotID pgtype.
 			&i.LastFiredAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Provider,
+			&i.SigningSecret,
 		); err != nil {
 			return nil, err
 		}
@@ -620,7 +692,7 @@ func (q *Queries) ListAutopilotTriggers(ctx context.Context, autopilotID pgtype.
 
 const listAutopilots = `-- name: ListAutopilots :many
 
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, scope, owner_user_id, group_id, model, is_private FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, scope, owner_user_id, group_id, model, is_private FROM autopilot
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
 ORDER BY created_at DESC
@@ -658,6 +730,7 @@ func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.AssigneeType,
+			&i.ProjectID,
 			&i.Scope,
 			&i.OwnerUserID,
 			&i.GroupID,
@@ -676,7 +749,7 @@ func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) 
 
 const listAutopilotsForUser = `-- name: ListAutopilotsForUser :many
 
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, scope, owner_user_id, group_id, model, is_private FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, scope, owner_user_id, group_id, model, is_private FROM autopilot
 WHERE workspace_id = $1::uuid
   AND ($2::text IS NULL OR status = $2)
   AND (
@@ -739,6 +812,7 @@ func (q *Queries) ListAutopilotsForUser(ctx context.Context, arg ListAutopilotsF
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.AssigneeType,
+			&i.ProjectID,
 			&i.Scope,
 			&i.OwnerUserID,
 			&i.GroupID,
@@ -757,7 +831,7 @@ func (q *Queries) ListAutopilotsForUser(ctx context.Context, arg ListAutopilotsF
 
 const recoverLostTriggers = `-- name: RecoverLostTriggers :many
 
-SELECT t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, a.workspace_id AS autopilot_workspace_id
+SELECT t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, a.workspace_id AS autopilot_workspace_id
 FROM autopilot_trigger t
 JOIN autopilot a ON t.autopilot_id = a.id
 WHERE t.kind = 'schedule'
@@ -780,6 +854,8 @@ type RecoverLostTriggersRow struct {
 	LastFiredAt          pgtype.Timestamptz `json:"last_fired_at"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	Provider             string             `json:"provider"`
+	SigningSecret        pgtype.Text        `json:"signing_secret"`
 	AutopilotWorkspaceID pgtype.UUID        `json:"autopilot_workspace_id"`
 }
 
@@ -811,6 +887,8 @@ func (q *Queries) RecoverLostTriggers(ctx context.Context) ([]RecoverLostTrigger
 			&i.LastFiredAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Provider,
+			&i.SigningSecret,
 			&i.AutopilotWorkspaceID,
 		); err != nil {
 			return nil, err
@@ -821,6 +899,45 @@ func (q *Queries) RecoverLostTriggers(ctx context.Context) ([]RecoverLostTrigger
 		return nil, err
 	}
 	return items, nil
+}
+
+const rotateAutopilotTriggerWebhookToken = `-- name: RotateAutopilotTriggerWebhookToken :one
+UPDATE autopilot_trigger
+SET webhook_token = $2,
+    updated_at = now()
+WHERE id = $1
+  AND kind = 'webhook'
+RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret
+`
+
+type RotateAutopilotTriggerWebhookTokenParams struct {
+	ID           pgtype.UUID `json:"id"`
+	WebhookToken pgtype.Text `json:"webhook_token"`
+}
+
+// Rotates the bearer token for a webhook trigger. Restricted to kind='webhook'
+// so an accidental call against a schedule/api trigger is a no-op (returns no
+// rows) rather than corrupting unrelated state.
+func (q *Queries) RotateAutopilotTriggerWebhookToken(ctx context.Context, arg RotateAutopilotTriggerWebhookTokenParams) (AutopilotTrigger, error) {
+	row := q.db.QueryRow(ctx, rotateAutopilotTriggerWebhookToken, arg.ID, arg.WebhookToken)
+	var i AutopilotTrigger
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.Kind,
+		&i.Enabled,
+		&i.CronExpression,
+		&i.Timezone,
+		&i.NextRunAt,
+		&i.WebhookToken,
+		&i.Label,
+		&i.LastFiredAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Provider,
+		&i.SigningSecret,
+	)
+	return i, err
 }
 
 const selectAutopilotsExceedingFailureThreshold = `-- name: SelectAutopilotsExceedingFailureThreshold :many
@@ -977,11 +1094,92 @@ func (q *Queries) SetAutopilotScope(ctx context.Context, arg SetAutopilotScopePa
 	return err
 }
 
+const setAutopilotTriggerSigningSecret = `-- name: SetAutopilotTriggerSigningSecret :one
+UPDATE autopilot_trigger
+SET signing_secret = $2,
+    updated_at = now()
+WHERE id = $1
+  AND kind = 'webhook'
+RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret
+`
+
+type SetAutopilotTriggerSigningSecretParams struct {
+	ID            pgtype.UUID `json:"id"`
+	SigningSecret pgtype.Text `json:"signing_secret"`
+}
+
+// Writes the signing secret for a webhook trigger. Kept as a dedicated query
+// (not a field on UpdateAutopilotTrigger) so the request body for the
+// write-only endpoint only ever carries the secret value, with no risk of an
+// accidental log line leaking it alongside other fields. Restricted to
+// webhook triggers to avoid corrupting unrelated state.
+func (q *Queries) SetAutopilotTriggerSigningSecret(ctx context.Context, arg SetAutopilotTriggerSigningSecretParams) (AutopilotTrigger, error) {
+	row := q.db.QueryRow(ctx, setAutopilotTriggerSigningSecret, arg.ID, arg.SigningSecret)
+	var i AutopilotTrigger
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.Kind,
+		&i.Enabled,
+		&i.CronExpression,
+		&i.Timezone,
+		&i.NextRunAt,
+		&i.WebhookToken,
+		&i.Label,
+		&i.LastFiredAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Provider,
+		&i.SigningSecret,
+	)
+	return i, err
+}
+
+const setAutopilotTriggerWebhookToken = `-- name: SetAutopilotTriggerWebhookToken :one
+UPDATE autopilot_trigger
+SET webhook_token = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret
+`
+
+type SetAutopilotTriggerWebhookTokenParams struct {
+	ID           pgtype.UUID `json:"id"`
+	WebhookToken pgtype.Text `json:"webhook_token"`
+}
+
+// Sets the webhook token at creation time. CreateAutopilotTrigger inserts the
+// row first (using its full 8-arg signature), then this query attaches the
+// token. Splitting the create + token-set keeps the existing CreateAutopilotTrigger
+// query usable by the schedule path without forcing every caller to think
+// about webhook_token.
+func (q *Queries) SetAutopilotTriggerWebhookToken(ctx context.Context, arg SetAutopilotTriggerWebhookTokenParams) (AutopilotTrigger, error) {
+	row := q.db.QueryRow(ctx, setAutopilotTriggerWebhookToken, arg.ID, arg.WebhookToken)
+	var i AutopilotTrigger
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.Kind,
+		&i.Enabled,
+		&i.CronExpression,
+		&i.Timezone,
+		&i.NextRunAt,
+		&i.WebhookToken,
+		&i.Label,
+		&i.LastFiredAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Provider,
+		&i.SigningSecret,
+	)
+	return i, err
+}
+
 const systemPauseAutopilot = `-- name: SystemPauseAutopilot :one
 UPDATE autopilot
 SET status = 'paused', updated_at = now()
 WHERE id = $1 AND status = 'active'
-RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, scope, owner_user_id, group_id, model, is_private
+RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, scope, owner_user_id, group_id, model, is_private
 `
 
 // Atomically pauses an autopilot only if it is currently active. Returns no
@@ -1006,6 +1204,7 @@ func (q *Queries) SystemPauseAutopilot(ctx context.Context, id pgtype.UUID) (Aut
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AssigneeType,
+		&i.ProjectID,
 		&i.Scope,
 		&i.OwnerUserID,
 		&i.GroupID,
@@ -1013,6 +1212,22 @@ func (q *Queries) SystemPauseAutopilot(ctx context.Context, id pgtype.UUID) (Aut
 		&i.IsPrivate,
 	)
 	return i, err
+}
+
+const touchAutopilotTriggerFiredAt = `-- name: TouchAutopilotTriggerFiredAt :exec
+UPDATE autopilot_trigger
+SET last_fired_at = now(),
+    updated_at = now()
+WHERE id = $1
+`
+
+// Bumps last_fired_at after a webhook fires, regardless of whether the
+// dispatch succeeded, was admission-skipped, or even if Autopilot status
+// transitioned to paused/disabled at exactly the wrong moment. Disabled /
+// paused early-return paths in the handler never call this.
+func (q *Queries) TouchAutopilotTriggerFiredAt(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, touchAutopilotTriggerFiredAt, id)
+	return err
 }
 
 const updateAutopilot = `-- name: UpdateAutopilot :one
@@ -1025,9 +1240,10 @@ UPDATE autopilot SET
     execution_mode = COALESCE($7, execution_mode),
     issue_title_template = $8,
     is_private = COALESCE($9::boolean, is_private),
+    project_id = $10,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, scope, owner_user_id, group_id, model, is_private
+RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, scope, owner_user_id, group_id, model, is_private
 `
 
 type UpdateAutopilotParams struct {
@@ -1040,6 +1256,7 @@ type UpdateAutopilotParams struct {
 	ExecutionMode      pgtype.Text `json:"execution_mode"`
 	IssueTitleTemplate pgtype.Text `json:"issue_title_template"`
 	IsPrivate          pgtype.Bool `json:"is_private"`
+	ProjectID          pgtype.UUID `json:"project_id"`
 }
 
 func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams) (Autopilot, error) {
@@ -1053,6 +1270,7 @@ func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams
 		arg.ExecutionMode,
 		arg.IssueTitleTemplate,
 		arg.IsPrivate,
+		arg.ProjectID,
 	)
 	var i Autopilot
 	err := row.Scan(
@@ -1070,6 +1288,7 @@ func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AssigneeType,
+		&i.ProjectID,
 		&i.Scope,
 		&i.OwnerUserID,
 		&i.GroupID,
@@ -1312,7 +1531,7 @@ UPDATE autopilot_trigger SET
     label = COALESCE($6, label),
     updated_at = now()
 WHERE id = $1
-RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at
+RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret
 `
 
 type UpdateAutopilotTriggerParams struct {
@@ -1347,6 +1566,8 @@ func (q *Queries) UpdateAutopilotTrigger(ctx context.Context, arg UpdateAutopilo
 		&i.LastFiredAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Provider,
+		&i.SigningSecret,
 	)
 	return i, err
 }

@@ -13,11 +13,16 @@ import type { OnboardingStep } from "./types";
  * intro, not a persisted step. It doesn't show a progress indicator
  * for the same reason — users shouldn't think of reading the intro
  * as progress toward completing setup.
+ *
+ * Note: "teammate" (the old "Create your first agent" step) is no longer
+ * part of the in-flow sequence. Helper agent creation now happens after
+ * onboarding exits, via the workspace OnboardingHelperModal — see
+ * `packages/views/workspace/onboarding-helper-modal.tsx`.
  */
 export const ONBOARDING_STEP_ORDER: readonly OnboardingStep[] = [
-  "questionnaire",
+  "source",
+  "role",
+  "use_case",
   "workspace",
   "runtime",
-  "agent",
-  "first_issue",
 ] as const;

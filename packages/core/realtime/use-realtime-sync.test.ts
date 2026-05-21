@@ -1,13 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import { chatKeys } from "../chat/queries";
-import {
-  agentActivityKeys,
-  agentRunCountsKeys,
-  agentTaskSnapshotKeys,
-  agentTasksKeys,
-} from "../agents/queries";
-import { inboxKeys } from "../inbox/queries";
 import { issueKeys } from "../issues/queries";
 import { workspaceKeys } from "../workspace/queries";
 import type {
@@ -18,7 +11,6 @@ import type {
 } from "../types";
 import {
   applyChatDoneToCache,
-  invalidateTaskLifecycleQueries,
   applyWorkspaceUpdatedToCache,
 } from "./use-realtime-sync";
 
@@ -26,7 +18,6 @@ const sessionId = "session-1";
 const taskId = "task-1";
 const messagesKey = chatKeys.messages(sessionId);
 const pendingKey = chatKeys.pendingTask(sessionId);
-const wsId = "ws-1";
 
 function createQueryClient() {
   return new QueryClient({
@@ -44,7 +35,6 @@ function userMessage(): ChatMessage {
     content: "hello",
     task_id: null,
     created_at: "2026-05-13T05:00:00Z",
-    responded_at: null,
   };
 }
 
@@ -85,7 +75,6 @@ describe("applyChatDoneToCache", () => {
         content: "done",
         task_id: taskId,
         created_at: "2026-05-13T05:00:02Z",
-        responded_at: null,
         elapsed_ms: 1234,
       },
     ]);
@@ -100,7 +89,6 @@ describe("applyChatDoneToCache", () => {
       content: "done",
       task_id: taskId,
       created_at: "2026-05-13T05:00:02Z",
-      responded_at: null,
       elapsed_ms: 1234,
     };
     qc.setQueryData<ChatMessage[]>(messagesKey, [userMessage(), assistant]);
@@ -135,32 +123,6 @@ describe("applyChatDoneToCache", () => {
       userMessage(),
     ]);
     expect(qc.getQueryData<ChatPendingTask>(pendingKey)).toEqual({});
-  });
-});
-
-describe("invalidateTaskLifecycleQueries", () => {
-  it("invalidates the inbox active issue tasks query with other task lifecycle caches", () => {
-    const qc = createQueryClient();
-
-    for (const key of [
-      agentTaskSnapshotKeys.list(wsId),
-      agentActivityKeys.last30d(wsId),
-      agentRunCountsKeys.last30d(wsId),
-      agentTasksKeys.all(wsId),
-      ["issues", "tasks"] as const,
-      inboxKeys.activeIssueTasks(wsId),
-    ]) {
-      qc.setQueryData(key, []);
-    }
-
-    invalidateTaskLifecycleQueries(qc, wsId);
-
-    expect(qc.getQueryState(agentTaskSnapshotKeys.list(wsId))?.isInvalidated).toBe(true);
-    expect(qc.getQueryState(agentActivityKeys.last30d(wsId))?.isInvalidated).toBe(true);
-    expect(qc.getQueryState(agentRunCountsKeys.last30d(wsId))?.isInvalidated).toBe(true);
-    expect(qc.getQueryState(agentTasksKeys.all(wsId))?.isInvalidated).toBe(true);
-    expect(qc.getQueryState(["issues", "tasks"])?.isInvalidated).toBe(true);
-    expect(qc.getQueryState(inboxKeys.activeIssueTasks(wsId))?.isInvalidated).toBe(true);
   });
 });
 

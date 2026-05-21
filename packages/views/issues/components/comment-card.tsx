@@ -1,9 +1,8 @@
 "use client";
 
+import { memo, useCallback, useRef, useState } from "react";
+import { CheckCircle2, ChevronRight, Copy, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 // CEREBRO-PATCH(comment-card-cerebro): cerebro modification of upstream file
-
-import { CheckCircle2, ChevronRight, Copy, GitFork, MessageCircleQuestion, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
-import { lazy, memo, Suspense, useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -32,10 +31,7 @@ import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-pick
 import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { timeAgo } from "@multica/core/utils";
-import { ContentEditor, type ContentEditorRef } from "../../editor/content-editor";
-import { FileDropOverlay } from "../../editor/file-drop-overlay";
-import { copyMarkdown } from "../../editor/utils/clipboard";
-import { useFileDropZone } from "../../editor/use-file-drop-zone";
+import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -161,44 +157,45 @@ function DeleteCommentDialog({
   );
 }
 
-// CEREBRO-PATCH(comments-move-to-subissue-ui): JEH-1309 confirmation before lifting a thread to a sub-issue.
-function MoveCommentToSubIssueDialog({
-  open,
-  onOpenChange,
-  onConfirm,
-  moving,
-  replyCount,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onConfirm: () => void;
-  moving?: boolean;
-  replyCount: number;
-}) {
-  const { t } = useT("issues");
+// ---------------------------------------------------------------------------
+// Standalone attachment list — renders attachments not already in the markdown
+// ---------------------------------------------------------------------------
+
+export function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
+  if (!attachments?.length) return null;
+  // Skip attachments whose URL is already referenced in the markdown content,
+  // and duplicates of the same file (same name/type/size) that are referenced.
+  const standalone = content
+    ? attachments.filter((a) => {
+        if (content.includes(a.url)) return false;
+        // Dedup: if another attachment with the same file identity is already
+        // inline in the content, this is a duplicate upload — skip it.
+        const hasSiblingInContent = attachments.some(
+          (other) =>
+            other.id !== a.id &&
+            other.filename === a.filename &&
+            other.content_type === a.content_type &&
+            other.size_bytes === a.size_bytes &&
+            content.includes(other.url),
+        );
+        if (hasSiblingInContent) return false;
+        return true;
+      })
+    : attachments;
+  if (!standalone.length) return null;
+
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t(($) => $.comment.move.title)}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {t(($) => $.comment.move.description, { count: replyCount })}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={moving}>{t(($) => $.comment.cancel_action)}</AlertDialogCancel>
-          <AlertDialogAction
-            disabled={moving}
-            onClick={(event) => {
-              event.preventDefault();
-              onConfirm();
-            }}
-          >
-            {moving ? t(($) => $.comment.move.moving_action) : t(($) => $.comment.move.action)}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <AttachmentDownloadProvider attachments={attachments}>
+      <div className={cn("flex flex-col gap-1", className)}>
+        {standalone.map((a) => (
+          <AttachmentRenderer
+            key={a.id}
+            attachment={{ kind: "record", attachment: a }}
+          />
+        ))}
+      </div>
+    </AttachmentDownloadProvider>
+// CEREBRO-PATCH(comments-move-to-subissue-ui): JEH-1309 confirmation before lifting a thread to a sub-issue.
   );
 }
 
@@ -263,8 +260,14 @@ function CommentRow({
     try {
       await onEdit(entry.id, trimmed);
       setEditing(false);
-    } catch {
-      toast.error(t(($) => $.comment.update_failed));
+      setPendingAttachments([]);
+      clearEditDraft(editDraftKey);
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.comment.update_failed),
+      );
     }
   };
 
@@ -470,8 +473,14 @@ function CommentCardImpl({
     try {
       await onEdit(entry.id, trimmed);
       setEditing(false);
-    } catch {
-      toast.error(t(($) => $.comment.update_failed));
+      setParentPendingAttachments([]);
+      clearParentEditDraft(parentEditDraftKey);
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.comment.update_failed),
+      );
     }
   };
 

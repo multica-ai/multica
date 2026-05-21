@@ -8,10 +8,10 @@ import {
   SelectValue,
 } from "@multica/ui/components/ui/select";
 
-// Common IANA zones surfaced as quick picks. Used as the fallback option set
-// when Intl.supportedValuesOf is not available, and promoted to the top of
-// the list when it is.
-const COMMON_TIMEZONES = [
+// Curated fallback list used when the runtime lacks `Intl.supportedValuesOf`.
+// Exported so every timezone picker draws from one source instead of
+// drifting copies.
+export const COMMON_TIMEZONES = [
   "UTC",
   "America/Los_Angeles",
   "America/Denver",
@@ -33,13 +33,25 @@ const COMMON_TIMEZONES = [
   "Pacific/Auckland",
 ];
 
+let cachedBrowserTZ: string | null = null;
 export function browserTimezone(): string {
+  if (cachedBrowserTZ !== null) return cachedBrowserTZ;
   try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    return tz || "UTC";
+    cachedBrowserTZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   } catch {
-    return "UTC";
+    cachedBrowserTZ = "UTC";
   }
+  return cachedBrowserTZ;
+}
+
+// Clears the module-level browserTimezone() cache. Browser code never
+// needs this — the tz is stable for a session — but the cache survives
+// across Vitest files in the same worker, so any test that stubs
+// `Intl.DateTimeFormat` (directly or via a fake timezone) MUST call this
+// in `beforeEach`, otherwise a value cached by an earlier suite leaks in.
+// Tests that mock the whole `./timezone-select` module are unaffected.
+export function resetBrowserTimezoneCache(): void {
+  cachedBrowserTZ = null;
 }
 
 type IntlWithSupportedValues = typeof Intl & {
@@ -64,10 +76,6 @@ export function timezoneOptions(current: string): string[] {
   ).filter(Boolean);
 }
 
-// Shared single-select timezone picker. Surfaces the browser-resolved zone
-// with a translated suffix (passed in by the caller — the picker itself stays
-// i18n-namespace agnostic), followed by a curated set of common IANA zones
-// and everything Intl.supportedValuesOf exposes.
 export function TimezoneSelect({
   value,
   onValueChange,

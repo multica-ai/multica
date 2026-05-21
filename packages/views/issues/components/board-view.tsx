@@ -487,7 +487,6 @@ export function BoardView({
                 issueMap={issueMapRef.current}
                 childProgressMap={childProgressMap}
                 myIssuesOpts={myIssuesOpts}
-                createIssueData={createIssueData}
                 projectId={projectId}
               />
             ) : (
@@ -510,7 +509,6 @@ export function BoardView({
                   issueMap={issueMapRef.current}
                   childProgressMap={childProgressMap}
                   projectId={projectId}
-                  createIssueData={createIssueData}
                   totalCount={group.totalCount}
                 />
               )
@@ -545,7 +543,6 @@ function PaginatedAssigneeBoardColumn({
   queryKey,
   filter,
   projectId,
-  createIssueData,
 }: {
   group: BoardColumnGroup;
   issueIds: string[];
@@ -554,7 +551,6 @@ function PaginatedAssigneeBoardColumn({
   queryKey: QueryKey;
   filter: AssigneeGroupedIssuesFilter;
   projectId?: string;
-  createIssueData?: Record<string, unknown>;
 }) {
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByAssigneeGroup(
     {
@@ -564,6 +560,46 @@ function PaginatedAssigneeBoardColumn({
     },
     queryKey,
     filter,
+  );
+  return (
+    <BoardColumn
+      group={group}
+      issueIds={issueIds}
+      issueMap={issueMap}
+      childProgressMap={childProgressMap}
+      totalCount={total}
+      projectId={projectId}
+      footer={
+        hasMore ? (
+          <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />
+        ) : undefined
+      }
+    />
+  );
+}
+
+function PaginatedBoardColumn({
+  group,
+  issueIds,
+  issueMap,
+  childProgressMap,
+  queryKey,
+  filter,
+  projectId,
+  createIssueData,
+}: {
+  group: BoardColumnGroup & { status: IssueStatus };
+  issueIds: string[];
+  issueMap: Map<string, Issue>;
+  childProgressMap?: Map<string, ChildProgress>;
+  queryKey: QueryKey;
+  filter: AssigneeGroupedIssuesFilter;
+  projectId?: string;
+  createIssueData?: Record<string, unknown>;
+}) {
+  const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
+    group.status,
+    myIssuesOpts,
   );
   return (
     <BoardColumn

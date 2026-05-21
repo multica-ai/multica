@@ -6,7 +6,6 @@ import {
   BookOpenText,
   FileText,
   KeyRound,
-  Shield,
   ListTodo,
   Terminal,
   Wrench, // CEREBRO-PATCH(agent-tools-tab): W8 tools tab icon
@@ -28,7 +27,6 @@ import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 // CEREBRO-PATCH(agent-sandbox-tab): JEH-1088 — persona sandbox tab (cerebro-only)
-import { SandboxTab } from "./tabs/sandbox-tab";
 import { CerebroToolsTab } from "./tabs/cerebro-tools-tab"; // CEREBRO-PATCH(agent-tools-tab): W8 tools tab
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
@@ -43,8 +41,8 @@ type DetailTab =
   | "sandbox"
   | "tools"; // CEREBRO-PATCH(agent-tools-tab): W8 tools tab
 
+const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "skills" | "environment" | "custom_args"> = {
 // CEREBRO-PATCH(agent-tools-tab): extended with "tools" key for W8
-const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "skills" | "environment" | "custom_args" | "sandbox" | "tools"> = {
   activity: "activity",
   tasks: "tasks",
   instructions: "instructions",

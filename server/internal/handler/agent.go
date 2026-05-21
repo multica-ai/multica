@@ -19,7 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
-	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -49,24 +49,17 @@ type AgentResponse struct {
 	Status             string              `json:"status"`
 	MaxConcurrentTasks int32               `json:"max_concurrent_tasks"`
 	Model              string              `json:"model"`
-	ThinkingLevel      string              `json:"thinking_level"`
-	OwnerID            *string             `json:"owner_id"`
-	Skills             []AgentSkillSummary `json:"skills"`
-	CreatedAt          string              `json:"created_at"`
-	UpdatedAt          string              `json:"updated_at"`
-	ArchivedAt         *string             `json:"archived_at"`
-	ArchivedBy         *string             `json:"archived_by"`
-	// PersonaSandbox is the name of the persona sandbox this agent runs in,
-	// or empty when no persona gating is configured. The daemon uses it at
-	// spawn time to fetch the matching profile and wire the PreToolUse hook.
-	PersonaSandbox string `json:"persona_sandbox"`
+	// ThinkingLevel is the runtime-native reasoning/effort token persisted
+	// for this agent (empty = use runtime default). The picker is per-runtime
+	// per-model; the API never normalizes across providers. See MUL-2339.
+	ThinkingLevel string              `json:"thinking_level"`
+	OwnerID       *string             `json:"owner_id"`
+	Skills        []AgentSkillSummary `json:"skills"`
+	CreatedAt     string              `json:"created_at"`
+	UpdatedAt     string              `json:"updated_at"`
+	ArchivedAt    *string             `json:"archived_at"`
+	ArchivedBy    *string             `json:"archived_by"`
 	// CEREBRO-PATCH(agent-can-trigger): JEH-1066 — visibility/trigger split.
-	// True iff the caller is allowed to trigger this agent under the cerebro
-	// group permission model. Non-cerebro deployments default to true (the
-	// upstream/group seam never denies visibility). The field is set by the
-	// handlers via setCanTrigger* after agentToResponse runs; agentToResponse
-	// itself leaves it false so callers must make an explicit decision.
-	CanTrigger bool `json:"can_trigger"`
 }
 
 func agentToResponse(a db.Agent) AgentResponse {
@@ -158,80 +151,64 @@ type ChatHistoryMessage struct {
 }
 
 type AgentTaskResponse struct {
-	ID                    string                `json:"id"`
-	AgentID               string                `json:"agent_id"`
-	RuntimeID             string                `json:"runtime_id"`
-	IssueID               string                `json:"issue_id"`
-	WorkspaceID           string                `json:"workspace_id"`
-	Status                string                `json:"status"`
-	Priority              int32                 `json:"priority"`
-	DispatchedAt          *string               `json:"dispatched_at"`
-	StartedAt             *string               `json:"started_at"`
-	CompletedAt           *string               `json:"completed_at"`
-	Result                any                   `json:"result"`
-	Error                 *string               `json:"error"`
-	FailureReason         string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
-	Attempt               int32                 `json:"attempt"`
-	MaxAttempts           int32                 `json:"max_attempts"`
-	ParentTaskID          *string               `json:"parent_task_id,omitempty"`
-	Agent                 *TaskAgentData        `json:"agent,omitempty"`
-	Repos                 []RepoData            `json:"repos,omitempty"`
-	ProjectID             string                `json:"project_id,omitempty"`        // issue's project, when present
-	ProjectTitle          string                `json:"project_title,omitempty"`     // for surfacing in agent context
-	ProjectResources      []ProjectResourceData `json:"project_resources,omitempty"` // resources attached to the project
-	CreatedAt             string                `json:"created_at"`
-	PriorSessionID        string                `json:"prior_session_id,omitempty"`        // session ID from a previous task on same issue
-	PriorWorkDir          string                `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on same issue
-	WorkDir               string                `json:"work_dir,omitempty"`                // local working directory pinned for this task; populated once the daemon reports it
-	TriggerCommentID      *string               `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
-	TriggerCommentContent string                `json:"trigger_comment_content,omitempty"` // content of the triggering comment
-	TriggerSummary        *string               `json:"trigger_summary,omitempty"`         // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
+	ID                      string                `json:"id"`
+	AgentID                 string                `json:"agent_id"`
+	RuntimeID               string                `json:"runtime_id"`
+	IssueID                 string                `json:"issue_id"`
+	WorkspaceID             string                `json:"workspace_id"`
+	Status                  string                `json:"status"`
+	Priority                int32                 `json:"priority"`
+	DispatchedAt            *string               `json:"dispatched_at"`
+	StartedAt               *string               `json:"started_at"`
+	CompletedAt             *string               `json:"completed_at"`
+	Result                  any                   `json:"result"`
+	Error                   *string               `json:"error"`
+	FailureReason           string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	Attempt                 int32                 `json:"attempt"`
+	MaxAttempts             int32                 `json:"max_attempts"`
+	ParentTaskID            *string               `json:"parent_task_id,omitempty"`
+	Agent                   *TaskAgentData        `json:"agent,omitempty"`
+	Repos                   []RepoData            `json:"repos,omitempty"`
+	ProjectID               string                `json:"project_id,omitempty"`        // issue's project, when present
+	ProjectTitle            string                `json:"project_title,omitempty"`     // for surfacing in agent context
+	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"` // resources attached to the project
+	CreatedAt               string                `json:"created_at"`
+	PriorSessionID          string                `json:"prior_session_id,omitempty"`          // session ID from a previous task on same issue
+	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on same issue
+	WorkDir                 string                `json:"work_dir,omitempty"`                  // local working directory pinned for this task; populated once the daemon reports it
+	TriggerCommentID        *string               `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
+	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
+	TriggerSummary          *string               `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
+	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
+	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
+	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
+	ChatMessage             string                `json:"chat_message,omitempty"`              // user message for chat tasks
+	ChatMessageAttachments  []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`  // attachments on the user message — agent calls `multica attachment download <id>` per entry
+	AutopilotRunID          string                `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot-spawned tasks
+	AutopilotID             string                `json:"autopilot_id,omitempty"`              // autopilot that spawned this task
+	AutopilotTitle          string                `json:"autopilot_title,omitempty"`           // autopilot title used as task context
+	AutopilotDescription    string                `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
+	AutopilotSource         string                `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
+	AutopilotTriggerPayload json.RawMessage       `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
+	QuickCreatePrompt       string                `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
+	SquadID                 string                `json:"squad_id,omitempty"`                  // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
+	SquadName               string                `json:"squad_name,omitempty"`                // display name for the picker squad
+	// RequestingUserName + RequestingUserProfileDescription mirror the user
+	// the agent is acting on behalf of (see daemon/types.go). v1 sources them
+	// from the runtime owner so they're populated for daemon runtimes and
+	// empty otherwise. The daemon emits both into the brief under
+	// `## Requesting User`; the heading is skipped entirely when description
+	// is empty.
+	RequestingUserName               string `json:"requesting_user_name,omitempty"`
+	RequestingUserProfileDescription string `json:"requesting_user_profile_description,omitempty"`
+	Kind                    string                `json:"kind"`                                // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
 	Title                 *string               `json:"title,omitempty"`                   // CEREBRO-PATCH(task-title-builder): short generated headline.
-	TriggerAuthorType     string                `json:"trigger_author_type,omitempty"`     // "agent" or "member" — author kind of the triggering comment
-	TriggerAuthorName     string                `json:"trigger_author_name,omitempty"`     // display name of the triggering comment author
-	ChatSessionID         string                `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
 	// CEREBRO-PATCH(chat-message-id-claim): JEH-1083 — pre-created assistant chat_message row exposed to the agent as MULTICA_CHAT_MESSAGE_ID so it can attach files mid-turn.
-	ChatMessageID string `json:"chat_message_id,omitempty"` // pre-created assistant chat_message for this chat task
-	ChatMessage   string `json:"chat_message,omitempty"`    // user message for chat tasks (also: legacy single-message field for daemons pre-JEH-330)
 	// CEREBRO-PATCH(agent-task-cerebro-fields): cerebro-only daemon fields.
-	ChatHistory       []ChatHistoryMessage `json:"chat_history,omitempty"`        // capped chat transcript for stateless managed HTTP runtimes
-	ChatMessages      []string             `json:"chat_messages,omitempty"`       // user messages newer than the last assistant reply (oldest first)
-	UserProfilePrompt string               `json:"user_profile_prompt,omitempty"` // compiled per-user communication prompt (JEH-304)
-	// TaskToken is a short-lived per-task token (mtt_ prefix) the daemon
-	// injects as MULTICA_TOKEN for the spawned agent process. Scoped to
-	// the task's issue/agent/workspace so an exfiltrated token cannot be
-	// used for general API access.
-	TaskToken string `json:"task_token,omitempty"`
-	// SandboxEnabled is the per-runtime sandbox override (JEH-418), copied
-	// from agent_runtime.sandbox_enabled at claim time so the daemon picks
-	// up changes without restarting. nil = inherit daemon's env-var default.
-	SandboxEnabled          *bool           `json:"sandbox_enabled,omitempty"`
-	AutopilotRunID          string          `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot-spawned tasks
-	AutopilotID             string          `json:"autopilot_id,omitempty"`              // autopilot that spawned this task
-	AutopilotTitle          string          `json:"autopilot_title,omitempty"`           // autopilot title used as task context
-	AutopilotDescription    string          `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
-	AutopilotSource         string          `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
-	AutopilotTriggerPayload json.RawMessage `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
-	QuickCreatePrompt       string          `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
-	Kind                    string          `json:"kind"`                                // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
 	// CEREBRO-PATCH(persona-spawn-subject): JEH-1080 — the human user the agent is acting on behalf of, plus that user's group memberships at claim time.
-	PersonaSpawnUserID   string   `json:"persona_spawn_user_id,omitempty"`
-	PersonaSpawnGroupIDs []string `json:"persona_spawn_group_ids,omitempty"`
 	// CEREBRO-PATCH(agent-task-model-override): per-task model override that wins over agent.model (JEH-1310).
-	ModelOverride string `json:"model_override,omitempty"`
-	// RuntimePersonaSandbox is the runtime-level persona sandbox upper
 	// CEREBRO-PATCH(agent): persona integration additions.
-	// bound (E1). Empty = no upper bound, the agent's persona_sandbox
-	// decides alone. Non-empty (e.g. "claude-readonly") = the daemon must
-	// use this sandbox at spawn time and ignore the agent-level value, so
-	// an admin's runtime-wide cap can't be bypassed by an agent owner who
-	// picked a more permissive sandbox on their agent.
-	RuntimePersonaSandbox string `json:"runtime_persona_sandbox,omitempty"`
 	// CEREBRO-PATCH(runtime-tools-config-claim-resp): runtime-level tools_config surfaced at claim so daemon can merge with agent.mcp_config (9031).
-	RuntimeToolsConfig     json.RawMessage      `json:"runtime_tools_config,omitempty"`
-	ChatMessageAttachments []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"` // attachments on the user message - agent calls `multica attachment download <id>` per entry
-	SquadID                string               `json:"squad_id,omitempty"`                 // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
-	SquadName              string               `json:"squad_name,omitempty"`               // display name for the picker squad
 }
 
 // ChatAttachmentMeta is the structured attachment metadata embedded in
@@ -249,17 +226,15 @@ type ChatAttachmentMeta struct {
 // TaskAgentData holds agent info included in claim responses so the daemon
 // can set up the execution environment (branch naming, skill files, instructions).
 type TaskAgentData struct {
-	ID           string                   `json:"id"`
-	Name         string                   `json:"name"`
-	Instructions string                   `json:"instructions"`
-	Skills       []service.AgentSkillData `json:"skills,omitempty"`
-	CustomEnv    map[string]string        `json:"custom_env,omitempty"`
-	CustomArgs   []string                 `json:"custom_args,omitempty"`
-	McpConfig    json.RawMessage          `json:"mcp_config,omitempty"`
-	Model        string                   `json:"model,omitempty"`
-	// PersonaSandbox is the agent's persona sandbox name (e.g. "claude-developer")
-	// passed to the daemon at task spawn time. Empty = no persona gating.
-	PersonaSandbox string `json:"persona_sandbox,omitempty"`
+	ID            string                   `json:"id"`
+	Name          string                   `json:"name"`
+	Instructions  string                   `json:"instructions"`
+	Skills        []service.AgentSkillData `json:"skills,omitempty"`
+	CustomEnv     map[string]string        `json:"custom_env,omitempty"`
+	CustomArgs    []string                 `json:"custom_args,omitempty"`
+	McpConfig     json.RawMessage          `json:"mcp_config,omitempty"`
+	Model         string                   `json:"model,omitempty"`
+	ThinkingLevel string                   `json:"thinking_level,omitempty"`
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
@@ -583,6 +558,15 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// thinking_level validation: provider-level enum only. Per-model gaps
+	// are enforced by the daemon at execution time (MUL-2339, Trump's
+	// review note — keep API behaviour consistent: literal-invalid →
+	// always 400; combination-invalid → daemon-side task error).
+	if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", req.ThinkingLevel, runtime.Provider))
+		return
+	}
+
 	// Probe workspace agent count BEFORE the insert so the funnel has a
 	// clean "first agent ever in this workspace" signal — Step 4 of
 	// onboarding always lands in this branch. A non-fatal read: if the
@@ -613,7 +597,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		mc = append([]byte(nil), rawMcpConfig...)
 	}
 
-	agent, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
+	created, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:        wsUUID,
 		Name:               req.Name,
 		Description:        req.Description,
@@ -630,7 +614,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		McpConfig:          mc,
 		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
 		ThinkingLevel:      pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
-		PersonaSandbox:     personaSandboxToText(req.PersonaSandbox),
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -644,23 +627,22 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create agent: "+err.Error())
 		return
 	}
-	slog.Info("agent created", append(logger.RequestAttrs(r), "agent_id", uuidToString(agent.ID), "name", agent.Name, "workspace_id", workspaceID)...)
+	slog.Info("agent created", append(logger.RequestAttrs(r), "agent_id", uuidToString(created.ID), "name", created.Name, "workspace_id", workspaceID)...)
 
 	if runtime.Status == "online" {
-		h.TaskService.ReconcileAgentStatus(r.Context(), agent.ID)
-		agent, _ = h.Queries.GetAgent(r.Context(), agent.ID)
+		h.TaskService.ReconcileAgentStatus(r.Context(), created.ID)
+		created, _ = h.Queries.GetAgent(r.Context(), created.ID)
 	}
 
-	resp := agentToResponse(agent)
+	resp := agentToResponse(created)
 	// CEREBRO-PATCH(agent-can-trigger): JEH-1066 — surface trigger eligibility.
-	resp.CanTrigger = h.cerebroCanTrigger(r.Context(), r, workspaceID, agent.ID, agent.OwnerID)
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": resp})
 
 	h.Analytics.Capture(analytics.AgentCreated(
 		ownerID,
 		workspaceID,
-		uuidToString(agent.ID),
+		uuidToString(created.ID),
 		runtime.Provider,
 		runtime.RuntimeMode,
 		req.Template,
@@ -684,22 +666,13 @@ type UpdateAgentRequest struct {
 	Status             *string            `json:"status"`
 	MaxConcurrentTasks *int32             `json:"max_concurrent_tasks"`
 	Model              *string            `json:"model"`
-	ThinkingLevel      *string            `json:"thinking_level"`
-	// PersonaSandbox: empty-string clears the assignment (no persona gating);
-	// "claude-developer" or similar attaches the named sandbox.
-	PersonaSandbox *string `json:"persona_sandbox"`
-}
-
-// personaSandboxToText converts the API form (empty = unset) into the
-// pgtype.Text shape sqlc expects. Unset values become an invalid pgtype.Text
-// so the COALESCE in CreateAgent / UpdateAgent leaves the column NULL or
-// untouched respectively.
-func personaSandboxToText(name string) pgtype.Text {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return pgtype.Text{Valid: false}
-	}
-	return pgtype.Text{String: name, Valid: true}
+	// ThinkingLevel is treated as a tri-state per-MUL-2339:
+	//   - field omitted → no change (leave existing value alone)
+	//   - field present with "" → explicit clear (use runtime default)
+	//   - field present with non-empty value → set (validated server-side)
+	// Distinguishing those modes is why this is a pointer; the raw-fields
+	// map captured at decode time tells us whether the key was sent.
+	ThinkingLevel *string `json:"thinking_level"`
 }
 
 // canViewAgentEnv checks whether the requesting user is allowed to see the
@@ -756,12 +729,11 @@ func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent d
 
 func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	agent, ok := h.loadAgentForUser(w, r, id)
+	existing, ok := h.loadAgentForUser(w, r, id)
 	if !ok {
 		return
 	}
-	member, ok := h.canManageAgent(w, r, agent)
-	if !ok {
+	if !h.canManageAgent(w, r, existing) {
 		return
 	}
 
@@ -784,7 +756,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := db.UpdateAgentParams{
-		ID: agent.ID,
+		ID: existing.ID,
 	}
 	if req.Name != nil {
 		params.Name = pgtype.Text{String: *req.Name, Valid: true}
@@ -819,8 +791,12 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if hasMcpConfig && !shouldClearMcpConfig {
 		params.McpConfig = append([]byte(nil), rawMcpConfig...)
 	}
-	targetRuntimeID := agent.RuntimeID
-	targetRuntimeProvider := ""
+
+	// Resolve the runtime that will be in force after this update so the
+	// thinking_level validation hits the right provider enum. When the
+	// request doesn't move the agent, we still need to load the *current*
+	// runtime to validate a thinking_level change. Resolve once and reuse.
+	targetRuntimeID := existing.RuntimeID
 	if req.RuntimeID != nil {
 		runtimeUUID, ok := parseUUIDOrBadRequest(w, *req.RuntimeID, "runtime_id")
 		if !ok {
@@ -828,7 +804,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
 			ID:          runtimeUUID,
-			WorkspaceID: agent.WorkspaceID,
+			WorkspaceID: existing.WorkspaceID,
 		})
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid runtime_id")
@@ -837,7 +813,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		// Same gate as CreateAgent — prevents UpdateAgent from being used to
 		// re-bind an agent onto someone else's private runtime, which would
 		// otherwise be a quiet end-run around the CreateAgent check.
-		member, ok := h.workspaceMember(w, r, uuidToString(agent.WorkspaceID))
+		member, ok := h.workspaceMember(w, r, uuidToString(existing.WorkspaceID))
 		if !ok {
 			return
 		}
@@ -849,6 +825,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		targetRuntimeProvider = runtime.Provider
 		params.RuntimeID = runtime.ID
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
+		targetRuntimeID = runtime.ID
 	}
 	if req.Visibility != nil {
 		params.Visibility = pgtype.Text{String: *req.Visibility, Valid: true}
@@ -905,52 +882,72 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.PersonaSandbox = personaSandboxToText(*req.PersonaSandbox)
 	}
 
-	agent, err = h.Queries.UpdateAgent(r.Context(), params)
+	// thinking_level handling (MUL-2339). Tri-state semantics:
+	//   - field omitted  → leave column alone (COALESCE narg), but if a
+	//     runtime change in this same request would make the *existing*
+	//     value literal-invalid for the new provider, reject 400. This
+	//     closes the gap Elon's review flagged: previously, switching a
+	//     Claude agent storing `max` to a Codex runtime would silently
+	//     keep `max` and forward it to the daemon.
+	//   - field set to "" → explicit clear (run ClearAgentThinkingLevel post-update)
+	//   - field set to value → validate against the target runtime's provider
+	//     enum; reject literal-invalid with 400. Per-model combination checks
+	//     run in the daemon at execution time, not here — see Trump's review
+	//     constraint that API behaviour stays consistent across change paths.
+	shouldClearThinkingLevel := false
+	if req.ThinkingLevel != nil {
+		value := *req.ThinkingLevel
+		if value == "" {
+			shouldClearThinkingLevel = true
+		} else {
+			// Need the target runtime's provider to validate. Re-fetch only when
+			// we haven't already loaded it above (i.e. the request didn't change
+			// runtime_id), to keep the no-change path one DB roundtrip.
+			provider, ok := h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
+			if !ok {
+				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
+				return
+			}
+			if !agent.IsKnownThinkingValue(provider, value) {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", value, provider))
+				return
+			}
+			params.ThinkingLevel = pgtype.Text{String: value, Valid: true}
+		}
+	} else if req.RuntimeID != nil && existing.ThinkingLevel.Valid && existing.ThinkingLevel.String != "" {
+		// Runtime is changing but the caller didn't touch thinking_level.
+		// If the existing value is not in the new provider's enum at all,
+		// preserving it would smuggle a literal-invalid token to the daemon.
+		// Hold the same line as the explicit-set path: always 400 on
+		// literal-invalid, never silently coerce. The caller can either
+		// pass `thinking_level: ""` to clear or pick a value valid for the
+		// new runtime.
+		provider, ok := h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
+		if !ok {
+			writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
+			return
+		}
+		if !agent.IsKnownThinkingValue(provider, existing.ThinkingLevel.String) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf(
+				"existing thinking_level %q is not valid for runtime %q; pass thinking_level=\"\" to clear or set a value valid for the new runtime",
+				existing.ThinkingLevel.String, provider,
+			))
+			return
+		}
+	}
+
+	updated, err := h.Queries.UpdateAgent(r.Context(), params)
 	if err != nil {
 		slog.Warn("update agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to update agent: "+err.Error())
 		return
 	}
 
-	// persona_sandbox: empty string in the request means explicitly clear.
-	if shouldClearPersonaSandbox {
-		agent, err = h.Queries.ClearAgentPersonaSandbox(r.Context(), parseUUID(id))
-		if err != nil {
-			slog.Warn("clear agent persona_sandbox failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-			writeError(w, http.StatusInternalServerError, "failed to clear persona_sandbox: "+err.Error())
-			return
-		}
-	}
-
-	// W4.6: audit-log persona_sandbox changes so workspace owners can see
-	// "who switched my agent off claude-readonly?" in Multica's UI without
-	// digging through stdout. We emit on either an explicit value change
-	// or a clear, and only when the field was actually present in the
-	// request body (rawFields check below).
-	if hasPersonaSandbox {
-		newValue := ""
-		if !shouldClearPersonaSandbox && req.PersonaSandbox != nil {
-			newValue = *req.PersonaSandbox
-		}
-		details, _ := json.Marshal(map[string]any{
-			"agent_id":   id,
-			"agent_name": agent.Name,
-			"new":        newValue,
-		})
-		_, _ = h.Queries.CreateActivity(r.Context(), db.CreateActivityParams{
-			WorkspaceID: agent.WorkspaceID,
-			IssueID:     pgtype.UUID{},
-			ActorType:   pgtype.Text{String: "member", Valid: true},
-			ActorID:     parseUUID(requestUserID(r)),
-			Action:      "agent_persona_sandbox_changed",
-			Details:     details,
-		})
-	}
-
-	// mcp_config: null in the request means explicitly clear the field.
-	// COALESCE in UpdateAgent cannot set a column to NULL, so we use a dedicated query.
+	// mcp_config / thinking_level: null/empty in the request means explicitly
+	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL,
+	// so we use dedicated clear queries.
 	if shouldClearMcpConfig {
-		agent, err = h.Queries.ClearAgentMcpConfig(r.Context(), agent.ID)
+		updated, err = h.Queries.ClearAgentMcpConfig(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent mcp_config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear mcp_config: "+err.Error())
@@ -958,7 +955,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if shouldClearThinkingLevel {
-		agent, err = h.Queries.ClearAgentThinkingLevel(r.Context(), agent.ID)
+		updated, err = h.Queries.ClearAgentThinkingLevel(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent thinking_level failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear thinking_level: "+err.Error())
@@ -966,18 +963,19 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp := agentToResponse(agent)
+	resp := agentToResponse(updated)
+	slog.Info("agent updated", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", uuidToString(updated.WorkspaceID))...)
 	// CEREBRO-PATCH(agent-can-trigger): JEH-1066 — surface trigger eligibility.
-	resp.CanTrigger = h.cerebroCanTrigger(r.Context(), r, uuidToString(agent.WorkspaceID), agent.ID, agent.OwnerID)
-	slog.Info("agent updated", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", uuidToString(agent.WorkspaceID))...)
 	userID := requestUserID(r)
-	actorType, actorID := h.resolveActor(r, userID, uuidToString(agent.WorkspaceID))
-	h.publish(protocol.EventAgentStatus, uuidToString(agent.WorkspaceID), actorType, actorID, map[string]any{"agent": resp})
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(updated.WorkspaceID))
+	h.publish(protocol.EventAgentStatus, uuidToString(updated.WorkspaceID), actorType, actorID, map[string]any{"agent": resp})
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// resolveAgentProvider returns the provider name for the runtime that will own
-// this agent after the in-flight update applies.
+// resolveAgentProvider returns the provider name for the runtime that
+// will own this agent after the in-flight update applies. Used by the
+// thinking_level validator so a runtime/model swap and a level swap
+// validated in the same request both consult the same provider.
 func (h *Handler) resolveAgentProvider(r *http.Request, workspaceID pgtype.UUID, runtimeID pgtype.UUID) (string, bool) {
 	rt, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
 		ID:          runtimeID,

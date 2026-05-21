@@ -40,6 +40,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { workloadConfig } from "../../agents/presence";
 import { ProviderLogo } from "./provider-logo";
 import { HealthIcon, useHealthLabel } from "./shared";
@@ -49,6 +50,7 @@ import {
   isVersionNewer,
   pctChange,
 } from "../utils";
+import { splitRuntimeName } from "./runtime-machines";
 import { useT } from "../../i18n";
 
 // Per-row data assembled at the page level. The columns reach into
@@ -62,22 +64,21 @@ export interface RuntimeRow {
   canDelete: boolean;
 }
 
-// Column widths in px. Name, Health, and CLI grow together until the
-// user resizes them. Their `size` values still flow into table.getTotalSize()
-// to set the table's min-width, giving each grow column a real floor below
-// which the container scrolls horizontally instead of shrinking further.
+// Column widths in px. Runtime is the primary scanning column, so it keeps
+// the only grow slot and receives the extra width until the user resizes it.
+// The size values still flow into table.getTotalSize() to set the table's
+// min-width, giving each column a real floor below which the container
+// scrolls horizontally instead of shrinking further.
 const COL_WIDTHS = {
-  // CEREBRO-PATCH(runtime-name-own-column): split provider logo into its own narrow column (JEH-1520)
-  runtime: 48,
-  name: 200,
   // CEREBRO-PATCH(runtime-machine-own-column): hostname gets its own column (JEH-1904)
-  machine: 140,
-  health: 200,
-  owner: 60,
-  agents: 100,
-  workload: 140,
-  cost: 100,
-  cli: 140,
+  // CEREBRO-PATCH(runtime-name-own-column): split provider logo into its own narrow column (JEH-1520)
+  runtime: 340,
+  health: 150,
+  owner: 72,
+  agents: 92,
+  workload: 120,
+  cost: 96,
+  cli: 112,
   // 60 = 16 left padding + 28 kebab + 16 right padding. Keeps the
   // kebab's right edge 16px from the card so it lines up with the
   // toolbar's px-4 right inset.
@@ -128,7 +129,6 @@ export function createRuntimeColumns({
       id: "health",
       header: () => t(($) => $.list.col_health),
       size: COL_WIDTHS.health,
-      meta: { grow: true },
       cell: ({ row }) => (
         <HealthCell runtime={row.original.runtime} now={now} />
       ),
@@ -193,7 +193,6 @@ export function createRuntimeColumns({
       id: "cli",
       header: () => t(($) => $.list.col_cli),
       size: COL_WIDTHS.cli,
-      meta: { grow: true },
       cell: ({ row }) => (
         <CliCell
           runtime={row.original.runtime}
@@ -228,59 +227,31 @@ export function createRuntimeColumns({
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Backend formats `runtime.name` as `"<base> (<hostname>)"`. Every runtime on
-// the same machine repeats the hostname suffix, so it dominates column width
-// while carrying near-zero scan value once seen on the first row. Split it
-// so the base name stays emphasised and the hostname renders muted.
-export function splitRuntimeName(name: string): {
-  base: string;
-  hostname: string | null;
-} {
-  const m = name.match(/^(.+?)\s+\(([^)]+)\)$/);
-  if (!m || !m[1] || !m[2]) return { base: name, hostname: null };
-  return { base: m[1], hostname: m[2] };
-}
-
 // ---------------------------------------------------------------------------
 // Cell renderers
 // ---------------------------------------------------------------------------
 
+function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
+  const { base: baseName } = splitRuntimeName(runtime.name);
 // CEREBRO-PATCH(runtime-name-own-column): provider logo cell — RuntimeNameCell split into provider + name (JEH-1520)
-function RuntimeProviderCell({ runtime }: { runtime: AgentRuntime }) {
   return (
-    <div className="flex h-8 w-8 items-center justify-center">
-      <ProviderLogo provider={runtime.provider} className="h-5 w-5" />
+    <div className="flex min-w-0 items-center gap-2">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center">
+        <ProviderLogo provider={runtime.provider} className="h-5 w-5" />
+      </div>
+      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        <span className="block min-w-0 shrink truncate text-sm font-medium">
+          {baseName}
+        </span>
+        <VisibilityBadge runtime={runtime} />
+      </div>
     </div>
   );
 }
 
 // CEREBRO-PATCH(runtime-name-own-column): name-only cell with hostname tooltip + visibility badge (JEH-1520)
 // CEREBRO-PATCH(runtime-machine-own-column): hostname moved to dedicated MachineCell; base name only here (JEH-1904)
-function RuntimeNameTextCell({ runtime }: { runtime: AgentRuntime }) {
-  const { base: baseName } = splitRuntimeName(runtime.name);
-  return (
-    <div className="flex min-w-0 items-center gap-1.5">
-      <span className="block min-w-0 shrink truncate text-sm font-medium">
-        {baseName}
-      </span>
-      <VisibilityBadge runtime={runtime} />
-    </div>
-  );
-}
-
 // CEREBRO-PATCH(runtime-machine-own-column): renders the hostname from runtime.name in its own column (JEH-1904)
-function MachineCell({ runtime }: { runtime: AgentRuntime }) {
-  const { hostname } = splitRuntimeName(runtime.name);
-  if (!hostname) {
-    return <span className="text-xs text-muted-foreground/50">—</span>;
-  }
-  return (
-    <span className="block min-w-0 truncate font-mono text-xs text-muted-foreground">
-      {hostname}
-    </span>
-  );
-}
-
 // Only public is worth a badge — private is the default and rendering a
 // `🔒 Private` chip on every row turns the whole column into noise.
 function VisibilityBadge({ runtime }: { runtime: AgentRuntime }) {
@@ -404,13 +375,17 @@ const COST_CELL_DAYS = 14;
 
 function CostCell({ runtimeId }: { runtimeId: string }) {
   const { t } = useT("runtimes");
+  const tz = useViewingTimezone();
   const { data: usage = [] } = useQuery(
-    runtimeUsageOptions(runtimeId, COST_CELL_DAYS),
+    runtimeUsageOptions(runtimeId, COST_CELL_DAYS, tz),
   );
-  const cost7d = useMemo(() => computeCostInWindow(usage, 7), [usage]);
+  const cost7d = useMemo(
+    () => computeCostInWindow(usage, 7, tz),
+    [usage, tz],
+  );
   const costPrev7d = useMemo(
-    () => computeCostInWindow(usage, 7, 7),
-    [usage],
+    () => computeCostInWindow(usage, 7, tz, 7),
+    [usage, tz],
   );
   const delta = pctChange(cost7d, costPrev7d);
 

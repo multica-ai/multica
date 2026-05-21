@@ -65,10 +65,8 @@ type DashboardUsageDailyResponse struct {
 }
 
 // GetDashboardUsageDaily returns per-(date, model) token rows for the
-// workspace, optionally scoped to a project. When the dashboard rollup
-// is enabled (USAGE_DASHBOARD_ROLLUP_ENABLED=true) reads come from
-// `task_usage_dashboard_daily` (migration 084); otherwise from the raw
-// task_usage stream.
+// workspace, optionally scoped to a project. Backed by task_usage_hourly,
+// sliced into calendar days under the viewer's tz.
 func (h *Handler) GetDashboardUsageDaily(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
@@ -78,9 +76,10 @@ func (h *Handler) GetDashboardUsageDaily(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	since := parseSinceParam(r, 30)
+	tz := h.resolveViewingTZ(r)
+	since := parseSinceParamInTZ(r, 30, tz)
 
-	resp, err := h.listDashboardUsageDaily(r.Context(), parseUUID(workspaceID), since, projectID)
+	resp, err := h.listDashboardUsageDaily(r.Context(), parseUUID(workspaceID), tz, since, projectID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list usage")
 		return
@@ -91,34 +90,13 @@ func (h *Handler) GetDashboardUsageDaily(w http.ResponseWriter, r *http.Request)
 func (h *Handler) listDashboardUsageDaily(
 	ctx context.Context,
 	workspaceID pgtype.UUID,
+	tz string,
 	since pgtype.Timestamptz,
 	projectID pgtype.UUID,
 ) ([]DashboardUsageDailyResponse, error) {
-	if h.cfg.UseDailyRollupForDashboard {
-		rows, err := h.Queries.ListDashboardUsageDailyRollup(ctx, db.ListDashboardUsageDailyRollupParams{
-			WorkspaceID: workspaceID,
-			Since:       since,
-			ProjectID:   projectID,
-		})
-		if err != nil {
-			return nil, err
-		}
-		resp := make([]DashboardUsageDailyResponse, len(rows))
-		for i, row := range rows {
-			resp[i] = DashboardUsageDailyResponse{
-				Date:             row.Date.Time.Format("2006-01-02"),
-				Model:            row.Model,
-				InputTokens:      row.InputTokens,
-				OutputTokens:     row.OutputTokens,
-				CacheReadTokens:  row.CacheReadTokens,
-				CacheWriteTokens: row.CacheWriteTokens,
-				TaskCount:        row.TaskCount,
-			}
-		}
-		return resp, nil
-	}
 	rows, err := h.Queries.ListDashboardUsageDaily(ctx, db.ListDashboardUsageDailyParams{
 		WorkspaceID: workspaceID,
+		Tz:          tz,
 		Since:       since,
 		ProjectID:   projectID,
 	})
@@ -151,10 +129,9 @@ type DashboardUsageByAgentResponse struct {
 	TaskCount        int32  `json:"task_count"`
 }
 
-// GetDashboardUsageByAgent returns per-(agent, model) token aggregates for
-// the workspace, optionally scoped to a project. Switches to the rollup
-// table when UseDailyRollupForDashboard is on (same gating as the daily
-// endpoint above).
+// GetDashboardUsageByAgent returns per-(agent, model) token aggregates
+// for the workspace, optionally scoped to a project. Backed by
+// task_usage_hourly with the viewer's tz applied to the `?days=` cutoff.
 func (h *Handler) GetDashboardUsageByAgent(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
@@ -164,7 +141,10 @@ func (h *Handler) GetDashboardUsageByAgent(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	since := parseSinceParam(r, 30)
+	// "By agent" has no date grouping in the SQL — tz only determines
+	// the cutoff boundary, not the bucket axis.
+	tz := h.resolveViewingTZ(r)
+	since := parseSinceParamInTZ(r, 30, tz)
 
 	resp, err := h.listDashboardUsageByAgent(r.Context(), parseUUID(workspaceID), since, projectID)
 	if err != nil {
@@ -180,29 +160,6 @@ func (h *Handler) listDashboardUsageByAgent(
 	since pgtype.Timestamptz,
 	projectID pgtype.UUID,
 ) ([]DashboardUsageByAgentResponse, error) {
-	if h.cfg.UseDailyRollupForDashboard {
-		rows, err := h.Queries.ListDashboardUsageByAgentRollup(ctx, db.ListDashboardUsageByAgentRollupParams{
-			WorkspaceID: workspaceID,
-			Since:       since,
-			ProjectID:   projectID,
-		})
-		if err != nil {
-			return nil, err
-		}
-		resp := make([]DashboardUsageByAgentResponse, len(rows))
-		for i, row := range rows {
-			resp[i] = DashboardUsageByAgentResponse{
-				AgentID:          uuidToString(row.AgentID),
-				Model:            row.Model,
-				InputTokens:      row.InputTokens,
-				OutputTokens:     row.OutputTokens,
-				CacheReadTokens:  row.CacheReadTokens,
-				CacheWriteTokens: row.CacheWriteTokens,
-				TaskCount:        row.TaskCount,
-			}
-		}
-		return resp, nil
-	}
 	rows, err := h.Queries.ListDashboardUsageByAgent(ctx, db.ListDashboardUsageByAgentParams{
 		WorkspaceID: workspaceID,
 		Since:       since,
@@ -250,7 +207,10 @@ func (h *Handler) GetDashboardAgentRunTime(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	since := parseSinceParam(r, 30)
+	// Cutoff in the viewer's tz so the "last N days" window matches the
+	// per-agent cost card (GetDashboardUsageByAgent).
+	tz := h.resolveViewingTZ(r)
+	since := parseSinceParamInTZ(r, 30, tz)
 
 	rows, err := h.Queries.ListDashboardAgentRunTime(r.Context(), db.ListDashboardAgentRunTimeParams{
 		WorkspaceID: parseUUID(workspaceID),
@@ -298,10 +258,14 @@ func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	since := parseSinceParam(r, 30)
+	// Slice day buckets in the viewer's tz so the Time / Tasks charts cut
+	// their calendar day identically to the Cost / Tokens charts.
+	tz := h.resolveViewingTZ(r)
+	since := parseSinceParamInTZ(r, 30, tz)
 
 	rows, err := h.Queries.ListDashboardRunTimeDaily(r.Context(), db.ListDashboardRunTimeDailyParams{
 		WorkspaceID: parseUUID(workspaceID),
+		Tz:          tz,
 		Since:       since,
 		ProjectID:   projectID,
 	})

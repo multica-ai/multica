@@ -206,7 +206,6 @@ function makeAgent(overrides: Partial<Agent> & { id: string; name: string; owner
     custom_args: [],
     custom_env_redacted: false,
     visibility: "private",
-    persona_sandbox: "",
     status: "idle",
     max_concurrent_tasks: 1,
     model: "",
@@ -229,7 +228,6 @@ function makeMember(user_id: string, name: string): MemberWithUser {
     email: `${user_id}@example.com`,
     avatar_url: null,
     created_at: "2026-01-01T00:00:00Z",
-    budget_enforcement_enabled: false,
   };
 }
 

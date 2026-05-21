@@ -3,10 +3,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CoreProvider } from "@multica/core/platform";
 import { pickLocale } from "@multica/core/i18n";
 import { useAuthStore } from "@multica/core/auth";
+import { useWelcomeStore } from "@multica/core/onboarding";
 import { workspaceKeys, workspaceListOptions } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import { useHasOnboarded } from "@multica/core/paths";
-import { useApplyStartPage } from "@multica/cerebro-preferences/views";
+import { setCurrentWorkspace } from "@multica/core/platform";
 import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Toaster } from "@multica/ui/components/ui/sonner";
@@ -119,55 +120,63 @@ function AppContent() {
     : undefined;
   useDaemonIPCBridge(activeWsId);
 
-  // Pre-workspace overlay routing for desktop. Mirrors the web entry-point
-  // judgment in callback / login:
-  //   zero workspaces:
-  //     pending invites on email → /invitations overlay
-  //     no invites & !onboarded  → /onboarding overlay
-  //     no invites &  onboarded  → /workspaces/new overlay
-  //   ≥1 workspaces              → no overlay, fall through to dashboard
+  // Pre-workspace overlay routing for desktop. Mirrors the web layout
+  // hard gate via overlays (desktop has no URL bar, so we open the
+  // onboarding overlay instead of router.replace):
+  //   onboarded + has workspace      → no overlay, dashboard
+  //   un-onboarded (any wsCount):
+  //     pending invites on email     → /invitations overlay
+  //     no invites                   → /onboarding overlay
+  //   onboarded + no workspace       → /workspaces/new overlay
   //
-  // Users with zero workspaces always get the invitation lookup first —
-  // they have no sidebar in which pending-invitation chips could surface,
-  // so accepting an invite has to be possible from this entry point.
-  // Onboarded users with at least one workspace skip the wall; new invites
-  // for them surface in the sidebar dropdown instead.
+  // V3 invariant: `onboarded_at != null` is the only path into the
+  // dashboard. CreateWorkspace does not mark onboarded; only Step 3's
+  // CompleteOnboarding (and AcceptInvitation) flip the flag. A user who
+  // somehow has a workspace but no onboarded mark must be sent back to
+  // /onboarding — we also clear the active workspace so the dashboard
+  // doesn't render under the overlay with stale workspace context.
   useEffect(() => {
     if (!user || !workspaceListFetched) return undefined;
     const { overlay } = useWindowOverlayStore.getState();
     if (overlay) return undefined;
-    if (wsCount > 0) return undefined;
-    // Look up pending invitations by email. Network blip is non-fatal —
-    // fall through to onboarding / new-workspace so the user isn't stuck
-    // on a blank window.
-    let cancelled = false;
-    const fallbackOverlayType: "onboarding" | "new-workspace" = hasOnboarded
-      ? "new-workspace"
-      : "onboarding";
-    void api
-      .listMyInvitations()
-      .then((invites) => {
-        if (cancelled) return;
-        const { overlay: latestOverlay, open: latestOpen } =
-          useWindowOverlayStore.getState();
-        if (latestOverlay) return;
-        if (invites.length > 0) {
-          qc.setQueryData(workspaceKeys.myInvitations(), invites);
-          latestOpen({ type: "invitations" });
-        } else {
-          latestOpen({ type: fallbackOverlayType });
-        }
-      })
-      .catch(() => {
-        if (cancelled) return;
-        const { overlay: latestOverlay, open: latestOpen } =
-          useWindowOverlayStore.getState();
-        if (latestOverlay) return;
-        latestOpen({ type: fallbackOverlayType });
-      });
-    return () => {
-      cancelled = true;
-    };
+    if (hasOnboarded && wsCount > 0) return undefined;
+    if (!hasOnboarded) {
+      // Stale workspace context (if any) would leak X-Workspace-Slug
+      // headers into onboarding-time API calls. Clear it before opening
+      // the overlay.
+      setCurrentWorkspace(null, null);
+      // Look up pending invitations by email. Network blip is non-fatal —
+      // fall through to onboarding so the user isn't stuck on a blank
+      // window. The sidebar's pending-invitations dropdown will surface
+      // missed invites later once they're onboarded.
+      let cancelled = false;
+      void api
+        .listMyInvitations()
+        .then((invites) => {
+          if (cancelled) return;
+          const { overlay: latestOverlay, open: latestOpen } =
+            useWindowOverlayStore.getState();
+          if (latestOverlay) return;
+          if (invites.length > 0) {
+            qc.setQueryData(workspaceKeys.myInvitations(), invites);
+            latestOpen({ type: "invitations" });
+          } else {
+            latestOpen({ type: "onboarding" });
+          }
+        })
+        .catch(() => {
+          if (cancelled) return;
+          const { overlay: latestOverlay, open: latestOpen } =
+            useWindowOverlayStore.getState();
+          if (latestOverlay) return;
+          latestOpen({ type: "onboarding" });
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+    open({ type: "new-workspace" });
+    return undefined;
   }, [user, workspaceListFetched, wsCount, workspaces, hasOnboarded, qc]);
 
   // Validate persisted tab state against the current user's workspace list,
@@ -277,6 +286,9 @@ function BlockingRuntimeConfigError({ message }: { message: string }) {
 async function handleDaemonLogout() {
   useTabStore.getState().reset();
   useWindowOverlayStore.getState().close();
+  // Drop any post-onboarding welcome signal so user B logging in next
+  // doesn't inherit user A's pending modal state.
+  useWelcomeStore.getState().reset();
   try {
     await window.daemonAPI.clearToken();
   } catch {

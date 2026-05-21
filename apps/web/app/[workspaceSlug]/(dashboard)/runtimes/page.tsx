@@ -1,5 +1,8 @@
 import { RuntimesPage } from "@multica/views/runtimes";
 
-export default function Page() {
-  return <RuntimesPage />;
+const cloudRuntimeEnabled =
+  process.env.NEXT_PUBLIC_ENABLE_CLOUD_RUNTIME === "true";
+
+export default function RuntimesRoute() {
+  return <RuntimesPage cloudRuntimeEnabled={cloudRuntimeEnabled} />;
 }

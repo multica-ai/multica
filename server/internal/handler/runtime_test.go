@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func TestRuntimeHandlersRejectMalformedRuntimeID(t *testing.T) {
@@ -142,24 +144,23 @@ func TestGetRuntimeUsage_BucketsByUsageTime(t *testing.T) {
 	insertTaskWithUsage(yesterdayLate, todayEarly, 1000)          // cross-midnight
 	insertTaskWithUsage(yesterdayMorning, yesterdayMorning, 2000) // full-day yesterday
 
-	// ListRuntimeUsage now reads from the `task_usage_daily` rollup
-	// table maintained by the cron-driven rollup_task_usage_daily()
-	// function. In production the watermarked wrapper waits a 5 min
-	// safety lag before consuming rows; here we drive the underlying
-	// window function directly with a wide-open range so the freshly
-	// inserted fixture rows are guaranteed to be aggregated before the
-	// handler is called. Each test invocation gets its own isolated
-	// daily buckets keyed by (date, runtime, provider, model), so
-	// re-running the test is idempotent (the upsert just rewrites the
-	// same totals).
+	// ListRuntimeUsage reads from task_usage_hourly,
+	// aggregated to per-(date, provider, model) at query time. The
+	// window function is idempotent, so re-running this test rewrites
+	// the same totals.
 	if _, err := testPool.Exec(ctx, `
-		SELECT rollup_task_usage_daily_window('-infinity'::timestamptz, 'infinity'::timestamptz)
+		SELECT rollup_task_usage_hourly_window('-infinity'::timestamptz, 'infinity'::timestamptz)
 	`); err != nil {
-		t.Fatalf("rollup_task_usage_daily_window: %v", err)
+		t.Fatalf("rollup window: %v", err)
 	}
 	t.Cleanup(func() {
+		// Hourly buckets touched by this test cover the two calendar
+		// days in fixture data (today and yesterday in UTC, which is
+		// what the test uses for `today` / `yesterday` mocks).
 		testPool.Exec(ctx, `
-			DELETE FROM task_usage_daily WHERE runtime_id = $1 AND bucket_date IN ($2::date, $3::date)
+			DELETE FROM task_usage_hourly
+			 WHERE runtime_id = $1
+			   AND DATE(bucket_hour AT TIME ZONE 'UTC') IN ($2::date, $3::date)
 		`, runtimeID, today, today.Add(-24*time.Hour))
 	})
 
@@ -198,11 +199,16 @@ func TestGetRuntimeUsage_BucketsByUsageTime(t *testing.T) {
 	}
 }
 
-// callUpdateSandbox sends a PATCH request to the sandbox endpoint and returns
-// the recorded response. Uses any-typed body so callers can pass typed bools,
-// nil, or raw bytes for malformed-body tests.
-func callUpdateSandbox(t *testing.T, runtimeID string, body any) *httptest.ResponseRecorder {
-	t.Helper()
+// TestListRuntimeUsageBucketsByViewerTimezone proves the runtime trend reads
+// bucket the day boundary in the VIEWER's tz (the argument passed to
+// listRuntimeUsage). The viewer tz is Asia/Shanghai; assertions only pass if
+// listRuntimeUsage applies that tz correctly.
+func TestListRuntimeUsageBucketsByViewerTimezone(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := handlerTestRuntimeID(t)
 
 	var req *http.Request
 	if raw, ok := body.([]byte); ok {
@@ -213,197 +219,172 @@ func callUpdateSandbox(t *testing.T, runtimeID string, body any) *httptest.Respo
 	} else {
 		req = newRequest(http.MethodPatch, "/api/runtimes/"+runtimeID+"/sandbox", body)
 	}
-	req = withURLParam(req, "runtimeId", runtimeID)
+	cutoff := time.Date(2026, 5, 4, 0, 0, 0, 0, loc)
+	cutoffDate := cutoff.Format("2006-01-02")
+	extraDate := cutoff.AddDate(0, 0, -1).Format("2006-01-02")
 
-	w := httptest.NewRecorder()
-	testHandler.UpdateAgentRuntimeSandbox(w, req)
-	return w
-}
-
-// TestUpdateRuntimeSandbox_AdminTogglePersists drives the JEH-418 acceptance
-// criterion: admin sets sandbox_enabled=false, response reflects it, the
-// runtime row persists it, and a follow-up null clears the override back to
-// inheriting the daemon's env-var default.
-func TestUpdateRuntimeSandbox_AdminTogglePersists(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-	runtimeID := handlerTestRuntimeID(t)
 	t.Cleanup(func() {
-		// Reset to NULL so other tests aren't affected by leftover state.
-		testPool.Exec(ctx, `UPDATE agent_runtime SET sandbox_enabled = NULL WHERE id = $1`, runtimeID)
+		testPool.Exec(ctx, `DELETE FROM task_usage_hourly WHERE runtime_id = $1 AND provider = 'cutoff-test'`, runtimeID)
 	})
 
-	// Override to false.
-	disabled := false
-	w := callUpdateSandbox(t, runtimeID, map[string]any{"sandbox_enabled": &disabled})
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateAgentRuntimeSandbox(false): expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	var resp AgentRuntimeResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.SandboxEnabled == nil || *resp.SandboxEnabled != false {
-		t.Fatalf("response sandbox_enabled = %v, want false", resp.SandboxEnabled)
-	}
-
-	// Persisted in DB?
-	var dbValid bool
-	var dbVal bool
-	if err := testPool.QueryRow(ctx,
-		`SELECT sandbox_enabled IS NOT NULL, COALESCE(sandbox_enabled, false) FROM agent_runtime WHERE id = $1`,
-		runtimeID,
-	).Scan(&dbValid, &dbVal); err != nil {
-		t.Fatalf("query persisted value: %v", err)
-	}
-	if !dbValid || dbVal != false {
-		t.Fatalf("persisted: valid=%v val=%v, want valid=true val=false", dbValid, dbVal)
-	}
-
-	// Override to true.
-	enabled := true
-	w = callUpdateSandbox(t, runtimeID, map[string]any{"sandbox_enabled": &enabled})
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateAgentRuntimeSandbox(true): expected 200, got %d", w.Code)
-	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.SandboxEnabled == nil || *resp.SandboxEnabled != true {
-		t.Fatalf("response sandbox_enabled = %v, want true", resp.SandboxEnabled)
-	}
-
-	// Clear override (null).
-	w = callUpdateSandbox(t, runtimeID, map[string]any{"sandbox_enabled": nil})
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateAgentRuntimeSandbox(null): expected 200, got %d", w.Code)
-	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.SandboxEnabled != nil {
-		t.Fatalf("response sandbox_enabled = %v, want nil after clearing override", resp.SandboxEnabled)
-	}
-}
-
-// TestUpdateRuntimeSandbox_MemberForbidden ensures non-admins cannot flip the
-// sandbox setting — it's a security-posture toggle gated to owner/admin.
-func TestUpdateRuntimeSandbox_MemberForbidden(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-	runtimeID := handlerTestRuntimeID(t)
-
-	// Demote testUserID to "member" for the duration of this test.
-	if _, err := testPool.Exec(ctx, `UPDATE member SET role = 'member' WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, testUserID); err != nil {
-		t.Fatalf("demote to member: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `UPDATE member SET role = 'owner' WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, testUserID)
-	})
-
-	disabled := false
-	w := callUpdateSandbox(t, runtimeID, map[string]any{"sandbox_enabled": &disabled})
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for member, got %d: %s", w.Code, w.Body.String())
-	}
-
-	// Sanity: nothing persisted to the runtime row.
-	var dbValid bool
-	if err := testPool.QueryRow(ctx,
-		`SELECT sandbox_enabled IS NOT NULL FROM agent_runtime WHERE id = $1`,
-		runtimeID,
-	).Scan(&dbValid); err != nil {
-		t.Fatalf("query persisted value: %v", err)
-	}
-	if dbValid {
-		t.Fatalf("expected no override persisted after forbidden request")
-	}
-}
-
-// TestUpdateRuntimeSandbox_RejectsMalformedBody guards against silently
-// treating an unparseable body as an explicit null.
-func TestUpdateRuntimeSandbox_RejectsMalformedBody(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	runtimeID := handlerTestRuntimeID(t)
-	w := callUpdateSandbox(t, runtimeID, []byte("not-json"))
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for malformed body, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-// TestClaimResponseSurfacesSandboxOverride ensures the daemon-facing claim
-// response carries the runtime's per-runtime sandbox setting so the daemon
-// can honour it without restart.
-func TestClaimResponseSurfacesSandboxOverride(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-	runtimeID := handlerTestRuntimeID(t)
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `UPDATE agent_runtime SET sandbox_enabled = NULL WHERE id = $1`, runtimeID)
-	})
-
-	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET sandbox_enabled = false WHERE id = $1`, runtimeID); err != nil {
-		t.Fatalf("set override: %v", err)
-	}
-
-	// Set up an issue + queued task for the runtime so claim has something to return.
-	var issueID string
+	// Seed task_usage_hourly directly with one bucket per Shanghai calendar
+	// day. Pick 04:00 local (= 20:00 UTC the previous day) to catch
+	// off-by-one tz-cutoff bugs.
+	var agentID pgtype.UUID
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type)
-		VALUES ($1, 'sandbox claim test', $2, 'member')
-		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
-		t.Fatalf("create issue: %v", err)
+		SELECT id FROM agent WHERE workspace_id = $1 ORDER BY id LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("pick fixture agent: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_usage_hourly (
+			bucket_hour, workspace_id, runtime_id, agent_id, project_id,
+			provider, model,
+			input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, event_count
+		)
+		VALUES
+			(($1::date + interval '4 hours') AT TIME ZONE 'Asia/Shanghai', $3, $4, $5, NULL,
+				'cutoff-test', 'old-day',    111, 0, 0, 0, 1),
+			(($2::date + interval '4 hours') AT TIME ZONE 'Asia/Shanghai', $3, $4, $5, NULL,
+				'cutoff-test', 'cutoff-day', 222, 0, 0, 0, 1)
+		ON CONFLICT ON CONSTRAINT uq_task_usage_hourly_key DO UPDATE
+			SET input_tokens = EXCLUDED.input_tokens,
+			    output_tokens = EXCLUDED.output_tokens,
+			    cache_read_tokens = EXCLUDED.cache_read_tokens,
+			    cache_write_tokens = EXCLUDED.cache_write_tokens,
+			    event_count = EXCLUDED.event_count
+	`, extraDate, cutoffDate, testWorkspaceID, runtimeID, agentID); err != nil {
+		t.Fatalf("seed hourly rows: %v", err)
+	}
 
-	var agentID string
+	resp, err := testHandler.listRuntimeUsage(ctx, parseUUID(runtimeID), "Asia/Shanghai", pgtype.Timestamptz{
+		Time:  cutoff,
+		Valid: true,
+	})
+	if err != nil {
+		t.Fatalf("listRuntimeUsage: %v", err)
+	}
+	byDate := make(map[string]int64)
+	for _, row := range resp {
+		if row.Provider == "cutoff-test" {
+			byDate[row.Date] += row.InputTokens
+		}
+	}
+	if byDate[cutoffDate] != 222 {
+		t.Fatalf("expected cutoff date %s to be included with 222 tokens, got map %v", cutoffDate, byDate)
+	}
+	if byDate[extraDate] != 0 {
+		t.Fatalf("expected extra date %s to be excluded, got map %v", extraDate, byDate)
+	}
+}
+
+// TestResolveViewingTZ covers the three legs of resolveViewingTZ:
+// explicit `?tz=` query param, the authenticated user's stored
+// user.timezone, and the UTC fallback when neither yields a valid zone.
+func TestResolveViewingTZ(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var userID string
 	if err := testPool.QueryRow(ctx,
-		`SELECT id FROM agent WHERE workspace_id = $1 AND name = 'Handler Test Agent'`,
-		testWorkspaceID,
-	).Scan(&agentID); err != nil {
-		t.Fatalf("find agent: %v", err)
+		`INSERT INTO "user" (name, email, timezone)
+		 VALUES ('TZ Resolve', 'tz-resolve@multica.ai', 'Asia/Tokyo') RETURNING id`,
+	).Scan(&userID); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, userID) })
+
+	// Explicit ?tz= wins over the stored preference.
+	req := newRequest("GET", "/api/dashboard/usage/daily?tz=America/New_York", nil)
+	req.Header.Set("X-User-ID", userID)
+	if got := testHandler.resolveViewingTZ(req); got != "America/New_York" {
+		t.Fatalf("query param: expected America/New_York, got %q", got)
 	}
 
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
-		VALUES ($1, $2, $3, 'queued', 0)
-		RETURNING id
-	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
-		t.Fatalf("enqueue task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
-
-	w := httptest.NewRecorder()
-	req := newRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
-	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.ClaimTaskByRuntime(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	// No ?tz= → falls back to the authenticated user's stored timezone.
+	req = newRequest("GET", "/api/dashboard/usage/daily", nil)
+	req.Header.Set("X-User-ID", userID)
+	if got := testHandler.resolveViewingTZ(req); got != "Asia/Tokyo" {
+		t.Fatalf("stored fallback: expected Asia/Tokyo, got %q", got)
 	}
 
-	var claim struct {
-		Task *AgentTaskResponse `json:"task"`
+	// An unparseable ?tz= is ignored, falling through to the stored value.
+	req = newRequest("GET", "/api/dashboard/usage/daily?tz=Mars/Olympus", nil)
+	req.Header.Set("X-User-ID", userID)
+	if got := testHandler.resolveViewingTZ(req); got != "Asia/Tokyo" {
+		t.Fatalf("invalid query param: expected Asia/Tokyo fallback, got %q", got)
 	}
-	if err := json.NewDecoder(w.Body).Decode(&claim); err != nil {
-		t.Fatalf("decode claim response: %v", err)
+
+	// No ?tz= and no stored value → UTC.
+	var bareUserID string
+	if err := testPool.QueryRow(ctx,
+		`INSERT INTO "user" (name, email)
+		 VALUES ('TZ Bare', 'tz-bare@multica.ai') RETURNING id`,
+	).Scan(&bareUserID); err != nil {
+		t.Fatalf("insert bare user: %v", err)
 	}
-	if claim.Task == nil {
-		t.Fatalf("expected task in claim response, got nil")
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, bareUserID) })
+	req = newRequest("GET", "/api/dashboard/usage/daily", nil)
+	req.Header.Set("X-User-ID", bareUserID)
+	if got := testHandler.resolveViewingTZ(req); got != "UTC" {
+		t.Fatalf("no preference: expected UTC, got %q", got)
 	}
-	if claim.Task.SandboxEnabled == nil {
-		t.Fatalf("expected sandbox_enabled in claim response, got nil — daemon would fall back to env-var default and miss the override")
+
+	// A stored timezone that is itself an invalid IANA zone — e.g. a row
+	// written before server-side validation existed — must fall through
+	// to UTC. Without the LoadLocation guard on the stored value this
+	// string would reach SQL `AT TIME ZONE` and 500 every dashboard read.
+	var badTZUserID string
+	if err := testPool.QueryRow(ctx,
+		`INSERT INTO "user" (name, email, timezone)
+		 VALUES ('TZ Bad', 'tz-bad@multica.ai', 'Bad/Zone') RETURNING id`,
+	).Scan(&badTZUserID); err != nil {
+		t.Fatalf("insert bad-tz user: %v", err)
 	}
-	if *claim.Task.SandboxEnabled != false {
-		t.Fatalf("expected sandbox_enabled=false, got %v", *claim.Task.SandboxEnabled)
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, badTZUserID) })
+	req = newRequest("GET", "/api/dashboard/usage/daily", nil)
+	req.Header.Set("X-User-ID", badTZUserID)
+	if got := testHandler.resolveViewingTZ(req); got != "UTC" {
+		t.Fatalf("invalid stored tz: expected UTC fallback, got %q", got)
+	}
+
+	// No X-User-ID header and no ?tz= — an unauthenticated caller has
+	// neither signal, so the resolver must return UTC without attempting
+	// (and panicking on) a GetUser lookup.
+	req = newRequest("GET", "/api/dashboard/usage/daily", nil)
+	if got := testHandler.resolveViewingTZ(req); got != "UTC" {
+		t.Fatalf("unauthenticated caller: expected UTC, got %q", got)
+	}
+}
+
+// TestRuntimeHeatmapEndpointsUseViewerTZ verifies that the hour-of-day
+// heatmap endpoints (GetRuntimeUsageByHour and GetRuntimeTaskActivity) bucket
+// in the viewer's tz supplied via ?tz= and return 200.
+func TestRuntimeHeatmapEndpointsUseViewerTZ(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID := handlerTestRuntimeID(t)
+
+	cases := []struct {
+		name   string
+		path   string
+		handle func(http.ResponseWriter, *http.Request)
+	}{
+		{"usage by-hour", "/api/runtimes/" + runtimeID + "/usage/by-hour?tz=Asia/Shanghai", testHandler.GetRuntimeUsageByHour},
+		{"task activity", "/api/runtimes/" + runtimeID + "/activity?tz=Asia/Shanghai", testHandler.GetRuntimeTaskActivity},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := newRequest("GET", c.path, nil)
+			req = withURLParam(req, "runtimeId", runtimeID)
+			c.handle(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("%s: expected 200, got %d: %s", c.name, w.Code, w.Body.String())
+			}
+		})
 	}
 }

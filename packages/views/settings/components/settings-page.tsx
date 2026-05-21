@@ -18,6 +18,7 @@ import {
   // CEREBRO-PATCH(settings-page-accounts-icon): Konti tab icon (JEH-999)
   KeyRound,
 } from "lucide-react";
+import { GitHubMark } from "./github-mark";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useChatStore } from "@multica/core/chat";
@@ -28,6 +29,7 @@ import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
+import { GitHubTab } from "./github-tab";
 import { IntegrationsTab } from "./integrations-tab";
 import { LabsTab } from "./labs-tab";
 // CEREBRO-PATCH(settings-page-notifications): use cerebro notifications-tab (Phase 1b relocation + push UI)
@@ -59,10 +61,18 @@ const AGENT_PROFILE_TAB_VALUE = "agent-profile";
 // CEREBRO-PATCH(settings-page-accounts-key): cerebro Konti tab value (JEH-999)
 const ACCOUNTS_TAB_VALUE = "accounts";
 
-const WORKSPACE_TAB_KEYS = ["general", "repositories", "integrations", "labs", "members"] as const;
+const WORKSPACE_TAB_KEYS = [
+  "general",
+  "repositories",
+  "github",
+  "integrations",
+  "labs",
+  "members",
+] as const;
 const WORKSPACE_TAB_VALUES = {
   general: "workspace",
   repositories: "repositories",
+  github: "github",
   integrations: "integrations",
   labs: "labs",
   members: "members",
@@ -70,6 +80,7 @@ const WORKSPACE_TAB_VALUES = {
 const WORKSPACE_TAB_ICONS = {
   general: Settings,
   repositories: FolderGit2,
+  github: GitHubMark,
   integrations: Plug,
   labs: FlaskConical,
   members: Users,
@@ -299,36 +310,27 @@ export function SettingsPage({
         </TabsList>
       </div>
 
-      {/* Right content. Documentation gets the full pane (it brings its own
-          internal layout); other tabs share a constrained, scrollable container. */}
-      <div className="flex-1 min-w-0 flex flex-col min-h-0 md:overflow-y-auto">
-        {activeTab === "documentation" && documentationContent ? (
-          <div className="flex-1 min-h-0 relative">{documentationContent}</div>
-        ) : (
-          <div className="w-full max-w-3xl mx-auto p-4 md:p-6">
-            <TabsContent value="profile"><AccountTab /></TabsContent>
+      {/* Right content */}
+      <div className="flex-1 min-w-0 md:overflow-y-auto">
+        <div className="w-full max-w-3xl mx-auto p-4 md:p-6">
+          <TabsContent value="profile"><AccountTab /></TabsContent>
+          <TabsContent value="preferences"><PreferencesTab /></TabsContent>
+          <TabsContent value="notifications"><NotificationsTab /></TabsContent>
+          <TabsContent value="tokens"><TokensTab /></TabsContent>
+          <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
+          <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
+          <TabsContent value="github"><GitHubTab /></TabsContent>
+          <TabsContent value="integrations"><IntegrationsTab /></TabsContent>
+          <TabsContent value="labs"><LabsTab /></TabsContent>
+          <TabsContent value="members"><MembersTab /></TabsContent>
+          {extraAccountTabs?.map((tab) => (
+            <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
+          ))}
+        </div>
             {/* CEREBRO-PATCH(settings-page-agent-profile-content): agent profile tab content */}
-            <TabsContent value="agent-profile"><AgentProfileTab /></TabsContent>
-            <TabsContent value="preferences"><PreferencesTab /></TabsContent>
-            <TabsContent value="notifications"><NotificationsTab /></TabsContent>
-            <TabsContent value="tokens"><TokensTab /></TabsContent>
-            <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
-            <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
-            <TabsContent value="integrations"><IntegrationsTab /></TabsContent>
-            <TabsContent value="labs"><LabsTab /></TabsContent>
             {/* CEREBRO-PATCH(settings-page-cerebro-members-extras): JEH-1067 inject Groups column + filter */}
-            <TabsContent value="members"><MembersTab cerebroExtras={membersTabCerebroExtras} /></TabsContent>
             {/* CEREBRO-PATCH(settings-page-groups-tab): JEH-1006/JEH-1067 workspace groups list + detail navigation */}
-            {groupsEnabled && (
-              <TabsContent value={GROUPS_TAB_VALUE}><GroupsTab onSelectGroup={(id) => navigation.push(`/${workspaceSlug}/groups/${id}`)} /></TabsContent>
-            )}
             {/* CEREBRO-PATCH(settings-page-accounts-content): cerebro Konti tab content (JEH-999) */}
-            <TabsContent value={ACCOUNTS_TAB_VALUE}><AccountsSettingsTab /></TabsContent>
-            {extraAccountTabs?.map((tab) => (
-              <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
-            ))}
-          </div>
-        )}
       </div>
     </Tabs>
   );

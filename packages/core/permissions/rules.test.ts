@@ -98,7 +98,6 @@ function makeRuntime(ownerId: string | null): RuntimeDevice {
     metadata: {},
     owner_id: ownerId,
     visibility: "private",
-    timezone: "UTC",
     last_seen_at: null,
     sandbox_enabled: null,
     persona_sandbox: "",

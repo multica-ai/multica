@@ -7,6 +7,7 @@ import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
+import { handleAppShortcut } from "./keyboard-shortcuts";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
@@ -189,19 +190,13 @@ function createWindow(): void {
     return { action: "deny" };
   });
 
-  // Prevent Cmd+R / Ctrl+R / Shift+Cmd+R / Shift+Ctrl+R / F5 from
-  // reloading the page. In a desktop app an accidental reload destroys
-  // in-memory state (tabs, drafts, WS connections) with no URL bar to
-  // navigate back. DevTools refresh (via the DevTools UI) still works.
-  mainWindow.webContents.on("before-input-event", (_event, input) => {
-    if (input.type !== "keyDown") return;
-    const cmdOrCtrl =
-      process.platform === "darwin" ? input.meta : input.control;
-    if (
-      (cmdOrCtrl && input.key.toLowerCase() === "r") ||
-      input.key === "F5"
-    ) {
-      _event.preventDefault();
+  // Window-level keyboard shortcuts. Calling preventDefault here prevents
+  // both the renderer keydown AND the application menu accelerator, so
+  // anything we own here (reload-block, zoom) is the sole handler for
+  // that combination — no double-fire with the macOS default View menu.
+  mainWindow.webContents.on("before-input-event", (event, input) => {
+    if (handleAppShortcut(input, mainWindow!.webContents)) {
+      event.preventDefault();
     }
   });
 

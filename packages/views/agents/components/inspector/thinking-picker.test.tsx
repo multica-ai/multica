@@ -28,7 +28,6 @@ function renderPicker(props: Partial<React.ComponentProps<typeof ThinkingPicker>
       <ThinkingPicker
         value=""
         levels={CODEX_LEVELS}
-        defaultLevel="medium"
         canEdit
         onChange={onChange}
         {...props}
@@ -46,10 +45,12 @@ describe("ThinkingPicker", () => {
     cleanup();
   });
 
-  it('renders "Default" when value is empty', () => {
+  it('renders "Follow CLI config" when value is empty', () => {
     renderPicker({ value: "" });
-    // The trigger and the tooltip both carry the label.
-    expect(screen.getAllByText("Default").length).toBeGreaterThan(0);
+    // The trigger and the tooltip both carry the label. Empty value means
+    // Multica omits --effort, so the local CLI's config decides the
+    // reasoning level — see thinking-prop-row.tsx for the contract.
+    expect(screen.getAllByText("Follow CLI config").length).toBeGreaterThan(0);
   });
 
   it("renders the matching level label when value is set", () => {
@@ -60,7 +61,7 @@ describe("ThinkingPicker", () => {
   it("renders the raw token when the saved value is no longer in the catalog", () => {
     // Simulates a model swap that dropped the option the user previously
     // picked — we still surface what's persisted so the user can clear it,
-    // rather than silently showing "Default".
+    // rather than silently showing "Follow CLI config".
     renderPicker({ value: "xhigh", levels: CODEX_LEVELS });
     expect(screen.getAllByText("xhigh").length).toBeGreaterThan(0);
   });
@@ -98,7 +99,7 @@ describe("ThinkingPicker", () => {
     fireEvent.click(screen.getByRole("button"));
     // Footer copy resolves through i18n — match a substring so we don't
     // pin to the exact translated wording.
-    const clearButton = screen.getByTitle(/Clear and fall back/i);
+    const clearButton = screen.getByTitle(/Clear the override/i);
     fireEvent.click(clearButton);
     expect(onChange).toHaveBeenCalledWith("");
   });

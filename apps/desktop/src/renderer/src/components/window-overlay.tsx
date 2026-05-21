@@ -62,14 +62,24 @@ function WindowOverlayInner() {
       {overlay.type === "invitations" && <InvitationsPage />}
       {overlay.type === "onboarding" && (
         <OnboardingFlow
-          onComplete={(ws) => {
+          onComplete={(ws, issueId) => {
             close();
-            // Starter content is offered after landing in the workspace.
-            if (ws) {
+            // Runtime-connected onboarding lands on its single guide
+            // issue. Runtime-less exits still land on the issues list.
+            if (ws && issueId) {
+              push(paths.workspace(ws.slug).issueDetail(issueId));
+            } else if (ws) {
               push(paths.workspace(ws.slug).issues());
             } else {
               push(paths.root());
             }
+          }}
+          // Restart the bundled daemon when the user hits Refresh on
+          // Step 3. The daemon's PATH probe runs once at boot, so a
+          // newly-installed CLI (Claude / Codex / Cursor) doesn't show
+          // up until the daemon is bounced.
+          onRuntimeRefresh={async () => {
+            await window.daemonAPI?.restart?.();
           }}
         />
       )}

@@ -1,41 +1,71 @@
-import type { QuestionnaireAnswers } from "./types";
+import type { QuestionnaireAnswers, Role, UseCase } from "./types";
 
 /**
- * Identifier for the four agent templates offered during onboarding Step 4.
- * Keep in sync with the template registry inside StepAgent in
+ * Identifier for the four legacy onboarding agent templates. Keep in
+ * sync with the template registry inside StepAgent in
  * `packages/views/onboarding/steps/step-agent.tsx`.
  */
 export type AgentTemplateId = "coding" | "planning" | "writing" | "assistant";
 
 /**
- * Pick a recommended agent template for a user based on their
- * questionnaire answers. Role is treated as the primary signal (who the
- * user is); use_case is only a tiebreaker for roles that legitimately
- * split between templates (developer / product_lead).
+ * Pick a recommended agent template based on the questionnaire
+ * (role × use_case). Role is the primary signal; use_case is a
+ * tiebreaker for roles that legitimately split between templates
+ * (engineer / product / marketing).
  *
- * `role = other` and `role = founder` both fall back to the generic
- * Assistant: "other" means the user declined to claim a role, and
- * "founder" means they wear every hat, so a single specialized agent is
- * a poor default.
+ * `use_case` is multi-select — when a user picks several, the rules
+ * below use `.includes(...)` against the set. Order of evaluation
+ * inside each role's switch is the implicit priority (first match
+ * wins). For ambiguous overlaps (e.g. engineer who picks both
+ * `manage_team` and `write_publish`) the earlier branch wins, which
+ * matches the prior single-select behavior when only one of those
+ * was selectable.
+ *
+ * Fallback chain when role is skipped or null:
+ *   1. Derive from use_case alone (same priority order).
+ *   2. Both unknown → `assistant` (the generic default).
  *
  * Pure / deterministic — safe to call on every render.
  */
 export function recommendTemplate(
   answers: Pick<QuestionnaireAnswers, "role" | "use_case">,
 ): AgentTemplateId {
-  const { role, use_case } = answers;
+  const role: Role | null = answers.role;
+  const useCases: readonly UseCase[] = answers.use_case ?? [];
 
-  if (role === "other" || role === "founder") return "assistant";
-  if (role === "writer") return "writing";
+  if (role === null) return fallbackFromUseCase(useCases);
 
-  if (role === "developer") {
-    return use_case === "planning" ? "planning" : "coding";
+  switch (role) {
+    case "engineer":
+      if (useCases.includes("manage_team") || useCases.includes("plan_research"))
+        return "planning";
+      if (useCases.includes("write_publish")) return "writing";
+      return "coding";
+    case "product":
+      if (useCases.includes("ship_code")) return "coding";
+      return "planning";
+    case "designer":
+      return "assistant";
+    case "writer":
+      return "writing";
+    case "marketing":
+      if (useCases.includes("write_publish") || useCases.includes("plan_research"))
+        return "writing";
+      return "planning";
+    case "research":
+      return "planning";
+    case "founder":
+    case "ops":
+    case "student":
+    case "other":
+      return "assistant";
   }
+}
 
-  if (role === "product_lead") {
-    return use_case === "coding" ? "coding" : "planning";
-  }
-
-  // Unknown / null role — user hasn't answered Q2 yet.
+function fallbackFromUseCase(useCases: readonly UseCase[]): AgentTemplateId {
+  if (useCases.includes("ship_code")) return "coding";
+  if (useCases.includes("write_publish")) return "writing";
+  if (useCases.includes("manage_team") || useCases.includes("plan_research"))
+    return "planning";
   return "assistant";
 }

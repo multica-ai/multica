@@ -11,6 +11,12 @@
       "english": "English",
       "chinese": "中文",
       "sync_failed": "Language saved on this device, but failed to sync to your account. Other devices may show the previous language."
+    },
+    "timezone": {
+      "title": "Viewing Timezone",
+      "browser_suffix": " (browser)",
+      "hint": "Used for dashboards, charts, and any 'today' label shown to you. It's a personal preference that applies across all your workspaces.",
+      "sync_failed": "Failed to save your timezone preference."
     }
   },
   "page": {
