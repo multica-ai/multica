@@ -27,6 +27,7 @@ export function AuthInitializer({
   onLogout,
   storage = defaultStorage,
   cookieAuth,
+  localMode,
   identity,
 }: {
   children: ReactNode;
@@ -34,6 +35,7 @@ export function AuthInitializer({
   onLogout?: () => void;
   storage?: StorageAdapter;
   cookieAuth?: boolean;
+  localMode?: boolean;
   identity?: ClientIdentity;
 }) {
   const qc = useQueryClient();
@@ -94,13 +96,51 @@ export function AuthInitializer({
         })
         .catch((err) => {
           logger.error("cookie auth init failed", err);
+          // In local mode, fall back to local-login when cookie auth fails
+          if (localMode) {
+            api.localLogin()
+              .then(({ token: newToken, user }) => {
+                storage.setItem("multica_token", newToken);
+                api.setToken(newToken);
+                return api.listWorkspaces().then((wsList) => {
+                  onLogin?.();
+                  useAuthStore.setState({ user, isLoading: false });
+                  qc.setQueryData(workspaceKeys.list(), wsList);
+                });
+              })
+              .catch((localErr) => {
+                logger.error("local mode cookie auth fallback failed", localErr);
+                onLogout?.();
+                useAuthStore.setState({ user: null, isLoading: false });
+              });
+            return;
+          }
           onAuthFailure();
         });
       return;
     }
 
     // Token mode: read from localStorage (Electron / legacy).
-    const token = storage.getItem("multica_token");
+    let token = storage.getItem("multica_token");
+    if (!token && localMode) {
+      // Local mode: auto-login without credentials
+      api.localLogin()
+        .then(({ token: newToken, user }) => {
+          storage.setItem("multica_token", newToken);
+          api.setToken(newToken);
+          return api.listWorkspaces().then((wsList) => {
+            onLogin?.();
+            useAuthStore.setState({ user, isLoading: false });
+            qc.setQueryData(workspaceKeys.list(), wsList);
+          });
+        })
+        .catch((err) => {
+          logger.error("local mode auth init failed", err);
+          onLogout?.();
+          useAuthStore.setState({ user: null, isLoading: false });
+        });
+      return;
+    }
     if (!token) {
       onLogout?.();
       useAuthStore.setState({ isLoading: false });

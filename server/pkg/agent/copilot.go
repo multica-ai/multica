@@ -197,9 +197,11 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	if execPath == "" {
 		execPath = "copilot"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
+	resolved, err := exec.LookPath(execPath)
+	if err != nil {
 		return nil, fmt.Errorf("copilot executable not found at %q: %w", execPath, err)
 	}
+	execPath = resolved
 
 	timeout := opts.Timeout
 	if timeout == 0 {

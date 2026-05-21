@@ -666,22 +666,49 @@ func (d *Daemon) deregisterRuntimes() {
 
 // resolveAuth loads the auth token from the CLI config for the active profile.
 func (d *Daemon) resolveAuth() error {
+	// 1. Explicit MULTICA_TOKEN env var takes precedence
+	if token := strings.TrimSpace(os.Getenv("MULTICA_TOKEN")); token != "" {
+		d.client.SetToken(token)
+		d.logger.Info("authenticated from MULTICA_TOKEN")
+		return nil
+	}
+
+	// 2. Token from CLI config file
 	cfg, err := cli.LoadCLIConfigForProfile(d.cfg.Profile)
 	if err != nil {
 		return fmt.Errorf("load CLI config: %w", err)
 	}
-	if cfg.Token == "" {
-		loginHint := "'multica login'"
-		if d.cfg.Profile != "" {
-			loginHint = fmt.Sprintf("'multica login --profile %s'", d.cfg.Profile)
-		}
-		d.logger.Warn("not authenticated — run " + loginHint + " to authenticate, then restart the daemon")
-		return fmt.Errorf("not authenticated: run %s first", loginHint)
+	if cfg.Token != "" {
+		d.client.SetToken(cfg.Token)
+		d.logger.Info("authenticated")
+		d.logger.Debug("auth token loaded", "profile", d.cfg.Profile, "token_len", len(cfg.Token))
+		return nil
 	}
-	d.client.SetToken(cfg.Token)
-	d.logger.Info("authenticated")
-	d.logger.Debug("auth token loaded", "profile", d.cfg.Profile, "token_len", len(cfg.Token))
-	return nil
+
+	// 3. Local mode: auto-login via /auth/local-login
+	if localModeEnabled() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		token, err := d.client.LocalLogin(ctx)
+		if err != nil {
+			return fmt.Errorf("local mode auth failed: %w", err)
+		}
+		d.client.SetToken(token)
+		d.logger.Info("authenticated via /auth/local-login")
+		return nil
+	}
+
+	loginHint := "'multica login'"
+	if d.cfg.Profile != "" {
+		loginHint = fmt.Sprintf("'multica login --profile %s'", d.cfg.Profile)
+	}
+	d.logger.Warn("not authenticated — run " + loginHint + " to authenticate, then restart the daemon")
+	return fmt.Errorf("not authenticated: run %s first", loginHint)
+}
+
+func localModeEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("MULTICA_LOCAL_MODE")))
+	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
 
 // allRuntimeIDs returns all runtime IDs across all watched workspaces.

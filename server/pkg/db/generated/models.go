@@ -313,6 +313,31 @@ type InboxItem struct {
 	Details       []byte             `json:"details"`
 }
 
+type ExternalIssueLink struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	Provider           string             `json:"provider"`
+	ExternalID         string             `json:"external_id"`
+	ExternalIdentifier pgtype.Text        `json:"external_identifier"`
+	ExternalUrl        pgtype.Text        `json:"external_url"`
+	LastSyncedAt       pgtype.Timestamptz `json:"last_synced_at"`
+	SyncDirection      string             `json:"sync_direction"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
+type WorkspaceIntegration struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Provider       string             `json:"provider"`
+	Enabled        bool               `json:"enabled"`
+	Config         []byte             `json:"config"`
+	DefaultAgentID pgtype.UUID        `json:"default_agent_id"`
+	WebhookSecret  pgtype.Text        `json:"webhook_secret"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Issue struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`

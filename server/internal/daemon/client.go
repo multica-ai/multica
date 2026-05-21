@@ -142,6 +142,21 @@ func (c *Client) Token() string {
 	return c.token
 }
 
+// LocalLogin authenticates via the /auth/local-login endpoint (self-hosted local mode only).
+func (c *Client) LocalLogin(ctx context.Context) (string, error) {
+	var resp struct {
+		Token string `json:"token"`
+	}
+	if err := c.postJSON(ctx, "/auth/local-login", map[string]any{}, &resp); err != nil {
+		return "", err
+	}
+	token := strings.TrimSpace(resp.Token)
+	if token == "" {
+		return "", errors.New("local login returned an empty token")
+	}
+	return token, nil
+}
+
 func (c *Client) ClaimTask(ctx context.Context, runtimeID string) (*Task, error) {
 	var resp struct {
 		Task *Task `json:"task"`

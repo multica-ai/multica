@@ -527,7 +527,8 @@ func mergeEnv(base []string, extra map[string]string) []string {
 func isFilteredChildEnvKey(key string) bool {
 	return key == "CLAUDECODE" ||
 		strings.HasPrefix(key, "CLAUDECODE_") ||
-		strings.HasPrefix(key, "CLAUDE_CODE_")
+		strings.HasPrefix(key, "CLAUDE_CODE_") ||
+		strings.HasPrefix(key, "COPILOT_")
 }
 
 // blockedArgMode specifies whether a blocked arg takes a value or is standalone.

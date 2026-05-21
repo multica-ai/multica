@@ -43,3 +43,8 @@ export {
   type ActorFilterValue,
   type IssueViewState,
 } from "./view-store";
+
+export {
+  useTimelineViewStore,
+  type TimelineSortDirection,
+} from "./timeline-view-store";

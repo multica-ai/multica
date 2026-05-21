@@ -127,3 +127,13 @@ export type {
   SquadMemberStatus,
   SquadMemberStatusListResponse,
 } from "./squad";
+
+export type {
+  Integration,
+  IntegrationProvider,
+  LinearIntegrationConfig,
+  GitHubIntegrationConfig,
+  CreateIntegrationRequest,
+  UpdateIntegrationRequest,
+  ExternalIssueLink,
+} from "./integration";

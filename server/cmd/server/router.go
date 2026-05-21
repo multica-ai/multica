@@ -249,6 +249,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.With(authRL).Post("/auth/send-code", h.SendCode)
 	r.With(authVerifyRL).Post("/auth/verify-code", h.VerifyCode)
 	r.With(authRL).Post("/auth/google", h.GoogleLogin)
+	r.Post("/auth/local-login", h.LocalLogin)
 	r.Post("/auth/logout", h.Logout)
 
 	// Public API
@@ -635,6 +636,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/notification-preferences", func(r chi.Router) {
 				r.Get("/", h.GetNotificationPreferences)
 				r.Put("/", h.UpdateNotificationPreferences)
+			})
+
+			// Integrations
+			r.Route("/api/integrations", func(r chi.Router) {
+				r.Get("/", h.ListIntegrations)
+				r.Post("/", h.CreateIntegration)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetIntegration)
+					r.Put("/", h.UpdateIntegration)
+					r.Delete("/", h.DeleteIntegration)
+					r.Get("/links", h.ListExternalLinks)
+				})
 			})
 		})
 	})

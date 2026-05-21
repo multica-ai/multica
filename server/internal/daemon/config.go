@@ -36,7 +36,7 @@ const (
 	DefaultWorkspaceSyncInterval          = 30 * time.Second
 	DefaultHealthPort                     = 19514
 	DefaultMaxConcurrentTasks             = 20
-	DefaultGCInterval                     = 1 * time.Hour
+	DefaultGCInterval                     = 30 * time.Minute
 	DefaultGCTTL                          = 24 * time.Hour // 1 day — AI-coding issues rarely stay open long
 	DefaultGCOrphanTTL                    = 72 * time.Hour // 3 days — orphans with no meta (crashes, pre-GC leftovers)
 	DefaultGCArtifactTTL                  = 12 * time.Hour // 12h — drop regenerable artifacts on completed but still-open issues
