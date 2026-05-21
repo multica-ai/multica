@@ -1590,7 +1590,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   };
 
   const detailContent = (
-    <div className="flex h-full min-w-0 flex-1 flex-col">
+    <div className="relative flex h-full min-w-0 flex-1 flex-col">
         <PageHeader className="gap-2 bg-background text-sm">
           <div className="flex flex-1 items-center gap-1.5 min-w-0">
             {workspace && (

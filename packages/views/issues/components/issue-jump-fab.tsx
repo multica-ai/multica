@@ -30,7 +30,7 @@ export function IssueJumpFab({
             type="button"
             onClick={onClick}
             aria-label={label}
-            className="fixed bottom-14 right-2 z-50 flex size-10 cursor-pointer items-center justify-center rounded-full bg-card text-muted-foreground shadow-sm ring-1 ring-foreground/10 transition-transform hover:scale-110 hover:text-accent-foreground active:scale-95"
+            className="absolute bottom-14 right-2 z-50 flex size-10 cursor-pointer items-center justify-center rounded-full bg-card text-muted-foreground shadow-sm ring-1 ring-foreground/10 transition-transform hover:scale-110 hover:text-accent-foreground active:scale-95"
           >
             {isNearBottom ? <ArrowUp className="size-5" /> : <ArrowDown className="size-5" />}
           </button>

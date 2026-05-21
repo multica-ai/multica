@@ -46,7 +46,7 @@ export function ChatFab() {
       <TooltipTrigger
         onClick={handleClick}
         className={cn(
-          "fixed bottom-2 right-2 z-50 flex size-10 cursor-pointer items-center justify-center rounded-full ring-1 ring-foreground/10 bg-card text-muted-foreground shadow-sm transition-transform hover:scale-110 hover:text-accent-foreground active:scale-95",
+          "absolute bottom-2 right-2 z-50 flex size-10 cursor-pointer items-center justify-center rounded-full ring-1 ring-foreground/10 bg-card text-muted-foreground shadow-sm transition-transform hover:scale-110 hover:text-accent-foreground active:scale-95",
           // Impulse the button itself while a chat task is running — no
           // outer ring to keep things calm.
           isRunning && "animate-chat-impulse",

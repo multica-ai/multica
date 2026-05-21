@@ -831,7 +831,7 @@ describe("IssueDetail (shared)", () => {
     renderIssueDetail();
 
     const jumpToBottom = await screen.findByRole("button", { name: "Jump to latest activity" });
-    expect(jumpToBottom).toHaveClass("fixed", "bottom-14", "right-2", "z-50", "size-10");
+    expect(jumpToBottom).toHaveClass("absolute", "bottom-14", "right-2", "z-50", "size-10");
 
     fireEvent.click(jumpToBottom);
 
