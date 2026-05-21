@@ -257,59 +257,64 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       };
     }, []);
 
-    // Sync external `defaultValue` changes into the editor.
-    // Tiptap v3 `useEditor` reads `content` only at mount (ueberdosis/tiptap#5831);
-    // without this effect, a WS-driven description update keeps the editor
-    // showing stale content until the issue is closed and reopened.
+    const replaceDictationPreviewText = (text: string) => {
+      if (!editor) return;
+
+      const existing = dictationPreviewRangeRef.current;
+      const docEnd = editor.state.doc.content.size;
+      const from = existing && existing.from <= existing.to && existing.to <= docEnd
+        ? existing.from
+        : editor.state.selection.from;
+      const to = existing && existing.from <= existing.to && existing.to <= docEnd
+        ? existing.to
+        : from;
+
+      editor.commands.focus();
+      const tr = editor.state.tr.insertText(text, from, to);
+      editor.view.dispatch(tr);
+
+      if (text) {
+        dictationPreviewRangeRef.current = { from, to: from + text.length };
+      } else {
+        dictationPreviewRangeRef.current = null;
+      }
+    };
+
     // CEREBRO-PATCH(input-autofocus): JEH-756 — focus after the editor exists,
+    // then wait briefly for closing dialogs/dropdowns to finish focus-restore.
+    // The guard is checked at execution time, not mount time: the New Message
+    // dialog can still own focus while its selection mounts InboxChatPanel,
+    // then release focus a few frames later.
     useEffect(() => {
-      if (!editor || editor.isDestroyed) return;
+      if (!editor || !autoFocusAtMount) return;
+      if (typeof window === "undefined") return;
 
-      const current = stripBlobUrls(editor.getMarkdown()).trimEnd();
-      // "Dirty" = user has local edits not yet flushed through the debounced
-      // `onUpdate`. `lastEmittedRef` is advanced only after a debounce fire,
-      // so a divergence means the editor holds unsaved bytes.
-      const isDirty =
-        lastEmittedRef.current !== null && current !== lastEmittedRef.current;
+      let didFocus = false;
+      let timeoutId: number | undefined;
+      const startedAt = window.performance?.now?.() ?? Date.now();
 
-      // Guard 1: focused AND dirty — protect bytes the user is actively
-      // typing. Focused-but-clean falls through: applying setContent is safe
-      // (no user input to lose) and necessary, because onBlur has no replay
-      // mechanism and a focused clean editor would otherwise drop this sync
-      // permanently.
-      if (editor.isFocused && isDirty) return;
+      const attemptFocus = () => {
+        if (didFocus) return;
+        if (editor.isDestroyed) return;
 
-      // Guard 2: unfocused-but-dirty — blur happened but the debounce window
-      // (debounceMs, 1500ms for description) hasn't flushed yet. The pending
-      // onUpdate will reach the server and the cache will reconcile; skipping
-      // here avoids overwriting unsaved local edits.
-      if (isDirty) return;
+        if (activeElementIsOwnedByDialog()) {
+          const now = window.performance?.now?.() ?? Date.now();
+          if (now - startedAt < AUTOFOCUS_DIALOG_RETRY_MS) {
+            timeoutId = window.setTimeout(attemptFocus, AUTOFOCUS_DIALOG_RETRY_STEP_MS);
+          }
+          return;
+        }
 
-      const incoming = defaultValue ? preprocessMarkdown(defaultValue) : "";
-      const incomingNormalized = stripBlobUrls(incoming).trimEnd();
-      // Guard 3: normalized-equal short-circuit. Avoids a no-op transaction
-      // when the cache reflects a write this same editor just emitted.
-      if (incomingNormalized === current) return;
+        didFocus = true;
+        editor.commands.focus("end");
+      };
 
-      // Guard 4: `emitUpdate: false`. Tiptap v3's setContent defaults to
-      // `emitUpdate: true`; without this we would re-trigger onUpdate →
-      // server save → self-write loop.
-      const { from, to } = editor.state.selection;
-      editor.commands.setContent(incoming, {
-        emitUpdate: false,
-        contentType: "markdown",
-      });
+      timeoutId = window.setTimeout(attemptFocus, 0);
 
-      // Clamp prior selection to the new doc size so the caret doesn't snap
-      // to position 0 after ProseMirror replaces the document.
-      const docSize = editor.state.doc.content.size;
-      editor.commands.setTextSelection({
-        from: Math.min(from, docSize),
-        to: Math.min(to, docSize),
-      });
-
-      lastEmittedRef.current = stripBlobUrls(editor.getMarkdown()).trimEnd();
-    }, [defaultValue, editor]);
+      return () => {
+        if (timeoutId) window.clearTimeout(timeoutId);
+      };
+    }, [editor, autoFocusAtMount]);
 
     useImperativeHandle(ref, () => ({
       getMarkdown: () => stripBlobUrls(editor?.getMarkdown() ?? ""),

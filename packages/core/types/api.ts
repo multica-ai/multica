@@ -1,5 +1,5 @@
-import type { Issue, IssueMetadata, IssueStatus, IssuePriority, IssueAssigneeType } from "./issue";
 // CEREBRO-PATCH(core-types-api): cerebro modification of upstream file
+import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType } from "./issue";
 import type { MemberRole } from "./workspace";
 import type { Project } from "./project";
 
@@ -47,17 +47,6 @@ export interface ListIssuesParams {
   assignee_ids?: string[];
   creator_id?: string;
   project_id?: string;
-  /**
-   * Widen the assignee filter to issues where the user is the *indirect*
-   * assignee — assignee is one of the user's owned agents, or a squad that
-   * involves the user (human member / leader-via-owned-agent / agent member
-   * owned by the user). Direct member assignment is intentionally excluded:
-   * `involves_user_id` and `assignee_id=<user>` (tab "Assigned to me") produce
-   * disjoint result sets by construction.
-   */
-  involves_user_id?: string;
-  /** JSONB containment filter on `issue.metadata`. AND across keys. */
-  metadata?: IssueMetadata;
   open_only?: boolean;
   /**
    * Restrict the result to issues with at least one of `start_date` /
@@ -85,10 +74,6 @@ export interface ListGroupedIssuesParams {
   assignee_ids?: string[];
   creator_id?: string;
   project_id?: string;
-  /** See `ListIssuesParams.involves_user_id` — same semantics. */
-  involves_user_id?: string;
-  /** JSONB containment filter on `issue.metadata`. AND across keys. */
-  metadata?: IssueMetadata;
   assignee_filters?: IssueActorRef[];
   include_no_assignee?: boolean;
   creator_filters?: IssueActorRef[];
@@ -136,8 +121,6 @@ export interface ListIssuesCache {
 export interface SearchIssueResult extends Issue {
   match_source: "title" | "description" | "comment";
   matched_snippet?: string;
-  matched_description_snippet?: string;
-  matched_comment_snippet?: string;
 }
 
 export interface SearchIssuesResponse {
@@ -161,9 +144,41 @@ export interface UpdateMeRequest {
   language?: string;
   /** Free-form self-description (max 2000 chars). Pass "" to clear. */
   profile_description?: string;
-  /** IANA tz to pin; "" clears back to browser-tz; undefined leaves untouched. */
-  timezone?: string;
+}
+
 // CEREBRO-PATCH(user-profile-v2-types): JEH-1031 — replace tech_pref with 4
+// per-axis scope ratings and add custom_prompt + prompt_mode escape hatch.
+// User communication profile (JEH-304 / JEH-1031). Mirrors the user_profile
+// DB row. The single tech_pref slider was replaced by four 1-5 scope ratings,
+// plus an optional custom prompt with a mode flag for append vs replace.
+export interface UserProfileResponse {
+  user_id: string;
+  persona: "utalmodig" | "ekspert" | "grundig" | "larling";
+  language: "da" | "en";
+  length_pref: number;
+  autonomy_pref: number;
+  git_pref: number;
+  code_pref: number;
+  computer_pref: number;
+  process_pref: number;
+  anti_patterns: string[];
+  custom_prompt: string;
+  prompt_mode: "append" | "replace";
+  updated_at: string;
+}
+
+export interface UserProfileRequest {
+  persona: "utalmodig" | "ekspert" | "grundig" | "larling";
+  language: "da" | "en";
+  length_pref: number;
+  autonomy_pref: number;
+  git_pref: number;
+  code_pref: number;
+  computer_pref: number;
+  process_pref: number;
+  anti_patterns: string[];
+  custom_prompt: string;
+  prompt_mode: "append" | "replace";
 }
 
 export interface CreateMemberRequest {

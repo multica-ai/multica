@@ -6,7 +6,7 @@ import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, 
 import { useQuery, type QueryKey } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
-import type { Issue, IssueAssigneeGroup, ProjectStatus, ProjectPriority, UpdateIssueRequest } from "@multica/core/types";
+import type { Issue, IssueAssigneeGroup, ProjectStatus, ProjectPriority, ProjectTreeItem, UpdateIssueRequest } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 // CEREBRO-PATCH(nested-projects): project detail exposes parent and descendant settings.
@@ -14,14 +14,7 @@ import { projectTreeOptions, useSetProjectParent, useSetProjectShowDescendants }
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
-import {
-  myIssueAssigneeGroupsOptions,
-  myIssueListOptions,
-  projectGanttIssuesOptions,
-  childIssueProgressOptions,
-  type AssigneeGroupedIssuesFilter,
-  type MyIssuesFilter,
-} from "@multica/core/issues/queries";
+import { myIssueAssigneeGroupsOptions, myIssueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter, type MyIssuesFilter } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useModalStore } from "@multica/core/modals";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
@@ -45,7 +38,6 @@ import { ProjectResourcesSection } from "./project-resources-section";
 import { IssuesHeader } from "../../issues/components/issues-header";
 import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
-import { GanttView } from "../../issues/components/gantt-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -130,7 +122,6 @@ function ProjectIssuesContent({
   assigneeGroupFilter,
   scope,
   filter,
-  ganttIssues,
 }: {
   projectId: string;
   projectIssues: Issue[];
@@ -139,7 +130,6 @@ function ProjectIssuesContent({
   assigneeGroupFilter?: AssigneeGroupedIssuesFilter;
   scope: string;
   filter: MyIssuesFilter;
-  ganttIssues: Issue[];
 }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
@@ -167,15 +157,22 @@ function ProjectIssuesContent({
     [displayIssues],
   );
 
-  // Gantt rides its own dedicated query (scheduled-only) so it doesn't have
-  // to wait for every status bucket to paginate in. View-store filters still
-  // apply so toggling priority / assignee / label hides the same bars.
-  const filteredGanttIssues = useMemo(
-    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
-    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
-  );
+  const { data: serverProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
+  const childProgressMap = subIssueDisplay === "hidden" ? new Map() : serverProgressMap;
 
-  const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
+  // Build children-by-parent map for inline nesting in "on-parent" mode
+  const childrenMap = useMemo(() => {
+    if (subIssueDisplay !== "on-parent") return new Map<string, Issue[]>();
+    const map = new Map<string, Issue[]>();
+    for (const issue of projectIssues) {
+      if (issue.parent_issue_id) {
+        const children = map.get(issue.parent_issue_id) ?? [];
+        children.push(issue);
+        map.set(issue.parent_issue_id, children);
+      }
+    }
+    return map;
+  }, [projectIssues, subIssueDisplay]);
 
   const visibleStatuses = useMemo(() => {
     if (statusFilters.length > 0)
@@ -193,25 +190,13 @@ function ProjectIssuesContent({
     (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position">) => {
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
-        {
-          onError: (err) =>
-            toast.error(
-              err instanceof Error && err.message
-                ? err.message
-                : t(($) => $.detail.toast_move_issue_failed),
-            ),
-        },
+        { onError: () => toast.error(t(($) => $.detail.toast_move_issue_failed)) },
       );
     },
     [updateIssueMutation, t],
   );
 
-  // Gantt has its own data source (scheduled-only) and its own empty axis —
-  // we never short-circuit it here, otherwise an unscheduled-but-non-empty
-  // project would surface a misleading "no issues" CTA. For Board/List the
-  // bucketed cache really is the ground truth, so an empty result means an
-  // empty project.
-  if (viewMode !== "gantt" && projectIssues.length === 0) {
+  if (projectIssues.length === 0) {
     return (
       <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
         <ListTodo className="h-10 w-10 text-muted-foreground/40" />
@@ -234,7 +219,7 @@ function ProjectIssuesContent({
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      {viewMode === "board" && (
+      {viewMode === "board" ? (
         <BoardView
           issues={assigneeGroups ? projectIssues : issues}
           assigneeGroups={assigneeGroups}
@@ -248,8 +233,7 @@ function ProjectIssuesContent({
           myIssuesFilter={filter}
           createIssueData={{ project_id: projectId }}
         />
-      )}
-      {viewMode === "list" && (
+      ) : (
         <ListView
           issues={issues}
           visibleStatuses={visibleStatuses}
@@ -261,7 +245,6 @@ function ProjectIssuesContent({
           createIssueData={{ project_id: projectId }}
         />
       )}
-      {viewMode === "gantt" && <GanttView issues={filteredGanttIssues} />}
     </div>
   );
 }
@@ -285,7 +268,6 @@ function ProjectIssuesSurface({
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
-  const usesGantt = viewMode === "gantt";
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
     () => ({
       ...filter,
@@ -303,40 +285,21 @@ function ProjectIssuesSurface({
     scope,
     assigneeGroupFilter,
   );
-  // Each view owns exactly one data source. Board/List ride the bucketed
-  // `myIssueListOptions` cache; the assignee-grouped board uses the grouped
-  // endpoint; Gantt has its own scheduled-only fetch. We gate `enabled` on
-  // the current view so switching to Gantt doesn't re-trigger the full
-  // per-status fetch in the background.
   const statusIssuesQuery = useQuery({
     ...myIssueListOptions(wsId, scope, filter),
-    enabled: !usesAssigneeBoard && !usesGantt,
+    enabled: !usesAssigneeBoard,
   });
   const assigneeGroupsQuery = useQuery({
     ...assigneeGroupsOptions,
     enabled: usesAssigneeBoard,
   });
-  // Gantt has its own data source — a single (paginated) fetch of every
-  // scheduled issue in the project. Independent from the bucketed Board/List
-  // cache so it isn't bottlenecked by per-status pagination and reacts in
-  // isolation to WS updates that move issues into or out of the scheduled
-  // set.
-  const ganttIssuesQuery = useQuery({
-    ...projectGanttIssuesOptions(wsId, projectId),
-    enabled: usesGantt,
-  });
-  const bucketedIssues = usesAssigneeBoard
+  const projectIssues = usesAssigneeBoard
     ? (assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [])
     : (statusIssuesQuery.data ?? []);
-  const ganttIssues = ganttIssuesQuery.data ?? [];
-  // What the header empty-state check looks at depends on the view: Gantt
-  // would otherwise be blamed for an empty Board cache, even though it has
-  // its own (potentially non-empty) scheduled cache.
-  const projectIssues = usesGantt ? ganttIssues : bucketedIssues;
 
   return (
     <>
-      <IssuesHeader scopedIssues={projectIssues} allowGantt />
+      <IssuesHeader scopedIssues={projectIssues} />
       <ProjectIssuesContent
         projectId={projectId}
         projectIssues={projectIssues}
@@ -345,7 +308,6 @@ function ProjectIssuesSurface({
         assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
         scope={scope}
         filter={filter}
-        ganttIssues={ganttIssues}
       />
       <BatchActionToolbar />
     </>
@@ -858,15 +820,38 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             </div>
           </PageHeader>
 
-          <ViewStoreProvider store={projectViewStore}>
-              <ProjectIssuesSurface
-                projectId={projectId}
-                scope={projectScope}
-                filter={projectFilter}
-              />
-            </ViewStoreProvider>
           {/* CEREBRO-PATCH(project-detail-tabs): wraps upstream's single issues view in Issues/Documents/Access tab system */}
+          <Tabs
+              value={projectTab}
+              onValueChange={(v) => setProjectTab(v as "issues" | "documents" | "access")}
+              className="flex flex-1 flex-col"
+            >
+              <TabsList className="mx-4 mt-2 w-fit">
+                <TabsTrigger value="issues">Issues</TabsTrigger>
+                <TabsTrigger value="documents">Documents</TabsTrigger>
+                <TabsTrigger value="access">
+                  {project.access === "restricted" && <RestrictedLock className="mr-1.5" />}
+                  Access
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="issues" className="flex flex-1 flex-col">
+                <ViewStoreProvider store={projectViewStore}>
+                  <ProjectIssuesSurface
+                    projectId={projectId}
+                    scope={projectScope}
+                    filter={projectFilter}
+                  />
+                </ViewStoreProvider>
+              </TabsContent>
+              <TabsContent value="documents" className="flex-1 overflow-auto">
+                <ProjectDocuments projectId={projectId} />
+              </TabsContent>
+              <TabsContent value="access" className="flex-1 overflow-auto">
+                <ProjectAccessTab project={project} />
                 {/* CEREBRO-PATCH(project-detail-group-access): JEH-1009 group-access list under the Access tab. */}
+                <div className="px-6 pb-6"><ProjectGroupAccessSection projectId={project.id} /></div>
+              </TabsContent>
+            </Tabs>
           </div>
         </ResizablePanel>
         {!isMobile && <ResizableHandle />}

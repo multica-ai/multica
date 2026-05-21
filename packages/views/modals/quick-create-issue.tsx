@@ -333,11 +333,7 @@ export function AgentCreatePanel({
           return;
         }
       }
-      setError(
-        e instanceof Error && e.message
-          ? e.message
-          : t(($) => $.create_issue.agent.error_unknown),
-      );
+      setError(t(($) => $.create_issue.agent.error_unknown));
     } finally {
       setSubmitting(false);
     }

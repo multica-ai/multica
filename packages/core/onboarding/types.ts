@@ -1,8 +1,6 @@
 export type OnboardingStep =
   | "welcome"
-  | "source"
-  | "role"
-  | "use_case"
+  | "questionnaire"
   | "workspace"
   | "runtime"
   | "teammate"
@@ -16,76 +14,33 @@ export type OnboardingStep =
  * `OnboardingPath*` constants in `server/internal/analytics/events.go`.
  */
 export type OnboardingCompletionPath =
-  | "full"
-  | "runtime_skipped"
-  | "cloud_waitlist"
-  | "skip_existing"
-  | "invite_accept";
+  | "full" // Reached Step 5 (first_issue) with a runtime connected
+  | "runtime_skipped" // Step 3 skipped (no runtime) but still completed
+  | "cloud_waitlist" // Submitted the cloud waitlist form and skipped Step 3
+  | "skip_existing" // "I've done this before" from Welcome
+  | "invite_accept"; // Accepted at least one invite from /invitations
 
-export type Source =
-  | "friends_colleagues"
-  | "search"
-  | "social_x"
-  | "social_linkedin"
-  | "social_youtube"
-  | "social_other"
-  | "blog_newsletter"
-  | "ai_assistant"
-  | "from_work"
-  | "event_conference"
-  | "dont_remember"
-  | "other";
+export type TeamSize = "solo" | "team" | "other";
 
 export type Role =
-  | "engineer"
-  | "product"
-  | "designer"
-  | "founder"
-  | "marketing"
+  | "developer"
+  | "product_lead"
   | "writer"
-  | "research"
-  | "ops"
-  | "student"
+  | "founder"
   | "other";
 
 export type UseCase =
-  | "ship_code"
-  | "manage_team"
-  | "personal_tasks"
-  | "plan_research"
-  | "write_publish"
-  | "automate_ops"
-  | "evaluate"
+  | "coding"
+  | "planning"
+  | "writing_research"
+  | "explore"
   | "other";
 
-/**
- * Questionnaire shape. `source` and `use_case` allow multiple values
- * (users hear about us through several channels and use Multica for
- * several things); `role` stays single-select since the agent template
- * recommendation wants a primary identity.
- *
- * `*_skipped: true` distinguishes an explicit Skip click from a slot
- * the user never reached. Both states are "unknown" for recommendation
- * purposes; the skip marker exists for analytics and so future
- * re-prompts can avoid nagging users who already declined.
- *
- * Backward compat: prior versions of this app wrote `source` and
- * `use_case` as a single string. `mergeQuestionnaire` in
- * `onboarding-flow.tsx` upgrades those rows to single-element arrays
- * on read; the server's `questionnaireAnswers.UnmarshalJSON` does the
- * same. `version` stays at 2 — the JSONB column is schema-less so a
- * mechanical bump would only show up in analytics, not in storage,
- * and we keep one funnel cohort.
- */
 export interface QuestionnaireAnswers {
-  source: Source[];
-  source_other: string | null;
-  source_skipped: boolean;
+  team_size: TeamSize | null;
+  team_size_other: string | null;
   role: Role | null;
   role_other: string | null;
-  role_skipped: boolean;
-  use_case: UseCase[];
+  use_case: UseCase | null;
   use_case_other: string | null;
-  use_case_skipped: boolean;
-  version: 2;
 }

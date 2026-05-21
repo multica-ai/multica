@@ -1,5 +1,5 @@
-import type { Issue, IssueMetadata, IssueReaction } from "./issue";
 // CEREBRO-PATCH(core-types-events): cerebro modification of upstream file
+import type { Issue, IssueReaction } from "./issue";
 import type { Agent } from "./agent";
 import type { InboxItem } from "./inbox";
 import type { Comment, Reaction } from "./comment";
@@ -68,7 +68,6 @@ export type WSEventType =
   | "label:updated"
   | "label:deleted"
   | "issue_labels:changed"
-  | "issue_metadata:changed"
   | "pin:created"
   | "pin:deleted"
   | "pin:reordered"
@@ -124,11 +123,6 @@ export interface IssueDeletedPayload {
 export interface IssueLabelsChangedPayload {
   issue_id: string;
   labels: Label[];
-}
-
-export interface IssueMetadataChangedPayload {
-  issue_id: string;
-  metadata: IssueMetadata;
 }
 
 export interface AgentStatusPayload {

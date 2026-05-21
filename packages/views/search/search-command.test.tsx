@@ -102,6 +102,7 @@ vi.mock("@multica/core/paths", () => ({
     myIssues: () => "/ws-test/my-issues",
     issues: () => "/ws-test/issues",
     projects: () => "/ws-test/projects",
+    search: () => "/ws-test/search",
     agents: () => "/ws-test/agents",
     runtimes: () => "/ws-test/runtimes",
     skills: () => "/ws-test/skills",
@@ -249,6 +250,31 @@ describe("SearchCommand", () => {
     await user.click(settingsItem);
 
     expect(mockPush).toHaveBeenCalledWith("/ws-test/settings");
+    expect(useSearchStore.getState().open).toBe(false);
+  });
+
+  it("opens the full search page with the current query", async () => {
+    const user = userEvent.setup();
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "billing bug");
+
+    await user.click(screen.getByText("Open page"));
+
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/search?q=billing%20bug");
+    expect(useSearchStore.getState().open).toBe(false);
+  });
+
+  it("opens the full search page when pressing Enter in the input", async () => {
+    const user = userEvent.setup();
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "mobile search{Enter}");
+
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/search?q=mobile%20search");
+    expect(mockOpenModal).not.toHaveBeenCalled();
     expect(useSearchStore.getState().open).toBe(false);
   });
 
@@ -470,65 +496,5 @@ describe("SearchCommand", () => {
     expect(screen.getByText("Recent")).toBeInTheDocument();
     expect(screen.getByText("Existing issue")).toBeInTheDocument();
     expect(screen.queryByText("deleted-issue")).not.toBeInTheDocument();
-  });
-
-  it("renders description and comment snippets regardless of match_source", async () => {
-    const user = userEvent.setup();
-    mockSearchIssues.mockResolvedValue({
-      issues: [
-        {
-          id: "issue-snippet",
-          workspace_id: "ws-test",
-          number: 99,
-          identifier: "MUL-99",
-          title: "HTML rendering pipeline",
-          description: null,
-          status: "todo",
-          priority: "none",
-          assignee_type: null,
-          assignee_id: null,
-          creator_type: "member",
-          creator_id: "user-1",
-          parent_issue_id: null,
-          project_id: null,
-          position: 0,
-          start_date: null,
-          due_date: null,
-          created_at: "2026-01-01T00:00:00Z",
-          updated_at: "2026-01-01T00:00:00Z",
-          match_source: "title",
-          matched_description_snippet: "...uses HTML templates for rendering...",
-          matched_comment_snippet: "...we should migrate away from HTML...",
-        },
-      ],
-      total: 1,
-    });
-    renderSearch();
-
-    const input = screen.getByPlaceholderText("Type a command or search...");
-    await user.type(input, "html");
-
-    await waitFor(
-      () => {
-        expect(screen.getByText((_, el) => el?.textContent === "HTML rendering pipeline" && el?.tagName === "SPAN")).toBeInTheDocument();
-      },
-      { timeout: 2000 },
-    );
-
-    // Description snippet should render even though match_source is "title"
-    expect(
-      screen.getByText((_, el) =>
-        (el?.textContent?.includes("uses HTML templates for rendering") ?? false) &&
-        el?.tagName === "SPAN",
-      ),
-    ).toBeInTheDocument();
-
-    // Comment snippet should render even though match_source is "title"
-    expect(
-      screen.getByText((_, el) =>
-        (el?.textContent?.includes("we should migrate away from HTML") ?? false) &&
-        el?.tagName === "SPAN",
-      ),
-    ).toBeInTheDocument();
   });
 });

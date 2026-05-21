@@ -67,11 +67,7 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
             toast.error(t(($) => $.create_form.errors.slug_conflict_toast));
             return;
           }
-          toast.error(
-            error instanceof Error && error.message
-              ? error.message
-              : t(($) => $.create_form.errors.create_failed),
-          );
+          toast.error(t(($) => $.create_form.errors.create_failed));
         },
       },
     );

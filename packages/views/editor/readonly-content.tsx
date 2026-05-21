@@ -18,7 +18,7 @@
  * - Rendering mentions with the same IssueMentionCard component and .mention class
  */
 
-import { isValidElement, memo, useMemo, useRef } from "react";
+import { isValidElement, memo, useMemo, useRef, useState } from "react";
 import ReactMarkdown, {
   defaultUrlTransform,
   type Components,
@@ -31,6 +31,8 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { createLowlight, common } from "lowlight";
 import { toHtml } from "hast-util-to-html";
+import { Maximize2, Download, Link as LinkIcon, FileText, Eye } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import type { Attachment } from "@multica/core/types";
@@ -41,14 +43,13 @@ import { useIssueLinkOpenMode } from "@multica/cerebro-preferences/views";
 import { SkillMentionChip } from "@multica/cerebro-skill-mention";
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
 import { useNavigation } from "../navigation";
-import { IssueMentionCard } from "../issues/components/issue-mention-card";
+import { useT } from "../i18n";
+import { IssueChip } from "../issues/components/issue-chip";
+import { ImageLightbox } from "./extensions/image-view";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { MermaidDiagram } from "./mermaid-diagram";
-import { HtmlBlockPreview } from "./html-block-preview";
-import { AttachmentDownloadProvider } from "./attachment-download-context";
-import { Attachment as AttachmentRenderer } from "./attachment";
 import "katex/dist/katex.min.css";
 import "./content-editor.css";
 
@@ -57,13 +58,6 @@ import "./content-editor.css";
 // ---------------------------------------------------------------------------
 
 const lowlight = createLowlight(common);
-
-// Code fences that the `code` renderer returns as a non-<code> React element
-// (Mermaid diagram, HTML preview iframe). The `pre` renderer below unwraps
-// these so the default <pre><code> envelope doesn't clamp their styles.
-// Anchored to whole class tokens so `language-htmlbars` / `language-mermaidx`
-// don't accidentally match and lose their <pre> wrapper.
-const PRE_UNWRAP_RE = /(^|\s)language-(html|mermaid)(\s|$)/;
 
 // ---------------------------------------------------------------------------
 // Sanitization schema — extends GitHub defaults to allow file-card data attrs
@@ -211,79 +205,95 @@ function ReadonlyLink({
   );
 }
 
-function buildComponents(): Partial<Components> {
-  return {
-    // Links — route mention:// to mention components, others show preview card
-    a: ReadonlyLink,
-
-    // Images — unified through <Attachment>. The resolver context provided
-    // by AttachmentDownloadProvider (mounted in ReadonlyContent below) turns
-    // a CDN URL into a full record when possible; external URLs render as
-    // plain images with lightbox-via-preview-modal. forceKind is mandatory
-    // here because markdown `![]()` carries no content-type and alt is
-    // commonly empty or descriptive — without it images fall through to
-    // the file-card chrome.
-    img: ({ src, alt }) => (
-      <AttachmentRenderer
-        attachment={{
-          kind: "url",
-          url: typeof src === "string" ? src : "",
-          filename: alt ?? "",
-          forceKind: "image",
-        }}
-      />
-    ),
-
-    // FileCard — intercept <div data-type="fileCard"> from preprocessMarkdown
-    div: ({ node, children, ...props }) => {
-      const dataType = node?.properties?.dataType as string | undefined;
-      if (dataType === "fileCard") {
-        const rawHref = (node?.properties?.dataHref as string) || "";
-        const href = isAllowedFileCardHref(rawHref) ? rawHref : "";
-        const filename = (node?.properties?.dataFilename as string) || "";
-        return (
-          <AttachmentRenderer
-            attachment={{ kind: "url", url: href, filename }}
-          />
-        );
-      }
-      return <div {...props}>{children}</div>;
-    },
-
-    // Tables — wrap in tableWrapper div for border/radius/scroll (matches Tiptap)
-    table: ({ children }) => (
-      <div className="tableWrapper">
-        <table>{children}</table>
-      </div>
-    ),
-
-    // Code — lowlight highlighting for blocks, plain render for inline
-    code: ({ className, children, node, ...props }) => {
-      const lang = /language-(\w+)/.exec(className || "")?.[1];
-      const isBlock =
-        node?.position &&
-        node.position.start.line !== node.position.end.line;
-
-      if (isBlock && lang === "mermaid") {
-        return <MermaidDiagram chart={String(children).replace(/\n$/, "")} />;
-      }
-      if (isBlock && lang === "html") {
-        // Like Mermaid, return the React element directly here and rely on
-        // the `pre` renderer below to unwrap it — react-markdown otherwise
-        // wraps `code` children in a `<pre>` whose monospace + overflow
-        // styles would clamp the preview iframe.
-        return <HtmlBlockPreview html={String(children).replace(/\n$/, "")} />;
-      }
-
-      if (!isBlock && !lang) {
-        // Inline code — CSS handles styling via .rich-text-editor code
-        return <code {...props}>{children}</code>;
-      }
-
-      // Block code — highlight with lowlight, output hljs classes
-      const code = String(children).replace(/\n$/, "");
 // CEREBRO-PATCH(readonly-content-cerebro): file-card div renderer with attachment viewer
+function FileCardDiv({
+  node,
+  children,
+  ...props
+}: React.ComponentProps<"div"> & { node?: { properties?: Record<string, unknown> } }) {
+  const wsPaths = useWorkspacePaths();
+  const router = useNavigation();
+  const dataType = node?.properties?.dataType as string | undefined;
+  if (dataType !== "fileCard") {
+    return <div {...props}>{children}</div>;
+  }
+  const rawHref = (node?.properties?.dataHref as string) || "";
   // CEREBRO-PATCH(file-card-relative-url): accept same-origin paths starting
+  // with `/` so chat uploads (relative `/uploads/…`) render correctly.
+  // Only allow http(s) or same-origin to block javascript: and other schemes.
+  const href = /^(https?:\/\/|\/)/i.test(rawHref) ? rawHref : "";
+  const filename = (node?.properties?.dataFilename as string) || "";
+  const attachmentId = (node?.properties?.dataAttachmentId as string) || "";
+  // We don't have content_type for inline file cards — fall back to filename
+  // extension via isViewableAttachment("", filename).
+  const viewable = Boolean(attachmentId) && isViewableAttachment("", filename);
+
+  const openViewer = () => {
+    const path = wsPaths.attachmentView(attachmentId);
+    if (router.openInNewTab) {
+      router.openInNewTab(path, filename);
+    } else if (router.getShareableUrl) {
+      window.open(router.getShareableUrl(path), "_blank", "noopener,noreferrer");
+    } else {
+      window.open(path, "_blank", "noopener,noreferrer");
+    }
+  };
+  const openDownload = () => {
+    if (href) window.open(href, "_blank", "noopener,noreferrer");
+  };
+
+  return (
+    <div className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">
+      <FileText className="size-4 shrink-0 text-muted-foreground" />
+      <button
+        type="button"
+        onClick={viewable ? openViewer : openDownload}
+        className="min-w-0 flex-1 truncate text-left text-sm hover:underline"
+        title={viewable ? "Open in viewer" : "Download"}
+      >
+        {filename}
+      </button>
+      {viewable && (
+        <button
+          type="button"
+          aria-label="Open in viewer"
+          title="Open in viewer"
+          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          onClick={openViewer}
+        >
+          <Eye className="size-3.5" />
+        </button>
+      )}
+      {href && (
+        <button
+          type="button"
+          aria-label="Download"
+          title="Download"
+          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          onClick={openDownload}
+        >
+          <Download className="size-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+const components: Partial<Components> = {
+  // Links — route mention:// to mention components, others show preview card
+  a: ReadonlyLink,
+
+  // Images — centered with toolbar + lightbox (matches Tiptap ImageView NodeView)
+  img: function ReadonlyImage({ src, alt }) {
+    const { t } = useT("editor");
+    const [lightbox, setLightbox] = useState(false);
+    const imgSrc = typeof src === "string" ? src : "";
+    const imgAlt = alt ?? "";
+
+    const handleView = () => setLightbox(true);
+    const handleDownload = () => {
+      window.open(imgSrc, "_blank", "noopener,noreferrer");
+    };
+    const handleCopyLink = async () => {
       try {
         await navigator.clipboard.writeText(imgSrc);
         toast.success(t(($) => $.image.link_copied));
@@ -292,31 +302,89 @@ function buildComponents(): Partial<Components> {
       }
     };
 
-    // Pre — pass through (CSS handles styling via .rich-text-editor pre).
-    // Special-case Mermaid / HtmlBlockPreview returned from the `code`
-    // renderer above so the outer `<pre>` does not wrap them — this is the
-    // standard two-layer pattern used to escape react-markdown's default
-    // `<pre><code>` envelope.
-    pre: ({ children }) => {
-      // react-markdown calls `pre` BEFORE invoking the `code` renderer —
-      // `children` is the unrendered `<code>` element from the AST. So we
-      // identify "this block was meant to be unwrapped" by inspecting the
-      // child's className (`language-mermaid`, `language-html`), not by
-      // checking `children.type === MermaidDiagram`, which never matches.
-      //
-      // Match by exact class token: a substring `includes("language-html")`
-      // would also fire on neighboring languages like `language-htmlbars`
-      // and silently strip their <pre> wrapper.
-      if (isValidElement(children)) {
-        const childProps = children.props as { className?: string };
-        if (PRE_UNWRAP_RE.test(childProps.className ?? "")) {
-          return <>{children}</>;
-        }
-      }
-      return <pre>{children}</pre>;
-    },
-  };
-}
+    return (
+      <span className="image-node">
+        <span className="image-figure" onClick={handleView}>
+          <img src={imgSrc} alt={imgAlt} className="image-content" draggable={false} />
+          <span
+            className="image-toolbar"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button type="button" onClick={handleView} title={t(($) => $.image.view)}>
+              <Maximize2 className="size-3.5" />
+            </button>
+            <button type="button" onClick={handleDownload} title={t(($) => $.image.download)}>
+              <Download className="size-3.5" />
+            </button>
+            <button type="button" onClick={handleCopyLink} title={t(($) => $.image.copy_link)}>
+              <LinkIcon className="size-3.5" />
+            </button>
+          </span>
+        </span>
+        {lightbox && (
+          <ImageLightbox src={imgSrc} alt={imgAlt} onClose={() => setLightbox(false)} />
+        )}
+      </span>
+    );
+  },
+
+  // FileCard — intercept <div data-type="fileCard"> from preprocessMarkdown
+  div: FileCardDiv,
+
+  // Tables — wrap in tableWrapper div for border/radius/scroll (matches Tiptap)
+  table: ({ children }) => (
+    <div className="tableWrapper">
+      <table>{children}</table>
+    </div>
+  ),
+
+  // Code — lowlight highlighting for blocks, plain render for inline
+  code: ({ className, children, node, ...props }) => {
+    const lang = /language-(\w+)/.exec(className || "")?.[1];
+    const isBlock =
+      node?.position &&
+      node.position.start.line !== node.position.end.line;
+
+    if (isBlock && lang === "mermaid") {
+      return <MermaidDiagram chart={String(children).replace(/\n$/, "")} />;
+    }
+
+    if (!isBlock && !lang) {
+      // Inline code — CSS handles styling via .rich-text-editor code
+      return <code {...props}>{children}</code>;
+    }
+
+    // Block code — highlight with lowlight, output hljs classes
+    const code = String(children).replace(/\n$/, "");
+    try {
+      const tree = lang
+        ? lowlight.highlight(lang, code)
+        : lowlight.highlightAuto(code);
+      return (
+        <code
+          className={cn("hljs", lang && `language-${lang}`)}
+          dangerouslySetInnerHTML={{ __html: toHtml(tree) }}
+        />
+      );
+    } catch {
+      // Fallback — render without highlighting
+      return (
+        <code className={className} {...props}>
+          {children}
+        </code>
+      );
+    }
+  },
+
+  // Pre — pass through (CSS handles styling via .rich-text-editor pre)
+  pre: ({ children }) => {
+    if (isValidElement(children) && children.type === MermaidDiagram) {
+      return <>{children}</>;
+    }
+    return <pre>{children}</pre>;
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Component
@@ -357,23 +425,17 @@ export const ReadonlyContent = memo(function ReadonlyContent({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hover = useLinkHover(wrapperRef);
 
-  // Components map is now static — all attachment-aware logic lives in
-  // <Attachment>, which reads the surrounding AttachmentDownloadProvider.
-  const components = useMemo(() => buildComponents(), []);
-
   return (
-    <AttachmentDownloadProvider attachments={attachments}>
-      <div ref={wrapperRef} className={cn("rich-text-editor readonly text-sm", className)}>
-        <ReactMarkdown
-          remarkPlugins={[remarkMath, remarkBreaks, [remarkGfm, { singleTilde: false }]]}
-          rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
-          urlTransform={urlTransform}
-          components={components}
-        >
-          {processed}
-        </ReactMarkdown>
-        <LinkHoverCard {...hover} />
-      </div>
-    </AttachmentDownloadProvider>
+    <div ref={wrapperRef} className={cn("rich-text-editor readonly text-sm", className)}>
+      <ReactMarkdown
+        remarkPlugins={[remarkMath, remarkBreaks, [remarkGfm, { singleTilde: false }]]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
+        urlTransform={urlTransform}
+        components={components}
+      >
+        {processed}
+      </ReactMarkdown>
+      <LinkHoverCard {...hover} />
+    </div>
   );
 });

@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { RuntimeUsage } from "@multica/core/types";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
-import { addDaysIso, estimateCost, todayIso, weekStartIso } from "../../utils";
+import { estimateCost } from "../../utils";
 import { useT } from "../../../i18n";
 
 // 26 weeks (~6 months) gives the heatmap real presence in the wider chart
@@ -11,11 +11,8 @@ import { useT } from "../../../i18n";
 const HEATMAP_WEEKS = 26;
 const CELL_SIZE = 16;
 const CELL_GAP = 3;
-// Monday-first row order, matching ISO 8601 and the rest of the Weekly
-// aggregation (see #MUL-2382). Rows labelled Mon / Wed / Fri keep the
-// density readable.
-const DAY_LABELS = ["Mon", "", "Wed", "", "Fri", "", ""];
-const WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const DAY_LABELS = ["", "Mon", "", "Wed", "", "Fri", ""];
+const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 // Cells use the brand-derived chart-1 hue with descending opacity instead
 // of a neutral foreground fade, so the heatmap reads as part of the same
@@ -50,13 +47,7 @@ interface Insights {
   windowDays: number;
 }
 
-export function ActivityHeatmap({
-  usage,
-  tz,
-}: {
-  usage: RuntimeUsage[];
-  tz: string;
-}) {
+export function ActivityHeatmap({ usage }: { usage: RuntimeUsage[] }) {
   const { t } = useT("runtimes");
   // Memo dep — estimateCost (called inside the body below) consults the
   // user-override store, so saving a custom rate must invalidate the cells.
@@ -70,32 +61,22 @@ export function ActivityHeatmap({
       dateCost.set(u.date, (dateCost.get(u.date) ?? 0) + estimateCost(u));
     }
 
-    // Anchor the grid on the Monday of the week containing "today" in the
-    // viewer's tz, then walk back HEATMAP_WEEKS-1 weeks. All dates are
-    // string-based YYYY-MM-DD so the host browser's tz can't shift a column.
-    // We stop drawing cells once we pass `today` so the in-progress week is
-    // partial (cells for "tomorrow onward" aren't rendered) — matches the
-    // Weekly chart's partial-week treatment.
-    const today = todayIso(tz);
-    const lastWeekStart = weekStartIso(today);
-    const startDate = addDaysIso(lastWeekStart, -(HEATMAP_WEEKS - 1) * 7);
-    const todayIndex = (HEATMAP_WEEKS - 1) * 7 + ((() => {
-      // Monday-based weekday of `today`: 0 = Mon ... 6 = Sun. Computed via
-      // string subtraction so the host timezone can't shift the value.
-      const [y, m, d] = today.split("-").map(Number);
-      const dt = new Date(Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1));
-      return (dt.getUTCDay() + 6) % 7;
-    })());
+    const today = new Date();
+    const todayDay = today.getDay();
+    const startOffset = todayDay + (HEATMAP_WEEKS - 1) * 7;
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() - startOffset);
 
     const allCells: {
       date: string;
-      dayOfWeek: number; // 0 = Mon ... 6 = Sun
+      dayOfWeek: number;
       week: number;
       cost: number;
     }[] = [];
-    for (let i = 0; i <= todayIndex; i++) {
-      const dateStr = addDaysIso(startDate, i);
-      const dayOfWeek = i % 7;
+    const d = new Date(startDate);
+    for (let i = 0; i <= startOffset; i++) {
+      const dateStr = d.toISOString().slice(0, 10);
+      const dayOfWeek = d.getDay();
       const week = Math.floor(i / 7);
       allCells.push({
         date: dateStr,
@@ -103,6 +84,7 @@ export function ActivityHeatmap({
         week,
         cost: dateCost.get(dateStr) ?? 0,
       });
+      d.setDate(d.getDate() + 1);
     }
 
     const nonZero = allCells.filter((c) => c.cost > 0).map((c) => c.cost);
@@ -189,7 +171,7 @@ export function ActivityHeatmap({
     };
 
     return { cells: cellsWithLevel, monthLabels: months, insights };
-  }, [usage, pricings, tz]);
+  }, [usage, pricings]);
 
   const labelWidth = 28;
   const svgWidth = labelWidth + HEATMAP_WEEKS * (CELL_SIZE + CELL_GAP);

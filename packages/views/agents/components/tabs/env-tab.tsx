@@ -114,12 +114,8 @@ export function EnvTab({
     try {
       await onSave({ custom_env: currentEnvMap });
       toast.success(t(($) => $.tab_body.env.saved_toast));
-    } catch (err) {
-      toast.error(
-        err instanceof Error && err.message
-          ? err.message
-          : t(($) => $.tab_body.env.save_failed_toast),
-      );
+    } catch {
+      toast.error(t(($) => $.tab_body.env.save_failed_toast));
     } finally {
       setSaving(false);
     }

@@ -46,6 +46,21 @@ JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.issue_id = $1
 GROUP BY tu.model;
 
+-- name: GetWorkspaceUsageSummary :many
+-- CEREBRO-PATCH(workspace-usage-summary): restore upstream workspace token rollup used by cerebro dashboard spend cards.
+SELECT
+    tu.model,
+    COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
+    COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN issue i ON i.id = atq.issue_id
+WHERE i.workspace_id = $1
+  AND tu.created_at >= $2
+GROUP BY tu.model;
+
 -- name: GetIssueSubtreeUsageByModel :many
 -- Per-model token totals across the issue and all descendants (recursive).
 -- The subtree CTE walks parent_issue_id at every level so deeply nested

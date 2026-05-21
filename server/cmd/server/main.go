@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
-	"github.com/multica-ai/multica/server/internal/auth"
 	// CEREBRO-PATCH(main-agent-pass-gate): JEH-1327 cerebro agent-pass gate import
 	cerebroagentpass "github.com/multica-ai/multica/server/internal/cerebro/agentpass"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"

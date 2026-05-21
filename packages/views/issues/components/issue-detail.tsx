@@ -24,7 +24,10 @@ import {
   Pin,
   PinOff,
   Plus,
+  Settings,
   Tag,
+  Trash2,
+  UserMinus,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -76,18 +79,18 @@ import {
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
 import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/ui/popover";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
-import type { Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
-import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
-import { useUpdateIssue } from "@multica/core/issues/mutations";
-import { toast } from "sonner";
-import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
-import { IssueActionsDropdown, useIssueActions } from "../actions";
+import type { Issue, IssueStatus, IssuePriority, TimelineEntry, IssueSubscriber, UpdateIssueRequest } from "@multica/core/types";
+import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
+import { PriorityIcon } from "./priority-icon";
+import { StatusIcon } from "./status-icon";
+import { AssigneePicker, canAssignAgent, DueDatePicker, LabelPicker, PriorityPicker, StartDatePicker, StatusPicker } from "./pickers";
+import { useMoveCommentToSubIssue, useUpdateIssue } from "@multica/core/issues/mutations";
+import { useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 // CEREBRO-PATCH(issue-private-badge-import): inherited-privacy badge in issue header (JEH-1750).
 import { PrivacyToggle, PrivateBadge } from "@multica/cerebro-access/views";
@@ -105,16 +108,14 @@ import { BacklogAgentHintDialog } from "./backlog-agent-hint-dialog";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { collectThreadReplies } from "./thread-utils";
 import { ExecutionLogSection } from "./execution-log-section";
-import { PullRequestList } from "./pull-request-list";
-import { useGitHubSettings } from "@multica/core/github";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
+import { useDeleteIssue } from "@multica/core/issues/mutations";
 import { projectDetailOptions } from "@multica/core/projects/queries";
-import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
@@ -401,6 +402,62 @@ function ActivityBlock({
 }
 
 // ---------------------------------------------------------------------------
+// ParticipantGroup
+// ---------------------------------------------------------------------------
+
+function ParticipantGroup({
+  heading,
+  subscribers,
+  getActorName,
+  ownerType,
+  ownerId,
+}: {
+  heading: string;
+  subscribers: IssueSubscriber[];
+  getActorName: (type: string, id: string) => string;
+  /** When set, the row matching {ownerType, ownerId} gets an "Owner" tag.
+   *  This is how the channel's assignee surfaces in the participant list,
+   *  per mockup-skærm 1's "Jesper Hvejsel · Owner". */
+  ownerType?: string | null;
+  ownerId?: string | null;
+}) {
+  if (subscribers.length === 0) return null;
+  return (
+    <div>
+      <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5">
+        {heading}{" "}
+        <span className="text-muted-foreground/60">· {subscribers.length}</span>
+      </div>
+      <ul className="space-y-1">
+        {subscribers.map((sub) => {
+          const isOwner =
+            ownerType === sub.user_type && ownerId === sub.user_id;
+          return (
+            <li
+              key={`${sub.user_type}-${sub.user_id}`}
+              className="flex items-center gap-2 text-xs"
+            >
+              <ActorAvatar actorType={sub.user_type} actorId={sub.user_id} size={20} />
+              <span className="truncate flex-1">
+                {getActorName(sub.user_type, sub.user_id)}
+              </span>
+              {isOwner && (
+                <span
+                  className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                  data-testid="owner-tag"
+                >
+                  Owner
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // SubIssueRow — sub-issue list item with inline status & assignee editing
 // ---------------------------------------------------------------------------
 
@@ -416,14 +473,7 @@ function SubIssueRow({ child }: { child: Issue }) {
     (updates: Partial<UpdateIssueRequest>) => {
       updateIssue.mutate(
         { id: child.id, ...updates },
-        {
-          onError: (err) =>
-            toast.error(
-              err instanceof Error && err.message
-                ? err.message
-                : t(($) => $.detail.update_failed),
-            ),
-        },
+        { onError: () => toast.error(t(($) => $.detail.update_failed)) },
       );
     },
     [child.id, updateIssue, t],
@@ -581,36 +631,18 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
-  const [metadataOpen, setMetadataOpen] = useState(false);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
-  const githubSettings = useGitHubSettings();
-
-  // Per-issue, per-session set of optional properties currently visible in
-  // the sidebar Properties section. Seeded on issue switch with whichever
-  // fields are already set; "+ Add property" adds an entry, clearing a
-  // value does *not* remove one (avoids row-flicker on edit → clear).
-  // Resets when the user navigates to a different issue.
-  const [visibleOptionalProps, setVisibleOptionalProps] = useState<Set<OptionalPropKey>>(
-    () => new Set(),
-  );
-  // Optional property to auto-open as soon as it's mounted (the user just
-  // picked it from "+ Add property" and we want them dropped straight into
-  // edit state). Consumed by the row that matches this key, cleared after.
-  const [autoOpenProp, setAutoOpenProp] = useState<OptionalPropKey | null>(null);
-  // Controlled state for the "+ Add property" popover. Base UI's Popover
-  // doesn't auto-dismiss on item click (it's not a Menu primitive), so the
-  // popover would stay open behind the newly auto-opened picker — two
-  // popovers stacked. We close it explicitly in `addOptionalProp`.
-  const [addPropPopoverOpen, setAddPropPopoverOpen] = useState(false);
-  // Virtuoso's `customScrollParent` wants the HTMLElement, not a ref. A plain
-  // `useRef.current` does not trigger a re-render when it populates, so the
-  // Virtuoso prop would never receive the element. Callback ref + state fixes
-  // that: setState triggers the re-render that hands Virtuoso the element.
-  const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
-  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  // Issue pages render long timelines; don't yank the user to the bottom on
+  // mount, but offer a "jump to latest" pill once they scroll up far enough.
+  const { isAtBottom, scrollToBottom } = useStickyBottom(scrollContainerRef, {
+    initialScroll: false,
+  });
   // CEREBRO-PATCH(issue-detail-nav-overlay-state): JEH-1518 — tabs ref + nav scroll state for multi-function overlay button
+  const tabsRef = useRef<HTMLDivElement>(null);
   const { scrollPercent, isInTabsArea, scrollToPageTop, scrollToTop, scrollToTabs } = useNavScrollState(scrollContainerRef, tabsRef); // CEREBRO-PATCH(issue-detail-page-top-button): JEH-1558 — add scrollToPageTop for page-top nav button.
   // CEREBRO-PATCH(issue-detail-highlight-scroll-hook): see import above (JEH-1002).
+  const highlightedId = useHighlightCommentScroll(highlightCommentId);
 
   // Per-issue, per-session set of optional properties currently visible in
   // the sidebar Properties section. Seeded on issue switch with whichever
@@ -648,44 +680,6 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
       return next;
     });
   }, []);
-
-  // Per-session activity-block expansion overrides. The default rule is
-  // "only the trailing block is expanded" (computed from timelineView.groups
-  // below); these two sets capture user clicks that diverge from the default.
-  // Two sets are needed because "default" can flip when a new activity block
-  // appends — without an explicit collapse override, a manually-collapsed
-  // older block would re-expand when it stops being the trailing one (or vice
-  // versa). Not persisted, matches the resolved-thread behaviour above.
-  const [expandedActivityIds, setExpandedActivityIds] = useState<Set<string>>(() => new Set());
-  const [collapsedActivityIds, setCollapsedActivityIds] = useState<Set<string>>(() => new Set());
-  const toggleActivityBlock = useCallback((id: string, currentlyExpanded: boolean) => {
-    if (currentlyExpanded) {
-      setCollapsedActivityIds((prev) => {
-        const next = new Set(prev);
-        next.add(id);
-        return next;
-      });
-      setExpandedActivityIds((prev) => {
-        if (!prev.has(id)) return prev;
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-    } else {
-      setExpandedActivityIds((prev) => {
-        const next = new Set(prev);
-        next.add(id);
-        return next;
-      });
-      setCollapsedActivityIds((prev) => {
-        if (!prev.has(id)) return prev;
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-    }
-  }, []);
-  const didHighlightRef = useRef<string | null>(null);
 
   // Per-session activity-block expansion overrides. The default rule is
   // "only the trailing block is expanded" (computed from timelineView.groups
@@ -879,34 +873,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     return { threadReplies, groups };
   }, [timeline]);
 
-  // Flat array consumed by <Virtuoso>. Recomputed when timelineView.groups
-  // changes (timeline events) or expandedResolved flips (user toggles a
-  // resolved thread). Kept in a useMemo so Virtuoso's data identity is stable
-  // across unrelated re-renders.
-  const items = useMemo<TimelineItem[]>(
-    () => flattenGroups(timelineView.groups, expandedResolved),
-    [timelineView.groups, expandedResolved],
-  );
-
   // ID of the trailing activity block — the only one expanded by default.
   const lastActivityGroupId = useMemo(() => {
     for (let i = timelineView.groups.length - 1; i >= 0; i--) {
       const g = timelineView.groups[i]!;
       if (g.type === "activities") return g.entries[0]!.id;
-    }
-    return null;
-  }, [timelineView.groups]);
-
-  // Map of reply-comment id → root-comment id, so a deep-link to a reply
-  // (which lives inside a CommentCard, not in the flat items array) can fall
-  // back to scrolling the root thread into view. Without this, an inbox
-  // notification on a reply would land at items[-1] and short-circuit.
-  const replyToRoot = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const [rootId, replies] of timelineView.threadReplies) {
-      for (const reply of replies) {
-        map.set(reply.id, rootId);
-      }
     }
     return null;
   }, [timelineView.groups]);
@@ -931,15 +902,24 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     initialData: () => allIssues.find((i) => i.id === parentIssueId),
     retry: false,
   });
-
-  // Project segment in the breadcrumb. The issue's project_id is the source of
-  // truth — same URL renders the same breadcrumb regardless of entry path.
-  const issueProjectId = issue?.project_id;
-  const { data: breadcrumbProject = null, isError: breadcrumbProjectError } = useQuery({
-    ...projectDetailOptions(wsId, issueProjectId ?? ""),
-    enabled: !!issueProjectId,
+  const parentIssue = parentIssueQuery.data ?? null;
+  // Parent exists (issue.parent_issue_id is set) but we got a 404 →
+  // the parent lives in a restricted project we can't access. Render
+  // a redacted placeholder so the user knows there IS a parent.
+  const parentIsRestricted =
+    !!parentIssueId && !parentIssue && parentIssueQuery.isError;
+  const {
+    data: projectForBreadcrumb = null,
+    isError: projectForBreadcrumbError,
+  } = useQuery({
+    ...projectDetailOptions(wsId, issue?.project_id ?? ""),
+    enabled: !!issue?.project_id,
   });
   // CEREBRO-PATCH(mention-access-prefetch-call): JEH-1250
+  useEnsureMentionAccessData(
+    issue?.project_id ?? null,
+    projectForBreadcrumb?.access ?? null,
+  );
   const { data: childIssues = [] } = useQuery({
     ...childIssuesOptions(wsId, id),
     enabled: !!issue,
@@ -1272,13 +1252,17 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_project)}>
-            <ProjectPicker
-              projectId={issue.project_id}
-              onUpdate={handleUpdateField}
-            />
+            <ProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} />
           </PropRow>
           {/* CEREBRO-PATCH(issue-privacy-toggle): per-issue visibility when no project parent */}
-
+          {!issue.project_id && (
+            <PropRow label="Visibility">
+              <PrivacyToggle
+                isPrivate={Boolean(issue.is_private)}
+                onUpdate={(value) => handleUpdateField({ is_private: value })}
+              />
+            </PropRow>
+          )}
           {/* Optional props — rendered only when set on the issue OR added
               via "+ Add property" in this session. Row order follows the
               order of `OPTIONAL_PROP_KEYS`. */}
@@ -1399,11 +1383,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
         </div>
       )}
 
-      {/* Parent issue — standalone section, only when the issue has a
-          parent. Setting a parent is reachable via the issue actions menu;
-          this card surfaces an existing parent without occupying sidebar
-          space for issues that don't have one. */}
-      {parentIssue && (
+      {/* Parent issue */}
+      {(parentIssue || parentIsRestricted) && (
         <div>
           <button
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${parentIssueOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
@@ -1429,10 +1410,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
         </div>
       )}
 
-      {/* Pull requests — hidden when the workspace disables the PR sidebar
-          (or the GitHub master switch is off). Backend data is kept either
-          way so re-enabling restores the section instantly. */}
-      {githubSettings.prSidebar && (
+      {/* Pull requests */}
+      {!isChat && (
         <div>
           <button
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${pullRequestsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
@@ -1519,92 +1498,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           </div>}
         </div>
       )}
-
-      {/* Metadata — agent-facing free-form KV bag. The values almost
-          never mean anything to humans, so the trigger row matches the
-          sibling section headers (Pull requests / Details / Parent issue)
-          but clicking opens a dialog with the raw JSON instead of expanding
-          inline — the payload can be large and pushing the rest of the
-          sidebar down was noisy. */}
-      {Object.keys(issue.metadata ?? {}).length > 0 && (
-        <>
-          <button
-            type="button"
-            className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
-            onClick={() => setMetadataOpen(true)}
-          >
-            {t(($) => $.detail.section_metadata)}
-            <span className="tabular-nums">
-              · {Object.keys(issue.metadata ?? {}).length}
-            </span>
-          </button>
-          <Dialog open={metadataOpen} onOpenChange={setMetadataOpen}>
-            <DialogContent className="max-w-2xl">
-              <DialogHeader>
-                <DialogTitle>{t(($) => $.detail.section_metadata)}</DialogTitle>
-              </DialogHeader>
-              <pre className="max-h-[60vh] overflow-auto rounded-md bg-muted p-3 font-mono text-xs">
-                {JSON.stringify(issue.metadata ?? {}, null, 2)}
-              </pre>
-            </DialogContent>
-          </Dialog>
-        </>
-      )}
     </div>
   );
-
-  // Shared row renderer for both timeline render modes (flat / virtualized).
-  // The wrapper `id="comment-..."` is the deep-link target — equivalent to
-  // a native `<a href="#comment-...">` anchor.
-  const renderItem = (_i: number, item: TimelineItem): React.ReactElement => {
-    if (item.kind === "resolved-bar") {
-      return (
-        <div className="pb-3" id={`comment-${item.id}`}>
-          <ResolvedThreadBar
-            entry={item.entry}
-            replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
-            onExpand={() => toggleResolvedExpand(item.id, true)}
-          />
-        </div>
-      );
-    }
-    if (item.kind === "comment") {
-      const isResolved = !!item.entry.resolved_at;
-      return (
-        <div className="pb-3" id={`comment-${item.id}`}>
-          <CommentCard
-            issueId={id}
-            entry={item.entry}
-            replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
-            currentUserId={user?.id}
-            canModerate={canModerateComments}
-            onReply={submitReply}
-            onEdit={editComment}
-            onDelete={deleteComment}
-            onToggleReaction={handleToggleReaction}
-            onResolveToggle={handleResolveToggle}
-            onCollapseResolved={isResolved ? () => toggleResolvedExpand(item.id, false) : undefined}
-            highlightedCommentId={highlightedId}
-          />
-        </div>
-      );
-    }
-    // activity-group
-    const expanded = expandedActivityIds.has(item.id)
-      ? true
-      : collapsedActivityIds.has(item.id)
-        ? false
-        : item.id === lastActivityGroupId;
-    return (
-      <ActivityBlock
-        entries={item.entries}
-        expanded={expanded}
-        onToggle={() => toggleActivityBlock(item.id, expanded)}
-        getActorName={getActorName}
-        t={t}
-      />
-    );
-  };
 
   const detailContent = (
     <div className="flex h-full min-w-0 flex-1 flex-col">
@@ -1625,17 +1520,16 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}
-            {issueProjectId && (
+            {issue.project_id && (
               <>
-                {breadcrumbProject ? (
+                {projectForBreadcrumb ? (
                   <AppLink
-                    href={paths.projectDetail(breadcrumbProject.id)}
-                    className="flex items-center gap-1 min-w-0 max-w-72 text-muted-foreground hover:text-foreground transition-colors"
+                    href={paths.projectDetail(issue.project_id)}
+                    className="text-muted-foreground hover:text-foreground transition-colors truncate shrink-0"
                   >
-                    <ProjectIcon project={breadcrumbProject} size="sm" />
-                    <span className="min-w-0 truncate">{breadcrumbProject.title}</span>
+                    {projectForBreadcrumb.title}
                   </AppLink>
-                ) : breadcrumbProjectError ? (
+                ) : projectForBreadcrumbError ? (
                   <span className="italic text-muted-foreground/70 shrink-0">
                     {t(($) => $.detail.breadcrumb_project_unknown)}
                   </span>

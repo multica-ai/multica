@@ -72,7 +72,6 @@ const baseIssue: Issue = {
   position: 0,
   start_date: null,
   due_date: null,
-  metadata: {},
   labels: [labelA],
   created_at: "2025-01-01T00:00:00Z",
   updated_at: "2025-01-01T00:00:00Z",

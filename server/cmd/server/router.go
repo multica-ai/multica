@@ -586,11 +586,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// can_manage hint so the UI can gate connect/disconnect.
 					r.Get("/github/installations", h.ListGitHubInstallations)
 					// CEREBRO-PATCH(feature-flags-routes): per-user feature-flag overrides
+					r.Get("/feature-flags", featureFlagsHandler.List)
+					r.Put("/feature-flags/{key}", featureFlagsHandler.Upsert)
 					// CEREBRO-PATCH(cerebro-groups-routes): workspace group list (member-level).
+					r.Get("/groups", cerebroGroupsHandler.List)
 					// CEREBRO-PATCH(cerebro-grants-routes): JEH-1179 grant reads (any member).
+					r.Get("/grants", cerebroGrantsHandler.List)
 					r.Get("/grants/audit", cerebroGrantsHandler.Audit) // CEREBRO-PATCH(persona-permissions-audit): expose grant audit before {grantId}.
+					r.Get("/grants/{grantId}", cerebroGrantsHandler.Get)
 					// CEREBRO-PATCH(cerebro-account-routes): workspace accounts CRUD + JEH-998 controls patch.
+					r.Get("/accounts", cerebroAccountHandler.List)
+					r.Post("/accounts", cerebroAccountHandler.Create)
+					r.Get("/accounts/{id}", cerebroAccountHandler.Get)
+					r.Delete("/accounts/{id}", cerebroAccountHandler.Delete)
+					r.Patch("/accounts/{id}/controls", cerebroAccountHandler.UpdateControls)
 					// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196 credential registry routes (CRUD + reveal + rotate + bindings + audit).
+					cerebroCredentialsHandler.Mount(r)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {

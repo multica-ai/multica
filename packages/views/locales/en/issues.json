@@ -112,9 +112,7 @@
         "title": "No created issues",
         "description": "Issues created here will appear in this view."
       }
-    },
-    "search_placeholder": "Search issues...",
-    "search_empty": "No issues match your search."
+    }
   },
   "list": {
     "empty_status": "No issues",
@@ -142,7 +140,6 @@
     "section_properties": "Properties",
     "section_parent_issue": "Parent issue",
     "section_pull_requests": "Pull requests",
-    "section_metadata": "Metadata",
     "section_details": "Details",
     "section_token_usage": "Token usage",
     "pull_requests_loading": "Loading…",

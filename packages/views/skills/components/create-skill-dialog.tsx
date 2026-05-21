@@ -41,7 +41,6 @@ import { cn } from "@multica/ui/lib/utils";
 import { openExternal } from "../../platform";
 import { RuntimeLocalSkillImportPanel } from "./runtime-local-skill-import-panel";
 import { useT } from "../../i18n";
-import { isNameConflictError } from "../lib/utils";
 
 type Method = "chooser" | "manual" | "url" | "runtime";
 
@@ -53,6 +52,10 @@ function seedAfterCreate(
   qc.setQueryData(skillDetailOptions(wsId, skill.id).queryKey, skill);
   qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
   qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+}
+
+function isNameConflictError(msg: string): boolean {
+  return /\b(409|conflict|already exists|unique constraint)\b/i.test(msg);
 }
 
 // ---------------------------------------------------------------------------
@@ -514,10 +517,7 @@ export function CreateSkillDialog({
           />
         )}
         {method === "runtime" && (
-          <RuntimeLocalSkillImportPanel
-            onImported={handleCreated}
-            onBulkDone={onClose}
-          />
+          <RuntimeLocalSkillImportPanel onImported={handleCreated} />
         )}
       </DialogContent>
     </Dialog>

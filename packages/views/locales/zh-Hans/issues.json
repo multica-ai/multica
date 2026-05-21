@@ -111,9 +111,7 @@
         "title": "没有已创建的 issue",
         "description": "由这里创建的 issue 会显示在此视图中。"
       }
-    },
-    "search_placeholder": "搜索 issue...",
-    "search_empty": "没有匹配的 issue。"
+    }
   },
   "list": {
     "empty_status": "无 issue",
@@ -141,7 +139,6 @@
     "section_properties": "属性",
     "section_parent_issue": "父 issue",
     "section_pull_requests": "Pull Request",
-    "section_metadata": "元数据",
     "section_details": "详情",
     "section_token_usage": "Token 用量",
     "pull_requests_loading": "加载中…",

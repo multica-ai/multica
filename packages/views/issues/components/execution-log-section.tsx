@@ -337,18 +337,17 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
       ? failureReasonLabel[task.failure_reason as TaskFailureReason]
       : null;
 
-  // Retry only makes sense for terminal-but-not-success rows. Passing
-  // task.id targets this specific row's agent — without it, the rerun
-  // endpoint would fall back to the issue's current assignee and the
-  // wrong agent would fire on rows whose agent has since been displaced
-  // (e.g. reassignment, squad worker, or a one-off @-mention agent).
+  // Retry only makes sense for terminal-but-not-success rows. The rerun
+  // endpoint creates a fresh task on the issue's current agent assignee
+  // (not necessarily this row's agent) — clicking retry on a row whose
+  // agent has since been reassigned will rerun under the new assignee.
   const canRetry = task.status === "failed" || task.status === "cancelled";
 
   const handleRetry = async () => {
     if (retrying) return;
     setRetrying(true);
     try {
-      await api.rerunIssue(issueId, task.id);
+      await api.rerunIssue(issueId);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.retry_failed));
     } finally {

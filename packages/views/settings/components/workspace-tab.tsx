@@ -177,12 +177,16 @@ export function WorkspaceTab() {
     setDescription(workspace?.description ?? "");
     setContext(workspace?.context ?? "");
     setIssuePrefix(workspace?.issue_prefix ?? "");
+    const gatewaySettings = getFirtalGatewaySettings(workspace);
+    setGatewayEnabled(gatewaySettings.enabled === true);
+    setGatewayUrl(gatewaySettings.gateway_url ?? "");
+    setGatewayApiKey("");
+    setGatewayModel(gatewaySettings.model ?? "");
     setGoogleServiceAccountJson(""); // CEREBRO-PATCH(workspace-tool-credentials)
   }, [workspace]);
 
   // Letters + digits only, uppercase, capped at 10 chars. The backend
-  // uppercases and trims on its side too — this is purely a UX guardrail
-  // so the value the user sees in the input matches what gets persisted.
+  // uppercases and trims on its side too; this keeps the visible value aligned.
   const normalizePrefix = (raw: string) =>
     raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
 
@@ -204,11 +208,6 @@ export function WorkspaceTab() {
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((ws) => (ws.id === updated.id ? updated : ws)),
       );
-      // Issue identifiers (`MUL-123`) are computed from `issue_prefix` at
-      // read time, not stored on each issue row. When the prefix changes,
-      // every cached issue's rendered identifier is stale until refetched.
-      // Limit invalidation to the prefix-changed branch so unrelated saves
-      // (name / description / context) stay cheap.
       if (includePrefix) {
         qc.invalidateQueries({ queryKey: issueKeys.all(updated.id) });
       }
@@ -237,8 +236,85 @@ export function WorkspaceTab() {
     void performSave(false);
   };
 
+  const handleSaveGatewaySettings = async () => {
+    if (!workspace) return;
+    setSavingGateway(true);
+    try {
+      const nextGateway: Record<string, unknown> = {
+        enabled: gatewayEnabled,
+        gateway_url: gatewayUrl.trim(),
+        model: gatewayModel.trim(),
+      };
+      if (gatewayApiKey.trim()) {
+        nextGateway.api_key = gatewayApiKey.trim();
+      }
+
+      const updated = await api.updateWorkspace(workspace.id, {
+        settings: {
+          ...workspace.settings,
+          firtal_gateway: nextGateway,
+        },
+      });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+      );
+      setGatewayApiKey("");
+      toast.success(t(($) => $.workspace.gateway_toast_saved));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.workspace.gateway_toast_failed));
+    } finally {
+      setSavingGateway(false);
+    }
+  };
+
   // CEREBRO-PATCH(workspace-tool-credentials): JEH-1290 W8 — save tool credentials handler
+  const handleSaveToolCredentials = useCallback(async () => {
+    if (!workspace) return;
+    setSavingToolCredentials(true);
+    try {
+      const nextCredentials: Record<string, unknown> = {};
+      if (googleServiceAccountJson.trim()) {
+        nextCredentials.google_service_account = googleServiceAccountJson.trim();
+      }
+      const updated = await api.updateWorkspace(workspace.id, {
+        settings: {
+          ...workspace.settings,
+          tool_credentials: nextCredentials,
+        },
+      });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+      );
+      setGoogleServiceAccountJson("");
+      toast.success(t(($) => $.workspace.tool_credentials_toast_saved));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.workspace.tool_credentials_toast_failed));
+    } finally {
+      setSavingToolCredentials(false);
+    }
+  }, [workspace, googleServiceAccountJson, qc, t]);
+
   // CEREBRO-PATCH(workspace-tool-credentials): JEH-1318 — verify Google SA JSON format before save
+  const handleVerifyToolCredentials = useCallback(() => {
+    const json = googleServiceAccountJson.trim();
+    if (!json) return;
+    setVerifyingToolCredentials(true);
+    try {
+      const parsed = JSON.parse(json) as Record<string, unknown>;
+      const required = ["type", "project_id", "private_key", "client_email"] as const;
+      const missing = required.filter((k) => !parsed[k]);
+      if (missing.length > 0) {
+        toast.error(t(($) => $.workspace.tool_credentials_verify_failed, { fields: missing.join(", ") }));
+      } else {
+        toast.success(t(($) => $.workspace.tool_credentials_verify_ok));
+      }
+    } catch {
+      toast.error(t(($) => $.workspace.tool_credentials_verify_failed, { fields: "invalid JSON" }));
+    } finally {
+      setVerifyingToolCredentials(false);
+    }
+  }, [googleServiceAccountJson, t]);
+
   const handleLeaveWorkspace = () => {
     if (!workspace) return;
     setConfirmAction({

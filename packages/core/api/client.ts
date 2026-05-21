@@ -121,9 +121,9 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
-  WebhookDelivery,
-  ListWebhookDeliveriesResponse,
   WorkSession,
+  UserProfileResponse,
+  UserProfileRequest,
   PushSubscriptionResponse,
   NotificationPreferenceResponse,
   NotificationPreferences,
@@ -133,11 +133,6 @@ import type {
   Squad,
   SquadMember,
 } from "../types";
-import type {
-  CloudRuntimeNode,
-  CreateCloudRuntimeNodeRequest,
-  ListCloudRuntimeNodesParams,
-} from "../runtimes/cloud-runtime";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
@@ -166,17 +161,13 @@ import {
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_TIMELINE_ENTRIES,
   EMPTY_USER,
-  EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
-  EMPTY_WEBHOOK_DELIVERY,
   GroupedIssuesResponseSchema,
-  ListWebhookDeliveriesResponseSchema,
   ListIssuesResponseSchema,
   OnboardingNoRuntimeBootstrapResponseSchema,
   OnboardingRuntimeBootstrapResponseSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
   UserSchema,
-  WebhookDeliveryResponseSchema,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -202,20 +193,6 @@ export interface ApiClientOptions {
 export interface LoginResponse {
   token: string;
   user: User;
-}
-
-export interface UserProfileResponse {
-  user_id: string;
-  display_name: string;
-  profile_description: string;
-  language: string;
-  updated_at: string;
-}
-
-export interface UserProfileRequest {
-  display_name?: string;
-  profile_description?: string;
-  language?: string;
 }
 
 // --- Starter content (post-onboarding import) -----------------------------
@@ -619,37 +596,6 @@ export class ApiClient {
 
   async deleteMyProfile(): Promise<void> {
     await this.fetch("/api/me/profile", { method: "DELETE" });
-  }
-
-  async listCloudRuntimeNodes(
-    params?: ListCloudRuntimeNodesParams,
-  ): Promise<CloudRuntimeNode[]> {
-    const search = new URLSearchParams();
-    if (params?.limit != null) search.set("limit", String(params.limit));
-    if (params?.offset != null) search.set("offset", String(params.offset));
-    const raw = await this.fetch<unknown>(`/api/cloud-runtime/nodes?${search}`);
-    return Array.isArray(raw) && raw.every((node) => typeof node?.id === "string")
-      ? (raw as CloudRuntimeNode[])
-      : [];
-  }
-
-  async createCloudRuntimeNode(
-    data: CreateCloudRuntimeNodeRequest,
-  ): Promise<CloudRuntimeNode> {
-    const raw = await this.fetch<unknown>("/api/cloud-runtime/nodes", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-    return raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string"
-      ? (raw as CloudRuntimeNode)
-      : ({ id: "", status: "" } as CloudRuntimeNode);
-  }
-
-  async deleteCloudRuntimeNode(id: string): Promise<void> {
-    await this.fetch("/api/cloud-runtime/nodes", {
-      method: "DELETE",
-      body: JSON.stringify({ id }),
-    });
   }
 
   // Fork-specific: per-user preferences (composer keybinding, etc.)
@@ -1661,10 +1607,9 @@ export class ApiClient {
     });
   }
 
-  async getRuntimeUsage(runtimeId: string, params?: { days?: number; tz?: string }): Promise<RuntimeUsage[]> {
+  async getRuntimeUsage(runtimeId: string, params?: { days?: number }): Promise<RuntimeUsage[]> {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));
-    if (params?.tz) search.set("tz", params.tz);
     return this.fetch(`/api/runtimes/${runtimeId}/usage?${search}`);
   }
 
@@ -1674,21 +1619,19 @@ export class ApiClient {
 
   async getRuntimeUsageByAgent(
     runtimeId: string,
-    params?: { days?: number; tz?: string },
+    params?: { days?: number },
   ): Promise<RuntimeUsageByAgent[]> {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));
-    if (params?.tz) search.set("tz", params.tz);
     return this.fetch(`/api/runtimes/${runtimeId}/usage/by-agent?${search}`);
   }
 
   async getRuntimeUsageByHour(
     runtimeId: string,
-    params?: { days?: number; tz?: string },
+    params?: { days?: number },
   ): Promise<RuntimeUsageByHour[]> {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));
-    if (params?.tz) search.set("tz", params.tz);
     return this.fetch(`/api/runtimes/${runtimeId}/usage/by-hour?${search}`);
   }
 
@@ -1700,12 +1643,11 @@ export class ApiClient {
   // ---------------------------------------------------------------------------
 
   async getDashboardUsageDaily(
-    params: { days?: number; project_id?: string | null; tz?: string },
+    params: { days?: number; project_id?: string | null },
   ): Promise<DashboardUsageDaily[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
-    if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/usage/daily?${search}`);
     return parseWithFallback<DashboardUsageDaily[]>(
       raw,
@@ -1716,12 +1658,11 @@ export class ApiClient {
   }
 
   async getDashboardUsageByAgent(
-    params: { days?: number; project_id?: string | null; tz?: string },
+    params: { days?: number; project_id?: string | null },
   ): Promise<DashboardUsageByAgent[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
-    if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/usage/by-agent?${search}`);
     return parseWithFallback<DashboardUsageByAgent[]>(
       raw,
@@ -1732,12 +1673,11 @@ export class ApiClient {
   }
 
   async getDashboardAgentRunTime(
-    params: { days?: number; project_id?: string | null; tz?: string },
+    params: { days?: number; project_id?: string | null },
   ): Promise<DashboardAgentRunTime[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
-    if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/agent-runtime?${search}`);
     return parseWithFallback<DashboardAgentRunTime[]>(
       raw,
@@ -1748,12 +1688,11 @@ export class ApiClient {
   }
 
   async getDashboardRunTimeDaily(
-    params: { days?: number; project_id?: string | null; tz?: string },
+    params: { days?: number; project_id?: string | null },
   ): Promise<DashboardRunTimeDaily[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
-    if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/runtime/daily?${search}`);
     return parseWithFallback<DashboardRunTimeDaily[]>(
       raw,
@@ -2732,10 +2671,6 @@ export class ApiClient {
     return this.fetch(`/api/squads/${squadId}/members`);
   }
 
-  async getSquadMemberStatus(squadId: string): Promise<import("../types").SquadMemberStatusListResponse> {
-    return this.fetch(`/api/squads/${squadId}/member-status`);
-  }
-
   async addSquadMember(squadId: string, data: { member_type: string; member_id: string; role?: string }): Promise<SquadMember> {
     return this.fetch(`/api/squads/${squadId}/members`, { method: "POST", body: JSON.stringify(data) });
   }
@@ -2781,13 +2716,6 @@ export class ApiClient {
     return this.fetch(`/api/autopilots/${id}/trigger`, { method: "POST" });
   }
 
-  async getAutopilotRun(
-    autopilotId: string,
-    runId: string,
-  ): Promise<AutopilotRun> {
-    return this.fetch(`/api/autopilots/${autopilotId}/runs/${runId}`);
-  }
-
   async listAutopilotRuns(id: string, params?: { limit?: number; offset?: number }): Promise<ListAutopilotRunsResponse> {
     const search = new URLSearchParams();
     if (params?.limit) search.set("limit", params.limit.toString());
@@ -2811,53 +2739,6 @@ export class ApiClient {
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
-  }
-
-  async rotateAutopilotTriggerWebhookToken(
-    autopilotId: string,
-    triggerId: string,
-  ): Promise<AutopilotTrigger> {
-    return this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}/rotate-token`, {
-      method: "POST",
-    });
-  }
-
-  async listAutopilotDeliveries(
-    autopilotId: string,
-    params?: { limit?: number; offset?: number },
-  ): Promise<ListWebhookDeliveriesResponse> {
-    const search = new URLSearchParams();
-    if (params?.limit != null) search.set("limit", String(params.limit));
-    if (params?.offset != null) search.set("offset", String(params.offset));
-    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/deliveries?${search}`);
-    return parseWithFallback(
-      raw,
-      ListWebhookDeliveriesResponseSchema,
-      EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
-      { endpoint: "GET /api/autopilots/{id}/deliveries" },
-    );
-  }
-
-  async getAutopilotDelivery(
-    autopilotId: string,
-    deliveryId: string,
-  ): Promise<WebhookDelivery> {
-    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/deliveries/${deliveryId}`);
-    return parseWithFallback(
-      raw,
-      WebhookDeliveryResponseSchema,
-      { ...EMPTY_WEBHOOK_DELIVERY, id: deliveryId, autopilot_id: autopilotId } as WebhookDelivery,
-      { endpoint: "GET /api/autopilots/{id}/deliveries/{deliveryId}" },
-    );
-  }
-
-  async replayAutopilotDelivery(
-    autopilotId: string,
-    deliveryId: string,
-  ): Promise<WebhookDelivery> {
-    return this.fetch(`/api/autopilots/${autopilotId}/deliveries/${deliveryId}/replay`, {
-      method: "POST",
-    });
   }
 
   // Artifacts

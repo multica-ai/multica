@@ -76,28 +76,3 @@ export interface CreateSquadActivityLogRequest {
   outcome: SquadActivityOutcome;
   details?: unknown;
 }
-
-export type SquadMemberStatusValue = "working" | "idle" | "offline" | "unstable";
-
-export interface SquadActiveIssueBrief {
-  issue_id: string;
-  identifier: string;
-  title: string;
-  status: string;
-  priority: string;
-}
-
-export interface SquadMemberStatus {
-  member_type: SquadMemberType;
-  member_id: string;
-  name: string;
-  avatar_url: string | null;
-  role: string;
-  status: SquadMemberStatusValue | string | null;
-  active_issue: SquadActiveIssueBrief | null;
-  updated_at: string | null;
-}
-
-export interface SquadMemberStatusListResponse {
-  members: SquadMemberStatus[];
-}

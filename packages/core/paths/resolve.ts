@@ -3,27 +3,20 @@ import { useAuthStore } from "../auth";
 import { paths } from "./paths";
 
 /**
- * Priority (onboarded-first):
- *   !hasOnboarded               → /onboarding
- *   hasOnboarded + workspace[0] → /<first.slug>/issues
- *   hasOnboarded + no workspace → /workspaces/new
+ * Priority:
+ *   !hasOnboarded                         → /onboarding
+ *   hasOnboarded && has workspace         → /<first.slug>/issues
+ *   hasOnboarded && zero workspaces       → /workspaces/new
  *
- * V3 invariant: `onboarded_at != null` is the single source of truth for
- * "may access /<slug>/*". The web workspace layout and the desktop App.tsx
- * overlay decision both gate on this — sending an un-onboarded user
- * straight to /issues would just be redirected back to /onboarding by
- * the layout gate, costing a navigation round-trip. Check onboarded
- * first.
+ * `onboarded_at` is the single source of truth for whether the user has
+ * passed first-contact. Backend transactions (CreateWorkspace,
+ * AcceptInvitation) atomically set this field whenever a user joins a
+ * `member` row, so "has workspace but !onboarded" is now a
+ * physically impossible state — see migration 065 for the existing-data
+ * backfill that closed the door retroactively.
  *
- * In v3 "has workspace but !onboarded" is physically rare (a user can
- * only land in that state by closing the app between Step 2 and Step 3
- * — both questionnaire and runtime picker steps run after workspace
- * creation but before CompleteOnboarding). OnboardingFlow's Step 2
- * already recognizes existing workspaces and offers "Continue with
- * {name}", so the recovery is seamless.
- *
- * Callers that need invitation-aware routing (callback / login) handle
- * the "un-onboarded with pending invites" branch themselves before calling
+ * Callers that need invitation-aware routing (callback / login) handle the
+ * "un-onboarded with pending invites" branch themselves before calling
  * this resolver — this resolver only deals with the post-invite-check
  * destination.
  */

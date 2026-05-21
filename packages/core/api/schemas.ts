@@ -334,46 +334,6 @@ const DashboardRunTimeDailySchema = z.object({
 
 export const DashboardRunTimeDailyListSchema = z.array(DashboardRunTimeDailySchema);
 
-const RuntimeUsageSchema = z.object({
-  date: z.string().default(""),
-  provider: z.string().default(""),
-  model: z.string().default(""),
-  input_tokens: z.number().default(0),
-  output_tokens: z.number().default(0),
-  cache_read_tokens: z.number().default(0),
-  cache_write_tokens: z.number().default(0),
-  task_count: z.number().default(0),
-}).loose();
-
-const RuntimeUsageByAgentSchema = z.object({
-  agent_id: z.string().default(""),
-  agent_name: z.string().default(""),
-  input_tokens: z.number().default(0),
-  output_tokens: z.number().default(0),
-  cache_read_tokens: z.number().default(0),
-  cache_write_tokens: z.number().default(0),
-  task_count: z.number().default(0),
-}).loose();
-
-const RuntimeUsageByHourSchema = z.object({
-  hour: z.number().default(0),
-  input_tokens: z.number().default(0),
-  output_tokens: z.number().default(0),
-  cache_read_tokens: z.number().default(0),
-  cache_write_tokens: z.number().default(0),
-  task_count: z.number().default(0),
-}).loose();
-
-const RuntimeHourlyActivitySchema = z.object({
-  hour: z.number().default(0),
-  count: z.number().default(0),
-}).loose();
-
-export const RuntimeUsageListSchema = z.array(RuntimeUsageSchema);
-export const RuntimeUsageByAgentListSchema = z.array(RuntimeUsageByAgentSchema);
-export const RuntimeUsageByHourListSchema = z.array(RuntimeUsageByHourSchema);
-export const RuntimeHourlyActivityListSchema = z.array(RuntimeHourlyActivitySchema);
-
 // ---------------------------------------------------------------------------
 // Agent template catalog — `/api/agent-templates*` and the
 // create-from-template response. The desktop app's create-agent picker
@@ -618,8 +578,6 @@ export const UserSchema = z.object({
   starter_content_state: z.string().nullable().default(null),
   language: z.string().nullable().default(null),
   profile_description: z.string().default(""),
-  timezone: z.string().nullable().default(null),
-  preferences: z.record(z.string(), z.unknown()).default({}),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();
@@ -635,7 +593,6 @@ export const EMPTY_USER: User = {
   starter_content_state: null,
   language: null,
   profile_description: "",
-  timezone: null,
   created_at: "",
   updated_at: "",
 };

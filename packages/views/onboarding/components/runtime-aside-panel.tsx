@@ -11,10 +11,7 @@ import { useT } from "../../i18n";
  * editorial shell's `<aside>` column.
  */
 export function RuntimeAsidePanel() {
-  const { t, i18n } = useT("onboarding");
-  const installDocHref = i18n.language?.startsWith("zh")
-    ? "https://multica.ai/docs/zh/install-agent-runtime"
-    : "https://multica.ai/docs/install-agent-runtime";
+  const { t } = useT("onboarding");
   return (
     <div className="flex flex-col gap-6">
       <section>
@@ -47,7 +44,7 @@ export function RuntimeAsidePanel() {
       </section>
 
       <a
-        href={installDocHref}
+        href="https://multica.ai/docs/daemon-runtimes"
         target="_blank"
         rel="noopener noreferrer"
         className="self-start text-[13px] text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"

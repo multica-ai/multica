@@ -98,7 +98,12 @@ export function IssuesPage() {
     return allIssues;
   }, [allIssues, scope]);
 
-  const headerIssues = usesAssigneeBoard ? assigneeIssues : scopedIssues;
+  // Sub-issue display filter: hide child issues from the list when not "standalone"
+  const displayIssues = useMemo(() => {
+    if (subIssueDisplay === "standalone") return scopedIssues;
+    // "on-parent" and "hidden" both remove child issues from the top-level list
+    return scopedIssues.filter((i) => !i.parent_issue_id);
+  }, [scopedIssues, subIssueDisplay]);
 
   const issues = useMemo(
     () => filterIssues(displayIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters }),
@@ -141,14 +146,7 @@ export function IssuesPage() {
     (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position">) => {
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
-        {
-          onError: (err) =>
-            toast.error(
-              err instanceof Error && err.message
-                ? err.message
-                : t(($) => $.page.move_failed),
-            ),
-        },
+        { onError: () => toast.error(t(($) => $.page.move_failed)) },
       );
     },
     [updateIssueMutation, t],

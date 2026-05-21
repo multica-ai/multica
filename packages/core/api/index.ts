@@ -4,12 +4,18 @@ export {
   PreviewTooLargeError,
   PreviewUnsupportedError,
 } from "./client";
-export type { ApiClientOptions } from "./client";
+export type {
+  ApiClientOptions,
+  ImportStarterContentPayload,
+  ImportStarterContentResponse,
+  ImportStarterIssuePayload,
+  ImportStarterWelcomeIssueTemplate,
   // CEREBRO-PATCH(cerebro-account-client): re-export account types (JEH-921 / JEH-999)
+  CerebroAccount,
+  CreateCerebroAccountRequest,
+} from "./client";
 export { parseWithFallback, setSchemaLogger } from "./schema";
 export type { ParseOptions } from "./schema";
-export { DuplicateIssueErrorBodySchema } from "./schemas";
-export type { DuplicateIssueErrorBody } from "./schemas";
 export { WSClient } from "./ws-client";
 
 import type { ApiClient as ApiClientType } from "./client";

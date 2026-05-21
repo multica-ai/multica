@@ -69,12 +69,8 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
     try {
       await deleteResource.mutateAsync(resource.id);
       toast.success(t(($) => $.resources.toast_removed));
-    } catch (err) {
-      toast.error(
-        err instanceof Error && err.message
-          ? err.message
-          : t(($) => $.resources.toast_remove_failed),
-      );
+    } catch {
+      toast.error(t(($) => $.resources.toast_remove_failed));
     }
   };
 

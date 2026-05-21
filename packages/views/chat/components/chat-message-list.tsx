@@ -20,11 +20,11 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { ChevronRight, ChevronDown, Brain, AlertCircle, AlertTriangle, Copy } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
-import { useAutoScroll } from "@multica/ui/hooks/use-auto-scroll";
-import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
+import { useStickyBottom } from "@multica/cerebro-ui/hooks/use-sticky-bottom";
+import { JumpToLatestButton } from "@multica/cerebro-ui/components/jump-to-latest-button";
+import { taskMessagesOptions } from "@multica/core/chat/queries";
 import { Markdown } from "@multica/views/common/markdown";
 import { copyMarkdown } from "../../editor";
-import { AttachmentList } from "../../issues/components/comment-card";
 import type { AgentAvailability } from "@multica/core/agents";
 import type { ChatMessage, ChatPendingTask, TaskMessagePayload, TaskFailureReason } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
@@ -85,10 +85,9 @@ export function ChatMessageList({
   // Live timeline for the in-flight task. useRealtimeSync keeps this cache
   // current via setQueryData on task:message events.
   const showLiveTimeline = !!pendingTaskId && !pendingAlreadyPersisted;
-  const canFetchLiveTimeline = isTaskMessageTaskId(pendingTaskId) && !pendingAlreadyPersisted;
   const { data: liveTaskMessages } = useQuery({
     ...taskMessagesOptions(pendingTaskId ?? ""),
-    enabled: canFetchLiveTimeline,
+    enabled: showLiveTimeline,
   });
   const liveTimeline: ChatTimelineItem[] = (liveTaskMessages ?? []).map(toTimelineItem);
   const hasLive = showLiveTimeline && liveTimeline.length > 0;
@@ -183,19 +182,28 @@ function MessageBubble({ message, isPending }: { message: ChatMessage; isPending
     const waiting = message.responded_at == null;
     return (
       <div className="flex justify-end">
-        <div className="rounded-2xl bg-muted px-3.5 py-2 text-sm max-w-[80%] break-words">
-          {/* User messages are authored as markdown in ContentEditor, so
-           * render them through the same pipeline as assistant replies.
-           * Neutralise prose's leading/trailing margin so single-line
-           * bubbles stay as compact as the plain-text version used to. */}
-          <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-            <Markdown attachments={message.attachments}>{message.content}</Markdown>
+        <div
+          className={cn(
+            "flex items-end gap-1.5 max-w-[80%]",
+            waiting && "opacity-60",
+          )}
+        >
+          <div className="rounded-2xl bg-muted px-3.5 py-2 text-sm break-words">
+            {/* User messages are authored as markdown in ContentEditor, so
+             * render them through the same pipeline as assistant replies.
+             * Neutralise prose's leading/trailing margin so single-line
+             * bubbles stay as compact as the plain-text version used to. */}
+            <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+              <Markdown>{message.content}</Markdown>
+            </div>
           </div>
-          <AttachmentList
-            attachments={message.attachments}
-            content={message.content}
-            className="mt-1.5"
-          />
+          {waiting && (
+            <span
+              role="status"
+              aria-label="Waiting for agent"
+              className="size-1.5 shrink-0 mb-2 rounded-full bg-muted-foreground/60 animate-pulse"
+            />
+          )}
         </div>
       </div>
     );
@@ -212,14 +220,13 @@ function AssistantMessage({
   isPending: boolean;
 }) {
   const taskId = message.task_id;
-  const canFetchTaskMessages = isTaskMessageTaskId(taskId);
 
   // Use the shared taskMessagesOptions so this cache entry is the same one
   // seeded by useRealtimeSync during task execution — zero refetch when the
   // task finishes, since WS already populated it.
   const { data: taskMessages } = useQuery({
     ...taskMessagesOptions(taskId ?? ""),
-    enabled: canFetchTaskMessages,
+    enabled: !!taskId,
   });
 
   const timeline: ChatTimelineItem[] = (taskMessages ?? []).map(toTimelineItem);
@@ -242,16 +249,12 @@ function AssistantMessage({
   return (
     <div className="w-full space-y-1.5">
       {timeline.length > 0 ? (
-        <TimelineView items={timeline} attachments={message.attachments} />
+        <TimelineView items={timeline} />
       ) : (
         <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-          <Markdown attachments={message.attachments}>{message.content}</Markdown>
+          <Markdown>{message.content}</Markdown>
         </div>
       )}
-      <AttachmentList
-        attachments={message.attachments}
-        content={message.content}
-      />
       <MessageFooter
         message={message}
         timeline={timeline}
@@ -426,11 +429,9 @@ function FailureBubble({
 function TimelineView({
   items,
   isStreaming,
-  attachments,
 }: {
   items: ChatTimelineItem[];
   isStreaming?: boolean;
-  attachments?: import("@multica/core/types").Attachment[];
 }) {
   const { preface, middle, final } = splitTimeline(items);
 
@@ -438,23 +439,15 @@ function TimelineView({
     <>
       {preface.length > 0 && (
         <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-          <Markdown attachments={attachments}>
-            {preface.map((t) => t.content ?? "").join("")}
-          </Markdown>
+          <Markdown>{preface.map((t) => t.content ?? "").join("")}</Markdown>
         </div>
       )}
       {middle.length > 0 && (
-        <OuterProcessFold
-          items={middle}
-          defaultOpen={!!isStreaming}
-          attachments={attachments}
-        />
+        <OuterProcessFold items={middle} defaultOpen={!!isStreaming} />
       )}
       {final.length > 0 && (
         <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-          <Markdown attachments={attachments}>
-            {final.map((t) => t.content ?? "").join("")}
-          </Markdown>
+          <Markdown>{final.map((t) => t.content ?? "").join("")}</Markdown>
         </div>
       )}
     </>
@@ -464,11 +457,9 @@ function TimelineView({
 function OuterProcessFold({
   items,
   defaultOpen,
-  attachments,
 }: {
   items: ChatTimelineItem[];
   defaultOpen?: boolean;
-  attachments?: import("@multica/core/types").Attachment[];
 }) {
   const { t } = useT("chat");
   // useState seeds once at mount — subsequent renders never overwrite the
@@ -489,7 +480,7 @@ function OuterProcessFold({
         <div className="mt-1 rounded-lg border bg-muted/20 p-2 space-y-0.5">
           {items.map((item) =>
             item.type === "text" ? (
-              <MiddleTextRow key={item.seq} item={item} attachments={attachments} />
+              <MiddleTextRow key={item.seq} item={item} />
             ) : (
               <ItemRow key={item.seq} item={item} />
             ),
@@ -504,16 +495,10 @@ function OuterProcessFold({
 // down-shifted (xs / muted) so it reads as part of the agent's process,
 // not the final answer — the final answer renders below the fold at full
 // prose size.
-function MiddleTextRow({
-  item,
-  attachments,
-}: {
-  item: ChatTimelineItem;
-  attachments?: import("@multica/core/types").Attachment[];
-}) {
+function MiddleTextRow({ item }: { item: ChatTimelineItem }) {
   return (
     <div className="py-0.5 text-xs text-muted-foreground prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-      <Markdown attachments={attachments}>{item.content ?? ""}</Markdown>
+      <Markdown>{item.content ?? ""}</Markdown>
     </div>
   );
 }

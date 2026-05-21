@@ -1,5 +1,5 @@
-export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueMetadata, IssueMetadataValue, IssueReaction } from "./issue";
 // CEREBRO-PATCH(core-types-index): cerebro modification of upstream file
+export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueReaction } from "./issue";
 export type {
   Agent,
   AgentStatus,
@@ -155,10 +155,6 @@ export type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
-  WebhookDelivery,
-  WebhookDeliveryStatus,
-  WebhookSignatureStatus,
-  ListWebhookDeliveriesResponse,
 } from "./autopilot";
 export type {
   Squad,
@@ -172,8 +168,4 @@ export type {
   RemoveSquadMemberRequest,
   UpdateSquadMemberRoleRequest,
   CreateSquadActivityLogRequest,
-  SquadMemberStatusValue,
-  SquadActiveIssueBrief,
-  SquadMemberStatus,
-  SquadMemberStatusListResponse,
 } from "./squad";

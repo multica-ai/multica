@@ -46,13 +46,6 @@ interface AgentTranscriptDialogProps {
   items: TimelineItem[];
   agentName: string;
   isLive?: boolean;
-  /**
-   * Optional content rendered between the header chips and the event list.
-   * Used by autopilot run rows to surface the inbound webhook trigger
-   * payload so it's visible regardless of whether the agent echoes it.
-   * The dialog stays generic — slot content is the caller's concern.
-   */
-  headerSlot?: React.ReactNode;
 }
 
 // ─── Color mapping for timeline segments ────────────────────────────────────
@@ -172,7 +165,6 @@ export function AgentTranscriptDialog({
   items,
   agentName,
   isLive = false,
-  headerSlot,
 }: AgentTranscriptDialogProps) {
   const { t } = useT("agents");
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
@@ -493,13 +485,6 @@ export function AgentTranscriptDialog({
               selectedSeq={selectedSeq}
               onSegmentClick={handleSegmentClick}
             />
-          </div>
-        )}
-
-        {/* ── Optional header slot (e.g. webhook payload preview) ── */}
-        {headerSlot && (
-          <div className="border-b px-4 py-3 shrink-0 bg-muted/20">
-            {headerSlot}
           </div>
         )}
 

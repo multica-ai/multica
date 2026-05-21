@@ -248,6 +248,61 @@ func (q *Queries) GetTaskUsage(ctx context.Context, taskID pgtype.UUID) ([]TaskU
 	return items, nil
 }
 
+const getWorkspaceUsageSummary = `-- name: GetWorkspaceUsageSummary :many
+SELECT
+    tu.model,
+    COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
+    COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN issue i ON i.id = atq.issue_id
+WHERE i.workspace_id = $1
+  AND tu.created_at >= $2
+GROUP BY tu.model
+`
+
+type GetWorkspaceUsageSummaryParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type GetWorkspaceUsageSummaryRow struct {
+	Model                 string `json:"model"`
+	TotalInputTokens      int64  `json:"total_input_tokens"`
+	TotalOutputTokens     int64  `json:"total_output_tokens"`
+	TotalCacheReadTokens  int64  `json:"total_cache_read_tokens"`
+	TotalCacheWriteTokens int64  `json:"total_cache_write_tokens"`
+}
+
+// CEREBRO-PATCH(workspace-usage-summary): restore upstream workspace token rollup used by cerebro dashboard spend cards.
+func (q *Queries) GetWorkspaceUsageSummary(ctx context.Context, arg GetWorkspaceUsageSummaryParams) ([]GetWorkspaceUsageSummaryRow, error) {
+	rows, err := q.db.Query(ctx, getWorkspaceUsageSummary, arg.WorkspaceID, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetWorkspaceUsageSummaryRow{}
+	for rows.Next() {
+		var i GetWorkspaceUsageSummaryRow
+		if err := rows.Scan(
+			&i.Model,
+			&i.TotalInputTokens,
+			&i.TotalOutputTokens,
+			&i.TotalCacheReadTokens,
+			&i.TotalCacheWriteTokens,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDashboardAgentRunTime = `-- name: ListDashboardAgentRunTime :many
 SELECT
     atq.agent_id,

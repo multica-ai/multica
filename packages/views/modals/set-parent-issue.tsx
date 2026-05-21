@@ -39,14 +39,7 @@ export function SetParentIssueModal({
       onSelect={(selected) => {
         updateIssue.mutate(
           { id: issueId, parent_issue_id: selected.id },
-          {
-            onError: (err) =>
-              toast.error(
-                err instanceof Error && err.message
-                  ? err.message
-                  : t(($) => $.set_parent.toast_failed),
-              ),
-          },
+          { onError: () => toast.error(t(($) => $.set_parent.toast_failed)) },
         );
         toast.success(t(($) => $.set_parent.toast_success, { identifier: selected.identifier }));
       }}

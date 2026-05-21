@@ -38,12 +38,8 @@ export function DeleteIssueConfirmModal({
       toast.success(t(($) => $.delete_issue.toast_deleted));
       onClose();
       if (navigateTo) navigation.push(navigateTo);
-    } catch (err) {
-      toast.error(
-        err instanceof Error && err.message
-          ? err.message
-          : t(($) => $.delete_issue.toast_delete_failed),
-      );
+    } catch {
+      toast.error(t(($) => $.delete_issue.toast_delete_failed));
       setDeleting(false);
     }
   };

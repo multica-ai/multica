@@ -193,12 +193,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
       onClose();
       toast.success(t(($) => $.create_project.toast_created));
       router.push(wsPaths.projectDetail(project.id));
-    } catch (err) {
-      toast.error(
-        err instanceof Error && err.message
-          ? err.message
-          : t(($) => $.create_project.toast_failed),
-      );
+    } catch {
+      toast.error(t(($) => $.create_project.toast_failed));
     } finally {
       setSubmitting(false);
     }

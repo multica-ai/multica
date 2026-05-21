@@ -29,14 +29,7 @@ export function BacklogAgentHintModal({
         if (issueId) {
           updateIssue.mutate(
             { id: issueId, status: "todo" },
-            {
-              onError: (err) =>
-                toast.error(
-                  err instanceof Error && err.message
-                    ? err.message
-                    : t(($) => $.backlog_hint.toast_status_failed),
-                ),
-            },
+            { onError: () => toast.error(t(($) => $.backlog_hint.toast_status_failed)) },
           );
         }
         onClose();
