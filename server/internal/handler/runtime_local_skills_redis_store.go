@@ -426,6 +426,60 @@ func (s *RedisLocalSkillImportStore) PopPending(ctx context.Context, runtimeID s
 	return nil, nil
 }
 
+func (s *RedisLocalSkillImportStore) PopPendingBatch(ctx context.Context, runtimeID string, limit int) ([]*RuntimeLocalSkillImportRequest, error) {
+	pendingKey := localSkillImportPendingKey(runtimeID)
+
+	// Fetch up to limit candidate IDs from the sorted set.
+	ids, err := s.rdb.ZRange(ctx, pendingKey, 0, int64(limit)-1).Result()
+	if err != nil {
+		return nil, fmt.Errorf("zrange pending batch: %w", err)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	// Try to claim each candidate individually using the existing atomic
+	// Lua script. This is safe under multi-node contention: each ZREM is
+	// atomic, so two nodes never claim the same request.
+	var result []*RuntimeLocalSkillImportRequest
+	for _, id := range ids {
+		req, err := s.loadImportRequest(ctx, id)
+		if err != nil {
+			return result, err
+		}
+		if req == nil {
+			s.rdb.ZRem(ctx, pendingKey, id)
+			continue
+		}
+		if req.Status != RuntimeLocalSkillPending {
+			s.rdb.ZRem(ctx, pendingKey, id)
+			continue
+		}
+
+		now := time.Now()
+		req.Status = RuntimeLocalSkillRunning
+		req.RunStartedAt = &now
+		req.UpdatedAt = now
+		data, err := s.marshalImport(req)
+		if err != nil {
+			return result, err
+		}
+
+		claimed, err := claimPendingScript.Run(
+			ctx, s.rdb,
+			[]string{pendingKey, localSkillImportKey(id)},
+			id, data, int(runtimeLocalSkillStoreRetention.Seconds()),
+		).Int64()
+		if err != nil {
+			return result, fmt.Errorf("claim pending batch: %w", err)
+		}
+		if claimed == 1 {
+			result = append(result, req)
+		}
+	}
+	return result, nil
+}
+
 func (s *RedisLocalSkillImportStore) Complete(ctx context.Context, id string, skill SkillResponse) error {
 	req, err := s.loadImportRequest(ctx, id)
 	if err != nil {

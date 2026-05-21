@@ -35,7 +35,7 @@ func (q *Queries) CountUnreadInboxForChannel(ctx context.Context, arg CountUnrea
 }
 
 const getDMByMembers = `-- name: GetDMByMembers :one
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.kind, i.start_date, i.is_private, i.classification FROM issue i
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.kind, i.start_date, i.metadata, i.is_private, i.classification FROM issue i
 WHERE i.workspace_id = $1
   AND i.kind = 'dm'
   AND EXISTS (
@@ -93,6 +93,7 @@ func (q *Queries) GetDMByMembers(ctx context.Context, arg GetDMByMembersParams) 
 		&i.FirstExecutedAt,
 		&i.Kind,
 		&i.StartDate,
+		&i.Metadata,
 		&i.IsPrivate,
 		&i.Classification,
 	)
@@ -282,7 +283,7 @@ SET kind = 'channel',
     updated_at = now()
 WHERE id = $1
   AND kind = 'dm'
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, kind, start_date, is_private, classification
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, kind, start_date, metadata, is_private, classification
 `
 
 type PromoteDMToChannelParams struct {
@@ -327,6 +328,7 @@ func (q *Queries) PromoteDMToChannel(ctx context.Context, arg PromoteDMToChannel
 		&i.FirstExecutedAt,
 		&i.Kind,
 		&i.StartDate,
+		&i.Metadata,
 		&i.IsPrivate,
 		&i.Classification,
 	)

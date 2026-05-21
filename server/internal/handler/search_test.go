@@ -48,12 +48,12 @@ func TestBuildSearchQuery_MultiTerm(t *testing.T) {
 	if args[0] != "foo bar" {
 		t.Errorf("expected phrase arg lowercased, got %q", args[0])
 	}
-	// args[1] is workspace_id placeholder; term args start at args[2].
-	if args[2] != "foo" {
-		t.Errorf("expected first term arg lowercased, got %q", args[2])
+	// args[0]=exact, args[1]=%phrase%, args[2]=phrase%, args[3]=workspace_id placeholder; term args start at args[4].
+	if args[4] != "%foo%" {
+		t.Errorf("expected first term arg as contains pattern, got %q", args[4])
 	}
-	if args[3] != "bar" {
-		t.Errorf("expected second term arg lowercased, got %q", args[3])
+	if args[5] != "%bar%" {
+		t.Errorf("expected second term arg as contains pattern, got %q", args[5])
 	}
 
 	// Multi-word query should have AND conditions.
@@ -142,5 +142,116 @@ func TestBuildProjectSearchQuery_IncludeClosed(t *testing.T) {
 
 	if strings.Contains(query, "NOT IN ('completed', 'cancelled')") {
 		t.Error("query should not exclude completed/cancelled when includeClosed=true")
+	}
+}
+
+// --- extractSnippet regression tests ---
+
+func TestExtractSnippet_PhraseMatch(t *testing.T) {
+	content := "The quick brown fox jumps over the lazy dog near the river bank"
+	snippet := extractSnippet(content, "brown fox")
+	if !strings.Contains(snippet, "brown fox") {
+		t.Errorf("snippet should contain the phrase 'brown fox', got %q", snippet)
+	}
+}
+
+func TestExtractSnippet_MultiWordNonContiguous(t *testing.T) {
+	// "deploy" and "kubernetes" both appear but not as a contiguous phrase.
+	content := "We need to deploy the new service. The kubernetes cluster is ready for production workloads."
+	snippet := extractSnippet(content, "deploy kubernetes")
+	// Should NOT fall back to first 120 chars blindly — should center on earliest term.
+	if !strings.Contains(strings.ToLower(snippet), "deploy") && !strings.Contains(strings.ToLower(snippet), "kubernetes") {
+		t.Errorf("snippet should contain at least one search term, got %q", snippet)
+	}
+	// Specifically, "deploy" appears first so snippet should be centered around it.
+	if !strings.Contains(strings.ToLower(snippet), "deploy") {
+		t.Errorf("snippet should center on earliest term 'deploy', got %q", snippet)
+	}
+}
+
+func TestExtractSnippet_FallbackWhenNoMatch(t *testing.T) {
+	content := strings.Repeat("a", 200)
+	snippet := extractSnippet(content, "zzz")
+	if len([]rune(snippet)) > 124 { // 120 + "..."
+		t.Errorf("snippet should be truncated to ~120 runes when no match, got len=%d", len([]rune(snippet)))
+	}
+}
+
+func TestExtractSnippet_ShortContent(t *testing.T) {
+	content := "short text"
+	snippet := extractSnippet(content, "missing")
+	if snippet != content {
+		t.Errorf("short content with no match should return as-is, got %q", snippet)
+	}
+}
+
+func TestExtractSnippet_CaseInsensitive(t *testing.T) {
+	content := "Error in HTML rendering pipeline"
+	snippet := extractSnippet(content, "html")
+	if !strings.Contains(snippet, "HTML") {
+		t.Errorf("snippet should find case-insensitive match, got %q", snippet)
+	}
+}
+
+func TestExtractSnippet_CJKContent(t *testing.T) {
+	content := "这是一段很长的中文内容，包含了搜索关键词测试用例，用来验证多字节字符不会被截断的情况"
+	snippet := extractSnippet(content, "搜索关键词")
+	if !strings.Contains(snippet, "搜索关键词") {
+		t.Errorf("snippet should contain CJK phrase, got %q", snippet)
+	}
+}
+
+// --- Ranking regression tests ---
+
+func TestBuildSearchQuery_CommentRankTiers(t *testing.T) {
+	query, _ := buildSearchQuery("test phrase", []string{"test", "phrase"}, 0, false, false)
+
+	// Comment phrase match should be tier 7
+	if !strings.Contains(query, "THEN 7") {
+		t.Error("query should contain tier 7 for comment phrase match")
+	}
+	// Comment all-term match should be tier 8
+	if !strings.Contains(query, "THEN 8") {
+		t.Error("query should contain tier 8 for comment all-term match")
+	}
+	// Fallback should be 9, not 7
+	if !strings.Contains(query, "ELSE 9") {
+		t.Error("query fallback should be ELSE 9")
+	}
+}
+
+func TestBuildSearchQuery_DescriptionRankTiers(t *testing.T) {
+	query, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false)
+
+	// Description phrase match should be tier 5
+	if !strings.Contains(query, "THEN 5") {
+		t.Error("query should contain tier 5 for description phrase match")
+	}
+	// Description all-term match should be tier 6
+	if !strings.Contains(query, "THEN 6") {
+		t.Error("query should contain tier 6 for description all-term match")
+	}
+}
+
+func TestBuildSearchQuery_SingleTermNoAllTermTiers(t *testing.T) {
+	query, _ := buildSearchQuery("html", []string{"html"}, 0, false, false)
+
+	// Extract the rank CASE expression (ends with "ELSE 9 END") to avoid
+	// false matches against statusRank which also contains THEN 4/6.
+	rankEnd := strings.Index(query, "ELSE 9 END")
+	if rankEnd == -1 {
+		t.Fatal("query should contain rank expression with ELSE 9 END")
+	}
+	rankExpr := query[:rankEnd]
+
+	// Single-term queries should NOT have tier 4 (title all-terms), 6 (desc all-terms), or 8 (comment all-terms)
+	if strings.Contains(rankExpr, "THEN 4") {
+		t.Error("single-term query should not have tier 4 (title all-terms)")
+	}
+	if strings.Contains(rankExpr, "THEN 6") {
+		t.Error("single-term query should not have tier 6 (description all-terms)")
+	}
+	if strings.Contains(rankExpr, "THEN 8") {
+		t.Error("single-term query should not have tier 8 (comment all-terms)")
 	}
 }

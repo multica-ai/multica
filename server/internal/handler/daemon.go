@@ -117,8 +117,18 @@ func (h *Handler) requireDaemonWorkspaceAccess(w http.ResponseWriter, r *http.Re
 		return true
 	}
 
-	// PAT/JWT fallback: verify user is a member of the workspace.
+	// PAT/JWT fallback: check membership cache before hitting DB.
+	userID := requestUserID(r)
+	if userID != "" {
+		if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
+			return true
+		}
+	}
+
 	_, ok := h.requireWorkspaceMember(w, r, workspaceID, "not found")
+	if ok && userID != "" {
+		h.MembershipCache.Set(r.Context(), userID, workspaceID)
+	}
 	return ok
 }
 
@@ -184,8 +194,15 @@ func (h *Handler) verifyDaemonWorkspaceAccess(r *http.Request, workspaceID strin
 	if userID == "" {
 		return false
 	}
+	if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
+		return true
+	}
 	_, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
-	return err == nil
+	if err != nil {
+		return false
+	}
+	h.MembershipCache.Set(r.Context(), userID, workspaceID)
+	return true
 }
 
 // ---------------------------------------------------------------------------
@@ -221,9 +238,10 @@ type DaemonRegisterRequest struct {
 }
 
 type daemonWorkspaceReposResponse struct {
-	WorkspaceID  string     `json:"workspace_id"`
-	Repos        []RepoData `json:"repos"`
-	ReposVersion string     `json:"repos_version"`
+	WorkspaceID  string          `json:"workspace_id"`
+	Repos        []RepoData      `json:"repos"`
+	ReposVersion string          `json:"repos_version"`
+	Settings     json.RawMessage `json:"settings,omitempty"`
 }
 
 func normalizeWorkspaceRepos(repos []RepoData) []RepoData {
@@ -272,13 +290,17 @@ func parseWorkspaceRepos(raw []byte) []RepoData {
 	return normalizeWorkspaceRepos(repos)
 }
 
-func workspaceReposResponse(workspaceID string, raw []byte) daemonWorkspaceReposResponse {
+func workspaceReposResponse(workspaceID string, raw []byte, settingsRaw []byte) daemonWorkspaceReposResponse {
 	repos := parseWorkspaceRepos(raw)
-	return daemonWorkspaceReposResponse{
+	resp := daemonWorkspaceReposResponse{
 		WorkspaceID:  workspaceID,
 		Repos:        repos,
 		ReposVersion: workspaceReposVersion(repos),
 	}
+	if len(settingsRaw) > 0 {
+		resp.Settings = json.RawMessage(settingsRaw)
+	}
+	return resp
 }
 
 func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
@@ -463,20 +485,13 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		"runtimes": resp,
 	})
 
-	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos)
-
-	// Include workspace settings so the daemon can honour feature toggles
-	// (e.g. co_authored_by_enabled for the prepare-commit-msg hook).
-	var settings json.RawMessage
-	if len(ws.Settings) > 0 {
-		settings = sanitizeWorkspaceSettingsJSON(ws.Settings)
-	}
+	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos, ws.Settings)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"runtimes":      resp,
 		"repos":         repoResp.Repos,
 		"repos_version": repoResp.ReposVersion,
-		"settings":      settings,
+		"settings":      repoResp.Settings,
 	})
 }
 
@@ -574,7 +589,7 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos))
+	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos, ws.Settings))
 }
 
 // PersonaAgentEntry is the shape returned by ListWorkspacePersonaAgents.
@@ -776,20 +791,12 @@ func (h *Handler) RefreshRuntimeCapabilities(w http.ResponseWriter, r *http.Requ
 }
 
 type DaemonHeartbeatRequest struct {
-	RuntimeID string `json:"runtime_id"`
+	RuntimeID           string `json:"runtime_id"`
+	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
 	// CEREBRO-PATCH(heartbeat-account-request): JEH-997 mirrors the
-	// Account field on protocol.DaemonHeartbeatRequestPayload so HTTP
-	// and WS heartbeat carry the same shape.
 	Account *protocol.DaemonHeartbeatAccount `json:"account,omitempty"`
-	// CLIVersion lets the daemon advertise its current Claude/Codex CLI
-	// version on every heartbeat (W4.2). When the value differs from
-	// what the runtime row already has, the server treats it as a CLI
-	// upgrade and asks the daemon to re-report capabilities (the CLI's
-	// tool list may have changed). Empty string skips the check.
-	CLIVersion string `json:"cli_version,omitempty"`
-	// Capabilities is the optional snapshot the daemon may include on
-	// heartbeat to short-circuit the refresh round-trip. Same shape as
-	// the registration payload.
+	// CEREBRO-PATCH(heartbeat-cli-version-request): W4.2 CLI version + capabilities fields on heartbeat payload.
+	CLIVersion   string          `json:"cli_version,omitempty"`
 	Capabilities json.RawMessage `json:"capabilities,omitempty"`
 }
 
@@ -804,6 +811,16 @@ type DaemonHeartbeatRequest struct {
 // therefore only invoke PopPending after HasPending confirms there is work
 // to claim, so we never start a claim we might have to abort.
 const heartbeatHasPendingTimeout = 1 * time.Second
+
+// maxLocalSkillImportBatch is how many pending import requests the heartbeat
+// handler pops per cycle. Higher values let the daemon process more imports
+// in parallel but increase per-heartbeat latency.
+//
+// Timeout invariant: IMPORT_CONCURRENCY (views/.../runtime-local-skill-import-panel.tsx)
+// × heartbeat period (~15s) must stay within runtimeLocalSkillPendingTimeout
+// (runtime_local_skills.go), and IMPORT_POLL_TIMEOUT_MS (core/runtimes/local-skills.ts)
+// must exceed pendingTimeout + runningTimeout.
+const maxLocalSkillImportBatch = 10
 
 // runtimeLivenessTTL is how long a Redis liveness record stays valid before
 // expiring. The daemon refreshes it every heartbeat (~15s), so this just
@@ -901,7 +918,7 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	authMs = time.Since(start).Milliseconds()
 
-	ack, m, err := h.processHeartbeat(r.Context(), rt)
+	ack, m, err := h.processHeartbeat(r.Context(), rt, req.SupportsBatchImport)
 	updateMs = m.UpdateMs
 	probeModelMs = m.ProbeModelMs
 	popModelMs = m.PopModelMs
@@ -985,6 +1002,9 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if ack.PendingLocalSkillImport != nil {
 		resp["pending_local_skill_import"] = ack.PendingLocalSkillImport
 	}
+	if len(ack.PendingLocalSkillImports) > 0 {
+		resp["pending_local_skill_imports"] = ack.PendingLocalSkillImports
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -995,8 +1015,15 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 // Workspace authorization is re-checked on every heartbeat instead of trusted
 // from the upgrade-time check because runtime ownership can change (e.g. a
 // runtime is reassigned to another workspace mid-connection).
-func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, payload protocol.DaemonHeartbeatRequestPayload) (*protocol.DaemonHeartbeatAckPayload, error) {
-	runtimeUUID, err := util.ParseUUID(payload.RuntimeID)
+//
+// When the runtime row is missing (pgx.ErrNoRows), the function returns a
+// successful ack with Status=HeartbeatStatusRuntimeGone and RuntimeGone=true
+// instead of an error. That keeps the hub from logging every beat at Warn,
+// and tells the daemon to drop the stale runtime and re-register. Other DB
+// errors still propagate as errors so they keep their existing Warn logging
+// and the daemon does not mistake a hiccup for a deletion.
+func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error) {
+	runtimeUUID, err := util.ParseUUID(runtimeID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid runtime_id: %w", err)
 	}
@@ -1004,7 +1031,7 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return &protocol.DaemonHeartbeatAckPayload{
-				RuntimeID:   payload.RuntimeID,
+				RuntimeID:   runtimeID,
 				Status:      protocol.HeartbeatStatusRuntimeGone,
 				RuntimeGone: true,
 			}, nil
@@ -1014,14 +1041,9 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	if identity.WorkspaceID != "" && identity.WorkspaceID != uuidToString(rt.WorkspaceID) {
 		return nil, fmt.Errorf("runtime not in connection workspace")
 	}
-	ack, _, err := h.processHeartbeat(ctx, rt)
+	ack, _, err := h.processHeartbeat(ctx, rt, supportsBatchImport)
 	// CEREBRO-PATCH(heartbeat-account-ws): JEH-997 mirror the HTTP-side
-	// account hook on the WS path so daemons that stay on WS still get
-	// their login identity registered.
 	// CEREBRO-PATCH(heartbeat-account-id-ack): JEH-881 forward registered account_id in WS ack.
-	if cerebroAccountID := h.recordHeartbeatAccount(ctx, rt, payload.Account); ack != nil && cerebroAccountID != "" {
-		ack.CerebroAccountID = cerebroAccountID
-	}
 	return ack, err
 }
 
@@ -1082,7 +1104,7 @@ type heartbeatMetrics struct {
 // the WebSocket daemon:heartbeat path: records liveness and pulls any pending
 // actions queued for the runtime. Auth and request decoding live in the
 // caller because they differ between transports.
-func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
+func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
 	var m heartbeatMetrics
 	runtimeID := uuidToString(rt.ID)
 
@@ -1186,14 +1208,42 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime) (*pr
 	switch {
 	case probeErr == nil && hasImport:
 		popStart := time.Now()
-		pendingImport, popErr := h.LocalSkillImportStore.PopPending(ctx, runtimeID)
-		m.PopImportMs = time.Since(popStart).Milliseconds()
-		if popErr != nil {
-			slog.Warn("local skill import PopPending failed", "error", popErr, "runtime_id", runtimeID)
-		} else if pendingImport != nil {
-			ack.PendingLocalSkillImport = &protocol.DaemonHeartbeatPendingLocalSkillImport{
-				ID:       pendingImport.ID,
-				SkillKey: pendingImport.SkillKey,
+		if supportsBatchImport {
+			pendingImports, popErr := h.LocalSkillImportStore.PopPendingBatch(ctx, runtimeID, maxLocalSkillImportBatch)
+			m.PopImportMs = time.Since(popStart).Milliseconds()
+			if popErr != nil {
+				slog.Warn("local skill import PopPendingBatch failed", "error", popErr, "runtime_id", runtimeID, "claimed", len(pendingImports))
+			}
+			// Always dispatch whatever was claimed — even on partial
+			// failure the claimed requests have already transitioned to
+			// running in the store. Dropping them here would leave them
+			// stranded until the running timeout.
+			if len(pendingImports) > 0 {
+				// Backwards compat: singular field carries the first item so
+				// old daemons that don't know the plural field still get one.
+				ack.PendingLocalSkillImport = &protocol.DaemonHeartbeatPendingLocalSkillImport{
+					ID:       pendingImports[0].ID,
+					SkillKey: pendingImports[0].SkillKey,
+				}
+				batch := make([]protocol.DaemonHeartbeatPendingLocalSkillImport, 0, len(pendingImports))
+				for _, p := range pendingImports {
+					batch = append(batch, protocol.DaemonHeartbeatPendingLocalSkillImport{
+						ID:       p.ID,
+						SkillKey: p.SkillKey,
+					})
+				}
+				ack.PendingLocalSkillImports = batch
+			}
+		} else {
+			pendingImport, popErr := h.LocalSkillImportStore.PopPending(ctx, runtimeID)
+			m.PopImportMs = time.Since(popStart).Milliseconds()
+			if popErr != nil {
+				slog.Warn("local skill import PopPending failed", "error", popErr, "runtime_id", runtimeID)
+			} else if pendingImport != nil {
+				ack.PendingLocalSkillImport = &protocol.DaemonHeartbeatPendingLocalSkillImport{
+					ID:       pendingImport.ID,
+					SkillKey: pendingImport.SkillKey,
+				}
 			}
 		}
 	case probeErr != nil:
@@ -1427,15 +1477,33 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
 		resp.Agent = &TaskAgentData{
-			ID:             uuidToString(agent.ID),
-			Name:           agent.Name,
-			Instructions:   agent.Instructions,
-			Skills:         skills,
-			CustomEnv:      customEnv,
-			CustomArgs:     customArgs,
-			McpConfig:      mcpConfig,
-			Model:          agent.Model.String,
-			PersonaSandbox: agent.PersonaSandbox.String,
+			ID:            uuidToString(agent.ID),
+			Name:          agent.Name,
+			Instructions:  agent.Instructions,
+			Skills:        skills,
+			CustomEnv:     customEnv,
+			CustomArgs:    customArgs,
+			McpConfig:     mcpConfig,
+			Model:         agent.Model.String,
+			ThinkingLevel: agent.ThinkingLevel.String,
+		}
+	}
+
+	// Resolve the runtime owner's profile description so the daemon can
+	// inject "## Requesting User" into the brief. Empty fields short-circuit
+	// the heading entirely on the daemon side; cloud / system runtimes with
+	// no owner stay anonymous. Failure here must not block claim — the agent
+	// can still run without the user-context section.
+	if runtime.OwnerID.Valid {
+		if owner, err := h.Queries.GetUser(r.Context(), runtime.OwnerID); err == nil {
+			resp.RequestingUserName = owner.Name
+			resp.RequestingUserProfileDescription = owner.ProfileDescription
+		} else {
+			slog.Debug("failed to load runtime owner for brief injection",
+				"runtime_id", runtimeID,
+				"owner_id", uuidToString(runtime.OwnerID),
+				"error", err,
+			)
 		}
 	}
 
@@ -1585,26 +1653,28 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
-			// Resume chat sessions only when the stored pointer was produced
-			// by the same runtime as the claiming task. When the chat_session
-			// pointer is missing (legacy NULL runtime_id), stale (last task
-			// failed before reporting completion), or runtime-mismatched, fall
-			// back to the most recent task row that recorded a session_id —
-			// otherwise a single failed turn would silently drop the entire
-			// conversation memory on the next message. The fallback also
-			// requires runtime to match.
-			if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
-				resp.PriorSessionID = cs.SessionID.String
-			}
-			if cs.WorkDir.Valid {
-				resp.PriorWorkDir = cs.WorkDir.String
-			}
-			if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil && prior.SessionID.Valid {
-				if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
-					resp.PriorSessionID = prior.SessionID.String
+			if !task.ForceFreshSession {
+				// Resume chat sessions only when the stored pointer was produced
+				// by the same runtime as the claiming task. When the chat_session
+				// pointer is missing (legacy NULL runtime_id), stale (last task
+				// failed before reporting completion), or runtime-mismatched, fall
+				// back to the most recent task row that recorded a session_id —
+				// otherwise a single failed turn would silently drop the entire
+				// conversation memory on the next message. The fallback also
+				// requires runtime to match.
+				if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
+					resp.PriorSessionID = cs.SessionID.String
 				}
-				if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
-					resp.PriorWorkDir = prior.WorkDir.String
+				if cs.WorkDir.Valid {
+					resp.PriorWorkDir = cs.WorkDir.String
+				}
+				if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil && prior.SessionID.Valid {
+					if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
+						resp.PriorSessionID = prior.SessionID.String
+					}
+					if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
+						resp.PriorWorkDir = prior.WorkDir.String
+					}
 				}
 			}
 			// CEREBRO-PATCH(daemon-handler-chat-history-cap): cap chat history at the SQL layer so long-lived
@@ -2346,8 +2416,12 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 // Verifies the task belongs to the caller's workspace.
 func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
+	taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task_id")
+	if !ok {
+		return
+	}
 
-	task, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskID))
+	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "task not found")
 		return
@@ -2371,11 +2445,11 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		messages, queryErr = h.Queries.ListTaskMessagesSince(r.Context(), db.ListTaskMessagesSinceParams{
-			TaskID: parseUUID(taskID),
+			TaskID: taskUUID,
 			Seq:    int32(sinceSeq),
 		})
 	} else {
-		messages, queryErr = h.Queries.ListTaskMessages(r.Context(), parseUUID(taskID))
+		messages, queryErr = h.Queries.ListTaskMessages(r.Context(), taskUUID)
 	}
 	if queryErr != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list task messages")

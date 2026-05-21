@@ -559,7 +559,7 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) spendCents(ctx context.Context, wsID pgtype.UUID, start, end time.Time) int {
 	rows, err := h.Upstream.GetWorkspaceUsageSummary(ctx, db.GetWorkspaceUsageSummaryParams{
 		WorkspaceID: wsID,
-		Since:       ts(start),
+		CreatedAt:   ts(start),
 	})
 	if err != nil {
 		return 0

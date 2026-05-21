@@ -17,6 +17,7 @@ export interface Tab {
   path: string;
   title: string;
   icon: string;
+  pinned: boolean;
   router: DataRouter;
   historyIndex: number;
   historyLength: number;
@@ -68,6 +69,8 @@ interface TabStore {
    * "every live workspace has at least one tab" holds.
    */
   closeTab: (tabId: string) => void;
+  /** Toggle whether a tab is pinned in the active workspace tab strip. */
+  togglePin: (tabId: string) => void;
   /**
    * Activate a tab. Finds it across all workspaces. Sets both the owning
    * workspace as active and that group's activeTabId; needed for any code
@@ -187,6 +190,7 @@ function makeTab(path: string, title: string, icon: string): Tab {
     path,
     title,
     icon,
+    pinned: false,
     router: createTabRouter(path),
     historyIndex: 0,
     historyLength: 1,
@@ -385,6 +389,22 @@ export const useTabStore = create<TabStore>()(
         disposeClosingRouter();
       },
 
+      togglePin(tabId) {
+        const { byWorkspace } = get();
+        const hit = findTabLocation(byWorkspace, tabId);
+        if (!hit) return;
+        const { slug, group, index } = hit;
+        const nextTabs = [...group.tabs];
+        const current = nextTabs[index];
+        nextTabs[index] = { ...current, pinned: !current.pinned };
+        set({
+          byWorkspace: {
+            ...byWorkspace,
+            [slug]: { ...group, tabs: nextTabs },
+          },
+        });
+      },
+
       setActiveTab(tabId) {
         const { byWorkspace, activeWorkspaceSlug } = get();
         const hit = findTabLocation(byWorkspace, tabId);
@@ -549,6 +569,7 @@ export const useTabStore = create<TabStore>()(
               path: clean,
               title: pTab.title,
               icon: pTab.icon,
+              pinned: pTab.pinned === true,
               router: createTabRouter(clean),
               historyIndex: 0,
               historyLength: 1,
@@ -593,6 +614,7 @@ interface V2PersistedTab {
   path: string;
   title: string;
   icon: string;
+  pinned?: boolean;
 }
 
 interface V2PersistedGroup {
@@ -617,6 +639,7 @@ export function migrateV1ToV2(v1: Partial<V1Persisted>): V2Persisted {
       path: tab.path,
       title: tab.title,
       icon: tab.icon,
+      pinned: false,
     });
   }
 

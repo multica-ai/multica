@@ -116,25 +116,16 @@ type ChatSessionUpdatedPayload struct {
 // Mirrors the body of POST /api/daemon/heartbeat so both transports share
 // identical semantics.
 type DaemonHeartbeatRequestPayload struct {
-	RuntimeID string `json:"runtime_id"`
+	RuntimeID           string `json:"runtime_id"`
+	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
 	// CEREBRO-PATCH(heartbeat-account): JEH-997 piggybacks the runtime's
-	// detected login identity on the heartbeat so the server can upsert
-	// cerebro_account + link agent_runtime.current_account_id idempotently.
 	Account *DaemonHeartbeatAccount `json:"account,omitempty"`
 	// CEREBRO-PATCH(heartbeat-cli-version): W4.2 CLI version + capabilities fields on heartbeat payload.
-	// CLIVersion is the daemon-detected agent CLI version at heartbeat time
-	// (W4.2). When it differs from the server's stored value, the server
-	// persists the new version and (if Capabilities is non-nil) refreshes
-	// the runtime's capabilities snapshot in the same transaction.
-	CLIVersion string `json:"cli_version,omitempty"`
-	// Capabilities is an optional capabilities snapshot the daemon advertises
-	// when CLI version drift is detected (W4.2). Empty/nil leaves the existing
-	// row untouched.
+	CLIVersion   string         `json:"cli_version,omitempty"`
 	Capabilities map[string]any `json:"capabilities,omitempty"`
+	// CEREBRO-PATCH(heartbeat-account-type): JEH-997 cerebro-only payload type.
 }
 
-// DaemonHeartbeatAccount carries the runtime's detected login identity.
-// CEREBRO-PATCH(heartbeat-account-type): JEH-997 cerebro-only payload type.
 type DaemonHeartbeatAccount struct {
 	Provider      string `json:"provider"`
 	LoginIdentity string `json:"login_identity"`
@@ -160,6 +151,11 @@ type DaemonHeartbeatAckPayload struct {
 	PendingModelList        *DaemonHeartbeatPendingModelList        `json:"pending_model_list,omitempty"`
 	PendingLocalSkills      *DaemonHeartbeatPendingLocalSkills      `json:"pending_local_skills,omitempty"`
 	PendingLocalSkillImport *DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_import,omitempty"`
+	// PendingLocalSkillImports carries multiple import requests in a single
+	// heartbeat so the daemon can process them concurrently. Old daemons
+	// that don't know this field silently ignore it (standard JSON behavior)
+	// and fall back to the singular PendingLocalSkillImport above.
+	PendingLocalSkillImports []DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_imports,omitempty"`
 }
 
 // HeartbeatStatusRuntimeGone is the ack Status used when the runtime row no

@@ -147,7 +147,6 @@ type Daemon struct {
 	// CEREBRO-PATCH(daemon-account-identity-cache): JEH-997 identity-probe cache.
 	accountIdentities *accountIdentityCache
 	// CEREBRO-PATCH(daemon-runtime-tool-scan-state): JEH-1710 per-runtime
-	// debounce for the periodic MCP tools/list scan. Process-local only.
 	toolScanState      *runtimeToolScanState
 	runner             taskRunner    // executes agent tasks; set to d.runTask by New(), overridable in tests
 	cancelPollInterval time.Duration // how often handleTask polls for server-side cancellation; overridable in tests
@@ -175,11 +174,11 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		agentVersions:             make(map[string]string),
 		wsHBLastAck:               make(map[string]time.Time),
 		activeEnvRoots:            make(map[string]int),
+		accountIdentities:         newAccountIdentityCache(),
+		toolScanState:             newRuntimeToolScanState(),
 		runtimeGoneInflight:       make(map[string]struct{}),
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
-		accountIdentities:         newAccountIdentityCache(),
-		toolScanState:             newRuntimeToolScanState(),
 		cancelPollInterval:        5 * time.Second,
 	}
 	d.runner = taskRunnerFunc(d.runTask)
@@ -781,7 +780,6 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		"device_name":       d.cfg.DeviceName,
 		"cli_version":       d.cfg.CLIVersion,
 		"launched_by":       d.cfg.LaunchedBy,
-		"timezone":          detectLocalTimezone(),
 		"runtimes":          runtimes,
 	}
 
@@ -794,41 +792,6 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	}
 	d.logger.Debug("register response", "workspace_id", workspaceID, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos), "repos_version", resp.ReposVersion)
 	return resp, nil
-}
-
-// detectLocalTimezone returns an IANA zone name for the daemon host, used as
-// the initial value of agent_runtime.timezone on first registration. The
-// server treats any unparseable value as "UTC", but we still try harder here
-// because we'd rather a real "Asia/Shanghai" than a silent UTC fallback.
-// Short abbreviations like "EST" are intentionally ignored: they lose DST
-// rules and are a poor reporting timezone.
-func detectLocalTimezone() string {
-	if tz, ok := canonicalTimezoneName(os.Getenv("TZ")); ok {
-		return tz
-	}
-	if data, err := os.ReadFile("/etc/timezone"); err == nil {
-		if tz, ok := canonicalTimezoneName(string(data)); ok {
-			return tz
-		}
-	}
-	if tz, ok := canonicalTimezoneName(time.Local.String()); ok {
-		return tz
-	}
-	return "UTC"
-}
-
-func canonicalTimezoneName(raw string) (string, bool) {
-	tz := strings.TrimSpace(raw)
-	if tz == "" || tz == "Local" {
-		return "", false
-	}
-	if tz != "UTC" && !strings.Contains(tz, "/") {
-		return "", false
-	}
-	if _, err := time.LoadLocation(tz); err != nil {
-		return "", false
-	}
-	return tz, true
 }
 
 func newWorkspaceState(workspaceID string, runtimeIDs []string, reposVersion string, repos []RepoData, settings json.RawMessage) *workspaceState {
@@ -887,8 +850,13 @@ func (d *Daemon) workspaceLastRepoSyncErr(workspaceID string) string {
 }
 
 // workspaceCoAuthoredByEnabled returns whether the Co-authored-by hook should
-// be installed for the given workspace. Defaults to true when the setting is
-// absent (new workspaces, older servers that don't send settings).
+// be installed for the given workspace. Defaults to true when either setting
+// is absent (new workspaces, older servers that don't send settings).
+//
+// The hook is gated by BOTH the GitHub master switch (`github_enabled`) and
+// the dedicated co-author switch (`co_authored_by_enabled`) so flipping the
+// workspace's master GitHub toggle off also stops new trailers from landing
+// in commits, matching the contract documented in RFC MUL-2414 §4.8.
 func (d *Daemon) workspaceCoAuthoredByEnabled(workspaceID string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -901,7 +869,7 @@ func (d *Daemon) workspaceCoAuthoredByEnabled(workspaceID string) bool {
 		CoAuthoredByEnabled *bool `json:"co_authored_by_enabled"`
 	}
 	if err := json.Unmarshal(ws.settings, &s); err != nil {
-		return true // default: enabled
+		return true // default: enabled when payload is malformed
 	}
 	if s.GitHubEnabled != nil && !*s.GitHubEnabled {
 		return false
@@ -1012,6 +980,11 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 	if ws, ok := d.workspaces[workspaceID]; ok {
 		ws.reposVersion = resp.ReposVersion
 		ws.allowedRepoURLs = repoAllowlist(resp.Repos)
+		// Keep the cached settings in sync with the server. The daemon's
+		// feature gates (e.g. workspaceCoAuthoredByEnabled) read directly from
+		// this field, so toggling a Setting in the web UI must update it here
+		// without requiring a daemon restart. An empty payload from the server
+		// clears the override and falls back to defaults.
 		ws.settings = resp.Settings
 	}
 	d.mu.Unlock()
@@ -1033,6 +1006,20 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return fmt.Errorf("workspace is not watched by this daemon: %s", workspaceID)
 	}
 
+	// Record whether the cache already had this repo before we took the
+	// per-workspace mutex. The two states behave differently below:
+	//
+	//   - cacheHitOnEntry=true: the repo is already cloned; we still must
+	//     refresh `workspaceState.settings` because the /repo/checkout
+	//     handler reads workspaceCoAuthoredByEnabled right after this and
+	//     the 30s workspaceSyncLoop tick is too slow for a freshly-flipped
+	//     GitHub master switch / `co_authored_by_enabled` toggle to feel
+	//     live (RFC MUL-2414 §4.8; PR #2847 review by Emacs).
+	//
+	//   - cacheHitOnEntry=false but cache hit *after* we acquire the mutex:
+	//     a sibling goroutine on a concurrent cold-miss already refreshed
+	//     and populated the cache. We can skip the duplicate refresh — the
+	//     sibling's refresh is fresh enough for our gate read.
 	cacheHitOnEntry := d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != ""
 
 	ws.repoRefreshMu.Lock()
@@ -1118,6 +1105,11 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	var removed int
 	for id, name := range apiIDs {
 		if currentIDs[id] {
+			// Already tracked: refresh the cached workspace settings so
+			// feature toggles flipped in the web UI take effect on the next
+			// gated operation without a daemon restart (see RFC MUL-2414 §4.8;
+			// reviewed in PR #2847). refreshWorkspaceRepos covers settings +
+			// repos in a single round trip.
 			// CEREBRO-PATCH(daemon-settings-refresh): keep settings live on existing workspaces (JEH-1590).
 			daemonsettings.RefreshExistingWorkspace(ctx, id, d.refreshWorkspaceSettings, d.logger)
 			// Already tracked: only intervene if the workspace lost all of its
@@ -1461,6 +1453,10 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
+	// CEREBRO-PATCH(heartbeat-account-id-ack): cache server-registered account id for task usage reports.
+	if d.accountIdentities != nil && resp.CerebroAccountID != "" {
+		d.accountIdentities.setAccountID(runtimeID, resp.CerebroAccountID)
+	}
 	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,
@@ -1490,7 +1486,14 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 			go d.handleLocalSkillList(ctx, *rt, resp.PendingLocalSkills.ID)
 		}
 	}
-	if resp.PendingLocalSkillImport != nil {
+	// Prefer the batch field (new backend); fall back to singular (old backend).
+	if len(resp.PendingLocalSkillImports) > 0 {
+		if rt := d.findRuntime(runtimeID); rt != nil {
+			for _, imp := range resp.PendingLocalSkillImports {
+				go d.handleLocalSkillImport(ctx, *rt, imp)
+			}
+		}
+	} else if resp.PendingLocalSkillImport != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
 			go d.handleLocalSkillImport(ctx, *rt, *resp.PendingLocalSkillImport)
 		}
@@ -1528,22 +1531,49 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	}
 
 	// Wire format matches handler.ModelEntry. Use a struct (not
-	// map[string]string) so the Default bool round-trips — without
-	// it the UI loses its "default" badge on the advertised pick.
+	// map[string]string) so the Default bool and the per-model
+	// Thinking catalog round-trip — without it the UI loses its
+	// "default" badge on the advertised pick and the thinking-level
+	// picker for claude/codex (MUL-2339).
+	type thinkingLevelWire struct {
+		Value       string `json:"value"`
+		Label       string `json:"label"`
+		Description string `json:"description,omitempty"`
+	}
+	type modelThinkingWire struct {
+		SupportedLevels []thinkingLevelWire `json:"supported_levels"`
+		DefaultLevel    string              `json:"default_level,omitempty"`
+	}
 	type modelWire struct {
-		ID       string `json:"id"`
-		Label    string `json:"label"`
-		Provider string `json:"provider,omitempty"`
-		Default  bool   `json:"default,omitempty"`
+		ID       string             `json:"id"`
+		Label    string             `json:"label"`
+		Provider string             `json:"provider,omitempty"`
+		Default  bool               `json:"default,omitempty"`
+		Thinking *modelThinkingWire `json:"thinking,omitempty"`
 	}
 	wire := make([]modelWire, 0, len(models))
 	for _, m := range models {
-		wire = append(wire, modelWire{
+		entry := modelWire{
 			ID:       m.ID,
 			Label:    m.Label,
 			Provider: m.Provider,
 			Default:  m.Default,
-		})
+		}
+		if m.Thinking != nil {
+			levels := make([]thinkingLevelWire, 0, len(m.Thinking.SupportedLevels))
+			for _, lvl := range m.Thinking.SupportedLevels {
+				levels = append(levels, thinkingLevelWire{
+					Value:       lvl.Value,
+					Label:       lvl.Label,
+					Description: lvl.Description,
+				})
+			}
+			entry.Thinking = &modelThinkingWire{
+				SupportedLevels: levels,
+				DefaultLevel:    m.Thinking.DefaultLevel,
+			}
+		}
+		wire = append(wire, entry)
 	}
 	d.reportModelListResult(ctx, rt, requestID, map[string]any{
 		"status":    "completed",
@@ -2266,19 +2296,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		return
 	}
 
-	// Report usage independently so it's captured even for failed/blocked tasks.
-	if len(result.Usage) > 0 {
-		if err := d.client.ReportTaskUsage(ctx, task.ID, result.Usage); err != nil {
-			taskLog.Warn("report task usage failed", "error", err)
-		}
-	}
 	// CEREBRO-PATCH(daemon-task-account-usage): JEH-881/JEH-1365 parse the task
-	// output AND verbose run logs for account-level usage signals (429 /
-	// usage-window-%) and persist them on the cerebro_account row so the UI can
-	// show exact quota state. Logs carry Anthropic x-ratelimit headers emitted
-	// by Claude Code's --verbose stream that are absent from the final comment.
 	d.maybeReportAccountUsage(ctx, task.RuntimeID, result.Comment, result.Logs, result.Usage, taskLog) // CEREBRO-PATCH(daemon-task-account-token-usage): include exact task tokens in account usage telemetry.
-
 	d.reportTaskResult(ctx, task.ID, result, taskLog)
 
 	// Write GC metadata after the task finishes so the periodic GC loop
@@ -2410,25 +2429,27 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Repos are passed as metadata only — the agent checks them out on demand
 	// via `multica repo checkout <url>`.
 	taskCtx := execenv.TaskContextForEnv{
-		IssueID:                 task.IssueID,
-		TriggerCommentID:        task.TriggerCommentID,
-		AgentID:                 agentID,
-		AgentName:               agentName,
-		AgentInstructions:       instructions,
-		AgentSkills:             convertSkillsForEnv(skills),
-		Repos:                   convertReposForEnv(task.Repos),
-		ProjectID:               task.ProjectID,
-		ProjectTitle:            task.ProjectTitle,
-		ProjectResources:        convertProjectResourcesForEnv(task.ProjectResources),
-		ChatSessionID:           task.ChatSessionID,
-		AutopilotRunID:          task.AutopilotRunID,
-		AutopilotID:             task.AutopilotID,
-		AutopilotTitle:          task.AutopilotTitle,
-		AutopilotDescription:    task.AutopilotDescription,
-		AutopilotSource:         task.AutopilotSource,
-		AutopilotTriggerPayload: strings.TrimSpace(string(task.AutopilotTriggerPayload)),
-		QuickCreatePrompt:       task.QuickCreatePrompt,
-		IsSquadLeader:           strings.Contains(instructions, "## Squad Operating Protocol"),
+		IssueID:                          task.IssueID,
+		TriggerCommentID:                 task.TriggerCommentID,
+		AgentID:                          agentID,
+		AgentName:                        agentName,
+		AgentInstructions:                instructions,
+		AgentSkills:                      convertSkillsForEnv(skills),
+		Repos:                            convertReposForEnv(task.Repos),
+		ProjectID:                        task.ProjectID,
+		ProjectTitle:                     task.ProjectTitle,
+		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
+		ChatSessionID:                    task.ChatSessionID,
+		AutopilotRunID:                   task.AutopilotRunID,
+		AutopilotID:                      task.AutopilotID,
+		AutopilotTitle:                   task.AutopilotTitle,
+		AutopilotDescription:             task.AutopilotDescription,
+		AutopilotSource:                  task.AutopilotSource,
+		AutopilotTriggerPayload:          strings.TrimSpace(string(task.AutopilotTriggerPayload)),
+		QuickCreatePrompt:                task.QuickCreatePrompt,
+		IsSquadLeader:                    strings.Contains(instructions, "## Squad Operating Protocol"),
+		RequestingUserName:               task.RequestingUserName,
+		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
 	}
 
 	// Mark candidate env roots as active before any env work so the GC loop
@@ -2643,10 +2664,44 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var mcpConfig json.RawMessage
 	if task.Agent != nil {
 		customArgs = task.Agent.CustomArgs
-		mcpConfig = task.Agent.McpConfig
+		// CEREBRO-PATCH(daemon-runtime-mcp-merge): runtime tools_config provides default MCP servers; agent mcp_config overrides by name (JEH-1710).
+		mcpConfig = daemonmcp.Merge(task.RuntimeToolsConfig, task.Agent.McpConfig)
+	} else {
+		mcpConfig = task.RuntimeToolsConfig
+	}
+	thinkingLevel := ""
+	if task.Agent != nil {
+		thinkingLevel = task.Agent.ThinkingLevel
+	}
+	// Per-model guard: the server validates the literal token against the
+	// provider's enum, but per-model gaps (Claude's `xhigh` on a non-Opus
+	// model, Codex's per-model `supported_reasoning_levels`) only resolve
+	// here, against the daemon's local CLI catalog. Invalid combinations
+	// log a warning and drop the level rather than failing the task, so a
+	// stale persisted value never blocks execution. Empty model is passed
+	// through unchanged — ValidateThinkingLevel resolves it to the
+	// provider's default model internally so default-model tasks aren't
+	// misjudged. Discovery errors fail open: if we can't list models, we
+	// keep the persisted level and let the CLI surface any objection.
+	if thinkingLevel != "" {
+		ok, err := agent.ValidateThinkingLevel(ctx, provider, entry.Path, model, thinkingLevel)
+		if err != nil {
+			taskLog.Warn("thinking_level: catalog lookup failed; passing through",
+				"provider", provider,
+				"model", model,
+				"thinking_level", thinkingLevel,
+				"error", err,
+			)
+		} else if !ok {
+			taskLog.Warn("thinking_level: not valid for this (provider, model); skipping injection",
+				"provider", provider,
+				"model", model,
+				"thinking_level", thinkingLevel,
+			)
+			thinkingLevel = ""
+		}
 	}
 	// CEREBRO-PATCH(daemon-runtime-mcp-merge): merge runtime-level MCP defaults with agent-level mcp_config (9031).
-	mcpConfig = daemonmcp.Merge(task.RuntimeToolsConfig, mcpConfig)
 	execOpts := agent.ExecOptions{
 		Cwd:                       env.WorkDir,
 		Model:                     model,
@@ -2656,6 +2711,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ExtraArgs:                 extraArgs,
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
+		ThinkingLevel:             thinkingLevel,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
@@ -2807,15 +2863,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if comment == "" {
 			comment = fmt.Sprintf("%s timed out after %s", provider, d.cfg.AgentTimeout)
 		}
+		failureReason := "timeout"
+		if reason, ok := classifyResumeUnsafeTimeout(provider, comment); ok {
+			taskLog.Warn("agent timed out with resume-unsafe session, classifying as blocked",
+				"failure_reason", reason,
+			)
+			failureReason = reason
+		}
 		return TaskResult{
 			Status:        "blocked",
 			Comment:       comment,
 			SessionID:     result.SessionID,
 			WorkDir:       env.WorkDir,
 			EnvRoot:       env.RootDir,
-			FailureReason: "timeout",
+			FailureReason: failureReason,
 			Usage:         usageEntries,
-			Logs:          result.Logs,
 		}, nil
 	case "idle_watchdog":
 		// The idle watchdog force-stopped the run because the backend
@@ -2835,6 +2897,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			EnvRoot:       env.RootDir,
 			FailureReason: "idle_watchdog",
 			Usage:         usageEntries,
+			Logs:          result.Logs,
 		}, nil
 	case "cancelled":
 		// Server cancelled the task (e.g. issue reassignment, user cancel).
@@ -3340,8 +3403,9 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 	result := make([]execenv.SkillContextForEnv, len(skills))
 	for i, s := range skills {
 		result[i] = execenv.SkillContextForEnv{
-			Name:    s.Name,
-			Content: s.Content,
+			Name:        s.Name,
+			Description: s.Description,
+			Content:     s.Content,
 		}
 		for _, f := range s.Files {
 			result[i].Files = append(result[i].Files, execenv.SkillFileContextForEnv{

@@ -130,4 +130,3 @@ describe("projectGanttIssuesOptions", () => {
     expect(options.queryKey).toEqual(issueKeys.projectGantt(WS_ID, PROJECT_ID));
   });
 });
-

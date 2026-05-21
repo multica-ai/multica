@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -94,14 +95,28 @@ func (h *Handler) PinTaskSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// RerunIssue manually re-enqueues the issue's current agent assignment as a
-// fresh task. Useful when an issue is stuck or the user wants to retry a
-// failed run. The new task is flagged force_fresh_session=true: the daemon
-// claim handler skips the (agent_id, issue_id) session-resume lookup so the
-// agent starts a clean session. A user clicking rerun has just judged the
-// prior output bad — replaying the same conversation would replay the same
-// poisoned state. (Automatic retry, by contrast, intentionally inherits the
-// session — that path handles infrastructure failures, not bad output.)
+// RerunIssueRequest is the optional body of POST /api/issues/{id}/rerun.
+// All fields are optional; an empty body keeps the legacy "rerun the issue's
+// current assignee" behaviour used by the CLI.
+type RerunIssueRequest struct {
+	// TaskID identifies the execution-log row the user clicked retry on.
+	// When set, the rerun targets the agent that ran that specific task
+	// (and reuses its leader/worker role) rather than the issue's current
+	// assignee — so clicking retry on row that belonged to a now-displaced
+	// agent re-fires that same agent, not the new assignee.
+	TaskID string `json:"task_id,omitempty"`
+}
+
+// RerunIssue manually re-enqueues an agent run for the issue. By default it
+// targets the issue's current assignee (agent or squad leader); if the
+// request body carries task_id, the rerun targets the agent that ran that
+// specific past task instead. The new task is flagged force_fresh_session=true:
+// the daemon claim handler skips the (agent_id, issue_id) session-resume
+// lookup so the agent starts a clean session. A user clicking rerun has just
+// judged the prior output bad — replaying the same conversation would replay
+// the same poisoned state. (Automatic retry, by contrast, intentionally
+// inherits the session — that path handles infrastructure failures, not bad
+// output.)
 func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, id)
@@ -109,7 +124,26 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.TaskService.RerunIssue(r.Context(), issue.ID, pgtype.UUID{})
+	// Body is optional. A zero-length body or `{}` keeps the legacy
+	// assignee-driven rerun behaviour the CLI relies on.
+	var req RerunIssueRequest
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+
+	var sourceTaskID pgtype.UUID
+	if req.TaskID != "" {
+		parsed, ok := parseUUIDOrBadRequest(w, req.TaskID, "task_id")
+		if !ok {
+			return
+		}
+		sourceTaskID = parsed
+	}
+
+	task, err := h.TaskService.RerunIssue(r.Context(), issue.ID, sourceTaskID, pgtype.UUID{})
 	if err != nil {
 		slog.Warn("issue rerun failed", "issue_id", id, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())

@@ -32,6 +32,8 @@ var autoUpdateInitialDelay = 2 * time.Minute
 //
 // Disabled when:
 //   - the operator opted out via --no-auto-update / MULTICA_DAEMON_AUTO_UPDATE=false;
+//   - the daemon points at a self-hosted server (default-off — set
+//     MULTICA_DAEMON_AUTO_UPDATE=true to opt back in);
 //   - the daemon was spawned by Desktop (the Electron app owns the binary);
 //   - the running version doesn't look like a tagged release (dev builds).
 //

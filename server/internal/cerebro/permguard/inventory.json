@@ -49,6 +49,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "DELETE /api/cloud-runtime/nodes",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "DELETE /api/comments/{commentId}/",
       "gate": "workspace_member"
     },
@@ -90,6 +94,10 @@
     },
     {
       "id": "DELETE /api/issues/{id}/labels/{labelId}",
+      "gate": "issue_scope"
+    },
+    {
+      "id": "DELETE /api/issues/{id}/metadata/{key}",
       "gate": "issue_scope"
     },
     {
@@ -173,11 +181,11 @@
       "gate": "workspace_member"
     },
     {
-      "id": "DELETE /api/workspaces/{id}/grants/{grantId}",
+      "id": "DELETE /api/workspaces/{id}/github/installations/{installationId}",
       "gate": "workspace_admin"
     },
     {
-      "id": "DELETE /api/workspaces/{id}/github/installations/{installationId}",
+      "id": "DELETE /api/workspaces/{id}/grants/{grantId}",
       "gate": "workspace_admin"
     },
     {
@@ -221,11 +229,11 @@
       "gate": "self_only"
     },
     {
-      "id": "PATCH /api/notifications/read-all",
+      "id": "PATCH /api/notifications/{id}/read",
       "gate": "self_only"
     },
     {
-      "id": "PATCH /api/notifications/{id}/read",
+      "id": "PATCH /api/notifications/read-all",
       "gate": "self_only"
     },
     {
@@ -233,7 +241,15 @@
       "gate": "project_access"
     },
     {
+      "id": "PATCH /api/runtimes/{runtimeId}/",
+      "gate": "cerebro_runtime_access"
+    },
+    {
       "id": "PATCH /api/runtimes/{runtimeId}/persona-sandbox",
+      "gate": "cerebro_runtime_access"
+    },
+    {
+      "id": "PATCH /api/runtimes/{runtimeId}/sandbox",
       "gate": "cerebro_runtime_access"
     },
     {
@@ -243,14 +259,6 @@
     {
       "id": "PATCH /api/runtimes/{runtimeId}/tools/{toolName}",
       "gate": "workspace_admin"
-    },
-    {
-      "id": "PATCH /api/runtimes/{runtimeId}/",
-      "gate": "cerebro_runtime_access"
-    },
-    {
-      "id": "PATCH /api/runtimes/{runtimeId}/sandbox",
-      "gate": "cerebro_runtime_access"
     },
     {
       "id": "PATCH /api/squads/{id}/members/role",
@@ -285,14 +293,6 @@
       "gate": "cerebro_capability:create_agent"
     },
     {
-      "id": "POST /api/agents/from-template",
-      "gate": "cerebro_capability:create_agent"
-    },
-    {
-      "id": "POST /api/agents/generate-avatar",
-      "gate": "workspace_member"
-    },
-    {
       "id": "POST /api/agents/{id}/archive",
       "gate": "cerebro_agent_access"
     },
@@ -303,6 +303,14 @@
     {
       "id": "POST /api/agents/{id}/restore",
       "gate": "cerebro_agent_access"
+    },
+    {
+      "id": "POST /api/agents/from-template",
+      "gate": "cerebro_capability:create_agent"
+    },
+    {
+      "id": "POST /api/agents/generate-avatar",
+      "gate": "workspace_member"
     },
     {
       "id": "POST /api/artifact-folders/",
@@ -321,11 +329,19 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "POST /api/autopilots/{id}/deliveries/{deliveryId}/replay",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/autopilots/{id}/trigger",
       "gate": "workspace_admin"
     },
     {
       "id": "POST /api/autopilots/{id}/triggers",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/autopilots/{id}/triggers/{triggerId}/rotate-webhook-token",
       "gate": "workspace_admin"
     },
     {
@@ -393,15 +409,39 @@
       "gate": "self_only"
     },
     {
+      "id": "POST /api/cloud-runtime/nodes",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/cloud-runtime/nodes/exec",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/cloud-runtime/nodes/reboot",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/cloud-runtime/nodes/start",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/cloud-runtime/nodes/status",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/cloud-runtime/nodes/stop",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/comments/{commentId}/move-to-subissue",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/comments/{commentId}/reactions",
       "gate": "workspace_member"
     },
     {
       "id": "POST /api/comments/{commentId}/resolve",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/comments/{commentId}/move-to-subissue",
       "gate": "workspace_member"
     },
     {
@@ -421,11 +461,11 @@
       "gate": "daemon_auth"
     },
     {
-      "id": "POST /api/daemon/runtimes/{runtimeId}/local-skills/import/{requestId}/result",
+      "id": "POST /api/daemon/runtimes/{runtimeId}/local-skills/{requestId}/result",
       "gate": "daemon_auth"
     },
     {
-      "id": "POST /api/daemon/runtimes/{runtimeId}/local-skills/{requestId}/result",
+      "id": "POST /api/daemon/runtimes/{runtimeId}/local-skills/import/{requestId}/result",
       "gate": "daemon_auth"
     },
     {
@@ -501,6 +541,26 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "POST /api/inbox/{id}/archive",
+      "gate": "self_only"
+    },
+    {
+      "id": "POST /api/inbox/{id}/mute",
+      "gate": "self_only"
+    },
+    {
+      "id": "POST /api/inbox/{id}/read",
+      "gate": "self_only"
+    },
+    {
+      "id": "POST /api/inbox/{id}/unarchive",
+      "gate": "self_only"
+    },
+    {
+      "id": "POST /api/inbox/{id}/unread",
+      "gate": "self_only"
+    },
+    {
       "id": "POST /api/inbox/archive-all",
       "gate": "self_only"
     },
@@ -525,26 +585,6 @@
       "gate": "self_only"
     },
     {
-      "id": "POST /api/inbox/{id}/archive",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/inbox/{id}/mute",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/inbox/{id}/read",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/inbox/{id}/unarchive",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/inbox/{id}/unread",
-      "gate": "self_only"
-    },
-    {
       "id": "POST /api/invitations/{id}/accept",
       "gate": "self_only"
     },
@@ -554,18 +594,6 @@
     },
     {
       "id": "POST /api/issues/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/issues/batch-delete",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/issues/batch-update",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/issues/quick-create",
       "gate": "workspace_member"
     },
     {
@@ -605,6 +633,18 @@
       "gate": "issue_scope"
     },
     {
+      "id": "POST /api/issues/batch-delete",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/issues/batch-update",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/issues/quick-create",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/labels/",
       "gate": "workspace_member"
     },
@@ -617,11 +657,11 @@
       "gate": "self_only"
     },
     {
-      "id": "POST /api/me/starter-content/dismiss",
+      "id": "POST /api/me/onboarding/no-runtime-bootstrap",
       "gate": "self_only"
     },
     {
-      "id": "POST /api/me/starter-content/import",
+      "id": "POST /api/me/onboarding/runtime-bootstrap",
       "gate": "self_only"
     },
     {
@@ -661,14 +701,6 @@
       "gate": "self_only"
     },
     {
-      "id": "POST /api/runtime-setup/exchange",
-      "exempt": "bootstrap-token \u2014 short-lived setup token authorises this exchange before any user JWT exists"
-    },
-    {
-      "id": "POST /api/runtime-setup/tokens",
-      "gate": "workspace_admin"
-    },
-    {
       "id": "POST /api/runtimes/{runtimeId}/local-skills",
       "gate": "cerebro_runtime_access"
     },
@@ -685,14 +717,6 @@
       "gate": "cerebro_runtime_access"
     },
     {
-      "id": "POST /api/runtimes/{runtimeId}/unpause",
-      "gate": "cerebro_runtime_access"
-    },
-    {
-      "id": "POST /api/runtimes/{runtimeId}/update",
-      "gate": "cerebro_runtime_access"
-    },
-    {
       "id": "POST /api/runtimes/{runtimeId}/tools/{toolName}/groups/{groupId}",
       "gate": "workspace_admin"
     },
@@ -701,15 +725,15 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "POST /api/runtimes/{runtimeId}/unpause",
+      "gate": "cerebro_runtime_access"
+    },
+    {
+      "id": "POST /api/runtimes/{runtimeId}/update",
+      "gate": "cerebro_runtime_access"
+    },
+    {
       "id": "POST /api/skills/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/skills/change-requests/{crId}/review",
-      "gate": "skill_ownership"
-    },
-    {
-      "id": "POST /api/skills/import",
       "gate": "workspace_member"
     },
     {
@@ -721,7 +745,11 @@
       "gate": "workspace_member"
     },
     {
-      "id": "POST /api/tasks/{taskId}/cancel",
+      "id": "POST /api/skills/change-requests/{crId}/review",
+      "gate": "skill_ownership"
+    },
+    {
+      "id": "POST /api/skills/import",
       "gate": "workspace_member"
     },
     {
@@ -733,12 +761,24 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/tasks/{taskId}/cancel",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/tokens/",
       "gate": "self_only"
     },
     {
       "id": "POST /api/upload-file",
       "gate": "issue_scope"
+    },
+    {
+      "id": "POST /api/webhooks/autopilots/{token}",
+      "gate": "pre_auth_token"
+    },
+    {
+      "id": "POST /api/webhooks/github",
+      "exempt": "pre-auth signed webhook — GitHub HMAC signature authorises delivery before any user JWT exists"
     },
     {
       "id": "POST /api/work-sessions/",
@@ -801,24 +841,20 @@
       "gate": "workspace_admin"
     },
     {
-      "id": "POST /api/webhooks/github",
-      "exempt": "pre-auth signed webhook — GitHub HMAC signature authorises delivery before any user JWT exists"
-    },
-    {
       "id": "POST /auth/google",
-      "exempt": "pre-auth \u2014 establishes identity"
+      "exempt": "pre-auth — establishes identity"
     },
     {
       "id": "POST /auth/logout",
-      "exempt": "pre-auth \u2014 clears identity, must succeed even with stale credentials"
+      "exempt": "pre-auth — clears identity, must succeed even with stale credentials"
     },
     {
       "id": "POST /auth/send-code",
-      "exempt": "pre-auth \u2014 establishes identity"
+      "exempt": "pre-auth — establishes identity"
     },
     {
       "id": "POST /auth/verify-code",
-      "exempt": "pre-auth \u2014 establishes identity"
+      "exempt": "pre-auth — establishes identity"
     },
     {
       "id": "PUT /api/agents/{id}/",
@@ -829,12 +865,12 @@
       "gate": "cerebro_agent_access"
     },
     {
-      "id": "PUT /api/agents/{id}/tools/{name}/",
-      "gate": "cerebro_agent_access"
-    },
-    {
       "id": "PUT /api/agents/{id}/tool-overrides/{toolName}",
       "gate": "workspace_admin"
+    },
+    {
+      "id": "PUT /api/agents/{id}/tools/{name}/",
+      "gate": "cerebro_agent_access"
     },
     {
       "id": "PUT /api/artifact-folders/{id}",
@@ -853,6 +889,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "PUT /api/autopilots/{id}/triggers/{triggerId}/signing-secret",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "PUT /api/cerebro/workflows/{id}",
       "gate": "workspace_member"
     },
@@ -866,6 +906,10 @@
     },
     {
       "id": "PUT /api/issues/{id}",
+      "gate": "issue_scope"
+    },
+    {
+      "id": "PUT /api/issues/{id}/metadata/{key}",
       "gate": "issue_scope"
     },
     {
@@ -960,7 +1004,7 @@
     },
     {
       "id": "bind_repo",
-      "exempt": "local-only \u2014 writes to MCP repo binding on disk, no remote call"
+      "exempt": "local-only — writes to MCP repo binding on disk, no remote call"
     },
     {
       "id": "complete_work",
@@ -992,19 +1036,19 @@
     },
     {
       "id": "credential_audit_log",
-      "exempt": "local-only stub \u2014 in-memory mock, no HTTP until JEH-1196"
+      "exempt": "local-only stub — in-memory mock, no HTTP until JEH-1196"
     },
     {
       "id": "credential_list",
-      "exempt": "local-only stub \u2014 in-memory mock, no HTTP until JEH-1196"
+      "exempt": "local-only stub — in-memory mock, no HTTP until JEH-1196"
     },
     {
       "id": "credential_policy_get",
-      "exempt": "local-only stub \u2014 in-memory mock, no HTTP until JEH-1196"
+      "exempt": "local-only stub — in-memory mock, no HTTP until JEH-1196"
     },
     {
       "id": "credential_policy_set",
-      "exempt": "local-only stub \u2014 in-memory mock, no HTTP until JEH-1196"
+      "exempt": "local-only stub — in-memory mock, no HTTP until JEH-1196"
     },
     {
       "id": "delete_artifact",
@@ -1024,7 +1068,7 @@
     },
     {
       "id": "evaluate_policy",
-      "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/grants policy check"
+      "exempt": "read-only — wraps GET /api/workspaces/{id}/grants policy check"
     },
     {
       "id": "fork_session",
@@ -1032,79 +1076,79 @@
     },
     {
       "id": "get_artifact",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+      "exempt": "read-only — GET endpoints carry their own auth, no mutation"
     },
     {
       "id": "get_grant",
-      "exempt": "local-only stub \u2014 in-memory mock per mcp-serve process, no HTTP until JEH-1179"
+      "exempt": "local-only stub — in-memory mock per mcp-serve process, no HTTP until JEH-1179"
     },
     {
       "id": "get_group",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+      "exempt": "read-only — GET endpoints carry their own auth, no mutation"
     },
     {
       "id": "get_issue",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+      "exempt": "read-only — GET endpoints carry their own auth, no mutation"
     },
     {
       "id": "get_me",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+      "exempt": "read-only — GET endpoints carry their own auth, no mutation"
     },
     {
       "id": "list_artifact_folders",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+      "exempt": "read-only — GET endpoints carry their own auth, no mutation"
     },
     {
       "id": "list_artifacts",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+      "exempt": "read-only — GET endpoints carry their own auth, no mutation"
     },
     {
       "id": "list_comments",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+      "exempt": "read-only — GET endpoints carry their own auth, no mutation"
     },
     {
       "id": "list_grant_audit",
-      "exempt": "local-only stub \u2014 in-memory mock per mcp-serve process, no HTTP until JEH-1179"
+      "exempt": "local-only stub — in-memory mock per mcp-serve process, no HTTP until JEH-1179"
     },
     {
       "id": "list_grants",
-      "exempt": "local-only stub \u2014 in-memory mock per mcp-serve process, no HTTP until JEH-1179"
+      "exempt": "local-only stub — in-memory mock per mcp-serve process, no HTTP until JEH-1179"
     },
     {
       "id": "list_group_agents",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+      "exempt": "read-only — GET endpoints carry their own auth, no mutation"
     },
     {
       "id": "list_group_capabilities",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+      "exempt": "read-only — GET endpoints carry their own auth, no mutation"
     },
     {
       "id": "list_group_members",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+      "exempt": "read-only — GET endpoints carry their own auth, no mutation"
     },
     {
       "id": "list_group_runtimes",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+      "exempt": "read-only — GET endpoints carry their own auth, no mutation"
     },
     {
       "id": "list_groups",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+      "exempt": "read-only — GET endpoints carry their own auth, no mutation"
     },
     {
       "id": "list_issues",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+      "exempt": "read-only — GET endpoints carry their own auth, no mutation"
     },
     {
       "id": "list_project_groups",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+      "exempt": "read-only — GET endpoints carry their own auth, no mutation"
     },
     {
       "id": "list_projects",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+      "exempt": "read-only — GET endpoints carry their own auth, no mutation"
     },
     {
       "id": "list_runtimes",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+      "exempt": "read-only — GET endpoints carry their own auth, no mutation"
     },
     {
       "id": "move_artifact",
@@ -1140,11 +1184,11 @@
     },
     {
       "id": "search_artifacts",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+      "exempt": "read-only — GET endpoints carry their own auth, no mutation"
     },
     {
       "id": "search_issues",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+      "exempt": "read-only — GET endpoints carry their own auth, no mutation"
     },
     {
       "id": "set_artifact_folder",
@@ -1194,15 +1238,15 @@
     },
     {
       "id": "agent e2e-spawn",
-      "exempt": "developer-tool \u2014 local spawn against own daemon, no server mutation"
+      "exempt": "developer-tool — local spawn against own daemon, no server mutation"
     },
     {
       "id": "agent get",
-      "exempt": "read-only \u2014 wraps GET /api/agents/{id}"
+      "exempt": "read-only — wraps GET /api/agents/{id}"
     },
     {
       "id": "agent list",
-      "exempt": "read-only \u2014 wraps GET /api/agents/"
+      "exempt": "read-only — wraps GET /api/agents/"
     },
     {
       "id": "agent restore",
@@ -1210,7 +1254,7 @@
     },
     {
       "id": "agent skills list",
-      "exempt": "read-only \u2014 wraps GET /api/agents/{id}/skills"
+      "exempt": "read-only — wraps GET /api/agents/{id}/skills"
     },
     {
       "id": "agent skills set",
@@ -1218,7 +1262,7 @@
     },
     {
       "id": "agent tasks",
-      "exempt": "read-only \u2014 wraps GET /api/agents/{id}/tasks"
+      "exempt": "read-only — wraps GET /api/agents/{id}/tasks"
     },
     {
       "id": "agent update",
@@ -1242,7 +1286,7 @@
     },
     {
       "id": "artifact folder list",
-      "exempt": "read-only \u2014 wraps GET /api/artifact-folders/"
+      "exempt": "read-only — wraps GET /api/artifact-folders/"
     },
     {
       "id": "artifact folder update",
@@ -1250,11 +1294,11 @@
     },
     {
       "id": "artifact get",
-      "exempt": "read-only \u2014 wraps GET /api/artifacts/{id}"
+      "exempt": "read-only — wraps GET /api/artifacts/{id}"
     },
     {
       "id": "artifact list",
-      "exempt": "read-only \u2014 wraps GET /api/artifacts/"
+      "exempt": "read-only — wraps GET /api/artifacts/"
     },
     {
       "id": "artifact set-folder",
@@ -1266,11 +1310,11 @@
     },
     {
       "id": "attachment download",
-      "exempt": "read-only \u2014 wraps GET /uploads/*"
+      "exempt": "read-only — wraps GET /uploads/*"
     },
     {
       "id": "attachment text",
-      "exempt": "read-only \u2014 wraps GET /api/attachments/{id}/content"
+      "exempt": "read-only — wraps GET /api/attachments/{id}/content"
     },
     {
       "id": "attachment upload",
@@ -1278,11 +1322,11 @@
     },
     {
       "id": "auth logout",
-      "exempt": "pre-auth \u2014 clears local credentials"
+      "exempt": "pre-auth — clears local credentials"
     },
     {
       "id": "auth status",
-      "exempt": "local-only \u2014 reads local CLI config"
+      "exempt": "local-only — reads local CLI config"
     },
     {
       "id": "autopilot create",
@@ -1294,15 +1338,15 @@
     },
     {
       "id": "autopilot get",
-      "exempt": "read-only \u2014 wraps GET /api/autopilots/{id}"
+      "exempt": "read-only — wraps GET /api/autopilots/{id}"
     },
     {
       "id": "autopilot list",
-      "exempt": "read-only \u2014 wraps GET /api/autopilots/"
+      "exempt": "read-only — wraps GET /api/autopilots/"
     },
     {
       "id": "autopilot runs",
-      "exempt": "read-only \u2014 wraps GET /api/autopilots/{id}/runs"
+      "exempt": "read-only — wraps GET /api/autopilots/{id}/runs"
     },
     {
       "id": "autopilot trigger",
@@ -1317,6 +1361,10 @@
       "gate": "via:DELETE /api/autopilots/{id}/triggers/{triggerId}/"
     },
     {
+      "id": "autopilot trigger-rotate-url",
+      "gate": "via:http"
+    },
+    {
       "id": "autopilot trigger-update",
       "gate": "via:PATCH /api/autopilots/{id}/triggers/{triggerId}/"
     },
@@ -1326,135 +1374,35 @@
     },
     {
       "id": "config set",
-      "exempt": "local-only \u2014 writes to CLI config file on disk"
+      "exempt": "local-only — writes to CLI config file on disk"
     },
     {
       "id": "config show",
-      "exempt": "local-only \u2014 reads CLI config file on disk"
+      "exempt": "local-only — reads CLI config file on disk"
     },
     {
       "id": "daemon disk-usage",
-      "exempt": "local-only \u2014 inspects daemon workdir on disk"
+      "exempt": "local-only — inspects daemon workdir on disk"
     },
     {
       "id": "daemon logs",
-      "exempt": "local-only \u2014 reads daemon log file on disk"
+      "exempt": "local-only — reads daemon log file on disk"
     },
     {
       "id": "daemon restart",
-      "exempt": "local-only \u2014 controls local daemon process"
+      "exempt": "local-only — controls local daemon process"
     },
     {
       "id": "daemon start",
-      "exempt": "local-only \u2014 controls local daemon process"
+      "exempt": "local-only — controls local daemon process"
     },
     {
       "id": "daemon status",
-      "exempt": "local-only \u2014 queries local daemon process"
+      "exempt": "local-only — queries local daemon process"
     },
     {
       "id": "daemon stop",
-      "exempt": "local-only \u2014 controls local daemon process"
-    },
-    {
-      "id": "grant create",
-      "gate": "via:POST /api/workspaces/{id}/grants"
-    },
-    {
-      "id": "grant delete",
-      "gate": "via:DELETE /api/workspaces/{id}/grants/{grantId}"
-    },
-    {
-      "id": "grant get",
-      "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/grants/{grantId}"
-    },
-    {
-      "id": "grant list",
-      "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/grants"
-    },
-    {
-      "id": "grant update",
-      "gate": "via:PATCH /api/workspaces/{id}/grants/{grantId}"
-    },
-    {
-      "id": "group agent add",
-      "gate": "via:POST /api/groups/{id}/agents"
-    },
-    {
-      "id": "group agent list",
-      "exempt": "read-only \u2014 wraps GET /api/groups/{id}/agents"
-    },
-    {
-      "id": "group agent remove",
-      "gate": "via:DELETE /api/groups/{id}/agents/{agentId}"
-    },
-    {
-      "id": "group capability list",
-      "exempt": "read-only \u2014 wraps GET /api/groups/{id}/capabilities"
-    },
-    {
-      "id": "group capability remove",
-      "gate": "via:DELETE /api/groups/{id}/capabilities/{capability}"
-    },
-    {
-      "id": "group capability set",
-      "gate": "via:POST /api/groups/{id}/capabilities"
-    },
-    {
-      "id": "group create",
-      "gate": "via:POST /api/workspaces/{id}/groups"
-    },
-    {
-      "id": "group delete",
-      "gate": "via:DELETE /api/groups/{id}"
-    },
-    {
-      "id": "group get",
-      "exempt": "read-only \u2014 wraps GET /api/groups/{id}"
-    },
-    {
-      "id": "group list",
-      "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/groups"
-    },
-    {
-      "id": "group member add",
-      "gate": "via:POST /api/groups/{id}/members"
-    },
-    {
-      "id": "group member list",
-      "exempt": "read-only \u2014 wraps GET /api/groups/{id}/members"
-    },
-    {
-      "id": "group member remove",
-      "gate": "via:DELETE /api/groups/{id}/members/{userId}"
-    },
-    {
-      "id": "group project add",
-      "gate": "via:POST /api/projects/{id}/group-access"
-    },
-    {
-      "id": "group project list",
-      "exempt": "read-only \u2014 wraps GET /api/projects/{id}/group-access"
-    },
-    {
-      "id": "group project remove",
-      "gate": "via:DELETE /api/projects/{id}/group-access/{groupId}"
-    },
-    {
-      "id": "group runtime add",
-      "gate": "via:POST /api/groups/{id}/runtimes"
-    },
-    {
-      "id": "group runtime list",
-      "exempt": "read-only \u2014 wraps GET /api/groups/{id}/runtimes"
-    },
-    {
-      "id": "group runtime remove",
-      "gate": "via:DELETE /api/groups/{id}/runtimes/{runtimeId}"
-    },
-    {
-      "id": "group update",
-      "gate": "via:PATCH /api/groups/{id}"
+      "exempt": "local-only — controls local daemon process"
     },
     {
       "id": "document create",
@@ -1477,16 +1425,112 @@
       "gate": "via:PUT /api/artifacts/{id}"
     },
     {
-      "id": "notifications list",
-      "exempt": "read-only — wraps GET /api/notifications"
+      "id": "grant create",
+      "gate": "via:POST /api/workspaces/{id}/grants"
     },
     {
-      "id": "issue assign",
-      "gate": "via:PUT /api/issues/{id}"
+      "id": "grant delete",
+      "gate": "via:DELETE /api/workspaces/{id}/grants/{grantId}"
+    },
+    {
+      "id": "grant get",
+      "exempt": "read-only — wraps GET /api/workspaces/{id}/grants/{grantId}"
+    },
+    {
+      "id": "grant list",
+      "exempt": "read-only — wraps GET /api/workspaces/{id}/grants"
+    },
+    {
+      "id": "grant update",
+      "gate": "via:PATCH /api/workspaces/{id}/grants/{grantId}"
+    },
+    {
+      "id": "group agent add",
+      "gate": "via:POST /api/groups/{id}/agents"
+    },
+    {
+      "id": "group agent list",
+      "exempt": "read-only — wraps GET /api/groups/{id}/agents"
+    },
+    {
+      "id": "group agent remove",
+      "gate": "via:DELETE /api/groups/{id}/agents/{agentId}"
+    },
+    {
+      "id": "group capability list",
+      "exempt": "read-only — wraps GET /api/groups/{id}/capabilities"
+    },
+    {
+      "id": "group capability remove",
+      "gate": "via:DELETE /api/groups/{id}/capabilities/{capability}"
+    },
+    {
+      "id": "group capability set",
+      "gate": "via:POST /api/groups/{id}/capabilities"
+    },
+    {
+      "id": "group create",
+      "gate": "via:POST /api/workspaces/{id}/groups"
+    },
+    {
+      "id": "group delete",
+      "gate": "via:DELETE /api/groups/{id}"
+    },
+    {
+      "id": "group get",
+      "exempt": "read-only — wraps GET /api/groups/{id}"
+    },
+    {
+      "id": "group list",
+      "exempt": "read-only — wraps GET /api/workspaces/{id}/groups"
+    },
+    {
+      "id": "group member add",
+      "gate": "via:POST /api/groups/{id}/members"
+    },
+    {
+      "id": "group member list",
+      "exempt": "read-only — wraps GET /api/groups/{id}/members"
+    },
+    {
+      "id": "group member remove",
+      "gate": "via:DELETE /api/groups/{id}/members/{userId}"
+    },
+    {
+      "id": "group project add",
+      "gate": "via:POST /api/projects/{id}/group-access"
+    },
+    {
+      "id": "group project list",
+      "exempt": "read-only — wraps GET /api/projects/{id}/group-access"
+    },
+    {
+      "id": "group project remove",
+      "gate": "via:DELETE /api/projects/{id}/group-access/{groupId}"
+    },
+    {
+      "id": "group runtime add",
+      "gate": "via:POST /api/groups/{id}/runtimes"
+    },
+    {
+      "id": "group runtime list",
+      "exempt": "read-only — wraps GET /api/groups/{id}/runtimes"
+    },
+    {
+      "id": "group runtime remove",
+      "gate": "via:DELETE /api/groups/{id}/runtimes/{runtimeId}"
+    },
+    {
+      "id": "group update",
+      "gate": "via:PATCH /api/groups/{id}"
     },
     {
       "id": "issue ask",
       "gate": "via:POST /api/issues/{id}/comments"
+    },
+    {
+      "id": "issue assign",
+      "gate": "via:PUT /api/issues/{id}"
     },
     {
       "id": "issue cancel-task",
@@ -1502,7 +1546,7 @@
     },
     {
       "id": "issue comment list",
-      "exempt": "read-only \u2014 wraps GET /api/issues/{id}/comments"
+      "exempt": "read-only — wraps GET /api/issues/{id}/comments"
     },
     {
       "id": "issue create",
@@ -1510,7 +1554,7 @@
     },
     {
       "id": "issue get",
-      "exempt": "read-only \u2014 wraps GET /api/issues/{id}"
+      "exempt": "read-only — wraps GET /api/issues/{id}"
     },
     {
       "id": "issue label add",
@@ -1518,7 +1562,7 @@
     },
     {
       "id": "issue label list",
-      "exempt": "read-only \u2014 wraps GET /api/issues/{id}/labels"
+      "exempt": "read-only — wraps GET /api/issues/{id}/labels"
     },
     {
       "id": "issue label remove",
@@ -1526,7 +1570,23 @@
     },
     {
       "id": "issue list",
-      "exempt": "read-only \u2014 wraps GET /api/issues/"
+      "exempt": "read-only — wraps GET /api/issues/"
+    },
+    {
+      "id": "issue metadata delete",
+      "gate": "via:http"
+    },
+    {
+      "id": "issue metadata get",
+      "gate": "via:http"
+    },
+    {
+      "id": "issue metadata list",
+      "gate": "via:http"
+    },
+    {
+      "id": "issue metadata set",
+      "gate": "via:http"
     },
     {
       "id": "issue rerun",
@@ -1534,15 +1594,15 @@
     },
     {
       "id": "issue run-messages",
-      "exempt": "read-only \u2014 wraps GET /api/daemon/tasks/{taskId}/messages"
+      "exempt": "read-only — wraps GET /api/daemon/tasks/{taskId}/messages"
     },
     {
       "id": "issue runs",
-      "exempt": "read-only \u2014 wraps GET /api/issues/{id}/runs"
+      "exempt": "read-only — wraps GET /api/issues/{id}/runs"
     },
     {
       "id": "issue search",
-      "exempt": "read-only \u2014 wraps GET /api/issues/search"
+      "exempt": "read-only — wraps GET /api/issues/search"
     },
     {
       "id": "issue status",
@@ -1554,7 +1614,7 @@
     },
     {
       "id": "issue subscriber list",
-      "exempt": "read-only \u2014 wraps GET /api/issues/{id}/subscribers"
+      "exempt": "read-only — wraps GET /api/issues/{id}/subscribers"
     },
     {
       "id": "issue subscriber remove",
@@ -1574,11 +1634,11 @@
     },
     {
       "id": "label get",
-      "exempt": "read-only \u2014 wraps GET /api/labels/{id}"
+      "exempt": "read-only — wraps GET /api/labels/{id}"
     },
     {
       "id": "label list",
-      "exempt": "read-only \u2014 wraps GET /api/labels/"
+      "exempt": "read-only — wraps GET /api/labels/"
     },
     {
       "id": "label update",
@@ -1586,15 +1646,19 @@
     },
     {
       "id": "login",
-      "exempt": "pre-auth \u2014 establishes identity, then writes token to CLI config"
+      "exempt": "pre-auth — establishes identity, then writes token to CLI config"
     },
     {
       "id": "mcp install",
-      "exempt": "local-only \u2014 wires the MCP entry into the developer's Claude config"
+      "exempt": "local-only — wires the MCP entry into the developer's Claude config"
     },
     {
       "id": "mcp serve",
-      "exempt": "local-only \u2014 runs the MCP stdio server in this process"
+      "exempt": "local-only — runs the MCP stdio server in this process"
+    },
+    {
+      "id": "notifications list",
+      "exempt": "read-only — wraps GET /api/notifications"
     },
     {
       "id": "project create",
@@ -1606,11 +1670,11 @@
     },
     {
       "id": "project get",
-      "exempt": "read-only \u2014 wraps GET /api/projects/{id}"
+      "exempt": "read-only — wraps GET /api/projects/{id}"
     },
     {
       "id": "project list",
-      "exempt": "read-only \u2014 wraps GET /api/projects/"
+      "exempt": "read-only — wraps GET /api/projects/"
     },
     {
       "id": "project resource add",
@@ -1618,7 +1682,7 @@
     },
     {
       "id": "project resource list",
-      "exempt": "read-only \u2014 wraps GET /api/projects/{id}/resources"
+      "exempt": "read-only — wraps GET /api/projects/{id}/resources"
     },
     {
       "id": "project resource remove",
@@ -1634,15 +1698,15 @@
     },
     {
       "id": "repo checkout",
-      "exempt": "local-only \u2014 git clone via daemon into local workdir"
+      "exempt": "local-only — git clone via daemon into local workdir"
     },
     {
       "id": "runtime activity",
-      "exempt": "read-only \u2014 wraps GET /api/runtimes/{runtimeId}/activity"
+      "exempt": "read-only — wraps GET /api/runtimes/{runtimeId}/activity"
     },
     {
       "id": "runtime list",
-      "exempt": "read-only \u2014 wraps GET /api/runtimes/"
+      "exempt": "read-only — wraps GET /api/runtimes/"
     },
     {
       "id": "runtime update",
@@ -1650,15 +1714,15 @@
     },
     {
       "id": "runtime usage",
-      "exempt": "read-only \u2014 wraps GET /api/runtimes/{runtimeId}/usage"
+      "exempt": "read-only — wraps GET /api/runtimes/{runtimeId}/usage"
     },
     {
       "id": "setup cloud",
-      "exempt": "bootstrap \u2014 uses runtime-setup token before any user session exists"
+      "exempt": "bootstrap — uses runtime-setup token before any user session exists"
     },
     {
       "id": "setup self-host",
-      "exempt": "bootstrap \u2014 uses runtime-setup token before any user session exists"
+      "exempt": "bootstrap — uses runtime-setup token before any user session exists"
     },
     {
       "id": "skill create",
@@ -1674,7 +1738,7 @@
     },
     {
       "id": "skill files list",
-      "exempt": "read-only \u2014 wraps GET /api/skills/{id}/files"
+      "exempt": "read-only — wraps GET /api/skills/{id}/files"
     },
     {
       "id": "skill files upsert",
@@ -1682,7 +1746,7 @@
     },
     {
       "id": "skill get",
-      "exempt": "read-only \u2014 wraps GET /api/skills/{id}"
+      "exempt": "read-only — wraps GET /api/skills/{id}"
     },
     {
       "id": "skill import",
@@ -1690,7 +1754,7 @@
     },
     {
       "id": "skill list",
-      "exempt": "read-only \u2014 wraps GET /api/skills/"
+      "exempt": "read-only — wraps GET /api/skills/"
     },
     {
       "id": "skill update",
@@ -1710,11 +1774,11 @@
     },
     {
       "id": "squad get",
-      "exempt": "read-only \u2014 wraps GET /api/squads/{id}"
+      "exempt": "read-only — wraps GET /api/squads/{id}"
     },
     {
       "id": "squad list",
-      "exempt": "read-only \u2014 wraps GET /api/squads"
+      "exempt": "read-only — wraps GET /api/squads"
     },
     {
       "id": "squad member add",
@@ -1722,7 +1786,7 @@
     },
     {
       "id": "squad member list",
-      "exempt": "read-only \u2014 wraps GET /api/squads/{id}/members"
+      "exempt": "read-only — wraps GET /api/squads/{id}/members"
     },
     {
       "id": "squad member remove",
@@ -1734,11 +1798,11 @@
     },
     {
       "id": "update",
-      "exempt": "local-only \u2014 replaces the multica binary on disk"
+      "exempt": "local-only — replaces the multica binary on disk"
     },
     {
       "id": "user profile get",
-      "exempt": "read-only \u2014 wraps GET /api/me/profile"
+      "exempt": "read-only — wraps GET /api/me/profile"
     },
     {
       "id": "user profile update",
@@ -1746,23 +1810,23 @@
     },
     {
       "id": "version",
-      "exempt": "local-only \u2014 prints build metadata"
+      "exempt": "local-only — prints build metadata"
     },
     {
       "id": "workspace get",
-      "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/"
+      "exempt": "read-only — wraps GET /api/workspaces/{id}/"
     },
     {
       "id": "workspace list",
-      "exempt": "read-only \u2014 wraps GET /api/workspaces/"
+      "exempt": "read-only — wraps GET /api/workspaces/"
     },
     {
       "id": "workspace member list",
-      "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/members"
+      "exempt": "read-only — wraps GET /api/workspaces/{id}/members"
     },
     {
       "id": "workspace switch",
-      "exempt": "local-only \u2014 changes the active workspace in CLI config"
+      "exempt": "local-only — changes the active workspace in CLI config"
     },
     {
       "id": "workspace update",

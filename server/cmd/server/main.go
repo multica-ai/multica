@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
-	"github.com/multica-ai/multica/server/internal/auth"
 	// CEREBRO-PATCH(main-agent-pass-gate): JEH-1327 cerebro agent-pass gate import
 	cerebroagentpass "github.com/multica-ai/multica/server/internal/cerebro/agentpass"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
@@ -131,11 +130,10 @@ func envDuration(name string, def time.Duration) time.Duration {
 func main() {
 	logger.Init()
 
-	// Validate JWT_SECRET early — log.Fatal if unset or shorter than the
-	// minimum accepted length. Fail fast before opening DB connections or
-	// listening on a port.
-	_ = auth.JWTSecret()
-
+	// Warn about missing configuration
+	if os.Getenv("JWT_SECRET") == "" {
+		slog.Warn("JWT_SECRET is not set — using insecure default. Set JWT_SECRET for production use.")
+	}
 	if os.Getenv("RESEND_API_KEY") == "" && strings.TrimSpace(os.Getenv("SMTP_HOST")) == "" {
 		slog.Warn("no email backend configured (RESEND_API_KEY and SMTP_HOST both empty) — verification codes will be printed to the log instead of emailed.")
 	}

@@ -40,7 +40,7 @@ function ActorAvatar({
         // Squads (a group, non-human) get a square tile so they don't read as
         // a single person; everyone else stays round.
         isSquad ? "rounded-md" : "rounded-full",
-        "bg-muted text-muted-foreground",
+        (!avatarUrl || imgError) && "bg-muted text-muted-foreground",
         className
       )}
       style={{ width: size, height: size, fontSize: size * 0.45 }}
