@@ -316,6 +316,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `daemon-config-test-firtal-gateway` | server/internal/daemon/config_test.go | 41 | Tests for explicit / inferred / strict-bool managed gateway runtime registration |
 | `daemon-daemon` | server/internal/daemon/daemon.go | 31 | Daemon additions (sandbox/prompt/types) |
 | `daemon-daemon-firtal-gateway-usage-cost` | server/internal/daemon/daemon.go | 11 | Include exact gateway spend when converting backend usage into task usage reports |
+| `daemon-settings-refresh` | server/internal/daemon/daemon.go<br>server/internal/cerebro/daemonsettings/refresh.go | 2 inline + 64 new | JEH-1916 / FIR-1924 — existing-workspace sync calls a cerebro-zone helper so settings changes still reach a running daemon without keeping the refresh logic in upstream-zone `daemon.go`. |
 | `daemon-daemon-test-timing` | server/internal/daemon/daemon_test.go | 39 | Scheduler-tolerant polling assertion for cancellation watcher tests |
 | `daemon-execenv` | server/internal/daemon/execenv/execenv.go | 1 | Daemon additions (sandbox/prompt/types) |
 | `daemon-handler` | server/internal/handler/daemon.go | 270 | Daemon additions (sandbox/prompt/types) |

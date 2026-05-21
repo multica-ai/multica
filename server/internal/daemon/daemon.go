@@ -18,7 +18,9 @@ import (
 	"time"
 
 	// CEREBRO-PATCH(daemon-runtime-mcp-merge-import): runtime/agent MCP merge for 9031.
+	// CEREBRO-PATCH(daemon-settings-refresh-import): keep settings live via cerebro-zone helper.
 	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp"
+	"github.com/multica-ai/multica/server/internal/cerebro/daemonsettings"
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -1117,9 +1119,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	for id, name := range apiIDs {
 		if currentIDs[id] {
 			// CEREBRO-PATCH(daemon-settings-refresh): keep settings live on existing workspaces (JEH-1590).
-			if _, err := d.refreshWorkspaceRepos(ctx, id); err != nil {
-				d.logger.Debug("workspace sync: refresh settings failed", "workspace_id", id, "error", err)
-			}
+			daemonsettings.RefreshExistingWorkspace(ctx, id, d.refreshWorkspaceSettings, d.logger)
 			// Already tracked: only intervene if the workspace lost all of its
 			// runtimes. The pointer is not replaced here either — ensureRepoReady
 			// holds repoRefreshMu from the original pointer.
@@ -1214,6 +1214,11 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 		d.logger.Debug("workspace sync done", "registered", registered, "removed", removed, "tracked", len(apiIDs))
 	}
 	return nil
+}
+
+func (d *Daemon) refreshWorkspaceSettings(ctx context.Context, workspaceID string) error {
+	_, err := d.refreshWorkspaceRepos(ctx, workspaceID)
+	return err
 }
 
 // heartbeatLoop supervises per-runtime HTTP heartbeat goroutines. Each runtime
