@@ -138,6 +138,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		UseDailyRollupForDashboard:    os.Getenv("USAGE_DASHBOARD_ROLLUP_ENABLED") == "true",
 		PublicURL:                     strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
 		TrustedProxies:                parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
+		CloudRuntimeFleetURL:          cloudRuntimeFleetURLFromEnv(),
+		CloudRuntimeFleetTimeout:      envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	if opts.DaemonWakeup != nil {
@@ -196,7 +198,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   origins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Workspace-ID", "X-Workspace-Slug", "X-Request-ID", "X-Agent-ID", "X-Task-ID", "X-CSRF-Token", "X-Client-Platform", "X-Client-Version", "X-Client-OS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Workspace-ID", "X-Workspace-Slug", "X-Request-ID", "X-Agent-ID", "X-Task-ID", "X-CSRF-Token", "X-Client-Platform", "X-Client-Version", "X-Client-OS", "X-User-PAT"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
@@ -589,6 +591,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Cloud Runtime fleet proxy. The remote service URL is configured
+			// on SaaS API nodes only; self-hosted deployments return 503.
+			r.Route("/api/cloud-runtime", func(r chi.Router) {
+				r.Get("/", h.GetCloudRuntimeService)
+				r.Get("/healthz", h.GetCloudRuntimeHealth)
+				r.Get("/readyz", h.GetCloudRuntimeReady)
+				r.Get("/nodes", h.ListCloudRuntimeNodes)
+				r.Post("/nodes", h.CreateCloudRuntimeNode)
+				r.Delete("/nodes", h.DeleteCloudRuntimeNode)
+				r.Post("/nodes/start", h.StartCloudRuntimeNode)
+				r.Post("/nodes/stop", h.StopCloudRuntimeNode)
+				r.Post("/nodes/reboot", h.RebootCloudRuntimeNode)
+				r.Post("/nodes/status", h.GetCloudRuntimeNodeStatus)
+				r.Post("/nodes/exec", h.ExecCloudRuntimeNode)
+			})
+
 			// Tasks (user-facing, with ownership check)
 			r.Post("/api/tasks/{taskId}/cancel", h.CancelTaskByUser)
 
@@ -723,4 +741,11 @@ func splitAndTrim(s string) []string {
 		}
 	}
 	return res
+}
+
+func cloudRuntimeFleetURLFromEnv() string {
+	if url := strings.TrimSpace(os.Getenv("MULTICA_CLOUD_FLEET_URL")); url != "" {
+		return url
+	}
+	return strings.TrimSpace(os.Getenv("MULTICA_FLEET_URL"))
 }
