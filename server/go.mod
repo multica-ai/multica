@@ -6,6 +6,9 @@ go 1.26.1
 // so CI can access it without cross-repo credentials. Matches hvejsel/firtal-persona@firtal-persona-cerebro-integration (a3fc8e2).
 replace github.com/hvejsel/firtal-persona/sdk/go => ../packages/cerebro-persona-sdk
 
+// CEREBRO-PATCH(pdf-attachment-text): PDF extraction lives outside the upstream server zone.
+replace github.com/multica-ai/multica/packages/cerebro-pdf-text => ../packages/cerebro-pdf-text
+
 require (
 	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/aws/aws-sdk-go-v2 v1.41.5
@@ -20,9 +23,9 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/hvejsel/firtal-persona/sdk/go v0.0.0-00010101000000-000000000000
 	github.com/jackc/pgx/v5 v5.9.2
-	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728 // CEREBRO-PATCH(pdf-attachment-text): pure-Go PDF text extraction for attachment content.
 	github.com/lmittmann/tint v1.1.3
 	github.com/mattn/go-shellwords v1.0.13
+	github.com/multica-ai/multica/packages/cerebro-pdf-text v0.0.0 // CEREBRO-PATCH(pdf-attachment-text): pure-Go PDF text extraction for attachment content.
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/pelletier/go-toml/v2 v2.3.0
 	github.com/prometheus/client_golang v1.23.2
@@ -56,6 +59,7 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/kr/text v0.2.0 // indirect
+	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect

@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(pdf-attachment-text): parser-specific coverage moved to packages/cerebro-pdf-text.
+
 import (
 	"bytes"
 	"context"
@@ -14,7 +16,6 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/ledongthuc/pdf"
 )
 
 // createHandlerTestChatSession seeds a chat_session row owned by testUserID
@@ -445,30 +446,6 @@ func TestGetAttachmentContent_PDFWithoutText(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "PDF contains no extractable text") {
 		t.Fatalf("body = %q, want no-text explanation", w.Body.String())
-	}
-}
-
-func TestGetAttachmentContent_PDFParserPanic(t *testing.T) {
-	store := &mockStorage{}
-	origStorage := testHandler.Storage
-	testHandler.Storage = store
-	defer func() { testHandler.Storage = origStorage }()
-
-	origPDFNewReader := pdfNewReader
-	pdfNewReader = func(io.ReaderAt, int64) (*pdf.Reader, error) {
-		panic("malformed xref")
-	}
-	defer func() { pdfNewReader = origPDFNewReader }()
-
-	id := seedPreviewAttachment(t, store, "broken-pdf-key.pdf", "broken.pdf", "application/pdf", []byte("%PDF-broken"))
-
-	req, w := newPreviewRequest(t, id, testWorkspaceID)
-	testHandler.GetAttachmentContent(w, req)
-	if w.Code != http.StatusUnsupportedMediaType {
-		t.Fatalf("status = %d, want 415; body=%s", w.Code, w.Body.String())
-	}
-	if !strings.Contains(w.Body.String(), "PDF could not be parsed") {
-		t.Fatalf("body = %q, want parser explanation", w.Body.String())
 	}
 }
 
