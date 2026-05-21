@@ -35,6 +35,7 @@ export function AttachmentBlock(props: AttachmentBlockProps) {
         filename={filename}
         onPreview={props.onPreview}
         onDownload={props.onDownload}
+        onDelete={props.onDelete}
       />
     );
   }

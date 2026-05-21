@@ -1198,6 +1198,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				resp.ProjectID = uuidToString(issue.ProjectID)
 				if proj, err := h.Queries.GetProject(r.Context(), issue.ProjectID); err == nil {
 					resp.ProjectTitle = proj.Title
+					resp.ProjectWorkdirPolicy = proj.WorkdirPolicy
+					if proj.CanonicalWorkdir.Valid {
+						resp.ProjectCanonicalWorkdir = proj.CanonicalWorkdir.String
+					}
 				}
 				if rows := h.listProjectResourcesForProject(r.Context(), issue.ProjectID); len(rows) > 0 {
 					out := make([]ProjectResourceData, 0, len(rows))
@@ -1414,98 +1418,102 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		} else {
 			var qc service.QuickCreateContext
 			if json.Unmarshal(task.Context, &qc) == nil && qc.Type == service.QuickCreateContextType {
-			hasQuickCreate = true
-			resp.QuickCreatePrompt = qc.Prompt
-			resp.WorkspaceID = qc.WorkspaceID
+				hasQuickCreate = true
+				resp.QuickCreatePrompt = qc.Prompt
+				resp.WorkspaceID = qc.WorkspaceID
 
-			// When the user picked a project in the modal, surface its title
-			// and resources to the daemon so the agent has the same context
-			// it would for an issue-bound task: the prompt template can name
-			// the project, and `multica repo checkout` sees the project's
-			// github_repo resources instead of the workspace fallback.
-			var projectRepos []RepoData
-			if qc.ProjectID != "" {
-				projectUUID, err := util.ParseUUID(qc.ProjectID)
-				if err == nil {
-					resp.ProjectID = qc.ProjectID
-					if proj, err := h.Queries.GetProject(r.Context(), projectUUID); err == nil {
-						resp.ProjectTitle = proj.Title
-					}
-					if rows := h.listProjectResourcesForProject(r.Context(), projectUUID); len(rows) > 0 {
-						out := make([]ProjectResourceData, 0, len(rows))
-						for _, row := range rows {
-							label := ""
-							if row.Label.Valid {
-								label = row.Label.String
-							}
-							ref := json.RawMessage(row.ResourceRef)
-							if len(ref) == 0 {
-								ref = json.RawMessage("{}")
-							}
-							out = append(out, ProjectResourceData{
-								ID:           uuidToString(row.ID),
-								ResourceType: row.ResourceType,
-								ResourceRef:  ref,
-								Label:        label,
-							})
-							if row.ResourceType == "github_repo" {
-								var payload struct {
-									URL string `json:"url"`
-								}
-								if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
-									projectRepos = append(projectRepos, RepoData{URL: payload.URL})
-								}
+				// When the user picked a project in the modal, surface its title
+				// and resources to the daemon so the agent has the same context
+				// it would for an issue-bound task: the prompt template can name
+				// the project, and `multica repo checkout` sees the project's
+				// github_repo resources instead of the workspace fallback.
+				var projectRepos []RepoData
+				if qc.ProjectID != "" {
+					projectUUID, err := util.ParseUUID(qc.ProjectID)
+					if err == nil {
+						resp.ProjectID = qc.ProjectID
+						if proj, err := h.Queries.GetProject(r.Context(), projectUUID); err == nil {
+							resp.ProjectTitle = proj.Title
+							resp.ProjectWorkdirPolicy = proj.WorkdirPolicy
+							if proj.CanonicalWorkdir.Valid {
+								resp.ProjectCanonicalWorkdir = proj.CanonicalWorkdir.String
 							}
 						}
-						resp.ProjectResources = out
+						if rows := h.listProjectResourcesForProject(r.Context(), projectUUID); len(rows) > 0 {
+							out := make([]ProjectResourceData, 0, len(rows))
+							for _, row := range rows {
+								label := ""
+								if row.Label.Valid {
+									label = row.Label.String
+								}
+								ref := json.RawMessage(row.ResourceRef)
+								if len(ref) == 0 {
+									ref = json.RawMessage("{}")
+								}
+								out = append(out, ProjectResourceData{
+									ID:           uuidToString(row.ID),
+									ResourceType: row.ResourceType,
+									ResourceRef:  ref,
+									Label:        label,
+								})
+								if row.ResourceType == "github_repo" {
+									var payload struct {
+										URL string `json:"url"`
+									}
+									if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
+										projectRepos = append(projectRepos, RepoData{URL: payload.URL})
+									}
+								}
+							}
+							resp.ProjectResources = out
+						}
 					}
 				}
-			}
 
-			if len(projectRepos) > 0 {
-				resp.Repos = projectRepos
-			} else if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(qc.WorkspaceID)); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
+				if len(projectRepos) > 0 {
+					resp.Repos = projectRepos
+				} else if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(qc.WorkspaceID)); err == nil && ws.Repos != nil {
+					var repos []RepoData
+					if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+						resp.Repos = repos
+					}
 				}
-			}
 
-			// Squad-leader briefing injection for quick-create tasks. When
-			// the user picked a squad in the modal, the task runs on the
-			// squad's leader agent (resolved by the handler). Surface the
-			// same Operating Protocol + Roster + user Instructions that
-			// issue-bound squad tasks see, so the leader can decide to
-			// delegate before opening the issue.
-			if resp.Agent != nil && qc.SquadID != "" {
-				wsUUID, wsErr := util.ParseUUID(qc.WorkspaceID)
-				squadUUID, sqErr := util.ParseUUID(qc.SquadID)
-				if wsErr == nil && sqErr == nil {
-					if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
-						ID:          squadUUID,
-						WorkspaceID: wsUUID,
-					}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
-						if strings.TrimSpace(resp.Agent.Instructions) == "" {
-							resp.Agent.Instructions = briefing
-						} else {
-							resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
+				// Squad-leader briefing injection for quick-create tasks. When
+				// the user picked a squad in the modal, the task runs on the
+				// squad's leader agent (resolved by the handler). Surface the
+				// same Operating Protocol + Roster + user Instructions that
+				// issue-bound squad tasks see, so the leader can decide to
+				// delegate before opening the issue.
+				if resp.Agent != nil && qc.SquadID != "" {
+					wsUUID, wsErr := util.ParseUUID(qc.WorkspaceID)
+					squadUUID, sqErr := util.ParseUUID(qc.SquadID)
+					if wsErr == nil && sqErr == nil {
+						if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+							ID:          squadUUID,
+							WorkspaceID: wsUUID,
+						}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
+							briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
+							if strings.TrimSpace(resp.Agent.Instructions) == "" {
+								resp.Agent.Instructions = briefing
+							} else {
+								resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
+							}
+							// Surface the squad identity to the daemon so the
+							// quick-create prompt defaults the new issue's
+							// assignee to the squad, not the leader agent.
+							resp.SquadID = uuidToString(squad.ID)
+							resp.SquadName = squad.Name
+							slog.Debug("injected squad leader briefing for quick-create",
+								"squad_id", uuidToString(squad.ID),
+								"squad_name", squad.Name,
+								"leader_agent_id", resp.Agent.ID,
+							)
 						}
-						// Surface the squad identity to the daemon so the
-						// quick-create prompt defaults the new issue's
-						// assignee to the squad, not the leader agent.
-						resp.SquadID = uuidToString(squad.ID)
-						resp.SquadName = squad.Name
-						slog.Debug("injected squad leader briefing for quick-create",
-							"squad_id", uuidToString(squad.ID),
-							"squad_name", squad.Name,
-							"leader_agent_id", resp.Agent.ID,
-						)
 					}
 				}
 			}
 		}
-	}
 	}
 
 	// Workspace isolation check: the daemon uses this response's workspace_id

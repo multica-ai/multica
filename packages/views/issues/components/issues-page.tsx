@@ -21,6 +21,8 @@ import { PageHeader } from "../../layout/page-header";
 import { IssuesHeader } from "./issues-header";
 import { BoardView } from "./board-view";
 import { ListView } from "./list-view";
+import { SwimlaneBoardView } from "./swimlane-board-view";
+import { TreeView } from "./tree-view";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import { useT } from "../../i18n";
 
@@ -41,6 +43,7 @@ export function IssuesPage() {
   const includeNoProject = useIssueViewStore((s) => s.includeNoProject);
   const labelFilters = useIssueViewStore((s) => s.labelFilters);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
+  const usesListLayout = viewMode === "list" || viewMode === "tree";
 
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(() => {
     const filter: AssigneeGroupedIssuesFilter = {
@@ -118,7 +121,7 @@ export function IssuesPage() {
 
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
-    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position">) => {
+    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "parent_issue_id" | "position">) => {
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
         {
@@ -153,7 +156,7 @@ export function IssuesPage() {
             <Skeleton className="h-8 w-8 rounded-md" />
           </div>
         </div>
-        {viewMode === "list" ? (
+        {usesListLayout ? (
           <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
             {Array.from({ length: 4 }).map((_, i) => (
               <Skeleton key={i} className="h-10 w-full rounded-lg" />
@@ -210,12 +213,22 @@ export function IssuesPage() {
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
               />
+            ) : viewMode === "swimlane" ? (
+              <SwimlaneBoardView
+                issues={issues}
+                allIssues={scopedIssues}
+                visibleStatuses={visibleStatuses}
+                onMoveIssue={handleMoveIssue}
+                childProgressMap={childProgressMap}
+              />
+            ) : viewMode === "tree" ? (
+              <TreeView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} />
             ) : (
               <ListView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} />
             )}
           </div>
         )}
-        {viewMode === "list" && <BatchActionToolbar />}
+        {usesListLayout && <BatchActionToolbar />}
       </ViewStoreProvider>
     </div>
   );

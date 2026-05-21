@@ -15,6 +15,7 @@ import { sortIssues } from "../utils/sort";
 import { StatusHeading } from "./status-heading";
 import { ListRow, type ChildProgress } from "./list-row";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
+import { buildIssueTreeRows, type IssueTreeRow } from "../utils/issue-hierarchy";
 import { useT } from "../../i18n";
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
@@ -26,6 +27,7 @@ export function ListView({
   myIssuesScope,
   myIssuesFilter,
   projectId,
+  tree = false,
 }: {
   issues: Issue[];
   visibleStatuses: IssueStatus[];
@@ -35,6 +37,8 @@ export function ListView({
   myIssuesFilter?: MyIssuesFilter;
   /** When set, the per-section "+" pre-fills the project on the create form. */
   projectId?: string;
+  /** Render parent/child hierarchy inside each status section. */
+  tree?: boolean;
 }) {
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
@@ -87,6 +91,8 @@ export function ListView({
             key={status}
             status={status}
             issues={issuesByStatus.get(status) ?? []}
+            allIssues={issues}
+            tree={tree}
             childProgressMap={childProgressMap}
             myIssuesOpts={myIssuesOpts}
             projectId={projectId}
@@ -100,15 +106,19 @@ export function ListView({
 function StatusAccordionItem({
   status,
   issues,
+  allIssues,
   childProgressMap,
   myIssuesOpts,
   projectId,
+  tree,
 }: {
   status: IssueStatus;
   issues: Issue[];
+  allIssues: Issue[];
   childProgressMap: Map<string, ChildProgress>;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
   projectId?: string;
+  tree: boolean;
 }) {
   const { t } = useT("issues");
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
@@ -117,6 +127,13 @@ function StatusAccordionItem({
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
     status,
     myIssuesOpts,
+  );
+  const rows = useMemo<IssueTreeRow[]>(
+    () =>
+      tree
+        ? buildIssueTreeRows(issues, allIssues)
+        : issues.map((issue) => ({ issue, depth: 0 })),
+    [allIssues, issues, tree],
   );
 
   const issueIds = issues.map((i) => i.id);
@@ -173,8 +190,14 @@ function StatusAccordionItem({
       <Accordion.Panel className="pt-1">
         {issues.length > 0 ? (
           <>
-            {issues.map((issue) => (
-              <ListRow key={issue.id} issue={issue} childProgress={childProgressMap.get(issue.id)} />
+            {rows.map(({ issue, depth, parentIssue }) => (
+              <ListRow
+                key={issue.id}
+                issue={issue}
+                depth={depth}
+                parentIssue={parentIssue}
+                childProgress={childProgressMap.get(issue.id)}
+              />
             ))}
             {hasMore && (
               <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />

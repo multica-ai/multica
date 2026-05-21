@@ -2218,6 +2218,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ProjectID:               task.ProjectID,
 		ProjectTitle:            task.ProjectTitle,
 		ProjectResources:        convertProjectResourcesForEnv(task.ProjectResources),
+		ProjectWorkdirPolicy:    task.ProjectWorkdirPolicy,
+		ProjectCanonicalWorkdir: task.ProjectCanonicalWorkdir,
 		ChatSessionID:           task.ChatSessionID,
 		AutopilotRunID:          task.AutopilotRunID,
 		AutopilotID:             task.AutopilotID,
@@ -2307,15 +2309,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// per-agent. When one daemon hosts multiple agents, slots index shared
 	// daemon-level resources such as GPUs.
 	agentEnv := map[string]string{
-		"MULTICA_TOKEN":        d.client.Token(),
-		"MULTICA_SERVER_URL":   d.cfg.ServerBaseURL,
-		"MULTICA_DAEMON_PORT":  fmt.Sprintf("%d", d.cfg.HealthPort),
-		"MULTICA_WORKSPACE_ID": task.WorkspaceID,
-		"MULTICA_AGENT_NAME":   agentName,
+		"MULTICA_TOKEN":            d.client.Token(),
+		"MULTICA_SERVER_URL":       d.cfg.ServerBaseURL,
+		"MULTICA_DAEMON_PORT":      fmt.Sprintf("%d", d.cfg.HealthPort),
+		"MULTICA_WORKSPACE_ID":     task.WorkspaceID,
+		"MULTICA_AGENT_NAME":       agentName,
 		"MULTICA_AGENT_ID":         task.AgentID,
 		"MULTICA_AGENT_RUNTIME_ID": task.RuntimeID,
 		"MULTICA_TASK_ID":          task.ID,
-		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
+		"MULTICA_TASK_SLOT":        strconv.Itoa(slot),
 	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID

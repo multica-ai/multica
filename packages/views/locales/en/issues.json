@@ -76,10 +76,14 @@
   },
   "view": {
     "tooltip_board": "Board view",
+    "tooltip_swimlane": "Swimlane board",
     "tooltip_list": "List view",
+    "tooltip_tree": "Tree view",
     "section": "View",
     "board": "Board",
-    "list": "List"
+    "swimlane": "Swimlane",
+    "list": "List",
+    "tree": "Tree"
   },
   "actor_issues": {
     "scope": {
@@ -115,7 +119,9 @@
     "show_column": "Show column",
     "add_issue_tooltip": "Add issue",
     "empty_column": "No issues",
-    "empty_grouping": "No matching issues"
+    "empty_grouping": "No matching issues",
+    "unparented_lane": "No parent",
+    "missing_parent_lane": "Parent outside this page"
   },
   "detail": {
     "not_found": "This issue does not exist or has been deleted in this workspace.",
@@ -247,6 +253,8 @@
     "send_tooltip": "Send",
     "expand_tooltip": "Expand",
     "collapse_tooltip": "Collapse",
+    "show_more": "Show more",
+    "show_less": "Show less",
     "resolve": {
       "resolve_action": "Resolve thread",
       "unresolve_action": "Unresolve thread",

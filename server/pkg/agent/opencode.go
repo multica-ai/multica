@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 // overridden by user-configured custom_args.
 var opencodeBlockedArgs = map[string]blockedArgMode{
 	"--format": blockedWithValue, // json output format for daemon communication
+	"--dir":    blockedWithValue, // task workdir namespace is daemon-controlled
 }
 
 // opencodeBackend implements Backend by spawning `opencode run --format json`
@@ -49,21 +51,10 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	args := []string{"run", "--format", "json"}
-	if opts.Model != "" {
-		args = append(args, "--model", opts.Model)
-	}
-	if opts.SystemPrompt != "" {
-		args = append(args, "--prompt", opts.SystemPrompt)
-	}
 	if opts.MaxTurns > 0 {
 		b.cfg.Logger.Warn("opencode does not support --max-turns; ignoring", "maxTurns", opts.MaxTurns)
 	}
-	if opts.ResumeSessionID != "" {
-		args = append(args, "--session", opts.ResumeSessionID)
-	}
-	args = append(args, filterCustomArgs(opts.CustomArgs, opencodeBlockedArgs, b.cfg.Logger)...)
-	args = append(args, prompt)
+	args := buildOpenCodeArgs(prompt, opts, b.cfg.Logger)
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	hideAgentWindow(cmd)
@@ -73,9 +64,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		cmd.Dir = opts.Cwd
 	}
 
-	env := buildEnv(b.cfg.Env)
-	// Auto-approve all tool use in daemon mode.
-	env = append(env, `OPENCODE_PERMISSION={"*":"allow"}`)
+	env := buildOpenCodeEnv(b.cfg.Env, opts.Cwd)
 	cmd.Env = env
 
 	stdout, err := cmd.StdoutPipe()
@@ -90,7 +79,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		return nil, fmt.Errorf("start opencode: %w", err)
 	}
 
-	b.cfg.Logger.Info("opencode started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info("opencode started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "pwd", envValue(env, "PWD"), "model", opts.Model)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -149,6 +138,63 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func buildOpenCodeArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
+	args := []string{"run", "--format", "json"}
+	if opts.Model != "" {
+		args = append(args, "--model", opts.Model)
+	}
+	if opts.SystemPrompt != "" {
+		args = append(args, "--prompt", opts.SystemPrompt)
+	}
+	if opts.ResumeSessionID != "" {
+		args = append(args, "--session", opts.ResumeSessionID)
+	}
+	if opts.Cwd != "" {
+		args = append(args, "--dir", opts.Cwd)
+	}
+	args = append(args, filterCustomArgs(opts.CustomArgs, opencodeBlockedArgs, defaultLogger(logger))...)
+	args = append(args, prompt)
+	return args
+}
+
+func buildOpenCodeEnv(extra map[string]string, cwd string) []string {
+	env := buildEnv(extra)
+	if cwd != "" {
+		env = setEnvValue(env, "PWD", cwd)
+	}
+	// Auto-approve all tool use in daemon mode.
+	return setEnvValue(env, "OPENCODE_PERMISSION", `{"*":"allow"}`)
+}
+
+func setEnvValue(env []string, key, value string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		entryKey, _, _ := strings.Cut(entry, "=")
+		if entryKey == key {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return append(out, key+"="+value)
+}
+
+func envValue(env []string, key string) string {
+	for i := len(env) - 1; i >= 0; i-- {
+		entryKey, value, ok := strings.Cut(env[i], "=")
+		if ok && entryKey == key {
+			return value
+		}
+	}
+	return ""
+}
+
+func defaultLogger(logger *slog.Logger) *slog.Logger {
+	if logger != nil {
+		return logger
+	}
+	return slog.Default()
 }
 
 // ── Event handlers ──

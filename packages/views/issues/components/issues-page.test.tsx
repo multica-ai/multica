@@ -159,7 +159,7 @@ vi.mock("@multica/core/issues/config", () => ({
 
 // Mock view store
 const mockViewState = {
-  viewMode: "board" as "board" | "list",
+  viewMode: "board" as "board" | "swimlane" | "list" | "tree",
   grouping: "status" as "status" | "assignee",
   statusFilters: [] as string[],
   priorityFilters: [] as string[],
@@ -249,10 +249,10 @@ vi.mock("@multica/core/issues/stores/issues-scope-store", () => ({
 vi.mock("@multica/core/issues/stores/selection-store", () => ({
   useIssueSelectionStore: Object.assign(
     (selector?: any) => {
-      const state = { selectedIds: new Set(), toggle: vi.fn(), clear: vi.fn(), setAll: vi.fn() };
+      const state = { selectedIds: new Set(), toggle: vi.fn(), select: vi.fn(), deselect: vi.fn(), clear: vi.fn(), setAll: vi.fn() };
       return selector ? selector(state) : state;
     },
-    { getState: () => ({ selectedIds: new Set(), toggle: vi.fn(), clear: vi.fn(), setAll: vi.fn() }) },
+    { getState: () => ({ selectedIds: new Set(), toggle: vi.fn(), select: vi.fn(), deselect: vi.fn(), clear: vi.fn(), setAll: vi.fn() }) },
   ),
 }));
 
@@ -409,6 +409,87 @@ const mockIssues: Issue[] = [
     priority: "medium",
     assignee_type: "squad",
     assignee_id: "squad-1",
+    creator_type: "member",
+    creator_id: "user-1",
+    start_date: null,
+    due_date: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  },
+];
+
+const hierarchyIssues: Issue[] = [
+  {
+    ...issueDefaults,
+    id: "issue-parent",
+    workspace_id: "ws-1",
+    number: 10,
+    identifier: "TES-10",
+    title: "Parent epic",
+    description: null,
+    status: "todo",
+    priority: "high",
+    assignee_type: "member",
+    assignee_id: "user-1",
+    creator_type: "member",
+    creator_id: "user-1",
+    start_date: null,
+    due_date: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  },
+  {
+    ...issueDefaults,
+    id: "issue-child-todo",
+    workspace_id: "ws-1",
+    number: 11,
+    identifier: "TES-11",
+    title: "Child todo",
+    description: null,
+    status: "todo",
+    priority: "medium",
+    assignee_type: "agent",
+    assignee_id: "agent-1",
+    creator_type: "member",
+    creator_id: "user-1",
+    parent_issue_id: "issue-parent",
+    start_date: null,
+    due_date: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  },
+  {
+    ...issueDefaults,
+    id: "issue-child-review",
+    workspace_id: "ws-1",
+    number: 12,
+    identifier: "TES-12",
+    title: "Child review",
+    description: null,
+    status: "in_review",
+    priority: "medium",
+    assignee_type: "agent",
+    assignee_id: "agent-1",
+    creator_type: "member",
+    creator_id: "user-1",
+    parent_issue_id: "issue-parent",
+    start_date: null,
+    due_date: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  },
+  {
+    ...issueDefaults,
+    id: "issue-standalone",
+    workspace_id: "ws-1",
+    number: 13,
+    identifier: "TES-13",
+    title: "Standalone issue",
+    description: null,
+    status: "todo",
+    priority: "low",
+    assignee_type: null,
+    assignee_id: null,
     creator_type: "member",
     creator_id: "user-1",
     start_date: null,
@@ -617,5 +698,40 @@ describe("IssuesPage (shared)", () => {
     await screen.findByText("Implement auth");
     expect(screen.queryByText("Squad task")).not.toBeInTheDocument();
     expect(screen.queryByText("Design landing page")).not.toBeInTheDocument();
+  });
+
+  it("renders tree view with child rows carrying parent context", async () => {
+    mockViewState.viewMode = "tree";
+    mockListIssues.mockImplementation((params: any) =>
+      Promise.resolve({
+        issues: hierarchyIssues.filter((i) => i.status === params?.status),
+        total: hierarchyIssues.filter((i) => i.status === params?.status).length,
+      }),
+    );
+
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findByText("Parent epic");
+    expect(screen.getByText("Child todo")).toBeInTheDocument();
+    expect(screen.getByText("Child review")).toBeInTheDocument();
+    expect(screen.getAllByTitle("Parent: TES-10 Parent epic").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("renders swimlane view with parent lanes and standalone lane", async () => {
+    mockViewState.viewMode = "swimlane";
+    mockListIssues.mockImplementation((params: any) =>
+      Promise.resolve({
+        issues: hierarchyIssues.filter((i) => i.status === params?.status),
+        total: hierarchyIssues.filter((i) => i.status === params?.status).length,
+      }),
+    );
+
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findByText("Parent epic");
+    expect(screen.getByText("Child todo")).toBeInTheDocument();
+    expect(screen.getByText("Child review")).toBeInTheDocument();
+    expect(screen.getByText("Standalone issue")).toBeInTheDocument();
+    expect(screen.getByText("No parent")).toBeInTheDocument();
   });
 });

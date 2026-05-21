@@ -9,7 +9,7 @@ import { ALL_STATUSES } from "../config";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
-export type ViewMode = "board" | "list";
+export type ViewMode = "board" | "swimlane" | "list" | "tree";
 export type IssueGrouping = "status" | "assignee";
 export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title";
 export type SortDirection = "asc" | "desc";

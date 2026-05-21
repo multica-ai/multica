@@ -41,7 +41,8 @@
     "preview_too_large": "File is too large to preview. Please download.",
     "preview_unsupported": "This file type can't be previewed.",
     "close": "Close",
-    "open_in_new_tab": "Open in new tab"
+    "open_in_new_tab": "Open in new tab",
+    "remove": "Remove attachment"
   },
   "link_hover": {
     "copy_link": "Copy link",

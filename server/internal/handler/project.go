@@ -17,19 +17,21 @@ import (
 )
 
 type ProjectResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	Title       string  `json:"title"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-	Status      string  `json:"status"`
-	Priority    string  `json:"priority"`
-	LeadType    *string `json:"lead_type"`
-	LeadID      *string `json:"lead_id"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
-	IssueCount  int64   `json:"issue_count"`
-	DoneCount   int64   `json:"done_count"`
+	ID               string  `json:"id"`
+	WorkspaceID      string  `json:"workspace_id"`
+	Title            string  `json:"title"`
+	Description      *string `json:"description"`
+	Icon             *string `json:"icon"`
+	Status           string  `json:"status"`
+	Priority         string  `json:"priority"`
+	LeadType         *string `json:"lead_type"`
+	LeadID           *string `json:"lead_id"`
+	WorkdirPolicy    string  `json:"workdir_policy"`
+	CanonicalWorkdir *string `json:"canonical_workdir"`
+	CreatedAt        string  `json:"created_at"`
+	UpdatedAt        string  `json:"updated_at"`
+	IssueCount       int64   `json:"issue_count"`
+	DoneCount        int64   `json:"done_count"`
 	// ResourceCount is a breadcrumb pointing at the sub-collection at
 	// /api/projects/{id}/resources. Resources themselves stay out of this
 	// payload to keep parent metadata and child collections separate; clients
@@ -39,17 +41,19 @@ type ProjectResponse struct {
 
 func projectToResponse(p db.Project) ProjectResponse {
 	return ProjectResponse{
-		ID:          uuidToString(p.ID),
-		WorkspaceID: uuidToString(p.WorkspaceID),
-		Title:       p.Title,
-		Description: textToPtr(p.Description),
-		Icon:        textToPtr(p.Icon),
-		Status:      p.Status,
-		Priority:    p.Priority,
-		LeadType:    textToPtr(p.LeadType),
-		LeadID:      uuidToPtr(p.LeadID),
-		CreatedAt:   timestampToString(p.CreatedAt),
-		UpdatedAt:   timestampToString(p.UpdatedAt),
+		ID:               uuidToString(p.ID),
+		WorkspaceID:      uuidToString(p.WorkspaceID),
+		Title:            p.Title,
+		Description:      textToPtr(p.Description),
+		Icon:             textToPtr(p.Icon),
+		Status:           p.Status,
+		Priority:         p.Priority,
+		LeadType:         textToPtr(p.LeadType),
+		LeadID:           uuidToPtr(p.LeadID),
+		WorkdirPolicy:    p.WorkdirPolicy,
+		CanonicalWorkdir: textToPtr(p.CanonicalWorkdir),
+		CreatedAt:        timestampToString(p.CreatedAt),
+		UpdatedAt:        timestampToString(p.UpdatedAt),
 	}
 }
 
@@ -70,14 +74,16 @@ func (h *Handler) loadProjectResourceCount(ctx context.Context, projectID pgtype
 }
 
 type CreateProjectRequest struct {
-	Title       string                                `json:"title"`
-	Description *string                               `json:"description"`
-	Icon        *string                               `json:"icon"`
-	Status      string                                `json:"status"`
-	Priority    string                                `json:"priority"`
-	LeadType    *string                               `json:"lead_type"`
-	LeadID      *string                               `json:"lead_id"`
-	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
+	Title            string                                `json:"title"`
+	Description      *string                               `json:"description"`
+	Icon             *string                               `json:"icon"`
+	Status           string                                `json:"status"`
+	Priority         string                                `json:"priority"`
+	LeadType         *string                               `json:"lead_type"`
+	LeadID           *string                               `json:"lead_id"`
+	WorkdirPolicy    *string                               `json:"workdir_policy"`
+	CanonicalWorkdir *string                               `json:"canonical_workdir"`
+	Resources        []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
 }
 
 // CreateProjectResourceRequestPayload mirrors CreateProjectResourceRequest but
@@ -91,13 +97,51 @@ type CreateProjectResourceRequestPayload struct {
 }
 
 type UpdateProjectRequest struct {
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-	Status      *string `json:"status"`
-	Priority    *string `json:"priority"`
-	LeadType    *string `json:"lead_type"`
-	LeadID      *string `json:"lead_id"`
+	Title            *string `json:"title"`
+	Description      *string `json:"description"`
+	Icon             *string `json:"icon"`
+	Status           *string `json:"status"`
+	Priority         *string `json:"priority"`
+	LeadType         *string `json:"lead_type"`
+	LeadID           *string `json:"lead_id"`
+	WorkdirPolicy    *string `json:"workdir_policy"`
+	CanonicalWorkdir *string `json:"canonical_workdir"`
+}
+
+const (
+	projectWorkdirPolicyNone     = "none"
+	projectWorkdirPolicyAdvisory = "advisory"
+)
+
+func normalizeProjectWorkdirPolicy(policy string) (string, bool) {
+	policy = strings.TrimSpace(policy)
+	switch policy {
+	case "", projectWorkdirPolicyNone:
+		return projectWorkdirPolicyNone, true
+	case projectWorkdirPolicyAdvisory:
+		return projectWorkdirPolicyAdvisory, true
+	default:
+		return "", false
+	}
+}
+
+func normalizeProjectCanonicalWorkdir(path *string) (pgtype.Text, error) {
+	if path == nil {
+		return pgtype.Text{Valid: false}, nil
+	}
+	trimmed := strings.TrimSpace(*path)
+	if trimmed == "" {
+		return pgtype.Text{Valid: false}, nil
+	}
+	if len(trimmed) > 4096 {
+		return pgtype.Text{}, fmt.Errorf("canonical_workdir is too long")
+	}
+	for _, r := range trimmed {
+		if r < 0x20 {
+			return pgtype.Text{}, fmt.Errorf("canonical_workdir contains control characters")
+		}
+	}
+	return pgtype.Text{String: trimmed, Valid: true}, nil
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -221,6 +265,22 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	canonicalWorkdir, err := normalizeProjectCanonicalWorkdir(req.CanonicalWorkdir)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	workdirPolicy := projectWorkdirPolicyNone
+	if req.WorkdirPolicy != nil {
+		var ok bool
+		workdirPolicy, ok = normalizeProjectWorkdirPolicy(*req.WorkdirPolicy)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "workdir_policy must be one of: none, advisory")
+			return
+		}
+	} else if canonicalWorkdir.Valid {
+		workdirPolicy = projectWorkdirPolicyAdvisory
+	}
 
 	// Pre-validate every resource payload before opening a transaction so an
 	// invalid ref produces a clean 400 with no DB work.
@@ -240,14 +300,16 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	createParams := db.CreateProjectParams{
-		WorkspaceID: wsUUID,
-		Title:       req.Title,
-		Description: ptrToText(req.Description),
-		Icon:        ptrToText(req.Icon),
-		Status:      status,
-		LeadType:    leadType,
-		LeadID:      leadID,
-		Priority:    priority,
+		WorkspaceID:      wsUUID,
+		Title:            req.Title,
+		Description:      ptrToText(req.Description),
+		Icon:             ptrToText(req.Icon),
+		Status:           status,
+		LeadType:         leadType,
+		LeadID:           leadID,
+		Priority:         priority,
+		WorkdirPolicy:    workdirPolicy,
+		CanonicalWorkdir: canonicalWorkdir,
 	}
 
 	// Without resources, keep the simple non-tx path.
@@ -374,11 +436,12 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal(bodyBytes, &rawFields)
 
 	params := db.UpdateProjectParams{
-		ID:          prevProject.ID,
-		Description: prevProject.Description,
-		Icon:        prevProject.Icon,
-		LeadType:    prevProject.LeadType,
-		LeadID:      prevProject.LeadID,
+		ID:               prevProject.ID,
+		Description:      prevProject.Description,
+		Icon:             prevProject.Icon,
+		LeadType:         prevProject.LeadType,
+		LeadID:           prevProject.LeadID,
+		CanonicalWorkdir: prevProject.CanonicalWorkdir,
 	}
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
@@ -419,6 +482,29 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			params.LeadID = leadUUID
 		} else {
 			params.LeadID = pgtype.UUID{Valid: false}
+		}
+	}
+	if _, ok := rawFields["workdir_policy"]; ok {
+		if req.WorkdirPolicy == nil {
+			params.WorkdirPolicy = pgtype.Text{String: projectWorkdirPolicyNone, Valid: true}
+		} else {
+			policy, valid := normalizeProjectWorkdirPolicy(*req.WorkdirPolicy)
+			if !valid {
+				writeError(w, http.StatusBadRequest, "workdir_policy must be one of: none, advisory")
+				return
+			}
+			params.WorkdirPolicy = pgtype.Text{String: policy, Valid: true}
+		}
+	}
+	if _, ok := rawFields["canonical_workdir"]; ok {
+		canonicalWorkdir, err := normalizeProjectCanonicalWorkdir(req.CanonicalWorkdir)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		params.CanonicalWorkdir = canonicalWorkdir
+		if _, policyProvided := rawFields["workdir_policy"]; !policyProvided && canonicalWorkdir.Valid {
+			params.WorkdirPolicy = pgtype.Text{String: projectWorkdirPolicyAdvisory, Valid: true}
 		}
 	}
 	project, err := h.Queries.UpdateProject(r.Context(), params)
@@ -580,7 +666,7 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) 
 
 	query := fmt.Sprintf(`SELECT p.id, p.workspace_id, p.title, p.description, p.icon,
 		p.status, p.priority, p.lead_type, p.lead_id,
-		p.created_at, p.updated_at,
+		p.created_at, p.updated_at, p.workdir_policy, p.canonical_workdir,
 		COUNT(*) OVER() AS total_count,
 		%s AS match_source
 	FROM project p
@@ -666,6 +752,8 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 			&row.project.LeadID,
 			&row.project.CreatedAt,
 			&row.project.UpdatedAt,
+			&row.project.WorkdirPolicy,
+			&row.project.CanonicalWorkdir,
 			&row.totalCount,
 			&row.matchSource,
 		); err != nil {

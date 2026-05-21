@@ -31,7 +31,7 @@ const FILE_CARD_MARKDOWN_RE = new RegExp(
 // React NodeView
 // ---------------------------------------------------------------------------
 
-export function FileCardView({ node }: NodeViewProps) {
+export function FileCardView({ node, editor, deleteNode }: NodeViewProps) {
   const href = (node.attrs.href as string) || "";
   const filename = (node.attrs.filename as string) || "";
   const uploading = node.attrs.uploading as boolean;
@@ -64,6 +64,7 @@ export function FileCardView({ node }: NodeViewProps) {
           uploading={uploading}
           onPreview={openPreview}
           onDownload={() => openByUrl(href)}
+          onDelete={editor.isEditable ? deleteNode : undefined}
         />
       </div>
       {preview.modal}

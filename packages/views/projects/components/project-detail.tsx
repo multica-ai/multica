@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Plus, Trash2, UserMinus } from "lucide-react";
+import { Check, ChevronRight, FolderOpen, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Plus, Trash2, UserMinus } from "lucide-react";
 import { useQuery, type QueryKey } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
@@ -33,6 +33,8 @@ import { ProjectResourcesSection } from "./project-resources-section";
 import { IssuesHeader } from "../../issues/components/issues-header";
 import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
+import { SwimlaneBoardView } from "../../issues/components/swimlane-board-view";
+import { TreeView } from "../../issues/components/tree-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -146,7 +148,7 @@ function ProjectIssuesContent({
 
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
-    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position">) => {
+    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "parent_issue_id" | "position">) => {
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
         {
@@ -194,6 +196,23 @@ function ProjectIssuesContent({
           visibleStatuses={visibleStatuses}
           hiddenStatuses={hiddenStatuses}
           onMoveIssue={handleMoveIssue}
+          childProgressMap={childProgressMap}
+          myIssuesScope={scope}
+          myIssuesFilter={filter}
+          projectId={projectId}
+        />
+      ) : viewMode === "swimlane" ? (
+        <SwimlaneBoardView
+          issues={issues}
+          allIssues={projectIssues}
+          visibleStatuses={visibleStatuses}
+          onMoveIssue={handleMoveIssue}
+          childProgressMap={childProgressMap}
+        />
+      ) : viewMode === "tree" ? (
+        <TreeView
+          issues={issues}
+          visibleStatuses={visibleStatuses}
           childProgressMap={childProgressMap}
           myIssuesScope={scope}
           myIssuesFilter={filter}
@@ -317,6 +336,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [progressOpen, setProgressOpen] = useState(true);
   const [descriptionOpen, setDescriptionOpen] = useState(true);
+  const [workdirOpen, setWorkdirOpen] = useState(false);
+  const [workdirDraft, setWorkdirDraft] = useState("");
 
   // Sidebar panel
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -344,6 +365,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery) || matchesPinyin(m.name, leadQuery));
   const filteredAgents = agents.filter((a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)));
 
+  useEffect(() => {
+    setWorkdirDraft(project?.canonical_workdir ?? "");
+  }, [project?.canonical_workdir]);
+
   const handleUpdateField = useCallback(
     (data: Parameters<typeof updateProject.mutate>[0] extends { id: string } & infer R ? R : never) => {
       if (!project) return;
@@ -361,6 +386,23 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       },
     });
   }, [project, deleteProject, router, wsPaths, t]);
+
+  const handleSaveWorkdir = useCallback(() => {
+    if (!project) return;
+    const trimmed = workdirDraft.trim();
+    handleUpdateField({
+      canonical_workdir: trimmed || null,
+      workdir_policy: trimmed ? "advisory" : "none",
+    });
+    setWorkdirOpen(false);
+  }, [handleUpdateField, project, workdirDraft]);
+
+  const handleClearWorkdir = useCallback(() => {
+    if (!project) return;
+    setWorkdirDraft("");
+    handleUpdateField({ canonical_workdir: null, workdir_policy: "none" });
+    setWorkdirOpen(false);
+  }, [handleUpdateField, project]);
 
   if (isLoading) {
     return (
@@ -539,6 +581,50 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   {filteredMembers.length === 0 && filteredAgents.length === 0 && leadFilter && (
                     <div className="px-2 py-3 text-center text-sm text-muted-foreground">{t(($) => $.lead.no_results)}</div>
                   )}
+                </div>
+              </PopoverContent>
+            </Popover>
+          </PropRow>
+          <PropRow label={t(($) => $.table.workdir)}>
+            <Popover open={workdirOpen} onOpenChange={setWorkdirOpen}>
+              <PopoverTrigger
+                render={
+                  <button type="button" className="inline-flex min-w-0 items-center gap-1.5 text-xs hover:text-foreground transition-colors">
+                    <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className={cn("truncate", !project.canonical_workdir && "text-muted-foreground")}>
+                      {project.canonical_workdir || t(($) => $.workdir.not_set)}
+                    </span>
+                    {project.workdir_policy === "advisory" && project.canonical_workdir && (
+                      <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        {t(($) => $.workdir.advisory_badge)}
+                      </span>
+                    )}
+                  </button>
+                }
+              />
+              <PopoverContent align="start" className="w-80 p-3">
+                <div className="space-y-3">
+                  <div>
+                    <div className="text-sm font-medium">{t(($) => $.workdir.title)}</div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {t(($) => $.workdir.description)}
+                    </p>
+                  </div>
+                  <input
+                    type="text"
+                    value={workdirDraft}
+                    onChange={(e) => setWorkdirDraft(e.target.value)}
+                    placeholder={t(($) => $.workdir.placeholder)}
+                    className="w-full rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                  <div className="flex items-center justify-end gap-2">
+                    <Button type="button" variant="ghost" size="sm" onClick={handleClearWorkdir}>
+                      {t(($) => $.workdir.clear)}
+                    </Button>
+                    <Button type="button" size="sm" onClick={handleSaveWorkdir}>
+                      {t(($) => $.workdir.save)}
+                    </Button>
+                  </div>
                 </div>
               </PopoverContent>
             </Popover>

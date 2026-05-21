@@ -26,21 +26,23 @@ func (q *Queries) CountIssuesByProject(ctx context.Context, projectID pgtype.UUI
 const createProject = `-- name: CreateProject :one
 INSERT INTO project (
     workspace_id, title, description, icon, status,
-    lead_type, lead_id, priority
+    lead_type, lead_id, priority, workdir_policy, canonical_workdir
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
-) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, workdir_policy, canonical_workdir
 `
 
 type CreateProjectParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Title       string      `json:"title"`
-	Description pgtype.Text `json:"description"`
-	Icon        pgtype.Text `json:"icon"`
-	Status      string      `json:"status"`
-	LeadType    pgtype.Text `json:"lead_type"`
-	LeadID      pgtype.UUID `json:"lead_id"`
-	Priority    string      `json:"priority"`
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	Title            string      `json:"title"`
+	Description      pgtype.Text `json:"description"`
+	Icon             pgtype.Text `json:"icon"`
+	Status           string      `json:"status"`
+	LeadType         pgtype.Text `json:"lead_type"`
+	LeadID           pgtype.UUID `json:"lead_id"`
+	Priority         string      `json:"priority"`
+	WorkdirPolicy    string      `json:"workdir_policy"`
+	CanonicalWorkdir pgtype.Text `json:"canonical_workdir"`
 }
 
 func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error) {
@@ -53,6 +55,8 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		arg.LeadType,
 		arg.LeadID,
 		arg.Priority,
+		arg.WorkdirPolicy,
+		arg.CanonicalWorkdir,
 	)
 	var i Project
 	err := row.Scan(
@@ -67,6 +71,8 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Priority,
+		&i.WorkdirPolicy,
+		&i.CanonicalWorkdir,
 	)
 	return i, err
 }
@@ -81,7 +87,7 @@ func (q *Queries) DeleteProject(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getProject = `-- name: GetProject :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, workdir_policy, canonical_workdir FROM project
 WHERE id = $1
 `
 
@@ -100,12 +106,14 @@ func (q *Queries) GetProject(ctx context.Context, id pgtype.UUID) (Project, erro
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Priority,
+		&i.WorkdirPolicy,
+		&i.CanonicalWorkdir,
 	)
 	return i, err
 }
 
 const getProjectInWorkspace = `-- name: GetProjectInWorkspace :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, workdir_policy, canonical_workdir FROM project
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -129,6 +137,8 @@ func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWor
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Priority,
+		&i.WorkdirPolicy,
+		&i.CanonicalWorkdir,
 	)
 	return i, err
 }
@@ -169,7 +179,7 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, projectIds []pgtype.
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, workdir_policy, canonical_workdir FROM project
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
   AND ($3::text IS NULL OR priority = $3)
@@ -203,6 +213,8 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Priority,
+			&i.WorkdirPolicy,
+			&i.CanonicalWorkdir,
 		); err != nil {
 			return nil, err
 		}
@@ -223,20 +235,24 @@ UPDATE project SET
     priority = COALESCE($6, priority),
     lead_type = $7,
     lead_id = $8,
+    workdir_policy = COALESCE($9, workdir_policy),
+    canonical_workdir = $10,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, workdir_policy, canonical_workdir
 `
 
 type UpdateProjectParams struct {
-	ID          pgtype.UUID `json:"id"`
-	Title       pgtype.Text `json:"title"`
-	Description pgtype.Text `json:"description"`
-	Icon        pgtype.Text `json:"icon"`
-	Status      pgtype.Text `json:"status"`
-	Priority    pgtype.Text `json:"priority"`
-	LeadType    pgtype.Text `json:"lead_type"`
-	LeadID      pgtype.UUID `json:"lead_id"`
+	ID               pgtype.UUID `json:"id"`
+	Title            pgtype.Text `json:"title"`
+	Description      pgtype.Text `json:"description"`
+	Icon             pgtype.Text `json:"icon"`
+	Status           pgtype.Text `json:"status"`
+	Priority         pgtype.Text `json:"priority"`
+	LeadType         pgtype.Text `json:"lead_type"`
+	LeadID           pgtype.UUID `json:"lead_id"`
+	WorkdirPolicy    pgtype.Text `json:"workdir_policy"`
+	CanonicalWorkdir pgtype.Text `json:"canonical_workdir"`
 }
 
 func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error) {
@@ -249,6 +265,8 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		arg.Priority,
 		arg.LeadType,
 		arg.LeadID,
+		arg.WorkdirPolicy,
+		arg.CanonicalWorkdir,
 	)
 	var i Project
 	err := row.Scan(
@@ -263,6 +281,8 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Priority,
+		&i.WorkdirPolicy,
+		&i.CanonicalWorkdir,
 	)
 	return i, err
 }

@@ -1,15 +1,41 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestMain(m *testing.M) {
+	if os.Getenv("MULTICA_TEST_OPENCODE_HELPER") == "1" {
+		runOpenCodeTestHelper()
+		return
+	}
+	os.Exit(m.Run())
+}
+
+func runOpenCodeTestHelper() {
+	capturePath := os.Getenv("MULTICA_TEST_OPENCODE_CAPTURE")
+	if capturePath != "" {
+		cwd, _ := os.Getwd()
+		payload := map[string]any{
+			"args": os.Args[1:],
+			"pwd":  os.Getenv("PWD"),
+			"cwd":  cwd,
+		}
+		data, _ := json.Marshal(payload)
+		_ = os.WriteFile(capturePath, data, 0o600)
+	}
+	fmt.Println(`{"type":"text","sessionID":"ses_opencode_helper","part":{"type":"text","text":"ok"}}`)
+	os.Exit(0)
+}
 
 func TestNewReturnsOpencodeBackend(t *testing.T) {
 	t.Parallel()
@@ -20,6 +46,77 @@ func TestNewReturnsOpencodeBackend(t *testing.T) {
 	if _, ok := b.(*opencodeBackend); !ok {
 		t.Fatalf("expected *opencodeBackend, got %T", b)
 	}
+}
+
+func TestOpencodeExecutePinsTaskWorkdirForAttachMode(t *testing.T) {
+	t.Parallel()
+
+	taskDir := t.TempDir()
+	capturePath := filepath.Join(t.TempDir(), "opencode-capture.json")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	backend := &opencodeBackend{cfg: Config{
+		ExecutablePath: os.Args[0],
+		Logger:         logger,
+		Env: map[string]string{
+			"MULTICA_TEST_OPENCODE_HELPER":  "1",
+			"MULTICA_TEST_OPENCODE_CAPTURE": capturePath,
+			"PWD":                           "/workspace",
+		},
+	}}
+
+	session, err := backend.Execute(context.Background(), "hello", ExecOptions{
+		Cwd: taskDir,
+		CustomArgs: []string{
+			"--attach", "http://127.0.0.1:4096",
+			"--dir", ".",
+			"--format", "text",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("result status = %q, error = %q", result.Status, result.Error)
+	}
+
+	var capture struct {
+		Args []string `json:"args"`
+		PWD  string   `json:"pwd"`
+		Cwd  string   `json:"cwd"`
+	}
+	data, err := os.ReadFile(capturePath)
+	if err != nil {
+		t.Fatalf("read capture: %v", err)
+	}
+	if err := json.Unmarshal(data, &capture); err != nil {
+		t.Fatalf("decode capture: %v", err)
+	}
+
+	if capture.Cwd != taskDir {
+		t.Fatalf("process cwd = %q, want %q", capture.Cwd, taskDir)
+	}
+	if capture.PWD != taskDir {
+		t.Fatalf("PWD = %q, want %q", capture.PWD, taskDir)
+	}
+	if !argsContainPair(capture.Args, "--dir", taskDir) {
+		t.Fatalf("args should contain daemon-owned --dir %q, got %#v", taskDir, capture.Args)
+	}
+	if argsContainPair(capture.Args, "--dir", ".") {
+		t.Fatalf("args should not contain user-supplied --dir ., got %#v", capture.Args)
+	}
+	if argsContainPair(capture.Args, "--format", "text") {
+		t.Fatalf("args should not contain user-supplied --format text, got %#v", capture.Args)
+	}
+}
+
+func argsContainPair(args []string, flag, value string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == value {
+			return true
+		}
+	}
+	return false
 }
 
 // ── Text event tests ──

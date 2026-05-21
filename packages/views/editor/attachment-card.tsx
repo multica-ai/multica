@@ -16,7 +16,7 @@
  * single-purpose row UI.
  */
 
-import { Download, Eye, FileText, Loader2 } from "lucide-react";
+import { Download, Eye, FileText, Loader2, Trash2 } from "lucide-react";
 import { useT } from "../i18n";
 import { getPreviewKind } from "./utils/preview";
 
@@ -25,8 +25,10 @@ interface AttachmentCardChromeProps {
   uploading?: boolean;
   canPreview: boolean;
   canDownload: boolean;
+  canDelete?: boolean;
   onPreview: () => void;
   onDownload: () => void;
+  onDelete?: () => void;
 }
 
 function AttachmentCardChrome({
@@ -34,8 +36,10 @@ function AttachmentCardChrome({
   uploading,
   canPreview,
   canDownload,
+  canDelete,
   onPreview,
   onDownload,
+  onDelete,
 }: AttachmentCardChromeProps) {
   const { t } = useT("editor");
   return (
@@ -85,6 +89,21 @@ function AttachmentCardChrome({
           <Download className="size-3.5" />
         </button>
       )}
+      {!uploading && canDelete && onDelete && (
+        <button
+          type="button"
+          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+          title={t(($) => $.attachment.remove)}
+          aria-label={t(($) => $.attachment.remove)}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onDelete();
+          }}
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      )}
     </div>
   );
 }
@@ -108,6 +127,8 @@ export interface AttachmentCardProps {
   onPreview: () => void;
   /** Pressed when the Download button is clicked. */
   onDownload: () => void;
+  /** Optional remove button, used by editable comment/file-card surfaces. */
+  onDelete?: () => void;
 }
 
 export function AttachmentCard({
@@ -118,6 +139,7 @@ export function AttachmentCard({
   uploading,
   onPreview,
   onDownload,
+  onDelete,
 }: AttachmentCardProps) {
   const kind = filename ? getPreviewKind(contentType, filename) : null;
   // Media kinds (pdf/video/audio) are previewable from a URL alone — the
@@ -137,8 +159,10 @@ export function AttachmentCard({
         uploading={uploading}
         canPreview={canPreview}
         canDownload={!!href}
+        canDelete={!!onDelete}
         onPreview={onPreview}
         onDownload={onDownload}
+        onDelete={onDelete}
       />
     </div>
   );

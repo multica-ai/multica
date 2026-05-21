@@ -522,6 +522,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/tasks", h.ListAgentTasks)
 					r.Get("/skills", h.ListAgentSkills)
 					r.Put("/skills", h.SetAgentSkills)
+					r.Get("/runtime-binding", h.GetMyAgentRuntimeBinding)
+					r.Put("/runtime-binding", h.UpsertMyAgentRuntimeBinding)
+					r.Delete("/runtime-binding", h.DeleteMyAgentRuntimeBinding)
 				})
 			})
 
@@ -543,6 +546,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetSkill)
 					r.Put("/", h.UpdateSkill)
 					r.Delete("/", h.DeleteSkill)
+					r.Post("/sync", h.SyncSkillFromOrigin)
 					r.Get("/files", h.ListSkillFiles)
 					r.Put("/files", h.UpsertSkillFile)
 					r.Delete("/files/{fileId}", h.DeleteSkillFile)

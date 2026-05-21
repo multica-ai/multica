@@ -12,8 +12,10 @@ import {
   FolderKanban,
   FolderMinus,
   List,
+  ListTree,
   SignalHigh,
   SlidersHorizontal,
+  TableRowsSplit,
   Tag,
   User,
   UserMinus,
@@ -56,6 +58,7 @@ import {
   SORT_OPTIONS,
   GROUPING_OPTIONS,
   CARD_PROPERTY_OPTIONS,
+  type ViewMode,
   type ActorFilterValue,
 } from "@multica/core/issues/stores/view-store";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
@@ -598,6 +601,18 @@ export function IssueDisplayControls({
   };
   const sortLabel = t(($) => $.display[SORT_LABEL_KEY[sortBy]]);
   const groupingLabel = t(($) => $.display[GROUPING_LABEL_KEY[grouping]]);
+  const VIEW_TOOLTIP_KEY: Record<ViewMode, "tooltip_board" | "tooltip_swimlane" | "tooltip_list" | "tooltip_tree"> = {
+    board: "tooltip_board",
+    swimlane: "tooltip_swimlane",
+    list: "tooltip_list",
+    tree: "tooltip_tree",
+  };
+  const viewIcon = {
+    board: <Columns3 className="size-4" />,
+    swimlane: <TableRowsSplit className="size-4" />,
+    list: <List className="size-4" />,
+    tree: <ListTree className="size-4" />,
+  } satisfies Record<ViewMode, React.ReactNode>;
 
   return (
     <div className="flex items-center gap-1">
@@ -922,18 +937,14 @@ export function IssueDisplayControls({
                   <TooltipTrigger
                     render={
                       <Button variant="outline" size="icon-sm" className="text-muted-foreground">
-                        {viewMode === "board" ? (
-                          <Columns3 className="size-4" />
-                        ) : (
-                          <List className="size-4" />
-                        )}
+                        {viewIcon[viewMode]}
                       </Button>
                     }
                   />
                 }
               />
-              <TooltipContent side="bottom">
-                {viewMode === "board" ? t(($) => $.view.tooltip_board) : t(($) => $.view.tooltip_list)}
+            <TooltipContent side="bottom">
+                {t(($) => $.view[VIEW_TOOLTIP_KEY[viewMode]])}
               </TooltipContent>
             </Tooltip>
             <DropdownMenuContent align="end" className="w-auto">
@@ -943,9 +954,17 @@ export function IssueDisplayControls({
                   <Columns3 />
                   {t(($) => $.view.board)}
                 </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => act.setViewMode("swimlane")}>
+                  <TableRowsSplit />
+                  {t(($) => $.view.swimlane)}
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => act.setViewMode("list")}>
                   <List />
                   {t(($) => $.view.list)}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => act.setViewMode("tree")}>
+                  <ListTree />
+                  {t(($) => $.view.tree)}
                 </DropdownMenuItem>
               </DropdownMenuGroup>
             </DropdownMenuContent>

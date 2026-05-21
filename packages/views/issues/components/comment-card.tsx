@@ -121,7 +121,17 @@ function DeleteCommentDialog({
 // Standalone attachment list — renders attachments not already in the markdown
 // ---------------------------------------------------------------------------
 
-export function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
+export function AttachmentList({
+  attachments,
+  content,
+  className,
+  onRemove,
+}: {
+  attachments?: Attachment[];
+  content?: string;
+  className?: string;
+  onRemove?: (attachmentId: string) => void;
+}) {
   const download = useDownloadAttachment();
   const preview = useAttachmentPreview();
   if (!attachments?.length) return null;
@@ -157,9 +167,84 @@ export function AttachmentList({ attachments, content, className }: { attachment
           href={a.url}
           onPreview={() => preview.tryOpen({ kind: "full", attachment: a })}
           onDownload={() => download(a.id)}
+          onDelete={onRemove ? () => onRemove(a.id) : undefined}
         />
       ))}
       {preview.modal}
+    </div>
+  );
+}
+
+const LONG_COMMENT_CHAR_THRESHOLD = 1600;
+const LONG_COMMENT_LINE_THRESHOLD = 18;
+
+function isLongCommentContent(content: string): boolean {
+  return (
+    content.length > LONG_COMMENT_CHAR_THRESHOLD ||
+    content.split("\n").length > LONG_COMMENT_LINE_THRESHOLD
+  );
+}
+
+function collectActiveAttachmentIds(
+  content: string,
+  attachments: Attachment[],
+  retainedStandaloneIds?: Set<string> | null,
+): string[] {
+  const ids = new Set<string>();
+  for (const attachment of attachments) {
+    if (content.includes(attachment.url)) ids.add(attachment.id);
+  }
+  for (const id of retainedStandaloneIds ?? []) ids.add(id);
+  return [...ids];
+}
+
+function sameIdSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((id) => set.has(id));
+}
+
+function initialStandaloneAttachmentIds(entry: TimelineEntry): Set<string> {
+  const content = entry.content ?? "";
+  return new Set(
+    (entry.attachments ?? [])
+      .filter((attachment) => !content.includes(attachment.url))
+      .map((attachment) => attachment.id),
+  );
+}
+
+function LongCommentContent({
+  content,
+  attachments,
+  className,
+}: {
+  content: string;
+  attachments?: Attachment[];
+  className?: string;
+}) {
+  const { t } = useT("issues");
+  const [expanded, setExpanded] = useState(false);
+  const isLong = isLongCommentContent(content);
+
+  return (
+    <div className={className}>
+      <div className={cn("relative", isLong && !expanded && "max-h-80 overflow-hidden")}>
+        <ReadonlyContent content={content} attachments={attachments} />
+        {isLong && !expanded && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-b from-transparent to-card" />
+        )}
+      </div>
+      {isLong && (
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          className="mt-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+        >
+          {expanded
+            ? t(($) => $.comment.show_less)
+            : t(($) => $.comment.show_more)}
+        </button>
+      )}
     </div>
   );
 }
@@ -197,6 +282,7 @@ function CommentRow({
   // them to the comment (otherwise they'd remain orphaned at the issue level
   // and disappear after refresh).
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
+  const [retainedStandaloneIds, setRetainedStandaloneIds] = useState<Set<string> | null>(null);
   const editorAttachments = pendingAttachments.length > 0
     ? [...(entry.attachments ?? []), ...pendingAttachments]
     : entry.attachments;
@@ -234,6 +320,7 @@ function CommentRow({
 
   const startEdit = () => {
     cancelledRef.current = false;
+    setRetainedStandaloneIds(initialStandaloneAttachmentIds(entry));
     setEditing(true);
   };
 
@@ -241,6 +328,7 @@ function CommentRow({
     cancelledRef.current = true;
     setEditing(false);
     setPendingAttachments([]);
+    setRetainedStandaloneIds(null);
     clearEditDraft(editDraftKey);
   };
 
@@ -250,19 +338,25 @@ function CommentRow({
       ?.getMarkdown()
       ?.replace(/(\n\s*)+$/, "")
       .trim();
-    if (!trimmed || trimmed === (entry.content ?? "").trim()) {
+    if (!trimmed) return;
+    const activeIds = collectActiveAttachmentIds(
+      trimmed,
+      [...(entry.attachments ?? []), ...pendingAttachments],
+      retainedStandaloneIds,
+    );
+    const attachmentsChanged = !sameIdSet(activeIds, (entry.attachments ?? []).map((a) => a.id));
+    if (trimmed === (entry.content ?? "").trim() && !attachmentsChanged) {
       setEditing(false);
       setPendingAttachments([]);
+      setRetainedStandaloneIds(null);
       clearEditDraft(editDraftKey);
       return;
     }
-    const activeIds = pendingAttachments
-      .filter((a) => trimmed.includes(a.url))
-      .map((a) => a.id);
     try {
-      await onEdit(entry.id, trimmed, activeIds.length > 0 ? activeIds : undefined);
+      await onEdit(entry.id, trimmed, activeIds);
       setEditing(false);
       setPendingAttachments([]);
+      setRetainedStandaloneIds(null);
       clearEditDraft(editDraftKey);
     } catch (err) {
       toast.error(
@@ -276,6 +370,9 @@ function CommentRow({
   const reactions = entry.reactions ?? [];
   const contentText = entry.content ?? "";
   const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
+  const standaloneEditAttachments = (entry.attachments ?? []).filter((attachment) =>
+    retainedStandaloneIds?.has(attachment.id),
+  );
 
   return (
     <div className={`py-3${isTemp ? " opacity-60" : ""}`}>
@@ -371,10 +468,26 @@ function CommentRow({
             />
           </div>
           <div className="flex items-center justify-between mt-2">
-            <FileUploadButton
-              size="sm"
-              onSelect={(file) => editEditorRef.current?.uploadFile(file)}
-            />
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              {standaloneEditAttachments.length > 0 && (
+                <AttachmentList
+                  attachments={standaloneEditAttachments}
+                  className="max-w-full"
+                  onRemove={(attachmentId) =>
+                    setRetainedStandaloneIds((ids) => {
+                      const next = new Set(ids ?? []);
+                      next.delete(attachmentId);
+                      return next;
+                    })
+                  }
+                />
+              )}
+              <FileUploadButton
+                size="sm"
+                multiple
+                onSelect={(file) => editEditorRef.current?.uploadFile(file)}
+              />
+            </div>
             <div className="flex items-center gap-2">
               <Button size="sm" variant="ghost" onClick={cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
               <Button size="sm" variant="outline" onClick={saveEdit}>{t(($) => $.comment.save_action)}</Button>
@@ -385,7 +498,7 @@ function CommentRow({
       ) : (
         <>
           <div className="mt-1.5 pl-8 text-sm leading-relaxed text-foreground/85">
-            <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+            <LongCommentContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8" />
           {!isTemp && (
@@ -434,6 +547,7 @@ function CommentCardImpl({
   const cancelledRef = useRef(false);
   // Pending uploads from the root-comment edit pass — same rationale as CommentRow.
   const [parentPendingAttachments, setParentPendingAttachments] = useState<Attachment[]>([]);
+  const [parentRetainedStandaloneIds, setParentRetainedStandaloneIds] = useState<Set<string> | null>(null);
   const parentEditorAttachments = parentPendingAttachments.length > 0
     ? [...(entry.attachments ?? []), ...parentPendingAttachments]
     : entry.attachments;
@@ -468,6 +582,7 @@ function CommentCardImpl({
 
   const startEdit = () => {
     cancelledRef.current = false;
+    setParentRetainedStandaloneIds(initialStandaloneAttachmentIds(entry));
     setEditing(true);
   };
 
@@ -475,6 +590,7 @@ function CommentCardImpl({
     cancelledRef.current = true;
     setEditing(false);
     setParentPendingAttachments([]);
+    setParentRetainedStandaloneIds(null);
     clearParentEditDraft(parentEditDraftKey);
   };
 
@@ -484,19 +600,25 @@ function CommentCardImpl({
       ?.getMarkdown()
       ?.replace(/(\n\s*)+$/, "")
       .trim();
-    if (!trimmed || trimmed === (entry.content ?? "").trim()) {
+    if (!trimmed) return;
+    const activeIds = collectActiveAttachmentIds(
+      trimmed,
+      [...(entry.attachments ?? []), ...parentPendingAttachments],
+      parentRetainedStandaloneIds,
+    );
+    const attachmentsChanged = !sameIdSet(activeIds, (entry.attachments ?? []).map((a) => a.id));
+    if (trimmed === (entry.content ?? "").trim() && !attachmentsChanged) {
       setEditing(false);
       setParentPendingAttachments([]);
+      setParentRetainedStandaloneIds(null);
       clearParentEditDraft(parentEditDraftKey);
       return;
     }
-    const activeIds = parentPendingAttachments
-      .filter((a) => trimmed.includes(a.url))
-      .map((a) => a.id);
     try {
-      await onEdit(entry.id, trimmed, activeIds.length > 0 ? activeIds : undefined);
+      await onEdit(entry.id, trimmed, activeIds);
       setEditing(false);
       setParentPendingAttachments([]);
+      setParentRetainedStandaloneIds(null);
       clearParentEditDraft(parentEditDraftKey);
     } catch (err) {
       toast.error(
@@ -517,6 +639,9 @@ function CommentCardImpl({
   const reactions = entry.reactions ?? [];
   const contentText = entry.content ?? "";
   const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
+  const parentStandaloneEditAttachments = (entry.attachments ?? []).filter((attachment) =>
+    parentRetainedStandaloneIds?.has(attachment.id),
+  );
 
   const isHighlighted = highlightedCommentId === entry.id;
 
@@ -669,10 +794,26 @@ function CommentCardImpl({
                   />
                 </div>
                 <div className="flex items-center justify-between mt-2">
-                  <FileUploadButton
-                    size="sm"
-                    onSelect={(file) => editEditorRef.current?.uploadFile(file)}
-                  />
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    {parentStandaloneEditAttachments.length > 0 && (
+                      <AttachmentList
+                        attachments={parentStandaloneEditAttachments}
+                        className="max-w-full"
+                        onRemove={(attachmentId) =>
+                          setParentRetainedStandaloneIds((ids) => {
+                            const next = new Set(ids ?? []);
+                            next.delete(attachmentId);
+                            return next;
+                          })
+                        }
+                      />
+                    )}
+                    <FileUploadButton
+                      size="sm"
+                      multiple
+                      onSelect={(file) => editEditorRef.current?.uploadFile(file)}
+                    />
+                  </div>
                   <div className="flex items-center gap-2">
                     <Button size="sm" variant="ghost" onClick={cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
                     <Button size="sm" variant="outline" onClick={saveEdit}>{t(($) => $.comment.save_action)}</Button>
@@ -683,7 +824,7 @@ function CommentCardImpl({
             ) : (
               <>
                 <div className="pl-10 text-sm leading-relaxed text-foreground/85">
-                  <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+                  <LongCommentContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
                 {!isTemp && (

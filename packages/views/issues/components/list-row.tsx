@@ -2,8 +2,10 @@
 
 import { memo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { CornerDownRight } from "lucide-react";
 import { AppLink } from "../../navigation";
 import type { Issue } from "@multica/core/types";
+import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -31,9 +33,13 @@ function formatDate(date: string): string {
 export const ListRow = memo(function ListRow({
   issue,
   childProgress,
+  depth = 0,
+  parentIssue,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
+  depth?: number;
+  parentIssue?: Issue;
 }) {
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(issue.id));
   const toggle = useIssueSelectionStore((s) => s.toggle);
@@ -53,13 +59,16 @@ export const ListRow = memo(function ListRow({
   const showStartDate = storeProperties.startDate && issue.start_date;
   const showDueDate = storeProperties.dueDate && issue.due_date;
   const showLabels = storeProperties.labels && labels.length > 0;
+  const clampedDepth = Math.min(depth, 3);
 
   return (
     <IssueActionsContextMenu issue={issue}>
       <div
-        className={`group/row flex h-9 items-center gap-2 px-4 text-sm transition-colors hover:not-data-[popup-open]:bg-accent/60 data-[popup-open]:bg-accent ${
-          selected ? "bg-accent/30" : ""
-        }`}
+        className={cn(
+          "group/row flex h-9 items-center gap-2 pr-4 text-sm transition-colors hover:not-data-[popup-open]:bg-accent/60 data-[popup-open]:bg-accent",
+          selected && "bg-accent/30",
+        )}
+        style={{ paddingLeft: 16 + clampedDepth * 18 }}
       >
         <div className="relative flex shrink-0 items-center justify-center w-4 h-4">
           <PriorityIcon
@@ -75,6 +84,9 @@ export const ListRow = memo(function ListRow({
             }`}
           />
         </div>
+        {depth > 0 && (
+          <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground/70" />
+        )}
         <AppLink
           href={p.issueDetail(issue.id)}
           className="flex flex-1 items-center gap-2 min-w-0"
@@ -82,6 +94,14 @@ export const ListRow = memo(function ListRow({
           <span className="w-16 shrink-0 text-xs text-muted-foreground">
             {issue.identifier}
           </span>
+          {depth > 0 && parentIssue && (
+            <span
+              title={`Parent: ${parentIssue.identifier} ${parentIssue.title}`}
+              className="hidden max-w-[120px] shrink-0 items-center rounded border border-border/70 bg-muted/40 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground sm:inline-flex"
+            >
+              <span className="truncate">{parentIssue.identifier}</span>
+            </span>
+          )}
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className="truncate">{issue.title}</span>
             {showChildProgress && (
