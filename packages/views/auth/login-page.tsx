@@ -152,6 +152,7 @@ export function LoginPage({
   const [loading, setLoading] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [existingUser, setExistingUser] = useState<User | null>(null);
+  const emailFormRef = useRef<HTMLFormElement | null>(null);
   // Tracks how the existing session was detected so handleCliAuthorize
   // uses the matching token source (cookie → issueCliToken, localStorage → direct).
   const authSourceRef = useRef<"cookie" | "localStorage">("cookie");
@@ -200,11 +201,13 @@ export function LoginPage({
   }, [cooldown]);
 
   const handleSendCode = useCallback(
-    async (e?: React.FormEvent) => {
+    async (e?: React.FormEvent<HTMLFormElement>) => {
       e?.preventDefault();
       const submittedEmail =
-        e?.currentTarget instanceof HTMLFormElement
+        e?.currentTarget
           ? String(new FormData(e.currentTarget).get("email") ?? "")
+          : emailFormRef.current
+            ? String(new FormData(emailFormRef.current).get("email") ?? "")
           : email;
       const normalizedEmail = submittedEmail.trim();
       if (!normalizedEmail) {
@@ -233,6 +236,10 @@ export function LoginPage({
     },
     [email, t],
   );
+
+  const handleContinueClick = useCallback(() => {
+    void handleSendCode();
+  }, [handleSendCode]);
 
   const handleVerify = useCallback(
     async (value: string) => {
@@ -483,7 +490,12 @@ export function LoginPage({
         </CardHeader>
         {!hideEmailLogin && (
           <CardContent>
-            <form id="login-form" onSubmit={handleSendCode} className="space-y-4">
+            <form
+              id="login-form"
+              ref={emailFormRef}
+              onSubmit={handleSendCode}
+              className="space-y-4"
+            >
               <div className="space-y-2">
                 <Label htmlFor="login-email">{t(($) => $.common.email)}</Label>
                 <Input
@@ -506,11 +518,11 @@ export function LoginPage({
         <CardFooter className="flex flex-col gap-3">
           {!hideEmailLogin && (
             <Button
-              type="submit"
-              form="login-form"
+              type="button"
               className="w-full"
               size="lg"
               disabled={loading}
+              onClick={handleContinueClick}
             >
               {loading
                 ? t(($) => $.signin.sending)
