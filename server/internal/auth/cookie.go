@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,22 +25,21 @@ const (
 )
 
 var (
-	ipCookieDomainWarnOnce sync.Once
-	authTokenTTLOnce       sync.Once
-	authTokenTTLCached     time.Duration
+	invalidCookieDomainWarnOnce sync.Once
+	authTokenTTLOnce           sync.Once
+	authTokenTTLCached         time.Duration
 )
+
+var cookieDomainLabelRE = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
 
 // parseAuthTokenTTL parses a raw AUTH_TOKEN_TTL value into a duration.
 // It first tries time.ParseDuration (e.g. "8760h", "720h30m"), then falls
-// back to parsing as integer seconds. Returns the parsed duration and true
-// on success; zero and false when the input is empty or invalid.
+// back to parsing as integer seconds.
 func parseAuthTokenTTL(raw string) (time.Duration, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return 0, false
 	}
-
-	// Try Go duration string first (e.g. "8760h", "720h30m").
 	if d, err := time.ParseDuration(raw); err == nil {
 		if d <= 0 {
 			return 0, false
@@ -50,8 +50,6 @@ func parseAuthTokenTTL(raw string) (time.Duration, bool) {
 		}
 		return d, true
 	}
-
-	// Fall back to plain integer seconds.
 	secs, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || secs <= 0 {
 		return 0, false
@@ -68,9 +66,7 @@ func parseAuthTokenTTL(raw string) (time.Duration, bool) {
 }
 
 // AuthTokenTTL returns the configured auth token lifetime. It reads the
-// AUTH_TOKEN_TTL environment variable (Go duration string or integer seconds) on first call and caches
-// the result. When the variable is unset or invalid the default of 30 days
-// is used.
+// AUTH_TOKEN_TTL env var and caches the result. Default: 30 days.
 func AuthTokenTTL() time.Duration {
 	authTokenTTLOnce.Do(func() {
 		raw := os.Getenv("AUTH_TOKEN_TTL")
@@ -88,10 +84,10 @@ func AuthTokenTTL() time.Duration {
 	return authTokenTTLCached
 }
 
-// cookieDomain returns the trimmed COOKIE_DOMAIN env value, or "" if it looks
-// like an IP address. RFC 6265 §4.1.2.3 forbids IP literals in the cookie
-// Domain attribute, so browsers silently drop Set-Cookie headers that carry
-// one. An IP value here is almost always a misconfiguration.
+// cookieDomain returns the trimmed COOKIE_DOMAIN env value, or "" if the value
+// is unsafe for the browser cookie Domain attribute. RFC 6265 §4.1.2.3 forbids
+// IP literals, and browsers can drop Set-Cookie headers that carry invalid
+// Domain attributes. Invalid values become host-only cookies instead.
 func cookieDomain() string {
 	raw := strings.TrimSpace(os.Getenv("COOKIE_DOMAIN"))
 	if raw == "" {
@@ -99,16 +95,36 @@ func cookieDomain() string {
 	}
 	// A leading dot ("." for subdomain matching) is legal syntax but doesn't
 	// change whether the remainder is an IP literal.
-	if ip := net.ParseIP(strings.TrimPrefix(raw, ".")); ip != nil {
-		ipCookieDomainWarnOnce.Do(func() {
-			slog.Warn(
-				"COOKIE_DOMAIN looks like an IP address; ignoring. RFC 6265 forbids IP literals in the cookie Domain attribute, so browsers would drop the Set-Cookie. Leave COOKIE_DOMAIN empty for single-host deployments, or use a real domain.",
-				"value", raw,
-			)
+	if ok, reason := validCookieDomain(raw); !ok {
+		invalidCookieDomainWarnOnce.Do(func() {
+			slog.Warn("COOKIE_DOMAIN is invalid for browser cookie Domain; ignoring so session cookies remain host-only", "reason", reason)
 		})
 		return ""
 	}
 	return raw
+}
+
+func validCookieDomain(raw string) (bool, string) {
+	trimmed := strings.TrimSpace(strings.TrimPrefix(raw, "."))
+	if trimmed == "" {
+		return false, "empty"
+	}
+	if strings.Contains(trimmed, "://") || strings.ContainsAny(trimmed, "/\\") {
+		return false, "not-a-domain"
+	}
+	if ip := net.ParseIP(strings.Trim(trimmed, "[]")); ip != nil {
+		return false, "ip-literal"
+	}
+	if strings.EqualFold(trimmed, "localhost") || !strings.Contains(trimmed, ".") {
+		return false, "single-label"
+	}
+	labels := strings.Split(trimmed, ".")
+	for _, label := range labels {
+		if label == "" || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") || !cookieDomainLabelRE.MatchString(label) {
+			return false, "invalid-label"
+		}
+	}
+	return true, ""
 }
 
 // isSecureCookie reports whether session cookies should carry the Secure flag.

@@ -31,6 +31,9 @@ function makeApi(getMe: () => Promise<User>): ApiClient {
   return {
     setToken: vi.fn(),
     getMe,
+    verifyCode: vi.fn().mockResolvedValue({ token: "login-token", user: fakeUser }),
+    googleLogin: vi.fn().mockResolvedValue({ token: "google-token", user: fakeUser }),
+    logout: vi.fn().mockResolvedValue(undefined),
     // Only the methods touched by store.initialize are needed. Cast to
     // ApiClient for type compatibility — the store treats it opaquely.
   } as unknown as ApiClient;
@@ -48,6 +51,7 @@ describe("authStore.initialize — token mode", () => {
 
     expect(store.getState().user).toBeNull();
     expect(store.getState().isLoading).toBe(false);
+    expect(store.getState().authStatus).toBe("temporarily_unreachable");
     expect(storage.snapshot().multica_token).toBe("t");
   });
 
@@ -59,6 +63,7 @@ describe("authStore.initialize — token mode", () => {
     await store.getState().initialize();
 
     expect(store.getState().user).toBeNull();
+    expect(store.getState().authStatus).toBe("temporarily_unreachable");
     expect(storage.snapshot().multica_token).toBe("t");
   });
 
@@ -77,6 +82,7 @@ describe("authStore.initialize — token mode", () => {
     await store.getState().initialize();
 
     expect(store.getState().user).toBeNull();
+    expect(store.getState().authStatus).toBe("unauthenticated");
     expect(storage.snapshot().multica_token).toBeUndefined();
   });
 
@@ -88,6 +94,77 @@ describe("authStore.initialize — token mode", () => {
     await store.getState().initialize();
 
     expect(store.getState().user).toEqual(fakeUser);
+    expect(store.getState().authStatus).toBe("authenticated");
     expect(storage.snapshot().multica_token).toBe("t");
+  });
+});
+
+describe("authStore.initialize — cookie mode", () => {
+  it("restores the user from cookie auth when getMe succeeds", async () => {
+    const storage = makeStorage();
+    const api = makeApi(() => Promise.resolve(fakeUser));
+    const store = createAuthStore({ api, storage, cookieAuth: true });
+
+    await store.getState().initialize();
+
+    expect(store.getState().user).toEqual(fakeUser);
+    expect(store.getState().isLoading).toBe(false);
+    expect(store.getState().authStatus).toBe("authenticated");
+    expect(api.setToken).not.toHaveBeenCalled();
+  });
+
+  it("does not clear an existing user during a transient cookie-auth probe failure", async () => {
+    const storage = makeStorage();
+    const api = makeApi(() =>
+      Promise.reject(new ApiError("server error", 503, "Service Unavailable")),
+    );
+    const store = createAuthStore({ api, storage, cookieAuth: true });
+    store.setState({ user: fakeUser, isLoading: false, authStatus: "authenticated" });
+
+    await store.getState().initialize();
+
+    expect(store.getState().user).toEqual(fakeUser);
+    expect(store.getState().authStatus).toBe("temporarily_unreachable");
+    expect(storage.snapshot()).toEqual({});
+  });
+
+  it("clears authenticated state on confirmed cookie-auth 401", async () => {
+    const storage = makeStorage();
+    const api = makeApi(() =>
+      Promise.reject(new ApiError("unauthorized", 401, "Unauthorized")),
+    );
+    const store = createAuthStore({ api, storage, cookieAuth: true });
+    store.setState({ user: fakeUser, isLoading: false, authStatus: "authenticated" });
+
+    await store.getState().initialize();
+
+    expect(store.getState().user).toBeNull();
+    expect(store.getState().authStatus).toBe("unauthenticated");
+  });
+});
+
+describe("authStore login flows", () => {
+  it("seeds the in-memory API token after cookie-mode code verification", async () => {
+    const storage = makeStorage();
+    const api = makeApi(() => Promise.resolve(fakeUser));
+    const store = createAuthStore({ api, storage, cookieAuth: true });
+
+    await store.getState().verifyCode("alice@example.com", "123456");
+
+    expect(api.setToken).toHaveBeenCalledWith("login-token");
+    expect(storage.snapshot().multica_token).toBeUndefined();
+    expect(store.getState().authStatus).toBe("authenticated");
+  });
+
+  it("seeds the in-memory API token after cookie-mode Google login", async () => {
+    const storage = makeStorage();
+    const api = makeApi(() => Promise.resolve(fakeUser));
+    const store = createAuthStore({ api, storage, cookieAuth: true });
+
+    await store.getState().loginWithGoogle("code", "https://app.example/auth/callback");
+
+    expect(api.setToken).toHaveBeenCalledWith("google-token");
+    expect(storage.snapshot().multica_token).toBeUndefined();
+    expect(store.getState().authStatus).toBe("authenticated");
   });
 });

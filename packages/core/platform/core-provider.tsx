@@ -15,13 +15,14 @@ import { QueryProvider } from "../provider";
 import { createLogger } from "../logger";
 import { defaultStorage } from "./storage";
 import { AuthInitializer } from "./auth-initializer";
+import { setCurrentWorkspace } from "./workspace-storage";
 import type { CoreProviderProps, ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
 
 // Module-level singletons — created once at first render, never recreated.
 // Vite HMR preserves module-level state, so these survive hot reloads.
 let initialized = false;
-let authStore: ReturnType<typeof createAuthStore>;
+let authStore: ReturnType<typeof createAuthStore> | undefined;
 let chatStore: ReturnType<typeof createChatStore>;
 function initCore(
   apiBaseUrl: string,
@@ -37,6 +38,13 @@ function initCore(
     logger: createLogger("api"),
     onUnauthorized: () => {
       storage.removeItem("multica_token");
+      setCurrentWorkspace(null, null);
+      authStore?.setState({
+        user: null,
+        isLoading: false,
+        authStatus: "unauthenticated",
+        authUnavailableSince: null,
+      });
     },
     identity,
   });
@@ -94,7 +102,7 @@ export function CoreProvider({
       >
         <WSProvider
           wsUrl={wsUrl}
-          authStore={authStore}
+          authStore={authStore!}
           storage={storage}
           cookieAuth={cookieAuth}
           identity={identity}

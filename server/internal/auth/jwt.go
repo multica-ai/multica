@@ -5,11 +5,16 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
+	"strings"
 	"sync"
+	"time"
 )
 
 const defaultJWTSecret = "multica-dev-secret-change-in-production"
+const placeholderJWTSecret = "change-me-in-production"
+const defaultSessionDuration = 30 * 24 * time.Hour
 
 var (
 	jwtSecret     []byte
@@ -26,6 +31,37 @@ func JWTSecret() []byte {
 	})
 
 	return jwtSecret
+}
+
+func JWTSecretIsConfigured() bool {
+	secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+	return secret != "" && secret != defaultJWTSecret && secret != placeholderJWTSecret
+}
+
+func ValidateJWTSecretConfiguration() error {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production") && !JWTSecretIsConfigured() {
+		return fmt.Errorf("JWT_SECRET is required in production and must be a persistent random value")
+	}
+	return nil
+}
+
+// Deprecated: SessionDuration reads MULTICA_SESSION_TTL but does not affect cookie MaxAge.
+// Use AUTH_TOKEN_TTL (read by AuthTokenTTL() in cookie.go) to configure session lifetime.
+func SessionDuration() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("MULTICA_SESSION_TTL"))
+	if raw == "" {
+		return defaultSessionDuration
+	}
+	duration, err := time.ParseDuration(raw)
+	if err != nil || duration <= 0 {
+		slog.Warn("MULTICA_SESSION_TTL is invalid; using default browser session lifetime")
+		return defaultSessionDuration
+	}
+	return duration
+}
+
+func SessionMaxAgeSeconds() int {
+	return int(SessionDuration().Seconds())
 }
 
 // GeneratePATToken creates a new personal access token: "mul_" + 40 random hex chars.

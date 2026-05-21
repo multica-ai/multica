@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -111,4 +112,35 @@ func TestFindOrCreateUserGating(t *testing.T) {
 			t.Fatalf("expected whitelisted user to pass signup check, but got %v", err)
 		}
 	})
+}
+
+func TestIssueJWTUsesConfiguredSessionTTL(t *testing.T) {
+	t.Setenv("MULTICA_SESSION_TTL", "24h")
+
+	h := newTestHandler(Config{})
+	tokenString, err := h.issueJWT(db.User{
+		Email: "alice@example.com",
+		Name:  "Alice",
+	})
+	if err != nil {
+		t.Fatalf("issueJWT: %v", err)
+	}
+
+	claims := jwt.MapClaims{}
+	_, _, err = jwt.NewParser().ParseUnverified(tokenString, claims)
+	if err != nil {
+		t.Fatalf("ParseUnverified: %v", err)
+	}
+
+	exp, ok := claims["exp"].(float64)
+	if !ok {
+		t.Fatalf("exp claim missing or wrong type: %#v", claims["exp"])
+	}
+	iat, ok := claims["iat"].(float64)
+	if !ok {
+		t.Fatalf("iat claim missing or wrong type: %#v", claims["iat"])
+	}
+	if got := int64(exp - iat); got < 24*60*60-1 || got > 24*60*60+1 {
+		t.Fatalf("JWT lifetime = %d seconds, want about 86400", got)
+	}
 }
