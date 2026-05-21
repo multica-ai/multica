@@ -1395,3 +1395,385 @@ func TestRollupTaskUsageHourlyConvergesOnTaskUsageDelete(t *testing.T) {
 		t.Errorf("after delete: expected bucket recomputed to 0, got %d", got)
 	}
 }
+
+// TestDashboardSquadFilter proves the ?squad_id= query param narrows every
+// dashboard rollup to agents that belong to the squad. A squad containing
+// the fixture agent surfaces its usage; a squad without it returns nothing.
+// It also checks squad_id composes (AND) with project_id.
+func TestDashboardSquadFilter(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("fetch runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+
+	// A project so the combined project_id + squad_id case can be exercised.
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, 'squad filter test project')
+		RETURNING id
+	`, testWorkspaceID).Scan(&projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID) })
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type, project_id, number)
+		VALUES (
+			$1, 'squad filter test', $2, 'member', $3,
+			(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1)
+		)
+		RETURNING id
+	`, testWorkspaceID, testUserID, projectID).Scan(&issueID); err != nil {
+		t.Fatalf("insert issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	now := time.Now().UTC()
+	started := now.Add(-30 * time.Minute)
+	completed := started.Add(10 * time.Minute) // 600s run
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, created_at)
+		VALUES ($1, $2, $3, 'completed', $4, $5, now())
+		RETURNING id
+	`, agentID, issueID, runtimeID, started, completed).Scan(&taskID); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
+		VALUES ($1, 'claude', 'squad-test-model', 1000, 0, now())
+	`, taskID); err != nil {
+		t.Fatalf("insert task_usage: %v", err)
+	}
+
+	// Aggregate the fixture rows into task_usage_hourly before asserting —
+	// in production the cron tick handles this with a 5-min lag.
+	if _, err := testPool.Exec(ctx, `
+		SELECT rollup_task_usage_hourly_window('1970-01-01'::timestamptz, now() + interval '1 hour')
+	`); err != nil {
+		t.Fatalf("rollup window: %v", err)
+	}
+
+	// Squad A contains the fixture agent; squad B does not. Inserting rows
+	// directly (not via CreateSquad) means no leader is auto-added as a
+	// member, so squad B genuinely has zero agent members.
+	mkSquad := func(name string) string {
+		var id string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO squad (workspace_id, name, leader_id, creator_id)
+			VALUES ($1, $2, $3, $4)
+			RETURNING id
+		`, testWorkspaceID, name, agentID, testUserID).Scan(&id); err != nil {
+			t.Fatalf("create squad %s: %v", name, err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM squad WHERE id = $1`, id) })
+		return id
+	}
+	squadWith := mkSquad("squad filter — with agent")
+	squadWithout := mkSquad("squad filter — without agent")
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO squad_member (squad_id, member_type, member_id, role)
+		VALUES ($1, 'agent', $2, 'leader')
+	`, squadWith, agentID); err != nil {
+		t.Fatalf("add squad member: %v", err)
+	}
+
+	type dailyRow struct {
+		Model       string `json:"model"`
+		InputTokens int64  `json:"input_tokens"`
+	}
+	sumDaily := func(query string) int64 {
+		w := httptest.NewRecorder()
+		testHandler.GetDashboardUsageDaily(w, newRequest("GET", "/api/dashboard/usage/daily?"+query, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("daily %q: expected 200, got %d: %s", query, w.Code, w.Body.String())
+		}
+		var rows []dailyRow
+		_ = json.NewDecoder(w.Body).Decode(&rows)
+		var total int64
+		for _, r := range rows {
+			if r.Model == "squad-test-model" {
+				total += r.InputTokens
+			}
+		}
+		return total
+	}
+
+	if got := sumDaily("days=1&squad_id=" + squadWith); got < 1000 {
+		t.Errorf("daily squad-with: expected >=1000 tokens, got %d", got)
+	}
+	if got := sumDaily("days=1&squad_id=" + squadWithout); got != 0 {
+		t.Errorf("daily squad-without: expected 0 tokens (agent not a member), got %d", got)
+	}
+	if got := sumDaily("days=1&project_id=" + projectID + "&squad_id=" + squadWith); got < 1000 {
+		t.Errorf("daily project+squad: expected >=1000 tokens, got %d", got)
+	}
+	if got := sumDaily("days=1&project_id=" + projectID + "&squad_id=" + squadWithout); got != 0 {
+		t.Errorf("daily project+squad (no member): expected 0 tokens, got %d", got)
+	}
+
+	// by-agent honours the squad filter, alone and combined (AND) with
+	// project_id: squad-with surfaces the agent's tokens, squad-without
+	// excludes them.
+	sumByAgent := func(query string) int64 {
+		w := httptest.NewRecorder()
+		testHandler.GetDashboardUsageByAgent(w, newRequest("GET", "/api/dashboard/usage/by-agent?"+query, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("by-agent %q: expected 200, got %d: %s", query, w.Code, w.Body.String())
+		}
+		var rows []struct {
+			AgentID     string `json:"agent_id"`
+			Model       string `json:"model"`
+			InputTokens int64  `json:"input_tokens"`
+		}
+		_ = json.NewDecoder(w.Body).Decode(&rows)
+		var total int64
+		for _, r := range rows {
+			if r.AgentID == agentID && r.Model == "squad-test-model" {
+				total += r.InputTokens
+			}
+		}
+		return total
+	}
+	if got := sumByAgent("days=1&squad_id=" + squadWith); got < 1000 {
+		t.Errorf("by-agent squad-with: expected >=1000 tokens, got %d", got)
+	}
+	if got := sumByAgent("days=1&squad_id=" + squadWithout); got != 0 {
+		t.Errorf("by-agent squad-without: agent leaked through filter, got %d", got)
+	}
+	if got := sumByAgent("days=1&project_id=" + projectID + "&squad_id=" + squadWith); got < 1000 {
+		t.Errorf("by-agent project+squad: expected >=1000 tokens, got %d", got)
+	}
+	if got := sumByAgent("days=1&project_id=" + projectID + "&squad_id=" + squadWithout); got != 0 {
+		t.Errorf("by-agent project+squad (no member): expected 0 tokens, got %d", got)
+	}
+
+	// agent-runtime honours the squad filter, alone and combined with
+	// project_id.
+	sumAgentRunTime := func(query string) int32 {
+		w := httptest.NewRecorder()
+		testHandler.GetDashboardAgentRunTime(w, newRequest("GET", "/api/dashboard/agent-runtime?"+query, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("agent-runtime %q: expected 200, got %d: %s", query, w.Code, w.Body.String())
+		}
+		var rows []struct {
+			AgentID   string `json:"agent_id"`
+			TaskCount int32  `json:"task_count"`
+		}
+		_ = json.NewDecoder(w.Body).Decode(&rows)
+		var tasks int32
+		for _, r := range rows {
+			if r.AgentID == agentID {
+				tasks += r.TaskCount
+			}
+		}
+		return tasks
+	}
+	if got := sumAgentRunTime("days=1&squad_id=" + squadWith); got < 1 {
+		t.Errorf("agent-runtime squad-with: expected >=1 task, got %d", got)
+	}
+	if got := sumAgentRunTime("days=1&squad_id=" + squadWithout); got != 0 {
+		t.Errorf("agent-runtime squad-without: expected 0 tasks, got %d", got)
+	}
+	if got := sumAgentRunTime("days=1&project_id=" + projectID + "&squad_id=" + squadWith); got < 1 {
+		t.Errorf("agent-runtime project+squad: expected >=1 task, got %d", got)
+	}
+	if got := sumAgentRunTime("days=1&project_id=" + projectID + "&squad_id=" + squadWithout); got != 0 {
+		t.Errorf("agent-runtime project+squad (no member): expected 0 tasks, got %d", got)
+	}
+
+	// runtime/daily honours the squad filter, alone and combined with
+	// project_id — an empty squad yields no rows.
+	sumRunTimeDaily := func(query string) int32 {
+		w := httptest.NewRecorder()
+		testHandler.GetDashboardRunTimeDaily(w, newRequest("GET", "/api/dashboard/runtime/daily?"+query, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("runtime/daily %q: expected 200, got %d: %s", query, w.Code, w.Body.String())
+		}
+		var rows []struct {
+			TaskCount int32 `json:"task_count"`
+		}
+		_ = json.NewDecoder(w.Body).Decode(&rows)
+		var tasks int32
+		for _, r := range rows {
+			tasks += r.TaskCount
+		}
+		return tasks
+	}
+	if got := sumRunTimeDaily("days=1&squad_id=" + squadWith); got < 1 {
+		t.Errorf("runtime/daily squad-with: expected >=1 task, got %d", got)
+	}
+	if got := sumRunTimeDaily("days=1&squad_id=" + squadWithout); got != 0 {
+		t.Errorf("runtime/daily squad-without: expected 0 tasks, got %d", got)
+	}
+	if got := sumRunTimeDaily("days=1&project_id=" + projectID + "&squad_id=" + squadWith); got < 1 {
+		t.Errorf("runtime/daily project+squad: expected >=1 task, got %d", got)
+	}
+	if got := sumRunTimeDaily("days=1&project_id=" + projectID + "&squad_id=" + squadWithout); got != 0 {
+		t.Errorf("runtime/daily project+squad (no member): expected 0 tasks, got %d", got)
+	}
+
+	// Invalid squad_id rejected with 400.
+	{
+		w := httptest.NewRecorder()
+		testHandler.GetDashboardUsageDaily(w, newRequest("GET", "/api/dashboard/usage/daily?squad_id=not-a-uuid", nil))
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("daily: expected 400 for invalid squad_id, got %d", w.Code)
+		}
+	}
+}
+
+// TestDashboardSquadFilterCrossWorkspace proves the squad filter cannot leak
+// another workspace's usage. The squad_id param is not checked against the
+// caller's workspace, and the squad_member subquery is itself
+// unscoped — so a caller can pass a foreign squad_id and the subquery will
+// return that foreign squad's agent ids. Safety rests entirely on the outer
+// `workspace_id = $1` gate: a foreign agent has no rows scoped to the
+// caller's workspace, so the intersection is empty. This test inserts a
+// foreign workspace with real, rolled-up usage and confirms none of it
+// surfaces when the primary workspace requests that foreign squad.
+func TestDashboardSquadFilterCrossWorkspace(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var foreignWorkspaceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug)
+		VALUES ('ws-squad-xtenant', 'ws-squad-xtenant-' || gen_random_uuid()::text)
+		RETURNING id
+	`).Scan(&foreignWorkspaceID); err != nil {
+		t.Fatalf("create foreign workspace: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, foreignWorkspaceID) })
+
+	var foreignRuntimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+		)
+		VALUES ($1, NULL, 'xtenant-rt', 'cloud', 'xtenant-rt', 'online', '{}'::jsonb, '{}'::jsonb, now())
+		RETURNING id
+	`, foreignWorkspaceID).Scan(&foreignRuntimeID); err != nil {
+		t.Fatalf("create foreign runtime: %v", err)
+	}
+	var foreignAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args, mcp_config
+		)
+		VALUES ($1, 'xtenant-agent', '', 'cloud', '{}'::jsonb, $2, 'private', 1, $3, '', '{}'::jsonb, '[]'::jsonb, '[]'::jsonb)
+		RETURNING id
+	`, foreignWorkspaceID, foreignRuntimeID, testUserID).Scan(&foreignAgentID); err != nil {
+		t.Fatalf("create foreign agent: %v", err)
+	}
+
+	// Real usage for the foreign agent, in the foreign workspace.
+	var foreignIssueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		VALUES ($1, 'xtenant squad usage', $2, 'member',
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		RETURNING id
+	`, foreignWorkspaceID, testUserID).Scan(&foreignIssueID); err != nil {
+		t.Fatalf("create foreign issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, foreignIssueID) })
+
+	now := time.Now().UTC()
+	started := now.Add(-20 * time.Minute)
+	completed := started.Add(5 * time.Minute)
+
+	var foreignTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, created_at)
+		VALUES ($1, $2, $3, 'completed', $4, $5, now())
+		RETURNING id
+	`, foreignAgentID, foreignIssueID, foreignRuntimeID, started, completed).Scan(&foreignTaskID); err != nil {
+		t.Fatalf("create foreign task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, foreignTaskID) })
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
+		VALUES ($1, 'claude', 'xtenant-squad-model', 5000, 0, now())
+	`, foreignTaskID); err != nil {
+		t.Fatalf("insert foreign task_usage: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		SELECT rollup_task_usage_hourly_window('1970-01-01'::timestamptz, now() + interval '1 hour')
+	`); err != nil {
+		t.Fatalf("rollup window: %v", err)
+	}
+
+	// A squad in the foreign workspace whose only member is the foreign agent.
+	var foreignSquadID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO squad (workspace_id, name, leader_id, creator_id)
+		VALUES ($1, 'xtenant squad', $2, $3)
+		RETURNING id
+	`, foreignWorkspaceID, foreignAgentID, testUserID).Scan(&foreignSquadID); err != nil {
+		t.Fatalf("create foreign squad: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO squad_member (squad_id, member_type, member_id, role)
+		VALUES ($1, 'agent', $2, 'leader')
+	`, foreignSquadID, foreignAgentID); err != nil {
+		t.Fatalf("add foreign squad member: %v", err)
+	}
+
+	// The primary workspace requests the foreign squad. newRequest scopes the
+	// request to testWorkspaceID via the X-Workspace-ID header.
+	{
+		w := httptest.NewRecorder()
+		testHandler.GetDashboardUsageDaily(w, newRequest("GET", "/api/dashboard/usage/daily?days=1&squad_id="+foreignSquadID, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("daily foreign squad: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var rows []struct {
+			Model       string `json:"model"`
+			InputTokens int64  `json:"input_tokens"`
+		}
+		_ = json.NewDecoder(w.Body).Decode(&rows)
+		for _, r := range rows {
+			if r.Model == "xtenant-squad-model" {
+				t.Errorf("daily foreign squad: cross-workspace usage leaked (%d tokens)", r.InputTokens)
+			}
+		}
+	}
+	{
+		w := httptest.NewRecorder()
+		testHandler.GetDashboardUsageByAgent(w, newRequest("GET", "/api/dashboard/usage/by-agent?days=1&squad_id="+foreignSquadID, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("by-agent foreign squad: expected 200, got %d", w.Code)
+		}
+		var rows []struct {
+			AgentID string `json:"agent_id"`
+		}
+		_ = json.NewDecoder(w.Body).Decode(&rows)
+		for _, r := range rows {
+			if r.AgentID == foreignAgentID {
+				t.Errorf("by-agent foreign squad: foreign agent leaked through filter")
+			}
+		}
+	}
+}

@@ -21,7 +21,9 @@ import (
 //
 // All three accept ?days=N (defaults to 30, capped at 365) and an optional
 // ?project_id=<uuid> to scope the rollup to a single project. With no
-// project_id the data spans the whole workspace.
+// project_id the data spans the whole workspace. They also accept an
+// optional ?squad_id=<uuid> to scope the rollup to one squad's agent
+// members; squad_id and project_id combine with AND.
 //
 // Cost is computed client-side from a per-model pricing table — the model
 // dimension is intentionally preserved on the wire (same convention as the
@@ -33,19 +35,19 @@ import (
 // access (see GetWorkspaceAgentRunCounts).
 // ---------------------------------------------------------------------------
 
-// parseProjectIDParam reads ?project_id=<uuid> off the URL. Returns a
-// pgtype.UUID with Valid=false when the param is absent so sqlc's nullable
-// argument resolves to SQL NULL and the WHERE clause degrades to "no
-// project filter". On a malformed UUID it writes a 400 and returns
-// ok=false; callers must return immediately.
-func parseProjectIDParam(w http.ResponseWriter, r *http.Request) (pgtype.UUID, bool) {
-	raw := r.URL.Query().Get("project_id")
+// parseOptionalUUIDParam reads an optional ?<param>=<uuid> off the URL.
+// Returns a pgtype.UUID with Valid=false when the param is absent so sqlc's
+// nullable argument resolves to SQL NULL and the WHERE clause degrades to
+// "no filter". On a malformed UUID it writes a 400 and returns ok=false;
+// callers must return immediately.
+func parseOptionalUUIDParam(w http.ResponseWriter, r *http.Request, param string) (pgtype.UUID, bool) {
+	raw := r.URL.Query().Get(param)
 	if raw == "" {
 		return pgtype.UUID{}, true
 	}
 	u, err := util.ParseUUID(raw)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid project_id")
+		writeError(w, http.StatusBadRequest, "invalid "+param)
 		return pgtype.UUID{}, false
 	}
 	return u, true
@@ -72,14 +74,18 @@ func (h *Handler) GetDashboardUsageDaily(w http.ResponseWriter, r *http.Request)
 	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
 		return
 	}
-	projectID, ok := parseProjectIDParam(w, r)
+	projectID, ok := parseOptionalUUIDParam(w, r, "project_id")
+	if !ok {
+		return
+	}
+	squadID, ok := parseOptionalUUIDParam(w, r, "squad_id")
 	if !ok {
 		return
 	}
 	tz := h.resolveViewingTZ(r)
 	since := parseSinceParamInTZ(r, 30, tz)
 
-	resp, err := h.listDashboardUsageDaily(r.Context(), parseUUID(workspaceID), tz, since, projectID)
+	resp, err := h.listDashboardUsageDaily(r.Context(), parseUUID(workspaceID), tz, since, projectID, squadID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list usage")
 		return
@@ -93,12 +99,14 @@ func (h *Handler) listDashboardUsageDaily(
 	tz string,
 	since pgtype.Timestamptz,
 	projectID pgtype.UUID,
+	squadID pgtype.UUID,
 ) ([]DashboardUsageDailyResponse, error) {
 	rows, err := h.Queries.ListDashboardUsageDaily(ctx, db.ListDashboardUsageDailyParams{
 		WorkspaceID: workspaceID,
 		Tz:          tz,
 		Since:       since,
 		ProjectID:   projectID,
+		SquadID:     squadID,
 	})
 	if err != nil {
 		return nil, err
@@ -137,7 +145,11 @@ func (h *Handler) GetDashboardUsageByAgent(w http.ResponseWriter, r *http.Reques
 	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
 		return
 	}
-	projectID, ok := parseProjectIDParam(w, r)
+	projectID, ok := parseOptionalUUIDParam(w, r, "project_id")
+	if !ok {
+		return
+	}
+	squadID, ok := parseOptionalUUIDParam(w, r, "squad_id")
 	if !ok {
 		return
 	}
@@ -146,7 +158,7 @@ func (h *Handler) GetDashboardUsageByAgent(w http.ResponseWriter, r *http.Reques
 	tz := h.resolveViewingTZ(r)
 	since := parseSinceParamInTZ(r, 30, tz)
 
-	resp, err := h.listDashboardUsageByAgent(r.Context(), parseUUID(workspaceID), since, projectID)
+	resp, err := h.listDashboardUsageByAgent(r.Context(), parseUUID(workspaceID), since, projectID, squadID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list usage by agent")
 		return
@@ -159,11 +171,13 @@ func (h *Handler) listDashboardUsageByAgent(
 	workspaceID pgtype.UUID,
 	since pgtype.Timestamptz,
 	projectID pgtype.UUID,
+	squadID pgtype.UUID,
 ) ([]DashboardUsageByAgentResponse, error) {
 	rows, err := h.Queries.ListDashboardUsageByAgent(ctx, db.ListDashboardUsageByAgentParams{
 		WorkspaceID: workspaceID,
 		Since:       since,
 		ProjectID:   projectID,
+		SquadID:     squadID,
 	})
 	if err != nil {
 		return nil, err
@@ -203,7 +217,11 @@ func (h *Handler) GetDashboardAgentRunTime(w http.ResponseWriter, r *http.Reques
 	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
 		return
 	}
-	projectID, ok := parseProjectIDParam(w, r)
+	projectID, ok := parseOptionalUUIDParam(w, r, "project_id")
+	if !ok {
+		return
+	}
+	squadID, ok := parseOptionalUUIDParam(w, r, "squad_id")
 	if !ok {
 		return
 	}
@@ -216,6 +234,7 @@ func (h *Handler) GetDashboardAgentRunTime(w http.ResponseWriter, r *http.Reques
 		WorkspaceID: parseUUID(workspaceID),
 		Since:       since,
 		ProjectID:   projectID,
+		SquadID:     squadID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agent runtime")
@@ -254,7 +273,11 @@ func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Reques
 	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
 		return
 	}
-	projectID, ok := parseProjectIDParam(w, r)
+	projectID, ok := parseOptionalUUIDParam(w, r, "project_id")
+	if !ok {
+		return
+	}
+	squadID, ok := parseOptionalUUIDParam(w, r, "squad_id")
 	if !ok {
 		return
 	}
@@ -268,6 +291,7 @@ func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Reques
 		Tz:          tz,
 		Since:       since,
 		ProjectID:   projectID,
+		SquadID:     squadID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list daily runtime")

@@ -56,6 +56,9 @@ FROM task_usage_hourly
 WHERE workspace_id = $1
   AND bucket_hour >= sqlc.arg('since')::timestamptz
   AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('squad_id')::uuid IS NULL OR agent_id IN (
+        SELECT member_id FROM squad_member
+        WHERE squad_id = sqlc.narg('squad_id') AND member_type = 'agent'))
 GROUP BY DATE(bucket_hour AT TIME ZONE sqlc.arg('tz')::text), model
 ORDER BY DATE(bucket_hour AT TIME ZONE sqlc.arg('tz')::text) DESC, model;
 
@@ -84,12 +87,17 @@ FROM task_usage_hourly
 WHERE workspace_id = $1
   AND bucket_hour >= @since::timestamptz
   AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('squad_id')::uuid IS NULL OR agent_id IN (
+        SELECT member_id FROM squad_member
+        WHERE squad_id = sqlc.narg('squad_id') AND member_type = 'agent'))
 GROUP BY agent_id, model
 ORDER BY agent_id, model;
 
 -- name: ListDashboardRunTimeDaily :many
 -- Daily per-date run time + task counts for the workspace, optionally
--- scoped to a single project. Powers the workspace dashboard's "Time"
+-- scoped to a single project. Also optionally scoped to a single squad
+-- via sqlc.narg('squad_id') — narrows to that squad's agent members.
+-- Powers the workspace dashboard's "Time"
 -- and "Tasks" metrics on the same toggle as Tokens / Cost. Bucketed by
 -- completed_at (terminal time) sliced into calendar days under the
 -- caller-supplied @tz — same Viewing-tz treatment as ListDashboardUsageDaily
@@ -117,12 +125,17 @@ WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= sqlc.arg('since')::timestamptz
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('squad_id')::uuid IS NULL OR atq.agent_id IN (
+        SELECT member_id FROM squad_member
+        WHERE squad_id = sqlc.narg('squad_id') AND member_type = 'agent'))
 GROUP BY DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text)
 ORDER BY DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text) DESC;
 
 -- name: ListDashboardAgentRunTime :many
 -- Per-agent total task run time and task count for the workspace, optionally
--- scoped to a single project. Counts only terminal runs (completed or failed)
+-- scoped to a single project. Also optionally scoped to a single squad via
+-- sqlc.narg('squad_id') — narrows to that squad's agent members.
+-- Counts only terminal runs (completed or failed)
 -- with both started_at and completed_at populated — queued/running tasks have
 -- no finite duration. Anchored on completed_at so the window matches the
 -- token cost window (which is anchored on tu.created_at, ~= completion time).
@@ -147,5 +160,8 @@ WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= @since::timestamptz
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('squad_id')::uuid IS NULL OR atq.agent_id IN (
+        SELECT member_id FROM squad_member
+        WHERE squad_id = sqlc.narg('squad_id') AND member_type = 'agent'))
 GROUP BY atq.agent_id
 ORDER BY total_seconds DESC;

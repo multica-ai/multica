@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BarChart3, FolderKanban } from "lucide-react";
+import { BarChart3, FolderKanban, Users } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from "@multica/ui/components/ui/select";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { agentListOptions } from "@multica/core/workspace/queries";
+import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import {
   dashboardUsageDailyOptions,
@@ -36,6 +36,8 @@ import {
 } from "../../runtimes/components/charts";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { SquadAvatar } from "../../squads/components/squad-avatar";
+import type { Squad } from "@multica/core/types";
 import {
   addDaysIso,
   aggregateByWeek,
@@ -90,6 +92,10 @@ function rangesForDim(dim: Dim) {
 // Sentinel for "no project filter" — kept distinct from the empty string
 // so it survives a refactor that ever lets a project be slug-keyed.
 const ALL_PROJECTS = "__all__";
+
+// Sentinel for "no squad filter" — distinct value from ALL_PROJECTS so the
+// two filters can never alias.
+const ALL_SQUADS = "__all_squads__";
 
 // Stable references — `data ?? []` would create a new empty array on
 // every render while the query is loading, which breaks useMemo's
@@ -154,6 +160,7 @@ export function DashboardPage() {
   const [dim, setDim] = useState<Dim>("daily");
   const [days, setDays] = useState<TimeRange>(30);
   const [projectValue, setProjectValue] = useState<string>(ALL_PROJECTS);
+  const [squadValue, setSquadValue] = useState<string>(ALL_SQUADS);
 
   const allowedRanges = rangesForDim(dim);
   const handleDimChange = (next: Dim) => {
@@ -170,6 +177,7 @@ export function DashboardPage() {
 
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: squads = [] } = useQuery(squadListOptions(wsId));
 
   // Validate the picked project against the current workspace's list. A
   // stale UUID — left over from a project that's been deleted, or from the
@@ -182,6 +190,15 @@ export function DashboardPage() {
     return projects.some((p) => p.id === projectValue) ? projectValue : null;
   }, [projectValue, projects]);
 
+  // Validate the picked squad against the current workspace's list — a
+  // stale UUID (deleted/archived squad, or a leftover after a workspace
+  // switch) must not silently filter every query to empty rows while the
+  // dropdown still reads "All squads".
+  const squadId = useMemo(() => {
+    if (squadValue === ALL_SQUADS) return null;
+    return squads.some((s) => s.id === squadValue) ? squadValue : null;
+  }, [squadValue, squads]);
+
   // The weekly chart paints `ceil(days / 7)` trailing calendar weeks anchored
   // at today-in-UTC. In the worst case (today = Sunday) the leftmost Monday
   // sits `weekCount * 7 - 1` days back, so a vanilla `days=30` request would
@@ -192,16 +209,16 @@ export function DashboardPage() {
   const chartFetchDays = dim === "weekly" ? weekCount * 7 : days;
 
   const dailyQuery = useQuery(
-    dashboardUsageDailyOptions(wsId, chartFetchDays, projectId, viewTZ),
+    dashboardUsageDailyOptions(wsId, chartFetchDays, projectId, squadId, viewTZ),
   );
   const byAgentQuery = useQuery(
-    dashboardUsageByAgentOptions(wsId, days, projectId, viewTZ),
+    dashboardUsageByAgentOptions(wsId, days, projectId, squadId, viewTZ),
   );
   const runTimeQuery = useQuery(
-    dashboardAgentRunTimeOptions(wsId, days, projectId, viewTZ),
+    dashboardAgentRunTimeOptions(wsId, days, projectId, squadId, viewTZ),
   );
   const runTimeDailyQuery = useQuery(
-    dashboardRunTimeDailyOptions(wsId, chartFetchDays, projectId, viewTZ),
+    dashboardRunTimeDailyOptions(wsId, chartFetchDays, projectId, squadId, viewTZ),
   );
 
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
@@ -326,6 +343,11 @@ export function DashboardPage() {
             projects={projects}
             value={projectValue}
             onChange={setProjectValue}
+          />
+          <SquadFilter
+            squads={squads}
+            value={squadValue}
+            onChange={setSquadValue}
           />
           <Segmented
             value={dim}
@@ -473,6 +495,60 @@ function ProjectFilter({
           <SelectItem key={p.id} value={p.id}>
             <ProjectIcon project={p} size="sm" />
             <span className="truncate">{p.title}</span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function SquadFilter({
+  squads,
+  value,
+  onChange,
+}: {
+  squads: Squad[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const { t } = useT("usage");
+  const allLabel = t(($) => $.filter.all_squads);
+  const selected = squads.find((s) => s.id === value);
+  const selectedName =
+    value === ALL_SQUADS ? allLabel : selected?.name ?? allLabel;
+
+  return (
+    <Select value={value} onValueChange={(v) => onChange(v ?? ALL_SQUADS)}>
+      <SelectTrigger
+        size="sm"
+        className="min-w-[180px]"
+        aria-label={t(($) => $.filter.squad_label)}
+      >
+        <SelectValue>
+          {() => (
+            <>
+              {selected ? (
+                <SquadAvatar squad={selected} size={16} className="rounded-sm" />
+              ) : (
+                <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              )}
+              <span className="truncate">{selectedName}</span>
+            </>
+          )}
+        </SelectValue>
+      </SelectTrigger>
+      {/* alignItemWithTrigger=false + max-h-72: same reasoning as
+          ProjectFilter — keep "All squads" reachable at the top of the
+          viewport and cap a long squad list to a scroll. */}
+      <SelectContent align="start" alignItemWithTrigger={false} className="max-h-72">
+        <SelectItem value={ALL_SQUADS}>
+          <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate">{allLabel}</span>
+        </SelectItem>
+        {squads.map((s) => (
+          <SelectItem key={s.id} value={s.id}>
+            <SquadAvatar squad={s} size={16} className="rounded-sm" />
+            <span className="truncate">{s.name}</span>
           </SelectItem>
         ))}
       </SelectContent>

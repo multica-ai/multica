@@ -12,8 +12,8 @@ import { Users, Plus, Search, Bot, User } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { useModalStore } from "@multica/core/modals";
+import { SquadAvatar } from "./squad-avatar";
 import type { Agent, Squad } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
@@ -206,33 +206,5 @@ function SquadsListSkeleton() {
         </div>
       </div>
     </>
-  );
-}
-
-function SquadAvatar({ squad }: { squad: Squad }) {
-  const initials = squad.name
-    .split(" ")
-    .map((w) => w[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
-  if (squad.avatar_url) {
-    return (
-      <ActorAvatarBase
-        name={squad.name}
-        initials={initials}
-        avatarUrl={squad.avatar_url}
-        size={36}
-        className="rounded-md"
-      />
-    );
-  }
-  return (
-    <div
-      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
-      title={squad.name}
-    >
-      <Users className="h-4 w-4" />
-    </div>
   );
 }
