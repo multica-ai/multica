@@ -109,6 +109,26 @@ export function aggregateDailyTokens(usage: DashboardUsageDaily[]): DailyTokenDa
     }));
 }
 
+export function mergeDailyRunTimeRows(
+  rows: DashboardRunTimeDaily[],
+  localRows: DashboardRunTimeDaily[] = [],
+): DashboardRunTimeDaily[] {
+  const map = new Map<string, DashboardRunTimeDaily>();
+  for (const r of [...rows, ...localRows]) {
+    const entry = map.get(r.date) ?? {
+      date: r.date,
+      total_seconds: 0,
+      task_count: 0,
+      failed_count: 0,
+    };
+    entry.total_seconds += r.total_seconds;
+    entry.task_count += r.task_count;
+    entry.failed_count += r.failed_count;
+    map.set(r.date, entry);
+  }
+  return [...map.values()].sort((a, b) => b.date.localeCompare(a.date));
+}
+
 export interface DashboardTokenTotals {
   input: number;
   output: number;

@@ -371,6 +371,12 @@ func TestDashboardLocalUsageEndpoints(t *testing.T) {
 		TaskCount    int32  `json:"task_count"`
 		FailedCount  int32  `json:"failed_count"`
 	}
+	type localDailyRunTimeRow struct {
+		Date         string `json:"date"`
+		TotalSeconds int64  `json:"total_seconds"`
+		TaskCount    int32  `json:"task_count"`
+		FailedCount  int32  `json:"failed_count"`
+	}
 
 	w := httptest.NewRecorder()
 	testHandler.GetDashboardLocalUsageDaily(w, newRequest("GET", "/api/dashboard/local-usage/daily?days=1&project_id="+projectID, nil))
@@ -429,6 +435,25 @@ func TestDashboardLocalUsageEndpoints(t *testing.T) {
 	}
 	if runtimeSeconds != 900 || taskCount != 2 || failedCount != 1 || !foundName {
 		t.Fatalf("local runtime rows = %+v, want 900s, 2 tasks, 1 failed, member-local-codex name", localRunTimes)
+	}
+
+	w = httptest.NewRecorder()
+	testHandler.GetDashboardLocalRunTimeDaily(w, newRequest("GET", "/api/dashboard/local-runtime/daily?days=1&project_id="+projectID, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("local runtime daily: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var localRunTimeDaily []localDailyRunTimeRow
+	_ = json.NewDecoder(w.Body).Decode(&localRunTimeDaily)
+	runtimeSeconds = 0
+	taskCount = 0
+	failedCount = 0
+	for _, r := range localRunTimeDaily {
+		runtimeSeconds += r.TotalSeconds
+		taskCount += r.TaskCount
+		failedCount += r.FailedCount
+	}
+	if runtimeSeconds != 900 || taskCount != 2 || failedCount != 1 {
+		t.Fatalf("local runtime daily rows = %+v, want 900s, 2 tasks, 1 failed", localRunTimeDaily)
 	}
 }
 

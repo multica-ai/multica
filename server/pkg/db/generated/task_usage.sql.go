@@ -337,6 +337,65 @@ func (q *Queries) ListDashboardLocalRunTimeByRunner(ctx context.Context, arg Lis
 	return items, nil
 }
 
+const listDashboardLocalRunTimeDaily = `-- name: ListDashboardLocalRunTimeDaily :many
+SELECT
+    DATE(lcr.completed_at) AS date,
+    COALESCE(
+        SUM(EXTRACT(EPOCH FROM (lcr.completed_at - lcr.started_at)))::bigint,
+        0
+    )::bigint AS total_seconds,
+    COUNT(*)::int AS task_count,
+    COUNT(*) FILTER (WHERE lcr.status = 'failed')::int AS failed_count
+FROM local_cli_run lcr
+LEFT JOIN issue i ON i.id = lcr.issue_id
+WHERE lcr.workspace_id = $1
+  AND lcr.status IN ('completed', 'failed', 'cancelled')
+  AND lcr.started_at IS NOT NULL
+  AND lcr.completed_at IS NOT NULL
+  AND lcr.completed_at >= DATE_TRUNC('day', $2::timestamptz)
+  AND ($3::uuid IS NULL OR i.project_id = $3)
+GROUP BY DATE(lcr.completed_at)
+ORDER BY DATE(lcr.completed_at) DESC
+`
+
+type ListDashboardLocalRunTimeDailyParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+}
+
+type ListDashboardLocalRunTimeDailyRow struct {
+	Date         pgtype.Date `json:"date"`
+	TotalSeconds int64       `json:"total_seconds"`
+	TaskCount    int32       `json:"task_count"`
+	FailedCount  int32       `json:"failed_count"`
+}
+
+func (q *Queries) ListDashboardLocalRunTimeDaily(ctx context.Context, arg ListDashboardLocalRunTimeDailyParams) ([]ListDashboardLocalRunTimeDailyRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardLocalRunTimeDaily, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardLocalRunTimeDailyRow{}
+	for rows.Next() {
+		var i ListDashboardLocalRunTimeDailyRow
+		if err := rows.Scan(
+			&i.Date,
+			&i.TotalSeconds,
+			&i.TaskCount,
+			&i.FailedCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDashboardLocalUsageByRunner = `-- name: ListDashboardLocalUsageByRunner :many
 SELECT
     lcu.owner_id,

@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   aggregateAgentTokens,
   aggregateDailyCost,
+  aggregateDailyTasks,
+  aggregateDailyTime,
   computeDailyTotals,
   formatDuration,
+  mergeDailyRunTimeRows,
   mergeAgentDashboardRows,
 } from "./utils";
 
@@ -119,6 +122,58 @@ describe("computeDailyTotals", () => {
     expect(totals.input).toBe(3_000_000);
     expect(totals.cost).toBe(9); // 3M × $3/M
     expect(totals.taskCount).toBe(5);
+  });
+});
+
+describe("mergeDailyRunTimeRows", () => {
+  it("adds remote and local runtime rows by date before chart aggregation", () => {
+    const merged = mergeDailyRunTimeRows(
+      [
+        {
+          date: "2026-05-10",
+          total_seconds: 600,
+          task_count: 2,
+          failed_count: 1,
+        },
+        {
+          date: "2026-05-09",
+          total_seconds: 120,
+          task_count: 1,
+          failed_count: 0,
+        },
+      ],
+      [
+        {
+          date: "2026-05-10",
+          total_seconds: 300,
+          task_count: 1,
+          failed_count: 0,
+        },
+      ],
+    );
+
+    expect(merged).toEqual([
+      {
+        date: "2026-05-10",
+        total_seconds: 900,
+        task_count: 3,
+        failed_count: 1,
+      },
+      {
+        date: "2026-05-09",
+        total_seconds: 120,
+        task_count: 1,
+        failed_count: 0,
+      },
+    ]);
+    expect(aggregateDailyTime(merged)).toMatchObject([
+      { date: "2026-05-09", totalSeconds: 120 },
+      { date: "2026-05-10", totalSeconds: 900 },
+    ]);
+    expect(aggregateDailyTasks(merged)).toMatchObject([
+      { date: "2026-05-09", completed: 1, failed: 0 },
+      { date: "2026-05-10", completed: 2, failed: 1 },
+    ]);
   });
 });
 

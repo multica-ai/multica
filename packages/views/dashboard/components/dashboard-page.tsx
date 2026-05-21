@@ -20,6 +20,7 @@ import {
   dashboardLocalUsageDailyOptions,
   dashboardLocalUsageByRunnerOptions,
   dashboardLocalRunTimeByRunnerOptions,
+  dashboardLocalRunTimeDailyOptions,
   dashboardAgentRunTimeOptions,
   dashboardRunTimeDailyOptions,
 } from "@multica/core/dashboard";
@@ -49,6 +50,7 @@ import {
   aggregateDailyTokens,
   computeDailyTotals,
   formatDuration,
+  mergeDailyRunTimeRows,
   mergeAgentDashboardRows,
   type AgentDashboardRow,
 } from "../utils";
@@ -164,6 +166,9 @@ export function DashboardPage() {
   const localRunTimeByRunnerQuery = useQuery(
     dashboardLocalRunTimeByRunnerOptions(wsId, days, projectId),
   );
+  const localRunTimeDailyQuery = useQuery(
+    dashboardLocalRunTimeDailyOptions(wsId, days, projectId),
+  );
   const runTimeQuery = useQuery(dashboardAgentRunTimeOptions(wsId, days, projectId));
   const runTimeDailyQuery = useQuery(
     dashboardRunTimeDailyOptions(wsId, days, projectId),
@@ -175,6 +180,8 @@ export function DashboardPage() {
   const localByRunnerUsage = localByRunnerQuery.data ?? EMPTY_LOCAL_BY_RUNNER;
   const localRunTimeByRunnerRows =
     localRunTimeByRunnerQuery.data ?? EMPTY_LOCAL_RUNTIME_BY_RUNNER;
+  const localRunTimeDailyRows =
+    localRunTimeDailyQuery.data ?? EMPTY_RUNTIME_DAILY;
   const runTimeRows = runTimeQuery.data ?? EMPTY_RUNTIME;
   const runTimeDailyRows = runTimeDailyQuery.data ?? EMPTY_RUNTIME_DAILY;
 
@@ -184,6 +191,7 @@ export function DashboardPage() {
     localDailyQuery.isLoading ||
     localByRunnerQuery.isLoading ||
     localRunTimeByRunnerQuery.isLoading ||
+    localRunTimeDailyQuery.isLoading ||
     runTimeQuery.isLoading ||
     runTimeDailyQuery.isLoading;
 
@@ -197,6 +205,7 @@ export function DashboardPage() {
     localDailyUsage.length === 0 &&
     localByRunnerUsage.length === 0 &&
     localRunTimeByRunnerRows.length === 0 &&
+    localRunTimeDailyRows.length === 0 &&
     runTimeRows.length === 0 &&
     runTimeDailyRows.length === 0;
 
@@ -214,13 +223,17 @@ export function DashboardPage() {
     () => aggregateDailyTokens(combinedDailyUsage),
     [combinedDailyUsage],
   );
+  const combinedRunTimeDailyRows = useMemo(
+    () => mergeDailyRunTimeRows(runTimeDailyRows, localRunTimeDailyRows),
+    [runTimeDailyRows, localRunTimeDailyRows],
+  );
   const dailyTime = useMemo(
-    () => aggregateDailyTime(runTimeDailyRows),
-    [runTimeDailyRows],
+    () => aggregateDailyTime(combinedRunTimeDailyRows),
+    [combinedRunTimeDailyRows],
   );
   const dailyTasks = useMemo(
-    () => aggregateDailyTasks(runTimeDailyRows),
-    [runTimeDailyRows],
+    () => aggregateDailyTasks(combinedRunTimeDailyRows),
+    [combinedRunTimeDailyRows],
   );
   const agentTokenRows = useMemo(
     () => aggregateAgentTokens(byAgentUsage),
@@ -236,13 +249,13 @@ export function DashboardPage() {
     let totalSeconds = 0;
     let taskCount = 0;
     let failedCount = 0;
-    for (const r of runTimeRows) {
+    for (const r of [...runTimeRows, ...localRunTimeByRunnerRows]) {
       totalSeconds += r.total_seconds;
       taskCount += r.task_count;
       failedCount += r.failed_count;
     }
     return { totalSeconds, taskCount, failedCount };
-  }, [runTimeRows]);
+  }, [runTimeRows, localRunTimeByRunnerRows]);
 
   const agentRows = useMemo(
     () =>

@@ -315,3 +315,23 @@ WHERE lcr.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
 GROUP BY lcr.owner_id, runner_name, lcr.cli_name
 ORDER BY runner_name;
+
+-- name: ListDashboardLocalRunTimeDaily :many
+SELECT
+    DATE(lcr.completed_at) AS date,
+    COALESCE(
+        SUM(EXTRACT(EPOCH FROM (lcr.completed_at - lcr.started_at)))::bigint,
+        0
+    )::bigint AS total_seconds,
+    COUNT(*)::int AS task_count,
+    COUNT(*) FILTER (WHERE lcr.status = 'failed')::int AS failed_count
+FROM local_cli_run lcr
+LEFT JOIN issue i ON i.id = lcr.issue_id
+WHERE lcr.workspace_id = $1
+  AND lcr.status IN ('completed', 'failed', 'cancelled')
+  AND lcr.started_at IS NOT NULL
+  AND lcr.completed_at IS NOT NULL
+  AND lcr.completed_at >= DATE_TRUNC('day', @since::timestamptz)
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+GROUP BY DATE(lcr.completed_at)
+ORDER BY DATE(lcr.completed_at) DESC;
