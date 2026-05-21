@@ -160,6 +160,42 @@
     "view_runtime": "View runtime",
     "create_agent": "Create an agent"
   },
+  "cloud_runtime": {
+    "action": "Cloud Runtime",
+    "title": "Cloud Runtime",
+    "description": "Launch a managed cloud node and watch its Fleet status.",
+    "create_title": "New node",
+    "create_hint": "Defaults target the shared us-west-2 Fleet configuration.",
+    "nodes_title": "Fleet nodes",
+    "refresh": "Refresh",
+    "nodes_empty": "No cloud nodes",
+    "nodes_failed": "Cloud Runtime unavailable",
+    "nodes_failed_hint": "Fleet did not return a node list.",
+    "node_fallback_name": "Cloud node",
+    "create": "Create node",
+    "creating": "Creating...",
+    "cancel": "Cancel",
+    "toast_created": "Cloud Runtime node created",
+    "toast_create_failed": "Failed to create Cloud Runtime node",
+    "fields": {
+      "name": "Name",
+      "instance_type": "Instance type",
+      "region": "Region",
+      "disk_size": "Disk size GiB",
+      "image_id": "AMI ID",
+      "subnet_id": "Subnet ID",
+      "key_name": "Key pair",
+      "bootstrap_pat": "Bootstrap PAT"
+    },
+    "placeholders": {
+      "name": "gpu-dev-01",
+      "key_name": "dev-key"
+    },
+    "validation": {
+      "instance_type_required": "Instance type is required",
+      "disk_size_invalid": "Disk size must be a positive integer"
+    }
+  },
   "update": {
     "cli_version_label": "CLI Version:",
     "version_unknown": "unknown",

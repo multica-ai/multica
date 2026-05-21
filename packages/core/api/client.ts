@@ -101,6 +101,12 @@ import type {
   SquadMemberStatusListResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
+import type {
+  CloudRuntimeNode,
+  CreateCloudRuntimeNodeOptions,
+  CreateCloudRuntimeNodeRequest,
+  ListCloudRuntimeNodesParams,
+} from "../runtimes/cloud-runtime";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
@@ -804,6 +810,33 @@ export class ApiClient {
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.owner) search.set("owner", params.owner);
     return this.fetch(`/api/runtimes?${search}`);
+  }
+
+  async listCloudRuntimeNodes(
+    params?: ListCloudRuntimeNodesParams,
+  ): Promise<CloudRuntimeNode[]> {
+    const search = new URLSearchParams();
+    if (params?.limit !== undefined) search.set("limit", String(params.limit));
+    if (params?.offset !== undefined) search.set("offset", String(params.offset));
+    const query = search.toString();
+    return this.fetch(`/api/cloud-runtime/nodes${query ? `?${query}` : ""}`);
+  }
+
+  async createCloudRuntimeNode(
+    data: CreateCloudRuntimeNodeRequest,
+    options?: CreateCloudRuntimeNodeOptions,
+  ): Promise<CloudRuntimeNode> {
+    const extraHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    const userPAT = options?.userPAT?.trim();
+    if (userPAT) extraHeaders["X-User-PAT"] = userPAT;
+    const res = await this.fetchRaw("/api/cloud-runtime/nodes", {
+      method: "POST",
+      body: JSON.stringify(data),
+      extraHeaders,
+    });
+    return res.json() as Promise<CloudRuntimeNode>;
   }
 
   async deleteRuntime(runtimeId: string): Promise<void> {

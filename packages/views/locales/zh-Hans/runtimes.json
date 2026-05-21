@@ -151,6 +151,42 @@
     "view_runtime": "查看运行时",
     "create_agent": "创建智能体"
   },
+  "cloud_runtime": {
+    "action": "Cloud Runtime",
+    "title": "Cloud Runtime",
+    "description": "创建托管云端节点，并查看它的 Fleet 状态。",
+    "create_title": "新节点",
+    "create_hint": "默认使用共享的 us-west-2 Fleet 配置。",
+    "nodes_title": "Fleet 节点",
+    "refresh": "刷新",
+    "nodes_empty": "还没有云端节点",
+    "nodes_failed": "Cloud Runtime 不可用",
+    "nodes_failed_hint": "Fleet 未返回节点列表。",
+    "node_fallback_name": "云端节点",
+    "create": "创建节点",
+    "creating": "创建中...",
+    "cancel": "取消",
+    "toast_created": "Cloud Runtime 节点已创建",
+    "toast_create_failed": "创建 Cloud Runtime 节点失败",
+    "fields": {
+      "name": "名称",
+      "instance_type": "实例规格",
+      "region": "Region",
+      "disk_size": "磁盘 GiB",
+      "image_id": "AMI ID",
+      "subnet_id": "Subnet ID",
+      "key_name": "Key pair",
+      "bootstrap_pat": "Bootstrap PAT"
+    },
+    "placeholders": {
+      "name": "gpu-dev-01",
+      "key_name": "dev-key"
+    },
+    "validation": {
+      "instance_type_required": "实例规格不能为空",
+      "disk_size_invalid": "磁盘大小必须是正整数"
+    }
+  },
   "update": {
     "cli_version_label": "CLI 版本：",
     "version_unknown": "未知",
