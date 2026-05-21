@@ -369,7 +369,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// Trigger @mentioned agents: parse agent mentions and enqueue tasks for each.
 	// Pass parentComment so that replies inherit mentions from the thread root.
 	if !privateAutopilotComment {
-		// CEREBRO-PATCH(mention-trigger-group-gate): JEH-1727 — thread r so the gate can resolve the viewer.
+		// CEREBRO-PATCH(mention-trigger-gate-hook): JEH-1917 — pass r to the relocated gate.
 		h.enqueueMentionedAgentTasks(r.Context(), r, issue, comment, parentComment, authorType, authorID, mentionDelegation, mentionDelegationErr)
 	}
 
@@ -553,7 +553,6 @@ func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util
 // admin/owner can mention a private agent).
 // Note: no status gate here — @mention is an explicit action and should work
 // even on done/cancelled issues (the agent can reopen the issue if needed).
-// CEREBRO-PATCH(mention-trigger-group-gate): JEH-1727 — r threaded through so the group-allowlist gate can run per mention.
 func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, r *http.Request, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string, delegation service.TaskDelegationContext, delegationErr error) {
 	wsID := uuidToString(issue.WorkspaceID)
 	mentions := util.ParseMentions(comment.Content)
@@ -592,9 +591,11 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, r *http.Reques
 			if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, wsID) {
 				continue
 			}
-			// CEREBRO-PATCH(mention-trigger-group-gate): JEH-1727 — squad-leader mention must pass the group allowlist.
-			if allowed, err := h.cerebroCanUseAgent(ctx, r, wsID, leaderID, agent.OwnerID); err != nil || !allowed {
-				continue
+			if h.MentionTriggerGate != nil { // CEREBRO-PATCH(mention-trigger-gate-hook): JEH-1917.
+				allowed, err := h.MentionTriggerGate.CanTriggerMention(ctx, r, wsID, leaderID, agent.OwnerID)
+				if err != nil || !allowed {
+					continue
+				}
 			}
 			// Dedup: skip if leader already has a pending task for this issue.
 			hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
@@ -639,9 +640,11 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, r *http.Reques
 		if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, wsID) {
 			continue
 		}
-		// CEREBRO-PATCH(mention-trigger-group-gate): JEH-1727 — @mention enqueue must pass the group allowlist.
-		if allowed, err := h.cerebroCanUseAgent(ctx, r, wsID, agentUUID, agent.OwnerID); err != nil || !allowed {
-			continue
+		if h.MentionTriggerGate != nil { // CEREBRO-PATCH(mention-trigger-gate-hook): JEH-1917.
+			allowed, err := h.MentionTriggerGate.CanTriggerMention(ctx, r, wsID, agentUUID, agent.OwnerID)
+			if err != nil || !allowed {
+				continue
+			}
 		}
 		// Dedup: skip if this agent already has a pending task for this issue.
 		hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{

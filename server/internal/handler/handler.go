@@ -112,6 +112,8 @@ type Handler struct {
 	RuntimePause RuntimePauseInvoker
 	// CEREBRO-PATCH(handler-group-permissions): cerebro group-permission gate.
 	GroupPermissions GroupPermissionsInvoker
+	// CEREBRO-PATCH(handler-mention-trigger-gate): cerebro @mention trigger gate.
+	MentionTriggerGate MentionTriggerGateInvoker
 	// CEREBRO-PATCH(handler-runtime-account): cerebro daemon-driven account
 	// registration service. Wired by the router after construction.
 	RuntimeAccount RuntimeAccountInvoker
@@ -161,6 +163,12 @@ type RuntimePauseState struct {
 	PausedAt    pgtype.Timestamptz
 	UnpauseAt   pgtype.Timestamptz
 	PauseReason pgtype.Text
+}
+
+// MentionTriggerGateInvoker is the upstream-side seam for Cerebro's
+// @mention trigger gate.
+type MentionTriggerGateInvoker interface {
+	CanTriggerMention(ctx context.Context, r *http.Request, workspaceID string, agentID, ownerID pgtype.UUID) (bool, error)
 }
 
 // ChannelListenInvoker is the upstream-side seam that the cerebro
