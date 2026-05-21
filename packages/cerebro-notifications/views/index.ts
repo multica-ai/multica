@@ -1,1 +1,1 @@
-export { NotificationsPage, NotificationBell } from "./components";
+export { NotificationsPage } from "./components";

@@ -94,8 +94,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
 import { notificationsListOptions } from "@multica/cerebro-notifications/core/queries";
 import { useArchiveAllNotifications } from "@multica/cerebro-notifications/core/mutations";
-// CEREBRO-PATCH(sidebar-notification-bell): JEH-1808 NotificationBell (polled badge + dropdown) mounted next to Inbox.
-import { NotificationBell } from "@multica/cerebro-notifications/views/components/notification-bell";
 import { api, ApiError } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
@@ -752,24 +750,20 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             {/* CEREBRO-PATCH(sidebar-inbox-header): JEH-1296 Inbox moved from personal group to header */}
             {wsId && (
               <SidebarMenuItem>
-                <div className="flex items-center gap-1">
-                  <SidebarMenuButton
-                    isActive={isNavActive(pathname, p.inbox())}
-                    render={<AppLink href={p.inbox()} />}
-                    onClick={handleNavClick}
-                    className="flex-1 text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
-                  >
-                    <Inbox />
-                    <span>{t(($) => $.nav.inbox)}</span>
-                    {unreadCount > 0 && (
-                      <span className="ml-auto text-xs">
-                        {unreadCount > 99 ? t(($) => $.sidebar.unread_overflow) : unreadCount}
-                      </span>
-                    )}
-                  </SidebarMenuButton>
-                  {/* CEREBRO-PATCH(sidebar-notification-bell-mount): JEH-1808 bell + dropdown surface */}
-                  <NotificationBell />
-                </div>
+                <SidebarMenuButton
+                  isActive={isNavActive(pathname, p.inbox())}
+                  render={<AppLink href={p.inbox()} />}
+                  onClick={handleNavClick}
+                  className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                >
+                  <Inbox />
+                  <span>{t(($) => $.nav.inbox)}</span>
+                  {unreadCount > 0 && (
+                    <span className="ml-auto text-xs">
+                      {unreadCount > 99 ? t(($) => $.sidebar.unread_overflow) : unreadCount}
+                    </span>
+                  )}
+                </SidebarMenuButton>
               </SidebarMenuItem>
             )}
           </SidebarMenu>
