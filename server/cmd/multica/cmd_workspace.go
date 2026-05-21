@@ -153,9 +153,9 @@ func runWorkspaceList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if currentID != "" {
-		fmt.Fprintln(os.Stderr, "\n* = current default workspace (use 'multica workspace switch <id|slug>' to change)")
+		fmt.Fprintln(os.Stderr, "\n* = current default workspace (use 'multica workspace switch <id|slug|prefix>' to change)")
 	} else {
-		fmt.Fprintln(os.Stderr, "\nNo default workspace set. Use 'multica workspace switch <id|slug>' to pick one.")
+		fmt.Fprintln(os.Stderr, "\nNo default workspace set. Use 'multica workspace switch <id|slug|prefix>' to pick one.")
 	}
 	fmt.Fprintln(os.Stderr, "Tip: pass the ID column, SLUG, or full UUID (--full-id) to 'workspace get/update/switch'.")
 	return nil
