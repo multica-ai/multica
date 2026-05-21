@@ -12,9 +12,9 @@ import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { ActorAvatar } from "../../common/actor-avatar";
 
-export function ProjectLeadPicker({ project, handleUpdate, renderTrigger, align = "start" }: { 
-  project: Project; 
-  handleUpdate: (data: UpdateProjectRequest) => void; 
+export function ProjectLeadPicker({ project, handleUpdate, renderTrigger, align = "start" }: {
+  project: Project;
+  handleUpdate: (data: UpdateProjectRequest) => void;
   renderTrigger: (leadName: string | null) => React.ReactElement;
   align?: "start" | "end" | "center"
 }) {
@@ -27,10 +27,10 @@ export function ProjectLeadPicker({ project, handleUpdate, renderTrigger, align 
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadFilter, setLeadFilter] = useState("");
   const leadQuery = leadFilter.toLowerCase();
-  
+
   const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery) || matchesPinyin(m.name, leadQuery));
   const filteredAgents = agents.filter((a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)));
-  
+
   const leadId = project.lead_id;
   const leadType = project.lead_type;
   const leadName = leadId && leadType ? getActorName(leadType, leadId) : null;

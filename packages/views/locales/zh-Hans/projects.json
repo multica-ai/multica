@@ -6,7 +6,8 @@
     "create_first": "创建第一个项目",
     "view_compact": "紧凑视图",
     "view_comfortable": "舒适视图",
-    "search_placeholder": "搜索项目..."
+    "search_placeholder": "搜索项目...",
+    "no_search_results": "未找到匹配的项目"
   },
   "table": {
     "name": "名称",

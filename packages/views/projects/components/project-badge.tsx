@@ -1,8 +1,8 @@
 "use client";
 
 import { Check } from "lucide-react";
-import { 
-  PROJECT_STATUS_CONFIG, 
+import {
+  PROJECT_STATUS_CONFIG,
   PROJECT_STATUS_ORDER,
   PROJECT_PRIORITY_CONFIG,
   PROJECT_PRIORITY_ORDER
@@ -21,7 +21,7 @@ import { useProjectStatusLabels, useProjectPriorityLabels } from "./labels";
 export function ProjectStatusBadge({ project, handleUpdate, triggerClassName, align = "end" }: { project: Project; handleUpdate: (data: UpdateProjectRequest) => void; triggerClassName?: string; align?: "start" | "end" | "center" }) {
   const statusLabels = useProjectStatusLabels();
   const statusCfg = PROJECT_STATUS_CONFIG[project.status];
-  
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -51,7 +51,7 @@ export function ProjectStatusBadge({ project, handleUpdate, triggerClassName, al
 export function ProjectPriorityBadge({ project, handleUpdate, triggerClassName, align = "end" }: { project: Project; handleUpdate: (data: UpdateProjectRequest) => void; triggerClassName?: string; align?: "start" | "end" | "center" }) {
   const priorityLabels = useProjectPriorityLabels();
   const priorityCfg = PROJECT_PRIORITY_CONFIG[project.priority];
-  
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger

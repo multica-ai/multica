@@ -91,8 +91,8 @@ function ProjectCard({ project }: { project: Project }) {
       </div>
 
       <div className="flex items-center justify-between px-3 pb-3 border-t mt-0 pt-2">
-        <ProjectLeadPicker 
-          project={project} 
+        <ProjectLeadPicker
+          project={project}
           handleUpdate={handleUpdate}
           renderTrigger={(leadName) => (
             <button type="button" className="flex items-center gap-1.5 rounded px-1.5 py-0.5 -mx-1.5 hover:bg-accent/60 transition-colors cursor-pointer">
@@ -153,8 +153,8 @@ function ProjectCardCompact({ project }: { project: Project }) {
         {project.issue_count > 0 ? `${project.done_count}/${project.issue_count}` : "--"}
       </span>
 
-      <ProjectLeadPicker 
-        project={project} 
+      <ProjectLeadPicker
+        project={project}
         handleUpdate={handleUpdate}
         align="start"
         renderTrigger={(leadName) => (
@@ -193,7 +193,7 @@ export function ProjectsPage() {
   const filteredProjects = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return projects;
-    return projects.filter((p) => 
+    return projects.filter((p) =>
       p.title.toLowerCase().includes(q) || matchesPinyin(p.title, q)
     );
   }, [projects, search]);
@@ -226,7 +226,7 @@ export function ProjectsPage() {
                 className="h-8 w-full sm:w-64 pl-8 text-sm"
               />
             </div>
-            
+
             <div className="flex items-center gap-2 sm:gap-4 shrink-0">
               <span className="hidden sm:inline-block font-mono text-xs tabular-nums text-muted-foreground/70">
                 {filteredProjects.length} / {projects.length}
@@ -259,7 +259,7 @@ export function ProjectsPage() {
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto">
+        <div key={viewMode} className={cn("flex-1", isCompact ? "overflow-hidden flex flex-col" : "overflow-y-auto")}>
           {isLoading ? (
             isCompact ? (
               <div className="pt-4 mx-5 overflow-x-auto rounded-md border pb-4 mb-5">
@@ -304,29 +304,36 @@ export function ProjectsPage() {
                 {t(($) => $.page.create_first)}
               </Button>
             </div>
-          ) : isCompact ? (
-            <div className="mt-4 mx-5 overflow-x-auto rounded-md border mb-5">
-              <div className={cn(COMPACT_GRID, "h-8 shrink-0 items-center gap-2 px-4 text-xs font-medium text-muted-foreground border-b bg-muted/30 sticky top-0 z-10")}>
-                <span />
-                <span className="text-left">{t(($) => $.table.name)}</span>
-                <span className="text-left">{t(($) => $.table.priority)}</span>
-                <span className="text-left">{t(($) => $.table.status)}</span>
-                <span className="text-left">{t(($) => $.table.progress)}</span>
-                <span className="text-left">{t(($) => $.table.lead)}</span>
-                <span className="text-left">{t(($) => $.table.created)}</span>
-              </div>
-            <div className="pb-4">
-              {filteredProjects.map((project) => (
-                <ProjectCardCompact key={project.id} project={project} />
-              ))}
+          ) : filteredProjects.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
+              <Search className="h-10 w-10 mb-3 opacity-30" />
+              <p className="text-sm">{t(($) => $.page.no_search_results)}</p>
             </div>
+          ) : isCompact ? (
+            <div className="mt-4 mx-5 rounded-md border mb-5 overflow-auto flex-1">
+              <div className="min-w-[740px]">
+                <div className={cn(COMPACT_GRID, "h-8 shrink-0 items-center gap-2 px-4 text-xs font-medium text-muted-foreground border-b bg-muted/30 sticky top-0 z-10")}>
+                  <span />
+                  <span className="text-left">{t(($) => $.table.name)}</span>
+                  <span className="text-left">{t(($) => $.table.priority)}</span>
+                  <span className="text-left">{t(($) => $.table.status)}</span>
+                  <span className="text-left">{t(($) => $.table.progress)}</span>
+                  <span className="text-left">{t(($) => $.table.lead)}</span>
+                  <span className="text-left">{t(($) => $.table.created)}</span>
+                </div>
+                <div className="pb-4">
+                  {filteredProjects.map((project) => (
+                    <ProjectCardCompact key={project.id} project={project} />
+                  ))}
+                </div>
+              </div>
             </div>
           ) : (
-          <div className="pt-4 pb-5 px-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {filteredProjects.map((project) => (
-              <ProjectCard key={project.id} project={project} />
-            ))}
-          </div>
+            <div className="pt-4 pb-5 px-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {filteredProjects.map((project) => (
+                <ProjectCard key={project.id} project={project} />
+              ))}
+            </div>
           )}
         </div>
       </div>

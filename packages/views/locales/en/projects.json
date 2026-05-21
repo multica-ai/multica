@@ -6,7 +6,8 @@
     "create_first": "Create your first project",
     "view_compact": "Compact",
     "view_comfortable": "Comfortable",
-    "search_placeholder": "Search projects..."
+    "search_placeholder": "Search projects...",
+    "no_search_results": "No results match your search"
   },
   "table": {
     "name": "Name",
