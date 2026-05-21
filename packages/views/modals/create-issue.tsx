@@ -101,7 +101,7 @@ export function ManualCreatePanel({
   const [formResetKey, setFormResetKey] = useState(0);
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
-    onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
+    onDrop: (files) => descEditorRef.current?.uploadFiles(files),
   });
   const [status, setStatus] = useState<IssueStatus>((data?.status as IssueStatus) || draft.status);
   const [priority, setPriority] = useState<IssuePriority>(draft.priority);
@@ -645,7 +645,9 @@ export function ManualCreatePanel({
             <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-h-7 items-center gap-2">
                 <FileUploadButton
+                  multiple
                   onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+                  onSelectMany={(files) => descEditorRef.current?.uploadFiles(files)}
                 />
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">

@@ -369,7 +369,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     try {
       result = await DocumentPicker.getDocumentAsync({
         copyToCacheDirectory: true,
-        multiple: false,
+        multiple: true,
         base64: false,
       });
     } catch (err) {
@@ -378,36 +378,37 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     }
 
     if (result.canceled) return;
-    const asset = result.assets[0];
-    if (!asset) return;
-    await uploadAttachment(
-      {
-        uri: asset.uri,
-        name: asset.name,
-        mimeType: asset.mimeType,
-        size: asset.size,
-      },
-      target,
-    );
+    for (const asset of result.assets) {
+      await uploadAttachment(
+        {
+          uri: asset.uri,
+          name: asset.name,
+          mimeType: asset.mimeType,
+          size: asset.size,
+        },
+        target,
+      );
+    }
   }, [t, uploadAttachment]);
 
   const pickImage = useCallback(async (target: "issue" | "comment") => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
+      allowsMultipleSelection: true,
       quality: 1,
     });
     if (result.canceled) return;
-    const asset = result.assets[0];
-    if (!asset) return;
-    await uploadAttachment(
-      {
-        uri: asset.uri,
-        name: asset.fileName ?? "image",
-        mimeType: asset.mimeType,
-        size: asset.fileSize,
-      },
-      target,
-    );
+    for (const asset of result.assets) {
+      await uploadAttachment(
+        {
+          uri: asset.uri,
+          name: asset.fileName ?? "image",
+          mimeType: asset.mimeType,
+          size: asset.fileSize,
+        },
+        target,
+      );
+    }
   }, [uploadAttachment]);
 
   const handleIssueReaction = useCallback((emoji: string) => {

@@ -496,7 +496,7 @@ func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, file
 
 // DownloadFile downloads a file from the given URL and returns the response body.
 // This is used for downloading attachments via their signed download_url.
-// Downloads are limited to 100 MB to match the upload size limit.
+// Downloads are limited to 500 MB to match the upload size limit.
 //
 // The URL may be absolute (a signed CloudFront/S3 URL) or relative
 // (a server-relative path like "/uploads/...") depending on how the
@@ -531,7 +531,7 @@ func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byt
 		return nil, fmt.Errorf("download returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	const maxDownloadSize = 100 << 20 // 100 MB
+	const maxDownloadSize = 500 << 20 // 500 MB
 	return io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize))
 }
 

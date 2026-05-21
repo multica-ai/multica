@@ -140,24 +140,18 @@ describe("LoginPage", () => {
   it("shows error when submitting with empty email", async () => {
     renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
-    // The Continue button is disabled when email is empty, so we submit the
-    // form programmatically the same way the component does — via form submit.
-    // Since the button is disabled, we directly call handleSendCode's logic
-    // by removing the required attr and submitting.
     const emailInput = screen.getByLabelText(/email/i);
-    // The input has required + the button is disabled, so we need to type
-    // a space then clear to trigger the empty-email error path.
-    // Actually, the component guards `if (!email)` in handleSendCode.
-    // But the button is disabled when `!email`. Let's verify:
     const button = screen.getByRole("button", { name: /continue/i });
-    expect(button).toBeDisabled();
+    expect(button).not.toBeDisabled();
 
-    // Type an email to enable button, then clear it — button becomes disabled again
     const user = userEvent.setup();
+    await user.click(button);
+    expect(mockSendCode).not.toHaveBeenCalled();
+
     await user.type(emailInput, "a");
     expect(button).not.toBeDisabled();
     await user.clear(emailInput);
-    expect(button).toBeDisabled();
+    expect(button).not.toBeDisabled();
   });
 
   // -------------------------------------------------------------------------
@@ -173,6 +167,19 @@ describe("LoginPage", () => {
     await user.click(screen.getByRole("button", { name: /continue/i }));
 
     expect(mockSendCode).toHaveBeenCalledWith("test@example.com");
+  });
+
+  it("reads the submitted email from the form when browser autofill bypasses React state", async () => {
+    mockSendCode.mockResolvedValueOnce(undefined);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
+
+    const input = screen.getByLabelText(/email/i) as HTMLInputElement;
+    input.value = "autofill@example.com";
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+
+    expect(mockSendCode).toHaveBeenCalledWith("autofill@example.com");
   });
 
   it("shows 'Sending code...' while submitting", async () => {

@@ -365,7 +365,7 @@ function CommentRow({
     return result;
   }, [uploadWithToast, issueId]);
   const { isDragOver, dropZoneProps } = useFileDropZone({
-    onDrop: (files) => files.forEach((f) => editEditorRef.current?.uploadFile(f)),
+    onDrop: (files) => editEditorRef.current?.uploadFiles(files),
     enabled: editing,
   });
 
@@ -563,7 +563,9 @@ function CommentRow({
           <div className="flex items-center justify-between mt-2">
             <FileUploadButton
               size="sm"
+              multiple
               onSelect={(file) => editEditorRef.current?.uploadFile(file)}
+              onSelectMany={(files) => editEditorRef.current?.uploadFiles(files)}
             />
             <div className="flex items-center gap-2">
               <Button size="sm" variant="ghost" onClick={cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
@@ -642,7 +644,7 @@ function CommentCardImpl({
     return result;
   }, [uploadWithToast, issueId]);
   const { isDragOver: parentDragOver, dropZoneProps: parentDropZoneProps } = useFileDropZone({
-    onDrop: (files) => files.forEach((f) => editEditorRef.current?.uploadFile(f)),
+    onDrop: (files) => editEditorRef.current?.uploadFiles(files),
     enabled: editing,
   });
 
@@ -932,7 +934,9 @@ function CommentCardImpl({
                 <div className="flex items-center justify-between mt-2">
                   <FileUploadButton
                     size="sm"
+                    multiple
                     onSelect={(file) => editEditorRef.current?.uploadFile(file)}
+                    onSelectMany={(files) => editEditorRef.current?.uploadFiles(files)}
                   />
                   <div className="flex items-center gap-2">
                     <Button size="sm" variant="ghost" onClick={cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>

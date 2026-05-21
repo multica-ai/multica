@@ -12,11 +12,13 @@ const docsUrl = process.env.DOCS_URL || "http://localhost:4000";
 // allows cross-origin HMR / webpack requests (e.g. from Tailscale IPs).
 const allowedDevOrigins = process.env.CORS_ALLOWED_ORIGINS
   ? process.env.CORS_ALLOWED_ORIGINS.split(",")
-      .map((origin) => {
+      .flatMap((origin) => {
         try {
-          return new URL(origin.trim()).host;
+          const url = new URL(origin.trim());
+          return [url.hostname, url.host];
         } catch {
-          return origin.trim();
+          const value = origin.trim();
+          return [value];
         }
       })
       .filter(Boolean)
