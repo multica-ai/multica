@@ -670,4 +670,3 @@ function VisibilityChoice({
     </Tooltip>
   );
 }
-
