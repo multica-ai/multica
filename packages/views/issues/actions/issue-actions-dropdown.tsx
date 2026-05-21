@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactElement } from "react";
+import { useState, type ReactElement, type ReactNode } from "react";
 import type { Issue } from "@multica/core/types";
 import {
   DropdownMenu,
@@ -19,6 +19,7 @@ interface IssueActionsDropdownProps {
   /** A single React element cloned by Base UI as the trigger (via `render` prop). */
   trigger: ReactElement;
   align?: "start" | "end" | "center";
+  children?: ReactNode;
   /** If set, navigate here after the issue is deleted. */
   onDeletedNavigateTo?: string;
 }
@@ -27,6 +28,7 @@ export function IssueActionsDropdown({
   issue,
   trigger,
   align = "end",
+  children,
   onDeletedNavigateTo,
 }: IssueActionsDropdownProps) {
   const actions = useIssueActions(issue);
@@ -48,6 +50,7 @@ export function IssueActionsDropdown({
             onOpenAssignee={() => setAssigneeOpen(true)}
             onDeletedNavigateTo={onDeletedNavigateTo}
           />
+          {children}
         </DropdownMenuContent>
       </DropdownMenu>
       {/* Mount the picker only once the user actually opens it. Otherwise

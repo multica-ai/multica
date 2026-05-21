@@ -73,8 +73,7 @@ import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
-import { useIssueActions } from "../actions";
-import { IssueActionsMenuItems, dropdownPrimitives } from "../actions/issue-actions-menu-items";
+import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
 import { CommentInput, type CommentInputRef } from "./comment-input";
@@ -2188,29 +2187,26 @@ export function IssueDetail({
               />
               <TooltipContent side="bottom">{actions.isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}</TooltipContent>
             </Tooltip>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
-                    <MoreHorizontal />
-                  </Button>
-                }
-              />
-              <DropdownMenuContent align="end" className="w-auto">
-                <IssueActionsMenuItems
-                  issue={issue}
-                  actions={actions}
-                  primitives={dropdownPrimitives}
-                  onDeletedNavigateTo={onDelete ? undefined : paths.issues()}
-                  onOpenAssignee={() => {}}
-                />
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => setClearHistoryDialogOpen(true)}>
-                  <Eraser className="h-3.5 w-3.5" />
-                  {t(($) => $.detail.clear_history)}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <IssueActionsDropdown
+              issue={issue}
+              trigger={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-muted-foreground"
+                  aria-label={t(($) => $.actions.more)}
+                >
+                  <MoreHorizontal />
+                </Button>
+              }
+              onDeletedNavigateTo={onDelete ? undefined : paths.issues()}
+            >
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setClearHistoryDialogOpen(true)}>
+                <Eraser className="h-3.5 w-3.5" />
+                {t(($) => $.detail.clear_history)}
+              </DropdownMenuItem>
+            </IssueActionsDropdown>
             <Tooltip>
               <TooltipTrigger
                 render={

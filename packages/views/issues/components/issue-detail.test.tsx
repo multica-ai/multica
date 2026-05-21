@@ -727,6 +727,21 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("Add property")).toBeInTheDocument();
   });
 
+  it("opens the shared assignee picker from the issue-detail overflow menu", async () => {
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getAllByText("TES-1").length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByLabelText("More"));
+    fireEvent.click((await screen.findAllByText("Assignee"))[1]!);
+
+    expect(await screen.findByPlaceholderText("Assign to...")).toBeInTheDocument();
+    expect(await screen.findByText("Members")).toBeInTheDocument();
+    expect((await screen.findAllByText("Test User")).length).toBeGreaterThan(0);
+  });
+
   it("hides every optional property row when none are set", async () => {
     // Override the default fixture: nothing optional set.
     mockApiObj.getIssue.mockResolvedValue({
@@ -739,7 +754,7 @@ describe("IssueDetail (shared)", () => {
     renderIssueDetail();
 
     await waitFor(() => {
-      expect(screen.getByText("Properties")).toBeInTheDocument();
+      expect(screen.getAllByText("Properties").length).toBeGreaterThanOrEqual(1);
     });
 
     expect(screen.queryByText("Priority")).not.toBeInTheDocument();
