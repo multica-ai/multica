@@ -127,6 +127,11 @@ BEGIN
 END;
 $$;
 
+-- INVARIANT: agent_task_queue.agent_id is immutable once a row is inserted.
+-- If a future feature makes agent_id mutable (e.g. reassign / rebind), it
+-- MUST be added to this trigger's `OF` column list, otherwise dirty
+-- buckets for the old agent_id will not be enqueued and historical
+-- aggregates will silently rot.
 CREATE TRIGGER trg_atq_dirty_hourly
 BEFORE UPDATE OF runtime_id, issue_id OR DELETE ON agent_task_queue
 FOR EACH ROW EXECUTE FUNCTION enqueue_task_usage_hourly_dirty_for_atq();

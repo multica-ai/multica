@@ -3,6 +3,20 @@
 // rows. Run once after the hourly-pipeline migrations ship, BEFORE registering
 // the pg_cron job for rollup_task_usage_hourly().
 //
+// SELF-HOST UPGRADE ORDER — migrations 100–104 are one group, but they
+// must NOT be applied in a single `make migrate-up`:
+//
+//  1. Apply 101+102 (creates task_usage_hourly + installs the triggers).
+//  2. Run THIS backfill to seed historical buckets.
+//  3. Apply 103+104 (drops the legacy daily rollups + runtime.timezone)
+//     and register the pg_cron job.
+//
+// If you run `migrate-up` straight through to 103/104 before this
+// backfill, the legacy daily pipelines are gone while task_usage_hourly
+// only holds buckets the triggers wrote since 102 — dashboards will show
+// empty history until backfill + cron catch up (tens to hundreds of
+// ticks on a DB with years of data, given the per-tick 1-day cap).
+//
 // Mirrors backfill_task_usage_dashboard_daily: walk task_usage's time
 // range in monthly slices and call the same idempotent window
 // primitive the cron path uses. Then stamp the rollup-state watermark
