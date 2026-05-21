@@ -1134,9 +1134,8 @@ INSERT INTO agent_runtime (
     device_info,
     metadata,
     owner_id,
-    timezone,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE(NULLIF($10, ''), 'UTC'), now())
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
 ON CONFLICT (workspace_id, daemon_id, provider)
 DO UPDATE SET
     name = EXCLUDED.name,
@@ -1160,7 +1159,6 @@ type UpsertAgentRuntimeParams struct {
 	DeviceInfo  string      `json:"device_info"`
 	Metadata    []byte      `json:"metadata"`
 	OwnerID     pgtype.UUID `json:"owner_id"`
-	Timezone    interface{} `json:"timezone"`
 }
 
 type UpsertAgentRuntimeRow struct {
@@ -1194,7 +1192,7 @@ type UpsertAgentRuntimeRow struct {
 // (xmax = 0) AS inserted distinguishes a fresh insert (true) from an upsert
 // that updated an existing row (false). Analytics reads this to fire
 // runtime_registered/runtime_ready only on first-time registration.
-// CEREBRO-PATCH(runtime-timezone-default): zero-value sqlc params must not persist an invalid empty timezone.
+// CEREBRO-PATCH(runtime-timezone-drop): runtime timezone was removed by migration 104; viewing tz now lives on user rows.
 func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntimeParams) (UpsertAgentRuntimeRow, error) {
 	row := q.db.QueryRow(ctx, upsertAgentRuntime,
 		arg.WorkspaceID,
@@ -1206,7 +1204,6 @@ func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntime
 		arg.DeviceInfo,
 		arg.Metadata,
 		arg.OwnerID,
-		arg.Timezone,
 	)
 	var i UpsertAgentRuntimeRow
 	err := row.Scan(

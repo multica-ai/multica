@@ -864,10 +864,19 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		scheduledFilter = pgtype.Bool{Bool: true, Valid: true}
 	}
 
+	// CEREBRO-PATCH(list-issues-access-context): list/count access filters need the caller's role and user id.
+	member, ok := h.resolveMemberFromRequest(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
 	issues, err := h.Queries.ListIssues(ctx, db.ListIssuesParams{
 		WorkspaceID:    wsUUID,
 		Limit:          int32(limit),
 		Offset:         int32(offset),
+		IsAdmin:        isWorkspaceAdmin(member),
+		UserID:         member.UserID,
 		Status:         statusFilter,
 		Priority:       priorityFilter,
 		AssigneeID:     assigneeFilter,
@@ -887,6 +896,8 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	// Get the true total count for pagination awareness.
 	total, err := h.Queries.CountIssues(ctx, db.CountIssuesParams{
 		WorkspaceID:    wsUUID,
+		IsAdmin:        isWorkspaceAdmin(member),
+		UserID:         member.UserID,
 		Status:         statusFilter,
 		Priority:       priorityFilter,
 		AssigneeID:     assigneeFilter,

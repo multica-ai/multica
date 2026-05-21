@@ -43,10 +43,9 @@ INSERT INTO agent_runtime (
     device_info,
     metadata,
     owner_id,
-    timezone,
     last_seen_at
--- CEREBRO-PATCH(runtime-timezone-default): zero-value sqlc params must not persist an invalid empty timezone.
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE(NULLIF(@timezone, ''), 'UTC'), now())
+-- CEREBRO-PATCH(runtime-timezone-drop): runtime timezone was removed by migration 104; viewing tz now lives on user rows.
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
 ON CONFLICT (workspace_id, daemon_id, provider)
 DO UPDATE SET
     name = EXCLUDED.name,
