@@ -719,9 +719,9 @@ func TestAggregateChecksConclusion(t *testing.T) {
 		return *p
 	}
 	cases := []struct {
-		name                            string
+		name                           string
 		failed, passed, pending, total int64
-		want                            string
+		want                           string
 	}{
 		{"no_suites_nil", 0, 0, 0, 0, "<nil>"},
 		{"any_failure_wins", 1, 5, 0, 6, "failed"},
@@ -787,16 +787,21 @@ func firePullRequestWebhookWithHead(t *testing.T, secret, identifier string, ins
 
 func fireCheckSuiteWebhook(t *testing.T, secret string, installationID int64, repo string, prNumbers []int32, suiteID, appID int64, headSHA, conclusion, updatedAt string) {
 	t.Helper()
+	fireCheckSuiteWebhookWithStatus(t, secret, installationID, repo, prNumbers, suiteID, appID, headSHA, "completed", "completed", conclusion, updatedAt)
+}
+
+func fireCheckSuiteWebhookWithStatus(t *testing.T, secret string, installationID int64, repo string, prNumbers []int32, suiteID, appID int64, headSHA, action, status, conclusion, updatedAt string) {
+	t.Helper()
 	prRefs := make([]map[string]any, 0, len(prNumbers))
 	for _, n := range prNumbers {
 		prRefs = append(prRefs, map[string]any{"number": n})
 	}
 	payload := map[string]any{
-		"action": "completed",
+		"action": action,
 		"check_suite": map[string]any{
 			"id":            suiteID,
 			"head_sha":      headSHA,
-			"status":        "completed",
+			"status":        status,
 			"conclusion":    conclusion,
 			"updated_at":    updatedAt,
 			"app":           map[string]any{"id": appID},
@@ -886,6 +891,46 @@ func TestWebhook_CheckSuite_AggregatesAcrossApps(t *testing.T) {
 	got := aggregateChecksConclusion(rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
 	if got == nil || *got != "failed" {
 		t.Errorf("expected aggregate failed, got %v (counts: failed=%d passed=%d pending=%d total=%d)",
+			got, rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
+	}
+}
+
+// TestWebhook_CheckSuite_PendingEventAggregates verifies queued/in-progress
+// suite deliveries are persisted and surfaced as pending until the same
+// suite reaches a completed conclusion.
+func TestWebhook_CheckSuite_PendingEventAggregates(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	const secret = "ci-pending-secret"
+	created, installationID := setupPRTestIssue(t, ctx, secret)
+
+	head := "pending123456"
+	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-pending", 12, "opened", head, "")
+	fireCheckSuiteWebhookWithStatus(t, secret, installationID, "ci-repo-pending", []int32{12}, 1201, 7201, head, "requested", "queued", "", "2026-05-01T00:00:00Z")
+
+	rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 PR row, got %d", len(rows))
+	}
+	got := aggregateChecksConclusion(rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
+	if got == nil || *got != "pending" {
+		t.Fatalf("expected aggregate pending, got %v (counts: failed=%d passed=%d pending=%d total=%d)",
+			got, rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
+	}
+
+	fireCheckSuiteWebhook(t, secret, installationID, "ci-repo-pending", []int32{12}, 1201, 7201, head, "success", "2026-05-01T00:02:00Z")
+	rows, err = testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue after completion: %v", err)
+	}
+	got = aggregateChecksConclusion(rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
+	if got == nil || *got != "passed" {
+		t.Errorf("expected aggregate passed after completion, got %v (counts: failed=%d passed=%d pending=%d total=%d)",
 			got, rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
 	}
 }
