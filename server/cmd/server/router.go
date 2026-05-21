@@ -131,15 +131,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
 
 	signupConfig := handler.Config{
-		AllowSignup:                   os.Getenv("ALLOW_SIGNUP") != "false",
-		AllowedEmails:                 splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
-		AllowedEmailDomains:           splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
-		UseDailyRollupForRuntimeUsage: os.Getenv("USAGE_DAILY_ROLLUP_ENABLED") == "true",
-		UseDailyRollupForDashboard:    os.Getenv("USAGE_DASHBOARD_ROLLUP_ENABLED") == "true",
-		PublicURL:                     strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
-		TrustedProxies:                parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
-		CloudRuntimeFleetURL:          cloudRuntimeFleetURLFromEnv(),
-		CloudRuntimeFleetTimeout:      envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
+		AllowSignup:              os.Getenv("ALLOW_SIGNUP") != "false",
+		AllowedEmails:            splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
+		AllowedEmailDomains:      splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
+		PublicURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
+		TrustedProxies:           parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
+		CloudRuntimeFleetURL:     cloudRuntimeFleetURLFromEnv(),
+		CloudRuntimeFleetTimeout: envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	if opts.DaemonWakeup != nil {
@@ -552,12 +550,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/files", h.UpsertSkillFile)
 					r.Delete("/files/{fileId}", h.DeleteSkillFile)
 				})
-			})
-
-			// Usage
-			r.Route("/api/usage", func(r chi.Router) {
-				r.Get("/daily", h.GetWorkspaceUsageByDay)
-				r.Get("/summary", h.GetWorkspaceUsageSummary)
 			})
 
 			// Dashboard — workspace-wide token + run-time rollups for the

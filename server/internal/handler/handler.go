@@ -50,27 +50,6 @@ type Config struct {
 	AllowSignup         bool
 	AllowedEmails       []string
 	AllowedEmailDomains []string
-	// UseDailyRollupForRuntimeUsage routes ListRuntimeUsage to the
-	// task_usage_daily rollup table when true. Default false: the read
-	// path stays on the raw task_usage stream so rollup-related issues
-	// (pg_cron not running, backfill not yet performed, watermark stuck)
-	// can never make the dashboard return empty/stale data. Operators
-	// flip this on per environment AFTER:
-	//   1) migrations 072..076 applied,
-	//   2) backfill_task_usage_daily ran successfully,
-	//   3) cron job scheduled and task_usage_rollup_lag_seconds() < 900.
-	UseDailyRollupForRuntimeUsage bool
-	// UseDailyRollupForDashboard routes the workspace `/dashboard` page's
-	// token-aggregation reads to `task_usage_dashboard_daily` (migration
-	// 084). Mirrors UseDailyRollupForRuntimeUsage above with the same
-	// fail-safe default (false → raw scan). Operators flip per
-	// environment AFTER:
-	//   1) migration 084 applied,
-	//   2) `backfill_task_usage_dashboard_daily` succeeded and stamped
-	//      the dashboard rollup watermark,
-	//   3) cron job scheduled (`rollup_task_usage_dashboard_daily`) and
-	//      `task_usage_dashboard_rollup_lag_seconds()` < 900.
-	UseDailyRollupForDashboard bool
 	// PublicURL is the absolute base URL the API is reachable at from the
 	// public internet, with no trailing slash (e.g. "https://app.multica.ai").
 	// Used only to build webhook_url responses for autopilot webhook triggers
