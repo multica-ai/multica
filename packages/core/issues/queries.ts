@@ -262,6 +262,8 @@ export function issueTimelineOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.timeline(issueId),
     queryFn: () => api.listTimeline(issueId),
+    // CEREBRO-PATCH(issue-timeline-refetch-on-mount): Inbox-notification → issue navigation must show the new comment without manual refresh. Global staleTime:Infinity + WS handlers that only attach on mount mean any comment that arrived while the user was on inbox is invisible until reload (JEH-1893/1878/1894). Forcing a refetch on every mount is the smallest fix that closes the gap; WS keeps the cache fresh while the issue page is open.
+    refetchOnMount: "always",
   });
 }
 

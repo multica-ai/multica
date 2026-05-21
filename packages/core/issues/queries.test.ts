@@ -8,6 +8,7 @@ import {
   PROJECT_GANTT_MAX_ISSUES,
   PROJECT_GANTT_PAGE_LIMIT,
   issueKeys,
+  issueTimelineOptions,
   projectGanttIssuesOptions,
 } from "./queries";
 
@@ -128,5 +129,17 @@ describe("projectGanttIssuesOptions", () => {
   it("uses the project-scoped Gantt cache key", () => {
     const options = projectGanttIssuesOptions(WS_ID, PROJECT_ID);
     expect(options.queryKey).toEqual(issueKeys.projectGantt(WS_ID, PROJECT_ID));
+  });
+});
+
+describe("issueTimelineOptions", () => {
+  it('forces refetchOnMount: "always" so inbox→issue navigation surfaces new comments without manual refresh', () => {
+    // Regression guard for JEH-1893/1878/1894. Removing this opt-in re-introduces
+    // the bug where staleTime:Infinity served the previous-visit cache while WS
+    // handlers only attach on mount, leaving comments that arrived during the
+    // user's inbox stay invisible until reload.
+    const options = issueTimelineOptions("issue-1");
+    expect(options.refetchOnMount).toBe("always");
+    expect(options.queryKey).toEqual(issueKeys.timeline("issue-1"));
   });
 });
