@@ -311,6 +311,11 @@ func TestGetAgent_DefaultNoRedactForOwner(t *testing.T) {
 	}
 	ctx := context.Background()
 
+	// Ensure workspace has no always_redact_env policy (guards against test-order leakage).
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = NULL WHERE id = $1`, testWorkspaceID); err != nil {
+		t.Fatalf("failed to clear workspace settings: %v", err)
+	}
+
 	agentID := createHandlerTestAgent(t, "no-redact-get-test-agent", nil)
 	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{"SECRET_KEY": "super-secret"}' WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("failed to set custom_env: %v", err)
