@@ -22,6 +22,7 @@ import (
 const (
 	codexAppServerSource       = "codex-app-server"
 	codexAppServerStartRetries = 5
+	codexProposedPlanInputKind = "codex_proposed_plan"
 )
 
 func executeCodexRemoteCLI(args []string, cwd string, env localCLIEnv, initialPrompt string, reporter *localRunReporter, usageReporter *localRunUsageReporter) (int, error) {
@@ -402,6 +403,9 @@ func (m *codexAppServerMapper) observeClientMessage(msg map[string]any) {
 func (m *codexAppServerMapper) observeServerMessage(msg map[string]any) {
 	if method := stringValue(msg["method"]); method != "" {
 		params, _ := msg["params"].(map[string]any)
+		if id := codexRPCID(msg["id"]); id != "" {
+			m.recordServerRequest(id, method, params)
+		}
 		m.handleNotification(method, params)
 		return
 	}
@@ -435,6 +439,32 @@ func (m *codexAppServerMapper) observeServerMessage(msg map[string]any) {
 	}
 }
 
+func (m *codexAppServerMapper) recordServerRequest(id, method string, params map[string]any) {
+	switch method {
+	case "item/tool/requestUserInput":
+		m.recordUserInputRequest(id, params)
+	}
+}
+
+func (m *codexAppServerMapper) recordUserInputRequest(id string, params map[string]any) {
+	content, input := codexAppServerUserInputRequestContent(params)
+	if content == "" {
+		return
+	}
+	threadID := m.threadID(params)
+	turnID := m.turnID(params)
+	sourceKey := "request:" + id
+	if threadID != "" && turnID != "" {
+		sourceKey = "thread:" + threadID + ":turn:" + turnID + ":request:" + id
+	}
+	m.post(localCLIMessage{
+		Type:      "text",
+		Content:   content,
+		Input:     input,
+		SourceKey: sourceKey,
+	})
+}
+
 func (m *codexAppServerMapper) handleNotification(method string, params map[string]any) {
 	switch method {
 	case "thread/started":
@@ -457,6 +487,8 @@ func (m *codexAppServerMapper) handleNotification(method string, params map[stri
 		}
 	case "item/agentMessage/delta":
 		m.recordAgentDelta(params)
+	case "item/plan/delta":
+		m.recordPlanDelta(params)
 	case "item/started":
 		m.recordStartedItem(params)
 	case "item/completed":
@@ -500,6 +532,17 @@ func (m *codexAppServerMapper) recordAgentDelta(params map[string]any) {
 	m.mu.Unlock()
 }
 
+func (m *codexAppServerMapper) recordPlanDelta(params map[string]any) {
+	itemID := codexAppServerParamItemID(params)
+	delta := stringValue(params["delta"])
+	if itemID == "" || delta == "" {
+		return
+	}
+	m.mu.Lock()
+	m.deltas[itemID] += delta
+	m.mu.Unlock()
+}
+
 func (m *codexAppServerMapper) recordCompletedItem(params map[string]any) {
 	item := nestedMap(params, "item")
 	if item == nil {
@@ -517,6 +560,8 @@ func (m *codexAppServerMapper) recordCompletedItem(params map[string]any) {
 		m.recordUserMessage(threadID, turnID, itemID, item)
 	case "agentMessage":
 		m.recordAgentMessage(threadID, turnID, itemID, item)
+	case "plan":
+		m.recordPlanMessage(threadID, turnID, itemID, item)
 	case "commandExecution":
 		m.recordCommandResult(threadID, turnID, itemID, item)
 	case "fileChange":
@@ -608,6 +653,27 @@ func (m *codexAppServerMapper) recordAgentMessage(threadID, turnID, itemID strin
 			SourceKey: "thread:" + threadID + ":turn:" + turnID + ":agent:" + itemID + ":final",
 		})
 	}
+}
+
+func (m *codexAppServerMapper) recordPlanMessage(threadID, turnID, itemID string, item map[string]any) {
+	content := strings.TrimSpace(codexAppServerItemText(item))
+	if content == "" {
+		m.mu.Lock()
+		content = strings.TrimSpace(m.deltas[itemID])
+		m.mu.Unlock()
+	}
+	if content == "" {
+		return
+	}
+	m.post(localCLIMessage{
+		Type:    "text",
+		Content: "Proposed Plan\n\n" + content,
+		Input: map[string]any{
+			"kind":    codexProposedPlanInputKind,
+			"item_id": itemID,
+		},
+		SourceKey: "thread:" + threadID + ":turn:" + turnID + ":plan:" + itemID,
+	})
 }
 
 func (m *codexAppServerMapper) recordCommandResult(threadID, turnID, itemID string, item map[string]any) {
@@ -872,6 +938,70 @@ func int64Value(v any) int64 {
 	default:
 		return 0
 	}
+}
+
+type codexAppServerUserInputOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
+type codexAppServerUserInputQuestion struct {
+	ID       string                          `json:"id"`
+	Header   string                          `json:"header"`
+	Question string                          `json:"question"`
+	Options  []codexAppServerUserInputOption `json:"options"`
+}
+
+type codexAppServerUserInputParams struct {
+	Questions []codexAppServerUserInputQuestion `json:"questions"`
+}
+
+func codexAppServerUserInputRequestContent(params map[string]any) (string, map[string]any) {
+	if params == nil {
+		return "", nil
+	}
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return "", nil
+	}
+	var parsed codexAppServerUserInputParams
+	if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed.Questions) == 0 {
+		return "", nil
+	}
+	q := parsed.Questions[0]
+	title := strings.TrimSpace(q.Header)
+	detail := strings.TrimSpace(q.Question)
+	if title == "" {
+		title = detail
+	}
+	if title == "" && detail == "" {
+		return "", nil
+	}
+	content := title
+	if detail != "" && detail != title {
+		content = title + "\n\n" + detail
+	}
+	options := make([]string, 0, len(q.Options))
+	for _, opt := range q.Options {
+		label := strings.TrimSpace(opt.Label)
+		if label == "" {
+			label = strings.TrimSpace(opt.Description)
+		}
+		if label != "" {
+			options = append(options, label)
+		}
+	}
+	input := map[string]any{
+		"kind":        "user_input_request",
+		"question_id": q.ID,
+	}
+	if strings.EqualFold(title, "Proposed Plan") {
+		input["kind"] = codexProposedPlanInputKind
+	}
+	if len(options) > 0 {
+		input["options"] = options
+	}
+	return content, input
 }
 
 func codexAppServerItemText(item map[string]any) string {
