@@ -2,6 +2,7 @@ import type {
   DashboardUsageDaily,
   DashboardUsageByAgent,
   DashboardLocalUsageByRunner,
+  DashboardLocalRunTimeByRunner,
   DashboardAgentRunTime,
   DashboardRunTimeDaily,
 } from "@multica/core/types";
@@ -186,6 +187,7 @@ export function aggregateLocalRunnerTokens(
     entry.tokens +=
       r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
     entry.cost += estimateCost(r);
+    entry.taskCount += r.task_count;
     map.set(runnerId, entry);
   }
   return [...map.values()].sort((a, b) => b.cost - a.cost);
@@ -215,9 +217,13 @@ export function mergeAgentDashboardRows(
   tokenRows: AgentCostRow[],
   runTimeRows: DashboardAgentRunTime[],
   localRows: AgentCostRow[] = [],
+  localRunTimeRows: DashboardLocalRunTimeByRunner[] = [],
 ): AgentDashboardRow[] {
   const runTimeByAgent = new Map(
     runTimeRows.map((r) => [r.agent_id, r] as const),
+  );
+  const localRunTimeByRunner = new Map<string, DashboardLocalRunTimeByRunner>(
+    localRunTimeRows.map((r) => [`local:${r.owner_id}:${r.cli_name}`, r] as const),
   );
   const merged = new Map<string, AgentDashboardRow>();
   for (const r of tokenRows) {
@@ -246,6 +252,7 @@ export function mergeAgentDashboardRows(
     });
   }
   for (const r of localRows) {
+    const rt = localRunTimeByRunner.get(r.agentId);
     merged.set(r.agentId, {
       agentId: r.agentId,
       source: "local",
@@ -253,8 +260,22 @@ export function mergeAgentDashboardRows(
       ownerId: r.ownerId,
       tokens: r.tokens,
       cost: r.cost,
-      seconds: 0,
-      taskCount: r.taskCount,
+      seconds: rt?.total_seconds ?? 0,
+      taskCount: rt ? rt.task_count : r.taskCount,
+    });
+  }
+  for (const r of localRunTimeRows) {
+    const runnerId = `local:${r.owner_id}:${r.cli_name}`;
+    if (merged.has(runnerId)) continue;
+    merged.set(runnerId, {
+      agentId: runnerId,
+      source: "local",
+      displayName: r.runner_name,
+      ownerId: r.owner_id,
+      tokens: 0,
+      cost: 0,
+      seconds: r.total_seconds,
+      taskCount: r.task_count,
     });
   }
   return [...merged.values()].sort((a, b) => {

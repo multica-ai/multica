@@ -189,6 +189,69 @@ describe("mergeAgentDashboardRows", () => {
     );
     expect(merged.map((r) => r.agentId)).toEqual(["high", "low", "zero-cost-long"]);
   });
+
+  it("merges local runner token rows with local run-time rows", () => {
+    const merged = mergeAgentDashboardRows(
+      [],
+      [],
+      [
+        {
+          agentId: "local:user-1:codex",
+          source: "local",
+          displayName: "Pat-local-codex",
+          ownerId: "user-1",
+          tokens: 3_000_000,
+          cost: 12,
+          taskCount: 2,
+        },
+      ],
+      [
+        {
+          owner_id: "user-1",
+          runner_name: "Pat-local-codex",
+          cli_name: "codex",
+          total_seconds: 900,
+          task_count: 1,
+          failed_count: 0,
+        },
+      ],
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      agentId: "local:user-1:codex",
+      source: "local",
+      seconds: 900,
+      taskCount: 1,
+    });
+  });
+
+  it("includes local runners that have run-time but no tokens", () => {
+    const merged = mergeAgentDashboardRows(
+      [],
+      [],
+      [],
+      [
+        {
+          owner_id: "user-1",
+          runner_name: "Pat-local-claude",
+          cli_name: "claude",
+          total_seconds: 120,
+          task_count: 1,
+          failed_count: 1,
+        },
+      ],
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      agentId: "local:user-1:claude",
+      source: "local",
+      displayName: "Pat-local-claude",
+      seconds: 120,
+      taskCount: 1,
+      tokens: 0,
+      cost: 0,
+    });
+  });
 });
 
 describe("formatDuration", () => {

@@ -18,6 +18,7 @@ import (
 //   GET /api/dashboard/usage/by-agent    per-(agent, model) token rows
 //   GET /api/dashboard/local-usage/daily per-(date, model) local CLI token rows
 //   GET /api/dashboard/local-usage/by-runner per-(runner, model) local CLI token rows
+//   GET /api/dashboard/local-runtime/by-runner per-runner local CLI run-time
 //   GET /api/dashboard/agent-runtime     per-agent run-time + task counts
 //   GET /api/dashboard/runtime/daily     per-date run-time + task counts
 //
@@ -242,6 +243,17 @@ type DashboardLocalUsageByRunnerResponse struct {
 	TaskCount        int32  `json:"task_count"`
 }
 
+// DashboardLocalRunTimeByRunnerResponse is one local runner's terminal run
+// time over the selected window.
+type DashboardLocalRunTimeByRunnerResponse struct {
+	OwnerID      string `json:"owner_id"`
+	RunnerName   string `json:"runner_name"`
+	CLIName      string `json:"cli_name"`
+	TotalSeconds int64  `json:"total_seconds"`
+	TaskCount    int32  `json:"task_count"`
+	FailedCount  int32  `json:"failed_count"`
+}
+
 // GetDashboardLocalUsageDaily returns local CLI token rows for workspace
 // dashboard composition. Local runs are intentionally not attributed to an
 // agent_runtime, so this stays separate from the daemon task usage endpoints.
@@ -314,6 +326,43 @@ func (h *Handler) GetDashboardLocalUsageByRunner(w http.ResponseWriter, r *http.
 			CacheReadTokens:  row.CacheReadTokens,
 			CacheWriteTokens: row.CacheWriteTokens,
 			TaskCount:        row.TaskCount,
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// GetDashboardLocalRunTimeByRunner returns per local-runner terminal run-time
+// aggregates. This stays separate from token-by-model rows so local runs that
+// touched multiple models do not duplicate duration in the client.
+func (h *Handler) GetDashboardLocalRunTimeByRunner(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+	projectID, ok := parseProjectIDParam(w, r)
+	if !ok {
+		return
+	}
+	since := parseSinceParam(r, 30)
+
+	rows, err := h.Queries.ListDashboardLocalRunTimeByRunner(r.Context(), db.ListDashboardLocalRunTimeByRunnerParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Since:       since,
+		ProjectID:   projectID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list local run time by runner")
+		return
+	}
+	resp := make([]DashboardLocalRunTimeByRunnerResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = DashboardLocalRunTimeByRunnerResponse{
+			OwnerID:      uuidToString(row.OwnerID),
+			RunnerName:   row.RunnerName,
+			CLIName:      row.CliName,
+			TotalSeconds: row.TotalSeconds,
+			TaskCount:    row.TaskCount,
+			FailedCount:  row.FailedCount,
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)

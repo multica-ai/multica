@@ -311,13 +311,16 @@ func TestDashboardLocalUsageEndpoints(t *testing.T) {
 		return id
 	}
 
-	mkRunWithUsage := func(issueID string, tokens int64) {
+	mkRunWithUsage := func(issueID string, tokens int64, status string, startedAt, completedAt time.Time) {
 		var runID string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO local_cli_run (workspace_id, issue_id, owner_id, cli_name, status, created_at, updated_at)
-			VALUES ($1, $2, $3, 'codex', 'completed', now(), now())
+			INSERT INTO local_cli_run (
+				workspace_id, issue_id, owner_id, cli_name, status,
+				started_at, completed_at, created_at, updated_at
+			)
+			VALUES ($1, $2, $3, 'codex', $4, $5, $6, now(), now())
 			RETURNING id
-		`, testWorkspaceID, issueID, testUserID).Scan(&runID); err != nil {
+		`, testWorkspaceID, issueID, testUserID, status, startedAt, completedAt).Scan(&runID); err != nil {
 			t.Fatalf("insert local run: %v", err)
 		}
 		if _, err := testPool.Exec(ctx, `
@@ -329,8 +332,27 @@ func TestDashboardLocalUsageEndpoints(t *testing.T) {
 		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM local_cli_run WHERE id = $1`, runID) })
 	}
 
-	mkRunWithUsage(mkIssue(true), 100)
-	mkRunWithUsage(mkIssue(false), 40)
+	now := time.Now().UTC()
+	projectStarted := now.Add(-20 * time.Minute)
+	projectCompleted := projectStarted.Add(10 * time.Minute)
+	failedStarted := now.Add(-12 * time.Minute)
+	failedCompleted := failedStarted.Add(5 * time.Minute)
+	otherStarted := now.Add(-15 * time.Minute)
+	otherCompleted := otherStarted.Add(7 * time.Minute)
+	mkRunWithUsage(mkIssue(true), 100, "completed", projectStarted, projectCompleted)
+	mkRunWithUsage(mkIssue(true), 25, "failed", failedStarted, failedCompleted)
+	mkRunWithUsage(mkIssue(false), 40, "completed", otherStarted, otherCompleted)
+
+	var runningRunID string
+	runningIssueID := mkIssue(true)
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO local_cli_run (workspace_id, issue_id, owner_id, cli_name, status, started_at, created_at, updated_at)
+		VALUES ($1, $2, $3, 'codex', 'running', $4, now(), now())
+		RETURNING id
+	`, testWorkspaceID, runningIssueID, testUserID, now.Add(-30*time.Minute)).Scan(&runningRunID); err != nil {
+		t.Fatalf("insert running local run: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM local_cli_run WHERE id = $1`, runningRunID) })
 
 	type dailyRow struct {
 		Model       string `json:"model"`
@@ -341,6 +363,13 @@ func TestDashboardLocalUsageEndpoints(t *testing.T) {
 		CLIName     string `json:"cli_name"`
 		Model       string `json:"model"`
 		InputTokens int64  `json:"input_tokens"`
+	}
+	type localRunTimeRow struct {
+		RunnerName   string `json:"runner_name"`
+		CLIName      string `json:"cli_name"`
+		TotalSeconds int64  `json:"total_seconds"`
+		TaskCount    int32  `json:"task_count"`
+		FailedCount  int32  `json:"failed_count"`
 	}
 
 	w := httptest.NewRecorder()
@@ -356,8 +385,8 @@ func TestDashboardLocalUsageEndpoints(t *testing.T) {
 			dailyTotal += r.InputTokens
 		}
 	}
-	if dailyTotal != 100 {
-		t.Fatalf("local daily project total = %d, want 100", dailyTotal)
+	if dailyTotal != 125 {
+		t.Fatalf("local daily project total = %d, want 125", dailyTotal)
 	}
 
 	w = httptest.NewRecorder()
@@ -375,8 +404,31 @@ func TestDashboardLocalUsageEndpoints(t *testing.T) {
 			foundName = strings.Contains(r.RunnerName, "-local-codex")
 		}
 	}
-	if runnerTotal < 140 || !foundName {
-		t.Fatalf("local by-runner rows = %+v, want total >=140 and member-local-codex name", runners)
+	if runnerTotal < 165 || !foundName {
+		t.Fatalf("local by-runner rows = %+v, want total >=165 and member-local-codex name", runners)
+	}
+
+	w = httptest.NewRecorder()
+	testHandler.GetDashboardLocalRunTimeByRunner(w, newRequest("GET", "/api/dashboard/local-runtime/by-runner?days=1&project_id="+projectID, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("local runtime by-runner: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var localRunTimes []localRunTimeRow
+	_ = json.NewDecoder(w.Body).Decode(&localRunTimes)
+	var runtimeSeconds int64
+	var taskCount int32
+	var failedCount int32
+	foundName = false
+	for _, r := range localRunTimes {
+		if r.CLIName == "codex" {
+			runtimeSeconds += r.TotalSeconds
+			taskCount += r.TaskCount
+			failedCount += r.FailedCount
+			foundName = strings.Contains(r.RunnerName, "-local-codex")
+		}
+	}
+	if runtimeSeconds != 900 || taskCount != 2 || failedCount != 1 || !foundName {
+		t.Fatalf("local runtime rows = %+v, want 900s, 2 tasks, 1 failed, member-local-codex name", localRunTimes)
 	}
 }
 

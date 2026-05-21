@@ -251,6 +251,19 @@ export const DashboardLocalUsageByRunnerListSchema = z.array(
   DashboardLocalUsageByRunnerSchema,
 );
 
+const DashboardLocalRunTimeByRunnerSchema = z.object({
+  owner_id: z.string(),
+  runner_name: z.string(),
+  cli_name: z.string(),
+  total_seconds: z.number().default(0),
+  task_count: z.number().default(0),
+  failed_count: z.number().default(0),
+}).passthrough();
+
+export const DashboardLocalRunTimeByRunnerListSchema = z.array(
+  DashboardLocalRunTimeByRunnerSchema,
+);
+
 const DashboardAgentRunTimeSchema = z.object({
   agent_id: z.string(),
   total_seconds: z.number().default(0),

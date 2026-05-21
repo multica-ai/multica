@@ -468,6 +468,15 @@ export interface DashboardLocalUsageByRunner {
   task_count: number;
 }
 
+export interface DashboardLocalRunTimeByRunner {
+  owner_id: string;
+  runner_name: string;
+  cli_name: string;
+  total_seconds: number;
+  task_count: number;
+  failed_count: number;
+}
+
 // Per-agent total terminal-task run-time + counts. Powers the workspace
 // dashboard's "time by agent" list. failed_count is a subset of
 // task_count (failed tasks still contribute to total_seconds because

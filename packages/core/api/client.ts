@@ -54,6 +54,7 @@ import type {
   DashboardUsageDaily,
   DashboardUsageByAgent,
   DashboardLocalUsageByRunner,
+  DashboardLocalRunTimeByRunner,
   DashboardAgentRunTime,
   DashboardRunTimeDaily,
   RuntimeUpdate,
@@ -159,6 +160,7 @@ import {
   CommentsListSchema,
   CreateAgentFromTemplateResponseSchema,
   DashboardAgentRunTimeListSchema,
+  DashboardLocalRunTimeByRunnerListSchema,
   DashboardLocalUsageByRunnerListSchema,
   DashboardRunTimeDailyListSchema,
   DashboardUsageByAgentListSchema,
@@ -1255,6 +1257,21 @@ export class ApiClient {
       DashboardLocalUsageByRunnerListSchema,
       [],
       { endpoint: "GET /api/dashboard/local-usage/by-runner" },
+    );
+  }
+
+  async getDashboardLocalRunTimeByRunner(
+    params: { days?: number; project_id?: string | null },
+  ): Promise<DashboardLocalRunTimeByRunner[]> {
+    const search = new URLSearchParams();
+    if (params.days) search.set("days", String(params.days));
+    if (params.project_id) search.set("project_id", params.project_id);
+    const raw = await this.fetch<unknown>(`/api/dashboard/local-runtime/by-runner?${search}`);
+    return parseWithFallback<DashboardLocalRunTimeByRunner[]>(
+      raw,
+      DashboardLocalRunTimeByRunnerListSchema,
+      [],
+      { endpoint: "GET /api/dashboard/local-runtime/by-runner" },
     );
   }
 

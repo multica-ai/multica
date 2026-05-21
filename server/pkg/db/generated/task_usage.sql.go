@@ -271,6 +271,72 @@ func (q *Queries) ListDashboardAgentRunTime(ctx context.Context, arg ListDashboa
 	return items, nil
 }
 
+const listDashboardLocalRunTimeByRunner = `-- name: ListDashboardLocalRunTimeByRunner :many
+SELECT
+    lcr.owner_id,
+    (COALESCE(NULLIF(u.name, ''), u.email) || '-local-' || lcr.cli_name)::text AS runner_name,
+    lcr.cli_name,
+    COALESCE(
+        SUM(EXTRACT(EPOCH FROM (lcr.completed_at - lcr.started_at)))::bigint,
+        0
+    )::bigint AS total_seconds,
+    COUNT(*)::int AS task_count,
+    COUNT(*) FILTER (WHERE lcr.status = 'failed')::int AS failed_count
+FROM local_cli_run lcr
+JOIN "user" u ON u.id = lcr.owner_id
+LEFT JOIN issue i ON i.id = lcr.issue_id
+WHERE lcr.workspace_id = $1
+  AND lcr.status IN ('completed', 'failed', 'cancelled')
+  AND lcr.started_at IS NOT NULL
+  AND lcr.completed_at IS NOT NULL
+  AND lcr.completed_at >= DATE_TRUNC('day', $2::timestamptz)
+  AND ($3::uuid IS NULL OR i.project_id = $3)
+GROUP BY lcr.owner_id, runner_name, lcr.cli_name
+ORDER BY runner_name
+`
+
+type ListDashboardLocalRunTimeByRunnerParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+}
+
+type ListDashboardLocalRunTimeByRunnerRow struct {
+	OwnerID      pgtype.UUID `json:"owner_id"`
+	RunnerName   string      `json:"runner_name"`
+	CliName      string      `json:"cli_name"`
+	TotalSeconds int64       `json:"total_seconds"`
+	TaskCount    int32       `json:"task_count"`
+	FailedCount  int32       `json:"failed_count"`
+}
+
+func (q *Queries) ListDashboardLocalRunTimeByRunner(ctx context.Context, arg ListDashboardLocalRunTimeByRunnerParams) ([]ListDashboardLocalRunTimeByRunnerRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardLocalRunTimeByRunner, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardLocalRunTimeByRunnerRow{}
+	for rows.Next() {
+		var i ListDashboardLocalRunTimeByRunnerRow
+		if err := rows.Scan(
+			&i.OwnerID,
+			&i.RunnerName,
+			&i.CliName,
+			&i.TotalSeconds,
+			&i.TaskCount,
+			&i.FailedCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDashboardLocalUsageByRunner = `-- name: ListDashboardLocalUsageByRunner :many
 SELECT
     lcu.owner_id,

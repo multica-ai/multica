@@ -24,6 +24,8 @@ export const dashboardKeys = {
     [...dashboardKeys.all(wsId), "local-daily", days, projectId] as const,
   localByRunner: (wsId: string, days: number, projectId: string | null) =>
     [...dashboardKeys.all(wsId), "local-by-runner", days, projectId] as const,
+  localRunTimeByRunner: (wsId: string, days: number, projectId: string | null) =>
+    [...dashboardKeys.all(wsId), "local-runtime-by-runner", days, projectId] as const,
   agentRuntime: (wsId: string, days: number, projectId: string | null) =>
     [...dashboardKeys.all(wsId), "agent-runtime", days, projectId] as const,
   runTimeDaily: (wsId: string, days: number, projectId: string | null) =>
@@ -86,6 +88,20 @@ export function dashboardLocalUsageByRunnerOptions(
     queryKey: dashboardKeys.localByRunner(wsId, days, projectId),
     queryFn: () =>
       api.getDashboardLocalUsageByRunner({ days, project_id: projectId ?? undefined }),
+    enabled: !!wsId,
+    staleTime: STALE_TIME,
+  });
+}
+
+export function dashboardLocalRunTimeByRunnerOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+) {
+  return queryOptions({
+    queryKey: dashboardKeys.localRunTimeByRunner(wsId, days, projectId),
+    queryFn: () =>
+      api.getDashboardLocalRunTimeByRunner({ days, project_id: projectId ?? undefined }),
     enabled: !!wsId,
     staleTime: STALE_TIME,
   });
