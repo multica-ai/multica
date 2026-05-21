@@ -359,9 +359,8 @@ export function AgentCreatePanel({
     const md = editorRef.current?.getMarkdown() ?? "";
     useIssueDraftStore.getState().setDraft({
       description: md,
-      ...(actor
-        ? { assigneeType: actor.type, assigneeId: actor.id }
-        : {}),
+      assigneeType: "member",
+      assigneeId: userId,
     });
     setLastMode("manual");
     // Hand the picked project to the manual panel through the same `data`

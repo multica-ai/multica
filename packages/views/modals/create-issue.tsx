@@ -44,6 +44,7 @@ import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-st
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { useAuthStore } from "@multica/core/auth";
 import {
   api,
   ApiError,
@@ -96,6 +97,7 @@ export function ManualCreatePanel({
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
+  const currentUserId = useAuthStore((s) => s.user?.id);
 
   const [title, setTitle] = useState(draft.title);
   const [formResetKey, setFormResetKey] = useState(0);
@@ -110,13 +112,13 @@ export function ManualCreatePanel({
     if (data && "assignee_type" in data) {
       return (data.assignee_type as IssueAssigneeType | null) ?? undefined;
     }
-    return draft.assigneeType;
+    return draft.assigneeType ?? (currentUserId ? "member" : undefined);
   });
   const [assigneeId, setAssigneeId] = useState<string | undefined>(() => {
     if (data && "assignee_id" in data) {
       return (data.assignee_id as string | null) ?? undefined;
     }
-    return draft.assigneeId;
+    return draft.assigneeId ?? currentUserId;
   });
   const [startDate, setStartDate] = useState<string | null>(draft.startDate);
   const [dueDate, setDueDate] = useState<string | null>(draft.dueDate);
