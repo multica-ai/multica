@@ -308,6 +308,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `core-workspace-queries` | packages/core/workspace/queries.ts | 10 | Cerebro workspace queries |
 | `create-project-modal-cerebro` | packages/views/modals/create-project.tsx | 22 | Create-project modal additions |
 | `daemon-client` | server/internal/daemon/client.go | 6 | Daemon additions (sandbox/prompt/types) |
+| `capabilities-shim` | server/internal/daemon/capabilities.go<br>server/internal/cerebro/capabilities/discovery.go<br>server/internal/cerebro/capabilities/discovery_test.go | 1 upstream hook + cerebro package helper | JEH-1916 — daemon keeps only a one-line hook while the legacy `map[string]any` compatibility bridge lives with the cerebro capability registry. |
 | `daemon-config` | server/internal/cerebro/runtime/config.go<br>server/internal/daemon/config.go | 0 | Daemon additions (sandbox/prompt/types) |
 | `daemon-config-firtal-gateway` | server/internal/daemon/config.go | 66 | Register the managed gateway runtime from central URL/key/model environment variables |
 | `daemon-config-firtal-gateway-strict-bool` | server/internal/daemon/config.go | 1 | Refuse to silently disable the gateway on unrecognized `MULTICA_FIRTAL_GATEWAY_ENABLED` values |

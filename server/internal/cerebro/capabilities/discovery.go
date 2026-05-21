@@ -213,6 +213,11 @@ func For(provider string) Set {
 	return cloneSet(src)
 }
 
+// LegacyProviderMap returns the daemon's legacy map shape for a provider.
+func LegacyProviderMap(provider string) map[string]any {
+	return AsMap(For(provider))
+}
+
 // EnrichWithAgentMCPServers replaces the static MCP list with the per-agent
 // configured servers. We do not merge — when an agent has its own mcp_config
 // it is the authoritative list for that spawn, and the static defaults would
