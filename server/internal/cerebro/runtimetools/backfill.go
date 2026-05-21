@@ -32,18 +32,39 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // BackfillToolMeta is the static metadata for one cloud (built-in) tool the
-// seeder needs to insert. It mirrors the relevant fields of the
-// runtime.ToolMeta type without taking a dependency on package runtime
-// (which would cause an import cycle: runtimetools is imported by main, and
-// runtime imports runtimetools transitively through the executor seam).
+// seeder needs to insert.
 type BackfillToolMeta struct {
 	Name        string
 	Description string
 }
+
+// SeedBuiltinCloudToolsForAllRuntimes backfills the runtime-tool registry with
+// every callable cloud built-in known to the Firtal gateway runtime.
+func SeedBuiltinCloudToolsForAllRuntimes(ctx context.Context, pool *pgxpool.Pool) error {
+	return SeedCloudToolsForAllRuntimes(ctx, pool, builtinCloudToolMeta())
+}
+
+func builtinCloudToolMeta() []BackfillToolMeta {
+	meta := cerebroruntime.AllBuiltinToolMeta()
+	cloud := make([]BackfillToolMeta, 0, len(meta))
+	for _, m := range meta {
+		if m.Status != cerebroruntime.ToolStatusImplemented &&
+			m.Status != cerebroruntime.ToolStatusNewlyImplemented {
+			continue
+		}
+		cloud = append(cloud, BackfillToolMeta{
+			Name:        m.Name,
+			Description: m.Description,
+		})
+	}
+	return cloud
+}
+
 // SeedCloudToolsForAllRuntimes is the bid 6 data backfill: every existing
 // agent_runtime row gets a cerebro_runtime_tool row for every cloud built-in
 // tool, with enabled=true so admins/owners (who bypass via
