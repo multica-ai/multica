@@ -40,8 +40,8 @@ set -a
 . "$ENV_FILE"
 set +a
 
-PORT="${BACKEND_PORT:-${API_PORT:-${SERVER_PORT:-${PORT:-8080}}}}"
-export PORT
+# shellcheck disable=SC1091
+. scripts/local-env.sh
 
 # ---------- Install dependencies ----------
 if [ ! -d node_modules ]; then
