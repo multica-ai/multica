@@ -113,17 +113,6 @@
     "step1_label": "Install the Multica CLI",
     "step2_label": "Start the daemon"
   },
-  "starter_content": {
-    "title": "Welcome — add starter tasks?",
-    "description_prefix": "A ",
-    "description_term": "Getting Started",
-    "description_suffix": " project with short tasks that walk through how agents, issues, and context work in Multica.",
-    "dismiss_action": "Start blank workspace",
-    "import_action": "Add starter tasks",
-    "success_toast": "Starter tasks added — check your sidebar",
-    "import_failed": "Import failed — please retry",
-    "dismiss_failed": "Could not dismiss — please retry"
-  },
   "cloud_waitlist": {
     "intro_main": "Cloud runtimes aren't live yet. Leave your email and we'll reach out when they are.",
     "intro_warning": "Heads-up: agents can't execute tasks without a runtime — if you hit Skip now, your workspace is read-only until you come back and install one.",

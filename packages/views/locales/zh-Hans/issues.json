@@ -129,6 +129,7 @@
   },
   "detail": {
     "not_found": "这个 issue 不存在或已在该工作区被删除。",
+    "breadcrumb_project_unknown": "未知项目",
     "back_to_issues": "返回 issue 列表",
     "title_placeholder": "issue 标题",
     "desc_placeholder": "添加描述...",

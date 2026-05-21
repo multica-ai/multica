@@ -173,6 +173,7 @@ import {
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_SQUAD_MEMBER_STATUS_LIST,
   EMPTY_TIMELINE_ENTRIES,
+  EMPTY_USER,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
   GroupedIssuesResponseSchema,
@@ -183,6 +184,7 @@ import {
   SquadMemberStatusListResponseSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
+  UserSchema,
   WebhookDeliveryResponseSchema,
 } from "./schemas";
 
@@ -234,52 +236,6 @@ const EMPTY_ONBOARDING_NO_RUNTIME_BOOTSTRAP_RESPONSE:
   workspace_id: "",
   issue_id: "",
 };
-
-// --- Starter content (post-onboarding import) -----------------------------
-// Shape mirrors the Go request/response in handler/onboarding.go.
-//
-// The client sends both branches of sub-issues and an unbound welcome
-// issue template (title + description, no `agent_id`). The SERVER picks
-// the branch by inspecting the workspace's agent list inside the
-// import transaction. This removes the client as a trusted decider —
-// even if the client has a stale agent cache or lies, the server uses
-// the DB as source of truth.
-
-export interface ImportStarterIssuePayload {
-  title: string;
-  description: string;
-  status: string;
-  priority: string;
-  /** Server uses `user_id` (per app-wide AssigneePicker convention)
-   *  as assignee when true. No member_id is threaded through. */
-  assign_to_self: boolean;
-}
-
-export interface ImportStarterWelcomeIssueTemplate {
-  title: string;
-  description: string;
-  /** Defaults to "high" on server when empty. */
-  priority: string;
-}
-
-export interface ImportStarterContentPayload {
-  workspace_id: string;
-  project: { title: string; description: string; icon: string };
-  /** Always sent. Server creates it only when an agent exists in the
-   *  workspace; ignored otherwise. Agent id is picked by the server. */
-  welcome_issue_template: ImportStarterWelcomeIssueTemplate;
-  /** Used when the workspace has at least one agent. */
-  agent_guided_sub_issues: ImportStarterIssuePayload[];
-  /** Used when the workspace has zero agents. */
-  self_serve_sub_issues: ImportStarterIssuePayload[];
-}
-
-export interface ImportStarterContentResponse {
-  user: User;
-  project_id: string;
-  /** Non-null when server took the agent-guided branch. */
-  welcome_issue_id: string | null;
-}
 
 export class ApiError extends Error {
   readonly status: number;
@@ -494,7 +450,10 @@ export class ApiClient {
   }
 
   async getMe(): Promise<User> {
-    return this.fetch("/api/me");
+    const raw = await this.fetch<unknown>("/api/me");
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "GET /api/me",
+    });
   }
 
   async markOnboardingComplete(payload?: {
@@ -563,38 +522,13 @@ export class ApiClient {
     });
   }
 
-  /**
-   * Imports the Getting Started project + optional welcome issue + sub-issues
-   * in a single server-side transaction. Gated by an atomic
-   * starter_content_state: NULL → 'imported' claim — a second call returns
-   * 409 (already decided) and creates nothing new.
-   *
-   * The content templates live in TypeScript (see
-   * @multica/views/onboarding/utils/starter-content-templates) and are
-   * rendered from the user's questionnaire answers before being sent.
-   */
-  async importStarterContent(
-    payload: ImportStarterContentPayload,
-  ): Promise<ImportStarterContentResponse> {
-    return this.fetch("/api/me/starter-content/import", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-  }
-
-  async dismissStarterContent(payload?: {
-    workspace_id?: string;
-  }): Promise<User> {
-    return this.fetch("/api/me/starter-content/dismiss", {
-      method: "POST",
-      body: payload ? JSON.stringify(payload) : undefined,
-    });
-  }
-
   async updateMe(data: UpdateMeRequest): Promise<User> {
-    return this.fetch("/api/me", {
+    const raw = await this.fetch<unknown>("/api/me", {
       method: "PATCH",
       body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "PATCH /api/me",
     });
   }
 
@@ -1511,9 +1445,10 @@ export class ApiClient {
     });
   }
 
-  async rerunIssue(issueId: string): Promise<AgentTask> {
+  async rerunIssue(issueId: string, taskId?: string): Promise<AgentTask> {
     return this.fetch(`/api/issues/${issueId}/rerun`, {
       method: "POST",
+      body: JSON.stringify(taskId ? { task_id: taskId } : {}),
     });
   }
 

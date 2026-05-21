@@ -241,6 +241,8 @@ const mockApiObj = vi.hoisted(() => ({
   removeCommentReaction: vi.fn(),
   listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
   listAgents: vi.fn().mockResolvedValue([]),
+  getProject: vi.fn(),
+  listProjects: vi.fn().mockResolvedValue({ projects: [] }),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -593,6 +595,7 @@ describe("IssueDetail (shared)", () => {
     ]);
     mockApiObj.listAgents.mockResolvedValue([]);
     window.getSelection()?.removeAllRanges();
+    mockApiObj.getProject.mockReset();
   });
 
   it("shows loading skeleton while data is loading", () => {
@@ -642,6 +645,60 @@ describe("IssueDetail (shared)", () => {
     // After the URL-driven workspace refactor, issue paths are scoped under
     // /<workspaceSlug>/issues.
     expect(wsLink.closest("a")).toHaveAttribute("href", "/test/issues");
+  });
+
+  it("omits the project breadcrumb segment when the issue has no project_id", async () => {
+    // Default fixture has project_id: null.
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Test WS")).toBeInTheDocument();
+    });
+
+    // Project should not have been fetched.
+    expect(mockApiObj.getProject).not.toHaveBeenCalled();
+    expect(screen.queryByText("Unknown project")).not.toBeInTheDocument();
+  });
+
+  it("renders the project breadcrumb segment when the issue belongs to a project", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "p-1" });
+    mockApiObj.getProject.mockResolvedValue({
+      id: "p-1",
+      workspace_id: "ws-1",
+      title: "Marketing site refresh",
+      description: null,
+      icon: "🚀",
+      status: "in_progress",
+      priority: "none",
+      lead_type: null,
+      lead_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      issue_count: 0,
+      done_count: 0,
+      resource_count: 0,
+    });
+
+    renderIssueDetail();
+
+    const projectLink = await screen.findByText("Marketing site refresh");
+    // The whole project segment is a single AppLink pointing at the project
+    // detail route under the active workspace slug.
+    expect(projectLink.closest("a")).toHaveAttribute("href", "/test/projects/p-1");
+  });
+
+  it("shows an Unknown project placeholder when the project query fails", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "p-missing" });
+    mockApiObj.getProject.mockRejectedValue(new Error("not found"));
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Unknown project")).toBeInTheDocument();
+    });
+    // Placeholder is non-interactive — no link wraps the text.
+    const placeholder = screen.getByText("Unknown project");
+    expect(placeholder.closest("a")).toBeNull();
   });
 
   it("renders properties sidebar with all core rows plus set optional rows", async () => {

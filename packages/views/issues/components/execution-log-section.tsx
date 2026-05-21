@@ -266,6 +266,7 @@ export function ExecutionLogSection({ issueId, onHighlightComment }: ExecutionLo
                     <PastRow
                       key={task.id}
                       task={task}
+                      issueId={issueId}
                       runIndex={taskIndexMap.get(task.id)}
                       colorClass={agentColorMap?.get(task.agent_id)}
                       onHighlightComment={onHighlightComment}
@@ -480,11 +481,13 @@ function ActiveRow({
 
 function PastRow({
   task,
+  issueId,
   runIndex,
   colorClass,
   onHighlightComment,
 }: {
   task: AgentTask;
+  issueId: string;
   runIndex?: number;
   colorClass?: string;
   onHighlightComment?: (commentId: string) => void;
@@ -503,10 +506,26 @@ function PastRow({
       ? `exit ${task.exit_code}`
       : null;
 
+  const [retrying, setRetrying] = useState(false);
+
   const handleTriggerClick =
     task.trigger_comment_id && onHighlightComment
       ? () => onHighlightComment(task.trigger_comment_id!)
       : undefined;
+
+  const canRetry = task.status === "failed" || task.status === "cancelled";
+
+  const handleRetry = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      await api.rerunIssue(issueId, task.id);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.retry_failed));
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   return (
     <RowShell task={task} runIndex={runIndex} colorClass={colorClass}>

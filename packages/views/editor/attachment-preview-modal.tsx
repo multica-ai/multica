@@ -352,7 +352,7 @@ function PreviewContent({
           <img
             src={state.mediaUrl}
             alt={state.filename}
-            className="max-h-full max-w-full rounded-lg object-contain"
+            className="h-full w-full rounded-lg object-contain"
           />
         </div>
       );
@@ -370,7 +370,7 @@ function PreviewContent({
           <video
             src={state.mediaUrl}
             controls
-            className="max-h-full max-w-full"
+            className="h-full w-full object-contain"
           />
         </div>
       );
