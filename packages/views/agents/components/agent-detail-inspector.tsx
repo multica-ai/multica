@@ -2,12 +2,10 @@
 
 import {
   useEffect,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
-import { Camera, Loader2, Pencil } from "lucide-react";
-import { toast } from "sonner";
+import { Loader2, Pencil } from "lucide-react";
 import type {
   Agent,
   AgentRuntime,
@@ -17,8 +15,6 @@ import {
   AGENT_DESCRIPTION_MAX_LENGTH,
   type AgentPresenceDetail,
 } from "@multica/core/agents";
-import { api } from "@multica/core/api";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { isImeComposing, timeAgo } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -39,6 +35,8 @@ import { PropRow } from "../../common/prop-row";
 import { availabilityConfig } from "../presence";
 import { CharCounter } from "./char-counter";
 import { useT } from "../../i18n";
+// CEREBRO-PATCH(agent-avatar-generate): JEH-1879 use cerebro wrapper with AI generation.
+import { CerebroInspectorAvatar } from "./cerebro-inspector-avatar";
 import { ConcurrencyPicker } from "./inspector/concurrency-picker";
 import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
@@ -99,7 +97,8 @@ export function AgentDetailInspector({
     <aside className="flex w-full flex-col rounded-lg border bg-background md:h-full md:min-h-0 md:overflow-y-auto">
       {/* Identity */}
       <div className="flex flex-col gap-3 border-b px-5 pb-5 pt-5">
-        <AvatarEditor agent={agent} canEdit={canEdit} onUpdate={update} />
+        {/* CEREBRO-PATCH(agent-avatar-generate): JEH-1879 swap manual-upload AvatarEditor for cerebro sibling with AI generation. */}
+        <CerebroInspectorAvatar agent={agent} canEdit={canEdit} onUpdate={update} />
         <NameAndDescription
           agent={agent}
           canEdit={canEdit}
@@ -233,82 +232,6 @@ function Section({
 // ---------------------------------------------------------------------------
 // Identity — avatar / name / description editors
 // ---------------------------------------------------------------------------
-
-function AvatarEditor({
-  agent,
-  canEdit,
-  onUpdate,
-}: {
-  agent: Agent;
-  canEdit: boolean;
-  onUpdate: (data: Record<string, unknown>) => Promise<void>;
-}) {
-  const { t } = useT("agents");
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const { upload, uploading } = useFileUpload(api);
-
-  if (!canEdit) {
-    return (
-      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted">
-        <ActorAvatar
-          actorType="agent"
-          actorId={agent.id}
-          size={56}
-          className="rounded-none"
-        />
-      </div>
-    );
-  }
-
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = "";
-    try {
-      const result = await upload(file);
-      if (!result) return;
-      await onUpdate({ avatar_url: result.link });
-      toast.success(t(($) => $.inspector.avatar_updated_toast));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t(($) => $.inspector.avatar_upload_failed_toast));
-    }
-  };
-
-  return (
-    <>
-      <button
-        type="button"
-        // rounded-lg matches the standard agent avatar treatment used in
-        // list rows. Avoid rounded-full — circles are reserved for humans.
-        className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={uploading}
-        aria-label={t(($) => $.inspector.change_avatar_aria)}
-      >
-        <ActorAvatar
-          actorType="agent"
-          actorId={agent.id}
-          size={56}
-          className="rounded-none"
-        />
-        <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
-          {uploading ? (
-            <Loader2 className="h-4 w-4 animate-spin text-white" />
-          ) : (
-            <Camera className="h-4 w-4 text-white" />
-          )}
-        </div>
-      </button>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={handleFile}
-      />
-    </>
-  );
-}
 
 function NameAndDescription({
   agent,
