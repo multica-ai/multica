@@ -133,6 +133,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `autopilot-scope-response-fields` | server/internal/handler/autopilot.go | 4 | scope columns wired into autopilotToResponse — JEH-724 |
 | `autopilot-scope-trigger` | server/internal/handler/autopilot.go | 4 | Trigger-permission check on TriggerAutopilot — JEH-724 |
 | `autopilot-scope-update` | server/internal/handler/autopilot.go | 4 | Edit-permission check on Update — JEH-724 |
+| `autopilot-squad-assignee-*` | server/internal/handler/autopilot.go<br>server/internal/cerebro/autopilotsquad/assignee.go | 3 hooks + 118 cerebro package lines | JEH-1916 — keep squad-as-autopilot-assignee validation and update semantics in a Cerebro package while leaving only small hooks in the upstream handler. |
 | `autopilots-autopilot-detail-page` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | Autopilots cerebro additions |
 | `autopilot-detail-header-shrink` | packages/views/autopilots/components/autopilot-detail-page.tsx | 4 | JEH-1144 — flex-1 + min-w-0 on the breadcrumb wrapper and shrink-0 on the status toggle + action buttons so they keep natural width when the header has to scroll horizontally on mobile |
 | `batch-action-toolbar-cerebro` | packages/views/issues/components/batch-action-toolbar.tsx | 1 | Issues board/list view cerebro additions |
