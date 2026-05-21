@@ -269,6 +269,43 @@ type TaskAgentData struct {
 	ThinkingLevel string                   `json:"thinking_level,omitempty"`
 }
 
+// taskToSlimResponse builds a response without the heavy Context and Result
+// blobs. Used by list endpoints (snapshot, task-runs) where these fields are
+// never consumed by the frontend and dominate response size.
+func taskToSlimResponse(t db.AgentTaskQueue) AgentTaskResponse {
+	failureReason := ""
+	if t.FailureReason.Valid {
+		failureReason = t.FailureReason.String
+	}
+	workDir := ""
+	if t.WorkDir.Valid {
+		workDir = t.WorkDir.String
+	}
+	return AgentTaskResponse{
+		ID:               uuidToString(t.ID),
+		AgentID:          uuidToString(t.AgentID),
+		RuntimeID:        uuidToString(t.RuntimeID),
+		IssueID:          uuidToString(t.IssueID),
+		Status:           t.Status,
+		Priority:         t.Priority,
+		DispatchedAt:     timestampToPtr(t.DispatchedAt),
+		StartedAt:        timestampToPtr(t.StartedAt),
+		CompletedAt:      timestampToPtr(t.CompletedAt),
+		Error:            textToPtr(t.Error),
+		FailureReason:    failureReason,
+		Attempt:          t.Attempt,
+		MaxAttempts:      t.MaxAttempts,
+		ParentTaskID:     uuidToPtr(t.ParentTaskID),
+		CreatedAt:        timestampToString(t.CreatedAt),
+		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
+		TriggerSummary:   textToPtr(t.TriggerSummary),
+		WorkDir:          workDir,
+		ChatSessionID:    uuidToString(t.ChatSessionID),
+		AutopilotRunID:   uuidToString(t.AutopilotRunID),
+		Kind:             computeTaskKind(t),
+	}
+}
+
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 	var result any
 	if t.Result != nil {
@@ -348,6 +385,7 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 
 	ownerFilter := r.URL.Query().Get("owner")
 	includeArchived := r.URL.Query().Get("include_archived") == "true"
+	slim := r.URL.Query().Get("slim") == "true"
 
 	var agents []db.Agent
 	var err error
@@ -414,6 +452,11 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		resp := agentToResponse(a)
+		if slim {
+			resp.Instructions = ""
+			resp.RuntimeConfig = nil
+			resp.McpConfig = nil
+		}
 		if skills, ok := skillMap[resp.ID]; ok {
 			resp.Skills = skills
 		}
@@ -1530,7 +1573,7 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 		if _, ok := allowed[uuidToString(t.AgentID)]; !ok {
 			continue
 		}
-		resp = append(resp, taskToResponse(t))
+		resp = append(resp, taskToSlimResponse(t))
 	}
 
 	writeJSON(w, http.StatusOK, resp)

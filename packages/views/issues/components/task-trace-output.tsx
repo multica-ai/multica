@@ -990,7 +990,9 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
 
   useEffect(() => {
     fetchPendingInteractions();
-    const interval = setInterval(fetchPendingInteractions, 3000);
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") fetchPendingInteractions();
+    }, 3000);
     return () => clearInterval(interval);
   }, [fetchPendingInteractions]);
 

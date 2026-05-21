@@ -292,45 +292,20 @@ export function useRealtimeSync(
         // PR queries — the open issue detail page will refetch its own list.
         qc.invalidateQueries({ queryKey: ["github", "pull-requests"] });
       },
-      // Powers the agent presence cache: any task lifecycle change
-      // (dispatch / completed / failed / cancelled) refreshes the
-      // workspace-wide agent-task-snapshot query so per-agent presence
-      // reflects the change. task:message is NOT in this prefix path — it
-      // stays in specificEvents to avoid an invalidate storm during long runs.
       task: () => {
         const wsId = getCurrentWsId();
         if (!wsId) return;
         qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
-        // 30d activity series shares the same lifecycle signal — any task
-        // completion / failure shifts the histogram. (Dispatch alone
-        // doesn't change a completed_at-anchored series, but invalidating
-        // here keeps the WS-handler shape uniform; the resulting refetch
-        // is cheap.) Both the list (trailing 7d slice) and the detail
-        // panel read off this single cache.
         qc.invalidateQueries({ queryKey: agentActivityKeys.last30d(wsId) });
-        // 30-day run count likewise increments per task lifecycle event.
         qc.invalidateQueries({ queryKey: agentRunCountsKeys.last30d(wsId) });
-        // Per-agent task list (Activity tab "Recent work"). Prefix match
-        // catches every agent's list — the per-agent detail key sits
-        // under agentTasks/<wsId>/<agentId>.
         qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
-        // Per-issue task list (issue-detail Execution log). Prefix match
-        // across all issues — keeps the contract "any task: event makes
-        // every list-of-tasks query stale" so cache stays fresh even
-        // when the relevant component isn't currently mounted.
         qc.invalidateQueries({ queryKey: ["issues", "tasks"] });
-        // Per-issue token usage card (issue-detail right rail). Same
-        // shape as the tasks invalidation above — any task lifecycle
-        // event shifts the aggregated usage numbers.
         qc.invalidateQueries({ queryKey: ["issues", "usage"] });
-        // Squad members-status reads the same task lifecycle to flip
-        // working ↔ idle for each agent member. Prefix-matches every
-        // mounted squad-page's members-status query in O(1).
-        qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
       },
     };
 
     const timers = new Map<string, ReturnType<typeof setTimeout>>();
+    const DEBOUNCE_MS: Record<string, number> = { task: 500 };
     const debouncedRefresh = (prefix: string, fn: () => void) => {
       const existing = timers.get(prefix);
       if (existing) clearTimeout(existing);
@@ -339,7 +314,7 @@ export function useRealtimeSync(
         setTimeout(() => {
           timers.delete(prefix);
           fn();
-        }, 100),
+        }, DEBOUNCE_MS[prefix] ?? 100),
       );
     };
 
