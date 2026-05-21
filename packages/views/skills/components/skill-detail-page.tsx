@@ -10,6 +10,7 @@ import {
   Lock,
   Pencil,
   Plus,
+  RefreshCw,
   Save,
   Sparkles,
   Trash2,
@@ -300,6 +301,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   const [files, setFiles] = useState<DraftFile[]>([]);
   const [selectedPath, setSelectedPath] = useState(SKILL_MD);
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showAddToAgents, setShowAddToAgents] = useState(false);
@@ -453,6 +455,31 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     }
   };
 
+  const handleSync = async () => {
+    if (!skill || !canEdit || isDirty) return;
+    setSyncing(true);
+    try {
+      const updated = await api.syncSkill(skill.id);
+      qc.setQueryData(
+        skillDetailOptions(wsId, skill.id).queryKey,
+        updated,
+      );
+      seedFromSkill(updated);
+      seededKeyRef.current = `${wsId}:${updated.id}@${updated.updated_at}`;
+      setConflictPending(false);
+      qc.invalidateQueries({
+        queryKey: workspaceKeys.skills(wsId),
+        exact: true,
+      });
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      toast.success(t(($) => $.detail.toast_synced));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(($) => $.detail.toast_sync_failed));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const handleDiscard = () => {
     if (!skill) return;
     seedFromSkill(skill);
@@ -572,6 +599,12 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     if (origin.type === "github") return t(($) => $.detail.subline.origin_github);
     return t(($) => $.detail.subline.origin_workspace);
   })();
+  const canSyncFromOrigin =
+    canEdit &&
+    !!origin?.source_url &&
+    (origin.type === "github" ||
+      origin.type === "skills_sh" ||
+      origin.type === "clawhub");
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
@@ -589,6 +622,33 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                 <Lock className="h-3 w-3" />
                 {t(($) => $.detail.read_only)}
               </span>
+            )}
+            {canSyncFromOrigin && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={handleSync}
+                      disabled={syncing || isDirty}
+                      className="text-muted-foreground"
+                      aria-label={t(($) => $.detail.sync_aria)}
+                    >
+                      {syncing ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                  }
+                />
+                <TooltipContent>
+                  {isDirty
+                    ? t(($) => $.detail.sync_dirty_tooltip)
+                    : t(($) => $.detail.sync_tooltip)}
+                </TooltipContent>
+              </Tooltip>
             )}
             {canEdit && (
               <Tooltip>

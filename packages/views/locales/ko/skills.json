@@ -92,6 +92,9 @@
   "detail": {
     "all_skills": "모든 스킬",
     "read_only": "읽기 전용",
+    "sync_aria": "출처에서 스킬 동기화",
+    "sync_tooltip": "출처에서 동기화",
+    "sync_dirty_tooltip": "동기화하기 전에 변경사항을 저장하거나 버리세요",
     "delete_aria": "스킬 삭제",
     "delete_tooltip": "스킬 삭제",
     "supporting_data_warning": "일부 워크스페이스 데이터를 불러오지 못했습니다. 다음 새로고침 전까지 생성자 표시, 런타임 이름, 수정 권한이 불완전하게 보일 수 있습니다.",
@@ -153,6 +156,8 @@
     },
     "toast_saved": "스킬을 저장했습니다",
     "toast_save_failed": "스킬을 저장하지 못했습니다",
+    "toast_synced": "스킬을 동기화했습니다",
+    "toast_sync_failed": "스킬을 동기화하지 못했습니다",
     "toast_deleted": "스킬을 삭제했습니다",
     "toast_delete_failed": "스킬을 삭제하지 못했습니다",
     "delete_dialog": {
