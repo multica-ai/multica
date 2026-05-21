@@ -435,7 +435,10 @@ func (h *Handler) DeleteSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Queries.DeleteSkill(r.Context(), skill.ID); err != nil {
+	if err := h.Queries.DeleteSkill(r.Context(), db.DeleteSkillParams{
+		ID:          skill.ID,
+		WorkspaceID: skill.WorkspaceID,
+	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete skill")
 		return
 	}

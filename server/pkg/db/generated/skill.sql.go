@@ -67,11 +67,17 @@ func (q *Queries) CreateSkill(ctx context.Context, arg CreateSkillParams) (Skill
 }
 
 const deleteSkill = `-- name: DeleteSkill :exec
-DELETE FROM skill WHERE id = $1
+DELETE FROM skill WHERE id = $1 AND workspace_id = $2
 `
 
-func (q *Queries) DeleteSkill(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteSkill, id)
+type DeleteSkillParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Defense-in-depth: workspace_id is a SQL-layer tenant guard. See DeleteIssue.
+func (q *Queries) DeleteSkill(ctx context.Context, arg DeleteSkillParams) error {
+	_, err := q.db.Exec(ctx, deleteSkill, arg.ID, arg.WorkspaceID)
 	return err
 }
 

@@ -1123,7 +1123,10 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("cancel tasks for deleted trigger comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
 	}
 
-	if err := h.Queries.DeleteComment(r.Context(), comment.ID); err != nil {
+	if err := h.Queries.DeleteComment(r.Context(), db.DeleteCommentParams{
+		ID:          comment.ID,
+		WorkspaceID: comment.WorkspaceID,
+	}); err != nil {
 		slog.Warn("delete comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete comment")
 		return

@@ -74,11 +74,17 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (C
 }
 
 const deleteComment = `-- name: DeleteComment :exec
-DELETE FROM comment WHERE id = $1
+DELETE FROM comment WHERE id = $1 AND workspace_id = $2
 `
 
-func (q *Queries) DeleteComment(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteComment, id)
+type DeleteCommentParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Defense-in-depth: workspace_id is a SQL-layer tenant guard. See DeleteIssue.
+func (q *Queries) DeleteComment(ctx context.Context, arg DeleteCommentParams) error {
+	_, err := q.db.Exec(ctx, deleteComment, arg.ID, arg.WorkspaceID)
 	return err
 }
 

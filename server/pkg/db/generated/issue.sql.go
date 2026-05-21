@@ -329,11 +329,21 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 }
 
 const deleteIssue = `-- name: DeleteIssue :exec
-DELETE FROM issue WHERE id = $1
+DELETE FROM issue WHERE id = $1 AND workspace_id = $2
 `
 
-func (q *Queries) DeleteIssue(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteIssue, id)
+type DeleteIssueParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Defense-in-depth: the workspace_id predicate makes the tenant invariant a
+// SQL-layer guarantee rather than a handler-layer one. Handler loaders
+// (loadIssueForUser / GetIssueInWorkspace) already enforce membership today,
+// but a future loader bypass or a new caller skipping the loader would be
+// silently catastrophic without this guard. See incident #1661.
+func (q *Queries) DeleteIssue(ctx context.Context, arg DeleteIssueParams) error {
+	_, err := q.db.Exec(ctx, deleteIssue, arg.ID, arg.WorkspaceID)
 	return err
 }
 
@@ -1129,17 +1139,19 @@ const updateIssueStatus = `-- name: UpdateIssueStatus :one
 UPDATE issue SET
     status = $2,
     updated_at = now()
-WHERE id = $1
+WHERE id = $1 AND workspace_id = $3
 RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata
 `
 
 type UpdateIssueStatusParams struct {
-	ID     pgtype.UUID `json:"id"`
-	Status string      `json:"status"`
+	ID          pgtype.UUID `json:"id"`
+	Status      string      `json:"status"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
+// Workspace_id in the WHERE clause is a SQL-layer tenant guard; see DeleteIssue.
 func (q *Queries) UpdateIssueStatus(ctx context.Context, arg UpdateIssueStatusParams) (Issue, error) {
-	row := q.db.QueryRow(ctx, updateIssueStatus, arg.ID, arg.Status)
+	row := q.db.QueryRow(ctx, updateIssueStatus, arg.ID, arg.Status, arg.WorkspaceID)
 	var i Issue
 	err := row.Scan(
 		&i.ID,

@@ -139,8 +139,13 @@ func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) 
 }
 
 const deleteChatSession = `-- name: DeleteChatSession :exec
-DELETE FROM chat_session WHERE id = $1
+DELETE FROM chat_session WHERE id = $1 AND workspace_id = $2
 `
+
+type DeleteChatSessionParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
 
 // Hard delete. chat_message rows cascade via FK ON DELETE CASCADE; the
 // chat_session_id on agent_task_queue is set NULL by FK so completed/failed
@@ -148,9 +153,10 @@ DELETE FROM chat_session WHERE id = $1
 // the same transaction that holds LockChatSessionForDelete and that has
 // already cancelled any in-flight tasks (see CancelAgentTasksByChatSession)
 // so the daemon does not keep running work whose result has nowhere to
-// land.
-func (q *Queries) DeleteChatSession(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteChatSession, id)
+// land. workspace_id in the WHERE clause is a SQL-layer tenant guard; see
+// DeleteIssue.
+func (q *Queries) DeleteChatSession(ctx context.Context, arg DeleteChatSessionParams) error {
+	_, err := q.db.Exec(ctx, deleteChatSession, arg.ID, arg.WorkspaceID)
 	return err
 }
 
