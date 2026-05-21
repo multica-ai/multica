@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	// CEREBRO-PATCH(autopilot-scope-import): scope visibility helper (JEH-724).
 	"github.com/multica-ai/multica/server/internal/cerebro/access"
+	// CEREBRO-PATCH(autopilot-squad-assignee-import): squad assignee logic lives in a cerebro package (JEH-1916).
+	"github.com/multica-ai/multica/server/internal/cerebro/autopilotsquad"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -431,11 +434,9 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 	if req.AssigneeType != nil && *req.AssigneeType != "" {
 		assigneeType = *req.AssigneeType
 	}
-	if !isValidAutopilotAssigneeType(assigneeType) {
-		writeError(w, http.StatusBadRequest, "assignee_type must be agent or squad")
-		return
-	}
-	if !h.validateAutopilotAssignee(w, r, assigneeType, assigneeUUID, wsUUID) {
+	// CEREBRO-PATCH(autopilot-squad-assignee-hook): validate agent/squad assignees in the cerebro package (JEH-1916).
+	if err := autopilotsquad.ValidateAssignee(r.Context(), h.Queries, assigneeType, assigneeUUID, wsUUID); err != nil {
+		writeError(w, err.StatusCode, err.Message)
 		return
 	}
 	projectID, ok := h.parseAutopilotProjectID(w, r, req.ProjectID, wsUUID)
@@ -550,51 +551,10 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		}
 		params.ProjectID = projectID
 	}
-	// assignee_type and assignee_id are validated as a pair: switching
-	// between agent and squad without supplying a new id would leave the
-	// row pointing at the wrong table. The client is expected to send both
-	// fields on any change; partial updates that change only one are
-	// rejected.
-	// CEREBRO-PATCH(autopilot-squad-assignee): preserve upstream agent/squad assignment validation (JEH-1590).
-	_, typeSent := rawFields["assignee_type"]
-	_, idSent := rawFields["assignee_id"]
-	if typeSent || idSent {
-		nextType := prev.AssigneeType
-		if typeSent && req.AssigneeType != nil && *req.AssigneeType != "" {
-			nextType = *req.AssigneeType
-		}
-		if !isValidAutopilotAssigneeType(nextType) {
-			writeError(w, http.StatusBadRequest, "assignee_type must be agent or squad")
-			return
-		}
-		nextID := prev.AssigneeID
-		if idSent {
-			if req.AssigneeID == nil {
-				writeError(w, http.StatusBadRequest, "assignee_id cannot be null")
-				return
-			}
-			parsed, ok := parseUUIDOrBadRequest(w, *req.AssigneeID, "assignee_id")
-			if !ok {
-				return
-			}
-			nextID = parsed
-		}
-		// Reject the agent↔squad switch without a paired id, otherwise the
-		// row would address agent(id) under assignee_type='squad' or vice
-		// versa.
-		if typeSent && !idSent && nextType != prev.AssigneeType {
-			writeError(w, http.StatusBadRequest, "assignee_id is required when changing assignee_type")
-			return
-		}
-		if !h.validateAutopilotAssignee(w, r, nextType, nextID, prev.WorkspaceID) {
-			return
-		}
-		if typeSent {
-			params.AssigneeType = pgtype.Text{String: nextType, Valid: true}
-		}
-		if idSent {
-			params.AssigneeID = nextID
-		}
+	// CEREBRO-PATCH(autopilot-squad-assignee-update-hook): apply squad update semantics in the cerebro package (JEH-1916).
+	if err := autopilotsquad.ApplyUpdate(r.Context(), h.Queries, prev, autopilotsquad.UpdateInputFromRaw(req.AssigneeType, req.AssigneeID, rawFields), &params); err != nil {
+		writeError(w, err.StatusCode, err.Message)
+		return
 	}
 
 	autopilot, err := h.Queries.UpdateAutopilot(r.Context(), params)
@@ -853,71 +813,6 @@ func isAllowedWebhookProvider(p string) bool {
 	case "generic", "github":
 		return true
 	default:
-		return false
-	}
-}
-
-func isValidAutopilotAssigneeType(t string) bool {
-	switch t {
-	case "agent", "squad":
-		return true
-	default:
-		return false
-	}
-}
-
-// validateAutopilotAssignee checks that the assignee (agent or squad) exists
-// in the given workspace, and for squad assignees that the squad's leader
-// agent is in a workable state at create / update time. Writes an HTTP error
-// and returns false on any failure.
-//
-// At dispatch time the same checks (resolveAutopilotLeader + AgentReadiness)
-// run again — they live there to handle "leader was online at save time but
-// went offline by trigger time". Save-time validation exists so the user gets
-// immediate feedback ("can't pick this squad because its leader is archived")
-// instead of discovering the autopilot is dead at the next schedule tick.
-func (h *Handler) validateAutopilotAssignee(w http.ResponseWriter, r *http.Request, assigneeType string, assigneeID, workspaceID pgtype.UUID) bool {
-	switch assigneeType {
-	case "agent":
-		if _, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-			ID:          assigneeID,
-			WorkspaceID: workspaceID,
-		}); err != nil {
-			writeError(w, http.StatusBadRequest, "assignee must be a valid agent in this workspace")
-			return false
-		}
-		return true
-	case "squad":
-		squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
-			ID:          assigneeID,
-			WorkspaceID: workspaceID,
-		})
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "assignee must be a valid squad in this workspace")
-			return false
-		}
-		// Archived squads must be rejected at save time: the dispatcher will
-		// otherwise produce an unbroken stream of skipped runs against a
-		// squad that can never be revived without an explicit un-archive.
-		// Pair with TransferSquadAutopilotsToLeader on DeleteSquad so any
-		// autopilot that survives the archive flips to assignee_type='agent'
-		// (the leader) and stops referencing the dead squad row.
-		if squad.ArchivedAt.Valid {
-			writeError(w, http.StatusUnprocessableEntity, "squad is archived; pick a different squad")
-			return false
-		}
-		leader, err := h.Queries.GetAgent(r.Context(), squad.LeaderID)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "squad leader agent not found")
-			return false
-		}
-		if leader.ArchivedAt.Valid {
-			writeError(w, http.StatusUnprocessableEntity, "squad leader is archived; pick a different squad or rotate the leader before assigning autopilot")
-			return false
-		}
-		return true
-	default:
-		writeError(w, http.StatusBadRequest, "assignee_type must be agent or squad")
 		return false
 	}
 }

@@ -128,7 +128,6 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 		Name        string  `json:"name"`
 		Description string  `json:"description"`
 		LeaderID    string  `json:"leader_id"`
-		AvatarURL   *string `json:"avatar_url"`
 		AvatarURL   *string `json:"avatar_url"` // CEREBRO-PATCH(squad-create-avatar): persist the avatar chosen in the create-squad modal.
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -933,7 +932,12 @@ func (h *Handler) isSquadLeaderReady(ctx context.Context, issue db.Issue) bool {
 		return false
 	}
 	return ready
+}
+
 // CEREBRO-PATCH(task-delegation-context): carries comment delegation provenance into the squad leader enqueue helper.
+type commentTaskDelegation struct {
+	context service.TaskDelegationContext
+	err     error
 }
 
 // enqueueSquadLeaderTask triggers the squad leader agent for an issue assigned to a squad.

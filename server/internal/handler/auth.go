@@ -51,11 +51,11 @@ var supportedLanguages = map[string]struct{}{
 }
 
 type UserResponse struct {
-	ID                      string          `json:"id"`
-	Name                    string          `json:"name"`
-	Email                   string          `json:"email"`
-	AvatarURL               *string         `json:"avatar_url"`
-	Language                *string         `json:"language"`
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	Email     string  `json:"email"`
+	AvatarURL *string `json:"avatar_url"`
+	Language  *string `json:"language"`
 	// Pinned IANA tz; nil = no preference (use browser-detected tz).
 	Timezone                *string         `json:"timezone"`
 	OnboardedAt             *string         `json:"onboarded_at"`
@@ -65,6 +65,8 @@ type UserResponse struct {
 	CreatedAt               string          `json:"created_at"`
 	UpdatedAt               string          `json:"updated_at"`
 	// CEREBRO-PATCH(user-preferences-blob): cerebro user preferences JSON for
+	// client-side settings.
+	Preferences map[string]any `json:"preferences"`
 }
 
 // MaxProfileDescriptionLen caps the user-supplied profile_description body.
@@ -98,6 +100,7 @@ func userToResponse(u db.User) UserResponse {
 		ProfileDescription:      u.ProfileDescription,
 		CreatedAt:               timestampToString(u.CreatedAt),
 		UpdatedAt:               timestampToString(u.UpdatedAt),
+		Preferences:             prefs,
 	}
 }
 

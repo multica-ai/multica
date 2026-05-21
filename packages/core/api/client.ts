@@ -121,8 +121,10 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
-  ListWebhookDeliveriesResponse,
   WebhookDelivery,
+  ListWebhookDeliveriesResponse,
+  WorkSession,
+  PushSubscriptionResponse,
   NotificationPreferenceResponse,
   NotificationPreferences,
   GitHubPullRequest,
@@ -130,14 +132,13 @@ import type {
   GitHubConnectResponse,
   Squad,
   SquadMember,
-  SquadMemberStatusListResponse,
 } from "../types";
-import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
   CloudRuntimeNode,
   CreateCloudRuntimeNodeRequest,
   ListCloudRuntimeNodesParams,
 } from "../runtimes/cloud-runtime";
+import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
@@ -152,8 +153,6 @@ import {
   AttachmentResponseSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
-  CloudRuntimeNodeListSchema,
-  CloudRuntimeNodeSchema,
   CreateAgentFromTemplateResponseSchema,
   DashboardAgentRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
@@ -162,24 +161,18 @@ import {
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_ATTACHMENT,
-  EMPTY_CLOUD_RUNTIME_NODE,
-  EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
-  EMPTY_SQUAD_MEMBER_STATUS_LIST,
   EMPTY_TIMELINE_ENTRIES,
   EMPTY_USER,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
   GroupedIssuesResponseSchema,
-  ListIssuesResponseSchema,
   ListWebhookDeliveriesResponseSchema,
-  RuntimeHourlyActivityListSchema,
-  RuntimeUsageByAgentListSchema,
-  RuntimeUsageByHourListSchema,
-  RuntimeUsageListSchema,
-  SquadMemberStatusListResponseSchema,
+  ListIssuesResponseSchema,
+  OnboardingNoRuntimeBootstrapResponseSchema,
+  OnboardingRuntimeBootstrapResponseSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
   UserSchema,
@@ -211,9 +204,102 @@ export interface LoginResponse {
   user: User;
 }
 
+export interface UserProfileResponse {
+  user_id: string;
+  display_name: string;
+  profile_description: string;
+  language: string;
+  updated_at: string;
+}
+
+export interface UserProfileRequest {
+  display_name?: string;
+  profile_description?: string;
+  language?: string;
+}
+
+// --- Starter content (post-onboarding import) -----------------------------
+export interface ImportStarterIssuePayload {
+  title: string;
+  description: string;
+  status: string;
+  priority: string;
+  assign_to_self: boolean;
+}
+
+export interface ImportStarterWelcomeIssueTemplate {
+  title: string;
+  description: string;
+  priority: string;
+}
+
+export interface ImportStarterContentPayload {
+  workspace_id: string;
+  project: { title: string; description: string; icon: string };
+  welcome_issue_template: ImportStarterWelcomeIssueTemplate;
+  agent_guided_sub_issues: ImportStarterIssuePayload[];
+  self_serve_sub_issues: ImportStarterIssuePayload[];
+}
+
+export interface ImportStarterContentResponse {
+  user: User;
+  project_id: string;
+  welcome_issue_id: string | null;
+}
+
+export interface OnboardingRuntimeBootstrapResponse {
+  workspace_id: string;
+  agent_id: string;
+  issue_id: string;
+}
+
+const EMPTY_ONBOARDING_RUNTIME_BOOTSTRAP_RESPONSE:
+  OnboardingRuntimeBootstrapResponse = {
+  workspace_id: "",
+  agent_id: "",
+  issue_id: "",
+};
+
+export interface OnboardingNoRuntimeBootstrapResponse {
+  workspace_id: string;
+  issue_id: string;
+}
+
 // CEREBRO-PATCH(cerebro-account-client): JEH-921 workspace account types. JEH-881 adds availability fields. JEH-998 adds usage fields.
+export interface CerebroAccount {
+  id: string;
+  workspace_id: string;
+  provider: string;
+  login_identity: string;
+  usage_window_pct: number | null;
+  throttled_until: string | null;
   tokens_5h: number; // CEREBRO-PATCH(cerebro-account-client): JEH-1365 rolling account token load.
+  tokens_7d: number;
+  extra_spend_on: boolean;
+  paused_manual: boolean;
+  created_at: string;
+  updated_at: string;
   // CEREBRO-PATCH(cerebro-account-availability): JEH-881 runtime availability fields.
+  runtime_count: number;
+  available_runtime_count: number;
+  nearest_unpause_at: string | null;
+  status: "available" | "throttled" | "paused" | "no_runtime";
+}
+export interface CreateCerebroAccountRequest {
+  provider: string;
+  login_identity: string;
+}
+export interface UpdateCerebroAccountControlsRequest {
+  extra_spend_on?: boolean;
+  paused_manual?: boolean;
+}
+
+const EMPTY_ONBOARDING_NO_RUNTIME_BOOTSTRAP_RESPONSE:
+  OnboardingNoRuntimeBootstrapResponse = {
+  workspace_id: "",
+  issue_id: "",
+};
+
 export class ApiError extends Error {
   readonly status: number;
   readonly statusText: string;
@@ -423,12 +509,9 @@ export class ApiClient {
     completion_path?: OnboardingCompletionPath;
     workspace_id?: string;
   }): Promise<User> {
-    const raw = await this.fetch<unknown>("/api/me/onboarding/complete", {
+    return this.fetch("/api/me/onboarding/complete", {
       method: "POST",
       body: payload ? JSON.stringify(payload) : undefined,
-    });
-    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
-      endpoint: "POST /api/me/onboarding/complete",
     });
   }
 
@@ -473,24 +556,36 @@ export class ApiClient {
     email: string;
     reason?: string;
   }): Promise<User> {
-    const raw = await this.fetch<unknown>("/api/me/onboarding/cloud-waitlist", {
+    return this.fetch("/api/me/onboarding/cloud-waitlist", {
       method: "POST",
       body: JSON.stringify(payload),
-    });
-    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
-      endpoint: "POST /api/me/onboarding/cloud-waitlist",
     });
   }
 
   async patchOnboarding(payload: {
     questionnaire?: Record<string, unknown>;
   }): Promise<User> {
-    const raw = await this.fetch<unknown>("/api/me/onboarding", {
+    return this.fetch("/api/me/onboarding", {
       method: "PATCH",
       body: JSON.stringify(payload),
     });
-    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
-      endpoint: "PATCH /api/me/onboarding",
+  }
+
+  async importStarterContent(
+    payload: ImportStarterContentPayload,
+  ): Promise<ImportStarterContentResponse> {
+    return this.fetch("/api/me/starter-content/import", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async dismissStarterContent(payload?: {
+    workspace_id?: string;
+  }): Promise<User> {
+    return this.fetch("/api/me/starter-content/dismiss", {
+      method: "POST",
+      body: payload ? JSON.stringify(payload) : undefined,
     });
   }
 
@@ -524,6 +619,37 @@ export class ApiClient {
 
   async deleteMyProfile(): Promise<void> {
     await this.fetch("/api/me/profile", { method: "DELETE" });
+  }
+
+  async listCloudRuntimeNodes(
+    params?: ListCloudRuntimeNodesParams,
+  ): Promise<CloudRuntimeNode[]> {
+    const search = new URLSearchParams();
+    if (params?.limit != null) search.set("limit", String(params.limit));
+    if (params?.offset != null) search.set("offset", String(params.offset));
+    const raw = await this.fetch<unknown>(`/api/cloud-runtime/nodes?${search}`);
+    return Array.isArray(raw) && raw.every((node) => typeof node?.id === "string")
+      ? (raw as CloudRuntimeNode[])
+      : [];
+  }
+
+  async createCloudRuntimeNode(
+    data: CreateCloudRuntimeNodeRequest,
+  ): Promise<CloudRuntimeNode> {
+    const raw = await this.fetch<unknown>("/api/cloud-runtime/nodes", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string"
+      ? (raw as CloudRuntimeNode)
+      : ({ id: "", status: "" } as CloudRuntimeNode);
+  }
+
+  async deleteCloudRuntimeNode(id: string): Promise<void> {
+    await this.fetch("/api/cloud-runtime/nodes", {
+      method: "DELETE",
+      body: JSON.stringify({ id }),
+    });
   }
 
   // Fork-specific: per-user preferences (composer keybinding, etc.)
@@ -876,24 +1002,9 @@ export class ApiClient {
     });
   }
 
-  // CEREBRO-PATCH(cerebro-agent-passes-client): JEH-1731 agent-pass admin API.
-  //   GET    /api/cerebro/agent-passes              — list all passes in workspace
-  //   POST   /api/cerebro/agent-passes              — issue a new pass (422 on scope widening)
-  //   DELETE /api/cerebro/agent-passes/{passId}     — revoke an active pass
-  async listCerebroAgentPasses<T = unknown>(): Promise<T> {
-    return this.fetch<T>("/api/cerebro/agent-passes");
-  }
-  async createCerebroAgentPass<T = unknown>(payload: unknown): Promise<T> {
-    return this.fetch<T>("/api/cerebro/agent-passes", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-  }
-  async revokeCerebroAgentPass<T = unknown>(passId: string, payload?: { reason?: string }): Promise<T> {
-    return this.fetch<T>(`/api/cerebro/agent-passes/${passId}`, {
-      method: "DELETE",
-      body: payload ? JSON.stringify(payload) : undefined,
-    });
+  // CEREBRO-PATCH(cerebro-api-request): authenticated request primitive for cerebro packages.
+  async cerebroRequest<T = unknown>(path: string, init?: RequestInit): Promise<T> {
+    return this.fetch<T>(path, init);
   }
 
   // CEREBRO-PATCH(cerebro-persona-grants-client): JEH-1180 Persona grant
@@ -1035,10 +1146,6 @@ export class ApiClient {
     if (params?.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     if (params?.creator_id) search.set("creator_id", params.creator_id);
     if (params?.project_id) search.set("project_id", params.project_id);
-    if (params?.involves_user_id) search.set("involves_user_id", params.involves_user_id);
-    if (params?.metadata && Object.keys(params.metadata).length > 0) {
-      search.set("metadata", JSON.stringify(params.metadata));
-    }
     if (params?.open_only) search.set("open_only", "true");
     if (params?.scheduled) search.set("scheduled", "true");
     const path = `/api/issues?${search}`;
@@ -1060,10 +1167,6 @@ export class ApiClient {
     if (params.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     if (params.creator_id) search.set("creator_id", params.creator_id);
     if (params.project_id) search.set("project_id", params.project_id);
-    if (params.involves_user_id) search.set("involves_user_id", params.involves_user_id);
-    if (params.metadata && Object.keys(params.metadata).length > 0) {
-      search.set("metadata", JSON.stringify(params.metadata));
-    }
     if (params.assignee_filters?.length) {
       search.set("assignee_filters", params.assignee_filters.map((f) => `${f.type}:${f.id}`).join(","));
     }
@@ -1385,49 +1488,6 @@ export class ApiClient {
     return this.fetch(`/api/runtimes?${search}`);
   }
 
-  async listCloudRuntimeNodes(
-    params?: ListCloudRuntimeNodesParams,
-  ): Promise<CloudRuntimeNode[]> {
-    const search = new URLSearchParams();
-    if (params?.limit !== undefined) search.set("limit", String(params.limit));
-    if (params?.offset !== undefined) search.set("offset", String(params.offset));
-    const query = search.toString();
-    const raw = await this.fetch<unknown>(
-      `/api/cloud-runtime/nodes${query ? `?${query}` : ""}`,
-    );
-    return parseWithFallback(
-      raw,
-      CloudRuntimeNodeListSchema,
-      EMPTY_CLOUD_RUNTIME_NODE_LIST,
-      { endpoint: "GET /api/cloud-runtime/nodes" },
-    );
-  }
-
-  async createCloudRuntimeNode(
-    data: CreateCloudRuntimeNodeRequest,
-  ): Promise<CloudRuntimeNode> {
-    const res = await this.fetchRaw("/api/cloud-runtime/nodes", {
-      method: "POST",
-      body: JSON.stringify(data),
-      extraHeaders: { "Content-Type": "application/json" },
-    });
-    const raw = await res.json() as unknown;
-    return parseWithFallback(
-      raw,
-      CloudRuntimeNodeSchema,
-      EMPTY_CLOUD_RUNTIME_NODE,
-      { endpoint: "POST /api/cloud-runtime/nodes" },
-    );
-  }
-
-  async deleteCloudRuntimeNode(nodeId: string): Promise<void> {
-    await this.fetchRaw("/api/cloud-runtime/nodes", {
-      method: "DELETE",
-      body: JSON.stringify({ id: nodeId }),
-      extraHeaders: { "Content-Type": "application/json" },
-    });
-  }
-
   async deleteRuntime(runtimeId: string): Promise<void> {
     await this.fetch(`/api/runtimes/${runtimeId}`, { method: "DELETE" });
   }
@@ -1593,7 +1653,7 @@ export class ApiClient {
 
   async updateRuntime(
     runtimeId: string,
-    patch: { visibility?: "private" | "public" },
+    patch: { timezone?: string; visibility?: "private" | "public" },
   ): Promise<AgentRuntime> {
     return this.fetch(`/api/runtimes/${runtimeId}`, {
       method: "PATCH",
@@ -1601,41 +1661,15 @@ export class ApiClient {
     });
   }
 
-  async getRuntimeUsage(
-    runtimeId: string,
-    params?: { days?: number; tz?: string },
-  ): Promise<RuntimeUsage[]> {
+  async getRuntimeUsage(runtimeId: string, params?: { days?: number; tz?: string }): Promise<RuntimeUsage[]> {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));
-    // `tz` drives the calendar-day boundary for the trend chart (Viewing
-    // layer). Caller-supplied; the backend falls back to user.timezone /
-    // UTC if omitted.
     if (params?.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(
-      `/api/runtimes/${runtimeId}/usage?${search}`,
-    );
-    return parseWithFallback<RuntimeUsage[]>(raw, RuntimeUsageListSchema, [], {
-      endpoint: "GET /api/runtimes/:id/usage",
-    });
+    return this.fetch(`/api/runtimes/${runtimeId}/usage?${search}`);
   }
 
-  async getRuntimeTaskActivity(
-    runtimeId: string,
-    params?: { tz?: string },
-  ): Promise<RuntimeHourlyActivity[]> {
-    // Hour-of-day heatmap follows the viewer's tz, like the other reports on
-    // this page. Pass the viewer's IANA zone so the server buckets correctly.
-    const search = new URLSearchParams();
-    if (params?.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(
-      `/api/runtimes/${runtimeId}/activity?${search}`,
-    );
-    return parseWithFallback<RuntimeHourlyActivity[]>(
-      raw,
-      RuntimeHourlyActivityListSchema,
-      [],
-      { endpoint: "GET /api/runtimes/:id/activity" },
-    );
+  async getRuntimeTaskActivity(runtimeId: string): Promise<RuntimeHourlyActivity[]> {
+    return this.fetch(`/api/runtimes/${runtimeId}/activity`);
   }
 
   async getRuntimeUsageByAgent(
@@ -1645,15 +1679,7 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));
     if (params?.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(
-      `/api/runtimes/${runtimeId}/usage/by-agent?${search}`,
-    );
-    return parseWithFallback<RuntimeUsageByAgent[]>(
-      raw,
-      RuntimeUsageByAgentListSchema,
-      [],
-      { endpoint: "GET /api/runtimes/:id/usage/by-agent" },
-    );
+    return this.fetch(`/api/runtimes/${runtimeId}/usage/by-agent?${search}`);
   }
 
   async getRuntimeUsageByHour(
@@ -1663,15 +1689,7 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));
     if (params?.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(
-      `/api/runtimes/${runtimeId}/usage/by-hour?${search}`,
-    );
-    return parseWithFallback<RuntimeUsageByHour[]>(
-      raw,
-      RuntimeUsageByHourListSchema,
-      [],
-      { endpoint: "GET /api/runtimes/:id/usage/by-hour" },
-    );
+    return this.fetch(`/api/runtimes/${runtimeId}/usage/by-hour?${search}`);
   }
 
   // ---------------------------------------------------------------------------
@@ -1719,8 +1737,6 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
-    // `tz` aligns the "last N days" cutoff with the viewer's calendar,
-    // matching the per-agent token card.
     if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/agent-runtime?${search}`);
     return parseWithFallback<DashboardAgentRunTime[]>(
@@ -1737,8 +1753,6 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
-    // `tz` cuts the day buckets in the viewer's calendar so Time / Tasks
-    // align with the Cost / Tokens charts.
     if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/runtime/daily?${search}`);
     return parseWithFallback<DashboardRunTimeDaily[]>(
@@ -1880,12 +1894,65 @@ export class ApiClient {
     });
   }
 
-  async rerunIssue(issueId: string, taskId?: string): Promise<AgentTask> {
+  // Channels (multi-party chat — issues with kind in channel,dm)
+  async listChannels(): Promise<Channel[]> {
+    return this.fetch("/api/channels");
+  }
+
+  async getChannel(id: string): Promise<Channel> {
+    return this.fetch(`/api/channels/${id}`);
+  }
+
+  async createChannel(data: CreateChannelRequest): Promise<Channel> {
+    return this.fetch("/api/channels", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async markChannelRead(id: string): Promise<{ count: number }> {
+    return this.fetch(`/api/channels/${id}/read`, { method: "POST" });
+  }
+
   // CEREBRO-PATCH(channel-archive-client): JEH-851 — per-user channel archive
+  // endpoints. Archive hides the channel from the user's channel list until
+  // a new inbox_item lands for it (server clears the row in re-surface
+  // listener), at which point the channel reappears.
+  async archiveChannel(id: string): Promise<{ archived_at: string }> {
+    return this.fetch(`/api/channels/${id}/archive`, { method: "POST" });
+  }
+
+  async unarchiveChannel(id: string): Promise<void> {
+    await this.fetch(`/api/channels/${id}/archive`, { method: "DELETE" });
+  }
+
   // CEREBRO-PATCH(channel-listen-client): JEH-699 — per (channel × agent)
+  // listen-mode endpoints. Default 'always' applies when no explicit row
+  // exists for an agent; the response only contains overrides, so the
+  // consumer fills the default itself.
+  async listChannelAgentSettings(
+    channelId: string,
+  ): Promise<ChannelAgentSettingsResponse> {
+    return this.fetch(`/api/channels/${channelId}/agent-settings`);
+  }
+
+  async setChannelAgentListenMode(
+    channelId: string,
+    agentId: string,
+    listenMode: ChannelAgentListenMode,
+  ): Promise<ChannelAgentSetting> {
+    return this.fetch(
+      `/api/channels/${channelId}/agents/${agentId}/listen-mode`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ listen_mode: listenMode }),
+      },
+    );
+  }
+
+  async rerunIssue(issueId: string): Promise<AgentTask> {
     return this.fetch(`/api/issues/${issueId}/rerun`, {
       method: "POST",
-      body: JSON.stringify(taskId ? { task_id: taskId } : {}),
     });
   }
 
@@ -2644,8 +2711,12 @@ export class ApiClient {
     return this.fetch(`/api/squads/${id}`);
   }
 
-  async createSquad(data: { name: string; description?: string; leader_id: string; avatar_url?: string }): Promise<Squad> {
+  async createSquad(data: {
+    name: string;
+    description?: string;
+    leader_id: string;
     avatar_url?: string; // CEREBRO-PATCH(upstream-create-squad-avatar): JEH-1541 align typed client with squad create modal/backend.
+  }): Promise<Squad> {
     return this.fetch("/api/squads", { method: "POST", body: JSON.stringify(data) });
   }
 
@@ -2661,6 +2732,10 @@ export class ApiClient {
     return this.fetch(`/api/squads/${squadId}/members`);
   }
 
+  async getSquadMemberStatus(squadId: string): Promise<import("../types").SquadMemberStatusListResponse> {
+    return this.fetch(`/api/squads/${squadId}/member-status`);
+  }
+
   async addSquadMember(squadId: string, data: { member_type: string; member_id: string; role?: string }): Promise<SquadMember> {
     return this.fetch(`/api/squads/${squadId}/members`, { method: "POST", body: JSON.stringify(data) });
   }
@@ -2671,17 +2746,6 @@ export class ApiClient {
 
   async updateSquadMemberRole(squadId: string, data: { member_type: string; member_id: string; role: string }): Promise<SquadMember> {
     return this.fetch(`/api/squads/${squadId}/members/role`, { method: "PATCH", body: JSON.stringify(data) });
-  }
-
-  // Per-squad members status snapshot: one row per member with derived
-  // working/idle/offline/unstable plus the issues each agent is currently
-  // running. Parsed with a lenient schema so a new server-side status
-  // value or extra field can't white-screen the Squad page (#2143).
-  async getSquadMemberStatus(squadId: string): Promise<SquadMemberStatusListResponse> {
-    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/members/status`);
-    return parseWithFallback(raw, SquadMemberStatusListResponseSchema, EMPTY_SQUAD_MEMBER_STATUS_LIST, {
-      endpoint: "GET /api/squads/:id/members/status",
-    }) as SquadMemberStatusListResponse;
   }
 
   // Autopilots
@@ -2717,18 +2781,18 @@ export class ApiClient {
     return this.fetch(`/api/autopilots/${id}/trigger`, { method: "POST" });
   }
 
+  async getAutopilotRun(
+    autopilotId: string,
+    runId: string,
+  ): Promise<AutopilotRun> {
+    return this.fetch(`/api/autopilots/${autopilotId}/runs/${runId}`);
+  }
+
   async listAutopilotRuns(id: string, params?: { limit?: number; offset?: number }): Promise<ListAutopilotRunsResponse> {
     const search = new URLSearchParams();
     if (params?.limit) search.set("limit", params.limit.toString());
     if (params?.offset) search.set("offset", params.offset.toString());
     return this.fetch(`/api/autopilots/${id}/runs?${search}`);
-  }
-
-  // Returns a single run including its full trigger_payload. List responses
-  // omit trigger_payload to keep them small (a webhook envelope can be
-  // up to 256 KiB × limit rows), so the detail view fetches via this route.
-  async getAutopilotRun(autopilotId: string, runId: string): Promise<AutopilotRun> {
-    return this.fetch(`/api/autopilots/${autopilotId}/runs/${runId}`);
   }
 
   async createAutopilotTrigger(autopilotId: string, data: CreateAutopilotTriggerRequest): Promise<AutopilotTrigger> {
@@ -2753,32 +2817,24 @@ export class ApiClient {
     autopilotId: string,
     triggerId: string,
   ): Promise<AutopilotTrigger> {
-    return this.fetch(
-      `/api/autopilots/${autopilotId}/triggers/${triggerId}/rotate-webhook-token`,
-      { method: "POST" },
-    );
+    return this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}/rotate-token`, {
+      method: "POST",
+    });
   }
 
-  // Webhook deliveries — list is slim (no raw_body / selected_headers /
-  // response_body); detail returns the full row. Both responses are parsed
-  // through a lenient schema so an unknown server-side `status` /
-  // `signature_status` value degrades to a generic row instead of dropping
-  // the whole list.
   async listAutopilotDeliveries(
     autopilotId: string,
     params?: { limit?: number; offset?: number },
   ): Promise<ListWebhookDeliveriesResponse> {
     const search = new URLSearchParams();
-    if (params?.limit) search.set("limit", params.limit.toString());
-    if (params?.offset) search.set("offset", params.offset.toString());
-    const raw = await this.fetch<unknown>(
-      `/api/autopilots/${autopilotId}/deliveries?${search}`,
-    );
+    if (params?.limit != null) search.set("limit", String(params.limit));
+    if (params?.offset != null) search.set("offset", String(params.offset));
+    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/deliveries?${search}`);
     return parseWithFallback(
       raw,
       ListWebhookDeliveriesResponseSchema,
       EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
-      { endpoint: "GET /api/autopilots/:id/deliveries" },
+      { endpoint: "GET /api/autopilots/{id}/deliveries" },
     );
   }
 
@@ -2786,35 +2842,142 @@ export class ApiClient {
     autopilotId: string,
     deliveryId: string,
   ): Promise<WebhookDelivery> {
-    const raw = await this.fetch<unknown>(
-      `/api/autopilots/${autopilotId}/deliveries/${deliveryId}`,
-    );
+    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/deliveries/${deliveryId}`);
     return parseWithFallback(
       raw,
       WebhookDeliveryResponseSchema,
-      { ...EMPTY_WEBHOOK_DELIVERY, id: deliveryId, autopilot_id: autopilotId },
-      { endpoint: "GET /api/autopilots/:id/deliveries/:deliveryId" },
+      { ...EMPTY_WEBHOOK_DELIVERY, id: deliveryId, autopilot_id: autopilotId } as WebhookDelivery,
+      { endpoint: "GET /api/autopilots/{id}/deliveries/{deliveryId}" },
     );
   }
 
-  // Replay creates a NEW delivery row referencing the original via
-  // `replayed_from_delivery_id`. Server rejects replays of
-  // signature-invalid / rejected deliveries with 400 — the UI keeps the
-  // button disabled for those rows, but the server is the source of truth.
   async replayAutopilotDelivery(
     autopilotId: string,
     deliveryId: string,
   ): Promise<WebhookDelivery> {
-    const raw = await this.fetch<unknown>(
-      `/api/autopilots/${autopilotId}/deliveries/${deliveryId}/replay`,
-      { method: "POST" },
-    );
-    return parseWithFallback(
-      raw,
-      WebhookDeliveryResponseSchema,
-      { ...EMPTY_WEBHOOK_DELIVERY, autopilot_id: autopilotId },
-      { endpoint: "POST /api/autopilots/:id/deliveries/:deliveryId/replay" },
-    );
+    return this.fetch(`/api/autopilots/${autopilotId}/deliveries/${deliveryId}/replay`, {
+      method: "POST",
+    });
+  }
+
+  // Artifacts
+  async createArtifact(data: CreateArtifactRequest): Promise<Artifact> {
+    return this.fetch("/api/artifacts", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getArtifact(id: string): Promise<Artifact> {
+    return this.fetch(`/api/artifacts/${id}`);
+  }
+
+  async listArtifactsByIssue(issueId: string): Promise<Artifact[]> {
+    return this.fetch(`/api/issues/${issueId}/artifacts`);
+  }
+
+  async listArtifactsByProject(projectId: string): Promise<Artifact[]> {
+    return this.fetch(`/api/projects/${projectId}/artifacts`);
+  }
+
+  async updateArtifact(id: string, data: UpdateArtifactRequest): Promise<Artifact> {
+    return this.fetch(`/api/artifacts/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteArtifact(id: string): Promise<void> {
+    await this.fetch(`/api/artifacts/${id}`, { method: "DELETE" });
+  }
+
+  async searchArtifacts(params?: ListArtifactsParams): Promise<Artifact[]> {
+    const search = new URLSearchParams();
+    if (params?.kind) search.set("kind", params.kind);
+    if (params?.scope) search.set("scope", params.scope);
+    if (params?.author_type) search.set("author_type", params.author_type);
+    if (params?.author_id) search.set("author_id", params.author_id);
+    if (params?.origin_issue_id)
+      search.set("origin_issue_id", params.origin_issue_id);
+    if (params?.q) search.set("q", params.q);
+    if (params?.limit != null) search.set("limit", String(params.limit));
+    if (params?.offset != null) search.set("offset", String(params.offset));
+    const qs = search.toString();
+    return this.fetch(`/api/artifacts${qs ? `?${qs}` : ""}`);
+  }
+
+  async updateArtifactScope(
+    id: string,
+    data: UpdateArtifactScopeRequest,
+  ): Promise<Artifact> {
+    return this.fetch(`/api/artifacts/${id}/scope`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async moveArtifactToFolder(
+    id: string,
+    data: MoveArtifactToFolderRequest,
+  ): Promise<Artifact> {
+    return this.fetch(`/api/artifacts/${id}/folder`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Artifact folders
+  async listArtifactFolders(): Promise<ArtifactFolder[]> {
+    return this.fetch("/api/artifact-folders");
+  }
+
+  async createArtifactFolder(
+    data: CreateArtifactFolderRequest,
+  ): Promise<ArtifactFolder> {
+    return this.fetch("/api/artifact-folders", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateArtifactFolder(
+    id: string,
+    data: UpdateArtifactFolderRequest,
+  ): Promise<ArtifactFolder> {
+    return this.fetch(`/api/artifact-folders/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteArtifactFolder(id: string): Promise<void> {
+    await this.fetch(`/api/artifact-folders/${id}`, { method: "DELETE" });
+  }
+
+  async uploadArtifactFile(file: File): Promise<ArtifactUploadResponse> {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const rid = createRequestId();
+    const start = Date.now();
+    this.logger.info("→ POST /api/artifact-uploads", { rid });
+
+    const res = await fetch(`${this.baseUrl}/api/artifact-uploads`, {
+      method: "POST",
+      headers: this.authHeaders(),
+      body: formData,
+      credentials: "include",
+    });
+
+    if (!res.ok) {
+      if (res.status === 401) this.handleUnauthorized();
+      const message = await this.parseErrorMessage(res, `Upload failed: ${res.status}`);
+      this.logger.error(`← ${res.status} /api/artifact-uploads`, { rid, duration: `${Date.now() - start}ms`, error: message });
+      throw new ApiError(message, res.status, res.statusText);
+    }
+
+    this.logger.info(`← ${res.status} /api/artifact-uploads`, { rid, duration: `${Date.now() - start}ms` });
+    return res.json() as Promise<ArtifactUploadResponse>;
   }
 
   // GitHub integration

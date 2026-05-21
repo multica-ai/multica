@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+
+	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
 )
 
 // TestValidateToolsConfig covers the three states the seeder cares about:
@@ -41,6 +43,28 @@ func TestSeedCloudToolsRejectsNilPool(t *testing.T) {
 	err := SeedCloudToolsForAllRuntimes(context.Background(), nil, []BackfillToolMeta{{Name: "x"}})
 	if err == nil {
 		t.Fatal("expected error for nil pool, got nil")
+	}
+}
+
+func TestBuiltinCloudToolMetaOnlyIncludesCallableTools(t *testing.T) {
+	callable := map[string]struct{}{}
+	for _, item := range cerebroruntime.AllBuiltinToolMeta() {
+		if item.Status == cerebroruntime.ToolStatusImplemented || item.Status == cerebroruntime.ToolStatusNewlyImplemented {
+			callable[item.Name] = struct{}{}
+		}
+	}
+
+	got := builtinCloudToolMeta()
+	if len(got) == 0 {
+		t.Fatal("expected callable built-in cloud tools, got none")
+	}
+	for _, item := range got {
+		if _, ok := callable[item.Name]; !ok {
+			t.Fatalf("non-callable tool %q included in cloud backfill", item.Name)
+		}
+		if item.Description == "" {
+			t.Fatalf("tool %q is missing description", item.Name)
+		}
 	}
 }
 

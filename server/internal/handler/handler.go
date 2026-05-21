@@ -75,6 +75,8 @@ type Config struct {
 	// return 503 instead of attempting to dial a hard-coded private service.
 	CloudRuntimeFleetURL     string
 	CloudRuntimeFleetTimeout time.Duration
+	// CEREBRO-PATCH(scanner-discovery-token): bearer token for daemon scanner discovery endpoint.
+	ScannerDiscoveryToken string
 }
 
 type cloudRuntimeProxy interface {
@@ -110,16 +112,38 @@ type Handler struct {
 	CloudRuntime          cloudRuntimeProxy
 	cfg                   Config
 	// CEREBRO-PATCH(handler-cerebro-fields): cerebro budget guard, web push,
+	// and daemon ping state.
+	BudgetService *service.BudgetService
+	PushService   *service.PushService
+	PingStore     *PingStore
 	// CEREBRO-PATCH(handler-channel-listen): channel-listener (per-(channel,agent)
+	// listen-mode) service. Set by the router after construction so the upstream
+	// handler.New signature stays unchanged.
+	ChannelListen ChannelListenInvoker
 	// CEREBRO-PATCH(handler-runtime-pause): cerebro runtime pause/unpause service.
+	RuntimePause RuntimePauseInvoker
 	// CEREBRO-PATCH(handler-group-permissions): cerebro group-permission gate.
+	GroupPermissions GroupPermissionsInvoker
+	// CEREBRO-PATCH(handler-mention-trigger-gate): cerebro @mention trigger gate.
+	MentionTriggerGate MentionTriggerGateInvoker
 	// CEREBRO-PATCH(handler-runtime-account): cerebro daemon-driven account
+	// registration service. Wired by the router after construction.
+	RuntimeAccount RuntimeAccountInvoker
 	// CEREBRO-PATCH(handler-persona-mask): JEH-1079 mask checker. Wired by
+	// the router after construction; nil = persona not configured (no redaction).
+	PersonaMask PersonaMaskInvoker
 	// CEREBRO-PATCH(handler-persona-mask-audit): JEH-1173 redaction ledger.
+	// Wired by the router after construction; nil = no audit row written.
+	PersonaMaskAudit PersonaMaskAuditWriter
 	// CEREBRO-PATCH(handler-tool-meta): JEH-1353 — ordered list of registered
+	// tools and name→description lookup for the tool grant admin API.
+	cerebroToolItems  []CerebroToolItem
+	cerebroToolDesc   map[string]string
 	cerebroToolStatus map[string]string // CEREBRO-PATCH(handler-tool-status): reject stale grants for excluded tools.
 	// CEREBRO-PATCH(handler-runtime-tools-admin): JEH-1710 unified runtime
+	runtimeToolsAdmin RuntimeToolsAdminService
 	// CEREBRO-PATCH(handler-runtime-tools-scan): JEH-1710 daemon-side ingest
+	runtimeToolsScan RuntimeToolsScanService
 }
 
 // RuntimePauseInvoker is the upstream-side seam that the cerebro runtime
@@ -147,6 +171,12 @@ type RuntimePauseState struct {
 	PausedAt    pgtype.Timestamptz
 	UnpauseAt   pgtype.Timestamptz
 	PauseReason pgtype.Text
+}
+
+// MentionTriggerGateInvoker is the upstream-side seam for Cerebro's
+// @mention trigger gate.
+type MentionTriggerGateInvoker interface {
+	CanTriggerMention(ctx context.Context, r *http.Request, workspaceID string, agentID, ownerID pgtype.UUID) (bool, error)
 }
 
 // ChannelListenInvoker is the upstream-side seam that the cerebro

@@ -40,6 +40,7 @@ import (
 	// CEREBRO-PATCH(cerebro-group-permissions-routes): JEH-1008 permission model handler import
 	cerebrogrouppermissions "github.com/multica-ai/multica/server/internal/cerebro/grouppermissions"
 	cerebroinbox "github.com/multica-ai/multica/server/internal/cerebro/inbox"
+	cerebromentiongate "github.com/multica-ai/multica/server/internal/cerebro/mentiongate"
 	cerebronotifications "github.com/multica-ai/multica/server/internal/cerebro/notifications"
 	// CEREBRO-PATCH(references-routes): JEH-837 issue references handler import.
 	cerebroreferences "github.com/multica-ai/multica/server/internal/cerebro/references"
@@ -257,8 +258,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroGrantsHandler := cerebrogrants.NewHandler(cerebrogrants.New(cerebroQueries, queries, pool, bus)) // CEREBRO-PATCH(cerebro-grants-routes): JEH-1213
 	// CEREBRO-PATCH(router-group-permissions-seam): JEH-1009 wire capability gate into the upstream handler
 	h.GroupPermissions = cerebrogrouppermissions.NewHandlerSeam(cerebroGroupPermissionsHandler.Service)
-	// CEREBRO-PATCH(router-channel-listen-gate): JEH-1727 — gate listen-mode triggers through the group-permission allowlist.
-	channelListenSvc.AgentTriggerGate = newChannelListenAgentGate(queries, cerebroGroupPermissionsHandler.Service)
+	mentionGate := cerebromentiongate.New(queries, cerebroGroupPermissionsHandler.Service) // CEREBRO-PATCH(router-mention-trigger-gate): JEH-1917.
+	h.MentionTriggerGate = mentionGate
+	channelListenSvc.AgentTriggerGate = mentionGate.ChannelListenGate()
 	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 workspace accounts handler
 	cerebroAccountHandler := cerebroaccount.New(cerebroQueries, bus)
 	// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196/1197 credential registry handler — cipher loaded from MULTICA_CREDENTIALS_KEY, governance policy wired via newCredentialsPolicy (owner-only when persona env is unset).
@@ -304,15 +306,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.SetRuntimeToolsScan(newRuntimeToolsScanAdapter(runtimeToolsSvc))
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler instance
 	cerebroTasksHandler := cerebrotasks.New(cerebroQueries)
-	// CEREBRO-PATCH(cerebro-agent-passes-routes): JEH-1731 agent-pass admin handler.
-	// Uses a dedicated agentpass.Service instance for ValidateChildScope — the gate
-	// instance in main.go and this admin instance share the same Postgres-backed
-	// queries, so there is no in-memory state to coordinate.
-	cerebroAgentPassSvc, cerebroAgentPassErr := cerebroagentpass.New(cerebroQueries, nil)
-	if cerebroAgentPassErr != nil {
-		panic("agent-pass admin service construction failed: " + cerebroAgentPassErr.Error())
-	}
-	cerebroAgentPassHandler := cerebroagentpass.NewHandler(cerebroQueries, cerebroAgentPassSvc)
 	// CEREBRO-PATCH(sharetoken-routes): JEH-1076 public-link share-token handler
 	cerebroShareTokenHandler := cerebrosharetoken.NewHandler(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow handler instance; JEH-1108 PR3 wires the engine Service so the test-only /_test/cron-sweep endpoint can fire the sweeper synchronously.
@@ -1113,12 +1106,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Delete("/api/cerebro/share-tokens/{tokenId}", cerebroShareTokenHandler.Revoke)
 			// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 cross-agent tasks list endpoint
 			r.Get("/api/cerebro/tasks", cerebroTasksHandler.List)
-			// CEREBRO-PATCH(cerebro-agent-passes-routes): JEH-1731 agent-pass admin API.
-			r.Route("/api/cerebro/agent-passes", func(r chi.Router) {
-				r.Get("/", cerebroAgentPassHandler.List)
-				r.Post("/", cerebroAgentPassHandler.Create)
-				r.Delete("/{passId}", cerebroAgentPassHandler.Revoke)
-			})
+			r.Mount("/api/cerebro/agent-passes", cerebroagentpass.NewAdminRoutes(cerebroQueries)) // CEREBRO-PATCH(cerebro-agent-passes-routes): JEH-1731 agent-pass admin API.
 			// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow engine REST surface (PR 2/3).
 			r.Route("/api/cerebro/workflows", func(r chi.Router) {
 				r.Get("/", cerebroWorkflowsHandler.List)

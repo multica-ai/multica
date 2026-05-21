@@ -263,12 +263,13 @@ type HeartbeatResponse struct {
 	Status      string `json:"status"`
 	RuntimeGone bool   `json:"runtime_gone,omitempty"`
 	// CEREBRO-PATCH(heartbeat-account-id-ack): JEH-881 registered cerebro account_id.
-	CerebroAccountID        string                   `json:"cerebro_account_id,omitempty"`
-	PendingPing             *PendingPing             `json:"pending_ping,omitempty"`
-	PendingUpdate           *PendingUpdate           `json:"pending_update,omitempty"`
-	PendingModelList        *PendingModelList        `json:"pending_model_list,omitempty"`
-	PendingLocalSkills      *PendingLocalSkills      `json:"pending_local_skills,omitempty"`
-	PendingLocalSkillImport *PendingLocalSkillImport `json:"pending_local_skill_import,omitempty"`
+	CerebroAccountID         string                    `json:"cerebro_account_id,omitempty"`
+	PendingPing              *PendingPing              `json:"pending_ping,omitempty"`
+	PendingUpdate            *PendingUpdate            `json:"pending_update,omitempty"`
+	PendingModelList         *PendingModelList         `json:"pending_model_list,omitempty"`
+	PendingLocalSkills       *PendingLocalSkills       `json:"pending_local_skills,omitempty"`
+	PendingLocalSkillImport  *PendingLocalSkillImport  `json:"pending_local_skill_import,omitempty"`
+	PendingLocalSkillImports []PendingLocalSkillImport `json:"pending_local_skill_imports,omitempty"`
 }
 
 // PendingPing represents a ping test request from the server.
@@ -313,16 +314,14 @@ type SendHeartbeatOpts struct {
 // (W4.2). Zero-value opts keeps the wire shape minimal.
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string, opts SendHeartbeatOpts) (*HeartbeatResponse, error) {
 	body := protocol.DaemonHeartbeatRequestPayload{
-		RuntimeID:    runtimeID,
-		Account:      opts.Account,
-		CLIVersion:   opts.CLIVersion,
-		Capabilities: opts.Capabilities,
+		RuntimeID:           runtimeID,
+		SupportsBatchImport: true,
+		Account:             opts.Account,
+		CLIVersion:          opts.CLIVersion,
+		Capabilities:        opts.Capabilities,
 	}
 	var resp HeartbeatResponse
-	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
-		"runtime_id":             runtimeID,
-		"supports_batch_import":  true,
-	}, &resp); err != nil {
+	if err := c.postJSON(ctx, "/api/daemon/heartbeat", body, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -371,9 +370,9 @@ func (c *Client) ReportLocalSkillImportResult(ctx context.Context, runtimeID, re
 // CEREBRO-PATCH(daemon-client-runtime-tool-scan): JEH-1710 daemon→server scan
 // wire types. Mirrors handler.RuntimeToolScanServer / RuntimeToolScanTool.
 type RuntimeToolScanServer struct {
-	Name  string                  `json:"name"`
-	Tools []RuntimeToolScanTool   `json:"tools"`
-	Error string                  `json:"error,omitempty"`
+	Name  string                `json:"name"`
+	Tools []RuntimeToolScanTool `json:"tools"`
+	Error string                `json:"error,omitempty"`
 }
 
 // RuntimeToolScanTool is one entry inside a server's tools/list response.

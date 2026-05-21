@@ -3,7 +3,6 @@ package handler
 // CEREBRO-PATCH(runtime-handler-runtime-test): cerebro modification of upstream file
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -210,14 +209,9 @@ func TestListRuntimeUsageBucketsByViewerTimezone(t *testing.T) {
 	ctx := context.Background()
 	runtimeID := handlerTestRuntimeID(t)
 
-	var req *http.Request
-	if raw, ok := body.([]byte); ok {
-		req = httptest.NewRequest(http.MethodPatch, "/api/runtimes/"+runtimeID+"/sandbox", bytes.NewReader(raw))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-User-ID", testUserID)
-		req.Header.Set("X-Workspace-ID", testWorkspaceID)
-	} else {
-		req = newRequest(http.MethodPatch, "/api/runtimes/"+runtimeID+"/sandbox", body)
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("load Asia/Shanghai: %v", err)
 	}
 	cutoff := time.Date(2026, 5, 4, 0, 0, 0, 0, loc)
 	cutoffDate := cutoff.Format("2006-01-02")

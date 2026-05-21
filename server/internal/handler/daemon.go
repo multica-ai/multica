@@ -220,7 +220,7 @@ type DaemonRegisterRequest struct {
 	DeviceName      string   `json:"device_name"`
 	CLIVersion      string   `json:"cli_version"` // multica CLI version
 	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
-	Runtimes []struct {
+	Runtimes        []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
@@ -794,6 +794,10 @@ type DaemonHeartbeatRequest struct {
 	RuntimeID           string `json:"runtime_id"`
 	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
 	// CEREBRO-PATCH(heartbeat-account-request): JEH-997 mirrors the
+	Account *protocol.DaemonHeartbeatAccount `json:"account,omitempty"`
+	// CEREBRO-PATCH(heartbeat-cli-version-request): W4.2 CLI version + capabilities fields on heartbeat payload.
+	CLIVersion   string          `json:"cli_version,omitempty"`
+	Capabilities json.RawMessage `json:"capabilities,omitempty"`
 }
 
 // heartbeatHasPendingTimeout bounds the cheap HasPending probe on the
@@ -1027,7 +1031,7 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return &protocol.DaemonHeartbeatAckPayload{
-				RuntimeID:   payload.RuntimeID,
+				RuntimeID:   runtimeID,
 				Status:      protocol.HeartbeatStatusRuntimeGone,
 				RuntimeGone: true,
 			}, nil

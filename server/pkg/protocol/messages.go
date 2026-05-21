@@ -119,8 +119,16 @@ type DaemonHeartbeatRequestPayload struct {
 	RuntimeID           string `json:"runtime_id"`
 	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
 	// CEREBRO-PATCH(heartbeat-account): JEH-997 piggybacks the runtime's
+	Account *DaemonHeartbeatAccount `json:"account,omitempty"`
 	// CEREBRO-PATCH(heartbeat-cli-version): W4.2 CLI version + capabilities fields on heartbeat payload.
-// CEREBRO-PATCH(heartbeat-account-type): JEH-997 cerebro-only payload type.
+	CLIVersion   string         `json:"cli_version,omitempty"`
+	Capabilities map[string]any `json:"capabilities,omitempty"`
+	// CEREBRO-PATCH(heartbeat-account-type): JEH-997 cerebro-only payload type.
+}
+
+type DaemonHeartbeatAccount struct {
+	Provider      string `json:"provider"`
+	LoginIdentity string `json:"login_identity"`
 }
 
 // DaemonHeartbeatAckPayload is the server's reply to DaemonHeartbeatRequestPayload.

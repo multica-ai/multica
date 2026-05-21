@@ -121,6 +121,20 @@ func TestAsMap_LegacyShape(t *testing.T) {
 	}
 }
 
+func TestLegacyProviderMap_MatchesLegacyShape(t *testing.T) {
+	got := LegacyProviderMap("claude")
+	want := AsMap(For("claude"))
+
+	for _, key := range []string{"providers", "tools", "mcp_servers", "discovery_method"} {
+		if got[key] == nil {
+			t.Fatalf("LegacyProviderMap missing %q", key)
+		}
+	}
+	if !equal(got["tools"].([]string), want["tools"].([]string)) {
+		t.Errorf("tools: got %v, want %v", got["tools"], want["tools"])
+	}
+}
+
 func TestKnownProviders_Sorted(t *testing.T) {
 	got := KnownProviders()
 	if len(got) < 4 {

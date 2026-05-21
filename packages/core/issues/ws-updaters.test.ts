@@ -10,7 +10,6 @@ import {
   onIssueCreated,
   onIssueDeleted,
   onIssueLabelsChanged,
-  onIssueMetadataChanged,
   onIssueUpdated,
 } from "./ws-updaters";
 import { issueKeys } from "./queries";
@@ -63,6 +62,7 @@ const baseIssue: Issue = {
   description: null,
   status: "todo",
   priority: "none",
+  kind: "issue",
   assignee_type: null,
   assignee_id: null,
   creator_type: "member",
@@ -179,43 +179,6 @@ describe("onIssueLabelsChanged", () => {
   });
 });
 
-describe("onIssueMetadataChanged", () => {
-  let qc: QueryClient;
-
-  beforeEach(() => {
-    qc = new QueryClient();
-  });
-
-  it("replaces metadata in both detail and list caches (no merge)", () => {
-    qc.setQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID), {
-      ...baseIssue,
-      metadata: { pr_number: 1, stale: "yes" },
-    });
-    qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
-      byStatus: {
-        todo: {
-          issues: [{ ...baseIssue, metadata: { pr_number: 1 } }],
-          total: 1,
-        },
-      },
-    });
-
-    onIssueMetadataChanged(qc, WS_ID, ISSUE_ID, { pr_number: 2 });
-
-    const detail = qc.getQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID));
-    expect(detail?.metadata).toEqual({ pr_number: 2 });
-    const list = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
-    expect(list?.byStatus.todo?.issues[0]?.metadata).toEqual({ pr_number: 2 });
-  });
-
-  it("leaves untouched caches as undefined (no spurious writes)", () => {
-    onIssueMetadataChanged(qc, WS_ID, ISSUE_ID, { foo: "bar" });
-
-    expect(qc.getQueryData(issueKeys.detail(WS_ID, ISSUE_ID))).toBeUndefined();
-    expect(qc.getQueryData(issueKeys.list(WS_ID))).toBeUndefined();
-  });
-});
-
 describe("onIssueDeleted", () => {
   let qc: QueryClient;
 
@@ -259,6 +222,8 @@ describe("onIssueDeleted", () => {
       total_output_tokens: 20,
       total_cache_read_tokens: 0,
       total_cache_write_tokens: 0,
+      cost_cents: 0,
+      subtree_cost_cents: 0,
       task_count: 1,
     });
     qc.setQueryData<Attachment[]>(issueKeys.attachments(ISSUE_ID), [

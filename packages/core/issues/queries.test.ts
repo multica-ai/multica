@@ -20,6 +20,7 @@ function makeIssue(idx: number): Issue {
     workspace_id: WS_ID,
     number: idx,
     identifier: `MUL-${idx}`,
+    kind: "issue",
     title: `Issue ${idx}`,
     description: null,
     status: "todo",
@@ -33,8 +34,8 @@ function makeIssue(idx: number): Issue {
     position: idx,
     start_date: "2026-05-01T00:00:00Z",
     due_date: null,
-    labels: [],
     metadata: {},
+    labels: [],
     created_at: "2025-01-01T00:00:00Z",
     updated_at: "2025-01-01T00:00:00Z",
   };

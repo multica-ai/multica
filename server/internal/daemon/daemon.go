@@ -18,7 +18,9 @@ import (
 	"time"
 
 	// CEREBRO-PATCH(daemon-runtime-mcp-merge-import): runtime/agent MCP merge for 9031.
+	// CEREBRO-PATCH(daemon-settings-refresh-import): keep settings live via cerebro-zone helper.
 	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp"
+	"github.com/multica-ai/multica/server/internal/cerebro/daemonsettings"
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -143,7 +145,9 @@ type Daemon struct {
 	bgSyncs sync.WaitGroup
 
 	// CEREBRO-PATCH(daemon-account-identity-cache): JEH-997 identity-probe cache.
+	accountIdentities *accountIdentityCache
 	// CEREBRO-PATCH(daemon-runtime-tool-scan-state): JEH-1710 per-runtime
+	toolScanState      *runtimeToolScanState
 	runner             taskRunner    // executes agent tasks; set to d.runTask by New(), overridable in tests
 	cancelPollInterval time.Duration // how often handleTask polls for server-side cancellation; overridable in tests
 	// runUpdateFn executes the brew-or-download upgrade. Set to d.runUpdate by
@@ -170,6 +174,8 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		agentVersions:             make(map[string]string),
 		wsHBLastAck:               make(map[string]time.Time),
 		activeEnvRoots:            make(map[string]int),
+		accountIdentities:         newAccountIdentityCache(),
+		toolScanState:             newRuntimeToolScanState(),
 		runtimeGoneInflight:       make(map[string]struct{}),
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
@@ -738,7 +744,7 @@ func (d *Daemon) findRuntime(id string) *Runtime {
 
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, error) {
 	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
-	var runtimes []map[string]string
+	var runtimes []map[string]any
 	for name, entry := range d.cfg.Agents {
 		version, err := detectAgentVersion(ctx, entry.Path)
 		if err != nil {
@@ -1105,14 +1111,10 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 			// reviewed in PR #2847). refreshWorkspaceRepos covers settings +
 			// repos in a single round trip.
 			// CEREBRO-PATCH(daemon-settings-refresh): keep settings live on existing workspaces (JEH-1590).
-			if _, err := d.refreshWorkspaceRepos(ctx, id); err != nil {
-				d.logger.Debug("workspace sync: refresh settings failed", "workspace_id", id, "error", err)
-			}
-			// Only intervene further if the workspace lost all of its
-			// runtimes (most commonly because handleRuntimeGone pruned them
-			// and its inline re-register failed). The pointer is not replaced
-			// here either — ensureRepoReady holds repoRefreshMu from the
-			// original pointer.
+			daemonsettings.RefreshExistingWorkspace(ctx, id, d.refreshWorkspaceSettings, d.logger)
+			// Already tracked: only intervene if the workspace lost all of its
+			// runtimes. The pointer is not replaced here either — ensureRepoReady
+			// holds repoRefreshMu from the original pointer.
 			if !d.workspaceNeedsRuntimeRecovery(id) {
 				continue
 			}
@@ -1204,6 +1206,11 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 		d.logger.Debug("workspace sync done", "registered", registered, "removed", removed, "tracked", len(apiIDs))
 	}
 	return nil
+}
+
+func (d *Daemon) refreshWorkspaceSettings(ctx context.Context, workspaceID string) error {
+	_, err := d.refreshWorkspaceRepos(ctx, workspaceID)
+	return err
 }
 
 // heartbeatLoop supervises per-runtime HTTP heartbeat goroutines. Each runtime
@@ -1305,8 +1312,23 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string, currentVersio
 		return
 	}
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
-	resp, err := d.client.SendHeartbeat(ctx, rid)
 	// CEREBRO-PATCH(daemon-heartbeat-account-refresh): JEH-997 re-probe the
+	// runtime's login identity right before the beat so a fresh login
+	// propagates within one tick instead of one daemon restart. Probe is
+	// cheap (one fstat + one JSON parse) and the result is cached.
+	d.refreshHeartbeatAccount(rid)
+	opts := SendHeartbeatOpts{Account: d.heartbeatAccountFor(rid)}
+	// W4.2: advertise the runtime's current CLI version + tool capabilities
+	// so the server can update its capabilities snapshot on drift. Skipped
+	// when we couldn't resolve the runtime (e.g. just deregistered) or when
+	// the provider has no detected version yet.
+	if rt := d.findRuntime(rid); rt != nil {
+		if v := currentVersions[rt.Provider]; v != "" {
+			opts.CLIVersion = v
+			opts.Capabilities = providerCapabilities(rt.Provider)
+		}
+	}
+	resp, err := d.client.SendHeartbeat(ctx, rid, opts)
 	if err != nil {
 		if ctx.Err() == nil {
 			if isRuntimeNotFoundError(err) {
@@ -1430,6 +1452,10 @@ func (d *Daemon) handlePing(ctx context.Context, rt Runtime, pingID string, sand
 func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, resp *HeartbeatResponse) {
 	if resp == nil {
 		return
+	}
+	// CEREBRO-PATCH(heartbeat-account-id-ack): cache server-registered account id for task usage reports.
+	if d.accountIdentities != nil && resp.CerebroAccountID != "" {
+		d.accountIdentities.setAccountID(runtimeID, resp.CerebroAccountID)
 	}
 	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
 		d.logger.Debug("heartbeat: pending actions",
@@ -2403,25 +2429,25 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Repos are passed as metadata only — the agent checks them out on demand
 	// via `multica repo checkout <url>`.
 	taskCtx := execenv.TaskContextForEnv{
-		IssueID:                 task.IssueID,
-		TriggerCommentID:        task.TriggerCommentID,
-		AgentID:                 agentID,
-		AgentName:               agentName,
-		AgentInstructions:       instructions,
-		AgentSkills:             convertSkillsForEnv(skills),
-		Repos:                   convertReposForEnv(task.Repos),
-		ProjectID:               task.ProjectID,
-		ProjectTitle:            task.ProjectTitle,
-		ProjectResources:        convertProjectResourcesForEnv(task.ProjectResources),
-		ChatSessionID:           task.ChatSessionID,
-		AutopilotRunID:          task.AutopilotRunID,
-		AutopilotID:             task.AutopilotID,
-		AutopilotTitle:          task.AutopilotTitle,
-		AutopilotDescription:    task.AutopilotDescription,
-		AutopilotSource:         task.AutopilotSource,
-		AutopilotTriggerPayload: strings.TrimSpace(string(task.AutopilotTriggerPayload)),
-		QuickCreatePrompt:       task.QuickCreatePrompt,
-		IsSquadLeader:           strings.Contains(instructions, "## Squad Operating Protocol"),
+		IssueID:                          task.IssueID,
+		TriggerCommentID:                 task.TriggerCommentID,
+		AgentID:                          agentID,
+		AgentName:                        agentName,
+		AgentInstructions:                instructions,
+		AgentSkills:                      convertSkillsForEnv(skills),
+		Repos:                            convertReposForEnv(task.Repos),
+		ProjectID:                        task.ProjectID,
+		ProjectTitle:                     task.ProjectTitle,
+		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
+		ChatSessionID:                    task.ChatSessionID,
+		AutopilotRunID:                   task.AutopilotRunID,
+		AutopilotID:                      task.AutopilotID,
+		AutopilotTitle:                   task.AutopilotTitle,
+		AutopilotDescription:             task.AutopilotDescription,
+		AutopilotSource:                  task.AutopilotSource,
+		AutopilotTriggerPayload:          strings.TrimSpace(string(task.AutopilotTriggerPayload)),
+		QuickCreatePrompt:                task.QuickCreatePrompt,
+		IsSquadLeader:                    strings.Contains(instructions, "## Squad Operating Protocol"),
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
 	}
@@ -2638,23 +2664,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var mcpConfig json.RawMessage
 	if task.Agent != nil {
 		customArgs = task.Agent.CustomArgs
-		mcpConfig = task.Agent.McpConfig
-	}
-	// Two-tier model resolution: an explicit agent.model wins,
-	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
-	// both are empty we deliberately pass "" through — each
-	// backend omits `--model` from the CLI invocation, so the
-	// provider picks its own default (Claude Code's shipped
-	// default, codex app-server's account-scoped default, etc.).
-	// Baking a Go-side "recommended default" here is how the
-	// cursor regression happened — static guesses drift from
-	// whatever the upstream CLI actually accepts.
-	model := ""
-	if task.Agent != nil && task.Agent.Model != "" {
-		model = task.Agent.Model
-	}
-	if model == "" {
-		model = entry.Model
+		// CEREBRO-PATCH(daemon-runtime-mcp-merge): runtime tools_config provides default MCP servers; agent mcp_config overrides by name (JEH-1710).
+		mcpConfig = daemonmcp.Merge(task.RuntimeToolsConfig, task.Agent.McpConfig)
+	} else {
+		mcpConfig = task.RuntimeToolsConfig
 	}
 	thinkingLevel := ""
 	if task.Agent != nil {
@@ -2885,25 +2898,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			FailureReason: "idle_watchdog",
 			Usage:         usageEntries,
 			Logs:          result.Logs,
-		}, nil
-	case "idle_watchdog":
-		// The idle watchdog force-stopped the run because the backend
-		// went silent (e.g. claude blocked on a tool call against a
-		// frozen child process). Route through the blocked path with a
-		// dedicated failure_reason so the run leaves "running" state and
-		// operators can tell idle-stop apart from a real timeout.
-		comment := result.Error
-		if comment == "" {
-			comment = idleWatchdogReason(d.cfg.AgentIdleWatchdog)
-		}
-		return TaskResult{
-			Status:        "blocked",
-			Comment:       comment,
-			SessionID:     result.SessionID,
-			WorkDir:       env.WorkDir,
-			EnvRoot:       env.RootDir,
-			FailureReason: "idle_watchdog",
-			Usage:         usageEntries,
 		}, nil
 	case "cancelled":
 		// Server cancelled the task (e.g. issue reassignment, user cancel).

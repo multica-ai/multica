@@ -56,10 +56,11 @@ type AgentRuntimeResponse struct {
 	// Visibility is "private" (default — only the owner / workspace admins
 	// can bind agents) or "public" (any workspace member can). See migration
 	// 083 and canUseRuntimeForAgent.
-	Visibility string  `json:"visibility"`
-	LastSeenAt *string `json:"last_seen_at"`
-	CreatedAt  string  `json:"created_at"`
-	UpdatedAt  string  `json:"updated_at"`
+	Visibility       string  `json:"visibility"`
+	CurrentAccountID *string `json:"current_account_id,omitempty"`
+	ToolsConfig      any     `json:"tools_config,omitempty"`
+	CreatedAt        string  `json:"created_at"`
+	UpdatedAt        string  `json:"updated_at"`
 	// CEREBRO-PATCH(runtime-account-id-response): expose current_account_id so RuntimeAccountsCard can link runtime→account (JEH-1461).
 	// CEREBRO-PATCH(runtime-tools-config-response): runtime-level MCP defaults JSON (9031).
 }
@@ -73,22 +74,9 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		metadata = map[string]any{}
 	}
 
-	return AgentRuntimeResponse{
-		ID:           uuidToString(rt.ID),
-		WorkspaceID:  uuidToString(rt.WorkspaceID),
-		DaemonID:     textToPtr(rt.DaemonID),
-		Name:         rt.Name,
-		RuntimeMode:  rt.RuntimeMode,
-		Provider:     rt.Provider,
-		LaunchHeader: agent.LaunchHeader(rt.Provider),
-		Status:       rt.Status,
-		DeviceInfo:   rt.DeviceInfo,
-		Metadata:     metadata,
-		OwnerID:      uuidToPtr(rt.OwnerID),
-		Visibility:   rt.Visibility,
-		LastSeenAt:   timestampToPtr(rt.LastSeenAt),
-		CreatedAt:    timestampToString(rt.CreatedAt),
-		UpdatedAt:    timestampToString(rt.UpdatedAt),
+	var capabilities any
+	if len(rt.Capabilities) > 0 {
+		json.Unmarshal(rt.Capabilities, &capabilities)
 	}
 	if capabilities == nil {
 		capabilities = map[string]any{}
@@ -114,8 +102,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		PausedAt:    timestampToPtr(rt.PausedAt),
 		UnpauseAt:   timestampToPtr(rt.UnpauseAt),
 		PauseReason: textToPtr(rt.PauseReason),
-		Visibility: rt.Visibility,
-		Timezone:   rt.Timezone,
+		Visibility:  rt.Visibility,
 		// CEREBRO-PATCH(runtime-account-id-response): map current_account_id from DB row to API response (JEH-1461).
 		CurrentAccountID: uuidToPtr(rt.CurrentAccountID),
 		// CEREBRO-PATCH(runtime-tools-config-response): unmarshal runtime tools_config jsonb so the UI gets a structured object (9031).

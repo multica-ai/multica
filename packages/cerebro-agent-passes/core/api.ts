@@ -7,7 +7,7 @@ import type {
 } from "./types";
 
 export async function fetchAgentPasses(): Promise<AgentPassListResponse> {
-  const raw = await api.listCerebroAgentPasses<AgentPassListResponse>();
+  const raw = await api.cerebroRequest<AgentPassListResponse>("/api/cerebro/agent-passes");
   // Server always returns { passes: [] } — fall back to an empty list
   // on shape drift instead of throwing into the UI (per the conventions
   // in apps/docs/content/docs/developers/conventions.mdx).
@@ -18,12 +18,18 @@ export async function fetchAgentPasses(): Promise<AgentPassListResponse> {
 }
 
 export async function createAgentPass(body: CreateAgentPassRequest): Promise<AgentPass> {
-  return api.createCerebroAgentPass<AgentPass>(body);
+  return api.cerebroRequest<AgentPass>("/api/cerebro/agent-passes", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 export async function revokeAgentPass(
   passId: string,
   body?: RevokeAgentPassRequest,
 ): Promise<AgentPass> {
-  return api.revokeCerebroAgentPass<AgentPass>(passId, body);
+  return api.cerebroRequest<AgentPass>(`/api/cerebro/agent-passes/${passId}`, {
+    method: "DELETE",
+    body: body ? JSON.stringify(body) : undefined,
+  });
 }

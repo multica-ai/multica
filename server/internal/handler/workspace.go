@@ -493,6 +493,11 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to add owner: "+err.Error())
 		return
 	}
+	user, err := qtx.GetUser(r.Context(), parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load user")
+		return
+	}
 
 	// NOTE: CreateWorkspace deliberately does NOT mark the user as
 	// onboarded. The `onboarded_at` flag is owned by CompleteOnboarding
@@ -507,15 +512,14 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	// claimStarterContentStateIfUnset suppresses the legacy starter-content
 	// dialog on older desktop builds that still render it when the column
 	// is NULL.
-	seededIssue, seededIssueCreated, err := ensureNoRuntimeOnboardingIssue(
-		r.Context(), qtx, ws.ID, parseUUID(userID), updatedUser.Language,
-	)
-	if err != nil {
+	if _, _, err := ensureNoRuntimeOnboardingIssue(
+		r.Context(), qtx, ws.ID, parseUUID(userID), user.Language,
+	); err != nil {
 		slog.Warn("create workspace: ensure install-runtime issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", uuidToString(ws.ID))...)
 		writeError(w, http.StatusInternalServerError, "failed to seed onboarding issue")
 		return
 	}
-	if err := claimStarterContentStateIfUnset(r.Context(), qtx, parseUUID(userID), updatedUser.StarterContentState); err != nil {
+	if err := claimStarterContentStateIfUnset(r.Context(), qtx, parseUUID(userID), user.StarterContentState); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to record starter content state")
 		return
 	}

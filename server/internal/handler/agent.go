@@ -10,7 +10,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
@@ -31,35 +30,37 @@ import (
 const maxAgentDescriptionLength = 255
 
 type AgentResponse struct {
-	ID                 string              `json:"id"`
-	WorkspaceID        string              `json:"workspace_id"`
-	RuntimeID          string              `json:"runtime_id"`
-	Name               string              `json:"name"`
-	Description        string              `json:"description"`
-	Instructions       string              `json:"instructions"`
-	AvatarURL          *string             `json:"avatar_url"`
-	RuntimeMode        string              `json:"runtime_mode"`
-	RuntimeConfig      any                 `json:"runtime_config"`
-	CustomEnv          map[string]string   `json:"custom_env"`
-	CustomArgs         []string            `json:"custom_args"`
-	McpConfig          json.RawMessage     `json:"mcp_config"`
-	CustomEnvRedacted  bool                `json:"custom_env_redacted"`
-	McpConfigRedacted  bool                `json:"mcp_config_redacted"`
-	Visibility         string              `json:"visibility"`
-	Status             string              `json:"status"`
-	MaxConcurrentTasks int32               `json:"max_concurrent_tasks"`
-	Model              string              `json:"model"`
+	ID                 string            `json:"id"`
+	WorkspaceID        string            `json:"workspace_id"`
+	RuntimeID          string            `json:"runtime_id"`
+	Name               string            `json:"name"`
+	Description        string            `json:"description"`
+	Instructions       string            `json:"instructions"`
+	AvatarURL          *string           `json:"avatar_url"`
+	RuntimeMode        string            `json:"runtime_mode"`
+	RuntimeConfig      any               `json:"runtime_config"`
+	CustomEnv          map[string]string `json:"custom_env"`
+	CustomArgs         []string          `json:"custom_args"`
+	McpConfig          json.RawMessage   `json:"mcp_config"`
+	CustomEnvRedacted  bool              `json:"custom_env_redacted"`
+	McpConfigRedacted  bool              `json:"mcp_config_redacted"`
+	Visibility         string            `json:"visibility"`
+	Status             string            `json:"status"`
+	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
+	Model              string            `json:"model"`
 	// ThinkingLevel is the runtime-native reasoning/effort token persisted
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
-	ThinkingLevel string              `json:"thinking_level"`
-	OwnerID       *string             `json:"owner_id"`
-	Skills        []AgentSkillSummary `json:"skills"`
-	CreatedAt     string              `json:"created_at"`
-	UpdatedAt     string              `json:"updated_at"`
-	ArchivedAt    *string             `json:"archived_at"`
-	ArchivedBy    *string             `json:"archived_by"`
+	ThinkingLevel  string              `json:"thinking_level"`
+	OwnerID        *string             `json:"owner_id"`
+	Skills         []AgentSkillSummary `json:"skills"`
+	CreatedAt      string              `json:"created_at"`
+	UpdatedAt      string              `json:"updated_at"`
+	ArchivedAt     *string             `json:"archived_at"`
+	ArchivedBy     *string             `json:"archived_by"`
+	PersonaSandbox string              `json:"persona_sandbox"`
 	// CEREBRO-PATCH(agent-can-trigger): JEH-1066 — visibility/trigger split.
+	CanTrigger bool `json:"can_trigger"`
 }
 
 func agentToResponse(a db.Agent) AgentResponse {
@@ -199,10 +200,21 @@ type AgentTaskResponse struct {
 	// empty otherwise. The daemon emits both into the brief under
 	// `## Requesting User`; the heading is skipped entirely when description
 	// is empty.
-	RequestingUserName               string `json:"requesting_user_name,omitempty"`
-	RequestingUserProfileDescription string `json:"requesting_user_profile_description,omitempty"`
-	Kind                    string                `json:"kind"`                                // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
-	Title                 *string               `json:"title,omitempty"`                   // CEREBRO-PATCH(task-title-builder): short generated headline.
+	RequestingUserName               string               `json:"requesting_user_name,omitempty"`
+	RequestingUserProfileDescription string               `json:"requesting_user_profile_description,omitempty"`
+	UserProfilePrompt                string               `json:"user_profile_prompt,omitempty"`
+	Kind                             string               `json:"kind"`                     // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+	Title                            *string              `json:"title,omitempty"`          // CEREBRO-PATCH(task-title-builder): short generated headline.
+	ModelOverride                    string               `json:"model_override,omitempty"` // CEREBRO-PATCH(agent-task-model-override): per-task model override that wins over agent.model (JEH-1310).
+	SandboxEnabled                   *bool                `json:"sandbox_enabled,omitempty"`
+	RuntimePersonaSandbox            string               `json:"runtime_persona_sandbox,omitempty"`
+	RuntimeToolsConfig               json.RawMessage      `json:"runtime_tools_config,omitempty"`
+	PersonaSpawnUserID               string               `json:"persona_spawn_user_id,omitempty"`
+	PersonaSpawnGroupIDs             []string             `json:"persona_spawn_group_ids,omitempty"`
+	ChatHistory                      []ChatHistoryMessage `json:"chat_history,omitempty"`
+	ChatMessages                     []string             `json:"chat_messages,omitempty"`
+	ChatMessageID                    string               `json:"chat_message_id,omitempty"`
+	TaskToken                        string               `json:"task_token,omitempty"`
 	// CEREBRO-PATCH(chat-message-id-claim): JEH-1083 — pre-created assistant chat_message row exposed to the agent as MULTICA_CHAT_MESSAGE_ID so it can attach files mid-turn.
 	// CEREBRO-PATCH(agent-task-cerebro-fields): cerebro-only daemon fields.
 	// CEREBRO-PATCH(persona-spawn-subject): JEH-1080 — the human user the agent is acting on behalf of, plus that user's group memberships at claim time.
@@ -553,7 +565,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can create agents on it")
 		return
 	}
-	if !agentpkg.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
+	if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", req.ThinkingLevel, runtime.Provider))
 		return
 	}
@@ -672,7 +684,8 @@ type UpdateAgentRequest struct {
 	//   - field present with non-empty value → set (validated server-side)
 	// Distinguishing those modes is why this is a pointer; the raw-fields
 	// map captured at decode time tells us whether the key was sent.
-	ThinkingLevel *string `json:"thinking_level"`
+	ThinkingLevel  *string `json:"thinking_level"`
+	PersonaSandbox *string `json:"persona_sandbox"`
 }
 
 // canViewAgentEnv checks whether the requesting user is allowed to see the
@@ -733,7 +746,8 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.canManageAgent(w, r, existing) {
+	member, ok := h.canManageAgent(w, r, existing)
+	if !ok {
 		return
 	}
 
@@ -822,10 +836,8 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		targetRuntimeID = runtime.ID
-		targetRuntimeProvider = runtime.Provider
 		params.RuntimeID = runtime.ID
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
-		targetRuntimeID = runtime.ID
 	}
 	if req.Visibility != nil {
 		params.Visibility = pgtype.Text{String: *req.Visibility, Valid: true}
@@ -839,47 +851,12 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.Model != nil {
 		params.Model = pgtype.Text{String: *req.Model, Valid: true}
 	}
-	_, hasThinkingLevel := rawFields["thinking_level"]
-	shouldClearThinkingLevel := hasThinkingLevel && (req.ThinkingLevel == nil || *req.ThinkingLevel == "")
-	if hasThinkingLevel && !shouldClearThinkingLevel {
-		provider := targetRuntimeProvider
-		if provider == "" {
-			var ok bool
-			provider, ok = h.resolveAgentProvider(r, agent.WorkspaceID, targetRuntimeID)
-			if !ok {
-				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
-				return
-			}
-		}
-		if !agentpkg.IsKnownThinkingValue(provider, *req.ThinkingLevel) {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", *req.ThinkingLevel, provider))
-			return
-		}
-		params.ThinkingLevel = pgtype.Text{String: *req.ThinkingLevel, Valid: true}
-	} else if req.RuntimeID != nil && !hasThinkingLevel && agent.ThinkingLevel.Valid && agent.ThinkingLevel.String != "" {
-		provider := targetRuntimeProvider
-		if provider == "" {
-			var ok bool
-			provider, ok = h.resolveAgentProvider(r, agent.WorkspaceID, targetRuntimeID)
-			if !ok {
-				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
-				return
-			}
-		}
-		if !agentpkg.IsKnownThinkingValue(provider, agent.ThinkingLevel.String) {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf(
-				"existing thinking_level %q is not valid for runtime %q; pass thinking_level=\"\" to clear or set a value valid for the new runtime",
-				agent.ThinkingLevel.String, provider,
-			))
-			return
-		}
-	}
 	// persona_sandbox: nil pointer = leave alone, "" = clear (handled below
 	// because COALESCE can't set NULL), otherwise = update to the named value.
 	rawPersonaSandbox, hasPersonaSandbox := rawFields["persona_sandbox"]
 	shouldClearPersonaSandbox := hasPersonaSandbox && (bytes.Equal(bytes.TrimSpace(rawPersonaSandbox), []byte("null")) || bytes.Equal(bytes.TrimSpace(rawPersonaSandbox), []byte(`""`)))
 	if req.PersonaSandbox != nil && !shouldClearPersonaSandbox {
-		params.PersonaSandbox = personaSandboxToText(*req.PersonaSandbox)
+		params.PersonaSandbox = pgtype.Text{String: *req.PersonaSandbox, Valid: *req.PersonaSandbox != ""}
 	}
 
 	// thinking_level handling (MUL-2339). Tri-state semantics:
@@ -959,6 +936,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Warn("clear agent thinking_level failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear thinking_level: "+err.Error())
+			return
+		}
+	}
+	if shouldClearPersonaSandbox {
+		updated, err = h.Queries.ClearAgentPersonaSandbox(r.Context(), updated.ID)
+		if err != nil {
+			slog.Warn("clear agent persona_sandbox failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear persona_sandbox: "+err.Error())
 			return
 		}
 	}
