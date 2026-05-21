@@ -314,7 +314,7 @@ func (h *Handler) CreateLocalCLIMessage(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var commentID pgtype.UUID
-	createsReply := (req.Type == "final" || (req.Type == "user_input" && !localCLIMessageIsCommand(req))) &&
+	createsReply := (req.Type == "final" || (req.Type == "user_input" && !localCLIMessageIsCommand(req)) || localCLIMessageIsCodexProposedPlan(req)) &&
 		run.CommentsMode == "thread" &&
 		run.TopCommentID.Valid &&
 		strings.TrimSpace(req.Content) != ""
@@ -334,7 +334,7 @@ func (h *Handler) CreateLocalCLIMessage(w http.ResponseWriter, r *http.Request) 
 		}
 		commentID = comment.ID
 		var displayName *string
-		if req.Type == "final" {
+		if req.Type == "final" || localCLIMessageIsCodexProposedPlan(req) {
 			name := h.localCLIDisplayName(r.Context(), run)
 			displayName = &name
 		}
@@ -378,6 +378,14 @@ func localCLIMessageIsCommand(req createLocalCLIMessageRequest) bool {
 	}
 	command, _ := req.Input["command"].(bool)
 	return command
+}
+
+func localCLIMessageIsCodexProposedPlan(req createLocalCLIMessageRequest) bool {
+	if req.Type != "text" || req.Input == nil {
+		return false
+	}
+	kind, _ := req.Input["kind"].(string)
+	return kind == "codex_proposed_plan"
 }
 
 func (h *Handler) UpdateLocalCLIUsage(w http.ResponseWriter, r *http.Request) {
@@ -445,7 +453,11 @@ func (h *Handler) localCLICommentDisplayNames(ctx context.Context, commentIDs []
 		FROM local_cli_message lcm
 		JOIN local_cli_run lcr ON lcr.id = lcm.run_id
 		JOIN "user" u ON u.id = lcr.owner_id
-		WHERE lcm.comment_id = ANY($1) AND lcm.type = 'final'
+		WHERE lcm.comment_id = ANY($1)
+			AND (
+				lcm.type = 'final'
+				OR (lcm.type = 'text' AND lcm.input->>'kind' = 'codex_proposed_plan')
+			)
 	`, commentIDs)
 	if err != nil {
 		return nil
