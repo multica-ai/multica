@@ -8,7 +8,7 @@ import {
   type CreateMode,
 } from "@multica/core/issues/stores/create-mode-store";
 import { AgentCreatePanel } from "./quick-create-issue";
-import { ManualCreatePanel, manualDialogContentClass } from "./create-issue";
+import { ManualCreatePanel, manualDialogContentClass, mobileFullScreenDialog } from "./create-issue";
 
 /**
  * Shell that owns the single `<Dialog>` AND `<DialogContent>` for the
@@ -56,18 +56,22 @@ export function CreateIssueDialog({
     mode === "agent"
       ? cn(
           "p-0 gap-0 flex flex-col overflow-hidden",
-          "!top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2",
+          // Mobile: full-screen modal — centered windows are unusable on a
+          // 390px viewport, especially when the keyboard is up. Desktop
+          // keeps the centered window via md: overrides.
+          mobileFullScreenDialog,
+          "md:!top-1/2 md:!left-1/2 md:!-translate-x-1/2 md:!-translate-y-1/2",
           // Smooth size transition when switching modes — the manual mode
           // uses the same easing.
-          "!transition-all !duration-300 !ease-out",
+          "md:!transition-all md:!duration-300 md:!ease-out",
           // Expanded matches manual's expanded footprint so toggling expand
           // mid-flow (or after a mode switch) lands the user on the same
           // visual size. Collapsed keeps the slim, content-driven default
           // — pasted screenshots still scroll inside instead of pushing the
           // dialog past the viewport.
           isExpanded
-            ? "!max-w-4xl !w-full !h-5/6"
-            : "!max-w-xl !w-full !max-h-[80vh]",
+            ? "md:!max-w-4xl md:!w-full md:!h-5/6"
+            : "md:!max-w-xl md:!w-full md:!max-h-[80vh]",
         )
       : manualDialogContentClass(isExpanded, backlogHintIssueId);
 

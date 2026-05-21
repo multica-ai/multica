@@ -4,7 +4,8 @@
     "breadcrumb_workspace_fallback": "Workspace",
     "empty_title": "No issues yet",
     "empty_hint": "Create an issue to get started.",
-    "move_failed": "Failed to move issue"
+    "move_failed": "Failed to move issue",
+    "new_issue_aria": "New issue"
   },
   "status": {
     "backlog": "Backlog",

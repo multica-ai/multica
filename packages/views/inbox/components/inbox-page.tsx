@@ -2,12 +2,13 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import {
+  inboxKeys,
   inboxListOptions,
   deduplicateInboxItems,
   useInboxUnreadCount,
@@ -51,6 +52,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
+import { MobilePullToRefresh } from "../../layout/mobile-pull-to-refresh";
 import { InboxListItem, useTimeAgo } from "./inbox-list-item";
 import { useTypeLabels } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
@@ -114,6 +116,11 @@ export function InboxPage() {
 
   const isMobile = useIsMobile();
   const unreadCount = useInboxUnreadCount(wsId);
+  const queryClient = useQueryClient();
+  const handleInboxRefresh = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: inboxKeys.list(wsId) }),
+    [queryClient, wsId],
+  );
 
   const markReadMutation = useMarkInboxRead();
   const archiveMutation = useArchiveInbox();
@@ -298,6 +305,13 @@ export function InboxPage() {
         defaultSidebarOpen={false}
         layoutId="multica_inbox_issue_detail_layout"
         highlightCommentId={selected.details?.comment_id ?? undefined}
+        // On mobile, an inbox tap means "show me the new thing" — drop the
+        // user at the bottom of the timeline when no specific comment_id
+        // came with the notification, so they don't have to manually scroll
+        // past the description and pages of older activity. Desktop keeps
+        // the canonical top-of-page behaviour because the side panel makes
+        // skimming the description cheap.
+        scrollToLatestIfNoHighlight={isMobile}
         onDelete={() => {
           // Issue deletion CASCADE-deletes the inbox item server-side, and the
           // issue:deleted WS event prunes it from the inbox cache. Just clear
@@ -414,9 +428,12 @@ export function InboxPage() {
     return (
       <div className="flex flex-1 flex-col min-h-0">
         {listHeader}
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        <MobilePullToRefresh
+          onRefresh={handleInboxRefresh}
+          className="flex-1 min-h-0 overflow-y-auto"
+        >
           {listBody}
-        </div>
+        </MobilePullToRefresh>
       </div>
     );
   }

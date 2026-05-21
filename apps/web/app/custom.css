@@ -4,6 +4,40 @@
  * @multica/ui/styles/base.css
  * ============================================================================= */
 
+/* PWA safe-area handling — paired with viewport-fit=cover in layout.tsx.
+ * env(safe-area-inset-*) returns 0 on regular Safari and on desktop, so
+ * non-PWA layouts are unaffected. In iOS standalone PWA mode (or any
+ * notched browser using viewport-fit=cover), the body picks up the
+ * notch / home-indicator gutters so app shell content does not render
+ * under the system UI. box-sizing:border-box (Tailwind preflight) keeps
+ * h-full children sized to the content area, not the padded box. */
+body {
+    padding-top: env(safe-area-inset-top);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+}
+
+/* Mobile-only first-paint fade. Browser refresh on iPhone otherwise pops
+ * the entire page in instantly, which feels jarring against the rest of
+ * the slide / cross-fade transitions on every other interaction.
+ * `pointer:coarse` scopes this to touch devices so desktop refreshes still
+ * paint synchronously. The animation runs once on initial mount and is
+ * harmless after that — :root is matched once per document load. */
+@media (pointer: coarse) {
+    @keyframes mt-app-mount {
+        from { opacity: 0.001; transform: translate3d(0, 4px, 0); }
+        to   { opacity: 1;     transform: translate3d(0, 0,    0); }
+    }
+    body {
+        animation: mt-app-mount 0.32s cubic-bezier(0.32, 0.72, 0, 1) both;
+    }
+    /* Skip the fade for users who asked for reduced motion. */
+    @media (prefers-reduced-motion: reduce) {
+        body { animation: none; }
+    }
+}
+
 /* The landing route tree is intentionally always-light (hero/cli/cloud
  * sections use hardcoded dark/light palettes). Shared components rendered
  * inside (e.g. CloudWaitlistExpand on /download) use semantic tokens that

@@ -20,9 +20,9 @@ export function HelpLauncher() {
       <DropdownMenuTrigger
         aria-label={t(($) => $.help.trigger)}
         title={t(($) => $.help.trigger)}
-        className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors cursor-pointer hover:bg-accent hover:text-foreground data-popup-open:bg-accent data-popup-open:text-foreground"
+        className="inline-flex size-9 items-center justify-center rounded-full text-muted-foreground transition-colors cursor-pointer hover:bg-accent hover:text-foreground data-popup-open:bg-accent data-popup-open:text-foreground md:size-7"
       >
-        <CircleHelp className="size-4" />
+        <CircleHelp className="size-5 md:size-4" />
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"

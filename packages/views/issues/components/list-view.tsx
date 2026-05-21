@@ -3,11 +3,13 @@
 import { useMemo } from "react";
 import { ChevronRight, Plus } from "lucide-react";
 import { Accordion } from "@base-ui/react/accordion";
+import { useQueryClient } from "@tanstack/react-query";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import type { Issue, IssueStatus } from "@multica/core/types";
 import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import type { MyIssuesFilter } from "@multica/core/issues/queries";
+import { issueKeys, type MyIssuesFilter } from "@multica/core/issues/queries";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { useModalStore } from "@multica/core/modals";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -15,6 +17,7 @@ import { sortIssues } from "../utils/sort";
 import { StatusHeading } from "./status-heading";
 import { ListRow, type ChildProgress } from "./list-row";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
+import { MobilePullToRefresh } from "../../layout/mobile-pull-to-refresh";
 import { useT } from "../../i18n";
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
@@ -66,8 +69,27 @@ export function ListView({
     ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
     : undefined;
 
+  const queryClient = useQueryClient();
+  const wsId = useWorkspaceId();
+  // Pull-to-refresh on mobile invalidates the active list cache so a finger
+  // drag from the top forces a refetch — same effect as cmd-R on desktop.
+  // For the My Issues scope we re-fetch the scoped variant; otherwise the
+  // workspace-wide list and the child-progress side-cache.
+  const onRefresh = async () => {
+    if (myIssuesScope) {
+      await queryClient.invalidateQueries({
+        queryKey: issueKeys.myList(wsId, myIssuesScope, myIssuesFilter ?? {}),
+      });
+    } else {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: issueKeys.list(wsId) }),
+        queryClient.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) }),
+      ]);
+    }
+  };
+
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto p-2">
+    <MobilePullToRefresh onRefresh={onRefresh} className="flex-1 min-h-0 overflow-y-auto p-2">
       <Accordion.Root
         multiple
         className="space-y-1"
@@ -93,7 +115,7 @@ export function ListView({
           />
         ))}
       </Accordion.Root>
-    </div>
+    </MobilePullToRefresh>
   );
 }
 

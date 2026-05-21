@@ -2,13 +2,16 @@
 
 import { useCallback, useEffect, useMemo } from "react";
 import { toast } from "sonner";
-import { ChevronRight, ListTodo } from "lucide-react";
+import { ChevronRight, ListTodo, Plus } from "lucide-react";
 import type { UpdateIssueRequest } from "@multica/core/types";
+import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useQuery } from "@tanstack/react-query";
 import { useIssueViewStore, useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
 import { useIssuesScopeStore } from "@multica/core/issues/stores/issues-scope-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
+import { openCreateIssueWithPreference } from "@multica/core/issues/stores/create-mode-store";
 import { filterIssues } from "../utils/filter";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -30,7 +33,12 @@ export function IssuesPage() {
 
   const workspace = useCurrentWorkspace();
   const scope = useIssuesScopeStore((s) => s.scope);
-  const viewMode = useIssueViewStore((s) => s.viewMode);
+  // On mobile, force list view regardless of the stored preference. Board
+  // view is a horizontally-scrolling Kanban; on a 390px screen it's just
+  // squeezed columns and is the #1 reason mobile feels broken.
+  const isMobile = useIsMobile();
+  const storedViewMode = useIssueViewStore((s) => s.viewMode);
+  const viewMode = isMobile ? "list" : storedViewMode;
   const grouping = useIssueViewStore((s) => s.grouping);
   const statusFilters = useIssueViewStore((s) => s.statusFilters);
   const priorityFilters = useIssueViewStore((s) => s.priorityFilters);
@@ -184,6 +192,20 @@ export function IssuesPage() {
         </span>
         <ChevronRight className="h-3 w-3 text-muted-foreground" />
         <span className="text-sm font-medium">{t(($) => $.page.breadcrumb_title)}</span>
+        {/* Mobile-only quick-create. Desktop users have the sidebar's
+            "New issue" item + the C shortcut, both of which are hidden on
+            mobile (drawer collapsed by default, no keyboard). Surfacing
+            create here means the most common action on the Issues page is
+            one tap away without opening the drawer first. */}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => openCreateIssueWithPreference()}
+          aria-label={t(($) => $.page.new_issue_aria)}
+          className="ml-auto md:hidden size-9 text-muted-foreground"
+        >
+          <Plus />
+        </Button>
       </PageHeader>
 
       <ViewStoreProvider store={useIssueViewStore}>

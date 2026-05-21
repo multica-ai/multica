@@ -8,10 +8,16 @@ import {
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
 import {
+  Sheet,
+  SheetTrigger,
+  SheetContent,
+} from "@multica/ui/components/ui/sheet";
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { isImeComposing } from "@multica/core/utils";
 import { useT } from "../../../i18n";
 
@@ -65,6 +71,7 @@ export function PropertyPicker({
   footer?: React.ReactNode;
 }) {
   const { t } = useT("issues");
+  const isMobile = useIsMobile();
   const placeholder = searchPlaceholder ?? t(($) => $.filters.placeholder);
   const filterAria = t(($) => $.pickers.filter_options_aria);
   const [query, setQuery] = useState("");
@@ -141,6 +148,64 @@ export function PropertyPicker({
     [getItems, highlightedIndex],
   );
 
+  const searchInput = searchable ? (
+    <div className="px-2 py-1.5 border-b">
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setHighlightedIndex(0);
+          onSearchChange?.(e.target.value);
+        }}
+        onKeyDown={handleKeyDown}
+        placeholder={placeholder}
+        aria-label={filterAria}
+        className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+      />
+    </div>
+  ) : null;
+
+  // On mobile, replace the floating Popover with a bottom sheet. The shared
+  // search/highlighting state above stays identical — only the surface that
+  // wraps it changes. Keyboard navigation is irrelevant on touch screens, so
+  // we drop the highlighted-row indicator there; tap selects directly.
+  if (isMobile) {
+    const triggerEl = (
+      <SheetTrigger
+        className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
+        render={triggerRender}
+      >
+        {trigger}
+      </SheetTrigger>
+    );
+
+    return (
+      <Sheet open={open} onOpenChange={handleOpenChange}>
+        {triggerEl}
+        <SheetContent
+          side="bottom"
+          showCloseButton={false}
+          className="rounded-t-xl pb-[env(safe-area-inset-bottom)] max-h-[80vh]"
+        >
+          {/* Drag-handle affordance — visual only; vaul-style swipe-to-close
+              isn't supported by base-ui Dialog but the bar still signals
+              "this slides up from the bottom" to iOS users. */}
+          <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-muted-foreground/30" />
+          {searchInput}
+          {header && <div className="border-b">{header}</div>}
+          <div
+            ref={listRef}
+            className="flex-1 overflow-y-auto px-1 pb-2"
+          >
+            {children}
+          </div>
+          {footer && <div className="border-t p-1">{footer}</div>}
+        </SheetContent>
+      </Sheet>
+    );
+  }
+
   const popoverTrigger = (
     <PopoverTrigger
       className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
@@ -161,23 +226,7 @@ export function PropertyPicker({
         popoverTrigger
       )}
       <PopoverContent align={align} className={`${width} gap-0 p-0`}>
-        {searchable && (
-          <div className="px-2 py-1.5 border-b">
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setHighlightedIndex(0);
-                onSearchChange?.(e.target.value);
-              }}
-              onKeyDown={handleKeyDown}
-              placeholder={placeholder}
-              aria-label={filterAria}
-              className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
-            />
-          </div>
-        )}
+        {searchInput}
         {header && <div className="border-b">{header}</div>}
         <div ref={listRef} className="p-1 max-h-72 overflow-y-auto">{children}</div>
         {footer && <div className="border-t p-1">{footer}</div>}
@@ -215,7 +264,7 @@ export function PickerItem({
       data-picker-item
       disabled={disabled}
       onClick={onClick}
-      className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-sm ${disabled ? "opacity-50 cursor-not-allowed" : hoverClassName ?? "hover:bg-accent"} transition-colors`}
+      className={`flex w-full items-center gap-3 rounded-md px-2 py-3 md:py-1.5 text-[15px] md:text-sm ${disabled ? "opacity-50 cursor-not-allowed" : hoverClassName ?? "hover:bg-accent"} transition-colors`}
     >
       {/* min-w-0 lets long children (like truncated label names) shrink
           inside the flex row instead of pushing the selected checkmark off

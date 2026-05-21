@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { AppLink, useNavigation } from "../navigation";
 import { HelpLauncher } from "./help-launcher";
 import {
@@ -54,6 +55,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  useSidebar,
 } from "@multica/ui/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -207,7 +209,7 @@ function SortablePinItem({
           }
         }}
         className={cn(
-          "text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground",
+          "h-11 text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground md:h-7",
           isDragging && "pointer-events-none",
         )}
       >
@@ -220,16 +222,20 @@ function SortablePinItem({
           }}
         >{label}</span>
         <Tooltip>
+          {/* On mobile we always show the unpin affordance (no hover state on
+           * touch); on desktop it reveals on row hover as before. The hit area
+           * is enlarged on mobile so it's a real tap target instead of a 10px
+           * dot users have to thread the needle on. */}
           <TooltipTrigger
             render={<span role="button" />}
-            className="hidden size-2.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground group-hover/pin:flex hover:text-foreground"
+            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground md:hidden md:size-2.5 md:rounded-sm md:group-hover/pin:flex"
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
               onUnpin();
             }}
           >
-            <X className="size-1" />
+            <X className="!size-3.5 md:!size-1" />
           </TooltipTrigger>
           <TooltipContent side="top" sideOffset={4}>{t(($) => $.sidebar.unpin_tooltip)}</TooltipContent>
         </Tooltip>
@@ -367,9 +373,36 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   });
   const deletePin = useDeletePin();
   const reorderPins = useReorderPins();
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const isMobile = useIsMobile();
+  // Mobile: disable pointer-based drag entirely. dnd-kit's PointerSensor on a
+  // touchscreen activates on horizontal scroll attempts inside the drawer,
+  // so the user accidentally reorders pins while just trying to scroll. The
+  // 44pt rows + persistent unpin X already give a real touch-friendly UI;
+  // reordering is a desktop-only affordance until we add a long-press handle.
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: isMobile
+        ? { distance: Number.POSITIVE_INFINITY }
+        : { distance: 5 },
+    }),
+  );
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const sidebarFadeStyle = useScrollFade(sidebarScrollRef, 24);
+
+  // Auto-close the mobile drawer when the route changes. Without this, tapping
+  // a nav item navigates *and* leaves the sheet covering the destination —
+  // forcing a second tap on the overlay to actually see the page. Pathname
+  // changes (router push from any source) are the trigger; a ref guards the
+  // initial mount so the effect is a no-op until the user actually navigates.
+  // Desktop is unaffected because openMobile is always false there.
+  const { setOpenMobile } = useSidebar();
+  const prevPathRef = useRef(pathname);
+  useEffect(() => {
+    if (prevPathRef.current !== pathname) {
+      prevPathRef.current = pathname;
+      setOpenMobile(false);
+    }
+  }, [pathname, setOpenMobile]);
 
   // Local presentational copy of pinnedItems for drop-animation stability.
   // Follows TQ at rest; frozen during a drag gesture so a mid-drag cache
@@ -463,13 +496,23 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
       <Sidebar variant="inset">
         {topSlot}
         {/* Workspace Switcher */}
-        <SidebarHeader className={cn("py-3", headerClassName)} style={headerStyle}>
+        <SidebarHeader
+          className={cn(
+            // pt-[env(...)] reserves room for the iOS status bar / notch when
+            // launched as a standalone PWA; falls back to 0 on desktop, so the
+            // existing 12px py-3 still applies. min() keeps the desktop value
+            // unchanged in the common case.
+            "pt-[max(env(safe-area-inset-top),0.75rem)] pb-3",
+            headerClassName,
+          )}
+          style={headerStyle}
+        >
           <SidebarMenu>
             <SidebarMenuItem>
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
-                    <SidebarMenuButton>
+                    <SidebarMenuButton className="h-11 md:h-8">
                       <span className="relative">
                         <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" />
                         {myInvitations.length > 0 && (
@@ -590,7 +633,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             )}
             <SidebarMenuItem>
               <SidebarMenuButton
-                className="text-muted-foreground"
+                className="h-11 text-muted-foreground md:h-8"
                 onClick={() => openCreateIssueWithPreference()}
               >
                 <span className="relative">
@@ -598,7 +641,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   <DraftDot />
                 </span>
                 <span>{t(($) => $.sidebar.new_issue)}</span>
-                <kbd className="pointer-events-none ml-auto inline-flex h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">{t(($) => $.sidebar.new_issue_shortcut)}</kbd>
+                {/* Keyboard shortcut hint is irrelevant on touch devices. */}
+                <kbd className="pointer-events-none ml-auto hidden h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground md:inline-flex">{t(($) => $.sidebar.new_issue_shortcut)}</kbd>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -609,7 +653,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {personalNav.map((item) => {
+                {personalNav
+                  // The bottom tab bar already gives mobile users a permanent
+                  // Inbox tab — listing it again in the drawer is dead
+                  // weight that the user explicitly asked us to drop. Mobile
+                  // sees `myIssues` only; desktop keeps the full pair so its
+                  // sidebar still mirrors web's pre-mobile behaviour.
+                  .filter((item) => !(isMobile && item.key === "inbox"))
+                  .map((item) => {
                   const href = p[item.key]();
                   const isActive = isNavActive(pathname, href);
                   return (
@@ -617,7 +668,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <SidebarMenuButton
                         isActive={isActive}
                         render={<AppLink href={href} />}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                        className="h-11 text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground md:h-8"
                       >
                         <item.icon />
                         <span>{t(($) => $.nav[item.labelKey])}</span>
@@ -673,7 +724,13 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarGroupLabel>{t(($) => $.sidebar.workspace_group)}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {workspaceNav.map((item) => {
+                {workspaceNav
+                  // Issues is duplicated by the bottom tab on mobile — drop
+                  // it from the drawer per user feedback. Projects /
+                  // Autopilots / Agents / Squads / Usage have no peer in
+                  // the bottom tab so they stay.
+                  .filter((item) => !(isMobile && item.key === "issues"))
+                  .map((item) => {
                   const href = p[item.key]();
                   const isActive = isNavActive(pathname, href);
                   return (
@@ -681,7 +738,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <SidebarMenuButton
                         isActive={isActive}
                         render={<AppLink href={href} />}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                        className="h-11 text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground md:h-8"
                       >
                         <item.icon />
                         <span>{t(($) => $.nav[item.labelKey])}</span>
@@ -705,7 +762,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <SidebarMenuButton
                         isActive={isActive}
                         render={<AppLink href={href} />}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                        className="h-11 text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground md:h-8"
                       >
                         <item.icon />
                         <span>{t(($) => $.nav[item.labelKey])}</span>

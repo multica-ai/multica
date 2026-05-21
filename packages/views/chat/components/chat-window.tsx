@@ -49,6 +49,7 @@ import {
   useUpdateChatSession,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
+import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
 import {
@@ -59,7 +60,10 @@ import {
 } from "./context-anchor";
 import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatResize } from "./use-chat-resize";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { createLogger } from "@multica/core/logger";
+import { useNavigation } from "../../navigation";
+import { MobileSidebarTrigger } from "../../layout/page-header";
 import type { Agent, ChatMessage, ChatPendingTask, ChatSession } from "@multica/core/types";
 import { useT } from "../../i18n";
 
@@ -69,12 +73,23 @@ const apiLogger = createLogger("chat.api");
 export function ChatWindow() {
   const { t } = useT("chat");
   const wsId = useWorkspaceId();
-  const isOpen = useChatStore((s) => s.isOpen);
+  const storeIsOpen = useChatStore((s) => s.isOpen);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   const setOpen = useChatStore((s) => s.setOpen);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
+  const slug = useWorkspaceSlug();
+  const { pathname, push } = useNavigation();
+  // Mobile drives chat visibility from the URL — /chat is a peer route to
+  // /inbox and /issues, so the bottom-nav tabs all behave identically (tap
+  // navigates, route change naturally hides the chat surface). On desktop
+  // chat is still a floating window controlled by the store. We compute
+  // both unconditionally and pick below; never branch hook calls.
+  const isMobile = useIsMobile();
+  const chatPath = slug ? paths.workspace(slug).chat() : null;
+  const onChatRoute = !!chatPath && (pathname === chatPath || pathname.startsWith(chatPath + "/"));
+  const isOpen = isMobile ? onChatRoute : storeIsOpen;
   const user = useAuthStore((s) => s.user);
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -427,11 +442,23 @@ export function ChatWindow() {
     uiLogger.info("minimize (close)", {
       activeSessionId,
       pendingTaskId,
+      isMobile,
     });
+    if (isMobile && slug) {
+      // Mobile: chat visibility tracks the URL. Tapping the close button
+      // routes to /issues (the bottom-nav default landing page) instead of
+      // flipping a store flag the URL no longer reflects.
+      push(paths.workspace(slug).issues());
+      return;
+    }
     setOpen(false);
-  }, [activeSessionId, pendingTaskId, setOpen]);
+  }, [activeSessionId, pendingTaskId, setOpen, isMobile, slug, push]);
 
   const isExpanded = useChatStore((s) => s.isExpanded);
+  // `isMobile` and route-driven `isOpen` are computed at the top of the
+  // component (before the early-data hooks). Mobile collapses the
+  // floating-window paradigm into a full-screen sheet anchored to the
+  // viewport bottom: no drag, no resize, no covering buttons.
 
   const windowRef = useRef<HTMLDivElement>(null);
   const { renderWidth, renderHeight, isAtMax, boundsReady, isDragging, toggleExpand, startDrag } = useChatResize(windowRef);
@@ -440,55 +467,95 @@ export function ChatWindow() {
   // a real message, or a pending task whose timeline will stream in.
   const hasMessages = messages.length > 0 || !!pendingTaskId;
 
-  const isVisible = isOpen && (isExpanded || boundsReady);
+  // On mobile we don't depend on ResizeObserver bounds (the sheet is sized
+  // by the viewport), so isVisible only needs `isOpen`. Without this guard
+  // the chat would never animate in on mobile — boundsReady is irrelevant
+  // when the panel uses `inset-0` instead of pixel width/height.
+  const isVisible = isMobile
+    ? isOpen
+    : isOpen && (isExpanded || boundsReady);
 
-  const containerClass = isExpanded
-    ? "absolute inset-3 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden"
-    : "absolute bottom-2 right-2 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden";
-  const containerStyle: React.CSSProperties = {
-    ...(!isExpanded ? { width: renderWidth, height: renderHeight } : {}),
-    transformOrigin: "bottom right",
-    pointerEvents: isOpen ? "auto" : "none",
-  };
+  // Mobile: render chat as a regular page within the dashboard shell —
+  // pinned to the SidebarInset top and stopped above the fixed bottom
+  // tab bar (3.25rem + safe-area), so the global Inbox / Issues / Chat
+  // row stays visible and tappable while a chat is open. Match the
+  // ordinary page background (not the sidebar's tinted surface) so chat
+  // reads as a peer of Inbox / Issues, not an overlay on top of them.
+  const containerClass = isMobile
+    ? "absolute inset-x-0 top-0 z-20 flex flex-col bg-background overflow-hidden"
+    : isExpanded
+      ? "absolute inset-3 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden"
+      : "absolute bottom-2 right-2 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden";
+  const containerStyle: React.CSSProperties = isMobile
+    ? {
+        bottom: "calc(3.25rem + env(safe-area-inset-bottom))",
+        transformOrigin: "bottom",
+        pointerEvents: isOpen ? "auto" : "none",
+      }
+    : {
+        ...(!isExpanded ? { width: renderWidth, height: renderHeight } : {}),
+        transformOrigin: "bottom right",
+        pointerEvents: isOpen ? "auto" : "none",
+      };
 
   return (
     <motion.div
       ref={windowRef}
       className={containerClass}
       style={containerStyle}
-      layout="position"
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{
-        opacity: isVisible ? 1 : 0,
-        scale: isVisible ? 1 : 0.95,
-      }}
+      layout={isMobile ? false : "position"}
+      // Both axes are tracked in initial / animate regardless of which
+      // branch is active. useIsMobile() returns false during SSR / first
+      // paint and flips true after hydration; if `initial` captured the
+      // desktop scale=0.95 and the mobile-branch `animate` only set y,
+      // the element would stay scaled at 0.95 forever — i.e. inset-0
+      // would compute against the viewport but the resulting box would
+      // render 95% of viewport, leaving the page header visible behind
+      // the chat sheet. Listing both keys keeps motion's prop updates
+      // self-consistent across the SSR→client transition.
+      initial={isMobile ? { opacity: 0, y: 24, scale: 1 } : { opacity: 0, y: 0, scale: 0.95 }}
+      animate={
+        isMobile
+          ? { opacity: isVisible ? 1 : 0, y: isVisible ? 0 : 24, scale: 1 }
+          : { opacity: isVisible ? 1 : 0, y: 0, scale: isVisible ? 1 : 0.95 }
+      }
       transition={{
         layout: isDragging
           ? { duration: 0 }
           : { type: "spring", duration: 0.3, bounce: 0 },
         opacity: { duration: 0.15 },
         scale: { type: "spring", duration: 0.2, bounce: 0 },
+        y: { type: "spring", duration: 0.25, bounce: 0 },
       }}
     >
-      {!isExpanded && <ChatResizeHandles onDragStart={startDrag} />}
-      {/* Header — ⊕ new + session dropdown | window tools */}
+      {!isMobile && !isExpanded && <ChatResizeHandles onDragStart={startDrag} />}
+      {/* Header — desktop: ⊕ new + session dropdown | maximize / minimize.
+       *  Mobile: hamburger drawer trigger + session dropdown | ⊕ new.
+       *  Mobile-side ⊕ swap puts the per-page action on the right edge
+       *  (matches Issues / Inbox PageHeader convention) and leaves the
+       *  left edge for the consistent app-wide menu affordance — without
+       *  the hamburger, chat was the only mobile page that could not get
+       *  back to the global drawer (Settings / workspace switch / etc). */}
       <div className="flex items-center justify-between border-b px-4 py-2.5 gap-2">
         <div className="flex items-center gap-1 min-w-0">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="rounded-full text-muted-foreground"
-                  onClick={handleNewChat}
-                />
-              }
-            >
-              <Plus />
-            </TooltipTrigger>
-            <TooltipContent side="top">{t(($) => $.window.new_chat_tooltip)}</TooltipContent>
-          </Tooltip>
+          <MobileSidebarTrigger />
+          {!isMobile && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="rounded-full text-muted-foreground"
+                    onClick={handleNewChat}
+                  />
+                }
+              >
+                <Plus />
+              </TooltipTrigger>
+              <TooltipContent side="top">{t(($) => $.window.new_chat_tooltip)}</TooltipContent>
+            </Tooltip>
+          )}
           <SessionDropdown
             sessions={sessions}
             // Use the full agent list (incl. archived) so historical
@@ -499,38 +566,66 @@ export function ChatWindow() {
           />
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-muted-foreground"
-                  onClick={toggleExpand}
-                />
-              }
+          {/* Mobile-only ⊕ — moved here from the left so the hamburger can
+           *  occupy the same slot the rest of the mobile app uses. Sized
+           *  like the Issues page's mobile + (size-9, muted ghost) so the
+           *  two pages read as the same affordance. */}
+          {isMobile && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="size-9 text-muted-foreground"
+              onClick={handleNewChat}
+              aria-label={t(($) => $.window.new_chat_tooltip)}
             >
-              {isExpanded || isAtMax ? <Minimize2 /> : <Maximize2 />}
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {isExpanded || isAtMax ? t(($) => $.window.restore_tooltip) : t(($) => $.window.expand_tooltip)}
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-muted-foreground"
-                  onClick={handleMinimize}
-                />
-              }
-            >
-              <Minus />
-            </TooltipTrigger>
-            <TooltipContent side="top">{t(($) => $.window.minimize_tooltip)}</TooltipContent>
-          </Tooltip>
+              <Plus />
+            </Button>
+          )}
+          {/* The maximize toggle is meaningless on mobile — the sheet is
+           *  always full-screen, there is no smaller "windowed" form to
+           *  restore to. Hiding it removes a confusing no-op button. */}
+          {!isMobile && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    onClick={toggleExpand}
+                  />
+                }
+              >
+                {isExpanded || isAtMax ? <Minimize2 /> : <Maximize2 />}
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {isExpanded || isAtMax ? t(($) => $.window.restore_tooltip) : t(($) => $.window.expand_tooltip)}
+              </TooltipContent>
+            </Tooltip>
+          )}
+          {/* Mobile leaves chat by tapping Inbox / Issues in the bottom
+           *  nav — the route change naturally hides the chat surface. We
+           *  drop the dedicated minimize button there so the header never
+           *  hints at a "minimize" gesture, which prior feedback called
+           *  out as confusing (clicking the chat tab a second time to
+           *  toggle was being read as a hidden minimize). */}
+          {!isMobile && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    onClick={handleMinimize}
+                  />
+                }
+              >
+                <Minus />
+              </TooltipTrigger>
+              <TooltipContent side="top">{t(($) => $.window.minimize_tooltip)}</TooltipContent>
+            </Tooltip>
+          )}
         </div>
       </div>
 

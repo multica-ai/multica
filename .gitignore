@@ -58,3 +58,8 @@ server/server
 data/
 .kilo
 .idea
+
+# Local Playwright probe scripts (one-off dev aids for mobile PWA work,
+# not part of the test suite). Anything matching at the repo root.
+/shot-*.mjs
+/shot-*.png

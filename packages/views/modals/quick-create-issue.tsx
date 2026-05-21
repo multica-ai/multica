@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
+import { cn } from "@multica/ui/lib/utils";
 import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -369,24 +370,24 @@ export function AgentCreatePanel({
     <>
         <DialogTitle className="sr-only">{t(($) => $.create_issue.sr_agent)}</DialogTitle>
 
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
-          <div className="flex items-center gap-1.5 text-xs">
+        {/* Header — mobile drops the workspace breadcrumb (just clutter on a
+            390px viewport with the dialog already taking the whole screen)
+            and the expand toggle (already full-screen, expand is a no-op).
+            Close button gets a real 44pt tap target on mobile via py-3. */}
+        <div className="flex items-center justify-between px-5 pt-[max(env(safe-area-inset-top),0.75rem)] pb-2 shrink-0 md:pt-3">
+          <div className="hidden md:flex items-center gap-1.5 text-xs">
             <span className="text-muted-foreground">{workspaceName}</span>
             <ChevronRight className="size-3 text-muted-foreground/50" />
             <span className="font-medium">{t(($) => $.create_issue.agent_breadcrumb)}</span>
           </div>
-          {/* Native `title` instead of Base UI Tooltip — Tooltip opens on
-              keyboard focus, and the dialog's focus trap briefly lands focus
-              on the first focusable element on mount, causing the tooltip to
-              auto-pop every open. Same workaround applies to expand. */}
+          <span className="md:hidden text-sm font-semibold">{t(($) => $.create_issue.agent_breadcrumb)}</span>
           <div className="flex items-center gap-1">
             <button
               type="button"
               onClick={() => setIsExpanded(!isExpanded)}
               title={isExpanded ? t(($) => $.common.collapse_tooltip) : t(($) => $.common.expand_tooltip)}
               aria-label={isExpanded ? t(($) => $.common.collapse_tooltip) : t(($) => $.common.expand_tooltip)}
-              className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+              className="hidden md:inline-flex rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
             >
               {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
             </button>
@@ -395,9 +396,9 @@ export function AgentCreatePanel({
               onClick={onClose}
               title={t(($) => $.common.close)}
               aria-label={t(($) => $.common.close)}
-              className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+              className="rounded-sm p-2 md:p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
             >
-              <XIcon className="size-4" />
+              <XIcon className="size-5 md:size-4" />
             </button>
           </div>
         </div>
@@ -477,8 +478,12 @@ export function AgentCreatePanel({
           />
         </div>
 
-        {/* Footer */}
-        <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
+        {/* Footer — mobile splits into two rows: secondary actions (paperclip
+            + switch-to-manual) on top, primary CTA full-width on the bottom.
+            The CTA is left-aligned with the safe-area inset and stretches
+            edge-to-edge so the user's thumb doesn't have to chase the corner.
+            Desktop keeps the original single-row, justified layout. */}
+        <div className="flex flex-col gap-3 border-t px-4 pt-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] shrink-0 md:gap-2 md:py-3 md:flex-row md:items-center md:justify-between">
           <div className="flex min-h-7 items-center gap-2">
             <FileUploadButton
               size="sm"
@@ -490,18 +495,16 @@ export function AgentCreatePanel({
                 {t(($) => $.create_issue.agent.sent_count, { count: sentCount })}
               </span>
             )}
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
             <button
               type="button"
               onClick={switchToManual}
               title={t(($) => $.create_issue.switch_to_manual_tooltip)}
-              className="flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
+              className="ml-auto md:ml-0 flex shrink-0 items-center gap-1.5 text-xs px-2 py-1.5 md:py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
             >
               <ArrowLeftRight className="size-3.5" />
               {t(($) => $.create_issue.switch_to_manual)}
             </button>
-            <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+            <label className="hidden md:flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none md:order-1 md:ml-2">
               <Switch
                 size="sm"
                 checked={keepOpen}
@@ -509,8 +512,10 @@ export function AgentCreatePanel({
               />
               {t(($) => $.create_issue.create_another)}
             </label>
+          </div>
+          <div className="flex items-center justify-end gap-2">
             <Button
-              size="sm"
+              size="default"
               onClick={submit}
               disabled={!hasContent || !actor || submitting || versionBlocked || uploading}
               title={
@@ -518,11 +523,24 @@ export function AgentCreatePanel({
                   ? t(($) => $.create_issue.agent.version_blocked_tooltip, { min: versionCheck.min })
                   : undefined
               }
-              className={justSent ? "min-w-28 !bg-emerald-600 !text-white" : "min-w-28"}
+              className={cn(
+                "w-full md:w-auto md:size-sm min-w-28 h-11 md:h-8",
+                justSent && "!bg-emerald-600 !text-white",
+              )}
             >
               {submitting ? t(($) => $.create_issue.agent.sending) : uploading ? t(($) => $.create_issue.agent.uploading) : justSent ? (
                 <span className="flex items-center gap-1"><Check className="size-3.5" />{t(($) => $.create_issue.agent.sent_label)}</span>
-              ) : `${t(($) => $.create_issue.agent.submit)} (${formatShortcut(modKey, enterKey)})`}
+              ) : (
+                <>
+                  {t(($) => $.create_issue.agent.submit)}{" "}
+                  {/* Hide the keyboard hint visually on touch devices via
+                      `display:none` (md:inline restores it on desktop).
+                      The text stays in the DOM so screen readers / tests
+                      still see "Create (Ctrl+Enter)" as the accessible
+                      name even on mobile. */}
+                  <span className="hidden md:inline">{`(${formatShortcut(modKey, enterKey)})`}</span>
+                </>
+              )}
             </Button>
           </div>
         </div>

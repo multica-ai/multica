@@ -7,6 +7,7 @@ import { useChatStore } from "@multica/core/chat";
 import { chatSessionsOptions, pendingChatTasksOptions } from "@multica/core/chat/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { createLogger } from "@multica/core/logger";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import {
   Tooltip,
   TooltipTrigger,
@@ -21,9 +22,15 @@ export function ChatFab() {
   const wsId = useWorkspaceId();
   const isOpen = useChatStore((s) => s.isOpen);
   const toggle = useChatStore((s) => s.toggle);
+  const isMobile = useIsMobile();
   const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
   const { data: pending } = useQuery(pendingChatTasksOptions(wsId));
 
+  // On mobile the chat lives in the bottom tab bar (MobileBottomNav) so the
+  // FAB would duplicate that affordance and — worse — overlap the comment
+  // input's send / paperclip buttons on issue-detail. Hide it entirely;
+  // SSR-safe because useIsMobile returns false during render.
+  if (isMobile) return null;
   if (isOpen) return null;
 
   const unreadSessionCount = sessions.filter((s) => s.has_unread).length;
@@ -46,7 +53,11 @@ export function ChatFab() {
       <TooltipTrigger
         onClick={handleClick}
         className={cn(
-          "absolute bottom-2 right-2 z-50 flex size-10 cursor-pointer items-center justify-center rounded-full ring-1 ring-foreground/10 bg-card text-muted-foreground shadow-sm transition-transform hover:scale-110 hover:text-accent-foreground active:scale-95",
+          // bottom offset: 0.5rem on desktop; lift above the mobile bottom
+          // tab bar (3.25rem) + iOS safe-area on mobile so the FAB stays
+          // tappable. Tailwind v4 arbitrary value with calc + env() works
+          // because the property collapses to a literal calc() expression.
+          "absolute right-2 z-50 bottom-[calc(0.5rem+3.25rem+env(safe-area-inset-bottom))] md:bottom-2 flex size-10 cursor-pointer items-center justify-center rounded-full ring-1 ring-foreground/10 bg-card text-muted-foreground shadow-sm transition-transform hover:scale-110 hover:text-accent-foreground active:scale-95",
           // Impulse the button itself while a chat task is running — no
           // outer ring to keep things calm.
           isRunning && "animate-chat-impulse",

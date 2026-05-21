@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
-import { Virtuoso } from "react-virtuoso";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
@@ -605,13 +605,21 @@ interface IssueDetailProps {
   layoutId?: string;
   /** When set, the issue detail will auto-scroll to this comment and briefly highlight it. */
   highlightCommentId?: string;
+  /**
+   * When the issue is opened from a context where the user expects to see
+   * the most recent activity first (e.g. tapping an inbox notification on
+   * mobile), set this to true. If no `highlightCommentId` is provided we
+   * scroll the timeline to the last activity so the user lands on the new
+   * thing instead of the issue description and pages of older history.
+   */
+  scrollToLatestIfNoHighlight?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // IssueDetail
 // ---------------------------------------------------------------------------
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, scrollToLatestIfNoHighlight = false }: IssueDetailProps) {
   const { t } = useT("issues");
   const id = issueId;
   const router = useNavigation();
@@ -1039,6 +1047,58 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     const fade = window.setTimeout(() => setHighlightedId(null), 2500);
     return () => clearTimeout(fade);
   }, [highlightCommentId, items, targetIdx, scrollContainerEl, replyToRoot, toggleResolvedExpand]);
+
+  // Mobile detail entries default to "show me the latest" because the
+  // long description + activity history fills several screens of scroll
+  // before the user can see the most recent reply, and that's the
+  // affordance touch users expect (matches Inbox tap-through behaviour).
+  // Desktop keeps the document-from-the-top convention because the right
+  // panel + wider viewport already give a fast overview.
+  const effectiveScrollToLatest = scrollToLatestIfNoHighlight || isMobile;
+
+  // Inbox-on-mobile fallback: when no specific comment is highlighted but
+  // the caller asked for "show the latest", scroll to the last timeline
+  // item after items have rendered. Runs at most once per (issue, scroll-
+  // container) — guarded by didScrollLatestRef so a later WS-driven items
+  // refresh doesn't yank the user back to the bottom mid-read. Skips when
+  // highlightCommentId is set so the deep-link scroll above wins.
+  //
+  // Why we drive Virtuoso through its ref rather than poking
+  // `scrollContainerEl.scrollTop = scrollContainerEl.scrollHeight`:
+  // Virtuoso uses estimated item heights on first paint and only learns
+  // real heights after each row mounts, so the parent's scrollHeight is
+  // a stale lower bound for the first dozen frames. Setting scrollTop to
+  // that estimate scrolls partway down and Virtuoso never re-correlates
+  // — the timeline lands somewhere in the middle of the description and
+  // the user reports "auto-scroll didn't happen". `scrollToIndex(LAST,
+  // 'end')` lets Virtuoso own the convergence: it iteratively scrolls,
+  // re-measures, and re-scrolls until the last row is actually pinned to
+  // the bottom of the viewport.
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const didScrollLatestRef = useRef(false);
+  useEffect(() => {
+    if (!effectiveScrollToLatest) return;
+    if (highlightCommentId) return;
+    if (!scrollContainerEl) return;
+    if (items.length === 0) return;
+    if (didScrollLatestRef.current) return;
+    didScrollLatestRef.current = true;
+    const lastIdx = items.length - 1;
+    // Defer one frame so Virtuoso has mounted and bound its scroll-parent.
+    // requestAnimationFrame is enough — the handle is set by the post-mount
+    // commit that immediately precedes the next frame.
+    requestAnimationFrame(() => {
+      const v = virtuosoRef.current;
+      if (v) {
+        v.scrollToIndex({ index: lastIdx, align: "end", behavior: "auto" });
+      } else {
+        // Fallback for the non-virtualized branch (only reachable when a
+        // highlightCommentId is set, which the guard above already skips,
+        // so this is dead code in practice — kept for safety).
+        scrollContainerEl.scrollTop = scrollContainerEl.scrollHeight;
+      }
+    });
+  }, [effectiveScrollToLatest, highlightCommentId, scrollContainerEl, items.length]);
 
   // Cmd-F / Ctrl-F on a virtualized timeline only searches what's mounted in
   // the viewport — off-screen comments are invisible to browser find-in-page.
@@ -1505,16 +1565,28 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const detailContent = (
     <div className="flex h-full min-w-0 flex-1 flex-col">
         <PageHeader className="gap-2 bg-background text-sm">
+          {/* Mobile: a back arrow that returns to /issues replaces the
+              workspace breadcrumb. Saves horizontal space and is the
+              expected affordance on a touch screen. The PageHeader's
+              own hamburger sits to the left of this, so we still get a
+              tab-bar-equivalent on mobile via the bottom nav anyway. */}
+          <AppLink
+            href={paths.issues()}
+            className="md:hidden -ml-1 mr-0.5 inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors shrink-0"
+            aria-label="Back to issues"
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </AppLink>
           <div className="flex flex-1 items-center gap-1.5 min-w-0">
             {workspace && (
               <>
                 <AppLink
                   href={paths.issues()}
-                  className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                  className="hidden md:inline text-muted-foreground hover:text-foreground transition-colors shrink-0"
                 >
                   {workspace.name}
                 </AppLink>
-                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+                <ChevronRight className="hidden md:inline h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}
             {issueProjectId && (
@@ -1541,17 +1613,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <>
                 <AppLink
                   href={paths.issueDetail(parentIssue.id)}
-                  className="text-muted-foreground hover:text-foreground transition-colors truncate shrink-0"
+                  className="hidden md:inline text-muted-foreground hover:text-foreground transition-colors truncate shrink-0"
                 >
                   {parentIssue.identifier}
                 </AppLink>
-                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+                <ChevronRight className="hidden md:inline h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}
-            <span className="text-muted-foreground tabular-nums shrink-0">
+            <span className="text-muted-foreground tabular-nums shrink-0 text-xs md:text-sm">
               {issue.identifier}
             </span>
-            <span className="truncate font-medium text-foreground">
+            {/* Mobile: the body's TitleEditor renders the same title at H1
+             *  size right below the header, so duplicating it truncated up
+             *  here just steals horizontal room from the action buttons.
+             *  Keep the identifier (it's the only place AGE-N is visible
+             *  on mobile) and let the H1 carry the title. */}
+            <span className="hidden md:inline truncate font-medium text-foreground">
               {issue.title}
             </span>
           </div>
@@ -1596,7 +1673,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    className={cn("text-muted-foreground", actions.isPinned && "text-foreground")}
+                    className={cn("hidden md:inline-flex text-muted-foreground", actions.isPinned && "text-foreground")}
                     onClick={actions.togglePin}
                   >
                     {actions.isPinned ? <PinOff /> : <Pin />}
@@ -1639,7 +1716,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           ref={setScrollContainerEl}
           className="relative flex-1 overflow-y-auto"
         >
-        <div className="mx-auto w-full max-w-4xl px-8 py-8">
+        <div className="mx-auto w-full max-w-4xl px-4 md:px-8 py-4 md:py-8">
           <TitleEditor
             key={`title-${id}`}
             defaultValue={issue.title}
@@ -1893,6 +1970,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 ) : (
                   <div className="mt-4">
                     <Virtuoso
+                      ref={virtuosoRef}
                       key={`${wsId}:${id}`}
                       customScrollParent={scrollContainerEl}
                       data={items}
@@ -1918,8 +1996,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               )
             )}
 
-            {/* Bottom comment input — no avatar, full width */}
-            <div className="mt-4">
+            {/* Bottom comment input. On mobile the input sticks to the
+                viewport bottom (sticky inside the same scroll container as
+                the timeline), so the reply box is always reachable without
+                scrolling to the end. iOS Safari's keyboard naturally pushes
+                the visual viewport up — sticky bottom rides along, so the
+                editor stays visible while typing without a custom
+                visualViewport listener. Desktop keeps the regular flow. */}
+            <div className="mt-4 md:static sticky bottom-0 -mx-4 md:mx-0 px-3 md:px-0 pb-[max(env(safe-area-inset-bottom),0.5rem)] md:pb-0 bg-background/95 md:bg-transparent md:backdrop-blur-none backdrop-blur supports-[backdrop-filter]:bg-background/80 md:supports-[backdrop-filter]:bg-transparent border-t md:border-0 z-10 pt-2 md:pt-0">
               {/* key={id}: web's /issues/[id] route doesn't remount on
                   issueId change, so without an explicit key the editor
                   keeps the previous issue's in-memory content and the

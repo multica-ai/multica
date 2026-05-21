@@ -397,20 +397,24 @@ export function ManualCreatePanel({
           <>
             <DialogTitle className="sr-only">{t(($) => $.create_issue.sr_manual)}</DialogTitle>
 
-            {/* Header */}
-            <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
-              <div className="flex items-center gap-1.5 text-xs">
+            {/* Header — mobile drops the workspace breadcrumb (clutter on a
+                390px viewport with the dialog already taking the whole screen)
+                and the expand toggle (already full-screen). Close gets a real
+                tap target on mobile. */}
+            <div className="flex items-center justify-between px-5 pt-[max(env(safe-area-inset-top),0.75rem)] pb-2 shrink-0 md:pt-3">
+              <div className="hidden md:flex items-center gap-1.5 text-xs">
                 <span className="text-muted-foreground">{workspaceName}</span>
                 <ChevronRight className="size-3 text-muted-foreground/50" />
                 <span className="font-medium">{t(($) => $.create_issue.manual_breadcrumb)}</span>
               </div>
+              <span className="md:hidden text-sm font-semibold">{t(($) => $.create_issue.manual_breadcrumb)}</span>
               <div className="flex items-center gap-1">
                 <Tooltip>
                   <TooltipTrigger
                     render={
                       <button
                         onClick={() => setIsExpanded(!isExpanded)}
-                        className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                        className="hidden md:inline-flex rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
                       >
                         {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
                       </button>
@@ -427,9 +431,9 @@ export function ManualCreatePanel({
                     render={
                       <button
                         onClick={onClose}
-                        className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                        className="rounded-sm p-2 md:p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
                       >
-                        <XIcon className="size-4" />
+                        <XIcon className="size-5 md:size-4" />
                       </button>
                     }
                   />
@@ -641,24 +645,25 @@ export function ManualCreatePanel({
               }}
             />
 
-            {/* Footer */}
-            <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
+            {/* Footer — mobile splits into two rows: secondary actions (paperclip
+                + switch-to-agent) on top, primary CTA full-width on the bottom.
+                The CTA stretches edge-to-edge so the user's thumb doesn't have
+                to chase a corner. Desktop keeps the original justified layout. */}
+            <div className="flex flex-col gap-3 border-t px-4 pt-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] shrink-0 md:gap-2 md:py-3 md:flex-row md:items-center md:justify-between">
               <div className="flex min-h-7 items-center gap-2">
                 <FileUploadButton
                   onSelect={(file) => descEditorRef.current?.uploadFile(file)}
                 />
-              </div>
-              <div className="flex flex-wrap items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={switchToAgent}
                   title={t(($) => $.create_issue.switch_to_agent_tooltip)}
-                  className="border-beam group flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer"
+                  className="border-beam group ml-auto md:ml-0 flex shrink-0 items-center gap-1.5 text-xs px-2 py-1.5 md:py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer"
                 >
                   <ArrowLeftRight className="size-3.5 text-brand/80 transition-transform duration-300 group-hover:rotate-180" />
                   {t(($) => $.create_issue.switch_to_agent)}
                 </button>
-                <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+                <label className="hidden md:flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none md:ml-2">
                   <Switch
                     size="sm"
                     checked={keepOpen}
@@ -666,7 +671,14 @@ export function ManualCreatePanel({
                   />
                   {t(($) => $.create_issue.create_another)}
                 </label>
-                <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <Button
+                  size="default"
+                  onClick={handleSubmit}
+                  disabled={!title.trim() || submitting}
+                  className="w-full md:w-auto h-11 md:h-8"
+                >
                   {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
                 </Button>
               </div>
@@ -677,6 +689,19 @@ export function ManualCreatePanel({
   );
 }
 
+/** Mobile full-screen DialogContent overrides — fills the viewport, no
+ *  rounding, accounts for iOS safe areas. Exported so both panels (manual +
+ *  agent) and the standalone CreateIssueModal share a single source of
+ *  truth. Desktop overrides via `md:` apply on top of these.
+ *
+ *  `100dvh` (dynamic viewport) lets the content shrink with the iOS keyboard
+ *  rather than overflow off-screen — the static `100vh` would render the
+ *  bottom row of buttons under the keyboard. */
+export const mobileFullScreenDialog = cn(
+  "!top-0 !left-0 !translate-x-0 !translate-y-0",
+  "!w-screen !h-[100dvh] !max-w-none !max-h-none !rounded-none",
+);
+
 /** className for DialogContent in manual mode — depends on isExpanded and the
  *  backlog-hint sub-state. Exported so the shell (which now owns the
  *  DialogContent) can apply the same visual treatment without duplicating it. */
@@ -686,14 +711,17 @@ export function manualDialogContentClass(
 ) {
   return cn(
     "p-0 gap-0 flex flex-col overflow-hidden",
-    "!top-1/2 !left-1/2 !-translate-x-1/2",
+    // Mobile defaults to full-screen; md: overrides land it back at the
+    // centered window with the original sizing.
+    mobileFullScreenDialog,
+    "md:!top-1/2 md:!left-1/2 md:!-translate-x-1/2",
     backlogHintIssueId
-      ? "!max-w-[480px] !w-[calc(100vw-2rem)] !h-auto !-translate-y-1/2 !transition-none !duration-0"
-      : "!transition-all !duration-300 !ease-out",
+      ? "md:!max-w-[480px] md:!w-[calc(100vw-2rem)] md:!h-auto md:!-translate-y-1/2 md:!transition-none md:!duration-0"
+      : "md:!transition-all md:!duration-300 md:!ease-out",
     !backlogHintIssueId && isExpanded
-      ? "!max-w-4xl !w-full !h-5/6 !-translate-y-1/2"
+      ? "md:!max-w-4xl md:!w-full md:!h-5/6 md:!-translate-y-1/2"
       : !backlogHintIssueId
-        ? "!max-w-2xl !w-full !h-96 !-translate-y-1/2"
+        ? "md:!max-w-2xl md:!w-full md:!h-96 md:!-translate-y-1/2"
         : "",
   );
 }

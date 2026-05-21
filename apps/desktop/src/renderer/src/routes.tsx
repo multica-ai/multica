@@ -24,6 +24,7 @@ import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { AgentsPage } from "@multica/views/agents";
 import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/views/squads/components";
 import { InboxPage } from "@multica/views/inbox";
+import { ChatPage } from "@multica/views/chat";
 import { SettingsPage } from "@multica/views/settings";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { Download, Server } from "lucide-react";
@@ -161,6 +162,11 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Squad" },
           },
           { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
+          // /chat is meaningful on mobile only (bottom-tab peer of inbox /
+          // issues). On desktop, ChatPage opens the floating chat window
+          // and redirects back to /issues, so a tab landed here resolves
+          // itself rather than 404'ing.
+          { path: "chat", element: <ChatPage />, handle: { title: "Chat" } },
           {
             path: "attachments/:id/preview",
             element: <AttachmentPreviewRoute />,

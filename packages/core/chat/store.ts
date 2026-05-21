@@ -127,8 +127,16 @@ export function createChatStore(options: ChatStoreOptions) {
   // Resolve initial isOpen from storage. The three-state read (null /
   // "true" / "false") is what enables the "new user → open" default while
   // still honouring an explicit "I closed it" choice on every reload.
+  //
+  // The default-open behaviour is desktop-only: on mobile the floating
+  // chat collapses to a full-screen sheet that would cover the entire app
+  // on first visit, which is hostile rather than discoverable. New mobile
+  // users see the FAB instead and tap it when they want chat.
   const storedOpen = storage.getItem(OPEN_KEY);
-  const initialIsOpen = storedOpen === null ? true : storedOpen === "true";
+  const isMobileViewport =
+    typeof window !== "undefined" && window.innerWidth < 768;
+  const initialIsOpen =
+    storedOpen === null ? !isMobileViewport : storedOpen === "true";
 
   const store = create<ChatState>((set, get) => ({
     isOpen: initialIsOpen,

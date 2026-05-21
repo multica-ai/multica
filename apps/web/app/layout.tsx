@@ -66,6 +66,11 @@ const sourceSerif = Source_Serif_4({
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  // viewportFit:"cover" enables env(safe-area-inset-*) on iOS so the
+  // app/manifest.ts standalone PWA can extend edge-to-edge without
+  // hiding content under the notch / home indicator. The matching
+  // body padding lives in custom.css.
+  viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },
     { media: "(prefers-color-scheme: dark)", color: "#05070b" },
@@ -83,6 +88,21 @@ export const metadata: Metadata = {
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
     shortcut: ["/favicon.svg"],
+    // Explicit apple-touch-icon: when both metadata.icons and the
+    // app/apple-icon.tsx route file exist, Next.js's icons block wins,
+    // so we must opt the apple slot in by hand. Without this, iOS falls
+    // back to a screenshot of the page as the home-screen icon.
+    apple: [{ url: "/apple-icon", sizes: "180x180", type: "image/png" }],
+  },
+  // Apple PWA meta — paired with app/apple-icon.tsx (180x180). When the
+  // user adds the site to the iPhone home screen, capable=true launches
+  // it in standalone mode (no Safari chrome), and statusBarStyle picks
+  // the iOS status bar tint. "default" = dark text on light bg, which
+  // matches our light theme; iOS auto-inverts under dark mode.
+  appleWebApp: {
+    capable: true,
+    title: "Multica",
+    statusBarStyle: "default",
   },
   openGraph: {
     type: "website",

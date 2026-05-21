@@ -4,7 +4,8 @@
     "breadcrumb_workspace_fallback": "工作区",
     "empty_title": "还没有 issue",
     "empty_hint": "创建一个 issue 开始使用。",
-    "move_failed": "移动 issue 失败"
+    "move_failed": "移动 issue 失败",
+    "new_issue_aria": "新建 issue"
   },
   "status": {
     "backlog": "待规划",
