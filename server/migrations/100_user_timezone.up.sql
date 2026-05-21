@@ -23,7 +23,7 @@
 -- in UTC. It is read-only from the rollup pipeline's perspective and is
 -- only consumed at query time to drive `DATE(bucket_hour AT TIME ZONE @tz)`.
 ALTER TABLE "user"
-    ADD COLUMN timezone TEXT NULL;
+    ADD COLUMN IF NOT EXISTS timezone TEXT NULL;
 
 COMMENT ON COLUMN "user".timezone IS
     'User-preferred IANA timezone for report rendering (Viewing tz). '

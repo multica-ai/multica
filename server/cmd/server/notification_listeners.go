@@ -846,25 +846,6 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries, pushSvc
 				startDateDetails, assigneeMemberID)
 		}
 
-		if startDateChanged, _ := payload["start_date_changed"].(bool); startDateChanged {
-			prevStartDateStr := ""
-			if prevStartDate, ok := payload["prev_start_date"].(*string); ok && prevStartDate != nil {
-				prevStartDateStr = *prevStartDate
-			}
-			newStartDateStr := ""
-			if issue.StartDate != nil {
-				newStartDateStr = *issue.StartDate
-			}
-			startDateDetails, _ := json.Marshal(map[string]string{
-				"from": prevStartDateStr,
-				"to":   newStartDateStr,
-			})
-			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
-				nil, "start_date_changed", "info",
-				issue.Title, "",
-				startDateDetails, "")
-		}
-
 		if dueDateChanged, _ := payload["due_date_changed"].(bool); dueDateChanged {
 			prevDueDateStr := ""
 			if prevDueDate, ok := payload["prev_due_date"].(*string); ok && prevDueDate != nil {

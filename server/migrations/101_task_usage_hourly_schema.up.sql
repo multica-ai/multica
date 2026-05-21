@@ -34,7 +34,7 @@
 --   no-project usage. PG15's `UNIQUE NULLS NOT DISTINCT` lets ON CONFLICT
 --   upsert the no-project bucket the same way it handles a concrete
 --   project. (Same pattern as 084.)
-CREATE TABLE task_usage_hourly (
+CREATE TABLE IF NOT EXISTS task_usage_hourly (
     bucket_hour         TIMESTAMPTZ NOT NULL,   -- UTC, truncated to hour boundary
     workspace_id        UUID        NOT NULL,
     runtime_id          UUID        NOT NULL,
@@ -57,24 +57,24 @@ CREATE TABLE task_usage_hourly (
 -- Workspace-wide trend (no other filter): /{slug}/dashboard. The leading
 -- workspace_id matches every dashboard query; bucket_hour DESC avoids an
 -- extra sort when the report walks "last 7/30/90 days" backwards.
-CREATE INDEX idx_task_usage_hourly_workspace_time
+CREATE INDEX IF NOT EXISTS idx_task_usage_hourly_workspace_time
     ON task_usage_hourly (workspace_id, bucket_hour DESC);
 
 -- Runtime detail page — trend + hour-of-day heatmap on a single runtime.
 -- The heatmap groups by `EXTRACT(HOUR FROM bucket_hour AT TIME ZONE
 -- <viewer's tz>)` over this range, so we want the rows pre-clustered
 -- by runtime.
-CREATE INDEX idx_task_usage_hourly_runtime_time
+CREATE INDEX IF NOT EXISTS idx_task_usage_hourly_runtime_time
     ON task_usage_hourly (runtime_id, bucket_hour DESC);
 
 -- Workspace dashboard "by agent" panel.
-CREATE INDEX idx_task_usage_hourly_workspace_agent_time
+CREATE INDEX IF NOT EXISTS idx_task_usage_hourly_workspace_agent_time
     ON task_usage_hourly (workspace_id, agent_id, bucket_hour DESC);
 
 -- Workspace dashboard "by project" panel. Partial because no-project
 -- buckets aggregate into a separate bucket and the panel filters them
 -- out; this keeps the index small.
-CREATE INDEX idx_task_usage_hourly_workspace_project_time
+CREATE INDEX IF NOT EXISTS idx_task_usage_hourly_workspace_project_time
     ON task_usage_hourly (workspace_id, project_id, bucket_hour DESC)
     WHERE project_id IS NOT NULL;
 
@@ -82,7 +82,7 @@ CREATE INDEX idx_task_usage_hourly_workspace_project_time
 -- shape as 073's `task_usage_rollup_state` and 084's
 -- `task_usage_dashboard_rollup_state` — a SMALLINT(1) PK is the easiest
 -- way to enforce "exactly one row" without a CHECK trigger.
-CREATE TABLE task_usage_hourly_rollup_state (
+CREATE TABLE IF NOT EXISTS task_usage_hourly_rollup_state (
     id                    SMALLINT    PRIMARY KEY DEFAULT 1 CHECK (id = 1),
     watermark_at          TIMESTAMPTZ NOT NULL DEFAULT '1970-01-01 00:00:00+00',
     last_run_started_at   TIMESTAMPTZ,
@@ -111,7 +111,7 @@ INSERT INTO task_usage_hourly_rollup_state (id) VALUES (1) ON CONFLICT DO NOTHIN
 -- enqueued_at < p_to as part of each tick, which keeps the steady state
 -- bounded; the explicit prune is a belt-and-braces guarantee for rows
 -- that somehow escape the window (e.g. crash mid-tick).
-CREATE TABLE task_usage_hourly_dirty (
+CREATE TABLE IF NOT EXISTS task_usage_hourly_dirty (
     bucket_hour   TIMESTAMPTZ NOT NULL,
     workspace_id  UUID        NOT NULL,
     runtime_id    UUID        NOT NULL,
@@ -129,5 +129,5 @@ CREATE TABLE task_usage_hourly_dirty (
 -- helper (prune_task_usage_hourly_dirty) deletes rows
 -- whose enqueued_at falls outside the retention horizon. Both scans
 -- use this index.
-CREATE INDEX idx_task_usage_hourly_dirty_enqueued_at
+CREATE INDEX IF NOT EXISTS idx_task_usage_hourly_dirty_enqueued_at
     ON task_usage_hourly_dirty (enqueued_at);

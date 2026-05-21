@@ -923,6 +923,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Usage
+			r.Route("/api/usage", func(r chi.Router) {
+				r.Get("/daily", h.GetWorkspaceUsageByDay)
+				r.Get("/summary", h.GetWorkspaceUsageSummary)
+			})
+
 			// Dashboard — workspace-wide token + run-time rollups for the
 			// "/{slug}/dashboard" page. Optional ?project_id filter scopes
 			// the rollup to a single project.

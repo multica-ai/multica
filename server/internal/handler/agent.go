@@ -947,6 +947,30 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if hasPersonaSandbox {
+		oldValue := ""
+		if existing.PersonaSandbox.Valid {
+			oldValue = existing.PersonaSandbox.String
+		}
+		newValue := ""
+		if updated.PersonaSandbox.Valid {
+			newValue = updated.PersonaSandbox.String
+		}
+		if oldValue != newValue {
+			details, _ := json.Marshal(map[string]string{
+				"agent_id": id,
+				"old":      oldValue,
+				"new":      newValue,
+			})
+			_, _ = h.Queries.CreateActivity(r.Context(), db.CreateActivityParams{
+				WorkspaceID: updated.WorkspaceID,
+				ActorType:   pgtype.Text{String: "member", Valid: true},
+				ActorID:     parseUUID(requestUserID(r)),
+				Action:      "agent_persona_sandbox_changed",
+				Details:     details,
+			})
+		}
+	}
 
 	resp := agentToResponse(updated)
 	slog.Info("agent updated", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", uuidToString(updated.WorkspaceID))...)

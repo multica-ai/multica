@@ -13,7 +13,7 @@ ALTER TABLE autopilot
     DROP CONSTRAINT IF EXISTS autopilot_assignee_id_fkey;
 
 ALTER TABLE autopilot
-    ADD COLUMN assignee_type TEXT NOT NULL DEFAULT 'agent'
+    ADD COLUMN IF NOT EXISTS assignee_type TEXT NOT NULL DEFAULT 'agent'
         CHECK (assignee_type IN ('agent', 'squad'));
 
 -- Composite index lets lookups discriminate by type cheaply, e.g. "all
@@ -27,7 +27,7 @@ CREATE INDEX IF NOT EXISTS idx_autopilot_assignee_type_id
 -- (and the cost it accrues) is the leader. First version does not consume
 -- the column; it exists so we never need a backfill.
 ALTER TABLE autopilot_run
-    ADD COLUMN squad_id UUID REFERENCES squad(id) ON DELETE SET NULL;
+    ADD COLUMN IF NOT EXISTS squad_id UUID REFERENCES squad(id) ON DELETE SET NULL;
 
 CREATE INDEX IF NOT EXISTS idx_autopilot_run_squad_id
     ON autopilot_run (squad_id) WHERE squad_id IS NOT NULL;

@@ -87,6 +87,31 @@ func (h *Handler) GetDashboardUsageDaily(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// GetWorkspaceUsageByDay preserves the legacy /api/usage/daily route as an
+// alias for the dashboard daily usage endpoint.
+func (h *Handler) GetWorkspaceUsageByDay(w http.ResponseWriter, r *http.Request) {
+	h.GetDashboardUsageDaily(w, r)
+}
+
+// GetWorkspaceUsageSummary preserves the legacy /api/usage/summary route.
+func (h *Handler) GetWorkspaceUsageSummary(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+	tz := h.resolveViewingTZ(r)
+	since := parseSinceParamInTZ(r, 30, tz)
+	rows, err := h.Queries.GetWorkspaceUsageSummary(r.Context(), db.GetWorkspaceUsageSummaryParams{
+		WorkspaceID: parseUUID(workspaceID),
+		CreatedAt:   since,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get usage summary")
+		return
+	}
+	writeJSON(w, http.StatusOK, rows)
+}
+
 func (h *Handler) listDashboardUsageDaily(
 	ctx context.Context,
 	workspaceID pgtype.UUID,

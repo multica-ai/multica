@@ -5,4 +5,4 @@
 -- to coalesce nullable state on the read path.
 
 ALTER TABLE "user"
-    ADD COLUMN profile_description TEXT NOT NULL DEFAULT '';
+    ADD COLUMN IF NOT EXISTS profile_description TEXT NOT NULL DEFAULT '';

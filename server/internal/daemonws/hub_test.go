@@ -151,13 +151,12 @@ func TestHeartbeatRoundTrip(t *testing.T) {
 	hub := NewHub()
 	var calls atomic.Int32
 	hub.SetHeartbeatHandler(func(_ context.Context, identity ClientIdentity, runtimeID string, _ bool) (*protocol.DaemonHeartbeatAckPayload, error) {
-	// CEREBRO-PATCH(daemonws-heartbeat-payload-test): JEH-997 — handler now receives
 		calls.Add(1)
 		if identity.WorkspaceID != "ws-1" {
 			t.Errorf("identity workspace = %q, want ws-1", identity.WorkspaceID)
 		}
 		return &protocol.DaemonHeartbeatAckPayload{
-			RuntimeID: payload.RuntimeID,
+			RuntimeID: runtimeID,
 			Status:    "ok",
 			PendingUpdate: &protocol.DaemonHeartbeatPendingUpdate{
 				ID:            "update-1",
@@ -243,7 +242,7 @@ func TestHeartbeatHandlerCtxNotTimeBounded(t *testing.T) {
 		if _, ok := ctx.Deadline(); ok {
 			t.Errorf("handler ctx must not carry a deadline; PopPending side effects cannot be safely un-run")
 		}
-		return &protocol.DaemonHeartbeatAckPayload{RuntimeID: payload.RuntimeID, Status: "ok"}, nil
+		return &protocol.DaemonHeartbeatAckPayload{RuntimeID: runtimeID, Status: "ok"}, nil
 	})
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

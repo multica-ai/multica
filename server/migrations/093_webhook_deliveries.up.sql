@@ -19,9 +19,9 @@
 --      needed.
 
 ALTER TABLE autopilot_trigger
-    ADD COLUMN provider TEXT NOT NULL DEFAULT 'generic'
+    ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'generic'
         CHECK (provider IN ('generic', 'github')),
-    ADD COLUMN signing_secret TEXT;
+    ADD COLUMN IF NOT EXISTS signing_secret TEXT;
 
 CREATE TABLE IF NOT EXISTS webhook_delivery (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
