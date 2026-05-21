@@ -26,9 +26,11 @@ package runtimetools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -124,12 +126,27 @@ func SeedCloudToolsForAllRuntimes(ctx context.Context, pool *pgxpool.Pool, cloud
 				Description: t.Description,
 				Enabled:     &enabled,
 			}); err != nil {
+				if isRuntimeToolRuntimeFKViolation(err) {
+					slog.Warn("runtime disappeared during cloud tool seed; skipping",
+						"runtime_id", util.UUIDToString(rt.id),
+						"tool", t.Name,
+						"error", err,
+					)
+					break
+				}
 				return fmt.Errorf("upsert cloud tool %s for runtime %s: %w",
 					t.Name, util.UUIDToString(rt.id), err)
 			}
 		}
 	}
 	return nil
+}
+
+func isRuntimeToolRuntimeFKViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) &&
+		pgErr.Code == "23503" &&
+		pgErr.ConstraintName == "cerebro_runtime_tool_runtime_id_fkey"
 }
 
 // scanToolsConfigForMalformed is the no-cloud-tools branch: walk every
