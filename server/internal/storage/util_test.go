@@ -1,0 +1,39 @@
+package storage
+
+import "testing"
+
+func TestContentDisposition(t *testing.T) {
+	cases := []struct {
+		name        string
+		disposition string
+		filename    string
+		want        string
+	}{
+		{
+			name:        "ascii filename preserves legacy shape",
+			disposition: "attachment",
+			filename:    "report.pdf",
+			want:        `attachment; filename="report.pdf"`,
+		},
+		{
+			name:        "header injection characters are sanitized",
+			disposition: "attachment",
+			filename:    `weird";name.txt`,
+			want:        `attachment; filename="weird__name.txt"`,
+		},
+		{
+			name:        "non ascii filename gets ascii fallback and utf8 filename star",
+			disposition: "inline",
+			filename:    "脉率.pdf",
+			want:        `inline; filename="__.pdf"; filename*=UTF-8''%E8%84%89%E7%8E%87.pdf`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := contentDisposition(tc.disposition, tc.filename); got != tc.want {
+				t.Fatalf("contentDisposition(%q, %q) = %q, want %q", tc.disposition, tc.filename, got, tc.want)
+			}
+		})
+	}
+}

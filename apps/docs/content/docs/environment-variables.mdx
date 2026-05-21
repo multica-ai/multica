@@ -82,16 +82,22 @@ Multica stores user-uploaded attachments (images and files in comments). **S3 is
 |---|---|---|
 | `S3_BUCKET` | empty | **Bucket name only** (for example `my-bucket`). Do **not** include the `.s3.<region>.amazonaws.com` suffix — the server constructs the public host from `S3_BUCKET` + `S3_REGION`. Setting this enables S3 storage |
 | `S3_REGION` | `us-west-2` | AWS region. Must match the bucket's actual region — it is used both for SDK signing and for building the public URL |
+| `S3_KEY_PREFIX` | empty | Optional object key prefix for all uploads, for example `multica-attachments/dev` stores files under `multica-attachments/dev/workspaces/...` |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | empty | Static credentials. When both are unset, the AWS SDK default credential chain is used (IAM role / environment credentials) |
-| `AWS_ENDPOINT_URL` | empty | Custom S3-compatible endpoint (for example [MinIO](https://min.io/)). Setting this switches to path-style URLs |
+| `AWS_ENDPOINT_URL` | empty | Custom S3-compatible endpoint (for example [MinIO](https://min.io/) or Huawei OBS) |
+| `S3_FORCE_PATH_STYLE` | `true` when `AWS_ENDPOINT_URL` is set | Keep `true` for MinIO-style endpoints; set `false` for Huawei OBS so presigned URLs use `https://<bucket>.obs.<region>.myhuaweicloud.com/<key>` |
+| `HUAWEICLOUD_OBS_AK` / `HUAWEICLOUD_OBS_SK` / `HUAWEICLOUD_OBS_ENDPOINT` | empty | Huawei OBS aliases. Used only when the matching `AWS_*` variables are unset |
 
 **When `S3_BUCKET` is unset**: the server logs `"S3_BUCKET not set, cloud upload disabled"` at startup, and all uploads fall back to local disk.
 
 **Public URLs** are constructed in this order of priority:
 
 1. `https://<CLOUDFRONT_DOMAIN>/<key>` if `CLOUDFRONT_DOMAIN` is set.
-2. `<AWS_ENDPOINT_URL>/<S3_BUCKET>/<key>` (path-style) if `AWS_ENDPOINT_URL` is set.
-3. `https://<S3_BUCKET>.s3.<S3_REGION>.amazonaws.com/<key>` (virtual-hosted-style). When `S3_BUCKET` contains dots, the server falls back to `https://s3.<S3_REGION>.amazonaws.com/<S3_BUCKET>/<key>` (path-style) because the AWS-issued wildcard TLS certificate does not validate dotted bucket hosts.
+2. `<AWS_ENDPOINT_URL>/<S3_BUCKET>/<key>` (path-style) if `AWS_ENDPOINT_URL` is set and `S3_FORCE_PATH_STYLE` is true.
+3. `https://<S3_BUCKET>.<AWS_ENDPOINT_URL host>/<key>` (virtual-hosted-style) if `AWS_ENDPOINT_URL` is set and `S3_FORCE_PATH_STYLE=false`.
+4. `https://<S3_BUCKET>.s3.<S3_REGION>.amazonaws.com/<key>` (virtual-hosted-style). When `S3_BUCKET` contains dots, the server falls back to `https://s3.<S3_REGION>.amazonaws.com/<S3_BUCKET>/<key>` (path-style) because the AWS-issued wildcard TLS certificate does not validate dotted bucket hosts.
+
+When `S3_KEY_PREFIX` is set, it becomes part of `<key>`. For example, `S3_KEY_PREFIX=multica-attachments/dev` stores workspace attachments under `multica-attachments/dev/workspaces/<workspace_id>/...`.
 
 ### Local disk (when S3 is not configured)
 
