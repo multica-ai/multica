@@ -202,6 +202,23 @@ export function AgentCreatePanel({
   // workspace. `data?.project_id` lets the modal opener seed a one-shot
   // override (e.g. a future "+ Issue" button on a project page); it does NOT
   // replace the persisted default.
+  const initialProjectId = data?.project_id as string | undefined;
+  const defaultProjectId = useMemo(() => {
+    if (
+      initialProjectId &&
+      (!projectsLoaded || projects.some((p) => p.id === initialProjectId))
+    ) {
+      return initialProjectId;
+    }
+    if (
+      lastProjectId &&
+      (!projectsLoaded || projects.some((p) => p.id === lastProjectId))
+    ) {
+      return lastProjectId;
+    }
+    if (!projectsLoaded || projects.length !== 1) return null;
+    return projects[0]?.id ?? null;
+  }, [initialProjectId, lastProjectId, projectsLoaded, projects]);
   const [projectId, setProjectId] = useState<string | null>(() => {
     const seed = (data?.project_id as string | undefined) ?? lastProjectId;
     return seed ?? null;
@@ -216,9 +233,14 @@ export function AgentCreatePanel({
   useEffect(() => {
     if (!projectsLoaded || projectId === null) return;
     if (projects.some((p) => p.id === projectId)) return;
-    setProjectId(null);
+    setProjectId(defaultProjectId);
     if (lastProjectId === projectId) setLastProjectId(null);
-  }, [projectsLoaded, projects, projectId, lastProjectId, setLastProjectId]);
+  }, [projectsLoaded, projects, projectId, defaultProjectId, lastProjectId, setLastProjectId]);
+
+  useEffect(() => {
+    if (!projectsLoaded || projectId !== null || !defaultProjectId) return;
+    setProjectId(defaultProjectId);
+  }, [projectsLoaded, projectId, defaultProjectId]);
 
   // Daemon CLI version gate. The agent-create flow needs the runtime's
   // bundled multica CLI to be ≥ MIN_QUICK_CREATE_CLI_VERSION; older
@@ -277,6 +299,10 @@ export function AgentCreatePanel({
   const submit = async () => {
     const md = editorRef.current?.getMarkdown()?.trim() ?? "";
     if (!md || !actor || submitting || versionBlocked || uploading) return;
+    if (!projectId) {
+      setError(t(($) => $.create_issue.project_required));
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -479,6 +505,7 @@ export function AgentCreatePanel({
             onUpdate={(u) => setProjectId(u.project_id ?? null)}
             triggerRender={<PillButton />}
             align="start"
+            allowClear={false}
           />
         </div>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "../navigation";
 import {
@@ -36,6 +36,7 @@ import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, Fil
 import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
 import { BacklogAgentHintContent } from "../issues/components/backlog-agent-hint-dialog";
 import { ProjectPicker } from "../projects/components/project-picker";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
@@ -136,6 +137,25 @@ export function ManualCreatePanel({
   // Fetch parent issue details for the chip (status/identifier/title).
   // List cache usually has it already, so this resolves synchronously.
   const wsId = useWorkspaceId();
+  const { data: projects = [], isSuccess: projectsLoaded } = useQuery(
+    projectListOptions(wsId),
+  );
+  const initialProjectId = (data?.project_id as string | undefined) || undefined;
+  const defaultProjectId = useMemo(() => {
+    if (
+      initialProjectId &&
+      (!projectsLoaded || projects.some((p) => p.id === initialProjectId))
+    ) {
+      return initialProjectId;
+    }
+    if (!projectsLoaded || projects.length !== 1) return undefined;
+    return projects[0]?.id;
+  }, [initialProjectId, projectsLoaded, projects]);
+  useEffect(() => {
+    if (!projectsLoaded) return;
+    if (projectId && projects.some((p) => p.id === projectId)) return;
+    setProjectId(defaultProjectId);
+  }, [projectsLoaded, projects, projectId, defaultProjectId]);
   const { data: parentIssue } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
@@ -193,6 +213,10 @@ export function ManualCreatePanel({
 
   const handleSubmit = async () => {
     if (!title.trim() || submitting) return;
+    if (!projectId) {
+      toast.error(t(($) => $.create_issue.project_required));
+      return;
+    }
     setSubmitting(true);
     try {
       const issue = await createIssueMutation.mutateAsync({
@@ -518,6 +542,7 @@ export function ManualCreatePanel({
                 onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
                 triggerRender={<PillButton />}
                 align="start"
+                allowClear={false}
               />
 
               {/* Parent chip — appears when parent is set.

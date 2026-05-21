@@ -599,6 +599,12 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("resolve project: %w", err)
 		}
 		body["project_id"] = project.ID
+	} else {
+		project, err := resolveDefaultProjectForIssueCreate(ctx, client)
+		if err != nil {
+			return err
+		}
+		body["project_id"] = project.ID
 	}
 	if v, _ := cmd.Flags().GetString("start-date"); v != "" {
 		body["start_date"] = v
@@ -696,6 +702,35 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	}
 
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+func resolveDefaultProjectForIssueCreate(ctx context.Context, client *cli.APIClient) (resolvedID, error) {
+	projects, err := fetchProjectCandidates(ctx, client)
+	if err != nil {
+		return resolvedID{}, fmt.Errorf("list projects: %w", err)
+	}
+	if len(projects) == 1 {
+		return resolvedID{ID: projects[0].ID, Display: projects[0].Display}, nil
+	}
+	if len(projects) == 0 {
+		return resolvedID{}, fmt.Errorf("--project is required, but this workspace has no projects")
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "--project is required because this workspace has %d projects. Available projects:\n", len(projects))
+	for _, project := range projects {
+		display := project.Display
+		if display == "" {
+			display = project.ID
+		}
+		fmt.Fprintf(&b, "- %s (%s)", display, project.ID)
+		if project.Detail != "" {
+			fmt.Fprintf(&b, " [%s]", project.Detail)
+		}
+		b.WriteByte('\n')
+	}
+	b.WriteString("Pass --project <project-id-or-prefix>.")
+	return resolvedID{}, errors.New(strings.TrimRight(b.String(), "\n"))
 }
 
 func activeDuplicateIssueCreateMessage(err error) (string, bool) {

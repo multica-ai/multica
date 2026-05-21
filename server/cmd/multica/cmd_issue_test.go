@@ -202,6 +202,16 @@ func newIssueCreateTestCmd() *cobra.Command {
 func TestRunIssueCreateSendsAllowDuplicate(t *testing.T) {
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/projects" {
+			json.NewEncoder(w).Encode(map[string]any{
+				"projects": []map[string]any{{
+					"id":     "11111111-1111-1111-1111-111111111111",
+					"title":  "Only Project",
+					"status": "in_progress",
+				}},
+			})
+			return
+		}
 		if r.URL.Path != "/api/issues" {
 			http.NotFound(w, r)
 			return
@@ -235,11 +245,77 @@ func TestRunIssueCreateSendsAllowDuplicate(t *testing.T) {
 	if got := body["allow_duplicate"]; got != true {
 		t.Fatalf("allow_duplicate = %#v, want true in request body", got)
 	}
+	if got := body["project_id"]; got != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("project_id = %#v, want default single project", got)
+	}
+}
+
+func TestRunIssueCreateRequiresProjectWhenWorkspaceHasMultipleProjects(t *testing.T) {
+	var posted bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/projects":
+			json.NewEncoder(w).Encode(map[string]any{
+				"projects": []map[string]any{
+					{
+						"id":     "11111111-1111-1111-1111-111111111111",
+						"title":  "Web App",
+						"status": "in_progress",
+					},
+					{
+						"id":     "22222222-2222-2222-2222-222222222222",
+						"title":  "CLI",
+						"status": "planned",
+					},
+				},
+			})
+		case "/api/issues":
+			posted = true
+			http.Error(w, "unexpected create", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Needs a project")
+	err := runIssueCreate(cmd, nil)
+	if err == nil {
+		t.Fatal("runIssueCreate: expected project-required error")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"--project is required because this workspace has 2 projects",
+		"Web App (11111111-1111-1111-1111-111111111111) [in_progress]",
+		"CLI (22222222-2222-2222-2222-222222222222) [planned]",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error missing %q:\n%s", want, msg)
+		}
+	}
+	if posted {
+		t.Fatal("runIssueCreate posted /api/issues despite missing project")
+	}
 }
 
 func TestRunIssueCreateShowsDuplicateMessage(t *testing.T) {
 	want := "Active duplicate issue exists: YUA-36 SH-PM-SYNTH-01 Synthesize recommendation-to-shortlist planning outputs (status: in_progress). Set allow_duplicate=true or use --allow-duplicate to create another."
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/projects" {
+			json.NewEncoder(w).Encode(map[string]any{
+				"projects": []map[string]any{{
+					"id":     "11111111-1111-1111-1111-111111111111",
+					"title":  "Only Project",
+					"status": "in_progress",
+				}},
+			})
+			return
+		}
 		if r.URL.Path != "/api/issues" {
 			http.NotFound(w, r)
 			return
