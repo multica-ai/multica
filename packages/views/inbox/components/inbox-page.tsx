@@ -173,9 +173,13 @@ export function InboxPage() {
     ...archivedChatSessionsOptions(wsId),
     enabled: isArchivedView,
   });
+  // CEREBRO-PATCH(inbox-page-archive-chat): FIR-1958 — chatSessionsOptions
+  // returns active + archived (shared with the chat-window picker). For the
+  // inbox sidebar we want active only in the default view so a just-archived
+  // chat actually disappears from the inbox row.
   const chatSessions = isArchivedView
     ? chatArchivedQuery.data ?? []
-    : chatDefaultQuery.data ?? [];
+    : (chatDefaultQuery.data ?? []).filter((s) => s.status !== "archived");
 
   // Workspace-wide "agent is working" signals: which issues and chat sessions
   // currently have an in-flight task. Used to render the small live indicator
@@ -319,14 +323,15 @@ export function InboxPage() {
     replace(url);
   }, [replace, wsPaths]);
 
-  // CEREBRO-PATCH(inbox-page-archive-chat): chat-session archive helper
-  // Upstream replaced archiveChatSession with deleteChatSession (#2115); preserve the
-  // cerebro "archive from inbox" UX by hard-deleting instead.
+  // CEREBRO-PATCH(inbox-page-archive-chat): FIR-1958 — soft-archive via
+  // updateChatSession(status: "archived") instead of deleteChatSession so the
+  // chat resurfaces in the "Show archived" view (and can be unarchived from
+  // the chat-session header). Prefix invalidation of chatKeys.sessions also
+  // refreshes the archived list (chatKeys.archivedSessions is nested under it).
   const handleArchiveChat = useCallback(async (sessionId: string) => {
     if (sessionId === selectedKey) setSelectedKey(null, "");
-    await api.deleteChatSession(sessionId);
+    await api.updateChatSession(sessionId, { status: "archived" });
     qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
-    qc.invalidateQueries({ queryKey: chatKeys.allSessions(wsId) });
   }, [selectedKey, setSelectedKey, wsId, qc]);
 
   // Shared inbox links (?issue=<id>) may point to notifications not in this
