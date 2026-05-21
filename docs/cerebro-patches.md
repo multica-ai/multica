@@ -35,7 +35,6 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 
 | Patch name | File(s) | `+` lines | Rationale |
 |---|---|---|---|
-| `issue-timeline-refetch-on-mount` | packages/core/issues/queries.ts | 1 | Force `refetchOnMount: "always"` on the issue-timeline query so inbox-notification → issue navigation always surfaces comments that arrived while the user was on the inbox page. The global `staleTime: Infinity` + WS handlers that only attach when the issue page mounts otherwise leave those comments invisible until manual reload (JEH-1893/1878/1894). |
 | `table-text-wrap` | packages/ui/markdown/Markdown.tsx | 4 | Add `table-fixed` + `break-words` to table/td in minimal and full render modes so cell text wraps on narrow screens (mobile) instead of overflowing horizontally (JEH-1611). |
 | `agent-table-formatting` | server/internal/daemon/execenv/runtime_config.go | 6 | Add "Table Formatting" section to agent runtime config instructing agents to keep cell content concise for mobile readability (JEH-1611). |
 | `agent-runs-history-expanded-default` | packages/views/issues/components/agent-live-card.tsx | 1 | Initialize `TaskRunHistory` open state to `true` so the "Execution history" section is expanded by default when the Agent Runs tab is opened (JEH-1247). |
