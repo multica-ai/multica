@@ -61,7 +61,7 @@ type Config struct {
 	CLIVersion                     string                // multica CLI version (e.g. "0.1.13")
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, astraflow, astraflow-cn
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
@@ -200,6 +200,21 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
+	}
+	// Astraflow: OpenAI-compatible platform (200+ models, global endpoint).
+	// Requires opencode on PATH and ASTRAFLOW_API_KEY set.
+	// The opencode binary is reused; OPENAI_API_KEY + OPENAI_BASE_URL are
+	// injected at task-execution time by the astraflow backend in pkg/agent.
+	if _, astraflowKeySet := os.LookupEnv("ASTRAFLOW_API_KEY"); astraflowKeySet {
+		if e, ok := probe("MULTICA_ASTRAFLOW_PATH", "opencode", "MULTICA_ASTRAFLOW_MODEL"); ok {
+			agents["astraflow"] = e
+		}
+	}
+	// Astraflow CN: China endpoint variant.
+	if _, astraflowCNKeySet := os.LookupEnv("ASTRAFLOW_CN_API_KEY"); astraflowCNKeySet {
+		if e, ok := probe("MULTICA_ASTRAFLOW_CN_PATH", "opencode", "MULTICA_ASTRAFLOW_CN_MODEL"); ok {
+			agents["astraflow-cn"] = e
+		}
 	}
 	if len(agents) == 0 {
 		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH")

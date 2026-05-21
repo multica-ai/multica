@@ -138,6 +138,19 @@ function GeminiLogo({ className }: { className: string }) {
   );
 }
 
+// Astraflow (UCloud) — brand mark using UCloud blue (#0052D9)
+function AstraflowLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="5" fill="#0052D9" />
+      <path
+        d="M12 4L19 18H14.5L12 13L9.5 18H5L12 4Z"
+        fill="#FFFFFF"
+      />
+    </svg>
+  );
+}
+
 // Kiro CLI — official icon sourced from kiro.dev/icon.svg.
 function KiroLogo({ className }: { className: string }) {
   const maskId = `kiro-logo-mask-${useId().replace(/:/g, "")}`;
@@ -207,6 +220,9 @@ export function ProviderLogo({
       return <KiroLogo className={className} />;
     case "gemini":
       return <GeminiLogo className={className} />;
+    case "astraflow":
+    case "astraflow-cn":
+      return <AstraflowLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }
