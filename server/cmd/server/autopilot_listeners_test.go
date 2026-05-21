@@ -365,64 +365,99 @@ func TestAutopilotStaleAdmissionSweepUnblocksDispatch(t *testing.T) {
 	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
 	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
 
-	ap := seedAutopilot(t, queries, "Stale admission autopilot", "member", parseUUID(testUserID), pickFixtureAgent(t))
-
-	var staleRunID pgtype.UUID
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO autopilot_run (autopilot_id, source, status, created_at, triggered_at)
-		VALUES ($1, 'schedule', 'running', now() - interval '2 minutes', now() - interval '2 minutes')
-		RETURNING id
-	`, ap.ID).Scan(&staleRunID); err != nil {
-		t.Fatalf("seed stale admission run: %v", err)
+	tests := []struct {
+		name        string
+		mode        string
+		staleStatus string
+		wantStatus  string
+		wantIssue   bool
+		wantTask    bool
+	}{
+		{
+			name:        "run_only running placeholder",
+			mode:        "run_only",
+			staleStatus: "running",
+			wantStatus:  "running",
+			wantTask:    true,
+		},
+		{
+			name:        "create_issue issue_created placeholder",
+			mode:        "create_issue",
+			staleStatus: "issue_created",
+			wantStatus:  "issue_created",
+			wantIssue:   true,
+		},
 	}
 
-	hasActive, err := queries.HasActiveAutopilotRun(ctx, ap.ID)
-	if err != nil {
-		t.Fatalf("HasActiveAutopilotRun before sweep: %v", err)
-	}
-	if !hasActive {
-		t.Fatal("expected stale admission run to count as active before sweep")
-	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ap := seedAutopilot(t, queries, "Stale admission autopilot "+tc.name, "member", parseUUID(testUserID), pickFixtureAgent(t))
+			if _, err := testPool.Exec(ctx, `UPDATE autopilot SET execution_mode = $2 WHERE id = $1`, ap.ID, tc.mode); err != nil {
+				t.Fatalf("set execution mode: %v", err)
+			}
+			ap.ExecutionMode = tc.mode
 
-	swept, err := autopilotSvc.SweepStaleAdmissionRuns(ctx, time.Minute)
-	if err != nil {
-		t.Fatalf("SweepStaleAdmissionRuns: %v", err)
-	}
-	if swept != 1 {
-		t.Fatalf("expected 1 stale admission run to be failed, got %d", swept)
-	}
+			var staleRunID pgtype.UUID
+			if err := testPool.QueryRow(ctx, `
+				INSERT INTO autopilot_run (autopilot_id, source, status, created_at, triggered_at)
+				VALUES ($1, 'schedule', $2, now() - interval '2 minutes', now() - interval '2 minutes')
+				RETURNING id
+			`, ap.ID, tc.staleStatus).Scan(&staleRunID); err != nil {
+				t.Fatalf("seed stale admission run: %v", err)
+			}
 
-	staleRun, err := queries.GetAutopilotRun(ctx, staleRunID)
-	if err != nil {
-		t.Fatalf("GetAutopilotRun stale: %v", err)
-	}
-	if staleRun.Status != "failed" {
-		t.Fatalf("expected stale admission run to fail, got %q", staleRun.Status)
-	}
-	if !staleRun.FailureReason.Valid || !strings.Contains(staleRun.FailureReason.String, "dispatch did not complete") {
-		t.Fatalf("expected stale admission failure reason, got %+v", staleRun.FailureReason)
-	}
+			hasActive, err := queries.HasActiveAutopilotRun(ctx, ap.ID)
+			if err != nil {
+				t.Fatalf("HasActiveAutopilotRun before sweep: %v", err)
+			}
+			if !hasActive {
+				t.Fatal("expected stale admission run to count as active before sweep")
+			}
 
-	hasActive, err = queries.HasActiveAutopilotRun(ctx, ap.ID)
-	if err != nil {
-		t.Fatalf("HasActiveAutopilotRun after sweep: %v", err)
-	}
-	if hasActive {
-		t.Fatal("expected stale admission sweep to clear active admission state")
-	}
+			swept, err := autopilotSvc.SweepStaleAdmissionRuns(ctx, time.Minute)
+			if err != nil {
+				t.Fatalf("SweepStaleAdmissionRuns: %v", err)
+			}
+			if swept != 1 {
+				t.Fatalf("expected 1 stale admission run to be failed, got %d", swept)
+			}
 
-	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "schedule", nil)
-	if err != nil {
-		t.Fatalf("DispatchAutopilot after sweep: %v", err)
-	}
-	if run == nil {
-		t.Fatal("expected a run, got nil")
-	}
-	if run.Status != "running" {
-		t.Fatalf("expected dispatch after sweep to run, got %q", run.Status)
-	}
-	if !run.TaskID.Valid {
-		t.Fatal("expected dispatch after sweep to enqueue a task")
+			staleRun, err := queries.GetAutopilotRun(ctx, staleRunID)
+			if err != nil {
+				t.Fatalf("GetAutopilotRun stale: %v", err)
+			}
+			if staleRun.Status != "failed" {
+				t.Fatalf("expected stale admission run to fail, got %q", staleRun.Status)
+			}
+			if !staleRun.FailureReason.Valid || !strings.Contains(staleRun.FailureReason.String, "dispatch did not complete") {
+				t.Fatalf("expected stale admission failure reason, got %+v", staleRun.FailureReason)
+			}
+
+			hasActive, err = queries.HasActiveAutopilotRun(ctx, ap.ID)
+			if err != nil {
+				t.Fatalf("HasActiveAutopilotRun after sweep: %v", err)
+			}
+			if hasActive {
+				t.Fatal("expected stale admission sweep to clear active admission state")
+			}
+
+			run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "schedule", nil)
+			if err != nil {
+				t.Fatalf("DispatchAutopilot after sweep: %v", err)
+			}
+			if run == nil {
+				t.Fatal("expected a run, got nil")
+			}
+			if run.Status != tc.wantStatus {
+				t.Fatalf("expected dispatch after sweep status %q, got %q", tc.wantStatus, run.Status)
+			}
+			if tc.wantIssue && !run.IssueID.Valid {
+				t.Fatal("expected dispatch after sweep to create and link an issue")
+			}
+			if tc.wantTask && !run.TaskID.Valid {
+				t.Fatal("expected dispatch after sweep to enqueue a task")
+			}
+		})
 	}
 }
 

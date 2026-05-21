@@ -416,7 +416,7 @@ UPDATE autopilot_run
 SET status = 'failed',
     completed_at = now(),
     failure_reason = 'autopilot dispatch did not complete before timeout'
-WHERE status = 'running'
+WHERE status IN ('running', 'issue_created')
   AND issue_id IS NULL
   AND task_id IS NULL
   AND created_at < now() - make_interval(secs => $1::double precision)
