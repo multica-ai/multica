@@ -8,6 +8,7 @@ import {
   Settings,
   X,
   Plus,
+  Pin,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -45,6 +46,7 @@ const TAB_ICONS: Record<string, LucideIcon> = {
 function SortableTabItem({ tab, isActive, isOnly }: { tab: Tab; isActive: boolean; isOnly: boolean }) {
   const setActiveTab = useTabStore((s) => s.setActiveTab);
   const closeTab = useTabStore((s) => s.closeTab);
+  const togglePin = useTabStore((s) => s.togglePin);
 
   const {
     attributes,
@@ -74,9 +76,16 @@ function SortableTabItem({ tab, isActive, isOnly }: { tab: Tab; isActive: boolea
     closeTab(tab.id);
   };
 
-  const stopDragOnClose = (e: React.PointerEvent) => {
+  const handleTogglePin = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    togglePin(tab.id);
+  };
+
+  const stopDragOnAction = (e: React.PointerEvent) => {
     e.stopPropagation();
   };
+  const isPinned = tab.pinned === true;
+  const LeadingIcon = isPinned ? Pin : Icon;
 
   return (
     <button
@@ -84,6 +93,7 @@ function SortableTabItem({ tab, isActive, isOnly }: { tab: Tab; isActive: boolea
       style={style}
       {...attributes}
       {...listeners}
+      aria-label={isPinned ? `${tab.title} (pinned)` : tab.title}
       onClick={handleClick}
       className={cn(
         "group flex h-7 w-40 items-center gap-1.5 rounded-md px-2 text-xs transition-colors",
@@ -94,7 +104,7 @@ function SortableTabItem({ tab, isActive, isOnly }: { tab: Tab; isActive: boolea
         isDragging && "opacity-60",
       )}
     >
-      {Icon && <Icon className="size-3.5 shrink-0" />}
+      {LeadingIcon && <LeadingIcon className="size-3.5 shrink-0" />}
       <span
         className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left"
         style={{
@@ -104,10 +114,19 @@ function SortableTabItem({ tab, isActive, isOnly }: { tab: Tab; isActive: boolea
       >
         {tab.title}
       </span>
-      {!isOnly && (
+      <span
+        aria-label={isPinned ? "Unpin tab" : "Pin tab"}
+        onClick={handleTogglePin}
+        onPointerDown={stopDragOnAction}
+        className="hidden size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors group-hover:flex hover:bg-muted-foreground/20 hover:text-foreground"
+      >
+        <Pin className="size-2.5" />
+      </span>
+      {!isOnly && !isPinned && (
         <span
+          aria-label="Close tab"
           onClick={handleClose}
-          onPointerDown={stopDragOnClose}
+          onPointerDown={stopDragOnAction}
           className="hidden size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors group-hover:flex hover:bg-muted-foreground/20 hover:text-foreground"
         >
           <X className="size-2.5" />
