@@ -152,6 +152,7 @@ vi.mock("../editor", () => {
         setValue("");
       },
       uploadFile: vi.fn(),
+      uploadFiles: vi.fn(),
       focus: vi.fn(),
     }));
 

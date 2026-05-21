@@ -154,6 +154,7 @@ vi.mock("../../editor", () => ({
       clearContent: () => setEditorValue(""),
       focus: () => {},
       uploadFile: () => {},
+      uploadFiles: () => {},
       hasActiveUploads: () => false,
     }));
 

@@ -159,6 +159,7 @@ vi.mock("../../editor", () => ({
       clearContent: () => { valueRef.current = ""; setValue(""); },
       focus: () => {},
       uploadFile: () => {},
+      uploadFiles: () => {},
       hasActiveUploads: () => false,
     }));
     return (

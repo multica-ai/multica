@@ -36,7 +36,7 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
   const editorRef = useRef<ContentEditorRef>(null);
   const [message, setMessage] = useState(draft.message);
   const { isDragOver, dropZoneProps } = useFileDropZone({
-    onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
+    onDrop: (files) => editorRef.current?.uploadFiles(files),
   });
   const { uploadWithToast } = useFileUpload(api);
   const mutation = useCreateFeedback();
@@ -129,7 +129,9 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
         <div className="flex items-center justify-between px-4 py-3 border-t shrink-0">
           <FileUploadButton
             size="sm"
+            multiple
             onSelect={(file) => editorRef.current?.uploadFile(file)}
+            onSelectMany={(files) => editorRef.current?.uploadFiles(files)}
           />
           <Button size="sm" onClick={handleSubmit} disabled={!canSubmit}>
             {mutation.isPending ? t(($) => $.feedback.sending) : t(($) => $.feedback.send)}

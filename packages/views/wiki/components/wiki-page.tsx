@@ -232,7 +232,7 @@ export function WikiPage({ pageId }: WikiPageProps) {
   );
 
   const { isDragOver, dropZoneProps } = useFileDropZone({
-    onDrop: (files) => files.forEach((file) => editorRef.current?.uploadFile(file)),
+    onDrop: (files) => editorRef.current?.uploadFiles(files),
     enabled: canEdit && !!selectedPage,
   });
 
@@ -346,7 +346,9 @@ export function WikiPage({ pageId }: WikiPageProps) {
                         <FileUploadButton
                           size="sm"
                           disabled={uploading}
+                          multiple
                           onSelect={(file) => editorRef.current?.uploadFile(file)}
+                          onSelectMany={(files) => editorRef.current?.uploadFiles(files)}
                         />
                       </div>
                       {isDragOver && <FileDropOverlay />}

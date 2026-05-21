@@ -68,7 +68,7 @@ const ReplyInput = forwardRef<ReplyInputRef, ReplyInputProps>(function ReplyInpu
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
   const { uploadWithToast } = useFileUpload(api);
   const { isDragOver, dropZoneProps } = useFileDropZone({
-    onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
+    onDrop: (files) => editorRef.current?.uploadFiles(files),
   });
 
   // Flush on tab close / mobile background — same rationale as CommentInput.
@@ -192,7 +192,9 @@ const ReplyInput = forwardRef<ReplyInputRef, ReplyInputProps>(function ReplyInpu
           </Tooltip>
           <FileUploadButton
             size="sm"
+            multiple
             onSelect={(file) => editorRef.current?.uploadFile(file)}
+            onSelectMany={(files) => editorRef.current?.uploadFiles(files)}
           />
           <button
             type="button"

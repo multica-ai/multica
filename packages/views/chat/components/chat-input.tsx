@@ -124,7 +124,7 @@ export function ChatInput({
   // surface routes the file through the editor's upload extension (same
   // handler as the in-editor paste path).
   const { isDragOver, dropZoneProps } = useFileDropZone({
-    onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
+    onDrop: (files) => editorRef.current?.uploadFiles(files),
   });
 
   const handleSend = () => {
@@ -249,7 +249,9 @@ export function ChatInput({
           {uploadEnabled && (
             <FileUploadButton
               size="sm"
+              multiple
               onSelect={(file) => editorRef.current?.uploadFile(file)}
+              onSelectMany={(files) => editorRef.current?.uploadFiles(files)}
             />
           )}
           <SubmitButton

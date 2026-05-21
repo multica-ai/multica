@@ -53,6 +53,18 @@ vi.mock("../../editor", () => ({
   ) {
     const valueRef = useRef<string>(defaultValue ?? "");
     const uploadingRef = useRef(0);
+    const uploadOne = async (file: File) => {
+      uploadingRef.current += 1;
+      try {
+        const result = await onUploadFile?.(file);
+        if (result) {
+          valueRef.current = `${valueRef.current}![](${result.link})`.trim();
+          onUpdate?.(valueRef.current);
+        }
+      } finally {
+        uploadingRef.current = Math.max(0, uploadingRef.current - 1);
+      }
+    };
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
       clearContent: () => {
@@ -60,16 +72,10 @@ vi.mock("../../editor", () => ({
       },
       blur: () => {},
       focus: () => {},
-      uploadFile: async (file: File) => {
-        uploadingRef.current += 1;
-        try {
-          const result = await onUploadFile?.(file);
-          if (result) {
-            valueRef.current = `${valueRef.current}![](${result.link})`.trim();
-            onUpdate?.(valueRef.current);
-          }
-        } finally {
-          uploadingRef.current = Math.max(0, uploadingRef.current - 1);
+      uploadFile: uploadOne,
+      uploadFiles: async (files: File[]) => {
+        for (const file of files) {
+          await uploadOne(file);
         }
       },
       hasActiveUploads: () => uploadingRef.current > 0,

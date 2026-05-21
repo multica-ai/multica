@@ -133,6 +133,7 @@ interface ContentEditorRef {
    *  attention. */
   blur: () => void;
   uploadFile: (file: File) => void;
+  uploadFiles: (files: File[]) => void;
   /** True when file uploads are still in progress. */
   hasActiveUploads: () => boolean;
 }
@@ -341,6 +342,16 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         if (!editor || !onUploadFileRef.current) return;
         const endPos = editor.state.doc.content.size;
         uploadAndInsertFile(editor, file, onUploadFileRef.current, endPos);
+      },
+      uploadFiles: (files: File[]) => {
+        const handler = onUploadFileRef.current;
+        if (!editor || !handler) return;
+        void (async () => {
+          for (const file of files) {
+            const endPos = editor.state.doc.content.size;
+            await uploadAndInsertFile(editor, file, handler, endPos);
+          }
+        })();
       },
       hasActiveUploads: () => {
         if (!editor) return false;
