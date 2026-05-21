@@ -202,14 +202,22 @@ export function LoginPage({
   const handleSendCode = useCallback(
     async (e?: React.FormEvent) => {
       e?.preventDefault();
-      if (!email) {
+      const submittedEmail =
+        e?.currentTarget instanceof HTMLFormElement
+          ? String(new FormData(e.currentTarget).get("email") ?? "")
+          : email;
+      const normalizedEmail = submittedEmail.trim();
+      if (!normalizedEmail) {
         setError(t(($) => $.common.email_required));
         return;
+      }
+      if (normalizedEmail !== email) {
+        setEmail(normalizedEmail);
       }
       setLoading(true);
       setError("");
       try {
-        await useAuthStore.getState().sendCode(email);
+        await useAuthStore.getState().sendCode(normalizedEmail);
         setStep("code");
         setCode("");
         setCooldown(60);
@@ -480,6 +488,7 @@ export function LoginPage({
                 <Label htmlFor="login-email">{t(($) => $.common.email)}</Label>
                 <Input
                   id="login-email"
+                  name="email"
                   type="email"
                   placeholder={t(($) => $.common.email_placeholder)}
                   value={email}
@@ -501,7 +510,7 @@ export function LoginPage({
               form="login-form"
               className="w-full"
               size="lg"
-              disabled={!email || loading}
+              disabled={loading}
             >
               {loading
                 ? t(($) => $.signin.sending)
