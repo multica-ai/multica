@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
-import { Virtuoso } from "react-virtuoso";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, Fragment } from "react";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
@@ -54,6 +54,7 @@ import { CommentInput } from "./comment-input";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { collectThreadReplies } from "./thread-utils";
 import { AgentLiveCard } from "./agent-live-card";
+import { IssueJumpFab } from "./issue-jump-fab";
 import { ExecutionLogSection } from "./execution-log-section";
 import { PullRequestList } from "./pull-request-list";
 import { useGitHubSettings } from "@multica/core/github";
@@ -76,6 +77,7 @@ import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
+import { useChatStore } from "@multica/core/chat";
 import { timeAgo } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -678,7 +680,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Virtuoso prop would never receive the element. Callback ref + state fixes
   // that: setState triggers the re-render that hands Virtuoso the element.
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [canJumpScroll, setCanJumpScroll] = useState(false);
+  const [isNearScrollBottom, setIsNearScrollBottom] = useState(false);
+  const isChatOpen = useChatStore((s) => s.isOpen);
 
   // Per-session: which resolved threads the user has temporarily expanded.
   // Not persisted (matches Linear) — reload collapses everything back to bars.
@@ -1002,6 +1008,54 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [allChildrenSelected, childIssueIds, deselectIds, selectIds]);
 
   const loading = issueLoading;
+
+  const updateJumpScrollState = useCallback(() => {
+    if (!scrollContainerEl) return;
+
+    const maxScrollTop = scrollContainerEl.scrollHeight - scrollContainerEl.clientHeight;
+    setCanJumpScroll(maxScrollTop > 80);
+    setIsNearScrollBottom(maxScrollTop - scrollContainerEl.scrollTop <= 80);
+  }, [scrollContainerEl]);
+
+  useLayoutEffect(() => {
+    if (!scrollContainerEl) return;
+
+    updateJumpScrollState();
+    scrollContainerEl.addEventListener("scroll", updateJumpScrollState, { passive: true });
+    window.addEventListener("resize", updateJumpScrollState);
+
+    const observer = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(() => updateJumpScrollState())
+      : null;
+    observer?.observe(scrollContainerEl);
+
+    return () => {
+      scrollContainerEl.removeEventListener("scroll", updateJumpScrollState);
+      window.removeEventListener("resize", updateJumpScrollState);
+      observer?.disconnect();
+    };
+  }, [scrollContainerEl, updateJumpScrollState, items.length]);
+
+  const handleJumpScroll = useCallback(() => {
+    if (!scrollContainerEl) return;
+
+    if (isNearScrollBottom) {
+      scrollContainerEl.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
+    if (virtuosoRef.current && items.length > 0) {
+      virtuosoRef.current.scrollToIndex({
+        index: items.length - 1,
+        align: "end",
+        behavior: "smooth",
+      });
+      return;
+    }
+
+    const maxScrollTop = scrollContainerEl.scrollHeight - scrollContainerEl.clientHeight;
+    scrollContainerEl.scrollTo({ top: maxScrollTop, behavior: "smooth" });
+  }, [isNearScrollBottom, items.length, scrollContainerEl]);
 
   // Deep-link landing. Semantically equivalent to navigating to
   // `#comment-${id}`: find the element with that id, scrollIntoView it.
@@ -1926,6 +1980,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 ) : (
                   <div className="mt-4">
                     <Virtuoso
+                      ref={virtuosoRef}
                       key={`${wsId}:${id}`}
                       customScrollParent={scrollContainerEl}
                       data={items}
@@ -1963,6 +2018,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </div>
         </div>
         </div>
+        {canJumpScroll && !isChatOpen && (
+          <IssueJumpFab
+            isNearBottom={isNearScrollBottom}
+            onClick={handleJumpScroll}
+            jumpToTopLabel={t(($) => $.detail.jump_to_top)}
+            jumpToBottomLabel={t(($) => $.detail.jump_to_bottom)}
+          />
+        )}
       </div>
   );
 

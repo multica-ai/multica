@@ -29,6 +29,13 @@ vi.mock("@multica/core/hooks", () => ({
 
 // Mock @multica/core/auth
 const mockAuthUser = { id: "user-1", email: "test@test.com", name: "Test User" };
+vi.mock("@multica/core/chat", () => ({
+  useChatStore: (selector?: any) => {
+    const state = { isOpen: false };
+    return selector ? selector(state) : state;
+  },
+}));
+
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: Object.assign(
     (selector?: any) => {
@@ -309,6 +316,7 @@ vi.mock("@multica/core/issues/stores", () => ({
 // it by default) so tests can assert the deep-link effect dispatched a
 // native scroll on the target node.
 const scrollIntoViewSpy = vi.hoisted(() => vi.fn());
+const virtuosoScrollToIndexSpy = vi.hoisted(() => vi.fn());
 
 vi.mock("react-virtuoso", () => ({
   Virtuoso: forwardRef(function MockVirtuoso(
@@ -316,10 +324,8 @@ vi.mock("react-virtuoso", () => ({
     ref: any,
   ) {
     useImperativeHandle(ref, () => ({
-      // Real Virtuoso ref methods are not exercised by tests in this file
-      // since the cold-path uses native scrollIntoView on the DOM node.
       scrollIntoView: vi.fn(),
-      scrollToIndex: vi.fn(),
+      scrollToIndex: virtuosoScrollToIndexSpy,
     }));
     return (
       <div data-testid="virtuoso-mock">
@@ -335,6 +341,25 @@ vi.mock("react-virtuoso", () => ({
 // with a spy so the deep-link effect's call can be observed.
 beforeEach(() => {
   scrollIntoViewSpy.mockClear();
+  virtuosoScrollToIndexSpy.mockClear();
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get: () => 0,
+  });
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+    configurable: true,
+    get: () => 0,
+  });
+  Object.defineProperty(HTMLElement.prototype, "scrollTop", {
+    configurable: true,
+    writable: true,
+    value: 0,
+  });
+  Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+    configurable: true,
+    writable: true,
+    value: vi.fn(),
+  });
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
     configurable: true,
     writable: true,
@@ -780,6 +805,42 @@ describe("IssueDetail (shared)", () => {
     });
 
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
+  });
+
+  it("jumps to the latest activity using Virtuoso when the timeline overflows", async () => {
+    const scrollTo = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get: () => 1500,
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get: () => 500,
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 0,
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      writable: true,
+      value: scrollTo,
+    });
+
+    renderIssueDetail();
+
+    const jumpToBottom = await screen.findByRole("button", { name: "Jump to latest activity" });
+    expect(jumpToBottom).toHaveClass("fixed", "bottom-14", "right-2", "z-50", "size-10");
+
+    fireEvent.click(jumpToBottom);
+
+    expect(virtuosoScrollToIndexSpy).toHaveBeenCalledWith({
+      index: 1,
+      align: "end",
+      behavior: "smooth",
+    });
+    expect(scrollTo).not.toHaveBeenCalledWith({ top: 1000, behavior: "smooth" });
   });
 
   it("collapses non-trailing activity blocks and expands the last one by default", async () => {

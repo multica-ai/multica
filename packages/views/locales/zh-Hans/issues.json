@@ -196,6 +196,8 @@
     "pin_tooltip": "固定到侧边栏",
     "unpin_tooltip": "从侧边栏取消固定",
     "sidebar_tooltip": "切换侧边栏",
+    "jump_to_bottom": "跳转到最新动态",
+    "jump_to_top": "跳转到顶部",
     "cmdf_toast_title": "页面内查找仅覆盖可见区",
     "cmdf_toast_description": "评论列表已虚拟滚动,⌘F 找不到视口外的评论。完整应用内搜索即将推出。",
     "update_failed": "更新 issue 失败",
