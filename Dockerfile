@@ -6,6 +6,8 @@ RUN apk add --no-cache git
 WORKDIR /src
 
 # Cache dependencies
+ARG GOPROXY
+ENV GOPROXY=$GOPROXY
 COPY server/go.mod server/go.sum ./server/
 RUN cd server && go mod download
 
