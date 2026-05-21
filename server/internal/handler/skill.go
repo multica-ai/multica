@@ -196,8 +196,13 @@ func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id st
 		return db.Skill{}, false
 	}
 
+	skillUUID, ok := parseUUIDOrBadRequest(w, id, "skill id")
+	if !ok {
+		return db.Skill{}, false
+	}
+
 	skill, err := h.Queries.GetSkillInWorkspace(r.Context(), db.GetSkillInWorkspaceParams{
-		ID:          parseUUID(id),
+		ID:          skillUUID,
 		WorkspaceID: parseUUID(workspaceID),
 	})
 	if err != nil {
