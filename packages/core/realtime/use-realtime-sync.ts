@@ -148,7 +148,7 @@ export function applyWorkspaceUpdatedToCache(
  * new WSClient instance is detected (workspace switch) to recover events
  * missed while disconnected.
  */
-function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
+export function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   const wsId = getCurrentWsId();
   if (wsId) {
     qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
@@ -163,6 +163,8 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: agentActivityKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
   }
+  // CEREBRO-PATCH(reconnect-timeline-invalidate): timeline cache is keyed by issueId, not wsId, so the workspace sweep above misses it; on reconnect a dropped comment:created leaves the timeline "fresh" and the new comment never appears when the user clicks in from the inbox (FIR-1941).
+  qc.invalidateQueries({ queryKey: ["issues", "timeline"] });
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 

@@ -20,7 +20,9 @@ import {
   applyChatDoneToCache,
   invalidateTaskLifecycleQueries,
   applyWorkspaceUpdatedToCache,
+  invalidateWorkspaceScopedQueries,
 } from "./use-realtime-sync";
+import { setCurrentWorkspace } from "../platform/workspace-storage";
 
 const sessionId = "session-1";
 const taskId = "task-1";
@@ -161,6 +163,23 @@ describe("invalidateTaskLifecycleQueries", () => {
     expect(qc.getQueryState(agentTasksKeys.all(wsId))?.isInvalidated).toBe(true);
     expect(qc.getQueryState(["issues", "tasks"])?.isInvalidated).toBe(true);
     expect(qc.getQueryState(inboxKeys.activeIssueTasks(wsId))?.isInvalidated).toBe(true);
+  });
+});
+
+describe("invalidateWorkspaceScopedQueries", () => {
+  it("marks the issue timeline stale on reconnect so dropped comment:created events are recovered (FIR-1941)", () => {
+    const qc = createQueryClient();
+    setCurrentWorkspace("ws-test", wsId);
+
+    const issueId = "issue-42";
+    const timelineKey = issueKeys.timeline(issueId);
+    qc.setQueryData(timelineKey, []);
+
+    invalidateWorkspaceScopedQueries(qc);
+
+    expect(qc.getQueryState(timelineKey)?.isInvalidated).toBe(true);
+
+    setCurrentWorkspace(null, null);
   });
 });
 
