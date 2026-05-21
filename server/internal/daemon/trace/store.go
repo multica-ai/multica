@@ -1,7 +1,6 @@
 package trace
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -113,9 +112,11 @@ func (s *JSONLStore) openFile(taskID, runID string) (*jsonlFile, error) {
 	return jf, nil
 }
 
-// countLines counts the number of newline-terminated lines in the file
-// starting from the current read position. The file position is restored
-// after counting.
+// countLines counts the number of newline characters in the file starting
+// from the current read position. The file position is restored after
+// counting. Counting newlines (rather than using bufio.Scanner) avoids the
+// scanner's per-line length limit, which can be exceeded by trace lines with
+// large RawPayload fields.
 func countLines(r io.ReadSeeker) (int, error) {
 	pos, err := r.Seek(0, io.SeekCurrent)
 	if err != nil {
@@ -126,13 +127,23 @@ func countLines(r io.ReadSeeker) (int, error) {
 	}
 	defer func() { _, _ = r.Seek(pos, io.SeekStart) }()
 
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, MaxContentLen), MaxContentLen*2)
 	count := 0
-	for scanner.Scan() {
-		count++
+	buf := make([]byte, 32*1024)
+	for {
+		n, readErr := r.Read(buf)
+		for i := 0; i < n; i++ {
+			if buf[i] == '\n' {
+				count++
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return count, readErr
+		}
 	}
-	return count, scanner.Err()
+	return count, nil
 }
 
 // NewJSONLStore creates a JSONLStore rooted at root. The directory is created
@@ -285,6 +296,8 @@ func (s *JSONLStore) ListRuns(ctx context.Context, taskID string) ([]string, err
 
 // readAll reads and parses all trace lines from the JSONL file for the given
 // task/run pair. If no file exists, returns nil, nil (not an error).
+// json.Decoder is used instead of bufio.Scanner to avoid the scanner's
+// per-line length limit, which can be exceeded by lines with large RawPayload.
 func (s *JSONLStore) readAll(taskID, runID string) ([]TraceLine, error) {
 	p := filepath.Join(s.root, taskID, runID+".jsonl")
 
@@ -298,18 +311,15 @@ func (s *JSONLStore) readAll(taskID, runID string) ([]TraceLine, error) {
 	defer f.Close()
 
 	var lines []TraceLine
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, MaxContentLen), MaxContentLen*2)
-	for scanner.Scan() {
+	dec := json.NewDecoder(f)
+	for {
 		var line TraceLine
-		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
-			// Skip malformed lines; they may be from a crashed write.
-			continue
+		if err := dec.Decode(&line); err != nil {
+			// io.EOF is the normal end; io.ErrUnexpectedEOF or a syntax error
+			// means a partial last line from a crashed write — stop reading.
+			break
 		}
 		lines = append(lines, line)
-	}
-	if err := scanner.Err(); err != nil {
-		return lines, fmt.Errorf("read trace file: %w", err)
 	}
 	return lines, nil
 }
