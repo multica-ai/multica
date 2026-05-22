@@ -21,6 +21,7 @@ import {
   dashboardRunTimeDailyOptions,
 } from "@multica/core/dashboard";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
+import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { PageHeader } from "../../layout/page-header";
 import { KpiCard } from "../../runtimes/components/shared";
 import {
@@ -64,9 +65,9 @@ import {
 // current value isn't in the new dimension's allowed set (see
 // `handleDimChange` below).
 //
-// 1d semantic: "today" (the natural calendar day from 00:00 in UTC, matching
-// the rollup's bucket_date axis), not "the last 24 hours". The client-side
-// `dailyCutoffIso` filter below enforces this even at the midnight edge.
+// 1d semantic: "today" (the natural calendar day from 00:00 in the viewer's
+// timezone), not "the last 24 hours". The client-side `dailyCutoffIso` filter
+// below enforces this even at the midnight edge.
 const TIME_RANGES = [
   { label: "1d", days: 1, dims: ["daily"] as const },
   { label: "7d", days: 7, dims: ["daily"] as const },
@@ -102,14 +103,6 @@ function fmtMoney(n: number): string {
   if (n >= 100) return `$${n.toFixed(0)}`;
   return `$${n.toFixed(2)}`;
 }
-
-// Weekly aggregation is locked to UTC: the dashboard daily rollup buckets
-// data by UTC `bucket_date` (and the raw fallback queries by `DATE(...)`,
-// also UTC), so any other zone for client-side week boundaries would put
-// cross-midnight rows into the wrong calendar week. Runtime-detail can use
-// the runtime's IANA tz because its rollup is materialized in that tz; the
-// workspace rollup has no equivalent, so weekly is UTC-only here.
-const WEEK_TZ = "UTC";
 
 // Local segmented control — same visual language the runtime usage section
 // uses for its period / tab toggles. shadcn's Tabs is wired for full tab
@@ -157,6 +150,7 @@ function Segmented<T extends string | number>({
 export function DashboardPage() {
   const { t } = useT("usage");
   const wsId = useWorkspaceId();
+  const viewTZ = useViewingTimezone();
   const [dim, setDim] = useState<Dim>("daily");
   const [days, setDays] = useState<TimeRange>(30);
   const [projectValue, setProjectValue] = useState<string>(ALL_PROJECTS);
@@ -198,12 +192,16 @@ export function DashboardPage() {
   const chartFetchDays = dim === "weekly" ? weekCount * 7 : days;
 
   const dailyQuery = useQuery(
-    dashboardUsageDailyOptions(wsId, chartFetchDays, projectId),
+    dashboardUsageDailyOptions(wsId, chartFetchDays, projectId, viewTZ),
   );
-  const byAgentQuery = useQuery(dashboardUsageByAgentOptions(wsId, days, projectId));
-  const runTimeQuery = useQuery(dashboardAgentRunTimeOptions(wsId, days, projectId));
+  const byAgentQuery = useQuery(
+    dashboardUsageByAgentOptions(wsId, days, projectId, viewTZ),
+  );
+  const runTimeQuery = useQuery(
+    dashboardAgentRunTimeOptions(wsId, days, projectId, viewTZ),
+  );
   const runTimeDailyQuery = useQuery(
-    dashboardRunTimeDailyOptions(wsId, chartFetchDays, projectId),
+    dashboardRunTimeDailyOptions(wsId, chartFetchDays, projectId, viewTZ),
   );
 
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
@@ -213,14 +211,14 @@ export function DashboardPage() {
 
   // Daily-aggregation surfaces (cost/tokens/time/tasks KPIs and the Daily
   // trend chart) re-scope to the user-selected `days` even when we
-  // over-fetched for the weekly chart. UTC matches the bucket_date the
-  // backend filters on, so the cutoff lands on the same calendar boundary
-  // the rollup used. Applied in both dims so 1d strictly means "today" even
-  // at the midnight UTC edge where the server's wall-clock cutoff would
+  // over-fetched for the weekly chart. The cutoff is anchored on the viewer's
+  // timezone — the same axis the backend slices `bucket_hour` on — so it
+  // lands on the same calendar boundary. Applied in both dims so 1d strictly
+  // means "today" even at the midnight edge where a wall-clock cutoff would
   // otherwise include yesterday.
   const dailyCutoffIso = useMemo(
-    () => addDaysIso(todayIso(WEEK_TZ), -(days - 1)),
-    [days],
+    () => addDaysIso(todayIso(viewTZ), -(days - 1)),
+    [days, viewTZ],
   );
   const dailyUsageInWindow = useMemo(
     () => dailyUsage.filter((u) => u.date >= dailyCutoffIso),
@@ -273,21 +271,21 @@ export function DashboardPage() {
   // leftmost trailing week always has data even when the user-selected `days`
   // (e.g. 30D) is shorter than the chart's `weekCount * 7` span. Buckets are
   // pre-zeroed inside the helpers, so sparse weeks render as empty bars
-  // instead of being dropped (MUL-2382 weekly window scoping). Locked to
-  // UTC so the week boundaries match the backend's UTC `bucket_date`.
+  // instead of being dropped (MUL-2382 weekly window scoping). Week
+  // boundaries follow the viewer's timezone.
   const weekly = useMemo(
-    () => aggregateByWeek(dailyUsage, WEEK_TZ, weekCount),
-    [dailyUsage, weekCount],
+    () => aggregateByWeek(dailyUsage, viewTZ, weekCount),
+    [dailyUsage, viewTZ, weekCount],
   );
   const weeklyCost = weekly.weeklyCostStack;
   const weeklyTokens = weekly.weeklyTokens;
   const weeklyTime = useMemo(
-    () => aggregateWeeklyTime(runTimeDailyRows, WEEK_TZ, weekCount),
-    [runTimeDailyRows, weekCount],
+    () => aggregateWeeklyTime(runTimeDailyRows, viewTZ, weekCount),
+    [runTimeDailyRows, viewTZ, weekCount],
   );
   const weeklyTasks = useMemo(
-    () => aggregateWeeklyTasks(runTimeDailyRows, WEEK_TZ, weekCount),
-    [runTimeDailyRows, weekCount],
+    () => aggregateWeeklyTasks(runTimeDailyRows, viewTZ, weekCount),
+    [runTimeDailyRows, viewTZ, weekCount],
   );
   const agentTokenRows = useMemo(
     () => aggregateAgentTokens(byAgentUsage),

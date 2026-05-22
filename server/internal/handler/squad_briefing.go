@@ -79,7 +79,14 @@ Hard rules:
   explaining the gap (and @mention the issue's reporter if possible)
   rather than silently doing the work.
 - ALWAYS call ` + "`" + `multica squad activity` + "`" + ` before ending your turn —
-  even when the outcome is no_action.`
+  even when the outcome is no_action.
+- A child issue you create with ` + "`" + `--status todo` + "`" + ` and an agent assignee
+  already fires that agent automatically — the assignment IS the trigger.
+  If you also @mention the same agent on this parent issue for the same
+  work, the agent runs twice in parallel (once from the mention, once
+  from the assignment). Pick exactly one path: either delegate by
+  @mention on this issue, or create a ` + "`" + `todo` + "`" + ` child issue assigned to
+  them. Never both for the same work.`
 
 // buildSquadLeaderBriefing composes the full system briefing appended to a
 // squad leader's Instructions when it claims a task on a squad-assigned

@@ -44,6 +44,40 @@ export function StepUseCase({
     { slug: "other", icon: <MoreHorizontal className="h-4 w-4" />, label: t(($) => $.questions.use_case.other), isOther: true },
   ];
 
+  // Multi-select: a user is realistically here for several things at
+  // once (ship code AND manage team, etc). Keeping it a single radio
+  // forced a primary that often isn't truthful; the template recommender
+  // already supports multi via includes(...) priority.
+  const selected: readonly string[] = [
+    ...(answers.use_case ?? []),
+    ...(!answers.use_case?.includes("other") && answers.use_case_other
+      ? ["other"]
+      : []),
+  ];
+
+  const toggle = (slug: string) => {
+    const current = answers.use_case ?? [];
+    if (slug === "other") {
+      if (current.includes("other")) {
+        onChange({
+          use_case: current.filter((s) => s !== "other"),
+          use_case_other: null,
+        });
+      } else {
+        onChange({
+          use_case: [...current, "other"],
+          use_case_skipped: false,
+        });
+      }
+      return;
+    }
+    const typed = slug as UseCase;
+    const next = current.includes(typed)
+      ? current.filter((s) => s !== typed)
+      : [...current, typed];
+    onChange({ use_case: next, use_case_skipped: false });
+  };
+
   return (
     <StepQuestion
       step="use_case"
@@ -51,27 +85,18 @@ export function StepUseCase({
       eyebrow={t(($) => $.questions.eyebrow_about_you)}
       question={t(($) => $.questions.use_case.question)}
       options={options}
-      selectedSlug={answers.use_case ?? (answers.use_case_other ? "other" : null)}
+      selectedSlugs={selected}
       otherValue={answers.use_case_other ?? ""}
       onOtherChange={(v) => onChange({ use_case_other: v })}
       otherPlaceholder={t(($) => $.questions.use_case.other_placeholder)}
-      onAnswer={(slug) => {
-        if (slug === "other") {
-          onChange({ use_case: "other", use_case_skipped: false });
-        } else {
-          onChange({
-            use_case: slug as UseCase,
-            use_case_other: null,
-            use_case_skipped: false,
-          });
-        }
-      }}
+      onAnswer={toggle}
       onAdvance={onAdvance}
       onSkip={() => {
-        onChange({ use_case: null, use_case_other: null, use_case_skipped: true });
+        onChange({ use_case: [], use_case_other: null, use_case_skipped: true });
         onSkip();
       }}
       onBack={onBack}
+      multiSelect
     />
   );
 }

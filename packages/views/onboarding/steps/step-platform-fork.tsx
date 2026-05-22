@@ -418,7 +418,7 @@ function CliInstallDialog({
               {t(($) => $.common.cancel)}
             </Button>
             <Button disabled={!canConnect} onClick={onConnect}>
-              {t(($) => $.step_platform.cli_dialog_connect)}
+              {t(($) => $.step_runtime.start_exploring)}
               <ArrowRight className="h-4 w-4" />
             </Button>
           </div>

@@ -65,8 +65,9 @@ FOR UPDATE;
 -- the same transaction that holds LockChatSessionForDelete and that has
 -- already cancelled any in-flight tasks (see CancelAgentTasksByChatSession)
 -- so the daemon does not keep running work whose result has nowhere to
--- land.
-DELETE FROM chat_session WHERE id = $1;
+-- land. workspace_id in the WHERE clause is a SQL-layer tenant guard; see
+-- DeleteIssue.
+DELETE FROM chat_session WHERE id = $1 AND workspace_id = $2;
 
 -- name: TouchChatSession :exec
 UPDATE chat_session SET updated_at = now()

@@ -69,7 +69,7 @@ const commentHardCap = 2000
 
 // ListComments returns comments for an issue. The default behaviour is
 // unchanged — full chronological dump capped at commentHardCap — so existing
-// callers and the desktop UI keep working as-is. Three optional query params
+// callers and the desktop UI keep working as-is. Four optional query params
 // give agent-style readers a thread-aware view that scales to long issues
 // without dragging every prior comment into context:
 //
@@ -77,28 +77,45 @@ const commentHardCap = 2000
 //     comment plus every descendant. The anchor may be a root or any reply;
 //     the server walks up to the root via a recursive CTE, so callers do not
 //     need to know whether the id they have is a root.
+//   - tail=<N> — only valid with thread. Cap the reply count at the N most
+//     recent replies (per (created_at, id)). The thread root is always
+//     returned, even when N=0, so the reader keeps the "what is this thread
+//     about" context. Without tail, thread returns the entire thread (the
+//     pre-MUL-2421 behavior).
 //   - recent=<N> — return the N most recently active threads (root + every
 //     descendant per thread). A thread's recency is MAX(created_at) across
 //     the whole subtree, so a stale-but-recently-replied thread ranks ahead
 //     of an active-but-quiet one. Row-based "newest N comments" is
 //     deliberately NOT exposed — it surfaces unrelated thread tails and
 //     hides relevant history (#2340).
-//   - before=<RFC3339> + before-id=<uuid> — thread cursor. The pair points at
-//     a thread's (last_activity_at, root_id); the next page returns threads
-//     strictly less recent. Both must be set together — a timestamp-only
-//     cursor cannot tie-break two threads whose last_activity falls in the
-//     same microsecond. The cursor for the next page is emitted via the
-//     X-Multica-Next-Before / X-Multica-Next-Before-Id response headers.
+//   - before=<RFC3339> + before-id=<uuid> — cursor. The pair's meaning is
+//     context-dependent so the flag surface stays small:
+//
+//   - with recent: a *thread* cursor — (last_activity_at, root_id) — and
+//     the next page returns threads strictly less recent.
+//   - with thread + tail: a *reply* cursor — (created_at, id) — and the
+//     next page returns replies in the same thread strictly older than
+//     that reply.
+//
+// Both values must be set together so the cursor can tie-break entries
+// landing in the same microsecond. The cursor for the next page is
+// emitted via the X-Multica-Next-Before / X-Multica-Next-Before-Id
+// response headers.
 //
 // Combination rules (kept narrow on purpose — Elon flagged the matrix risk):
 //
-//   - thread is exclusive with recent and before/before-id. Asking for "the
-//     most recent N within thread X" or "thread X but only before T" mixes
-//     two different navigation models and is rejected with 400.
-//   - thread may combine with since (incremental polling of one thread).
+//   - thread is exclusive with recent. Asking for "the most recent N within
+//     thread X" mixes two different navigation models and is rejected.
+//   - thread + before/before-id requires tail. Without tail, thread returns
+//     the entire thread and a cursor would be ignored — reject loudly so
+//     the documented "cursor scrolls within a tailed window" rule holds.
+//   - tail requires thread (it is a thread-scoped limit; outside of thread
+//     it has no defined behavior).
+//   - thread may combine with since (incremental polling of one thread),
+//     and the since filter is applied after the tail/cursor cut so the
+//     thread root is still emitted but stale rows drop out.
 //   - recent may combine with before/before-id (scroll older threads) and
 //     with since (recent activity in a window).
-//   - since may combine with anything except (thread + recent / before).
 //
 // The response body is always chronological (oldest → newest); under recent
 // that means threads are listed oldest-active first and the freshest thread
@@ -128,6 +145,7 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 
 	threadStr := q.Get("thread")
 	recentStr := q.Get("recent")
+	tailStr := q.Get("tail")
 	beforeTimeStr := q.Get("before")
 	beforeIDStr := q.Get("before_id")
 	if beforeIDStr == "" {
@@ -140,21 +158,21 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "thread and recent are mutually exclusive")
 		return
 	}
-	if threadStr != "" && (beforeTimeStr != "" || beforeIDStr != "") {
-		writeError(w, http.StatusBadRequest, "thread cannot be combined with before / before_id")
+	if tailStr != "" && threadStr == "" {
+		writeError(w, http.StatusBadRequest, "tail requires thread (it is a thread-scoped limit)")
 		return
 	}
 	if (beforeTimeStr == "") != (beforeIDStr == "") {
 		writeError(w, http.StatusBadRequest, "before and before_id must be set together (composite cursor)")
 		return
 	}
-	// Cursor only makes sense as "scroll older within a recent window". A
-	// cursor without `recent` would otherwise be silently dropped by
-	// fetchCommentsForList and fall back to the default / since path —
-	// returning a full timeline that the caller did not ask for. Reject
-	// loudly so the API surface matches the documented semantics.
-	if beforeTimeStr != "" && recentStr == "" {
-		writeError(w, http.StatusBadRequest, "before / before_id require recent (cursor scrolls within a recent window)")
+	// Cursor needs either a recent window (thread cursor) or a tailed thread
+	// (reply cursor). A bare cursor would otherwise fall through to the
+	// default / since path — returning a full timeline that the caller did
+	// not ask for. Reject loudly so the API surface matches the documented
+	// semantics.
+	if beforeTimeStr != "" && recentStr == "" && (threadStr == "" || tailStr == "") {
+		writeError(w, http.StatusBadRequest, "before / before_id require recent (thread cursor) or thread + tail (reply cursor)")
 		return
 	}
 
@@ -194,14 +212,35 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 		recentN = n
 	}
 
+	// tail=0 is allowed (returns root only — useful for "what is this thread
+	// about" lookups without dragging any replies into context). Negative
+	// values are rejected because they'd round-trip to LIMIT -N which
+	// PostgreSQL flags as a syntax error.
+	threadTail := -1
+	threadTailSet := false
+	if tailStr != "" {
+		n, err := strconv.Atoi(tailStr)
+		if err != nil || n < 0 {
+			writeError(w, http.StatusBadRequest, "invalid tail parameter; expected non-negative integer")
+			return
+		}
+		if n > commentHardCap {
+			n = commentHardCap
+		}
+		threadTail = n
+		threadTailSet = true
+	}
+
 	result, err := h.fetchCommentsForList(r.Context(), fetchCommentsArgs{
-		Issue:        issue,
-		Since:        sinceTime,
-		ThreadAnchor: threadStr,
-		RecentN:      recentN,
-		HasCursor:    hasCursor,
-		BeforeAt:     beforeCursor,
-		BeforeID:     beforeUUID,
+		Issue:         issue,
+		Since:         sinceTime,
+		ThreadAnchor:  threadStr,
+		ThreadTail:    threadTail,
+		ThreadTailSet: threadTailSet,
+		RecentN:       recentN,
+		HasCursor:     hasCursor,
+		BeforeAt:      beforeCursor,
+		BeforeID:      beforeUUID,
 	})
 	if err != nil {
 		switch err {
@@ -230,10 +269,13 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 		resp[i] = commentToResponse(c, grouped[cid], groupedAtt[cid])
 	}
 
-	// Emit the next thread cursor as response headers when the recent page is
-	// likely not the last one (returned a full page of threads). Headers stay
-	// out of the JSON body so the default flat-array response shape — which
-	// the desktop UI and existing callers depend on — is unchanged.
+	// Emit the next cursor as response headers when the page is likely not
+	// the last one. The cursor's meaning is context-dependent: under recent
+	// it points at the oldest thread in the page (next page = older threads);
+	// under thread + tail it points at the oldest reply in the page (next
+	// page = older replies in the same thread). Headers stay out of the JSON
+	// body so the default flat-array response shape — which the desktop UI
+	// and existing callers depend on — is unchanged.
 	if result.NextBefore != "" && result.NextBeforeID != "" {
 		w.Header().Set("X-Multica-Next-Before", result.NextBefore)
 		w.Header().Set("X-Multica-Next-Before-Id", result.NextBeforeID)
@@ -245,14 +287,21 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 // fetchCommentsArgs bundles the parsed query params so fetchCommentsForList
 // stays readable. Sentinel errors below let the caller turn DB-layer outcomes
 // into the right HTTP status without leaking SQL details.
+//
+// ThreadTail is split into a value + a "set" flag because tail=0 is a
+// meaningful caller intent (return just the root). A bare int would collapse
+// "user did not pass --tail" and "user passed --tail 0" into the same state,
+// which would silently downgrade the latter to the full-thread path.
 type fetchCommentsArgs struct {
-	Issue        db.Issue
-	Since        pgtype.Timestamptz
-	ThreadAnchor string
-	RecentN      int
-	HasCursor    bool
-	BeforeAt     pgtype.Timestamptz
-	BeforeID     pgtype.UUID
+	Issue         db.Issue
+	Since         pgtype.Timestamptz
+	ThreadAnchor  string
+	ThreadTail    int
+	ThreadTailSet bool
+	RecentN       int
+	HasCursor     bool
+	BeforeAt      pgtype.Timestamptz
+	BeforeID      pgtype.UUID
 }
 
 // fetchCommentsResult carries both the materialised comments and (for the
@@ -283,6 +332,115 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 		anchor, err := util.ParseUUID(args.ThreadAnchor)
 		if err != nil {
 			return fetchCommentsResult{}, errCommentThreadBadID
+		}
+		// Tailed path: paged query that returns root + the @reply_limit
+		// most recent replies (per (created_at, id)). The thread root is
+		// always returned, so a reader can land on a long thread without
+		// dragging hundreds of replies into context. The reply-internal
+		// cursor (--before / --before-id under --thread + --tail) scrolls
+		// to older replies inside the same thread.
+		if args.ThreadTailSet {
+			// Probe for has-more by asking the SQL for one extra reply
+			// beyond what the caller wants. If we get back >tail replies
+			// there is at least one older reply still on disk; if we get
+			// back ≤tail the page is the tail of the thread and there is
+			// nothing older to scroll to (so we must NOT emit a cursor —
+			// otherwise the next page is wasted round-trip that returns
+			// just the root). This is the exact-boundary fix called out
+			// in the MUL-2421 review.
+			rows, err := h.Queries.ListThreadCommentsForIssuePaged(ctx, db.ListThreadCommentsForIssuePagedParams{
+				AnchorID:    anchor,
+				IssueID:     issue.ID,
+				WorkspaceID: issue.WorkspaceID,
+				HasCursor:   args.HasCursor,
+				BeforeAt:    args.BeforeAt,
+				BeforeID:    args.BeforeID,
+				ReplyLimit:  int32(args.ThreadTail) + 1,
+			})
+			if err != nil {
+				return fetchCommentsResult{}, err
+			}
+			if len(rows) == 0 {
+				return fetchCommentsResult{}, errCommentThreadNotFound
+			}
+			// Split the result into root + replies (ASC order preserved).
+			// Root is identified by parent_id IS NULL and is always
+			// present in the SQL output; we keep it out of the cursor /
+			// tail-trim logic so the user always sees thread context.
+			var rootComment *db.Comment
+			replies := make([]db.Comment, 0, len(rows))
+			for _, r := range rows {
+				c := db.Comment{
+					ID:             r.ID,
+					IssueID:        r.IssueID,
+					AuthorType:     r.AuthorType,
+					AuthorID:       r.AuthorID,
+					Content:        r.Content,
+					Type:           r.Type,
+					CreatedAt:      r.CreatedAt,
+					UpdatedAt:      r.UpdatedAt,
+					ParentID:       r.ParentID,
+					WorkspaceID:    r.WorkspaceID,
+					ResolvedAt:     r.ResolvedAt,
+					ResolvedByType: r.ResolvedByType,
+					ResolvedByID:   r.ResolvedByID,
+				}
+				if !r.ParentID.Valid {
+					root := c
+					rootComment = &root
+					continue
+				}
+				replies = append(replies, c)
+			}
+			// Trim the probe overflow back to the caller's tail. The SQL
+			// emits ASC, so the extra row is the oldest reply — dropping
+			// it from the head is what aligns "newest N" with the user's
+			// request.
+			hasMore := len(replies) > args.ThreadTail
+			if hasMore {
+				replies = replies[1:]
+			}
+			out := make([]db.Comment, 0, len(replies)+1)
+			if rootComment != nil {
+				out = append(out, *rootComment)
+			}
+			for _, r := range replies {
+				// since drops stale rows AFTER the tail / cursor cut.
+				// The root is exempt (already appended above): a reader
+				// who set --since to skip already-seen replies still
+				// needs the root context if the page only contained
+				// the root.
+				if args.Since.Valid && !r.CreatedAt.Time.After(args.Since.Time) {
+					continue
+				}
+				out = append(out, r)
+			}
+			// Emit a reply cursor only when we proved an older reply
+			// exists (hasMore). On an exact-boundary page (replyCount
+			// == tail with no overflow) hasMore is false and the cursor
+			// stays empty.
+			//
+			// Additionally suppress the cursor when `since` is set and
+			// the oldest retained reply on this page is already <= since.
+			// The next page walks replies strictly older than that one,
+			// so every older reply has created_at strictly less — if the
+			// cursor target itself can't satisfy `> since`, no older
+			// reply can either, and continuing to paginate would only
+			// return root-only pages until the agent walks the entire
+			// pre-`since` history. This mirrors the head-thread guard on
+			// the recent + since path. Flagged by Elon's second review on
+			// MUL-2421.
+			res := fetchCommentsResult{Comments: out}
+			emitCursor := hasMore && len(replies) > 0
+			if emitCursor && args.Since.Valid && !replies[0].CreatedAt.Time.After(args.Since.Time) {
+				emitCursor = false
+			}
+			if emitCursor {
+				oldest := replies[0]
+				res.NextBefore = oldest.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
+				res.NextBeforeID = uuidToString(oldest.ID)
+			}
+			return res, nil
 		}
 		rows, err := h.Queries.ListThreadCommentsForIssue(ctx, db.ListThreadCommentsForIssueParams{
 			AnchorID:    anchor,
@@ -965,7 +1123,10 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("cancel tasks for deleted trigger comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
 	}
 
-	if err := h.Queries.DeleteComment(r.Context(), comment.ID); err != nil {
+	if err := h.Queries.DeleteComment(r.Context(), db.DeleteCommentParams{
+		ID:          comment.ID,
+		WorkspaceID: comment.WorkspaceID,
+	}); err != nil {
 		slog.Warn("delete comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete comment")
 		return

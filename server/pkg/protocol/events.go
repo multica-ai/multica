@@ -3,9 +3,10 @@ package protocol
 // Event types for WebSocket communication between server, web clients, and daemon.
 const (
 	// Issue events
-	EventIssueCreated = "issue:created"
-	EventIssueUpdated = "issue:updated"
-	EventIssueDeleted = "issue:deleted"
+	EventIssueCreated         = "issue:created"
+	EventIssueUpdated         = "issue:updated"
+	EventIssueDeleted         = "issue:deleted"
+	EventIssueMetadataChanged = "issue_metadata:changed"
 
 	// Comment events
 	EventCommentCreated       = "comment:created"
@@ -31,6 +32,7 @@ const (
 	// change" — not "every internal status flip".
 	EventTaskQueued    = "task:queued"    // ∅ → queued (enqueue / retry create)
 	EventTaskDispatch  = "task:dispatch"  // queued → dispatched (daemon claim)
+	EventTaskRunning   = "task:running"   // dispatched → running (daemon started)
 	EventTaskProgress  = "task:progress"
 	EventTaskCompleted = "task:completed" // running → completed
 	EventTaskFailed    = "task:failed"    // running → failed

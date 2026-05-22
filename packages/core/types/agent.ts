@@ -26,7 +26,6 @@ export interface RuntimeDevice {
   owner_id: string | null;
   /** Defaults to "private" when the backend predates the visibility flag. */
   visibility: RuntimeVisibility;
-  timezone: string;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;
@@ -127,6 +126,7 @@ export interface Agent {
   custom_env: Record<string, string>;
   custom_args: string[];
   custom_env_redacted: boolean;
+  custom_env_redacted_reason?: 'policy' | 'role';
   visibility: AgentVisibility;
   status: AgentStatus;
   max_concurrent_tasks: number;

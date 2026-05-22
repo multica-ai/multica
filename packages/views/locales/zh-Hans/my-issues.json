@@ -7,6 +7,8 @@
   },
   "header": {
     "scope": {
+      "all_label": "全部",
+      "all_description": "分给我的、我创建的、或我的智能体和小队相关的",
       "assigned_label": "已分配",
       "assigned_description": "分配给我的 issue",
       "created_label": "我创建的",

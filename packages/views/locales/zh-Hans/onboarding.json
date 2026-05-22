@@ -179,19 +179,61 @@
     "add_more_hint": "随时添加更多智能体。一支专长各异的小团队胜过一个万能选手。",
     "docs_link": "创建第一个智能体 →"
   },
-  "step_teammate": {
-    "eyebrow": "第一个队友",
-    "headline": "创建你的第一个队友：Multica Helper",
-    "lede": "Multica Helper 是连接到 {{runtime}} 的入门智能体。它会打开一个上手引导 issue，带你走完核心流程。",
-    "avatar_label": "Multica Helper 头像",
-    "name": "Multica Helper",
-    "role": "上手引导",
-    "point_issue": "只从一个上手引导 issue 开始",
-    "point_context": "读取工作区上下文和 issue 详情",
-    "point_customize": "之后可以改名或替换",
-    "footer_hint": "我们会创建一个智能体和一个上手引导 issue。",
-    "create_action": "创建 Multica Helper",
-    "create_failed": "创建 Multica Helper 失败"
+  "welcome_after_onboarding": {
+    "loading_helper": "正在为你准备 Helper……",
+    "error_title": "准备失败",
+    "error_generic": "出了点问题，请重试。",
+    "retry": "重试",
+    "dismiss_error": "知道了",
+    "error_close": "关闭",
+    "user_context_heading": "关于我",
+    "user_context_role_label": "角色",
+    "user_context_use_case_label": "想用 Multica 做",
+    "runtime": {
+      "greeting": "Hi，欢迎来到 Multica",
+      "subtitle": "我是你的第一个 Agent 助手。",
+      "capabilities": "你可以问我任何关于 Multica 的使用，也可以让我帮你在工作区完成任务 —— 建 issue、定时任务、再建一个 agent……",
+      "section_label": "选一个或多个任务,让我开始干活：",
+      "assign_empty": "选一个或多个",
+      "assign_count": "分配 {{count}} 个任务给我 →",
+      "assign_count_plural": "分配 {{count}} 个任务给我 →",
+      "cards": {
+        "intro": {
+          "subtitle": "让我用 1-2 段话讲清楚 Multica 是什么、能干嘛。"
+        },
+        "tour": {
+          "subtitle": "陪你走一遍 issue、agent、squad、autopilot 怎么配合。"
+        },
+        "welcome_page": {
+          "subtitle": "给你写一个小 HTML 页面，庆祝上手 Multica。"
+        }
+      },
+      "success": {
+        "title": "都搞定了！",
+        "subtitle": "稍作等待，你的 {{agentName}} 正在为你工作 ☕",
+        "tip_inbox": "它有进展时，你能在「收件箱」收到通知。",
+        "tip_chat": "想直接聊聊？点右下角的对话气泡就行。",
+        "got_it": "知道了 →"
+      }
+    },
+    "skip": {
+      "loading": "正在为你准备工作区……",
+      "title": "欢迎来到 Multica！",
+      "subtitle": "我们为你创建了两个任务，帮助你进行下一步操作。",
+      "got_it": "知道了",
+      "status_in_progress": "进行中",
+      "status_todo": "待办",
+      "cards": {
+        "install_runtime": {
+          "title": "连接一个运行时",
+          "subtitle": "安装 Codex 或 Kimi 让 agent 上线。"
+        },
+        "create_agent": {
+          "title": "创建你的第一个 agent",
+          "subtitle": "运行时上线后，把第一个 agent 建出来。"
+        }
+      }
+    }
   },
   "step_workspace": {
     "eyebrow_first": "你的第一个工作区",
@@ -283,7 +325,8 @@
     "hint_selected": "已选择：{{name}}",
     "hint_pick": "在上方选一个 agent 运行时继续。",
     "hint_waiting": "等待第一个结果...",
-    "hint_skip_or_refresh": "装好后点刷新，或跳过进入工作区。"
+    "hint_skip_or_refresh": "装好后点刷新，或跳过进入工作区。",
+    "start_exploring": "开始探索"
   },
   "step_platform": {
     "eyebrow": "连接一台电脑",
