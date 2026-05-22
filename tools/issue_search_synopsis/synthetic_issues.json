@@ -1,0 +1,137 @@
+[
+  {
+    "identifier": "SYN-100",
+    "title": "Research control room: cross-domain validation",
+    "status": "in_review",
+    "assignee_type": "agent",
+    "description": "Parent control room for banking, retail, airline, and telecom validation. The accepted route is all-domain validation with banking context window checks and a latest consolidation signal.",
+    "latest_signal": "Final consolidation: child_count 7, in_review 3, in_progress 1, blocked 1. Keep SYN-100 as the canonical parent for cross-child banking context window synthetic validation leakage questions. Results are ready for analysis after child aggregation.",
+    "comments": [
+      "Meta discussion mentioned telecom, retail, and banking many times before the final consolidation.",
+      "Earlier child chatter should not outrank the parent when the query asks for control-room state.",
+      "Exploration notes repeated banking generator canary rerun, retail strict gate failure analysis, airline verifier boundary failure, telecom runtime unblock rerun canary, and trace pipeline fixed json extraction rewards card while the route was still unclear."
+    ]
+  },
+  {
+    "identifier": "SYN-110",
+    "parent_identifier": "SYN-100",
+    "title": "Banking generator canary rerun",
+    "status": "in_progress",
+    "assignee_type": "agent",
+    "description": "Specific child for banking native generator extension and canary rerun.",
+    "latest_signal": "Canary rerun is active. This child should win specific banking generator canary queries, but not broad parent validation queries.",
+    "artifact_paths": ["artifacts/synthetic/banking_canary_summary.json"]
+  },
+  {
+    "identifier": "SYN-120",
+    "parent_identifier": "SYN-100",
+    "title": "Retail strict gate failure analysis",
+    "status": "in_review",
+    "assignee_type": "agent",
+    "description": "Specific child for retail strict gate failure case analysis.",
+    "latest_signal": "Failure analysis complete; reviewer should compare strict gate behavior before route_next."
+  },
+  {
+    "identifier": "SYN-130",
+    "parent_identifier": "SYN-100",
+    "title": "Airline verifier boundary failure analysis",
+    "status": "in_review",
+    "assignee_type": "agent",
+    "description": "Specific child for airline verifier boundary failure analysis.",
+    "latest_signal": "Boundary failure analysis is ready for review."
+  },
+  {
+    "identifier": "SYN-140",
+    "parent_identifier": "SYN-100",
+    "title": "Telecom runtime unblock rerun canary",
+    "status": "blocked",
+    "assignee_type": "agent",
+    "description": "Specific child for telecom runtime unblock and rerun canary.",
+    "latest_signal": "Blocked on missing external runtime capacity. This is a true_blocked resource dependency."
+  },
+  {
+    "identifier": "SYN-150",
+    "parent_identifier": "SYN-100",
+    "title": "Canonical telecom schema visible reconstruction",
+    "status": "in_review",
+    "assignee_type": "agent",
+    "description": "Current canonical telecom schema route with visible reconstruction.",
+    "latest_signal": "Accepted 74 rejected 0. This canonical route supersedes the old telecom package.",
+    "artifact_paths": ["artifacts/synthetic/telecom_schema_summary.json"]
+  },
+  {
+    "identifier": "SYN-151",
+    "parent_identifier": "SYN-100",
+    "title": "Old telecom package curation",
+    "status": "cancelled",
+    "assignee_type": "agent",
+    "description": "Deprecated telecom package route retained only for regression coverage.",
+    "latest_signal": "Accepted 72 rejected 2. Superseded by SYN-150 and cancelled with note.",
+    "superseded": true
+  },
+  {
+    "identifier": "SYN-160",
+    "parent_identifier": "SYN-100",
+    "title": "Trace pipeline JSON extraction rewards card fix",
+    "status": "done",
+    "assignee_type": "agent",
+    "description": "Specific child for trace pipeline fixed JSON extraction and rewards card fixture repair.",
+    "latest_signal": "Fixed JSON extraction for the synthetic rewards card case."
+  },
+  {
+    "identifier": "SYN-170",
+    "parent_identifier": "SYN-100",
+    "title": "Synthetic artifacts ready for analysis",
+    "status": "done",
+    "assignee_type": "agent",
+    "description": "Publishes clean synthetic result artifacts for analysis.",
+    "latest_signal": "Ready for analysis. Result path: artifacts/synthetic/final_summary.json.",
+    "artifact_paths": ["artifacts/synthetic/final_summary.json", "artifacts/synthetic/regression_results.json"]
+  },
+  {
+    "identifier": "SYN-200",
+    "title": "Research workflow governance and in_review hygiene",
+    "status": "in_review",
+    "assignee_type": "agent",
+    "description": "Defines route_next, needs_user_decision, true_blocked, child issue threshold, and control-room summary rules.",
+    "latest_signal": "Treat in_review as close, route_next, needs_user_decision, or true_blocked. Open child issues only for long running execution, artifact ownership, separate blockers, monitoring, or repo ownership.",
+    "comments": [
+      "Blocked means missing permission, missing resource, required human decision, or external dependency.",
+      "Routine progress should not mention a human unless a decision is needed."
+    ]
+  },
+  {
+    "identifier": "SYN-210",
+    "title": "Comment chatter regression",
+    "status": "done",
+    "assignee_type": "agent",
+    "description": "Regression issue for ensuring meta discussion chatter does not outrank the final result.",
+    "latest_signal": "Final result should outrank long discussion threads.",
+    "comments": [
+      "A very long meta discussion repeats unrelated search terms, parent key references, old child names, and exploratory chatter.",
+      "The synopsis should use the final result instead of indexing all chatter equally.",
+      "Noisy thread: control room child_count in_review blocked consolidation latest final signal accepted route all domains child status aggregation active children in progress banking context window synthetic validation leakage banking generator canary rerun retail strict gate failure analysis airline verifier boundary failure telecom runtime unblock rerun canary telecom visible reconstruction accepted rejected canonical telecom schema old package trace pipeline fixed json extraction rewards card daily governance route_next needs_user_decision true_blocked semantics missing permission resource open child issue threshold long running artifact ownership stale cancelled branch sidecar index baseline canonical issue synopsis rerank lifecycle flag."
+    ]
+  },
+  {
+    "identifier": "SYN-211",
+    "title": "Cancelled stale branch archive",
+    "status": "cancelled",
+    "assignee_type": "agent",
+    "description": "Stale cancelled branch retained so the regression can still retrieve it when explicitly requested.",
+    "latest_signal": "Cancelled branch. Downrank unless the query asks for stale cancelled branch behavior.",
+    "comments": [
+      "Archived notes mention canonical issue synopsis rerank lifecycle flag, sidecar index baseline, artifacts ready for analysis, and governance true_blocked semantics even though this route is stale."
+    ],
+    "superseded": true
+  },
+  {
+    "identifier": "SYN-220",
+    "title": "Issue synopsis rerank proposal",
+    "status": "in_review",
+    "assignee_type": "agent",
+    "description": "Proposal for canonical issue synopsis, child aggregation, latest final signal, lifecycle flag rerank, and sidecar index baseline evaluation.",
+    "latest_signal": "Use canonical issue synopsis and lifecycle flag rerank as the primary direction. Keep sidecar index experiments as optional baseline, not the main production index."
+  }
+]
+
