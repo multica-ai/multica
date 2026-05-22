@@ -713,10 +713,13 @@ function AutopilotFormBody({
         </div>
       </PageHeader>
 
-      {/* Body: two columns */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+      {/* Body: stacked-scroll on mobile, two side-by-side columns on desktop.
+          Mobile uses page-level scroll within the body so the title editor stays
+          visible under the sticky header (JEH-1897 — without this, the aside is
+          shrink-0 + tall enough to squash the left column to 0px, hiding the title). */}
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
         {/* Left: Runbook */}
-        <div className="flex-1 min-h-0 flex flex-col border-b lg:border-b-0 lg:border-r">
+        <div className="flex flex-col border-b lg:flex-1 lg:min-h-0 lg:border-b-0 lg:border-r">
           <div className="px-6 pt-5 pb-3 shrink-0">
             <TitleEditor
               autoFocus={isCreate}
@@ -737,8 +740,8 @@ function AutopilotFormBody({
             </span>
           </div>
 
-          <div className="flex-1 min-h-0 px-6 pb-6 flex flex-col">
-            <div className="h-full overflow-y-auto rounded-lg border border-border bg-background transition-colors focus-within:border-input px-4 py-3">
+          <div className="px-6 pb-6 flex flex-col lg:flex-1 lg:min-h-0">
+            <div className="min-h-[200px] rounded-lg border border-border bg-background transition-colors focus-within:border-input px-4 py-3 lg:h-full lg:overflow-y-auto">
               <ContentEditor
                 defaultValue={initialDescription}
                 placeholder={t(($) => $.dialog.description_placeholder)}
@@ -751,7 +754,7 @@ function AutopilotFormBody({
         </div>
 
         {/* Right: Configuration */}
-        <aside className="w-full lg:w-[340px] shrink-0 overflow-y-auto px-5 py-5 space-y-5 bg-muted/30">
+        <aside className="w-full lg:w-[340px] shrink-0 px-5 py-5 space-y-5 bg-muted/30 lg:overflow-y-auto">
           <AgentSection
             selectedId={assigneeId}
             onChange={setAssigneeId}
