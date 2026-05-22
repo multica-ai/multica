@@ -56,7 +56,9 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
 
   useEffect(() => {
     refreshPaused();
-    const interval = setInterval(refreshPaused, 3000);
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") refreshPaused();
+    }, 30_000);
     return () => clearInterval(interval);
   }, [refreshPaused]);
 

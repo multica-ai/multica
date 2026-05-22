@@ -961,11 +961,13 @@ export class ApiClient {
     workspace_id?: string;
     include_archived?: boolean;
     owner?: "me";
+    slim?: boolean;
   }): Promise<Agent[]> {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.include_archived) search.set("include_archived", "true");
     if (params?.owner === "me") search.set("owner", "me");
+    if (params?.slim) search.set("slim", "true");
     return this.fetch(`/api/agents?${search}`);
   }
 
