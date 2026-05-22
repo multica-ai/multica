@@ -25,6 +25,8 @@ var hermesBlockedArgs = map[string]blockedArgMode{
 	"acp": blockedStandalone,
 }
 
+var acpMissingSessionErrorRe = regexp.MustCompile(`(?i)\b(no session found|session\s+not\s+found|unknown session|no such session|session[^:;,.]{0,120}\b(not found|does not exist))\b`)
+
 // hermesBackend implements Backend by spawning `hermes acp` and communicating
 // via the ACP (Agent Communication Protocol) JSON-RPC 2.0 over stdin/stdout.
 // This is the same pattern as Codex but with the ACP protocol instead of
@@ -213,13 +215,48 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		if cwd == "" {
 			cwd = "."
 		}
+		resumedSession := opts.ResumeSessionID != ""
+		recoveredStaleResume := false
 
-		if opts.ResumeSessionID != "" {
+		recoverStaleResume := func(phase string, cause error, setModel bool) error {
+			if recoveredStaleResume {
+				return cause
+			}
+			b.cfg.Logger.Warn("hermes resumed session is no longer available; retrying current prompt in a fresh session",
+				"phase", phase,
+				"requested_session_id", opts.ResumeSessionID,
+				"session_id", sessionID,
+				"error", cause,
+			)
+			streamingCurrentTurn.Store(false)
+			freshSessionID, err := createHermesSession(runCtx, c, cwd, opts.Model)
+			if err != nil {
+				return err
+			}
+			sessionID = freshSessionID
+			c.sessionID = sessionID
+			recoveredStaleResume = true
+			if setModel && opts.Model != "" {
+				if err := setHermesSessionModel(runCtx, c, sessionID, opts.Model); err != nil {
+					return fmt.Errorf("hermes could not switch fresh session to model %q: %w", opts.Model, err)
+				}
+			}
+			return nil
+		}
+
+		if resumedSession {
 			result, err := c.request(runCtx, "session/resume", map[string]any{
 				"cwd":       cwd,
 				"sessionId": opts.ResumeSessionID,
 			})
 			if err != nil {
+				if isACPMissingSessionError(err) {
+					if retryErr := recoverStaleResume("session/resume", err, false); retryErr == nil {
+						goto sessionReady
+					} else {
+						err = retryErr
+					}
+				}
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("hermes session/resume failed: %v", err)
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
@@ -235,22 +272,16 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				)
 			}
 		} else {
-			result, err := c.request(runCtx, "session/new", buildHermesSessionParams(cwd, opts.Model))
+			sessionID, err = createHermesSession(runCtx, c, cwd, opts.Model)
 			if err != nil {
 				finalStatus = "failed"
-				finalError = fmt.Sprintf("hermes session/new failed: %v", err)
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
-				return
-			}
-			sessionID = extractACPSessionID(result)
-			if sessionID == "" {
-				finalStatus = "failed"
-				finalError = "hermes session/new returned no session ID"
+				finalError = err.Error()
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
 		}
 
+	sessionReady:
 		c.sessionID = sessionID
 		b.cfg.Logger.Info("hermes session created", "session_id", sessionID)
 
@@ -263,22 +294,33 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// user would think their pick was honoured while the
 		// task actually ran on something else.
 		if opts.Model != "" {
-			if _, err := c.request(runCtx, "session/set_model", map[string]any{
-				"sessionId": sessionID,
-				"modelId":   opts.Model,
-			}); err != nil {
-				b.cfg.Logger.Warn("hermes set_session_model failed", "error", err, "requested_model", opts.Model)
-				finalStatus = "failed"
-				finalError = fmt.Sprintf("hermes could not switch to model %q: %v", opts.Model, err)
-				resCh <- Result{
-					Status:     finalStatus,
-					Error:      finalError,
-					DurationMs: time.Since(startTime).Milliseconds(),
-					SessionID:  sessionID,
+			modelSet := false
+			if err := setHermesSessionModel(runCtx, c, sessionID, opts.Model); err != nil {
+				if resumedSession && isACPMissingSessionError(err) {
+					if retryErr := recoverStaleResume("session/set_model", err, true); retryErr == nil {
+						modelSet = true
+					} else {
+						err = retryErr
+					}
 				}
-				return
+				if !modelSet {
+					b.cfg.Logger.Warn("hermes set_session_model failed", "error", err, "requested_model", opts.Model)
+					finalStatus = "failed"
+					finalError = fmt.Sprintf("hermes could not switch to model %q: %v", opts.Model, err)
+					resCh <- Result{
+						Status:     finalStatus,
+						Error:      finalError,
+						DurationMs: time.Since(startTime).Milliseconds(),
+						SessionID:  sessionID,
+					}
+					return
+				}
+			} else {
+				modelSet = true
 			}
-			b.cfg.Logger.Info("hermes session model set", "model", opts.Model)
+			if modelSet {
+				b.cfg.Logger.Info("hermes session model set", "model", opts.Model)
+			}
 		}
 
 		// 4. Send the prompt and wait for PromptResponse.
@@ -292,12 +334,14 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// initialize / session setup stays dropped, but every notification
 		// belonging to this turn is processed.
 		streamingCurrentTurn.Store(true)
-		_, err = c.request(runCtx, "session/prompt", map[string]any{
-			"sessionId": sessionID,
-			"prompt": []map[string]any{
-				{"type": "text", "text": prompt},
-			},
-		})
+		err = promptHermesSession(runCtx, c, sessionID, prompt)
+		if err != nil && resumedSession && isACPMissingSessionError(err) {
+			err = recoverStaleResume("session/prompt", err, true)
+			if err == nil {
+				streamingCurrentTurn.Store(true)
+				err = promptHermesSession(runCtx, c, sessionID, prompt)
+			}
+		}
 		if err != nil {
 			// If the request itself failed (not just context cancelled),
 			// check if the context was cancelled/timed out.
@@ -385,6 +429,36 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func createHermesSession(ctx context.Context, c *hermesClient, cwd, model string) (string, error) {
+	result, err := c.request(ctx, "session/new", buildHermesSessionParams(cwd, model))
+	if err != nil {
+		return "", fmt.Errorf("hermes session/new failed: %w", err)
+	}
+	sessionID := extractACPSessionID(result)
+	if sessionID == "" {
+		return "", fmt.Errorf("hermes session/new returned no session ID")
+	}
+	return sessionID, nil
+}
+
+func setHermesSessionModel(ctx context.Context, c *hermesClient, sessionID, model string) error {
+	_, err := c.request(ctx, "session/set_model", map[string]any{
+		"sessionId": sessionID,
+		"modelId":   model,
+	})
+	return err
+}
+
+func promptHermesSession(ctx context.Context, c *hermesClient, sessionID, prompt string) error {
+	_, err := c.request(ctx, "session/prompt", map[string]any{
+		"sessionId": sessionID,
+		"prompt": []map[string]any{
+			{"type": "text", "text": prompt},
+		},
+	})
+	return err
 }
 
 // ── hermesClient: ACP JSON-RPC 2.0 transport ──
@@ -1151,6 +1225,13 @@ func resolveResumedSessionID(requested string, response json.RawMessage) (string
 		return requested, false
 	}
 	return got, got != requested
+}
+
+func isACPMissingSessionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return acpMissingSessionErrorRe.MatchString(err.Error())
 }
 
 // buildHermesSessionParams constructs the params map for the ACP `session/new`
