@@ -762,6 +762,18 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	var assigneeTypesFilter []string
+	if rawTypes := r.URL.Query().Get("assignee_types"); rawTypes != "" {
+		for _, raw := range strings.Split(rawTypes, ",") {
+			if s := strings.TrimSpace(raw); s != "" {
+				if !isIssueActorType(s) {
+					writeError(w, http.StatusBadRequest, "invalid assignee_types")
+					return
+				}
+				assigneeTypesFilter = append(assigneeTypesFilter, s)
+			}
+		}
+	}
 	var assigneeFilter pgtype.UUID
 	if a := r.URL.Query().Get("assignee_id"); a != "" {
 		id, ok := parseUUIDOrBadRequest(w, a, "assignee_id")
@@ -818,6 +830,10 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("include_no_project") == "true" {
 		includeNoProject = pgtype.Bool{Bool: true, Valid: true}
 	}
+	labelIdsFilter, ok := parseUUIDListFilter(w, r.URL.Query().Get("label_ids"), "label_ids")
+	if !ok {
+		return
+	}
 	// involves_user_id widens the assignee filter to surface issues where the
 	// user is the indirect assignee (their owned agent, or a squad they belong
 	// to / lead / have an agent inside). Direct member-assignment is excluded
@@ -838,6 +854,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID:       wsUUID,
 			Priority:          priorityFilter,
 			Priorities:        priorityFilters,
+			AssigneeTypes:     assigneeTypesFilter,
 			AssigneeID:        assigneeFilter,
 			AssigneeIds:       assigneeIdsFilter,
 			AssigneePairs:     assigneePairs,
@@ -847,6 +864,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			ProjectID:         projectFilter,
 			ProjectIds:        projectIdsFilter,
 			IncludeNoProject:  includeNoProject,
+			LabelIds:          labelIdsFilter,
 			InvolvesUserID:    involvesUserFilter,
 		})
 		if err != nil {
@@ -910,6 +928,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		Status:            statusFilter,
 		Priority:          priorityFilter,
 		Priorities:        priorityFilters,
+		AssigneeTypes:     assigneeTypesFilter,
 		AssigneeID:        assigneeFilter,
 		AssigneeIds:       assigneeIdsFilter,
 		AssigneePairs:     assigneePairs,
@@ -919,6 +938,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		ProjectID:         projectFilter,
 		ProjectIds:        projectIdsFilter,
 		IncludeNoProject:  includeNoProject,
+		LabelIds:          labelIdsFilter,
 		InvolvesUserID:    involvesUserFilter,
 		Scheduled:         scheduledFilter,
 	})
@@ -933,6 +953,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		Status:            statusFilter,
 		Priority:          priorityFilter,
 		Priorities:        priorityFilters,
+		AssigneeTypes:     assigneeTypesFilter,
 		AssigneeID:        assigneeFilter,
 		AssigneeIds:       assigneeIdsFilter,
 		AssigneePairs:     assigneePairs,
@@ -942,6 +963,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		ProjectID:         projectFilter,
 		ProjectIds:        projectIdsFilter,
 		IncludeNoProject:  includeNoProject,
+		LabelIds:          labelIdsFilter,
 		InvolvesUserID:    involvesUserFilter,
 		Scheduled:         scheduledFilter,
 	})

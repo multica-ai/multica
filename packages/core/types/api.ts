@@ -42,6 +42,7 @@ export interface ListIssuesParams {
   status?: IssueStatus;
   priority?: IssuePriority;
   priorities?: IssuePriority[];
+  assignee_types?: IssueAssigneeType[];
   assignee_id?: string;
   assignee_ids?: string[];
   assignees?: Array<{ type: IssueAssigneeType; id: string }>;

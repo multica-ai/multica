@@ -10,7 +10,6 @@ import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { useQuery } from "@tanstack/react-query";
-import { filterIssues } from "../../issues/utils/filter";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -25,6 +24,7 @@ import { myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-st
 import { PageHeader } from "../../layout/page-header";
 import { useT } from "../../i18n";
 import { MyIssuesHeader } from "./my-issues-header";
+import { buildIssueListServerFilter } from "../../issues/utils/server-filter";
 
 export function MyIssuesPage() {
   const { t } = useT("my-issues");
@@ -63,11 +63,28 @@ export function MyIssuesPage() {
         return {};
     }
   }, [scope, user]);
+  const visibleStatuses = useMemo(() => {
+    if (statusFilters.length > 0)
+      return BOARD_STATUSES.filter((s) => statusFilters.includes(s));
+    return BOARD_STATUSES;
+  }, [statusFilters]);
+  const serverFilter = useMemo<MyIssuesFilter>(
+    () =>
+      buildIssueListServerFilter(
+        filter,
+        {
+          statusFilters,
+          priorityFilters,
+        },
+        visibleStatuses,
+      ),
+    [filter, priorityFilters, statusFilters, visibleStatuses],
+  );
 
   // For the "my" scope, use the combined query that fetches both assigned and
   // created issues. For all other scopes, use the single-filter query.
   const { data: myIssuesMy = [] } = useQuery({
-    ...myAllIssuesListOptions(wsId, user?.id ?? ""),
+    ...myAllIssuesListOptions(wsId, user?.id ?? "", serverFilter),
     enabled: scope === "my" && !!user,
   });
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
@@ -84,7 +101,7 @@ export function MyIssuesPage() {
     assigneeGroupFilter,
   );
   const statusIssuesQuery = useQuery({
-    ...myIssueListOptions(wsId, scope, filter),
+    ...myIssueListOptions(wsId, scope, serverFilter),
     enabled: !usesAssigneeBoard,
   });
   const assigneeGroupsQuery = useQuery({
@@ -106,29 +123,9 @@ export function MyIssuesPage() {
     ? assigneeGroupsQuery.isLoading
     : statusIssuesQuery.isLoading;
 
-  // Apply status/priority filters from view store
-  const issues = useMemo(
-    () =>
-      filterIssues(myIssues, {
-        statusFilters,
-        priorityFilters,
-        assigneeFilters: [],
-        includeNoAssignee: false,
-        creatorFilters: [],
-        projectFilters: [],
-        includeNoProject: false,
-        labelFilters: [],
-      }),
-    [myIssues, statusFilters, priorityFilters],
-  );
+  const issues = myIssues;
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
-
-  const visibleStatuses = useMemo(() => {
-    if (statusFilters.length > 0)
-      return BOARD_STATUSES.filter((s) => statusFilters.includes(s));
-    return BOARD_STATUSES;
-  }, [statusFilters]);
 
   const hiddenStatuses = useMemo(() => {
     return BOARD_STATUSES.filter((s) => !visibleStatuses.includes(s));
@@ -228,7 +225,7 @@ export function MyIssuesPage() {
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
                 myIssuesScope={scope}
-                myIssuesFilter={filter}
+                myIssuesFilter={serverFilter}
               />
             ) : (
               <ListView
@@ -236,7 +233,7 @@ export function MyIssuesPage() {
                 visibleStatuses={visibleStatuses}
                 childProgressMap={childProgressMap}
                 myIssuesScope={scope}
-                myIssuesFilter={filter}
+                myIssuesFilter={serverFilter}
               />
             )}
           </div>

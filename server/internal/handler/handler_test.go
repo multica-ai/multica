@@ -1437,12 +1437,37 @@ func TestListIssuesSupportsCompoundMobileFilters(t *testing.T) {
 		"assignee_id":   testUserID,
 		"project_id":    projectID,
 	})
+	agentID := createHandlerTestAgent(t, "Mobile filter non-member agent", nil)
+	wrongAssigneeType := createIssue("Mobile filter wrong assignee type", map[string]any{
+		"priority":      "low",
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+		"project_id":    projectID,
+	})
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/labels?workspace_id="+testWorkspaceID, map[string]any{
+		"name":  "Compound filter label",
+		"color": "#3b82f6",
+	})
+	testHandler.CreateLabel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateLabel: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var label LabelResponse
+	json.NewDecoder(w.Body).Decode(&label)
+	attachReq := newRequest("POST", "/api/issues/"+assignedProject.ID+"/labels", map[string]any{
+		"label_id": label.ID,
+	})
+	attachReq = withURLParam(attachReq, "id", assignedProject.ID)
+	testHandler.AttachLabel(httptest.NewRecorder(), attachReq)
 
 	query := fmt.Sprintf(
-		"/api/issues?workspace_id=%s&status=blocked&priorities=urgent,low&assignees=member:%s&include_no_assignee=true&project_ids=%s&include_no_project=true&limit=1000",
+		"/api/issues?workspace_id=%s&status=blocked&priorities=urgent,low&assignee_types=member&assignees=member:%s&include_no_assignee=true&project_ids=%s&include_no_project=true&label_ids=%s&limit=1000",
 		testWorkspaceID,
 		testUserID,
 		projectID,
+		label.ID,
 	)
 	w = httptest.NewRecorder()
 	req = newRequest("GET", query, nil)
@@ -1465,11 +1490,14 @@ func TestListIssuesSupportsCompoundMobileFilters(t *testing.T) {
 	if !seen[assignedProject.ID] {
 		t.Fatalf("ListIssues: expected assigned project issue %s in results", assignedProject.ID)
 	}
-	if !seen[noAssigneeNoProject.ID] {
-		t.Fatalf("ListIssues: expected no-assignee/no-project issue %s in results", noAssigneeNoProject.ID)
+	if seen[noAssigneeNoProject.ID] {
+		t.Fatalf("ListIssues: did not expect unlabeled no-assignee/no-project issue %s in results", noAssigneeNoProject.ID)
 	}
 	if seen[wrongPriority.ID] {
 		t.Fatalf("ListIssues: did not expect wrong-priority issue %s in results", wrongPriority.ID)
+	}
+	if seen[wrongAssigneeType.ID] {
+		t.Fatalf("ListIssues: did not expect wrong-assignee-type issue %s in results", wrongAssigneeType.ID)
 	}
 }
 

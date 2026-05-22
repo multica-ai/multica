@@ -25,7 +25,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/
 import { ListView } from "../issues/components/list-view";
 import { BatchActionToolbar } from "../issues/components/batch-action-toolbar";
 import { IssueDisplayControls } from "../issues/components/issues-header";
-import { filterIssues } from "../issues/utils/filter";
+import { buildIssueListServerFilter } from "../issues/utils/server-filter";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
 import { useT } from "../i18n";
 
@@ -75,9 +75,44 @@ export function ActorIssuesPanel({
         : { creator_id: actorId },
     [scope, actorId],
   );
+  const visibleStatuses = useMemo(() => {
+    if (statusFilters.length > 0) {
+      return BOARD_STATUSES.filter((s) => statusFilters.includes(s));
+    }
+    return BOARD_STATUSES;
+  }, [statusFilters]);
+  const serverFilter = useMemo<MyIssuesFilter>(
+    () =>
+      buildIssueListServerFilter(
+        queryFilter,
+        {
+          statusFilters,
+          priorityFilters,
+          assigneeFilters,
+          includeNoAssignee,
+          creatorFilters,
+          projectFilters,
+          includeNoProject,
+          labelFilters,
+        },
+        visibleStatuses,
+      ),
+    [
+      assigneeFilters,
+      creatorFilters,
+      includeNoAssignee,
+      includeNoProject,
+      labelFilters,
+      priorityFilters,
+      projectFilters,
+      queryFilter,
+      statusFilters,
+      visibleStatuses,
+    ],
+  );
   const queryScope = `${actorType}:${actorId}:${scope}`;
 
-  const rawIssuesQuery = useQuery(myIssueListOptions(wsId, queryScope, queryFilter));
+  const rawIssuesQuery = useQuery(myIssueListOptions(wsId, queryScope, serverFilter));
   const rawIssues = useMemo(
     () => rawIssuesQuery.data ?? [],
     [rawIssuesQuery.data],
@@ -94,30 +129,7 @@ export function ActorIssuesPanel({
     [actorId, actorType, rawIssues, scope],
   );
 
-  const filteredIssues = useMemo(
-    () =>
-      filterIssues(actorIssues, {
-        statusFilters,
-        priorityFilters,
-        assigneeFilters,
-        includeNoAssignee,
-        creatorFilters,
-        projectFilters,
-        includeNoProject,
-        labelFilters,
-      }),
-    [
-      actorIssues,
-      statusFilters,
-      priorityFilters,
-      assigneeFilters,
-      includeNoAssignee,
-      creatorFilters,
-      projectFilters,
-      includeNoProject,
-      labelFilters,
-    ],
-  );
+  const filteredIssues = actorIssues;
 
   const issues = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -135,13 +147,6 @@ export function ActorIssuesPanel({
   const { data: childProgressMap = new Map() } = useQuery(
     childIssueProgressOptions(wsId),
   );
-
-  const visibleStatuses = useMemo(() => {
-    if (statusFilters.length > 0) {
-      return BOARD_STATUSES.filter((s) => statusFilters.includes(s));
-    }
-    return BOARD_STATUSES;
-  }, [statusFilters]);
 
   if (isLoading) {
     return <ActorIssuesSkeleton />;
@@ -212,7 +217,7 @@ export function ActorIssuesPanel({
               visibleStatuses={visibleStatuses}
               childProgressMap={childProgressMap}
               myIssuesScope={queryScope}
-              myIssuesFilter={queryFilter}
+              myIssuesFilter={serverFilter}
             />
           </div>
         )}
