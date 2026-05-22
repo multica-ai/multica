@@ -20,10 +20,20 @@ $ServerURL = if ($env:MULTICA_SERVER) { $env:MULTICA_SERVER } else { $DefaultSer
 $Version = $env:MULTICA_VERSION
 
 # Resolve OBS paths based on channel
-if ($Channel -eq "test") {
-    $OBSPrefix = "cli-test"
-} else {
-    $OBSPrefix = "cli"
+switch ($Channel) {
+    "" {
+        $Channel = "prod"
+        $OBSPrefix = "cli"
+    }
+    "prod" {
+        $OBSPrefix = "cli"
+    }
+    "test" {
+        $OBSPrefix = "cli-test"
+    }
+    default {
+        Exit-Fatal "Unsupported channel: $Channel (supported: prod, test)"
+    }
 }
 $OBSBase = "$OBSHost/$OBSPrefix/releases"
 $ManifestURL = "$OBSHost/$OBSPrefix/manifest.json"
@@ -51,7 +61,11 @@ function Get-LatestVersion {
 
     # Try server endpoint first
     try {
-        $version = (Invoke-RestMethod -Uri "$ServerURL/install/latest-cli-version" -TimeoutSec 10).Trim()
+        $versionEndpoint = "$ServerURL/install/latest-cli-version"
+        if ($Channel -eq "test") {
+            $versionEndpoint = "$versionEndpoint?channel=test"
+        }
+        $version = (Invoke-RestMethod -Uri $versionEndpoint -TimeoutSec 10).Trim()
         if ($version) {
             return $version.TrimStart("v")
         }
