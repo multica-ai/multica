@@ -190,7 +190,10 @@ RETURNING *;
 
 -- name: UpdateAutopilotRunCompleted :one
 UPDATE autopilot_run
-SET status = 'completed', completed_at = now(), result = sqlc.narg('result')
+SET status = 'completed',
+    completed_at = now(),
+    result = sqlc.narg('result'),
+    previous_failure_reason = COALESCE(previous_failure_reason, failure_reason)
 WHERE id = $1
 RETURNING *;
 
@@ -254,7 +257,8 @@ RETURNING *;
 
 -- name: GetAutopilotRunByIssue :one
 SELECT * FROM autopilot_run
-WHERE issue_id = $1 AND status IN ('issue_created', 'running')
+WHERE issue_id = $1 AND status IN ('issue_created', 'running', 'failed', 'skipped')
+ORDER BY created_at DESC
 LIMIT 1;
 
 -- name: FailAutopilotRunsByIssue :exec

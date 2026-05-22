@@ -342,12 +342,21 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 
 	switch issue.Status {
 	case "done", "in_review":
+		wasFailed := run.Status == "failed" || run.Status == "skipped"
 		updatedRun, err := s.Queries.UpdateAutopilotRunCompleted(ctx, db.UpdateAutopilotRunCompletedParams{
 			ID: run.ID,
 		})
 		if err != nil {
 			slog.Warn("failed to complete autopilot run", "run_id", util.UUIDToString(run.ID), "error", err)
 			return
+		}
+		if wasFailed {
+			slog.Info("autopilot run recovered from failed to completed via issue sync",
+				"run_id", util.UUIDToString(run.ID),
+				"issue_id", util.UUIDToString(issue.ID),
+				"previous_status", run.Status,
+				"previous_failure_reason", run.FailureReason.String,
+			)
 		}
 		s.captureAutopilotRunCompleted(autopilot, updatedRun)
 		s.publishRunDone(wsID, updatedRun, "completed")
