@@ -233,15 +233,22 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 	if path == "" {
 		return "", false, fmt.Errorf("`openclaw config file` returned empty output")
 	}
-	if path == "~" || strings.HasPrefix(path, "~/") {
+	if path == "~" || strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
 		home, herr := os.UserHomeDir()
 		if herr != nil {
 			return "", false, fmt.Errorf("expand `~` in openclaw config path: %w", herr)
 		}
-		if path == "~" {
+		switch {
+		case path == "~":
 			path = home
-		} else {
+		case strings.HasPrefix(path, "~/"):
 			path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
+		case strings.HasPrefix(path, `~\`):
+			// Windows CLI returns backslash separators; normalise to
+			// forward slashes so filepath.Join produces a clean path
+			// on any OS.
+			rest := strings.ReplaceAll(strings.TrimPrefix(path, `~\`), `\`, "/")
+			path = filepath.Join(home, rest)
 		}
 	}
 	if !filepath.IsAbs(path) {
