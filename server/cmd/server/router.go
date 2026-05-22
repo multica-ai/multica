@@ -637,9 +637,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/summary", h.GetWorkspaceUsageSummary)
 			})
 
-			// Dashboard — workspace-wide token + run-time rollups for the
-			// "/{slug}/dashboard" page. Optional ?project_id filter scopes
-			// the rollup to a single project.
+			// Dashboard — workspace-wide token/run-time rollups for the
+			// "/{slug}/usage" and "/{slug}/agent-dashboard" pages. Optional
+			// ?project_id filter scopes usage rollups to a single project.
 			r.Route("/api/dashboard", func(r chi.Router) {
 				r.Get("/usage/daily", h.GetDashboardUsageDaily)
 				r.Get("/usage/by-agent", h.GetDashboardUsageByAgent)
@@ -649,6 +649,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/local-runtime/by-runner", h.GetDashboardLocalRunTimeByRunner)
 				r.Get("/agent-runtime", h.GetDashboardAgentRunTime)
 				r.Get("/runtime/daily", h.GetDashboardRunTimeDaily)
+				r.Get("/agent-runs", h.GetAgentRunDashboard)
+				r.Get("/agent-runs/{taskId}", h.GetAgentRunDashboardRun)
 			})
 
 			// Runtimes

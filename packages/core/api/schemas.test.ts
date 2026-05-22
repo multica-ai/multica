@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { DuplicateIssueErrorBodySchema } from "./schemas";
+import {
+  AgentRunDashboardSchema,
+  AgentRunDashboardRunDetailSchema,
+  DuplicateIssueErrorBodySchema,
+  EMPTY_AGENT_RUN_DASHBOARD,
+  EMPTY_AGENT_RUN_DETAIL,
+} from "./schemas";
+import { parseWithFallback } from "./schema";
 
 // The duplicate-issue branch in create-issue.tsx feeds ApiError.body
 // (typed as `unknown`) through this schema. Any future server drift that
@@ -47,5 +54,35 @@ describe("DuplicateIssueErrorBodySchema", () => {
   it("accepts a missing error field (it is optional)", () => {
     const { error: _omit, ...without } = valid;
     expect(DuplicateIssueErrorBodySchema.safeParse(without).success).toBe(true);
+  });
+});
+
+describe("agent run dashboard schemas", () => {
+  it("falls back to empty dashboard data for malformed payloads", () => {
+    const out = parseWithFallback(
+      {
+        summary: { total_runs: "oops" },
+        daily: null,
+      },
+      AgentRunDashboardSchema,
+      EMPTY_AGENT_RUN_DASHBOARD,
+      { endpoint: "GET /api/dashboard/agent-runs" },
+    );
+
+    expect(out).toEqual(EMPTY_AGENT_RUN_DASHBOARD);
+  });
+
+  it("falls back to empty run detail data for malformed payloads", () => {
+    const out = parseWithFallback(
+      {
+        run: { id: 123 },
+        timeline: null,
+      },
+      AgentRunDashboardRunDetailSchema,
+      EMPTY_AGENT_RUN_DETAIL,
+      { endpoint: "GET /api/dashboard/agent-runs/{taskId}" },
+    );
+
+    expect(out).toEqual(EMPTY_AGENT_RUN_DETAIL);
   });
 });

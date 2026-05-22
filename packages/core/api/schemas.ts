@@ -294,6 +294,171 @@ const DashboardRunTimeDailySchema = z.object({
 
 export const DashboardRunTimeDailyListSchema = z.array(DashboardRunTimeDailySchema);
 
+const AgentRunDashboardSummarySchema = z.object({
+  total_runs: z.number().default(0),
+  successful_runs: z.number().default(0),
+  failed_runs: z.number().default(0),
+  success_rate: z.number().default(0),
+  active_agent_count: z.number().default(0),
+  average_duration_seconds: z.number().default(0),
+}).passthrough();
+
+const AgentRunDashboardDailySchema = z.object({
+  date: z.string(),
+  total_runs: z.number().default(0),
+  successful_runs: z.number().default(0),
+  failed_runs: z.number().default(0),
+  success_rate: z.number().default(0),
+}).passthrough();
+
+const AgentRunDashboardHeatmapCellSchema = z.object({
+  weekday: z.number().default(0),
+  hour: z.number().default(0),
+  run_count: z.number().default(0),
+}).passthrough();
+
+const AgentRunDashboardFailureReasonSchema = z.object({
+  reason: z.string().default("agent_error"),
+  count: z.number().default(0),
+}).passthrough();
+
+const AgentRunDashboardAgentSchema = z.object({
+  agent_id: z.string(),
+  agent_name: z.string().default(""),
+  agent_status: z.string().default("idle"),
+  total_runs: z.number().default(0),
+  successful_runs: z.number().default(0),
+  failed_runs: z.number().default(0),
+  success_rate: z.number().default(0),
+  average_duration_seconds: z.number().default(0),
+  last_run_at: z.string().nullable().default(null),
+  last_task_id: z.string().nullable().default(null),
+  last_status: z.string().nullable().default(null),
+  project_id: z.string().nullable().default(null),
+  project_title: z.string().nullable().default(null),
+  project_count: z.number().default(0),
+  available_actions: z.array(z.string()).default([]),
+}).passthrough();
+
+const AgentRunDashboardRunSchema = z.object({
+  id: z.string(),
+  agent_id: z.string(),
+  agent_name: z.string().default(""),
+  issue_id: z.string().nullable().default(null),
+  issue_title: z.string().nullable().default(null),
+  issue_number: z.number().nullable().default(null),
+  project_id: z.string().nullable().default(null),
+  project_title: z.string().nullable().default(null),
+  status: z.string().default("queued"),
+  run_at: z.string().default(""),
+  started_at: z.string().nullable().default(null),
+  completed_at: z.string().nullable().default(null),
+  duration_seconds: z.number().default(0),
+  failure_reason: z.string().default(""),
+  error: z.string().nullable().default(null),
+  attempt: z.number().default(1),
+  max_attempts: z.number().default(1),
+}).passthrough();
+
+const AgentRunDashboardRetryDistributionSchema = z.object({
+  attempt: z.number().default(1),
+  count: z.number().default(0),
+}).passthrough();
+
+export const EMPTY_AGENT_RUN_DASHBOARD = {
+  summary: {
+    total_runs: 0,
+    successful_runs: 0,
+    failed_runs: 0,
+    success_rate: 0,
+    active_agent_count: 0,
+    average_duration_seconds: 0,
+  },
+  daily: [],
+  heatmap: [],
+  failure_reasons: [],
+  agents: [],
+  recent_runs: [],
+  recent_failures: [],
+  retry_distribution: [],
+};
+
+export const AgentRunDashboardSchema = z.object({
+  summary: AgentRunDashboardSummarySchema.default(
+    EMPTY_AGENT_RUN_DASHBOARD.summary,
+  ),
+  daily: z.array(AgentRunDashboardDailySchema).default([]),
+  heatmap: z.array(AgentRunDashboardHeatmapCellSchema).default([]),
+  failure_reasons: z.array(AgentRunDashboardFailureReasonSchema).default([]),
+  agents: z.array(AgentRunDashboardAgentSchema).default([]),
+  recent_runs: z.array(AgentRunDashboardRunSchema).default([]),
+  recent_failures: z.array(AgentRunDashboardRunSchema).default([]),
+  retry_distribution: z.array(AgentRunDashboardRetryDistributionSchema).default([]),
+}).passthrough();
+
+const AgentRunTimelineEventSchema = z.object({
+  key: z.string().default("event"),
+  label: z.string().default("Event"),
+  timestamp: z.string().default(""),
+}).passthrough();
+
+const AgentRunDurationBreakdownSchema = z.object({
+  total_seconds: z.number().default(0),
+  llm_seconds: z.number().default(0),
+  tool_call_seconds: z.number().default(0),
+  network_wait_seconds: z.number().default(0),
+}).passthrough();
+
+const AgentRunMessageSchema = z.object({
+  seq: z.number().default(0),
+  type: z.string().default("text"),
+  tool: z.string().optional(),
+  content: z.string().optional(),
+  input: z.record(z.string(), z.unknown()).optional(),
+  output: z.string().optional(),
+  created_at: z.string().default(""),
+}).passthrough();
+
+export const EMPTY_AGENT_RUN_DETAIL = {
+  run: {
+    id: "",
+    agent_id: "",
+    agent_name: "",
+    issue_id: null,
+    issue_title: null,
+    issue_number: null,
+    project_id: null,
+    project_title: null,
+    status: "queued",
+    run_at: "",
+    started_at: null,
+    completed_at: null,
+    duration_seconds: 0,
+    failure_reason: "",
+    error: null,
+    attempt: 1,
+    max_attempts: 1,
+  },
+  timeline: [],
+  duration_breakdown: {
+    total_seconds: 0,
+    llm_seconds: 0,
+    tool_call_seconds: 0,
+    network_wait_seconds: 0,
+  },
+  messages: [],
+};
+
+export const AgentRunDashboardRunDetailSchema = z.object({
+  run: AgentRunDashboardRunSchema.default(EMPTY_AGENT_RUN_DETAIL.run),
+  timeline: z.array(AgentRunTimelineEventSchema).default([]),
+  duration_breakdown: AgentRunDurationBreakdownSchema.default(
+    EMPTY_AGENT_RUN_DETAIL.duration_breakdown,
+  ),
+  messages: z.array(AgentRunMessageSchema).default([]),
+  result: z.unknown().optional(),
+}).passthrough();
+
 // ---------------------------------------------------------------------------
 // Agent template catalog — `/api/agent-templates*` and the
 // create-from-template response. The desktop app's create-agent picker

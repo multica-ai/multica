@@ -82,6 +82,7 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "squads",
   "inbox",
   "my-issues",
+  "agent-dashboard",
   "wiki",
   "usage",
   "runtimes",

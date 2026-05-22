@@ -19,6 +19,7 @@ function workspaceScoped(slug: string) {
   return {
     root: () => `${ws}/issues`,
     usage: () => `${ws}/usage`,
+    agentDashboard: () => `${ws}/agent-dashboard`,
     issues: () => `${ws}/issues`,
     issueDetail: (id: string, opts?: { commentId?: string }) => {
       const path = `${ws}/issues/${encode(id)}`;

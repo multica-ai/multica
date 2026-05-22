@@ -21,6 +21,7 @@ import enModals from "./en/modals.json";
 import enRuntimes from "./en/runtimes.json";
 import enLayout from "./en/layout.json";
 import enUsage from "./en/usage.json";
+import enAgentDashboard from "./en/agent-dashboard.json";
 import enUi from "./en/ui.json";
 import enSquads from "./en/squads.json";
 import zhHansCommon from "./zh-Hans/common.json";
@@ -45,6 +46,7 @@ import zhHansModals from "./zh-Hans/modals.json";
 import zhHansRuntimes from "./zh-Hans/runtimes.json";
 import zhHansLayout from "./zh-Hans/layout.json";
 import zhHansUsage from "./zh-Hans/usage.json";
+import zhHansAgentDashboard from "./zh-Hans/agent-dashboard.json";
 import zhHansUi from "./zh-Hans/ui.json";
 import zhHansSquads from "./zh-Hans/squads.json";
 
@@ -75,6 +77,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     runtimes: enRuntimes,
     layout: enLayout,
     usage: enUsage,
+    "agent-dashboard": enAgentDashboard,
     ui: enUi,
     squads: enSquads,
   },
@@ -101,6 +104,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     runtimes: zhHansRuntimes,
     layout: zhHansLayout,
     usage: zhHansUsage,
+    "agent-dashboard": zhHansAgentDashboard,
     ui: zhHansUi,
     squads: zhHansSquads,
   },

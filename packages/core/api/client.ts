@@ -57,6 +57,8 @@ import type {
   DashboardLocalRunTimeByRunner,
   DashboardAgentRunTime,
   DashboardRunTimeDaily,
+  AgentRunDashboard,
+  AgentRunDashboardRunDetail,
   RuntimeUpdate,
   CLIUpdateManifest,
   RuntimePing,
@@ -163,6 +165,10 @@ import {
   DashboardRunTimeDailyListSchema,
   DashboardLocalRunTimeByRunnerListSchema,
   DashboardLocalUsageByRunnerListSchema,
+  AgentRunDashboardRunDetailSchema,
+  AgentRunDashboardSchema,
+  EMPTY_AGENT_RUN_DASHBOARD,
+  EMPTY_AGENT_RUN_DETAIL,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
   EMPTY_AGENT_TEMPLATE_DETAIL,
@@ -1317,6 +1323,44 @@ export class ApiClient {
       DashboardRunTimeDailyListSchema,
       [],
       { endpoint: "GET /api/dashboard/runtime/daily" },
+    );
+  }
+
+  async getAgentRunDashboard(params: {
+    days?: number;
+    agent_ids?: string[];
+    start_hour?: number;
+    end_hour?: number;
+    tz?: string;
+    limit?: number;
+  }): Promise<AgentRunDashboard> {
+    const search = new URLSearchParams();
+    if (params.days) search.set("days", String(params.days));
+    if (params.start_hour !== undefined) search.set("start_hour", String(params.start_hour));
+    if (params.end_hour !== undefined) search.set("end_hour", String(params.end_hour));
+    if (params.tz) search.set("tz", params.tz);
+    if (params.limit) search.set("limit", String(params.limit));
+    for (const id of params.agent_ids ?? []) {
+      if (id) search.append("agent_id", id);
+    }
+    const raw = await this.fetch<unknown>(`/api/dashboard/agent-runs?${search}`);
+    return parseWithFallback<AgentRunDashboard>(
+      raw,
+      AgentRunDashboardSchema,
+      EMPTY_AGENT_RUN_DASHBOARD,
+      { endpoint: "GET /api/dashboard/agent-runs" },
+    );
+  }
+
+  async getAgentRunDashboardRunDetail(
+    taskId: string,
+  ): Promise<AgentRunDashboardRunDetail> {
+    const raw = await this.fetch<unknown>(`/api/dashboard/agent-runs/${taskId}`);
+    return parseWithFallback<AgentRunDashboardRunDetail>(
+      raw,
+      AgentRunDashboardRunDetailSchema,
+      EMPTY_AGENT_RUN_DETAIL,
+      { endpoint: "GET /api/dashboard/agent-runs/{taskId}" },
     );
   }
 

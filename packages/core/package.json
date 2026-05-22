@@ -56,6 +56,8 @@
     "./runtimes/custom-pricing-store": "./runtimes/custom-pricing-store.ts",
     "./dashboard": "./dashboard/index.ts",
     "./dashboard/queries": "./dashboard/queries.ts",
+    "./agent-dashboard": "./agent-dashboard/index.ts",
+    "./agent-dashboard/queries": "./agent-dashboard/queries.ts",
     "./agents": "./agents/index.ts",
     "./agents/queries": "./agents/queries.ts",
     "./agents/derive-presence": "./agents/derive-presence.ts",
