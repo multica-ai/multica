@@ -43,12 +43,9 @@ func TestBuildCommentReplyInstructionsCodexLinux(t *testing.T) {
 }
 
 // TestBuildCommentReplyInstructionsNonCodexLinux pins that every non-Codex
-// provider on Linux/macOS gets the lightweight pre-#1795 inline template.
-// The "MUST stdin" mandate was originally a Codex-specific fix that
-// #1795 / #1851 accidentally spread to every provider, breaking Windows
-// non-ASCII for all of them (#2198 / #2236 / #2376). Non-Codex providers
-// handle inline escaping correctly and the CLI server-decodes `\n` etc.,
-// so the inline template works on every non-Windows platform.
+// provider on Linux/macOS gets the same single-quoted HEREDOC template as
+// Codex. Inline `--content "..."` lets the agent shell expand `$()`,
+// variables, quotes, and code snippets before multica receives the body.
 //
 // Not parallel: mutates the package-level runtimeGOOS.
 func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
@@ -66,7 +63,9 @@ func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
 				got := BuildCommentReplyInstructions(provider, issueID, triggerID)
 
 				for _, want := range []string{
-					"multica issue comment add " + issueID + " --parent " + triggerID + " --content \"...\"",
+					"multica issue comment add " + issueID + " --parent " + triggerID + " --content-stdin",
+					"Always use `--content-stdin` with a single-quoted HEREDOC",
+					"<<'COMMENT'",
 					"do NOT reuse --parent values from previous turns",
 					"If you decide to reply",
 				} {
@@ -75,17 +74,12 @@ func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
 					}
 				}
 
-				// Non-Codex / non-Windows providers must NOT receive the
-				// Codex-specific "MUST stdin" mandate or its HEREDOC
-				// template — that was the over-spread of #1795 / #1851.
 				for _, banned := range []string{
-					"Always use `--content-stdin`",
-					"<<'COMMENT'",
-					"--parent " + triggerID + " --content-stdin",
 					"--parent " + triggerID + " --content-file",
+					"--content \"...\"",
 				} {
 					if strings.Contains(got, banned) {
-						t.Errorf("%s reply instructions still steers at codex template: %q\n---\n%s", name, banned, got)
+						t.Errorf("%s reply instructions should not contain %q\n---\n%s", name, banned, got)
 					}
 				}
 			})
