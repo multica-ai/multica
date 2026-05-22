@@ -256,6 +256,7 @@ vi.mock("@multica/core/issues/config", () => ({
   ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
   BOARD_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked"],
   STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
+  UNKNOWN_STATUS_CONFIG: { label: "Unknown", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
   STATUS_CONFIG: {
     backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
     todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
@@ -264,6 +265,20 @@ vi.mock("@multica/core/issues/config", () => ({
     done: { label: "Done", iconColor: "text-info", hoverBg: "hover:bg-info/10" },
     blocked: { label: "Blocked", iconColor: "text-destructive", hoverBg: "hover:bg-destructive/10" },
     cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
+  },
+  isIssueStatus: (status: string) =>
+    ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"].includes(status),
+  getStatusConfig: (status: string) => {
+    const config = {
+      backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
+      todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
+      in_progress: { label: "In Progress", iconColor: "text-warning", hoverBg: "hover:bg-warning/10" },
+      in_review: { label: "In Review", iconColor: "text-success", hoverBg: "hover:bg-success/10" },
+      done: { label: "Done", iconColor: "text-info", hoverBg: "hover:bg-info/10" },
+      blocked: { label: "Blocked", iconColor: "text-destructive", hoverBg: "hover:bg-destructive/10" },
+      cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
+    } as Record<string, { label: string; iconColor: string; hoverBg: string }>;
+    return config[status] ?? { label: "Unknown", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" };
   },
   PRIORITY_ORDER: ["urgent", "high", "medium", "low", "none"],
   PRIORITY_CONFIG: {
@@ -725,6 +740,21 @@ describe("IssueDetail (shared)", () => {
     // The "+ Add property" affordance is always offered while any
     // optional field is still hidden.
     expect(screen.getByText("Add property")).toBeInTheDocument();
+  });
+
+  it("renders issue detail when the API returns an unknown status", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      status: "triage",
+    } as unknown as Issue);
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("triage")).toBeInTheDocument();
   });
 
   it("opens the shared assignee picker from the issue-detail overflow menu", async () => {
