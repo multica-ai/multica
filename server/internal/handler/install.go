@@ -20,7 +20,6 @@ var installSH string
 var installPS1 string
 
 const (
-	manifestURL       = "https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json"
 	versionCacheTTL   = 5 * time.Minute
 	manifestFetchTime = 10 * time.Second
 )
@@ -42,22 +41,47 @@ type manifestAsset struct {
 }
 
 var (
-	cachedVersion   string
-	cacheExpiry     time.Time
-	versionCacheMu  sync.RWMutex
+	prodManifestURL        = "https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json"
+	testManifestURL        = "https://multica.obs.cn-east-3.myhuaweicloud.com/cli-test/manifest.json"
+	cachedVersionByChannel = map[string]string{}
+	cacheExpiryByChannel   = map[string]time.Time{}
+	versionCacheMu         sync.RWMutex
 )
 
-func fetchLatestCLIVersion() (string, error) {
+func normalizeCLIChannel(channel string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(channel)) {
+	case "", "prod", "production":
+		return "prod", nil
+	case "test":
+		return "test", nil
+	default:
+		return "", fmt.Errorf("unsupported channel %q", channel)
+	}
+}
+
+func manifestURLForChannel(channel string) string {
+	if channel == "test" {
+		return testManifestURL
+	}
+	return prodManifestURL
+}
+
+func fetchLatestCLIVersion(channel string) (string, error) {
+	channel, err := normalizeCLIChannel(channel)
+	if err != nil {
+		return "", err
+	}
+
 	versionCacheMu.RLock()
-	if time.Now().Before(cacheExpiry) && cachedVersion != "" {
-		v := cachedVersion
+	if expiresAt := cacheExpiryByChannel[channel]; time.Now().Before(expiresAt) && cachedVersionByChannel[channel] != "" {
+		v := cachedVersionByChannel[channel]
 		versionCacheMu.RUnlock()
 		return v, nil
 	}
 	versionCacheMu.RUnlock()
 
 	client := &http.Client{Timeout: manifestFetchTime}
-	resp, err := client.Get(manifestURL)
+	resp, err := client.Get(manifestURLForChannel(channel))
 	if err != nil {
 		return "", fmt.Errorf("fetch manifest: %w", err)
 	}
@@ -83,8 +107,8 @@ func fetchLatestCLIVersion() (string, error) {
 	}
 
 	versionCacheMu.Lock()
-	cachedVersion = version
-	cacheExpiry = time.Now().Add(versionCacheTTL)
+	cachedVersionByChannel[channel] = version
+	cacheExpiryByChannel[channel] = time.Now().Add(versionCacheTTL)
 	versionCacheMu.Unlock()
 
 	return version, nil
@@ -108,9 +132,15 @@ func (h *Handler) ServeInstallPS1(w http.ResponseWriter, r *http.Request) {
 
 // ServeLatestCLIVersion returns the latest CLI version as plain text.
 func (h *Handler) ServeLatestCLIVersion(w http.ResponseWriter, r *http.Request) {
-	version, err := fetchLatestCLIVersion()
+	channel, err := normalizeCLIChannel(r.URL.Query().Get("channel"))
 	if err != nil {
-		slog.Error("failed to fetch latest CLI version", "error", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	version, err := fetchLatestCLIVersion(channel)
+	if err != nil {
+		slog.Error("failed to fetch latest CLI version", "channel", channel, "error", err)
 		http.Error(w, "failed to determine latest version", http.StatusBadGateway)
 		return
 	}

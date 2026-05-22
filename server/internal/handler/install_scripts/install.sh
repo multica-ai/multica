@@ -71,11 +71,18 @@ while [ $# -gt 0 ]; do
 done
 
 # --- Resolve OBS paths based on channel ---
-if [ "$CHANNEL" = "test" ]; then
-    OBS_PREFIX="cli-test"
-else
-    OBS_PREFIX="cli"
-fi
+case "$CHANNEL" in
+    ""|prod)
+        CHANNEL="prod"
+        OBS_PREFIX="cli"
+        ;;
+    test)
+        OBS_PREFIX="cli-test"
+        ;;
+    *)
+        die "Unsupported channel: $CHANNEL (supported: prod, test)"
+        ;;
+esac
 OBS_BASE="${OBS_HOST}/${OBS_PREFIX}/releases"
 MANIFEST_URL="${OBS_HOST}/${OBS_PREFIX}/manifest.json"
 
@@ -118,7 +125,11 @@ fetch_latest_version() {
     info "Fetching latest CLI version..."
 
     # Try the server endpoint first (returns plain text, no JSON parsing needed)
-    VERSION=$(curl -fsSL "${SERVER_URL}/install/latest-cli-version" 2>/dev/null | tr -d '[:space:]') || true
+    version_endpoint="${SERVER_URL}/install/latest-cli-version"
+    if [ "$CHANNEL" = "test" ]; then
+        version_endpoint="${version_endpoint}?channel=test"
+    fi
+    VERSION=$(curl -fsSL "$version_endpoint" 2>/dev/null | tr -d '[:space:]') || true
 
     if [ -z "$VERSION" ]; then
         # Fallback: parse manifest.json from OBS
