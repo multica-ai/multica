@@ -150,4 +150,31 @@ describe("workspace mention targets", () => {
 
     expect(sorted.map((target) => target.label)).toEqual(["Zoe", "Bot", "Alice"]);
   });
+
+  it("prioritizes the current user's own agents and demotes All members", () => {
+    const sorted = sortMentionTargetsByFrequency(
+      [
+        { id: "all", label: "All members", type: "all" },
+        { id: "alice", label: "Alice", type: "member" },
+        { id: "shared-bot", label: "Aardvark Shared", type: "agent" },
+        { id: "my-bot", label: "My Bot", type: "agent" },
+      ],
+      [
+        {
+          actor_type: "member",
+          actor_id: "alice",
+          frequency: 9,
+          last_mentioned_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      { ownAgentIds: ["my-bot"] },
+    );
+
+    expect(sorted.map((target) => `${target.type}:${target.id}`)).toEqual([
+      "agent:my-bot",
+      "member:alice",
+      "agent:shared-bot",
+      "all:all",
+    ]);
+  });
 });

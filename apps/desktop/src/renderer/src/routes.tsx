@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import {
   createMemoryRouter,
-  Navigate,
   Outlet,
   useMatches,
   useParams,
@@ -15,6 +14,7 @@ import { AgentDetailPage } from "./pages/agent-detail-page";
 import { MemberDetailPage } from "./pages/member-detail-page";
 import { RuntimeDetailPage } from "./pages/runtime-detail-page";
 import { AttachmentPreviewRoute } from "./pages/attachment-preview-page";
+import { HtmlArtifactPreviewRoute } from "./pages/html-artifact-preview-page";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
 import { DashboardPage } from "@multica/views/dashboard";
@@ -71,7 +71,7 @@ function WikiPageRoute() {
 /**
  * Route definitions shared by all tabs.
  *
- * Every tab path is workspace-scoped: `/{slug}/{route}/...`. Pre-workspace
+ * Every tab path is workspace-scoped: `/{slug}` or `/{slug}/{route}/...`. Pre-workspace
  * flows (create workspace, accept invite) are NOT routes — they render as a
  * window-level overlay via `WindowOverlay`, dispatched by the navigation
  * adapter's transition-path interception. The `activeWorkspaceSlug` in the
@@ -94,7 +94,7 @@ export const appRoutes: RouteObject[] = [
         path: ":workspaceSlug",
         element: <WorkspaceRouteLayout />,
         children: [
-          { index: true, element: <Navigate to="issues" replace /> },
+          { index: true, element: null, handle: { title: "Workspace" } },
           {
             path: "issues",
             element: (
@@ -174,6 +174,11 @@ export const appRoutes: RouteObject[] = [
             path: "attachments/:id/preview",
             element: <AttachmentPreviewRoute />,
             handle: { title: "Attachment" },
+          },
+          {
+            path: "html-preview",
+            element: <HtmlArtifactPreviewRoute />,
+            handle: { title: "HTML Preview" },
           },
           {
             path: "usage",

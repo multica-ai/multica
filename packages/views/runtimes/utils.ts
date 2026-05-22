@@ -732,15 +732,16 @@ export function aggregateCostByHour(rows: RuntimeUsageByHour[]): CostByKey[] {
   return [...buckets.values()];
 }
 
-
-// "Cost · 30D" KPI hint: percentage delta vs. the immediately prior window
-// of equal length. Returns null when there's no comparable prior data
-// (caller renders nothing rather than a misleading "+∞%").
 // Sum of estimated cost over the trailing window
 //   [today − offsetDays − daysBack, today − offsetDays).
 // `offsetDays = 0, daysBack = 7` → last 7 days.
 // `offsetDays = 7, daysBack = 7` → the 7 days *before* the last 7 (the
 // "previous" window for the runtime-list ↑/↓ delta).
+//
+// "Today" is read in `tz` (the viewer's timezone) so the cutoff lands on
+// the same calendar boundary the backend used when bucketing rows — the
+// rows arrive bucketed in the viewer's tz, so slicing them with the JS
+// engine's local tz would shift the window by a day at the edges.
 //
 // Walks the same daily-grain `RuntimeUsage` rows that `aggregateByDate` uses,
 // so the runtime-list cost stays consistent with the runtime-detail KPIs
@@ -748,15 +749,12 @@ export function aggregateCostByHour(rows: RuntimeUsageByHour[]): CostByKey[] {
 export function computeCostInWindow(
   rows: readonly RuntimeUsage[],
   daysBack: number,
+  tz: string,
   offsetDays: number = 0,
 ): number {
-  const now = new Date();
-  const end = new Date(now);
-  end.setDate(now.getDate() - offsetDays);
-  const start = new Date(now);
-  start.setDate(now.getDate() - offsetDays - daysBack);
-  const isoEnd = end.toISOString().slice(0, 10);
-  const isoStart = start.toISOString().slice(0, 10);
+  const today = todayIso(tz);
+  const isoEnd = addDaysIso(today, -offsetDays);
+  const isoStart = addDaysIso(today, -offsetDays - daysBack);
   let total = 0;
   for (const r of rows) {
     if (r.date >= isoStart && r.date < isoEnd) total += estimateCost(r);

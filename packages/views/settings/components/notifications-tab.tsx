@@ -108,7 +108,7 @@ const webhookTemplatePlaceholder = `{
   }
 }`;
 
-const openclawWeixinBindPrompt = "将multica cli更新到最新版，然后用 multica notify bind-wechat 绑定微信通知";
+const openclawWeixinBindPrompt = "先执行 `curl -fsSL https://multica.wujieai.com/install.sh | sh -s -- --restart` 将 multica cli 更新到最新版并重启 daemon，然后用 multica notify bind-wechat 绑定微信通知";
 
 function preferenceKey(pref: NotificationChannelPreference) {
   return `${pref.channel}:${pref.event_type}`;

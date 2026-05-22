@@ -9,8 +9,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // setupRerunTestFixture creates an issue assigned to the integration test
@@ -165,6 +165,134 @@ func TestGetLastTaskSessionExcludesAPIInvalidRequest(t *testing.T) {
 	})
 	if err == nil && prior.SessionID.Valid {
 		t.Fatalf("expected no resumable session for api_invalid_request, got %q", prior.SessionID.String)
+	}
+}
+
+// TestGetLastTaskSessionExcludesCodexSemanticInactivity covers Codex
+// semantic inactivity timeouts: the failed task did establish a session, but
+// resuming it can replay the same stuck Codex state. The resume lookup must
+// skip that session.
+func TestGetLastTaskSessionExcludesCodexSemanticInactivity(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'HEALTHY-SESSION', '/tmp/healthy', 'timeout')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert healthy failed task: %v", err)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', 'CODEX-STUCK-SESSION', '/tmp/codex-stuck', 'codex_semantic_inactivity',
+		        'codex semantic inactivity timeout after 10m0s without agent progress (last activity: tool-result:exec_command)')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert codex semantic inactivity task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("GetLastTaskSession failed: %v", err)
+	}
+	if prior.SessionID.String != "HEALTHY-SESSION" {
+		t.Fatalf("expected HEALTHY-SESSION, got %q", prior.SessionID.String)
+	}
+}
+
+func TestCreateRetryTaskFreshensCodexSemanticInactivity(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	var parentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			started_at, completed_at, session_id, work_dir, failure_reason,
+			attempt, max_attempts
+		)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute',
+		        'CODEX-STUCK-SESSION', '/tmp/codex-stuck', 'codex_semantic_inactivity', 1, 2)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&parentID); err != nil {
+		t.Fatalf("insert codex semantic inactivity parent task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	child, err := queries.CreateRetryTask(ctx, pgtype.UUID{Bytes: parseUUIDBytes(parentID), Valid: true})
+	if err != nil {
+		t.Fatalf("CreateRetryTask failed: %v", err)
+	}
+	if child.SessionID.Valid {
+		t.Fatalf("expected retry child to drop poisoned session_id, got %q", child.SessionID.String)
+	}
+	if child.WorkDir.Valid {
+		t.Fatalf("expected retry child to drop poisoned work_dir, got %q", child.WorkDir.String)
+	}
+	if !child.ForceFreshSession {
+		t.Fatal("expected retry child to force a fresh session")
+	}
+	if child.Attempt != 2 {
+		t.Fatalf("expected attempt 2, got %d", child.Attempt)
+	}
+}
+
+func TestCreateRetryTaskKeepsOrdinaryTimeoutSession(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	var parentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			started_at, completed_at, session_id, work_dir, failure_reason,
+			attempt, max_attempts
+		)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute',
+		        'ORDINARY-TIMEOUT-SESSION', '/tmp/ordinary-timeout', 'timeout', 1, 2)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&parentID); err != nil {
+		t.Fatalf("insert ordinary timeout parent task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	child, err := queries.CreateRetryTask(ctx, pgtype.UUID{Bytes: parseUUIDBytes(parentID), Valid: true})
+	if err != nil {
+		t.Fatalf("CreateRetryTask failed: %v", err)
+	}
+	if !child.SessionID.Valid || child.SessionID.String != "ORDINARY-TIMEOUT-SESSION" {
+		t.Fatalf("expected retry child to inherit session_id, got %+v", child.SessionID)
+	}
+	if !child.WorkDir.Valid || child.WorkDir.String != "/tmp/ordinary-timeout" {
+		t.Fatalf("expected retry child to inherit work_dir, got %+v", child.WorkDir)
+	}
+	if child.ForceFreshSession {
+		t.Fatal("expected ordinary timeout retry child to keep resume enabled")
+	}
+	if child.Attempt != 2 {
+		t.Fatalf("expected attempt 2, got %d", child.Attempt)
 	}
 }
 
