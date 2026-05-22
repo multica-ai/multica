@@ -1481,6 +1481,18 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Inject workspace context into the brief so agents see the admin-defined
+	// background information. We load the workspace once here — after all
+	// task-type-specific logic — to cover every task kind (issue, chat,
+	// autopilot, quick-create) uniformly.
+	if resp.WorkspaceID != "" {
+		if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(resp.WorkspaceID)); err == nil {
+			if ws.Context.Valid && strings.TrimSpace(ws.Context.String) != "" {
+				resp.WorkspaceContext = strings.TrimSpace(ws.Context.String)
+			}
+		}
+	}
+
 	// Workspace isolation check: the daemon uses this response's workspace_id
 	// as the only authority for MULTICA_WORKSPACE_ID in the agent env. An
 	// empty value would make the CLI silently fall back to the user-global

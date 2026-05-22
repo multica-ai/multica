@@ -191,6 +191,10 @@ type AgentTaskResponse struct {
 	// is empty.
 	RequestingUserName               string `json:"requesting_user_name,omitempty"`
 	RequestingUserProfileDescription string `json:"requesting_user_profile_description,omitempty"`
+	// WorkspaceContext is the free-text context set by workspace admins in
+	// Settings → General. Injected into the brief as ## Workspace Context
+	// when non-empty.
+	WorkspaceContext string `json:"workspace_context,omitempty"`
 	Kind                             string `json:"kind"` // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
 }
 

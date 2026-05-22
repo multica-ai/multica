@@ -3083,6 +3083,40 @@ func TestBuildMetaSkillContentOmitsRequestingUserWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestBuildMetaSkillContentEmitsWorkspaceContext(t *testing.T) {
+	t.Parallel()
+	content := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:          "issue-1",
+		AgentName:        "Lambda",
+		AgentID:          "agent-1",
+		WorkspaceContext: "Use Go 1.22+\nPrefer table-driven tests",
+	})
+
+	if !strings.Contains(content, "## Workspace Context") {
+		t.Fatalf("expected workspace context heading\n---\n%s", content)
+	}
+	if !strings.Contains(content, "> Use Go 1.22+") {
+		t.Errorf("expected blockquoted first line\n---\n%s", content)
+	}
+	if !strings.Contains(content, "> Prefer table-driven tests") {
+		t.Errorf("expected blockquoted second line\n---\n%s", content)
+	}
+}
+
+func TestBuildMetaSkillContentOmitsWorkspaceContextWhenEmpty(t *testing.T) {
+	t.Parallel()
+	content := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:          "issue-1",
+		AgentName:        "Lambda",
+		AgentID:          "agent-1",
+		WorkspaceContext: "   \n  ",
+	})
+
+	if strings.Contains(content, "## Workspace Context") {
+		t.Errorf("expected no workspace context heading for blank context\n---\n%s", content)
+	}
+}
+
 // TestInjectRuntimeConfigCommentTriggerThreadFirstReads locks in
 // MUL-2387 + MUL-2421: the runtime config's comment-triggered Workflow
 // section must steer the agent at thread-aware reads first, default the

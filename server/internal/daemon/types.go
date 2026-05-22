@@ -69,6 +69,10 @@ type Task struct {
 	// when description is empty so the agent doesn't see a useless heading.
 	RequestingUserName               string `json:"requesting_user_name,omitempty"`
 	RequestingUserProfileDescription string `json:"requesting_user_profile_description,omitempty"`
+	// WorkspaceContext is the free-text context set by workspace admins in
+	// Settings → General. Injected into the brief as ## Workspace Context
+	// when non-empty.
+	WorkspaceContext string `json:"workspace_context,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon

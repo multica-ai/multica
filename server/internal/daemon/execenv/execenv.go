@@ -70,6 +70,7 @@ type TaskContextForEnv struct {
 	// context and the agent stays anonymous-user mode.
 	RequestingUserName               string
 	RequestingUserProfileDescription string
+	WorkspaceContext                 string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

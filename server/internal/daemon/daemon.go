@@ -2260,6 +2260,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		IsSquadLeader:           strings.Contains(instructions, "## Squad Operating Protocol"),
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
+		WorkspaceContext:                 task.WorkspaceContext,
 	}
 
 	// Mark candidate env roots as active before any env work so the GC loop
