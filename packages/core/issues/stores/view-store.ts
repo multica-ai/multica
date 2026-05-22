@@ -9,15 +9,17 @@ import { ALL_STATUSES } from "../config";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
-export type ViewMode = "board" | "list";
+export type ViewMode = "board" | "list" | "gantt";
+export type GanttZoom = "day" | "week" | "month";
 export type IssueGrouping = "status" | "assignee";
-export type SortField = "position" | "priority" | "due_date" | "created_at" | "title";
+export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title";
 export type SortDirection = "asc" | "desc";
 
 export interface CardProperties {
   priority: boolean;
   description: boolean;
   assignee: boolean;
+  startDate: boolean;
   dueDate: boolean;
   project: boolean;
   childProgress: boolean;
@@ -32,6 +34,7 @@ export interface ActorFilterValue {
 export const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: "position", label: "Manual" },
   { value: "priority", label: "Priority" },
+  { value: "start_date", label: "Start date" },
   { value: "due_date", label: "Due date" },
   { value: "created_at", label: "Created date" },
   { value: "title", label: "Title" },
@@ -46,6 +49,7 @@ export const CARD_PROPERTY_OPTIONS: { key: keyof CardProperties; label: string }
   { key: "priority", label: "Priority" },
   { key: "description", label: "Description" },
   { key: "assignee", label: "Assignee" },
+  { key: "startDate", label: "Start date" },
   { key: "dueDate", label: "Due date" },
   { key: "project", label: "Project" },
   { key: "labels", label: "Labels" },
@@ -63,11 +67,21 @@ export interface IssueViewState {
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
+  // When true, the list only shows issues that currently have at least one
+  // agent task in `running` status. Drives the workspace "agents working"
+  // quick filter chip in the issues header. Not persisted across reloads —
+  // running state changes second-to-second, a persisted toggle would let
+  // users return to an empty list with no obvious cause.
+  agentRunningFilter: boolean;
   sortBy: SortField;
   sortDirection: SortDirection;
   cardProperties: CardProperties;
   listCollapsedStatuses: IssueStatus[];
+  ganttZoom: GanttZoom;
+  ganttShowCompleted: boolean;
   setViewMode: (mode: ViewMode) => void;
+  setGanttZoom: (zoom: GanttZoom) => void;
+  toggleGanttShowCompleted: () => void;
   setGrouping: (grouping: IssueGrouping) => void;
   toggleStatusFilter: (status: IssueStatus) => void;
   togglePriorityFilter: (priority: IssuePriority) => void;
@@ -77,6 +91,7 @@ export interface IssueViewState {
   toggleProjectFilter: (projectId: string) => void;
   toggleNoProject: () => void;
   toggleLabelFilter: (labelId: string) => void;
+  toggleAgentRunningFilter: () => void;
   hideStatus: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
   clearFilters: () => void;
@@ -97,20 +112,27 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   projectFilters: [],
   includeNoProject: false,
   labelFilters: [],
+  agentRunningFilter: false,
   sortBy: "position",
   sortDirection: "asc",
   cardProperties: {
     priority: true,
     description: true,
     assignee: true,
+    startDate: true,
     dueDate: true,
     project: true,
     childProgress: true,
     labels: true,
   },
   listCollapsedStatuses: [],
+  ganttZoom: "week",
+  ganttShowCompleted: false,
 
   setViewMode: (mode) => set({ viewMode: mode }),
+  setGanttZoom: (zoom) => set({ ganttZoom: zoom }),
+  toggleGanttShowCompleted: () =>
+    set((state) => ({ ganttShowCompleted: !state.ganttShowCompleted })),
   setGrouping: (grouping) => set({ grouping }),
   toggleStatusFilter: (status) =>
     set((state) => ({
@@ -166,6 +188,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         ? state.labelFilters.filter((id) => id !== labelId)
         : [...state.labelFilters, labelId],
     })),
+  toggleAgentRunningFilter: () =>
+    set((state) => ({ agentRunningFilter: !state.agentRunningFilter })),
   hideStatus: (status) =>
     set((state) => {
       // If no filter active, activate filter with all EXCEPT this one
@@ -192,6 +216,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       projectFilters: [],
       includeNoProject: false,
       labelFilters: [],
+      agentRunningFilter: false,
     }),
   setSortBy: (field) => set({ sortBy: field }),
   setSortDirection: (dir) => set({ sortDirection: dir }),
@@ -214,6 +239,10 @@ export const viewStorePersistOptions = (name: string) => ({
   name,
   storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
   partialize: (state: IssueViewState) => ({
+    // NOTE: `agentRunningFilter` is intentionally NOT persisted — running
+    // state changes second-to-second, and a stored toggle would let users
+    // return to an unexplained empty list. Keep it ephemeral. See the
+    // field comment on IssueViewState.
     viewMode: state.viewMode,
     grouping: state.grouping,
     statusFilters: state.statusFilters,
@@ -228,6 +257,8 @@ export const viewStorePersistOptions = (name: string) => ({
     sortDirection: state.sortDirection,
     cardProperties: state.cardProperties,
     listCollapsedStatuses: state.listCollapsedStatuses,
+    ganttZoom: state.ganttZoom,
+    ganttShowCompleted: state.ganttShowCompleted,
   }),
   // Default Zustand merge is shallow, so a persisted `cardProperties` snapshot
   // saved before a new toggle was introduced wins entirely and the new key is

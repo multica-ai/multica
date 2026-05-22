@@ -19,6 +19,7 @@
     "squads",
     "---How agents run---",
     "daemon-runtimes",
+    "install-agent-runtime",
     "tasks",
     "providers",
     "---Collaborating with agents---",
@@ -38,6 +39,7 @@
     "cli",
     "auth-tokens",
     "desktop-app",
+    "mobile-app",
     "---Developers---",
     "developers"
   ]

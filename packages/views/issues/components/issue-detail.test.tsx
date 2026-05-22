@@ -219,6 +219,8 @@ const mockApiObj = vi.hoisted(() => ({
   removeCommentReaction: vi.fn(),
   listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
   listAgents: vi.fn().mockResolvedValue([]),
+  getProject: vi.fn(),
+  listProjects: vi.fn().mockResolvedValue({ projects: [] }),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -348,11 +350,6 @@ vi.mock("@multica/core/modals", () => ({
   ),
 }));
 
-// Mock core/utils
-vi.mock("@multica/core/utils", () => ({
-  timeAgo: () => "1d ago",
-}));
-
 // Mock core/hooks/use-file-upload
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
   useFileUpload: () => ({ uploadWithToast: vi.fn().mockResolvedValue("https://example.com/file.png") }),
@@ -401,7 +398,9 @@ const mockIssue: Issue = {
   parent_issue_id: null,
   project_id: null,
   position: 0,
+  start_date: null,
   due_date: "2026-06-01T00:00:00Z",
+  metadata: {},
   created_at: "2026-01-15T00:00:00Z",
   updated_at: "2026-01-20T00:00:00Z",
 };
@@ -507,6 +506,9 @@ describe("IssueDetail (shared)", () => {
       { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
     ]);
     mockApiObj.listAgents.mockResolvedValue([]);
+    // Reset project mock — individual tests override per case. Default fixture
+    // has project_id: null so getProject is not invoked.
+    mockApiObj.getProject.mockReset();
   });
 
   it("shows loading skeleton while data is loading", () => {
@@ -542,6 +544,60 @@ describe("IssueDetail (shared)", () => {
     expect(wsLink.closest("a")).toHaveAttribute("href", "/test/issues");
   });
 
+  it("omits the project breadcrumb segment when the issue has no project_id", async () => {
+    // Default fixture has project_id: null.
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Test WS")).toBeInTheDocument();
+    });
+
+    // Project should not have been fetched.
+    expect(mockApiObj.getProject).not.toHaveBeenCalled();
+    expect(screen.queryByText("Unknown project")).not.toBeInTheDocument();
+  });
+
+  it("renders the project breadcrumb segment when the issue belongs to a project", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "p-1" });
+    mockApiObj.getProject.mockResolvedValue({
+      id: "p-1",
+      workspace_id: "ws-1",
+      title: "Marketing site refresh",
+      description: null,
+      icon: "🚀",
+      status: "in_progress",
+      priority: "none",
+      lead_type: null,
+      lead_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      issue_count: 0,
+      done_count: 0,
+      resource_count: 0,
+    });
+
+    renderIssueDetail();
+
+    const projectLink = await screen.findByText("Marketing site refresh");
+    // The whole project segment is a single AppLink pointing at the project
+    // detail route under the active workspace slug.
+    expect(projectLink.closest("a")).toHaveAttribute("href", "/test/projects/p-1");
+  });
+
+  it("shows an Unknown project placeholder when the project query fails", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "p-missing" });
+    mockApiObj.getProject.mockRejectedValue(new Error("not found"));
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Unknown project")).toBeInTheDocument();
+    });
+    // Placeholder is non-interactive — no link wraps the text.
+    const placeholder = screen.getByText("Unknown project");
+    expect(placeholder.closest("a")).toBeNull();
+  });
+
   it("renders properties sidebar with all core rows plus set optional rows", async () => {
     renderIssueDetail();
 
@@ -573,6 +629,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.getIssue.mockResolvedValue({
       ...mockIssue,
       priority: "none",
+      start_date: null,
       due_date: null,
     });
 
@@ -603,6 +660,69 @@ describe("IssueDetail (shared)", () => {
 
     expect(screen.queryByTestId("panel-group")).not.toBeInTheDocument();
     expect(screen.queryByText("Properties")).not.toBeInTheDocument();
+  });
+
+  it("hides metadata content from the sidebar and shows a button when the bag has keys", async () => {
+    // Metadata is agent-facing; the sidebar only exposes a button that opens
+    // the raw JSON on demand. Keys are NOT rendered inline anywhere.
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      metadata: {
+        pr_url: "https://example.com/pr/1",
+        pipeline_status: "running",
+      },
+    });
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      // Trigger label includes a "· N" count so users can see payload size
+      // before clicking — accept any count via regex.
+      expect(screen.getByRole("button", { name: /^Metadata\b/ })).toBeInTheDocument();
+    });
+
+    // Key names are not rendered in the sidebar prior to opening the dialog.
+    expect(screen.queryByText("pr_url")).not.toBeInTheDocument();
+    expect(screen.queryByText("pipeline_status")).not.toBeInTheDocument();
+  });
+
+  it("opens a dialog with formatted JSON when the Metadata button is clicked", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      metadata: {
+        pr_url: "https://example.com/pr/1",
+        pipeline_status: "running",
+      },
+    });
+
+    renderIssueDetail();
+
+    const button = await screen.findByRole("button", { name: /^Metadata\b/ });
+    fireEvent.click(button);
+
+    // The dialog renders a <pre> containing the formatted JSON; checking the
+    // exact serialized payload also verifies the indent / structure.
+    const expected = JSON.stringify(
+      { pr_url: "https://example.com/pr/1", pipeline_status: "running" },
+      null,
+      2,
+    );
+    await waitFor(() => {
+      const pre = document.querySelector("pre");
+      expect(pre).not.toBeNull();
+      expect(pre!.textContent).toBe(expected);
+    });
+  });
+
+  it("hides the Metadata button entirely when the bag is empty", async () => {
+    // Default fixture already has metadata: {}, asserted explicitly here.
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Details")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole("button", { name: /^Metadata\b/ })).not.toBeInTheDocument();
   });
 
   it("renders Details section with Created by and dates", async () => {

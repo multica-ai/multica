@@ -72,7 +72,7 @@ multica daemon status
 
 In the web UI, go to **Settings → Runtimes**. The daemon you just started should appear as one or more active runtimes — one per AI coding tool installed locally.
 
-If it shows as offline, don't panic — see [Troubleshooting → Daemon can't reach the server](/troubleshooting#daemon-cant-reach-the-server).
+If it shows as offline, don't panic — see [Troubleshooting → Daemon can't connect to the server](/troubleshooting#daemon-cant-connect-to-the-server).
 
 ## 5. Create an agent
 
@@ -99,7 +99,7 @@ Assign the issue to the agent you just created — click its avatar in the web U
 multica issue assign MUL-1 --to my-agent-name
 ```
 
-`--to` takes the **name** of an agent or member. A substring match works — if the agent is called `my-code-reviewer`, `reviewer` resolves to it. If your workspace has overlapping names, pass `--to-id <uuid>` instead (mutually exclusive with `--to`); look up the UUID via `multica agent list --output json` or `multica workspace members --output json`.
+`--to` takes the **name** of an agent or member. A substring match works — if the agent is called `my-code-reviewer`, `reviewer` resolves to it. If your workspace has overlapping names, pass `--to-id <uuid>` instead (mutually exclusive with `--to`); look up the UUID via `multica agent list --output json` or `multica workspace member list --output json`.
 
 **What happens next from the daemon**:
 

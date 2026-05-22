@@ -1,5 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+const { getAttachmentTextContentMock } = vi.hoisted(() => ({
+  getAttachmentTextContentMock: vi.fn(),
+}));
+
+vi.mock("@multica/core/api", () => ({
+  api: { getAttachmentTextContent: getAttachmentTextContentMock },
+  PreviewTooLargeError: class extends Error {},
+  PreviewUnsupportedError: class extends Error {},
+}));
 
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
@@ -153,6 +165,23 @@ describe("ReadonlyContent Mermaid rendering", () => {
     );
   });
 
+  it("does not regress Mermaid unwrap after the HtmlBlockPreview branch was added", async () => {
+    // Both Mermaid and HtmlBlockPreview rely on react-markdown's `code`
+    // renderer returning a non-<code> React element, and on the `pre`
+    // renderer recognizing the element by reference and unwrapping it. If
+    // someone tightens the `pre` check to a single component, the other
+    // one quietly regresses into a `<pre>`-wrapped DOM. This test pins the
+    // contract.
+    const { container } = render(
+      <ReadonlyContent
+        content={["```mermaid", "graph LR", "  A --> B", "```"].join("\n")}
+      />,
+    );
+    expect(container.querySelector(".mermaid-diagram")).not.toBeNull();
+    // No outer <pre> envelope.
+    expect(container.querySelector("pre")).toBeNull();
+  });
+
   it("opens a fullscreen lightbox when the toolbar button is clicked", async () => {
     const { container } = render(
       <ReadonlyContent
@@ -184,5 +213,99 @@ describe("ReadonlyContent Mermaid rendering", () => {
     await waitFor(() => {
       expect(document.querySelector(".mermaid-diagram-lightbox")).toBeNull();
     });
+  });
+});
+
+describe("ReadonlyContent HTML block rendering", () => {
+  // `language=html` fenced blocks should default to a preview iframe with
+  // sandbox="allow-scripts" (chart JS executes in an opaque origin) and
+  // must NOT be wrapped by react-markdown's default <pre>, which would
+  // clamp the iframe with monospace / overflow styles. The two-layer
+  // code+pre unwrap mirror's Mermaid's pattern.
+  it("renders an iframe with sandbox='allow-scripts' for ```html and skips the outer <pre>", () => {
+    const { container } = render(
+      <ReadonlyContent
+        content={["```html", '<h1 id="x">hi</h1>', "```"].join("\n")}
+      />,
+    );
+    const frame = container.querySelector<HTMLIFrameElement>("iframe");
+    expect(frame).not.toBeNull();
+    expect(frame?.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(frame?.getAttribute("srcdoc")).toContain('<h1 id="x">hi</h1>');
+    expect(container.querySelector("pre")).toBeNull();
+  });
+
+  it("keeps the <pre><code> wrapper for adjacent languages like htmlbars / mermaidx", () => {
+    // Regression: the previous `className.includes("language-html")` check
+    // matched `language-htmlbars` too, so an htmlbars fence lost its outer
+    // <pre> envelope and rendered as bare lowlight-highlighted spans. The
+    // unwrap rule must match the exact class token, not a prefix.
+    const { container } = render(
+      <ReadonlyContent
+        content={[
+          "```htmlbars",
+          "<div>{{name}}</div>",
+          "```",
+          "",
+          "```mermaidx",
+          "not a real lang",
+          "```",
+        ].join("\n")}
+      />,
+    );
+    const pres = container.querySelectorAll("pre");
+    // Both fences keep their <pre> wrapper.
+    expect(pres.length).toBe(2);
+    // And the inner <code> still carries the original language class.
+    expect(
+      container.querySelector("pre code.language-htmlbars"),
+    ).not.toBeNull();
+    expect(
+      container.querySelector("pre code.language-mermaidx"),
+    ).not.toBeNull();
+  });
+});
+
+describe("ReadonlyContent file-card → AttachmentBlock HTML routing", () => {
+  // Regression pin for readonly-content.tsx:279. The `div data-type=fileCard`
+  // branch must render through <AttachmentBlock>, not the older
+  // <AttachmentCard>. Reverting that line would skip the html+attachmentId
+  // dispatcher branch and surface the bare file-card chrome (filename row)
+  // instead of the rendered iframe — the exact regression MUL-2330 fixed.
+  function renderWithQuery(ui: ReactElement) {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  }
+
+  it("renders the !file[](url) HTML attachment as an iframe (no file-card chrome)", async () => {
+    getAttachmentTextContentMock.mockResolvedValueOnce({
+      text: "<p>chart</p>",
+      originalContentType: "text/html",
+    });
+    const attachment = {
+      id: "att-1",
+      url: "/uploads/report.html",
+      filename: "report.html",
+      content_type: "text/html",
+      size_bytes: 0,
+    } as any;
+    const { container, queryByText } = renderWithQuery(
+      <ReadonlyContent
+        content="!file[report.html](/uploads/report.html)"
+        attachments={[attachment]}
+      />,
+    );
+    const frame = await waitFor(() => {
+      const f = container.querySelector<HTMLIFrameElement>("iframe");
+      expect(f).not.toBeNull();
+      return f!;
+    });
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(frame.getAttribute("srcdoc")).toContain("<p>chart</p>");
+    // AttachmentCard chrome surfaces the filename as visible text in a
+    // <p class="truncate"> row. HtmlAttachmentPreview replaces it entirely.
+    expect(queryByText("report.html")).toBeNull();
   });
 });

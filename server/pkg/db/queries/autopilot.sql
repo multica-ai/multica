@@ -18,23 +18,25 @@ WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateAutopilot :one
 INSERT INTO autopilot (
-    workspace_id, title, description, assignee_id,
-    status, execution_mode, issue_title_template,
+    workspace_id, title, description, assignee_type, assignee_id,
+    status, execution_mode, issue_title_template, project_id,
     created_by_type, created_by_id
 ) VALUES (
-    $1, $2, sqlc.narg('description'), $3,
-    $4, $5, sqlc.narg('issue_title_template'),
-    $6, $7
+    $1, $2, sqlc.narg('description'), $3, $4,
+    $5, $6, sqlc.narg('issue_title_template'), sqlc.narg('project_id'),
+    $7, $8
 ) RETURNING *;
 
 -- name: UpdateAutopilot :one
 UPDATE autopilot SET
     title = COALESCE(sqlc.narg('title'), title),
     description = COALESCE(sqlc.narg('description'), description),
+    assignee_type = COALESCE(sqlc.narg('assignee_type'), assignee_type),
     assignee_id = COALESCE(sqlc.narg('assignee_id')::uuid, assignee_id),
     status = COALESCE(sqlc.narg('status'), status),
     execution_mode = COALESCE(sqlc.narg('execution_mode'), execution_mode),
     issue_title_template = sqlc.narg('issue_title_template'),
+    project_id = sqlc.narg('project_id'),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -62,10 +64,11 @@ WHERE id = $1;
 -- name: CreateAutopilotTrigger :one
 INSERT INTO autopilot_trigger (
     autopilot_id, kind, enabled, cron_expression, timezone,
-    next_run_at, webhook_token, label
+    next_run_at, webhook_token, label, provider
 ) VALUES (
     $1, $2, $3, sqlc.narg('cron_expression'), sqlc.narg('timezone'),
-    sqlc.narg('next_run_at'), sqlc.narg('webhook_token'), sqlc.narg('label')
+    sqlc.narg('next_run_at'), sqlc.narg('webhook_token'), sqlc.narg('label'),
+    COALESCE(sqlc.narg('provider')::text, 'generic')
 ) RETURNING *;
 
 -- name: UpdateAutopilotTrigger :one
@@ -89,15 +92,78 @@ SET next_run_at = sqlc.narg('next_run_at'),
     updated_at = now()
 WHERE id = $1;
 
+-- name: GetWebhookTriggerByToken :one
+-- Look up a webhook trigger by its public bearer token. Joined to autopilot
+-- so the webhook handler can derive the workspace from the trigger's parent
+-- without trusting any request header. The handler still re-loads the
+-- Autopilot via GetAutopilot and cross-checks WorkspaceID matches the row's
+-- autopilot_workspace_id.
+SELECT t.*, a.workspace_id AS autopilot_workspace_id
+FROM autopilot_trigger t
+JOIN autopilot a ON a.id = t.autopilot_id
+WHERE t.kind = 'webhook'
+  AND t.webhook_token = $1;
+
+-- name: TouchAutopilotTriggerFiredAt :exec
+-- Bumps last_fired_at after a webhook fires, regardless of whether the
+-- dispatch succeeded, was admission-skipped, or even if Autopilot status
+-- transitioned to paused/disabled at exactly the wrong moment. Disabled /
+-- paused early-return paths in the handler never call this.
+UPDATE autopilot_trigger
+SET last_fired_at = now(),
+    updated_at = now()
+WHERE id = $1;
+
+-- name: RotateAutopilotTriggerWebhookToken :one
+-- Rotates the bearer token for a webhook trigger. Restricted to kind='webhook'
+-- so an accidental call against a schedule/api trigger is a no-op (returns no
+-- rows) rather than corrupting unrelated state.
+UPDATE autopilot_trigger
+SET webhook_token = $2,
+    updated_at = now()
+WHERE id = $1
+  AND kind = 'webhook'
+RETURNING *;
+
+-- name: SetAutopilotTriggerWebhookToken :one
+-- Sets the webhook token at creation time. CreateAutopilotTrigger inserts the
+-- row first (using its full 8-arg signature), then this query attaches the
+-- token. Splitting the create + token-set keeps the existing CreateAutopilotTrigger
+-- query usable by the schedule path without forcing every caller to think
+-- about webhook_token.
+UPDATE autopilot_trigger
+SET webhook_token = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: SetAutopilotTriggerSigningSecret :one
+-- Writes the signing secret for a webhook trigger. Kept as a dedicated query
+-- (not a field on UpdateAutopilotTrigger) so the request body for the
+-- write-only endpoint only ever carries the secret value, with no risk of an
+-- accidental log line leaking it alongside other fields. Restricted to
+-- webhook triggers to avoid corrupting unrelated state.
+UPDATE autopilot_trigger
+SET signing_secret = sqlc.narg('signing_secret'),
+    updated_at = now()
+WHERE id = $1
+  AND kind = 'webhook'
+RETURNING *;
+
 -- =====================
 -- Autopilot Run Management
 -- =====================
 
 -- name: CreateAutopilotRun :one
+-- squad_id is an attribution hook: set to the assignee squad when the
+-- parent autopilot has assignee_type='squad', NULL otherwise. The executing
+-- agent_id on agent_task_queue still records who actually ran the work
+-- (the squad leader); squad_id lets reports group by squad without a join.
 INSERT INTO autopilot_run (
-    autopilot_id, trigger_id, source, status, trigger_payload
+    autopilot_id, trigger_id, source, status, trigger_payload, squad_id
 ) VALUES (
-    $1, sqlc.narg('trigger_id'), $2, $3, sqlc.narg('trigger_payload')
+    $1, sqlc.narg('trigger_id'), $2, $3, sqlc.narg('trigger_payload'),
+    sqlc.narg('squad_id')
 ) RETURNING *;
 
 -- name: GetAutopilotRun :one

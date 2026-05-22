@@ -94,7 +94,10 @@ vi.mock("../../agents/presence", () => ({
   workloadConfig: { idle: { icon: () => null, textClass: "" } },
 }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
-vi.mock("../../navigation", () => ({ AppLink: () => null }));
+vi.mock("../../navigation", () => ({
+  AppLink: () => null,
+  useNavigation: () => ({ push: vi.fn(), replace: vi.fn() }),
+}));
 
 import { RuntimeDetail } from "./runtime-detail";
 
@@ -112,7 +115,6 @@ function makeRuntime(overrides: Partial<AgentRuntime>): AgentRuntime {
     metadata: {},
     owner_id: "user-me",
     visibility: "private",
-    timezone: "UTC",
     last_seen_at: "2026-04-27T11:59:50Z",
     created_at: "2026-04-01T00:00:00Z",
     updated_at: "2026-04-01T00:00:00Z",

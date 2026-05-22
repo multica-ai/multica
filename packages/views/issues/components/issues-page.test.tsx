@@ -337,6 +337,7 @@ const issueDefaults = {
   parent_issue_id: null,
   project_id: null,
   position: 0,
+  metadata: {},
 };
 
 const mockIssues: Issue[] = [
@@ -354,6 +355,7 @@ const mockIssues: Issue[] = [
     assignee_id: "user-1",
     creator_type: "member",
     creator_id: "user-1",
+    start_date: null,
     due_date: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -372,6 +374,7 @@ const mockIssues: Issue[] = [
     assignee_id: "agent-1",
     creator_type: "member",
     creator_id: "user-1",
+    start_date: null,
     due_date: "2026-02-01T00:00:00Z",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -390,6 +393,7 @@ const mockIssues: Issue[] = [
     assignee_id: null,
     creator_type: "member",
     creator_id: "user-1",
+    start_date: null,
     due_date: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -408,6 +412,7 @@ const mockIssues: Issue[] = [
     assignee_id: "squad-1",
     creator_type: "member",
     creator_id: "user-1",
+    start_date: null,
     due_date: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -527,8 +532,8 @@ describe("IssuesPage (shared)", () => {
     renderWithQuery(<IssuesPage />);
 
     await screen.findByText("Test User");
-    expect(screen.getByText("Agent One")).toBeInTheDocument();
-    expect(screen.getByText("Squad One")).toBeInTheDocument();
+    expect(screen.getAllByText("Agent One").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Squad One").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("No assignee")).toBeInTheDocument();
   });
 

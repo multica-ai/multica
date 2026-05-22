@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import {
   ArrowUpCircle,
   Globe,
-  Lock,
   MoreHorizontal,
   Trash2,
 } from "lucide-react";
@@ -41,6 +40,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { workloadConfig } from "../../agents/presence";
 import { ProviderLogo } from "./provider-logo";
 import { HealthIcon, useHealthLabel } from "./shared";
@@ -50,6 +50,7 @@ import {
   isVersionNewer,
   pctChange,
 } from "../utils";
+import { splitRuntimeName } from "./runtime-machines";
 import { useT } from "../../i18n";
 
 // Per-row data assembled at the page level. The columns reach into
@@ -63,18 +64,19 @@ export interface RuntimeRow {
   canDelete: boolean;
 }
 
-// Column widths in px. Runtime, Health, and CLI grow together until the
-// user resizes them. Their `size` values still flow into table.getTotalSize()
-// to set the table's min-width, giving each grow column a real floor below
-// which the container scrolls horizontally instead of shrinking further.
+// Column widths in px. Runtime is the primary scanning column, so it keeps
+// the only grow slot and receives the extra width until the user resizes it.
+// The size values still flow into table.getTotalSize() to set the table's
+// min-width, giving each column a real floor below which the container
+// scrolls horizontally instead of shrinking further.
 const COL_WIDTHS = {
-  runtime: 240,
-  health: 200,
-  owner: 60,
-  agents: 100,
-  workload: 140,
-  cost: 100,
-  cli: 140,
+  runtime: 340,
+  health: 150,
+  owner: 72,
+  agents: 92,
+  workload: 120,
+  cost: 96,
+  cli: 112,
   // 60 = 16 left padding + 28 kebab + 16 right padding. Keeps the
   // kebab's right edge 16px from the card so it lines up with the
   // toolbar's px-4 right inset.
@@ -110,7 +112,6 @@ export function createRuntimeColumns({
       id: "health",
       header: () => t(($) => $.list.col_health),
       size: COL_WIDTHS.health,
-      meta: { grow: true },
       cell: ({ row }) => (
         <HealthCell runtime={row.original.runtime} now={now} />
       ),
@@ -175,7 +176,6 @@ export function createRuntimeColumns({
       id: "cli",
       header: () => t(($) => $.list.col_cli),
       size: COL_WIDTHS.cli,
-      meta: { grow: true },
       cell: ({ row }) => (
         <CliCell
           runtime={row.original.runtime}
@@ -210,25 +210,12 @@ export function createRuntimeColumns({
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Backend formats `runtime.name` as `"<base> (<hostname>)"`. Every runtime on
-// the same machine repeats the hostname suffix, so it dominates column width
-// while carrying near-zero scan value once seen on the first row. Split it
-// so the base name stays emphasised and the hostname renders muted.
-export function splitRuntimeName(name: string): {
-  base: string;
-  hostname: string | null;
-} {
-  const m = name.match(/^(.+?)\s+\(([^)]+)\)$/);
-  if (!m || !m[1] || !m[2]) return { base: name, hostname: null };
-  return { base: m[1], hostname: m[2] };
-}
-
 // ---------------------------------------------------------------------------
 // Cell renderers
 // ---------------------------------------------------------------------------
 
 function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
-  const { base: baseName, hostname } = splitRuntimeName(runtime.name);
+  const { base: baseName } = splitRuntimeName(runtime.name);
   return (
     <div className="flex min-w-0 items-center gap-2">
       <div className="flex h-8 w-8 shrink-0 items-center justify-center">
@@ -238,54 +225,28 @@ function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
         <span className="block min-w-0 shrink truncate text-sm font-medium">
           {baseName}
         </span>
-        {hostname && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <span className="block min-w-0 flex-1 basis-0 truncate text-xs text-muted-foreground/70">
-                  ({hostname})
-                </span>
-              }
-            />
-            <TooltipContent>{hostname}</TooltipContent>
-          </Tooltip>
-        )}
         <VisibilityBadge runtime={runtime} />
       </div>
     </div>
   );
 }
 
-// VisibilityBadge — small chip next to the runtime name showing whether
-// the runtime is shareable (public) or owner-only (private). Older backends
-// that don't ship the visibility field render the strict default (private).
+// Only public is worth a badge — private is the default and rendering a
+// `🔒 Private` chip on every row turns the whole column into noise.
 function VisibilityBadge({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");
-  const isPublic = runtime.visibility === "public";
-  const Icon = isPublic ? Globe : Lock;
-  const label = isPublic
-    ? t(($) => $.detail.visibility_label.public)
-    : t(($) => $.detail.visibility_label.private);
-  const tooltip = isPublic
-    ? t(($) => $.detail.visibility_hint.public)
-    : t(($) => $.detail.visibility_hint.private);
+  if (runtime.visibility !== "public") return null;
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <span
-            className={`shrink-0 inline-flex items-center gap-0.5 rounded px-1 text-[10px] font-medium ${
-              isPublic
-                ? "bg-info/10 text-info"
-                : "bg-muted text-muted-foreground"
-            }`}
-          >
-            <Icon className="h-2.5 w-2.5" />
-            {label}
+          <span className="shrink-0 inline-flex items-center gap-0.5 rounded bg-info/10 px-1 text-[10px] font-medium text-info">
+            <Globe className="h-2.5 w-2.5" />
+            {t(($) => $.detail.visibility_label.public)}
           </span>
         }
       />
-      <TooltipContent>{tooltip}</TooltipContent>
+      <TooltipContent>{t(($) => $.detail.visibility_hint.public)}</TooltipContent>
     </Tooltip>
   );
 }
@@ -373,13 +334,17 @@ const COST_CELL_DAYS = 14;
 
 function CostCell({ runtimeId }: { runtimeId: string }) {
   const { t } = useT("runtimes");
+  const tz = useViewingTimezone();
   const { data: usage = [] } = useQuery(
-    runtimeUsageOptions(runtimeId, COST_CELL_DAYS),
+    runtimeUsageOptions(runtimeId, COST_CELL_DAYS, tz),
   );
-  const cost7d = useMemo(() => computeCostInWindow(usage, 7), [usage]);
+  const cost7d = useMemo(
+    () => computeCostInWindow(usage, 7, tz),
+    [usage, tz],
+  );
   const costPrev7d = useMemo(
-    () => computeCostInWindow(usage, 7, 7),
-    [usage],
+    () => computeCostInWindow(usage, 7, tz, 7),
+    [usage, tz],
   );
   const delta = pctChange(cost7d, costPrev7d);
 
@@ -449,11 +414,6 @@ function CliCell({
 
   return (
     <div className="flex min-w-0 items-center gap-1 text-xs">
-      {isManaged && (
-        <span className="shrink-0 rounded-sm bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">
-          {t(($) => $.list.cli_managed_badge)}
-        </span>
-      )}
       <span
         className={`truncate font-mono ${
           hasUpdate ? "text-warning" : "text-muted-foreground"

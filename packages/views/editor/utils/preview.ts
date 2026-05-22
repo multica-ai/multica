@@ -11,6 +11,7 @@
  */
 
 export type PreviewKind =
+  | "image"
   | "pdf"
   | "video"
   | "audio"
@@ -122,6 +123,9 @@ const VIDEO_EXTS = new Set<string>([
 const AUDIO_EXTS = new Set<string>([
   "mp3", "wav", "m4a", "ogg", "oga", "flac", "aac", "opus",
 ]);
+const IMAGE_EXTS = new Set<string>([
+  "png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico", "svg",
+]);
 
 function extOf(filename: string): string {
   const base = filename.toLowerCase().split(/[\\/]/).pop() ?? "";
@@ -163,6 +167,11 @@ export function getPreviewKind(
   if (ct === "application/pdf" || ext === "pdf") return "pdf";
   if (ct.startsWith("video/") || (ext && VIDEO_EXTS.has(ext))) return "video";
   if (ct.startsWith("audio/") || (ext && AUDIO_EXTS.has(ext))) return "audio";
+
+  // Image — must come BEFORE the html/text branches because svg is
+  // text-like (XML), and image/* content-types include text/svg variants
+  // that isTextLike would otherwise catch.
+  if (ct.startsWith("image/") || (ext && IMAGE_EXTS.has(ext))) return "image";
 
   // Markdown — covers both the well-typed case and the common
   // server-side sniffer fallback (text/plain for .md).

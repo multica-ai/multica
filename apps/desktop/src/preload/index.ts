@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
+import {
+  isNavigationGesture,
+  NAVIGATION_GESTURE_CHANNEL,
+  type NavigationGesture,
+} from "../shared/navigation-gestures";
 
 // Synchronously fetch app metadata from main at preload time so the renderer
 // can pass it into CoreProvider during the initial render — the alternative
@@ -139,6 +144,16 @@ const desktopAPI = {
     ipcRenderer.on("inbox:open", handler);
     return () => {
       ipcRenderer.removeListener("inbox:open", handler);
+    };
+  },
+  /** Listen for native macOS back/forward swipe gestures. */
+  onNavigationGesture: (callback: (gesture: NavigationGesture) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, gesture: unknown) => {
+      if (isNavigationGesture(gesture)) callback(gesture);
+    };
+    ipcRenderer.on(NAVIGATION_GESTURE_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(NAVIGATION_GESTURE_CHANNEL, handler);
     };
   },
 };

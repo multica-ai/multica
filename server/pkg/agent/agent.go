@@ -35,6 +35,15 @@ type ExecOptions struct {
 	ExtraArgs                 []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
 	CustomArgs                []string        // per-agent CLI arguments appended after ExtraArgs
 	McpConfig                 json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	// ThinkingLevel is the runtime-native reasoning/effort value (e.g.
+	// Claude's "low|medium|high|xhigh|max", Codex's "none|minimal|low|
+	// medium|high|xhigh"). Empty means "use the runtime/model default" —
+	// every backend that consumes this skips its --effort / reasoning_effort
+	// injection so the upstream CLI's own default applies. Currently honoured
+	// by the claude and codex backends only; other backends ignore the
+	// field rather than fail (so MUL-2339 can grow runtime support
+	// incrementally without breaking unrelated agents).
+	ThinkingLevel string
 }
 
 // Session represents a running agent execution.
