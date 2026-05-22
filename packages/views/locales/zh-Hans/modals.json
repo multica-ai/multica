@@ -122,6 +122,7 @@
     "toast_created": "已创建 issue",
     "view_issue": "查看 issue",
     "toast_failed": "创建 issue 失败",
+    "project_required": "创建 issue 前请选择项目。",
     "toast_duplicate_title": "已存在同名 issue",
     "toast_duplicate_view": "查看已有 issue",
     "toast_link_subissues_all_failed": "关联子 issue 失败",

@@ -142,15 +142,15 @@ func TestBuildQuickCreatePromptProjectPinning(t *testing.T) {
 		}
 	}
 
-	// Without a project, the prompt must keep the legacy "omit" instruction
-	// so the agent doesn't accidentally start passing --project on plain
-	// quick-create runs.
+	// Without a project, the prompt must avoid pinning a specific project.
+	// The CLI will now default only when the workspace has one project, or
+	// fail with the available project list when there are multiple choices.
 	plain := buildQuickCreatePrompt(Task{QuickCreatePrompt: "fix the login button color"})
 	if !strings.Contains(plain, "**project**: omit") {
 		t.Errorf("buildQuickCreatePrompt without project must keep the omit instruction, got:\n%s", plain)
 	}
-	if strings.Contains(plain, "--project") {
-		t.Errorf("buildQuickCreatePrompt without project must NOT mention --project, got:\n%s", plain)
+	if strings.Contains(plain, "--project \"") {
+		t.Errorf("buildQuickCreatePrompt without project must NOT pin a project id, got:\n%s", plain)
 	}
 }
 
@@ -218,7 +218,7 @@ func TestBuildPromptCommentTriggerPromotesThreadReads(t *testing.T) {
 		TriggerAuthorType:     "member",
 		TriggerAuthorName:     "Bohan",
 	}
-	out := BuildPrompt(task, "claude")
+	out := BuildPrompt(task)
 
 	mustContain := []string{
 		// Thread-first read pinned by trigger comment id.
@@ -257,7 +257,7 @@ func TestBuildPromptCommentTriggerPromotesThreadReads(t *testing.T) {
 // to the flat dump, even though it cannot anchor a --thread without a
 // trigger comment id.
 func TestBuildPromptDefaultMentionsRecent(t *testing.T) {
-	out := BuildPrompt(Task{IssueID: "issue-default-1"}, "claude")
+	out := BuildPrompt(Task{IssueID: "issue-default-1"})
 	for _, s := range []string{
 		"--recent 20 --output json",
 		"Next thread cursor:",

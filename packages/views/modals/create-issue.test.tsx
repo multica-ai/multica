@@ -27,6 +27,9 @@ const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
+const mockProjects = vi.hoisted(() => ({
+  list: [{ id: "proj-1", title: "Default Project" }],
+}));
 
 const mockDraftStore = {
   draft: {
@@ -63,10 +66,23 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-test",
 }));
 
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector?: (state: { user: { id: string } }) => unknown) =>
+    (selector ? selector({ user: { id: "user-1" } }) : { user: { id: "user-1" } }),
+}));
+
 vi.mock("@multica/core/issues/queries", () => ({
   issueDetailOptions: (wsId: string, id: string) => ({
     queryKey: ["issues", wsId, "detail", id],
     queryFn: () => Promise.resolve(null),
+  }),
+}));
+
+vi.mock("@multica/core/projects/queries", () => ({
+  projectListOptions: () => ({
+    queryKey: ["projects"],
+    queryFn: () => Promise.resolve(mockProjects.list),
+    initialData: mockProjects.list,
   }),
 }));
 
@@ -192,7 +208,9 @@ vi.mock("../issues/components", () => ({
 }));
 
 vi.mock("../projects/components/project-picker", () => ({
-  ProjectPicker: () => <div data-testid="project-picker" />,
+  ProjectPicker: ({ projectId }: { projectId: string | null }) => (
+    <div data-testid="project-picker" data-project-id={projectId ?? ""} />
+  ),
 }));
 
 vi.mock("@multica/ui/components/ui/dialog", () => ({
@@ -297,6 +315,7 @@ describe("CreateIssueModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockQuickCreateStore.keepOpen = false;
+    mockProjects.list = [{ id: "proj-1", title: "Default Project" }];
     mockDraftStore.draft = {
       title: "",
       description: "",
@@ -339,13 +358,13 @@ describe("CreateIssueModal", () => {
         description: undefined,
         status: "todo",
         priority: "none",
-        assignee_type: undefined,
-        assignee_id: undefined,
+        assignee_type: "member",
+        assignee_id: "user-1",
         start_date: undefined,
         due_date: undefined,
         attachment_ids: undefined,
         parent_issue_id: undefined,
-        project_id: undefined,
+        project_id: "proj-1",
       });
     });
 
@@ -387,13 +406,13 @@ describe("CreateIssueModal", () => {
         description: "Description to clear",
         status: "todo",
         priority: "none",
-        assignee_type: undefined,
-        assignee_id: undefined,
+        assignee_type: "member",
+        assignee_id: "alice",
         start_date: undefined,
         due_date: undefined,
         attachment_ids: undefined,
         parent_issue_id: undefined,
-        project_id: undefined,
+        project_id: "proj-1",
       });
     });
 
@@ -405,8 +424,8 @@ describe("CreateIssueModal", () => {
       description: "",
       status: "todo",
       priority: "none",
-      assigneeType: undefined,
-      assigneeId: undefined,
+      assigneeType: "member",
+      assigneeId: "alice",
       startDate: null,
       dueDate: null,
     });
@@ -441,6 +460,22 @@ describe("CreateIssueModal", () => {
       expect.objectContaining({ prompt: "Refactor auth", squad_id: "squad-1" }),
     );
     expect(carry).not.toHaveProperty("agent_id");
+  });
+
+  it("blocks manual create when multiple projects exist and none is selected", async () => {
+    const user = userEvent.setup();
+    mockProjects.list = [
+      { id: "proj-1", title: "Project One" },
+      { id: "proj-2", title: "Project Two" },
+    ];
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Needs a project");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    expect(mockCreateIssue).not.toHaveBeenCalled();
+    expect(mockToastError).toHaveBeenCalledWith("Select a project before creating an issue.");
   });
 
   // Manual → agent must forward the picked project so the new modal pins to
