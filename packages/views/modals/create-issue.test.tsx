@@ -25,6 +25,7 @@ const mockSetDraft = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
 const mockSetLastAssignee = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
+const mockSetDuplicatePolicy = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
@@ -51,6 +52,11 @@ const mockQuickCreateStore = {
   keepOpen: false,
   setKeepOpen: mockSetKeepOpen,
 };
+
+const mockIssueCreatePreferencesStore = vi.hoisted(() => ({
+  duplicatePolicy: "confirm" as "confirm" | "allow",
+  setDuplicatePolicy: mockSetDuplicatePolicy,
+}));
 
 vi.mock("../navigation", () => ({
   useNavigation: () => ({ push: mockPush }),
@@ -85,6 +91,12 @@ vi.mock("@multica/core/issues/stores/draft-store", () => ({
 vi.mock("@multica/core/issues/stores/quick-create-store", () => ({
   useQuickCreateStore: (selector?: (state: typeof mockQuickCreateStore) => unknown) =>
     (selector ? selector(mockQuickCreateStore) : mockQuickCreateStore),
+}));
+
+vi.mock("@multica/core/issues/stores/create-preferences-store", () => ({
+  useIssueCreatePreferencesStore: (
+    selector?: (state: typeof mockIssueCreatePreferencesStore) => unknown,
+  ) => (selector ? selector(mockIssueCreatePreferencesStore) : mockIssueCreatePreferencesStore),
 }));
 
 vi.mock("@multica/core/issues/mutations", () => ({
@@ -312,6 +324,10 @@ describe("CreateIssueModal", () => {
     mockSetKeepOpen.mockImplementation((v: boolean) => {
       mockQuickCreateStore.keepOpen = v;
     });
+    mockIssueCreatePreferencesStore.duplicatePolicy = "confirm";
+    mockSetDuplicatePolicy.mockImplementation((policy: "confirm" | "allow") => {
+      mockIssueCreatePreferencesStore.duplicatePolicy = policy;
+    });
     // Reset the shared draft mock so per-test assignee seeding (squad / agent)
     // doesn't leak into the next test in the suite.
     mockDraftStore.draft.assigneeType = undefined;
@@ -484,6 +500,113 @@ describe("CreateIssueModal", () => {
     await user.click(screen.getByRole("button", { name: "View existing issue" }));
     expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-dup");
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-dup");
+  });
+
+  it("can retry a duplicate issue create with allow_duplicate", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    mockCreateIssue
+      .mockRejectedValueOnce(
+        new ApiError("An active issue with this title already exists: MUL-7 – Login bug", 409, "Conflict", {
+          code: "active_duplicate_issue",
+          error: "An active issue with this title already exists: MUL-7 – Login bug",
+          issue: {
+            id: "issue-dup",
+            identifier: "MUL-7",
+            title: "Login bug",
+          },
+        }),
+      )
+      .mockResolvedValueOnce({
+        id: "issue-new",
+        identifier: "MUL-8",
+        title: "Login bug",
+        status: "todo",
+      });
+
+    renderModal(<CreateIssueModal onClose={onClose} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Login bug");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockToastCustom).toHaveBeenCalledTimes(1));
+    const renderToast = mockToastCustom.mock.calls[0]?.[0];
+    render(renderToast("toast-dup"));
+
+    await user.click(screen.getByRole("button", { name: "Create anyway" }));
+
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(2));
+    expect(mockCreateIssue).toHaveBeenNthCalledWith(2, {
+      title: "Login bug",
+      description: undefined,
+      status: "todo",
+      priority: "none",
+      assignee_type: undefined,
+      assignee_id: undefined,
+      start_date: undefined,
+      due_date: undefined,
+      attachment_ids: undefined,
+      parent_issue_id: undefined,
+      project_id: undefined,
+      allow_duplicate: true,
+    });
+    expect(mockSetDuplicatePolicy).not.toHaveBeenCalled();
+    expect(mockToastDismiss).toHaveBeenCalledWith("toast-dup");
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("persists the duplicate allow preference from the duplicate toast", async () => {
+    const user = userEvent.setup();
+    mockCreateIssue
+      .mockRejectedValueOnce(
+        new ApiError("An active issue with this title already exists: MUL-7 – Login bug", 409, "Conflict", {
+          code: "active_duplicate_issue",
+          error: "An active issue with this title already exists: MUL-7 – Login bug",
+          issue: {
+            id: "issue-dup",
+            identifier: "MUL-7",
+            title: "Login bug",
+          },
+        }),
+      )
+      .mockResolvedValueOnce({
+        id: "issue-new",
+        identifier: "MUL-8",
+        title: "Login bug",
+        status: "todo",
+      });
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Login bug");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockToastCustom).toHaveBeenCalledTimes(1));
+    const renderToast = mockToastCustom.mock.calls[0]?.[0];
+    render(renderToast("toast-dup"));
+
+    await user.click(screen.getByLabelText("Always create duplicate titles"));
+    await user.click(screen.getByRole("button", { name: "Create anyway" }));
+
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(2));
+    expect(mockSetDuplicatePolicy).toHaveBeenCalledWith("allow");
+    expect(mockCreateIssue).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ allow_duplicate: true }),
+    );
+  });
+
+  it("sends allow_duplicate by default when the local preference allows duplicates", async () => {
+    const user = userEvent.setup();
+    mockIssueCreatePreferencesStore.duplicatePolicy = "allow";
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Login bug");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({ allow_duplicate: true }),
+      );
+    });
   });
 
   // Schema drift safety: server returns a 409 with a body that doesn't match
