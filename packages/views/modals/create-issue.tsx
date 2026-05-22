@@ -40,7 +40,7 @@ import { ProjectPicker } from "../projects/components/project-picker";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { labelListOptions } from "@multica/core/labels";
+import { labelListOptions, useCreateLabel } from "@multica/core/labels";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
@@ -61,6 +61,19 @@ import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const INLINE_LABEL_COLORS = [
+  "#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6",
+  "#3b82f6", "#6366f1", "#a855f7", "#ec4899", "#64748b",
+] as const;
+
+function pickInlineLabelColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  }
+  return INLINE_LABEL_COLORS[hash % INLINE_LABEL_COLORS.length] ?? INLINE_LABEL_COLORS[0]!;
+}
 
 // ---------------------------------------------------------------------------
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
@@ -165,7 +178,9 @@ export function ManualCreatePanel({
     enabled: !!parentIssueId,
   });
   const { data: workspaceLabels = [] } = useQuery(labelListOptions(wsId));
+  const createLabelMutation = useCreateLabel();
   const [labelIds, setLabelIds] = useState<string[]>([]);
+  const [labelSearch, setLabelSearch] = useState("");
 
   // File upload — collect attachment IDs so we can link them after issue creation.
   const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
@@ -194,6 +209,39 @@ export function ManualCreatePanel({
 
   const createIssueMutation = useCreateIssue();
   const updateIssueMutation = useUpdateIssue();
+  const labelSearchTrimmed = labelSearch.trim();
+  const filteredLabels = useMemo(() => {
+    const q = labelSearchTrimmed.toLowerCase();
+    if (!q) return workspaceLabels;
+    return workspaceLabels.filter((label) => label.name.toLowerCase().includes(q));
+  }, [workspaceLabels, labelSearchTrimmed]);
+  const canCreateLabel = useMemo(() => {
+    if (!labelSearchTrimmed || createLabelMutation.isPending) return false;
+    const q = labelSearchTrimmed.toLowerCase();
+    return !workspaceLabels.some((label) => label.name.toLowerCase() === q);
+  }, [createLabelMutation.isPending, labelSearchTrimmed, workspaceLabels]);
+
+  const createInlineLabel = () => {
+    if (!canCreateLabel) return;
+    const name = labelSearchTrimmed;
+    createLabelMutation.mutate(
+      { name, color: pickInlineLabelColor(name) },
+      {
+        onSuccess: (label) => {
+          setLabelIds((prev) => (prev.includes(label.id) ? prev : [...prev, label.id]));
+          setLabelSearch("");
+        },
+        onError: (err: unknown) => {
+          toast.error(
+            err instanceof Error && err.message
+              ? err.message
+              : t(($) => $.create_issue.create_label_failed),
+          );
+        },
+      },
+    );
+  };
+
   const resetForNextIssue = () => {
     setTitle("");
     setStatus("todo");
@@ -576,12 +624,34 @@ export function ManualCreatePanel({
                   }
                 />
                 <DropdownMenuContent align="start" className="w-56">
-                  {workspaceLabels.length === 0 ? (
+                  <div className="px-2 py-1.5">
+                    <input
+                      value={labelSearch}
+                      onChange={(e) => setLabelSearch(e.target.value)}
+                      onKeyDown={(e) => {
+                        // Prevent DropdownMenu typeahead/hotkeys from swallowing
+                        // alphanumeric input while typing into the search box.
+                        e.stopPropagation();
+                      }}
+                      placeholder={t(($) => $.create_issue.labels_search_placeholder)}
+                      className="h-8 w-full rounded-md border bg-background px-2 text-xs outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  </div>
+                  {canCreateLabel && (
+                    <DropdownMenuItem onClick={createInlineLabel}>
+                      <span className="truncate">
+                        {t(($) => $.create_issue.create_label_action, { name: labelSearchTrimmed })}
+                      </span>
+                    </DropdownMenuItem>
+                  )}
+                  {filteredLabels.length === 0 ? (
                     <DropdownMenuItem disabled>
-                      {t(($) => $.create_issue.no_labels)}
+                      {workspaceLabels.length === 0
+                        ? t(($) => $.create_issue.no_labels)
+                        : t(($) => $.create_issue.no_labels_found)}
                     </DropdownMenuItem>
                   ) : (
-                    workspaceLabels.map((label) => {
+                    filteredLabels.map((label) => {
                       const selected = labelIds.includes(label.id);
                       return (
                         <DropdownMenuItem

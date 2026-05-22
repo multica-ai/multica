@@ -24,6 +24,7 @@ const mockCreateIssue = vi.hoisted(() => vi.fn());
 const mockSetDraft = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
+const mockCreateLabel = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
@@ -96,6 +97,7 @@ vi.mock("@multica/core/labels", () => ({
         { id: "label-2", name: "feature", color: "#22c55e" },
       ]),
   }),
+  useCreateLabel: () => ({ mutate: mockCreateLabel, isPending: false }),
 }));
 
 vi.mock("@multica/core/issues/stores/draft-store", () => ({
@@ -349,6 +351,11 @@ describe("CreateIssueModal", () => {
     mockSetKeepOpen.mockImplementation((v: boolean) => {
       mockQuickCreateStore.keepOpen = v;
     });
+    mockCreateLabel.mockImplementation(
+      (_data: { name: string; color: string }, opts?: { onSuccess?: (label: { id: string }) => void }) => {
+        opts?.onSuccess?.({ id: "label-new" });
+      },
+    );
     // Reset the shared draft mock so per-test assignee seeding (squad / agent)
     // doesn't leak into the next test in the suite.
     mockDraftStore.draft.assigneeType = undefined;
@@ -524,6 +531,49 @@ describe("CreateIssueModal", () => {
     expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({
       attachment_ids: undefined,
     }));
+  });
+
+  it("sends selected existing labels in create request", async () => {
+    const user = userEvent.setup();
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Issue with existing label");
+    await user.click(screen.getByLabelText("Select labels"));
+    await user.click(screen.getByRole("button", { name: /bug/i }));
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Issue with existing label",
+          label_ids: ["label-1"],
+        }),
+      );
+    });
+  });
+
+  it("supports creating a new label inline and attaches it on create", async () => {
+    const user = userEvent.setup();
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Issue with new label");
+    await user.click(screen.getByLabelText("Select labels"));
+    await user.type(screen.getByPlaceholderText("Search or type a new label"), "critical");
+    await user.click(screen.getByRole("button", { name: /Create label "critical"/i }));
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "critical" }),
+        expect.any(Object),
+      );
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Issue with new label",
+          label_ids: ["label-new"],
+        }),
+      );
+    });
   });
 
   // Manual → agent must forward the picked project so the new modal pins to
