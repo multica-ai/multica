@@ -15,6 +15,7 @@ export function useTypeLabels(): Record<InboxItemType, string> {
   const { t } = useT("inbox");
   return {
     issue_assigned: t(($) => $.types.issue_assigned),
+    issue_subscribed: t(($) => $.types.issue_subscribed),
     unassigned: t(($) => $.types.unassigned),
     assignee_changed: t(($) => $.types.assignee_changed),
     status_changed: t(($) => $.types.status_changed),
