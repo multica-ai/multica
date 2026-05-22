@@ -1392,6 +1392,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.QuickCreatePrompt = qc.Prompt
 			resp.WorkspaceID = qc.WorkspaceID
 
+			if qc.ParentIssueID != "" {
+				resp.ParentIssueID = qc.ParentIssueID
+			}
+
 			// When the user picked a project in the modal, surface its title
 			// and resources to the daemon so the agent has the same context
 			// it would for an issue-bound task: the prompt template can name

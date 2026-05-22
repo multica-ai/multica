@@ -369,6 +369,7 @@ export function ManualCreatePanel({
           ? { squad_id: assigneeId }
           : {}),
       ...(projectId ? { project_id: projectId } : {}),
+      ...(parentIssueId ? { parent_issue_id: parentIssueId } : {}),
     });
   };
 

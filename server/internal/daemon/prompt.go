@@ -105,6 +105,11 @@ func buildQuickCreatePrompt(task Task) string {
 	} else {
 		b.WriteString("- **project**: omit. The platform will route the issue to the workspace default.\n")
 	}
+
+	if task.ParentIssueID != "" {
+		fmt.Fprintf(&b, "- **parent**: required for this run. Pass `--parent %q` so the new issue is created as a sub-issue of the specified parent. The user chose to create this issue under that parent — always pass the flag.\n", task.ParentIssueID)
+	}
+
 	b.WriteString("- **status**: omit (defaults to `todo`).\n")
 	b.WriteString("- **attachments**: do NOT pass `--attachment`. The flag only accepts LOCAL file paths. Any image URL in the user input is already markdown — keep it inline in `--description` instead.\n\n")
 

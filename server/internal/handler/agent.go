@@ -189,6 +189,7 @@ type AgentTaskResponse struct {
 	QuickCreatePrompt       string                `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
 	SquadID                 string                `json:"squad_id,omitempty"`                  // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
 	SquadName               string                `json:"squad_name,omitempty"`                // display name for the picker squad
+	ParentIssueID           string                `json:"parent_issue_id,omitempty"`           // for quick-create tasks: pre-set parent so the agent passes --parent to CLI
 	// RequestingUserName + RequestingUserProfileDescription mirror the user
 	// the agent is acting on behalf of (see daemon/types.go). v1 sources them
 	// from the runtime owner so they're populated for daemon runtimes and

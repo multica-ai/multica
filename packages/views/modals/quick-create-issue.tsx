@@ -280,6 +280,7 @@ export function AgentCreatePanel({
           : { squad_id: actor.id }),
         prompt: md,
         project_id: projectId ?? undefined,
+        parent_issue_id: (data?.parent_issue_id as string) || undefined,
       });
       setLastActor(actor.type, actor.id);
       setLastProjectId(projectId);
@@ -358,11 +359,14 @@ export function AgentCreatePanel({
         : {}),
     });
     setLastMode("manual");
-    // Hand the picked project to the manual panel through the same `data`
-    // channel that already carries agent_id / parent_issue_id. The manual
-    // panel reads `data.project_id` on mount; this preserves the user's
-    // selection across the mode flip without piping a third store through.
-    onSwitchMode?.(projectId ? { project_id: projectId } : null);
+    // Hand the picked project and parent_issue_id to the manual panel through
+    // the same `data` channel. The manual panel reads `data.project_id` and
+    // `data.parent_issue_id` on mount; this preserves the user's selection
+    // across the mode flip without piping additional stores through.
+    const carry: Record<string, unknown> = {};
+    if (projectId) carry.project_id = projectId;
+    if (data?.parent_issue_id) carry.parent_issue_id = data.parent_issue_id;
+    onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
   };
 
   return (
