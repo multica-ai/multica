@@ -124,6 +124,27 @@ type Attachment struct {
 	ChatMessageID pgtype.UUID        `json:"chat_message_id"`
 }
 
+type AttachmentUploadSession struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	AttachmentID  pgtype.UUID        `json:"attachment_id"`
+	ObjectKey     string             `json:"object_key"`
+	UploadID      string             `json:"upload_id"`
+	Filename      string             `json:"filename"`
+	ContentType   string             `json:"content_type"`
+	SizeBytes     int64              `json:"size_bytes"`
+	PartSizeBytes int64              `json:"part_size_bytes"`
+	UploaderType  string             `json:"uploader_type"`
+	UploaderID    pgtype.UUID        `json:"uploader_id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	CommentID     pgtype.UUID        `json:"comment_id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	Status        string             `json:"status"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Autopilot struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`

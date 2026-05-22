@@ -21,6 +21,7 @@ import (
 	notifyutil "github.com/multica-ai/multica/server/internal/notify"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/storage"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/redis/go-redis/v9"
 )
@@ -53,6 +54,13 @@ func closeRedisClient(label string, client *redis.Client) {
 	if err := client.Close(); err != nil {
 		slog.Warn("redis client close failed", "client", label, "error", err)
 	}
+}
+
+func storageForAttachmentCleanup() storage.Storage {
+	if s3 := storage.NewS3StorageFromEnv(); s3 != nil {
+		return s3
+	}
+	return storage.NewLocalStorageFromEnv()
 }
 
 func shardedRelayConfigFromEnv() realtime.ShardedStreamRelayConfig {
@@ -304,6 +312,7 @@ func main() {
 	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
 	taskSvc.Analytics = analyticsClient
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
+	uploadCleanupHandler := handler.New(queries, pool, hub, bus, service.NewEmailService(), storageForAttachmentCleanup(), nil, analyticsClient, handler.Config{})
 	registerAutopilotListeners(bus, autopilotSvc)
 
 	// Construct a LivenessStore that mirrors the one wired into the HTTP
@@ -322,6 +331,7 @@ func main() {
 	go runNotificationDeliveryDispatcher(sweepCtx, queries, service.NewEmailService(), daemonHub)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
+	go uploadCleanupHandler.RunAttachmentUploadCleanup(sweepCtx, 0)
 
 	if metricsServer != nil {
 		go func() {
