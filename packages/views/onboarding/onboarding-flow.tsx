@@ -63,7 +63,7 @@ function mergeQuestionnaire(
  * Shell's onComplete contract:
  *   onComplete(workspace?, issueId?) — if an issue id is present, navigate
  *   straight into that onboarding issue; otherwise navigate into the
- *   workspace issues list. Runtime-connected onboarding creates one
+ *   workspace home. Runtime-connected onboarding creates one
  *   Multica Helper agent plus one issue; runtime-skipped onboarding creates one
  *   self-serve install-runtime issue.
  */

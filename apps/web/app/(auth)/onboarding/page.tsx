@@ -19,7 +19,7 @@ import type { Workspace } from "@multica/core/types";
  * `<OnboardingFlow />`. Kept minimal — guard on auth, render, exit.
  *
  * On complete: runtime-connected onboarding may provide a guide issue id;
- * navigate there. Otherwise land on the workspace issues list, or root if
+ * navigate there. Otherwise land on the workspace home, or root if
  * the flow never produced a workspace.
  *
  * `CliInstallInstructions` is passed in as the `runtimeInstructions`
@@ -38,7 +38,7 @@ export default function OnboardingPage() {
   // The bootstrap path calls refreshMe() before returning, which flips
   // hasOnboarded to true while the page is still mounted. Without this
   // flag the guard below races onComplete: the guard's router.replace
-  // (issues list) can overtake onComplete's router.push (guide issue),
+  // (workspace home) can overtake onComplete's router.push (guide issue),
   // dropping the user on the wrong destination. Marking the page as
   // "completing" right before onComplete navigates keeps the guard
   // silent for the in-flight transition.
@@ -72,7 +72,7 @@ export default function OnboardingPage() {
       if (ws && issueId) {
         router.push(paths.workspace(ws.slug).issueDetail(issueId));
       } else if (ws) {
-        router.push(paths.workspace(ws.slug).issues());
+        router.push(paths.workspace(ws.slug).root());
       } else {
         router.push(paths.root());
       }

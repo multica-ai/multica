@@ -31,7 +31,7 @@ export default function Page() {
 
   return (
     <NewWorkspacePage
-      onSuccess={(ws) => router.push(paths.workspace(ws.slug).issues())}
+      onSuccess={(ws) => router.push(paths.workspace(ws.slug).root())}
       onBack={onBack}
     />
   );
