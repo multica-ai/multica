@@ -37,6 +37,11 @@ export class WSClient {
   private onReconnectCallbacks = new Set<() => void>();
   private anyHandlers = new Set<(msg: WSMessage) => void>();
   private logger: Logger;
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private pongTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  private pongReceived = false;
+  private pingIntervalMs: number;
+  private pongTimeoutMs: number;
 
   constructor(
     url: string,
@@ -44,12 +49,16 @@ export class WSClient {
       logger?: Logger;
       cookieAuth?: boolean;
       identity?: WSClientIdentity;
+      pingInterval?: number;
+      pongTimeout?: number;
     },
   ) {
     this.baseUrl = url;
     this.logger = options?.logger ?? noopLogger;
     this.cookieAuth = options?.cookieAuth ?? false;
     this.identity = options?.identity;
+    this.pingIntervalMs = options?.pingInterval ?? 30_000;
+    this.pongTimeoutMs = options?.pongTimeout ?? 10_000;
   }
 
   setAuth(token: string | null, workspaceSlug: string) {
@@ -100,6 +109,15 @@ export class WSClient {
         this.onAuthenticated();
         return;
       }
+      if ((msg as any).type === "pong") {
+        this.pongReceived = true;
+        this.clearPongTimeoutTimer();
+        return;
+      }
+      if ((msg as any).type === "ping") {
+        this.send({ type: "pong" } as any);
+        return;
+      }
       this.logger.debug("received", msg.type);
       const eventHandlers = this.handlers.get(msg.type);
       if (eventHandlers) {
@@ -113,6 +131,7 @@ export class WSClient {
     };
 
     this.ws.onclose = () => {
+      this.stopPing();
       this.logger.warn("disconnected, reconnecting in 3s");
       this.reconnectTimer = setTimeout(() => this.connect(), 3000);
     };
@@ -125,6 +144,7 @@ export class WSClient {
 
   private onAuthenticated() {
     this.logger.info("connected");
+    this.startPing();
     if (this.hasConnectedBefore) {
       for (const cb of this.onReconnectCallbacks) {
         try {
@@ -137,7 +157,38 @@ export class WSClient {
     this.hasConnectedBefore = true;
   }
 
+  private startPing() {
+    this.stopPing();
+    this.pingTimer = setInterval(() => {
+      this.pongReceived = false;
+      this.send({ type: "ping" } as any);
+      this.pongTimeoutTimer = setTimeout(() => {
+        if (!this.pongReceived && this.ws) {
+          this.logger.warn("ws: pong timeout, closing connection");
+          this.stopPing();
+          this.ws.close();
+        }
+      }, this.pongTimeoutMs);
+    }, this.pingIntervalMs);
+  }
+
+  private stopPing() {
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
+    this.clearPongTimeoutTimer();
+  }
+
+  private clearPongTimeoutTimer() {
+    if (this.pongTimeoutTimer) {
+      clearTimeout(this.pongTimeoutTimer);
+      this.pongTimeoutTimer = null;
+    }
+  }
+
   disconnect() {
+    this.stopPing();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
