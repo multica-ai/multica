@@ -117,11 +117,12 @@ WITH filtered AS (
     WHERE a.workspace_id = $1
       AND COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= $2::timestamptz
       AND (COALESCE(cardinality($3::uuid[]), 0) = 0 OR atq.agent_id = ANY($3::uuid[]))
+      AND (COALESCE(cardinality($4::uuid[]), 0) = 0 OR a.owner_id = ANY($4::uuid[]))
       AND (
-        ($4::int <= $5::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $6::text)::int BETWEEN $4::int AND $5::int)
-        OR ($4::int > $5::int AND (
-          EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $6::text)::int >= $4::int
-          OR EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $6::text)::int <= $5::int
+        ($5::int <= $6::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $7::text)::int BETWEEN $5::int AND $6::int)
+        OR ($5::int > $6::int AND (
+          EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $7::text)::int >= $5::int
+          OR EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $7::text)::int <= $6::int
         ))
       )
 )
@@ -145,6 +146,7 @@ type GetAgentRunDashboardSummaryParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Since       pgtype.Timestamptz `json:"since"`
 	AgentIds    []pgtype.UUID      `json:"agent_ids"`
+	OwnerIds    []pgtype.UUID      `json:"owner_ids"`
 	StartHour   int32              `json:"start_hour"`
 	EndHour     int32              `json:"end_hour"`
 	Tz          string             `json:"tz"`
@@ -163,6 +165,7 @@ func (q *Queries) GetAgentRunDashboardSummary(ctx context.Context, arg GetAgentR
 		arg.WorkspaceID,
 		arg.Since,
 		arg.AgentIds,
+		arg.OwnerIds,
 		arg.StartHour,
 		arg.EndHour,
 		arg.Tz,
@@ -191,13 +194,14 @@ WITH filtered AS (
     FROM agent_task_queue atq
     JOIN agent a ON a.id = atq.agent_id
     WHERE a.workspace_id = $1
-      AND COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= $3::timestamptz
+      AND COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= $4::timestamptz
       AND (COALESCE(cardinality($2::uuid[]), 0) = 0 OR atq.agent_id = ANY($2::uuid[]))
+      AND (COALESCE(cardinality($3::uuid[]), 0) = 0 OR a.owner_id = ANY($3::uuid[]))
       AND (
-        ($4::int <= $5::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $6::text)::int BETWEEN $4::int AND $5::int)
-        OR ($4::int > $5::int AND (
-          EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $6::text)::int >= $4::int
-          OR EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $6::text)::int <= $5::int
+        ($5::int <= $6::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $7::text)::int BETWEEN $5::int AND $6::int)
+        OR ($5::int > $6::int AND (
+          EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $7::text)::int >= $5::int
+          OR EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $7::text)::int <= $6::int
         ))
       )
 ),
@@ -254,12 +258,14 @@ LEFT JOIN latest ON latest.agent_id = a.id
 WHERE a.workspace_id = $1
   AND a.archived_at IS NULL
   AND (COALESCE(cardinality($2::uuid[]), 0) = 0 OR a.id = ANY($2::uuid[]))
+  AND (COALESCE(cardinality($3::uuid[]), 0) = 0 OR a.owner_id = ANY($3::uuid[]))
 ORDER BY a.name ASC
 `
 
 type ListAgentRunDashboardAgentsParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	AgentIds    []pgtype.UUID      `json:"agent_ids"`
+	OwnerIds    []pgtype.UUID      `json:"owner_ids"`
 	Since       pgtype.Timestamptz `json:"since"`
 	StartHour   int32              `json:"start_hour"`
 	EndHour     int32              `json:"end_hour"`
@@ -286,6 +292,7 @@ func (q *Queries) ListAgentRunDashboardAgents(ctx context.Context, arg ListAgent
 	rows, err := q.db.Query(ctx, listAgentRunDashboardAgents,
 		arg.WorkspaceID,
 		arg.AgentIds,
+		arg.OwnerIds,
 		arg.Since,
 		arg.StartHour,
 		arg.EndHour,
@@ -335,11 +342,12 @@ WITH filtered AS (
     WHERE a.workspace_id = $2
       AND COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= $3::timestamptz
       AND (COALESCE(cardinality($4::uuid[]), 0) = 0 OR atq.agent_id = ANY($4::uuid[]))
+      AND (COALESCE(cardinality($5::uuid[]), 0) = 0 OR a.owner_id = ANY($5::uuid[]))
       AND (
-        ($5::int <= $6::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $1::text)::int BETWEEN $5::int AND $6::int)
-        OR ($5::int > $6::int AND (
-          EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $1::text)::int >= $5::int
-          OR EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $1::text)::int <= $6::int
+        ($6::int <= $7::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $1::text)::int BETWEEN $6::int AND $7::int)
+        OR ($6::int > $7::int AND (
+          EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $1::text)::int >= $6::int
+          OR EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $1::text)::int <= $7::int
         ))
       )
 )
@@ -358,6 +366,7 @@ type ListAgentRunDashboardDailyParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Since       pgtype.Timestamptz `json:"since"`
 	AgentIds    []pgtype.UUID      `json:"agent_ids"`
+	OwnerIds    []pgtype.UUID      `json:"owner_ids"`
 	StartHour   int32              `json:"start_hour"`
 	EndHour     int32              `json:"end_hour"`
 }
@@ -375,6 +384,7 @@ func (q *Queries) ListAgentRunDashboardDaily(ctx context.Context, arg ListAgentR
 		arg.WorkspaceID,
 		arg.Since,
 		arg.AgentIds,
+		arg.OwnerIds,
 		arg.StartHour,
 		arg.EndHour,
 	)
@@ -415,11 +425,12 @@ WITH filtered AS (
       AND atq.status = 'failed'
       AND COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= $2::timestamptz
       AND (COALESCE(cardinality($3::uuid[]), 0) = 0 OR atq.agent_id = ANY($3::uuid[]))
+      AND (COALESCE(cardinality($4::uuid[]), 0) = 0 OR a.owner_id = ANY($4::uuid[]))
       AND (
-        ($4::int <= $5::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $6::text)::int BETWEEN $4::int AND $5::int)
-        OR ($4::int > $5::int AND (
-          EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $6::text)::int >= $4::int
-          OR EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $6::text)::int <= $5::int
+        ($5::int <= $6::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $7::text)::int BETWEEN $5::int AND $6::int)
+        OR ($5::int > $6::int AND (
+          EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $7::text)::int >= $5::int
+          OR EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $7::text)::int <= $6::int
         ))
       )
 ),
@@ -445,6 +456,7 @@ type ListAgentRunDashboardFailureReasonsParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Since       pgtype.Timestamptz `json:"since"`
 	AgentIds    []pgtype.UUID      `json:"agent_ids"`
+	OwnerIds    []pgtype.UUID      `json:"owner_ids"`
 	StartHour   int32              `json:"start_hour"`
 	EndHour     int32              `json:"end_hour"`
 	Tz          string             `json:"tz"`
@@ -460,6 +472,7 @@ func (q *Queries) ListAgentRunDashboardFailureReasons(ctx context.Context, arg L
 		arg.WorkspaceID,
 		arg.Since,
 		arg.AgentIds,
+		arg.OwnerIds,
 		arg.StartHour,
 		arg.EndHour,
 		arg.Tz,
@@ -492,11 +505,12 @@ WITH filtered AS (
     WHERE a.workspace_id = $2
       AND COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= $3::timestamptz
       AND (COALESCE(cardinality($4::uuid[]), 0) = 0 OR atq.agent_id = ANY($4::uuid[]))
+      AND (COALESCE(cardinality($5::uuid[]), 0) = 0 OR a.owner_id = ANY($5::uuid[]))
       AND (
-        ($5::int <= $6::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $1::text)::int BETWEEN $5::int AND $6::int)
-        OR ($5::int > $6::int AND (
-          EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $1::text)::int >= $5::int
-          OR EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $1::text)::int <= $6::int
+        ($6::int <= $7::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $1::text)::int BETWEEN $6::int AND $7::int)
+        OR ($6::int > $7::int AND (
+          EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $1::text)::int >= $6::int
+          OR EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $1::text)::int <= $7::int
         ))
       )
 )
@@ -516,6 +530,7 @@ type ListAgentRunDashboardHeatmapParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Since       pgtype.Timestamptz `json:"since"`
 	AgentIds    []pgtype.UUID      `json:"agent_ids"`
+	OwnerIds    []pgtype.UUID      `json:"owner_ids"`
 	StartHour   int32              `json:"start_hour"`
 	EndHour     int32              `json:"end_hour"`
 }
@@ -532,6 +547,7 @@ func (q *Queries) ListAgentRunDashboardHeatmap(ctx context.Context, arg ListAgen
 		arg.WorkspaceID,
 		arg.Since,
 		arg.AgentIds,
+		arg.OwnerIds,
 		arg.StartHour,
 		arg.EndHour,
 	)
@@ -573,11 +589,12 @@ WITH filtered AS (
     WHERE a.workspace_id = $3
       AND COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= $4::timestamptz
       AND (COALESCE(cardinality($5::uuid[]), 0) = 0 OR atq.agent_id = ANY($5::uuid[]))
+      AND (COALESCE(cardinality($6::uuid[]), 0) = 0 OR a.owner_id = ANY($6::uuid[]))
       AND (
-        ($6::int <= $7::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $8::text)::int BETWEEN $6::int AND $7::int)
-        OR ($6::int > $7::int AND (
-          EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $8::text)::int >= $6::int
-          OR EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $8::text)::int <= $7::int
+        ($7::int <= $8::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $9::text)::int BETWEEN $7::int AND $8::int)
+        OR ($7::int > $8::int AND (
+          EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $9::text)::int >= $7::int
+          OR EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $9::text)::int <= $8::int
         ))
       )
 )
@@ -622,6 +639,7 @@ type ListAgentRunDashboardRecentRunsParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Since       pgtype.Timestamptz `json:"since"`
 	AgentIds    []pgtype.UUID      `json:"agent_ids"`
+	OwnerIds    []pgtype.UUID      `json:"owner_ids"`
 	StartHour   int32              `json:"start_hour"`
 	EndHour     int32              `json:"end_hour"`
 	Tz          string             `json:"tz"`
@@ -654,6 +672,7 @@ func (q *Queries) ListAgentRunDashboardRecentRuns(ctx context.Context, arg ListA
 		arg.WorkspaceID,
 		arg.Since,
 		arg.AgentIds,
+		arg.OwnerIds,
 		arg.StartHour,
 		arg.EndHour,
 		arg.Tz,
@@ -706,11 +725,12 @@ WITH filtered AS (
     WHERE a.workspace_id = $1
       AND COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= $2::timestamptz
       AND (COALESCE(cardinality($3::uuid[]), 0) = 0 OR atq.agent_id = ANY($3::uuid[]))
+      AND (COALESCE(cardinality($4::uuid[]), 0) = 0 OR a.owner_id = ANY($4::uuid[]))
       AND (
-        ($4::int <= $5::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $6::text)::int BETWEEN $4::int AND $5::int)
-        OR ($4::int > $5::int AND (
-          EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $6::text)::int >= $4::int
-          OR EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $6::text)::int <= $5::int
+        ($5::int <= $6::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $7::text)::int BETWEEN $5::int AND $6::int)
+        OR ($5::int > $6::int AND (
+          EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $7::text)::int >= $5::int
+          OR EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE $7::text)::int <= $6::int
         ))
       )
 )
@@ -724,6 +744,7 @@ type ListAgentRunDashboardRetryDistributionParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Since       pgtype.Timestamptz `json:"since"`
 	AgentIds    []pgtype.UUID      `json:"agent_ids"`
+	OwnerIds    []pgtype.UUID      `json:"owner_ids"`
 	StartHour   int32              `json:"start_hour"`
 	EndHour     int32              `json:"end_hour"`
 	Tz          string             `json:"tz"`
@@ -739,6 +760,7 @@ func (q *Queries) ListAgentRunDashboardRetryDistribution(ctx context.Context, ar
 		arg.WorkspaceID,
 		arg.Since,
 		arg.AgentIds,
+		arg.OwnerIds,
 		arg.StartHour,
 		arg.EndHour,
 		arg.Tz,

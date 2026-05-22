@@ -4,6 +4,9 @@
   "filter": {
     "all_agents": "全部智能体",
     "agent_count": "{{count}} 个智能体",
+    "mine": "我的",
+    "all_owners": "全部成员",
+    "selected_owner": "已选成员",
     "to": "至"
   },
   "kpi": {

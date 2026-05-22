@@ -12,6 +12,7 @@ WITH filtered AS (
     WHERE a.workspace_id = @workspace_id
       AND COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= @since::timestamptz
       AND (COALESCE(cardinality(@agent_ids::uuid[]), 0) = 0 OR atq.agent_id = ANY(@agent_ids::uuid[]))
+      AND (COALESCE(cardinality(@owner_ids::uuid[]), 0) = 0 OR a.owner_id = ANY(@owner_ids::uuid[]))
       AND (
         (@start_hour::int <= @end_hour::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE @tz::text)::int BETWEEN @start_hour::int AND @end_hour::int)
         OR (@start_hour::int > @end_hour::int AND (
@@ -47,6 +48,7 @@ WITH filtered AS (
     WHERE a.workspace_id = @workspace_id
       AND COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= @since::timestamptz
       AND (COALESCE(cardinality(@agent_ids::uuid[]), 0) = 0 OR atq.agent_id = ANY(@agent_ids::uuid[]))
+      AND (COALESCE(cardinality(@owner_ids::uuid[]), 0) = 0 OR a.owner_id = ANY(@owner_ids::uuid[]))
       AND (
         (@start_hour::int <= @end_hour::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE @tz::text)::int BETWEEN @start_hour::int AND @end_hour::int)
         OR (@start_hour::int > @end_hour::int AND (
@@ -74,6 +76,7 @@ WITH filtered AS (
     WHERE a.workspace_id = @workspace_id
       AND COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= @since::timestamptz
       AND (COALESCE(cardinality(@agent_ids::uuid[]), 0) = 0 OR atq.agent_id = ANY(@agent_ids::uuid[]))
+      AND (COALESCE(cardinality(@owner_ids::uuid[]), 0) = 0 OR a.owner_id = ANY(@owner_ids::uuid[]))
       AND (
         (@start_hour::int <= @end_hour::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE @tz::text)::int BETWEEN @start_hour::int AND @end_hour::int)
         OR (@start_hour::int > @end_hour::int AND (
@@ -106,6 +109,7 @@ WITH filtered AS (
       AND atq.status = 'failed'
       AND COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= @since::timestamptz
       AND (COALESCE(cardinality(@agent_ids::uuid[]), 0) = 0 OR atq.agent_id = ANY(@agent_ids::uuid[]))
+      AND (COALESCE(cardinality(@owner_ids::uuid[]), 0) = 0 OR a.owner_id = ANY(@owner_ids::uuid[]))
       AND (
         (@start_hour::int <= @end_hour::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE @tz::text)::int BETWEEN @start_hour::int AND @end_hour::int)
         OR (@start_hour::int > @end_hour::int AND (
@@ -146,6 +150,7 @@ WITH filtered AS (
     WHERE a.workspace_id = @workspace_id
       AND COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= @since::timestamptz
       AND (COALESCE(cardinality(@agent_ids::uuid[]), 0) = 0 OR atq.agent_id = ANY(@agent_ids::uuid[]))
+      AND (COALESCE(cardinality(@owner_ids::uuid[]), 0) = 0 OR a.owner_id = ANY(@owner_ids::uuid[]))
       AND (
         (@start_hour::int <= @end_hour::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE @tz::text)::int BETWEEN @start_hour::int AND @end_hour::int)
         OR (@start_hour::int > @end_hour::int AND (
@@ -207,6 +212,7 @@ LEFT JOIN latest ON latest.agent_id = a.id
 WHERE a.workspace_id = @workspace_id
   AND a.archived_at IS NULL
   AND (COALESCE(cardinality(@agent_ids::uuid[]), 0) = 0 OR a.id = ANY(@agent_ids::uuid[]))
+  AND (COALESCE(cardinality(@owner_ids::uuid[]), 0) = 0 OR a.owner_id = ANY(@owner_ids::uuid[]))
 ORDER BY a.name ASC;
 
 -- name: ListAgentRunDashboardRecentRuns :many
@@ -229,6 +235,7 @@ WITH filtered AS (
     WHERE a.workspace_id = @workspace_id
       AND COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= @since::timestamptz
       AND (COALESCE(cardinality(@agent_ids::uuid[]), 0) = 0 OR atq.agent_id = ANY(@agent_ids::uuid[]))
+      AND (COALESCE(cardinality(@owner_ids::uuid[]), 0) = 0 OR a.owner_id = ANY(@owner_ids::uuid[]))
       AND (
         (@start_hour::int <= @end_hour::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE @tz::text)::int BETWEEN @start_hour::int AND @end_hour::int)
         OR (@start_hour::int > @end_hour::int AND (
@@ -283,6 +290,7 @@ WITH filtered AS (
     WHERE a.workspace_id = @workspace_id
       AND COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= @since::timestamptz
       AND (COALESCE(cardinality(@agent_ids::uuid[]), 0) = 0 OR atq.agent_id = ANY(@agent_ids::uuid[]))
+      AND (COALESCE(cardinality(@owner_ids::uuid[]), 0) = 0 OR a.owner_id = ANY(@owner_ids::uuid[]))
       AND (
         (@start_hour::int <= @end_hour::int AND EXTRACT(HOUR FROM COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) AT TIME ZONE @tz::text)::int BETWEEN @start_hour::int AND @end_hour::int)
         OR (@start_hour::int > @end_hour::int AND (

@@ -4,6 +4,9 @@
   "filter": {
     "all_agents": "All agents",
     "agent_count": "{{count}} agents",
+    "mine": "Mine",
+    "all_owners": "All members",
+    "selected_owner": "Selected member",
     "to": "to"
   },
   "kpi": {

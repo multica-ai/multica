@@ -1329,6 +1329,7 @@ export class ApiClient {
   async getAgentRunDashboard(params: {
     days?: number;
     agent_ids?: string[];
+    owner_id?: string;
     start_hour?: number;
     end_hour?: number;
     tz?: string;
@@ -1338,6 +1339,7 @@ export class ApiClient {
     if (params.days) search.set("days", String(params.days));
     if (params.start_hour !== undefined) search.set("start_hour", String(params.start_hour));
     if (params.end_hour !== undefined) search.set("end_hour", String(params.end_hour));
+    if (params.owner_id) search.set("owner_id", params.owner_id);
     if (params.tz) search.set("tz", params.tz);
     if (params.limit) search.set("limit", String(params.limit));
     for (const id of params.agent_ids ?? []) {

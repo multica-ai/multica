@@ -13,6 +13,8 @@ import {
   Filter,
   ListFilter,
   RefreshCw,
+  UserRound,
+  Users,
   XCircle,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -29,19 +31,22 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { agentListOptions } from "@multica/core/workspace/queries";
+import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import {
   agentRunDashboardOptions,
   agentRunDashboardRunDetailOptions,
 } from "@multica/core/agent-dashboard";
+import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type {
+  Agent,
   AgentRunDashboardAgent,
   AgentRunDashboardDaily,
   AgentRunDashboardFailureReason,
   AgentRunDashboardHeatmapCell,
   AgentRunDashboardRun,
+  MemberWithUser,
 } from "@multica/core/types";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
@@ -100,7 +105,8 @@ type AgentSortKey =
 const SUCCESS_WARNING_THRESHOLD = 0.8;
 const PAGE_SIZE = 20;
 
-const EMPTY_AGENTS: { id: string; name: string }[] = [];
+const EMPTY_AGENTS: Agent[] = [];
+const EMPTY_MEMBERS: MemberWithUser[] = [];
 const EMPTY_DAILY: AgentRunDashboardDaily[] = [];
 const EMPTY_HEATMAP: AgentRunDashboardHeatmapCell[] = [];
 const EMPTY_REASONS: AgentRunDashboardFailureReason[] = [];
@@ -330,6 +336,9 @@ function useDashboardUrlState() {
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>(() =>
     parseSelectedAgents(initial.get("agents")),
   );
+  const [selectedOwnerId, setSelectedOwnerId] = useState<string | null>(() =>
+    initial.get("owner")?.trim() || null,
+  );
   const [startHour, setStartHour] = useState(() => parseHour(initial.get("start_hour"), 0));
   const [endHour, setEndHour] = useState(() => parseHour(initial.get("end_hour"), 23));
   const [sortKey, setSortKey] = useState<AgentSortKey>(() => parseSortKey(initial.get("sort")));
@@ -341,6 +350,7 @@ function useDashboardUrlState() {
   useEffect(() => {
     const params = new URLSearchParams();
     if (days !== 30) params.set("days", String(days));
+    if (selectedOwnerId) params.set("owner", selectedOwnerId);
     if (selectedAgentIds.length > 0) params.set("agents", selectedAgentIds.join(","));
     if (startHour !== 0) params.set("start_hour", String(startHour));
     if (endHour !== 23) params.set("end_hour", String(endHour));
@@ -358,6 +368,7 @@ function useDashboardUrlState() {
     pathname,
     replace,
     selectedAgentIds,
+    selectedOwnerId,
     sortDir,
     sortKey,
     startHour,
@@ -372,6 +383,12 @@ function useDashboardUrlState() {
     selectedAgentIds,
     setSelectedAgentIds: (next: string[]) => {
       setSelectedAgentIds(next);
+      setPage(1);
+    },
+    selectedOwnerId,
+    setSelectedOwnerId: (next: string | null) => {
+      setSelectedOwnerId(next);
+      setSelectedAgentIds([]);
       setPage(1);
     },
     startHour,
@@ -397,6 +414,7 @@ export function AgentDashboardPage() {
   const { t } = useT("agent-dashboard");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
+  const currentUserId = useAuthStore((s) => s.user?.id ?? null);
   const timezone = useMemo(defaultTimezone, []);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const {
@@ -404,6 +422,8 @@ export function AgentDashboardPage() {
     setDays,
     selectedAgentIds,
     setSelectedAgentIds,
+    selectedOwnerId,
+    setSelectedOwnerId,
     startHour,
     setStartHour,
     endHour,
@@ -417,10 +437,16 @@ export function AgentDashboardPage() {
   } = useDashboardUrlState();
 
   const { data: agents = EMPTY_AGENTS } = useQuery(agentListOptions(wsId));
+  const { data: members = EMPTY_MEMBERS } = useQuery(memberListOptions(wsId));
+  const ownerAgents = useMemo(
+    () => agents.filter((agent) => !selectedOwnerId || agent.owner_id === selectedOwnerId),
+    [agents, selectedOwnerId],
+  );
   const dashboardQuery = useQuery(
     agentRunDashboardOptions(wsId, {
       days,
       agentIds: selectedAgentIds,
+      ownerId: selectedOwnerId,
       startHour,
       endHour,
       timezone,
@@ -472,8 +498,14 @@ export function AgentDashboardPage() {
           <h1 className="truncate text-sm font-medium">{t(($) => $.title)}</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <OwnerFilter
+            members={members}
+            currentUserId={currentUserId}
+            selectedOwnerId={selectedOwnerId}
+            onChange={setSelectedOwnerId}
+          />
           <AgentFilter
-            agents={agents}
+            agents={ownerAgents}
             selectedAgentIds={selectedAgentIds}
             onChange={setSelectedAgentIds}
           />
@@ -602,12 +634,68 @@ function Segmented<T extends string | number>({
   );
 }
 
+function OwnerFilter({
+  members,
+  currentUserId,
+  selectedOwnerId,
+  onChange,
+}: {
+  members: MemberWithUser[];
+  currentUserId: string | null;
+  selectedOwnerId: string | null;
+  onChange: (id: string | null) => void;
+}) {
+  const { t } = useT("agent-dashboard");
+  const selectedMember = selectedOwnerId
+    ? members.find((member) => member.user_id === selectedOwnerId) ?? null
+    : null;
+  const mineActive = !!currentUserId && selectedOwnerId === currentUserId;
+
+  return (
+    <div className="flex items-center gap-1">
+      <Button
+        variant={mineActive ? "secondary" : "outline"}
+        size="sm"
+        disabled={!currentUserId}
+        onClick={() => {
+          if (currentUserId) onChange(currentUserId);
+        }}
+      >
+        <UserRound />
+        <span>{t(($) => $.filter.mine)}</span>
+      </Button>
+      <Select
+        value={selectedOwnerId ?? "all"}
+        onValueChange={(value) => onChange(value === "all" ? null : value)}
+      >
+        <SelectTrigger size="sm" className="w-44 max-w-[46vw]">
+          <Users className="h-3.5 w-3.5 text-muted-foreground" />
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent alignItemWithTrigger={false}>
+          <SelectItem value="all">{t(($) => $.filter.all_owners)}</SelectItem>
+          {selectedOwnerId && !selectedMember && (
+            <SelectItem value={selectedOwnerId}>
+              {t(($) => $.filter.selected_owner)}
+            </SelectItem>
+          )}
+          {members.map((member) => (
+            <SelectItem key={member.user_id} value={member.user_id}>
+              <span className="truncate">{member.name || member.email}</span>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 function AgentFilter({
   agents,
   selectedAgentIds,
   onChange,
 }: {
-  agents: { id: string; name: string }[];
+  agents: Agent[];
   selectedAgentIds: string[];
   onChange: (ids: string[]) => void;
 }) {

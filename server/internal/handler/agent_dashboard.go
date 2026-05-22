@@ -19,6 +19,7 @@ type agentRunDashboardFilters struct {
 	WorkspaceID pgtype.UUID
 	Since       pgtype.Timestamptz
 	AgentIDs    []pgtype.UUID
+	OwnerIDs    []pgtype.UUID
 	StartHour   int32
 	EndHour     int32
 	Timezone    string
@@ -140,10 +141,11 @@ type AgentRunDashboardResponse struct {
 
 func (h *Handler) GetAgentRunDashboard(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
-	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
 		return
 	}
-	filters, ok := parseAgentRunDashboardFilters(w, r, workspaceID)
+	filters, ok := parseAgentRunDashboardFilters(w, r, workspaceID, member.UserID)
 	if !ok {
 		return
 	}
@@ -151,6 +153,7 @@ func (h *Handler) GetAgentRunDashboard(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: filters.WorkspaceID,
 		Since:       filters.Since,
 		AgentIds:    filters.AgentIDs,
+		OwnerIds:    filters.OwnerIDs,
 		StartHour:   filters.StartHour,
 		EndHour:     filters.EndHour,
 		Tz:          filters.Timezone,
@@ -164,6 +167,7 @@ func (h *Handler) GetAgentRunDashboard(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: filters.WorkspaceID,
 		Since:       filters.Since,
 		AgentIds:    filters.AgentIDs,
+		OwnerIds:    filters.OwnerIDs,
 		StartHour:   filters.StartHour,
 		EndHour:     filters.EndHour,
 		Tz:          filters.Timezone,
@@ -176,6 +180,7 @@ func (h *Handler) GetAgentRunDashboard(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: filters.WorkspaceID,
 		Since:       filters.Since,
 		AgentIds:    filters.AgentIDs,
+		OwnerIds:    filters.OwnerIDs,
 		StartHour:   filters.StartHour,
 		EndHour:     filters.EndHour,
 		Tz:          filters.Timezone,
@@ -188,6 +193,7 @@ func (h *Handler) GetAgentRunDashboard(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: filters.WorkspaceID,
 		Since:       filters.Since,
 		AgentIds:    filters.AgentIDs,
+		OwnerIds:    filters.OwnerIDs,
 		StartHour:   filters.StartHour,
 		EndHour:     filters.EndHour,
 		Tz:          filters.Timezone,
@@ -200,6 +206,7 @@ func (h *Handler) GetAgentRunDashboard(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: filters.WorkspaceID,
 		Since:       filters.Since,
 		AgentIds:    filters.AgentIDs,
+		OwnerIds:    filters.OwnerIDs,
 		StartHour:   filters.StartHour,
 		EndHour:     filters.EndHour,
 		Tz:          filters.Timezone,
@@ -212,6 +219,7 @@ func (h *Handler) GetAgentRunDashboard(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: filters.WorkspaceID,
 		Since:       filters.Since,
 		AgentIds:    filters.AgentIDs,
+		OwnerIds:    filters.OwnerIDs,
 		StartHour:   filters.StartHour,
 		EndHour:     filters.EndHour,
 		Tz:          filters.Timezone,
@@ -226,6 +234,7 @@ func (h *Handler) GetAgentRunDashboard(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: filters.WorkspaceID,
 		Since:       filters.Since,
 		AgentIds:    filters.AgentIDs,
+		OwnerIds:    filters.OwnerIDs,
 		StartHour:   filters.StartHour,
 		EndHour:     filters.EndHour,
 		Tz:          filters.Timezone,
@@ -240,6 +249,7 @@ func (h *Handler) GetAgentRunDashboard(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: filters.WorkspaceID,
 		Since:       filters.Since,
 		AgentIds:    filters.AgentIDs,
+		OwnerIds:    filters.OwnerIDs,
 		StartHour:   filters.StartHour,
 		EndHour:     filters.EndHour,
 		Tz:          filters.Timezone,
@@ -303,7 +313,7 @@ func (h *Handler) GetAgentRunDashboardRun(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, detail)
 }
 
-func parseAgentRunDashboardFilters(w http.ResponseWriter, r *http.Request, workspaceID string) (agentRunDashboardFilters, bool) {
+func parseAgentRunDashboardFilters(w http.ResponseWriter, r *http.Request, workspaceID string, currentUserID pgtype.UUID) (agentRunDashboardFilters, bool) {
 	tz := strings.TrimSpace(r.URL.Query().Get("tz"))
 	if tz == "" {
 		tz = "UTC"
@@ -324,6 +334,10 @@ func parseAgentRunDashboardFilters(w http.ResponseWriter, r *http.Request, works
 	if !ok {
 		return agentRunDashboardFilters{}, false
 	}
+	ownerIDs, ok := parseOwnerIDQueryParam(w, r, currentUserID)
+	if !ok {
+		return agentRunDashboardFilters{}, false
+	}
 	limit := int32(50)
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
@@ -340,6 +354,7 @@ func parseAgentRunDashboardFilters(w http.ResponseWriter, r *http.Request, works
 		WorkspaceID: parseUUID(workspaceID),
 		Since:       parseSinceParamInTZ(r, 30, tz),
 		AgentIDs:    agentIDs,
+		OwnerIDs:    ownerIDs,
 		StartHour:   int32(startHour),
 		EndHour:     int32(endHour),
 		Timezone:    tz,
@@ -361,10 +376,31 @@ func parseHourQueryParam(w http.ResponseWriter, r *http.Request, name string, de
 }
 
 func parseAgentIDQueryParam(w http.ResponseWriter, r *http.Request) ([]pgtype.UUID, bool) {
-	rawValues := append([]string{}, r.URL.Query()["agent_id"]...)
-	if raw := r.URL.Query().Get("agent_ids"); raw != "" {
+	rawValues := collectUUIDQueryValues(r, "agent_id", "agent_ids")
+	return parseUUIDQueryValues(w, rawValues, "agent_id")
+}
+
+func parseOwnerIDQueryParam(w http.ResponseWriter, r *http.Request, currentUserID pgtype.UUID) ([]pgtype.UUID, bool) {
+	rawValues := collectUUIDQueryValues(r, "owner_id", "owner_ids")
+	if raw := strings.TrimSpace(r.URL.Query().Get("owner")); raw != "" {
+		if raw == "me" {
+			rawValues = append(rawValues, uuidToString(currentUserID))
+		} else {
+			rawValues = append(rawValues, raw)
+		}
+	}
+	return parseUUIDQueryValues(w, rawValues, "owner_id")
+}
+
+func collectUUIDQueryValues(r *http.Request, singleKey string, listKey string) []string {
+	rawValues := append([]string{}, r.URL.Query()[singleKey]...)
+	if raw := r.URL.Query().Get(listKey); raw != "" {
 		rawValues = append(rawValues, strings.Split(raw, ",")...)
 	}
+	return rawValues
+}
+
+func parseUUIDQueryValues(w http.ResponseWriter, rawValues []string, fieldName string) ([]pgtype.UUID, bool) {
 	seen := map[string]struct{}{}
 	out := make([]pgtype.UUID, 0, len(rawValues))
 	for _, raw := range rawValues {
@@ -377,7 +413,7 @@ func parseAgentIDQueryParam(w http.ResponseWriter, r *http.Request) ([]pgtype.UU
 		}
 		u, err := util.ParseUUID(value)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid agent_id")
+			writeError(w, http.StatusBadRequest, "invalid "+fieldName)
 			return nil, false
 		}
 		seen[value] = struct{}{}

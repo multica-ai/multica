@@ -4,6 +4,7 @@ import { api } from "../api";
 export interface AgentRunDashboardParams {
   days: number;
   agentIds: string[];
+  ownerId?: string | null;
   startHour: number;
   endHour: number;
   timezone: string;
@@ -18,6 +19,7 @@ export const agentRunDashboardKeys = {
       "overview",
       params.days,
       [...params.agentIds].sort().join(","),
+      params.ownerId ?? "",
       params.startHour,
       params.endHour,
       params.timezone,
@@ -39,6 +41,7 @@ export function agentRunDashboardOptions(
       api.getAgentRunDashboard({
         days: params.days,
         agent_ids: params.agentIds,
+        owner_id: params.ownerId ?? undefined,
         start_hour: params.startHour,
         end_hour: params.endHour,
         tz: params.timezone,
