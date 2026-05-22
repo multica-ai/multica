@@ -29,9 +29,25 @@
 
 ### cli
 
-- Jenkins job: `Multica-CLI`
+- Jenkins job: `Multica-CLI-Prod`（生产环境）
+- Jenkins job: `Multica-CLI-Test`（测试环境）
 - 部署目标: OBS (`https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json`)
 - 产出要求: Jenkins build URL、CLI version、manifest URL、artifact/checksum 发布结果
+
+#### 环境隔离
+
+| 环境 | Jenkins Job | OBS Prefix | Manifest |
+|------|------------|-----------|----------|
+| test | `Multica-CLI-Test` | `cli-test` | `cli-test/manifest.json` |
+| prod | `Multica-CLI-Prod` | `cli` | `cli/manifest.json` |
+
+约束：
+
+- test job 硬编码 `--prefix cli-test`，禁止写入 `cli/` prefix
+- prod job 硬编码 `--prefix cli`，禁止从非 main/tag 发布
+- test 发布不创建 Gitee Release
+- 安装脚本通过 `--channel test` 参数或 `MULTICA_CHANNEL=test` 环境变量切换到测试通道
+- prod job 发布后校验 `cli/manifest.json` version == CLI_VERSION
 
 ## 发布流程
 
@@ -89,7 +105,7 @@ PROJECT_VERSION=v$(git describe --tags --long \
 
 ### B. 发布 CLI artifacts 到 OBS
 
-触发 `Multica-CLI` 并等待 `SUCCESS`。
+触发 `Multica-CLI-Prod` 并等待 `SUCCESS`。
 
 当前 live job 至少接受参数：
 
