@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -610,5 +612,83 @@ func TestCreateComment_SquadMentionTriggersLeader(t *testing.T) {
 	// The squad's leader should have a queued task.
 	if got := countQueued(leaderID); got != 1 {
 		t.Fatalf("after @squad mention: expected 1 leader task, got %d", got)
+	}
+}
+
+func TestCreateComment_SquadMentionLeaderClaimGetsBriefing(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var leaderID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id, runtime_id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
+	`, testWorkspaceID).Scan(&leaderID, &runtimeID); err != nil {
+		t.Fatalf("load leader agent: %v", err)
+	}
+
+	squad := seedSquadForBriefing(t, leaderID, "Mention Briefing Squad", "Coordinate before coding.")
+	helperID := createHandlerTestAgent(t, "Mention Briefing Helper", []byte("[]"))
+	addAgentMember(t, squad.ID, helperID, "developer")
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title)
+		VALUES ($1, 'member', $2, 'squad mention claim briefing test')
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	w := httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "[@Mention Briefing Squad](mention://squad/" + util.UUIDToString(squad.ID) + ") please coordinate this",
+	})
+	r = withURLParam(r, "id", issueID)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var taskID string
+	var rawContext []byte
+	if err := testPool.QueryRow(ctx, `
+		SELECT id, context FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND is_leader_task = TRUE
+	`, issueID, leaderID).Scan(&taskID, &rawContext); err != nil {
+		t.Fatalf("load queued leader task: %v", err)
+	}
+	_ = taskID
+	var taskContext service.TaskContext
+	if err := json.Unmarshal(rawContext, &taskContext); err != nil {
+		t.Fatalf("unmarshal task context: %v", err)
+	}
+	if taskContext.SquadID != util.UUIDToString(squad.ID) {
+		t.Fatalf("queued leader task context squad_id = %q, want %q", taskContext.SquadID, util.UUIDToString(squad.ID))
+	}
+	if taskContext.SquadName != "Mention Briefing Squad" {
+		t.Fatalf("queued leader task context squad_name = %q", taskContext.SquadName)
+	}
+	if taskContext.LeaderTaskSource != service.LeaderTaskSourceSquadMention {
+		t.Fatalf("queued leader task source = %q, want %q", taskContext.LeaderTaskSource, service.LeaderTaskSourceSquadMention)
+	}
+
+	agent := claimAndDecodeAgent(t, runtimeID)
+	for _, want := range []string{
+		"## Squad Operating Protocol",
+		"## Squad Roster",
+		"## Squad Instructions (Mention Briefing Squad)",
+		"Coordinate before coding.",
+		"`[@Mention Briefing Helper](mention://agent/" + helperID + ")`",
+	} {
+		if !strings.Contains(agent.Instructions, want) {
+			t.Errorf("expected squad mention claim instructions to contain %q\n--- instructions ---\n%s", want, agent.Instructions)
+		}
 	}
 }

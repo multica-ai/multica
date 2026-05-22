@@ -84,22 +84,26 @@ const commentHardCap = 2000
 //     comment plus every descendant. The anchor may be a root or any reply;
 //     the server walks up to the root via a recursive CTE, so callers do not
 //     need to know whether the id they have is a root.
+//
 //   - tail=<N> — only valid with thread. Cap the reply count at the N most
 //     recent replies (per (created_at, id)). The thread root is always
 //     returned, even when N=0, so the reader keeps the "what is this thread
 //     about" context. Without tail, thread returns the entire thread (the
 //     pre-MUL-2421 behavior).
+//
 //   - recent=<N> — return the N most recently active threads (root + every
 //     descendant per thread). A thread's recency is MAX(created_at) across
 //     the whole subtree, so a stale-but-recently-replied thread ranks ahead
 //     of an active-but-quiet one. Row-based "newest N comments" is
 //     deliberately NOT exposed — it surfaces unrelated thread tails and
 //     hides relevant history (#2340).
+//
 //   - before=<RFC3339> + before-id=<uuid> — cursor. The pair's meaning is
 //     context-dependent so the flag surface stays small:
 //
 //   - with recent: a *thread* cursor — (last_activity_at, root_id) — and
 //     the next page returns threads strictly less recent.
+//
 //   - with thread + tail: a *reply* cursor — (created_at, id) — and the
 //     next page returns replies in the same thread strictly older than
 //     that reply.
@@ -603,6 +607,21 @@ func taskContextForCommentType(commentType string) []byte {
 	data, err := json.Marshal(service.TaskContext{RunMode: "plan"})
 	if err != nil {
 		return nil
+	}
+	return data
+}
+
+func taskContextForSquadMention(base []byte, squad db.Squad) []byte {
+	var cfg service.TaskContext
+	if len(base) > 0 {
+		_ = json.Unmarshal(base, &cfg)
+	}
+	cfg.SquadID = uuidToString(squad.ID)
+	cfg.SquadName = squad.Name
+	cfg.LeaderTaskSource = service.LeaderTaskSourceSquadMention
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return base
 	}
 	return data
 }
@@ -1180,7 +1199,8 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 			if err != nil || hasPending {
 				continue
 			}
-			if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, leaderID, comment.ID); err != nil {
+			squadTaskContext := taskContextForSquadMention(taskContext, squad)
+			if _, err := h.TaskService.EnqueueTaskForSquadLeaderWithContext(ctx, issue, leaderID, comment.ID, squadTaskContext); err != nil {
 				slog.Warn("enqueue squad leader mention task failed", "issue_id", uuidToString(issue.ID), "squad_id", m.ID, "error", err)
 			}
 			continue

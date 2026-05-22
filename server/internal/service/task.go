@@ -45,8 +45,13 @@ type TaskService struct {
 }
 
 type TaskContext struct {
-	RunMode string `json:"run_mode,omitempty"`
+	RunMode          string `json:"run_mode,omitempty"`
+	SquadID          string `json:"squad_id,omitempty"`
+	SquadName        string `json:"squad_name,omitempty"`
+	LeaderTaskSource string `json:"leader_task_source,omitempty"`
 }
+
+const LeaderTaskSourceSquadMention = "squad_mention"
 
 type TaskWakeupNotifier interface {
 	NotifyTaskAvailable(runtimeID, taskID string)
@@ -474,6 +479,7 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		IssueID:           issue.ID,
 		Priority:          priorityToInt(issue.Priority),
 		TriggerCommentID:  triggerCommentID,
+		Context:           taskContext,
 		TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 	})
@@ -517,7 +523,11 @@ func (s *TaskService) EnqueueTaskForMentionWithContext(ctx context.Context, issu
 // as a worker (do not skip). This matters for agents that are simultaneously
 // the leader and a worker of the same squad — see migration 090.
 func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, nil, true, false)
+	return s.EnqueueTaskForSquadLeaderWithContext(ctx, issue, leaderID, triggerCommentID, nil)
+}
+
+func (s *TaskService) EnqueueTaskForSquadLeaderWithContext(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, triggerCommentID pgtype.UUID, taskContext []byte) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, taskContext, true, false)
 }
 
 func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, taskContext []byte, isLeader bool, forceFreshSession bool) (db.AgentTaskQueue, error) {
@@ -541,6 +551,7 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 		IssueID:           issue.ID,
 		Priority:          priorityToInt(issue.Priority),
 		TriggerCommentID:  triggerCommentID,
+		Context:           taskContext,
 		TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
 		IsLeaderTask:      pgtype.Bool{Bool: isLeader, Valid: isLeader},
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
