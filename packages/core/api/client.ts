@@ -953,6 +953,36 @@ export class ApiClient {
     return this.fetch<T>(path, init);
   }
 
+  // CEREBRO-PATCH(cerebro-references-api): JEH-837/JEH-838 issue reference API.
+  //   GET    /api/issues/{id}/references             — list references on an issue
+  //   POST   /api/issues/{id}/references             — UPSERT a reference on an issue
+  //   PATCH  /api/cerebro/references/{refId}         — patch label/url/metadata
+  //   DELETE /api/cerebro/references/{refId}         — drop a reference
+  //   GET    /api/cerebro/references?object=&ref_id= — reverse-lookup
+  // Bodies are `unknown` so the cerebro-references package owns the schema.
+  async listCerebroIssueReferences<T = unknown>(issueId: string): Promise<T> {
+    return this.fetch<T>(`/api/issues/${issueId}/references`);
+  }
+  async createCerebroIssueReference<T = unknown>(issueId: string, payload: unknown): Promise<T> {
+    return this.fetch<T>(`/api/issues/${issueId}/references`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+  async updateCerebroReference<T = unknown>(refId: string, payload: unknown): Promise<T> {
+    return this.fetch<T>(`/api/cerebro/references/${refId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+  async deleteCerebroReference(refId: string): Promise<void> {
+    await this.fetch<void>(`/api/cerebro/references/${refId}`, { method: "DELETE" });
+  }
+  async listCerebroReferencesByObject<T = unknown>(object: string, refId: string): Promise<T> {
+    const params = new URLSearchParams({ object, ref_id: refId });
+    return this.fetch<T>(`/api/cerebro/references?${params.toString()}`);
+  }
+
   // CEREBRO-PATCH(cerebro-persona-grants-client): JEH-1180 Persona grant
   // control plane UI. Endpoints mirror the JEH-1179 description:
   //   GET    /api/workspaces/{id}/grants[?subject_type=…&subject_id=…&resource_type=…&status=…&classification=…]
