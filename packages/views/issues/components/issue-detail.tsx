@@ -107,7 +107,7 @@ import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
-import { timeAgo } from "@multica/core/utils";
+import { useTimeAgo } from "../../i18n";
 import { cn } from "@multica/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
@@ -596,12 +596,14 @@ function ActivityBlock({
   onToggle,
   getActorName,
   t,
+  timeAgo,
 }: {
   entries: TimelineEntry[];
   expanded: boolean;
   onToggle: () => void;
   getActorName: (type: string, id: string) => string;
   t: ActivityT;
+  timeAgo: (dateStr: string) => string;
 }) {
   if (!expanded) {
     const count = entries.length;
@@ -2093,6 +2095,7 @@ export function IssueDetail({
         onToggle={() => toggleActivityBlock(item.id, expanded)}
         getActorName={getActorName}
         t={t}
+        timeAgo={timeAgo}
       />
     );
   };

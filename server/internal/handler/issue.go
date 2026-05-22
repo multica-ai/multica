@@ -2433,6 +2433,15 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 	}
 
+	// Platform-driven parent notification: when this issue transitions into
+	// `done` and has a parent, post a top-level system comment on the parent
+	// (MUL-2538 — replaces the agent-prompt rule that caused self-mention
+	// loops in PR #2918). The helper guards on transition + parent state and
+	// fails best-effort.
+	if statusChanged {
+		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -2601,7 +2610,10 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	// Collect all attachment URLs (issue-level + comment-level) before CASCADE delete.
 	attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
 
-	err := h.Queries.DeleteIssue(r.Context(), issue.ID)
+	err := h.Queries.DeleteIssue(r.Context(), db.DeleteIssueParams{
+		ID:          issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete issue")
 		return
@@ -2880,6 +2892,12 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 		}
 
+		// Platform-driven parent notification, mirrored from UpdateIssue
+		// (MUL-2538). Best-effort; failure does not abort the batch.
+		if statusChanged {
+			h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+		}
+
 		updated++
 	}
 
@@ -2942,7 +2960,10 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 		// Collect attachment URLs before CASCADE delete to clean up S3 objects.
 		attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
 
-		if err := h.Queries.DeleteIssue(r.Context(), issue.ID); err != nil {
+		if err := h.Queries.DeleteIssue(r.Context(), db.DeleteIssueParams{
+			ID:          issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err != nil {
 			slog.Warn("batch delete issue failed", "issue_id", issueID, "error", err)
 			continue
 		}

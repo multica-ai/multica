@@ -194,8 +194,6 @@ import {
   GroupedIssuesResponseSchema,
   ListIssuesResponseSchema,
   ListWebhookDeliveriesResponseSchema,
-  OnboardingNoRuntimeBootstrapResponseSchema,
-  OnboardingRuntimeBootstrapResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
@@ -520,43 +518,6 @@ export class ApiClient {
     return parseWithFallback(raw, UserSchema, EMPTY_USER, {
       endpoint: "POST /api/me/onboarding/complete",
     });
-  }
-
-  async bootstrapOnboardingRuntime(payload: {
-    workspace_id: string;
-    runtime_id: string;
-  }): Promise<OnboardingRuntimeBootstrapResponse> {
-    const raw = await this.fetch<unknown>(
-      "/api/me/onboarding/runtime-bootstrap",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-      },
-    );
-    return parseWithFallback(
-      raw,
-      OnboardingRuntimeBootstrapResponseSchema,
-      EMPTY_ONBOARDING_RUNTIME_BOOTSTRAP_RESPONSE,
-      { endpoint: "POST /api/me/onboarding/runtime-bootstrap" },
-    );
-  }
-
-  async bootstrapOnboardingNoRuntime(payload: {
-    workspace_id: string;
-  }): Promise<OnboardingNoRuntimeBootstrapResponse> {
-    const raw = await this.fetch<unknown>(
-      "/api/me/onboarding/no-runtime-bootstrap",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-      },
-    );
-    return parseWithFallback(
-      raw,
-      OnboardingNoRuntimeBootstrapResponseSchema,
-      EMPTY_ONBOARDING_NO_RUNTIME_BOOTSTRAP_RESPONSE,
-      { endpoint: "POST /api/me/onboarding/no-runtime-bootstrap" },
-    );
   }
 
   async joinCloudWaitlist(payload: {
@@ -1182,10 +1143,10 @@ export class ApiClient {
     );
   }
 
-  async deleteCloudRuntimeNode(nodeId: string): Promise<void> {
+  async deleteCloudRuntimeNode(instanceId: string): Promise<void> {
     await this.fetchRaw("/api/cloud-runtime/nodes", {
       method: "DELETE",
-      body: JSON.stringify({ id: nodeId }),
+      body: JSON.stringify({ instance_id: instanceId }),
       extraHeaders: { "Content-Type": "application/json" },
     });
   }

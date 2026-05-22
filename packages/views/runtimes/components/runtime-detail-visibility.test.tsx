@@ -94,7 +94,10 @@ vi.mock("../../agents/presence", () => ({
   workloadConfig: { idle: { icon: () => null, textClass: "" } },
 }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
-vi.mock("../../navigation", () => ({ AppLink: () => null }));
+vi.mock("../../navigation", () => ({
+  AppLink: () => null,
+  useNavigation: () => ({ push: vi.fn(), replace: vi.fn() }),
+}));
 
 import { RuntimeDetail } from "./runtime-detail";
 

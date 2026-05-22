@@ -31,7 +31,7 @@ import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-picker";
 import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { timeAgo } from "@multica/core/utils";
+import { useTimeAgo } from "../../i18n";
 import { ContentEditor, type ContentEditorRef, type SelectionQuoteActions, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -344,6 +344,7 @@ function CommentRow({
   selectionQuoteActions?: SelectionQuoteActions;
 }) {
   const { t } = useT("issues");
+  const timeAgo = useTimeAgo();
   const { getActorName } = useActorName();
   const copyCommentLink = useCopyCommentLink(issueId);
   const [editing, setEditing] = useState(false);
@@ -623,6 +624,7 @@ function CommentCardImpl({
   onQuoteToReplyInThread,
 }: CommentCardProps) {
   const { t } = useT("issues");
+  const timeAgo = useTimeAgo();
   const { getActorName } = useActorName();
   const copyCommentLink = useCopyCommentLink(issueId);
   const { uploadWithToast } = useFileUpload(api, (err) => toast.error(err.message));

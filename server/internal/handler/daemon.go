@@ -164,13 +164,9 @@ type DaemonRegisterRequest struct {
 	// Timezone is the daemon host's IANA timezone (e.g. "Asia/Shanghai"),
 	// detected client-side from time.Local. The server stores it on each
 	// agent_runtime row created for this daemon so token-usage rollups
-	// bucket by the operator's local calendar day instead of UTC. Empty
-	// or invalid values fall back to "UTC". The value is set ONLY on
-	// first-time registration; once a user overrides the tz via the web
-	// UI, the upsert query preserves that override on subsequent
-	// daemon reconnects (see UpsertAgentRuntime in runtime.sql).
+	// bucket by the operator's local calendar day instead of UTC.
 	Timezone   string `json:"timezone"`
-	HealthPort int    `json:"health_port"` // local daemon health/trace port
+	HealthPort int    `json:"health_port"`
 	Runtimes   []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
@@ -1529,6 +1525,24 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "task workspace isolation check failed")
 		return
+	}
+
+	// Workspace-level Context (workspace.context DB column) — the per-workspace
+	// system prompt that workspace owners set in Settings → General. Inject it
+	// into the brief regardless of task kind (issue / chat / autopilot /
+	// quick-create) so every agent running in the workspace sees the same
+	// shared context. Empty string when the owner hasn't set one; the daemon
+	// skips rendering the heading in that case.
+	if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(resp.WorkspaceID)); err == nil {
+		if ws.Context.Valid {
+			resp.WorkspaceContext = ws.Context.String
+		}
+	} else {
+		slog.Warn("task claim: failed to load workspace for context injection",
+			"task_id", uuidToString(task.ID),
+			"workspace_id", resp.WorkspaceID,
+			"error", err,
+		)
 	}
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)

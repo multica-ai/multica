@@ -11,11 +11,10 @@ import {
   useAgentPresenceDetail,
 } from "@multica/core/agents";
 import { issueDetailOptions } from "@multica/core/issues";
-import { timeAgo } from "@multica/core/utils";
 import type { AgentTask } from "@multica/core/types";
 import { AlertTriangle } from "lucide-react";
 import { AppLink } from "../../navigation";
-import { useT } from "../../i18n";
+import { useT, useTimeAgo } from "../../i18n";
 import { workloadConfig } from "../presence";
 
 interface AgentLivePeekCardProps {
@@ -200,6 +199,7 @@ function LastActivityRow({
   emptyLabel: string;
   failedLabel: string;
 }) {
+  const timeAgo = useTimeAgo();
   return (
     <div className="flex items-center gap-1.5">
       <span className="w-16 shrink-0 text-muted-foreground">{label}</span>

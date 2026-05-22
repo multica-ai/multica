@@ -19,6 +19,7 @@ import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar
 import { useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { myIssueAssigneeGroupsOptions, myIssueListOptions, myAllIssuesListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter, type MyIssuesFilter } from "@multica/core/issues/queries";
+import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-store";
 import { PageHeader } from "../../layout/page-header";
@@ -36,7 +37,20 @@ export function MyIssuesPage() {
   const priorityFilters = useStore(myIssuesViewStore, (s) => s.priorityFilters);
   const scope = useStore(myIssuesViewStore, (s) => s.scope);
   const grouping = useStore(myIssuesViewStore, (s) => s.grouping);
+  const agentRunningFilter = useStore(myIssuesViewStore, (s) => s.agentRunningFilter);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
+
+  // See issues-page.tsx for the rationale — derive a workspace-wide set
+  // of issue ids with at least one running task, drive the "agents
+  // working" quick-filter from it.
+  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  const runningIssueIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const t of snapshot) {
+      if (t.status === "running" && t.issue_id) ids.add(t.issue_id);
+    }
+    return ids;
+  }, [snapshot]);
 
   // Clear filter state when switching between workspaces (URL-driven).
   useClearFiltersOnWorkspaceChange(myIssuesViewStore, wsId);
@@ -59,6 +73,12 @@ export function MyIssuesPage() {
         return { creator_id: user.id };
       case "agents":
         return { involves_user_id: user.id };
+      case "all":
+        // "All" is the union of the three single-relation filters above;
+        // the per-relation user id is plumbed through `userId` to
+        // myIssue*Options. The filter object stays empty so it carries
+        // no narrowing of its own.
+        return {};
       default:
         return {};
     }
@@ -99,9 +119,10 @@ export function MyIssuesPage() {
     wsId,
     scope,
     assigneeGroupFilter,
+    user?.id,
   );
   const statusIssuesQuery = useQuery({
-    ...myIssueListOptions(wsId, scope, serverFilter),
+    ...myIssueListOptions(wsId, scope, filter, user?.id),
     enabled: !usesAssigneeBoard,
   });
   const assigneeGroupsQuery = useQuery({
@@ -123,7 +144,23 @@ export function MyIssuesPage() {
     ? assigneeGroupsQuery.isLoading
     : statusIssuesQuery.isLoading;
 
-  const issues = myIssues;
+  // Apply status/priority/agent-running filters from view store
+  const issues = useMemo(
+    () =>
+      filterIssues(myIssues, {
+        statusFilters,
+        priorityFilters,
+        assigneeFilters: [],
+        includeNoAssignee: false,
+        creatorFilters: [],
+        projectFilters: [],
+        includeNoProject: false,
+        labelFilters: [],
+        agentRunningFilter,
+        runningIssueIds,
+      }),
+    [myIssues, statusFilters, priorityFilters, agentRunningFilter, runningIssueIds],
+  );
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
 

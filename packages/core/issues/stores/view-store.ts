@@ -67,6 +67,12 @@ export interface IssueViewState {
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
+  // When true, the list only shows issues that currently have at least one
+  // agent task in `running` status. Drives the workspace "agents working"
+  // quick filter chip in the issues header. Not persisted across reloads —
+  // running state changes second-to-second, a persisted toggle would let
+  // users return to an empty list with no obvious cause.
+  agentRunningFilter: boolean;
   sortBy: SortField;
   sortDirection: SortDirection;
   cardProperties: CardProperties;
@@ -85,6 +91,7 @@ export interface IssueViewState {
   toggleProjectFilter: (projectId: string) => void;
   toggleNoProject: () => void;
   toggleLabelFilter: (labelId: string) => void;
+  toggleAgentRunningFilter: () => void;
   hideStatus: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
   clearFilters: () => void;
@@ -105,6 +112,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   projectFilters: [],
   includeNoProject: false,
   labelFilters: [],
+  agentRunningFilter: false,
   sortBy: "position",
   sortDirection: "asc",
   cardProperties: {
@@ -180,6 +188,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         ? state.labelFilters.filter((id) => id !== labelId)
         : [...state.labelFilters, labelId],
     })),
+  toggleAgentRunningFilter: () =>
+    set((state) => ({ agentRunningFilter: !state.agentRunningFilter })),
   hideStatus: (status) =>
     set((state) => {
       // If no filter active, activate filter with all EXCEPT this one
@@ -206,6 +216,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       projectFilters: [],
       includeNoProject: false,
       labelFilters: [],
+      agentRunningFilter: false,
     }),
   setSortBy: (field) => set({ sortBy: field }),
   setSortDirection: (dir) => set({ sortDirection: dir }),
@@ -228,6 +239,10 @@ export const viewStorePersistOptions = (name: string) => ({
   name,
   storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
   partialize: (state: IssueViewState) => ({
+    // NOTE: `agentRunningFilter` is intentionally NOT persisted — running
+    // state changes second-to-second, and a stored toggle would let users
+    // return to an unexplained empty list. Keep it ephemeral. See the
+    // field comment on IssueViewState.
     viewMode: state.viewMode,
     grouping: state.grouping,
     statusFilters: state.statusFilters,

@@ -19,14 +19,22 @@ type FooterGroup = {
   links: { label: string; href: string }[];
 };
 
+export type ContactSalesOption = { value: string; label: string };
+
 export type LandingDict = {
-  header: { github: string; login: string; dashboard: string; changelog: string };
+  header: {
+    github: string;
+    login: string;
+    dashboard: string;
+    changelog: string;
+  };
   hero: {
     headlineLine1: string;
     headlineLine2: string;
     subheading: string;
     cta: string;
     downloadDesktop: string;
+    talkToSales: string;
     worksWith: string;
     imageAlt: string;
   };
@@ -160,6 +168,48 @@ export type LandingDict = {
       allReleases: string;
       currentVersion: string;
       versionUnavailable: string;
+    };
+  };
+  contactSales: {
+    pageTitle: string;
+    pageDescription: string;
+    eyebrow: string;
+    title: string;
+    subtitle: string;
+    notice: { badge: string; body: string };
+    fields: {
+      firstName: string;
+      lastName: string;
+      businessEmail: string;
+      businessEmailHint: string;
+      companyName: string;
+      companySize: string;
+      countryRegion: string;
+      useCase: string;
+      goals: string;
+      goalsHint: string;
+      selectPlaceholder: string;
+      submit: string;
+      submitting: string;
+    };
+    companySizes: ContactSalesOption[];
+    useCases: ContactSalesOption[];
+    countries: string[];
+    consent: {
+      intro: string;
+      outreach: string;
+      updates: string;
+      unsubscribe: string;
+      submitConsent: string;
+      privacyLinkLabel: string;
+      privacyLinkHref: string;
+    };
+    success: { title: string; message: string; cta: string };
+    errors: {
+      generic: string;
+      rateLimit: string;
+      freeEmail: string;
+      invalidEmail: string;
     };
   };
 };

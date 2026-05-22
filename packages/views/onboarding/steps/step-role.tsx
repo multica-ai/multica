@@ -48,6 +48,13 @@ export function StepRole({
     { slug: "other", icon: <MoreHorizontal className="h-4 w-4" />, label: t(($) => $.questions.role.other), isOther: true },
   ];
 
+  // Role stays single-select — the agent template recommender treats
+  // role as the primary identity signal; allowing several would force
+  // the recommender to pick a tiebreaker the user never expressed.
+  const selectedSlug =
+    answers.role ?? (answers.role_other ? "other" : null);
+  const selected: readonly string[] = selectedSlug ? [selectedSlug] : [];
+
   return (
     <StepQuestion
       step="role"
@@ -55,7 +62,7 @@ export function StepRole({
       eyebrow={t(($) => $.questions.eyebrow_about_you)}
       question={t(($) => $.questions.role.question)}
       options={options}
-      selectedSlug={answers.role ?? (answers.role_other ? "other" : null)}
+      selectedSlugs={selected}
       otherValue={answers.role_other ?? ""}
       onOtherChange={(v) => onChange({ role_other: v })}
       otherPlaceholder={t(($) => $.questions.role.other_placeholder)}

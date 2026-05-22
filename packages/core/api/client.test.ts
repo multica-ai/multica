@@ -304,21 +304,21 @@ describe("ApiClient", () => {
     ).resolves.toMatchObject({ id: "", status: "" });
   });
 
-  it("deleteCloudRuntimeNode sends DELETE with JSON body containing node id", async () => {
+  it("deleteCloudRuntimeNode sends DELETE with JSON body containing instance id", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       new Response(null, { status: 204 }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
-    await client.deleteCloudRuntimeNode("node-abc-123");
+    await client.deleteCloudRuntimeNode("i-0123456789abcdef0");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, opts] = fetchMock.mock.calls[0]!;
     expect(url).toBe("https://api.example.test/api/cloud-runtime/nodes");
     expect(opts).toMatchObject({
       method: "DELETE",
-      body: JSON.stringify({ id: "node-abc-123" }),
+      body: JSON.stringify({ instance_id: "i-0123456789abcdef0" }),
     });
     expect((opts.headers as Record<string, string>)["Content-Type"]).toBe(
       "application/json",
