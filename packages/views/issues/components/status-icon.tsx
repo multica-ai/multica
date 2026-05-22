@@ -1,5 +1,5 @@
 import type { IssueStatus } from "@multica/core/types";
-import { STATUS_CONFIG } from "@multica/core/issues/config";
+import { getStatusConfig, isIssueStatus } from "@multica/core/issues/config";
 
 // ---------------------------------------------------------------------------
 // Geometry constants (viewBox 0 0 14 14, center 7,7)
@@ -139,6 +139,10 @@ function CancelledIcon() {
   );
 }
 
+function UnknownIcon() {
+  return <ProgressCircle progress={0} />;
+}
+
 // ---------------------------------------------------------------------------
 // Renderer map
 // ---------------------------------------------------------------------------
@@ -162,12 +166,12 @@ export function StatusIcon({
   className = "h-4 w-4",
   inheritColor = false,
 }: {
-  status: IssueStatus;
+  status: string;
   className?: string;
   inheritColor?: boolean;
 }) {
-  const cfg = STATUS_CONFIG[status];
-  const Renderer = STATUS_RENDERERS[status];
+  const cfg = getStatusConfig(status);
+  const Renderer = isIssueStatus(status) ? STATUS_RENDERERS[status] : UnknownIcon;
 
   return (
     <svg

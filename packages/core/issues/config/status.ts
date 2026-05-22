@@ -1,5 +1,13 @@
 import type { IssueStatus } from "../../types";
 
+type StatusConfig = {
+  label: string;
+  iconColor: string;
+  hoverBg: string;
+  dividerColor: string;
+  columnBg: string;
+};
+
 export const STATUS_ORDER: IssueStatus[] = [
   "backlog",
   "todo",
@@ -30,16 +38,15 @@ export const BOARD_STATUSES: IssueStatus[] = [
   "blocked",
 ];
 
-export const STATUS_CONFIG: Record<
-  IssueStatus,
-  {
-    label: string;
-    iconColor: string;
-    hoverBg: string;
-    dividerColor: string;
-    columnBg: string;
-  }
-> = {
+export const UNKNOWN_STATUS_CONFIG: StatusConfig = {
+  label: "Unknown",
+  iconColor: "text-muted-foreground",
+  hoverBg: "hover:bg-accent",
+  dividerColor: "bg-muted-foreground/40",
+  columnBg: "bg-muted/40",
+};
+
+export const STATUS_CONFIG: Record<IssueStatus, StatusConfig> = {
   backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent", dividerColor: "bg-muted-foreground/40", columnBg: "bg-muted/40" },
   todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent", dividerColor: "bg-muted-foreground/40", columnBg: "bg-muted/40" },
   in_progress: { label: "In Progress", iconColor: "text-warning", hoverBg: "hover:bg-warning/10", dividerColor: "bg-warning", columnBg: "bg-warning/5" },
@@ -48,3 +55,11 @@ export const STATUS_CONFIG: Record<
   blocked: { label: "Blocked", iconColor: "text-destructive", hoverBg: "hover:bg-destructive/10", dividerColor: "bg-destructive", columnBg: "bg-destructive/5" },
   cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent", dividerColor: "bg-muted-foreground/40", columnBg: "bg-muted/40" },
 };
+
+export function isIssueStatus(status: string): status is IssueStatus {
+  return Object.prototype.hasOwnProperty.call(STATUS_CONFIG, status);
+}
+
+export function getStatusConfig(status: string): StatusConfig {
+  return isIssueStatus(status) ? STATUS_CONFIG[status] : UNKNOWN_STATUS_CONFIG;
+}

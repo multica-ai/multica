@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { IssueStatus, UpdateIssueRequest } from "@multica/core/types";
-import { ALL_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config";
+import type { UpdateIssueRequest } from "@multica/core/types";
+import { ALL_STATUSES, STATUS_CONFIG, isIssueStatus } from "@multica/core/issues/config";
 import { StatusIcon } from "../status-icon";
 import { PropertyPicker, PickerItem } from "./property-picker";
 import { useT } from "../../../i18n";
@@ -16,7 +16,7 @@ export function StatusPicker({
   onOpenChange: controlledOnOpenChange,
   align,
 }: {
-  status: IssueStatus;
+  status: string;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   trigger?: React.ReactNode;
   triggerRender?: React.ReactElement;
@@ -28,6 +28,7 @@ export function StatusPicker({
   const open = controlledOpen ?? internalOpen;
   const setOpen = controlledOnOpenChange ?? setInternalOpen;
   const { t } = useT("issues");
+  const currentLabel = isIssueStatus(status) ? t(($) => $.status[status]) : status;
 
   return (
     <PropertyPicker
@@ -40,7 +41,7 @@ export function StatusPicker({
         customTrigger ?? (
           <>
             <StatusIcon status={status} className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">{t(($) => $.status[status])}</span>
+            <span className="truncate">{currentLabel}</span>
           </>
         )
       }

@@ -671,9 +671,9 @@ export function SearchCommand() {
                         <HighlightText text={issue.title} query={query} />
                       </span>
                       <span
-                        className={`ml-auto text-xs shrink-0 ${STATUS_CONFIG[issue.status].iconColor}`}
+                        className={`ml-auto text-xs shrink-0 ${STATUS_CONFIG[issue.status]?.iconColor ?? "text-muted-foreground"}`}
                       >
-                        {STATUS_CONFIG[issue.status].label}
+                        {STATUS_CONFIG[issue.status]?.label ?? issue.status}
                       </span>
                     </div>
                     {issue.matched_description_snippet && (
