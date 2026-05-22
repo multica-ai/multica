@@ -29,7 +29,7 @@ const mockQuickCreateStore = {
 // "loaded as empty" (the deleted-project case) and "still loading" without
 // re-mocking the whole module.
 const mockProjectsQuery = vi.hoisted(() => ({
-  data: [] as Array<{ id: string; title: string; icon: string | null }>,
+  data: [{ id: "proj-1", title: "Default Project", icon: null }] as Array<{ id: string; title: string; icon: string | null }>,
   isSuccess: true,
 }));
 
@@ -133,7 +133,9 @@ vi.mock("../issues/components", () => ({
 }));
 
 vi.mock("../projects/components/project-picker", () => ({
-  ProjectPicker: () => <div data-testid="project-picker" />,
+  ProjectPicker: ({ projectId }: { projectId: string | null }) => (
+    <div data-testid="project-picker" data-project-id={projectId ?? ""} />
+  ),
 }));
 
 vi.mock("../common/pill-button", () => ({
@@ -284,7 +286,7 @@ describe("AgentCreatePanel", () => {
     mockQuickCreateStore.lastProjectId = null;
     mockQuickCreateStore.prompt = "Persisted draft prompt";
     mockQuickCreateStore.keepOpen = false;
-    mockProjectsQuery.data = [];
+    mockProjectsQuery.data = [{ id: "proj-1", title: "Default Project", icon: null }];
     mockProjectsQuery.isSuccess = true;
     mockSquadsData.list = [];
     mockQuickCreateIssue.mockResolvedValue(undefined);
@@ -323,14 +325,12 @@ describe("AgentCreatePanel", () => {
       expect(mockQuickCreateIssue).toHaveBeenCalledWith({
         agent_id: "agent-1",
         prompt: "New agent prompt",
-        project_id: undefined,
+        project_id: "proj-1",
       });
     });
 
     expect(mockSetLastActor).toHaveBeenCalledWith("agent", "agent-1");
-    // No project picked → persisted project preference is cleared so the
-    // store stays in sync with the actual outgoing request.
-    expect(mockSetLastProjectId).toHaveBeenCalledWith(null);
+    expect(mockSetLastProjectId).toHaveBeenCalledWith("proj-1");
     expect(mockClearPrompt).toHaveBeenCalled();
     expect(mockSetLastMode).toHaveBeenCalledWith("agent");
     expect(onClose).toHaveBeenCalled();
@@ -365,7 +365,7 @@ describe("AgentCreatePanel", () => {
       expect(mockQuickCreateIssue).toHaveBeenCalledWith({
         squad_id: "squad-1",
         prompt: "Investigate the regression",
-        project_id: undefined,
+        project_id: "proj-1",
       });
     });
     expect(mockSetLastActor).toHaveBeenCalledWith("squad", "squad-1");
@@ -392,7 +392,10 @@ describe("AgentCreatePanel", () => {
   // dead value and trigger the server's `project not found` rejection.
   it("clears a stale persisted project once the projects list resolves without it", async () => {
     mockQuickCreateStore.lastProjectId = "deleted-proj";
-    mockProjectsQuery.data = [];
+    mockProjectsQuery.data = [
+      { id: "proj-1", title: "Replacement Project", icon: null },
+      { id: "proj-2", title: "Second Project", icon: null },
+    ];
     mockProjectsQuery.isSuccess = true;
 
     renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
@@ -400,6 +403,7 @@ describe("AgentCreatePanel", () => {
     await waitFor(() => {
       expect(mockSetLastProjectId).toHaveBeenCalledWith(null);
     });
+    expect(screen.getByTestId("project-picker")).toHaveAttribute("data-project-id", "");
   });
 
   // Mirror case: while the query is still loading, we must NOT preemptively
@@ -413,5 +417,26 @@ describe("AgentCreatePanel", () => {
     renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
     expect(mockSetLastProjectId).not.toHaveBeenCalled();
+  });
+
+  it("blocks agent create when multiple projects exist and none is selected", async () => {
+    const user = userEvent.setup();
+    mockProjectsQuery.data = [
+      { id: "proj-1", title: "Project One", icon: null },
+      { id: "proj-2", title: "Project Two", icon: null },
+    ];
+    mockProjectsQuery.isSuccess = true;
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    const editor = screen.getByPlaceholderText(
+      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+    );
+    await user.clear(editor);
+    await user.type(editor, "Create follow-up");
+    await user.click(screen.getByRole("button", { name: /^Create \(/i }));
+
+    expect(mockQuickCreateIssue).not.toHaveBeenCalled();
+    expect(screen.getByText("Select a project before creating an issue.")).toBeInTheDocument();
   });
 });

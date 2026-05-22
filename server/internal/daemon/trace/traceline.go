@@ -66,12 +66,16 @@ type TraceLine struct {
 	Redacted bool `json:"redacted,omitempty"`
 }
 
-// truncateContent enforces MaxContentLen on Content and sets Truncated.
-// It operates on a value receiver and returns a new TraceLine so the
-// caller always gets a copy with the limit applied.
+// truncateContent enforces MaxContentLen on Content and RawPayload and sets
+// Truncated. It operates on a value receiver and returns a new TraceLine so
+// the caller always gets a copy with the limit applied.
 func (l TraceLine) truncateContent() TraceLine {
 	if len(l.Content) > MaxContentLen {
 		l.Content = l.Content[:MaxContentLen]
+		l.Truncated = true
+	}
+	if len(l.RawPayload) > MaxContentLen {
+		l.RawPayload = l.RawPayload[:MaxContentLen]
 		l.Truncated = true
 	}
 	return l

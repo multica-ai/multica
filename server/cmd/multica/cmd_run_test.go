@@ -413,6 +413,50 @@ func TestCodexAppServerMapperMapsFileChange(t *testing.T) {
 	}
 }
 
+func TestCodexAppServerMapperMapsProposedPlanRequest(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	mapper := newCodexAppServerMapper(reporter, nil, "")
+
+	mapper.Observe(false, []byte(`{"method":"turn/started","params":{"threadId":"thread-1","turn":{"id":"turn-1"}}}`))
+	mapper.Observe(false, []byte(`{"jsonrpc":"2.0","id":23,"method":"item/tool/requestUserInput","params":{"itemId":"item-1","threadId":"thread-1","turnId":"turn-1","questions":[{"id":"q1","header":"Proposed Plan","question":"1. Inspect localrun sync\n2. Persist the proposed plan","options":[{"label":"Approve plan","description":"Continue"},{"label":"Edit plan","description":"Revise"},{"label":"Cancel","description":"Stop"}]}]}}`))
+	reporter.Close()
+
+	texts := localMessagesByType(poster.messages(), "text")
+	if len(texts) != 1 || texts[0].Content != "Proposed Plan\n\n1. Inspect localrun sync\n2. Persist the proposed plan" {
+		t.Fatalf("texts = %+v, want proposed plan request recorded", texts)
+	}
+	if texts[0].SourceKey != "thread:thread-1:turn:turn-1:request:23" {
+		t.Fatalf("source key = %q, want turn-scoped request source key", texts[0].SourceKey)
+	}
+	if texts[0].Input["kind"] != codexProposedPlanInputKind || texts[0].Input["question_id"] != "q1" {
+		t.Fatalf("input = %+v, want user input metadata", texts[0].Input)
+	}
+}
+
+func TestCodexAppServerMapperMapsProposedPlanItem(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	mapper := newCodexAppServerMapper(reporter, nil, "")
+
+	mapper.Observe(false, []byte(`{"method":"turn/started","params":{"threadId":"thread-1","turn":{"id":"turn-1"}}}`))
+	mapper.Observe(false, []byte(`{"method":"item/plan/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"plan-1","delta":"1. Inspect localrun sync\n"}}`))
+	mapper.Observe(false, []byte(`{"method":"item/plan/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"plan-1","delta":"2. Persist the proposed plan"}}`))
+	mapper.Observe(false, []byte(`{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"plan-1","type":"plan","text":"1. Inspect localrun sync\n2. Persist the proposed plan"}}}`))
+	reporter.Close()
+
+	texts := localMessagesByType(poster.messages(), "text")
+	if len(texts) != 1 || texts[0].Content != "Proposed Plan\n\n1. Inspect localrun sync\n2. Persist the proposed plan" {
+		t.Fatalf("texts = %+v, want proposed plan item recorded", texts)
+	}
+	if texts[0].SourceKey != "thread:thread-1:turn:turn-1:plan:plan-1" {
+		t.Fatalf("source key = %q, want turn-scoped plan source key", texts[0].SourceKey)
+	}
+	if texts[0].Input["kind"] != codexProposedPlanInputKind || texts[0].Input["item_id"] != "plan-1" {
+		t.Fatalf("input = %+v, want proposed plan metadata", texts[0].Input)
+	}
+}
+
 func TestCodexAppServerMapperMapsErrors(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")

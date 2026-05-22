@@ -160,6 +160,8 @@ export interface UpdateMeRequest {
   name?: string;
   avatar_url?: string;
   language?: string;
+  /** Free-form self-description (max 2000 chars). Pass "" to clear. */
+  profile_description?: string;
 }
 
 export interface CreateMemberRequest {

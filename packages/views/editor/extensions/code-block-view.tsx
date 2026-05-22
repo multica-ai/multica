@@ -18,7 +18,7 @@ import { CodeBlockIframe } from "../code-block-iframe";
 // keystroke causes the iframe to re-load and flicker.
 const PREVIEW_DEBOUNCE_MS = 200;
 
-const HTML_PREVIEW_HEIGHT = "h-[320px]";
+const HTML_PREVIEW_HEIGHT = "h-[480px]";
 
 function useDebouncedValue<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = useState(value);

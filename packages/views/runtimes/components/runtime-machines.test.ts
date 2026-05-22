@@ -106,6 +106,58 @@ describe("runtime machine grouping", () => {
     expect(subtitle).toMatch(/^daemon /);
   });
 
+  it("synthesizes a placeholder local machine when ensureLocalMachine is set and no runtime matches", () => {
+    // Reproduces the "Start button disappears after stopping the daemon"
+    // bug: the daemon is stopped (localDaemonId is null) and the server
+    // has already GC'd the local runtime, so no machine ends up flagged
+    // isCurrent. Without synthesis the local row vanishes and the
+    // Start button has nowhere to render.
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({
+          id: "rt-remote",
+          daemon_id: "daemon-remote",
+          name: "Claude (remote.box)",
+          device_info: "remote.box",
+        }),
+      ],
+      {
+        now: NOW,
+        localDaemonId: null,
+        localMachineName: "My Laptop",
+        ensureLocalMachine: true,
+      },
+    );
+
+    expect(machines).toHaveLength(2);
+    const local = machines.find((m) => m.isCurrent);
+    expect(local).toMatchObject({
+      title: "My Laptop",
+      section: "local",
+      isCurrent: true,
+      runtimes: [],
+    });
+  });
+
+  it("does not synthesize a placeholder when a real local runtime exists", () => {
+    const machines = buildRuntimeMachines(
+      [makeRuntime({ daemon_id: "daemon-1" })],
+      {
+        now: NOW,
+        localDaemonId: "daemon-1",
+        ensureLocalMachine: true,
+      },
+    );
+
+    expect(machines).toHaveLength(1);
+    expect(machines[0]).toMatchObject({
+      isCurrent: true,
+      runtimes: expect.arrayContaining([
+        expect.objectContaining({ daemon_id: "daemon-1" }),
+      ]),
+    });
+  });
+
   it("keeps cloud runtimes as cloud workers when they have no daemon", () => {
     const machines = buildRuntimeMachines(
       [

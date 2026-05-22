@@ -4,13 +4,7 @@ export {
   PreviewTooLargeError,
   PreviewUnsupportedError,
 } from "./client";
-export type {
-  ApiClientOptions,
-  ImportStarterContentPayload,
-  ImportStarterContentResponse,
-  ImportStarterIssuePayload,
-  ImportStarterWelcomeIssueTemplate,
-} from "./client";
+export type { ApiClientOptions } from "./client";
 export { parseWithFallback, setSchemaLogger } from "./schema";
 export type { ParseOptions } from "./schema";
 export { DuplicateIssueErrorBodySchema } from "./schemas";

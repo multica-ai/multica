@@ -18,7 +18,7 @@ import { useT } from "../../i18n";
 
 /**
  * Step 2 — "Which best describes you?" Primary signal for the
- * onboarding assistant and starter issue content.
+ * onboarding assistant.
  */
 export function StepRole({
   answers,

@@ -241,6 +241,8 @@ const mockApiObj = vi.hoisted(() => ({
   removeCommentReaction: vi.fn(),
   listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
   listAgents: vi.fn().mockResolvedValue([]),
+  getProject: vi.fn(),
+  listProjects: vi.fn().mockResolvedValue({ projects: [] }),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -254,6 +256,7 @@ vi.mock("@multica/core/issues/config", () => ({
   ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
   BOARD_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked"],
   STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
+  UNKNOWN_STATUS_CONFIG: { label: "Unknown", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
   STATUS_CONFIG: {
     backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
     todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
@@ -262,6 +265,20 @@ vi.mock("@multica/core/issues/config", () => ({
     done: { label: "Done", iconColor: "text-info", hoverBg: "hover:bg-info/10" },
     blocked: { label: "Blocked", iconColor: "text-destructive", hoverBg: "hover:bg-destructive/10" },
     cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
+  },
+  isIssueStatus: (status: string) =>
+    ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"].includes(status),
+  getStatusConfig: (status: string) => {
+    const config = {
+      backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
+      todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
+      in_progress: { label: "In Progress", iconColor: "text-warning", hoverBg: "hover:bg-warning/10" },
+      in_review: { label: "In Review", iconColor: "text-success", hoverBg: "hover:bg-success/10" },
+      done: { label: "Done", iconColor: "text-info", hoverBg: "hover:bg-info/10" },
+      blocked: { label: "Blocked", iconColor: "text-destructive", hoverBg: "hover:bg-destructive/10" },
+      cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
+    } as Record<string, { label: string; iconColor: string; hoverBg: string }>;
+    return config[status] ?? { label: "Unknown", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" };
   },
   PRIORITY_ORDER: ["urgent", "high", "medium", "low", "none"],
   PRIORITY_CONFIG: {
@@ -593,6 +610,7 @@ describe("IssueDetail (shared)", () => {
     ]);
     mockApiObj.listAgents.mockResolvedValue([]);
     window.getSelection()?.removeAllRanges();
+    mockApiObj.getProject.mockReset();
   });
 
   it("shows loading skeleton while data is loading", () => {
@@ -644,6 +662,60 @@ describe("IssueDetail (shared)", () => {
     expect(wsLink.closest("a")).toHaveAttribute("href", "/test/issues");
   });
 
+  it("omits the project breadcrumb segment when the issue has no project_id", async () => {
+    // Default fixture has project_id: null.
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Test WS")).toBeInTheDocument();
+    });
+
+    // Project should not have been fetched.
+    expect(mockApiObj.getProject).not.toHaveBeenCalled();
+    expect(screen.queryByText("Unknown project")).not.toBeInTheDocument();
+  });
+
+  it("renders the project breadcrumb segment when the issue belongs to a project", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "p-1" });
+    mockApiObj.getProject.mockResolvedValue({
+      id: "p-1",
+      workspace_id: "ws-1",
+      title: "Marketing site refresh",
+      description: null,
+      icon: "🚀",
+      status: "in_progress",
+      priority: "none",
+      lead_type: null,
+      lead_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      issue_count: 0,
+      done_count: 0,
+      resource_count: 0,
+    });
+
+    renderIssueDetail();
+
+    const projectLink = await screen.findByText("Marketing site refresh");
+    // The whole project segment is a single AppLink pointing at the project
+    // detail route under the active workspace slug.
+    expect(projectLink.closest("a")).toHaveAttribute("href", "/test/projects/p-1");
+  });
+
+  it("shows an Unknown project placeholder when the project query fails", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "p-missing" });
+    mockApiObj.getProject.mockRejectedValue(new Error("not found"));
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Unknown project")).toBeInTheDocument();
+    });
+    // Placeholder is non-interactive — no link wraps the text.
+    const placeholder = screen.getByText("Unknown project");
+    expect(placeholder.closest("a")).toBeNull();
+  });
+
   it("renders properties sidebar with all core rows plus set optional rows", async () => {
     renderIssueDetail();
 
@@ -670,6 +742,36 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("Add property")).toBeInTheDocument();
   });
 
+  it("renders issue detail when the API returns an unknown status", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      status: "triage",
+    } as unknown as Issue);
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("triage")).toBeInTheDocument();
+  });
+
+  it("opens the shared assignee picker from the issue-detail overflow menu", async () => {
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getAllByText("TES-1").length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByLabelText("More"));
+    fireEvent.click((await screen.findAllByText("Assignee"))[1]!);
+
+    expect(await screen.findByPlaceholderText("Assign to...")).toBeInTheDocument();
+    expect(await screen.findByText("Members")).toBeInTheDocument();
+    expect((await screen.findAllByText("Test User")).length).toBeGreaterThan(0);
+  });
+
   it("hides every optional property row when none are set", async () => {
     // Override the default fixture: nothing optional set.
     mockApiObj.getIssue.mockResolvedValue({
@@ -682,7 +784,7 @@ describe("IssueDetail (shared)", () => {
     renderIssueDetail();
 
     await waitFor(() => {
-      expect(screen.getByText("Properties")).toBeInTheDocument();
+      expect(screen.getAllByText("Properties").length).toBeGreaterThanOrEqual(1);
     });
 
     expect(screen.queryByText("Priority")).not.toBeInTheDocument();

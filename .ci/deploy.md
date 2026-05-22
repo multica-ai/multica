@@ -7,7 +7,7 @@
 ## 基本原则
 
 1. **发布版本只有一个来源**：每次生产发布开始时先确定唯一的 `PROJECT_VERSION`，后续 backend、frontend、CLI、Gitee Release 都必须使用或校验同一个版本。
-2. **Jenkins 负责有副作用的生产动作**：生产构建、推镜像、K3S rollout、CLI artifacts 发布到 OBS 都应由 Jenkins Job 执行；Agent 负责 plan、触发、等待、校验、汇总。
+2. **Jenkins 负责执行已沉淀的CI/CD流程**：生产构建、推镜像、K3S rollout、CLI artifacts 发布到 OBS 都应由 Jenkins Job 执行；Agent 负责 plan、触发、等待、校验、汇总。
 3. **Release 最后创建**：只有 backend、frontend、CLI 三个组件都发布成功，并且版本校验通过后，才能创建或更新 Gitee Release。
 4. **不要让下游步骤自行猜版本**：尤其是 CLI Jenkins Job 不应只靠“最新 tag”推导发布版本；如果 Jenkins Job 暂未支持显式版本参数，发布流程必须在 Release 前校验 Jenkins 实际产物版本。
 
@@ -15,13 +15,15 @@
 
 ### backend
 
-- Jenkins job: `multica-backend-prod-pipeline`
+- Jenkins job: `multica-backend-prod-pipeline`（prod环境）
+- Jenkins job: `multica-backend-test-pipeline`（test环境）
 - 部署目标: K3S
 - 产出要求: Jenkins build URL、部署结果、镜像 tag、代码 revision
 
 ### frontend
 
-- Jenkins job: `multica-frontend-prod-pipeline`
+- Jenkins job: `multica-frontend-prod-pipeline`（prod环境）
+- Jenkins job: `multica-frontend-test-pipeline`（test环境）
 - 部署目标: K3S
 - 产出要求: Jenkins build URL、部署结果、镜像 tag、代码 revision
 
@@ -31,15 +33,15 @@
 - 部署目标: OBS (`https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json`)
 - 产出要求: Jenkins build URL、CLI version、manifest URL、artifact/checksum 发布结果
 
-## 生产发布流程
+## 发布流程
 
 顺序固定为：
 
 ```text
 pre. 同步 main + 确定 PROJECT_VERSION
 A. backend/frontend Jenkins prod pipeline 发布服务端到 K3S
-C. Multica-CLI Jenkins Job 构建并发布 CLI artifacts 到 OBS
-B. 汇总 A+C 的结果，创建/更新 Gitee Release
+B. Multica-CLI Jenkins Job 构建并发布 CLI artifacts 到 OBS
+C. 汇总 A+B 的结果，创建/更新 Gitee Release
 ```
 
 ### pre. 同步 main + 确定 PROJECT_VERSION
@@ -85,7 +87,7 @@ PROJECT_VERSION=v$(git describe --tags --long \
 - 记录 backend/frontend build URL、build number、镜像 tag、checkout revision。
 - 如果任一服务端发布失败，停止流程，不触发 CLI，不创建 Release。
 
-### C. 发布 CLI artifacts 到 OBS
+### B. 发布 CLI artifacts 到 OBS
 
 触发 `Multica-CLI` 并等待 `SUCCESS`。
 
@@ -118,9 +120,9 @@ curl -fsSL https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json | j
 - OBS `manifest.json.version` 必须等于 `PROJECT_VERSION`。
 - 不相等时，停止流程，不创建/更新 Gitee Release；应转入修复 Jenkins Job 或重新触发 CLI 构建。
 
-### B. Gitee Release
+### C. Gitee Release
 
-只有 A 和 C 都成功，且版本校验通过后，才创建或更新 Gitee Release。
+只有 A 和 B 都成功，且版本校验通过后，才创建或更新 Gitee Release。
 
 Release 内容必须至少包含：
 
@@ -143,24 +145,3 @@ Release 内容必须至少包含：
 - Release 版本号必须等于发布流程 pre 阶段确定的 `PROJECT_VERSION`。
 - Release 在 backend、frontend、cli 三个组件都发布成功后再创建或更新。
 - Release 不是用来修正发布事实的地方；如果 Jenkins/OBS 实际版本和 `PROJECT_VERSION` 不一致，先修发布产物，再写 Release。
-
-## AutoPilot / Agent 职责边界
-
-AutoPilot 可以作为发布入口，但它不应该内置一套独立发布逻辑。它的职责应收敛为：
-
-1. 读取 webhook/body 中的 `environment`、`branch` 等少量输入。
-2. 按本文件定位项目发布约定。
-3. 调度合适的 OPS Agent / Jenkins 能力执行 plan、触发、等待、校验、汇总。
-4. 把最终结果回写给用户。
-
-OPS Agent 是发布编排的主要执行体：它应结合本文件、Jenkins skill、项目特定 workflow 来驱动发布。AutoPilot 不应绕过 OPS Agent 自行决定 tag、Jenkins 参数或 Release 内容。
-
-## 待 OPS 沉淀项
-
-以下改动属于流程能力建设，不在本文件内直接实现：
-
-1. 为 `Multica-CLI` Jenkins Job 增加显式版本参数，如 `CLI_VERSION` / `ReleaseTag`。
-2. 调整 Jenkins Job 内部逻辑：生产发布优先使用显式版本；不再只用 `git tag --sort=-v:refname | head -n 1` 猜版本。
-3. 在 OPS Agent instruction / skills 中沉淀 Multica 发布 A → C → B 编排和版本校验。
-4. 如有必要，新增 Multica-specific release workflow，例如 `multica-release plan/trigger-services/trigger-cli/publish-gitee-release`。
-5. 明确 Gitee Release 阶段由 OPS/Jenkins 能力处理，并消费 A+C 的机器可读发布元数据。

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "../navigation";
 import {
@@ -36,6 +36,7 @@ import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, Fil
 import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
 import { BacklogAgentHintContent } from "../issues/components/backlog-agent-hint-dialog";
 import { ProjectPicker } from "../projects/components/project-picker";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
@@ -44,6 +45,7 @@ import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-st
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { useAuthStore } from "@multica/core/auth";
 import {
   api,
   ApiError,
@@ -96,6 +98,7 @@ export function ManualCreatePanel({
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
+  const currentUserId = useAuthStore((s) => s.user?.id);
 
   const [title, setTitle] = useState(draft.title);
   const [formResetKey, setFormResetKey] = useState(0);
@@ -110,13 +113,13 @@ export function ManualCreatePanel({
     if (data && "assignee_type" in data) {
       return (data.assignee_type as IssueAssigneeType | null) ?? undefined;
     }
-    return draft.assigneeType;
+    return draft.assigneeType ?? (currentUserId ? "member" : undefined);
   });
   const [assigneeId, setAssigneeId] = useState<string | undefined>(() => {
     if (data && "assignee_id" in data) {
       return (data.assignee_id as string | null) ?? undefined;
     }
-    return draft.assigneeId;
+    return draft.assigneeId ?? currentUserId;
   });
   const [startDate, setStartDate] = useState<string | null>(draft.startDate);
   const [dueDate, setDueDate] = useState<string | null>(draft.dueDate);
@@ -134,6 +137,25 @@ export function ManualCreatePanel({
   // Fetch parent issue details for the chip (status/identifier/title).
   // List cache usually has it already, so this resolves synchronously.
   const wsId = useWorkspaceId();
+  const { data: projects = [], isSuccess: projectsLoaded } = useQuery(
+    projectListOptions(wsId),
+  );
+  const initialProjectId = (data?.project_id as string | undefined) || undefined;
+  const defaultProjectId = useMemo(() => {
+    if (
+      initialProjectId &&
+      (!projectsLoaded || projects.some((p) => p.id === initialProjectId))
+    ) {
+      return initialProjectId;
+    }
+    if (!projectsLoaded || projects.length !== 1) return undefined;
+    return projects[0]?.id;
+  }, [initialProjectId, projectsLoaded, projects]);
+  useEffect(() => {
+    if (!projectsLoaded) return;
+    if (projectId && projects.some((p) => p.id === projectId)) return;
+    setProjectId(defaultProjectId);
+  }, [projectsLoaded, projects, projectId, defaultProjectId]);
   const { data: parentIssue } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
@@ -191,6 +213,10 @@ export function ManualCreatePanel({
 
   const handleSubmit = async () => {
     if (!title.trim() || submitting) return;
+    if (!projectId) {
+      toast.error(t(($) => $.create_issue.project_required));
+      return;
+    }
     setSubmitting(true);
     try {
       const issue = await createIssueMutation.mutateAsync({
@@ -516,6 +542,7 @@ export function ManualCreatePanel({
                 onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
                 triggerRender={<PillButton />}
                 align="start"
+                allowClear={false}
               />
 
               {/* Parent chip — appears when parent is set.

@@ -132,6 +132,7 @@
     "section_skills": "Skills",
     "prop_runtime": "Runtime",
     "prop_model": "Model",
+    "prop_thinking": "Thinking",
     "prop_visibility": "Visibility",
     "prop_allowed_users": "Allowed users",
     "prop_concurrency": "Concurrency",
@@ -202,7 +203,11 @@
     "model_custom_tooltip": "Use \"{{value}}\" as a custom model id",
     "model_custom_use": "Use \"{{value}}\"",
     "model_clear": "Clear (use provider default)",
-    "model_clear_title": "Clear and fall back to the runtime's provider default"
+    "model_clear_title": "Clear and fall back to the runtime's provider default",
+    "thinking_default": "Follow CLI config",
+    "thinking_tooltip": "Thinking · {{value}}",
+    "thinking_clear": "Follow CLI config",
+    "thinking_clear_title": "Clear the override and let the local CLI config (claude/codex) decide the reasoning level"
   },
   "model_dropdown": {
     "label": "Model",
