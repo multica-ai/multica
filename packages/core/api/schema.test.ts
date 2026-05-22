@@ -290,6 +290,51 @@ describe("ApiClient schema fallback", () => {
       expect(resp.reused_skill_ids).toEqual([]);
     });
   });
+
+  describe("importSkillsBatch", () => {
+    const validSkill = {
+      id: "skill-1",
+      workspace_id: "ws-1",
+      name: "demo-skill",
+      description: "Demo",
+      config: {},
+      created_by: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      content: "# Demo",
+      files: [],
+    };
+
+    it("parses the batch response and preserves empty arrays", async () => {
+      stubFetchJson({
+        imported: 1,
+        skipped: 0,
+        failed: 0,
+        skills: [validSkill],
+        errors: [],
+      });
+      const client = new ApiClient("https://api.example.test");
+      const resp = await client.importSkillsBatch({ url: "https://skills.sh/acme/repo" });
+
+      expect(resp.imported).toBe(1);
+      expect(resp.skills).toHaveLength(1);
+      expect(resp.errors).toEqual([]);
+    });
+
+    it("falls back to an empty contract when the batch response drifts", async () => {
+      stubFetchJson({ imported: "one", skills: null });
+      const client = new ApiClient("https://api.example.test");
+      const resp = await client.importSkillsBatch({ url: "https://skills.sh/acme/repo" });
+
+      expect(resp).toEqual({
+        imported: 0,
+        skipped: 0,
+        failed: 0,
+        skills: [],
+        errors: [],
+      });
+    });
+  });
 });
 
 // Direct tests for the helper, decoupled from any specific endpoint —

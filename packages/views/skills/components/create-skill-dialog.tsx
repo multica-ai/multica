@@ -294,7 +294,7 @@ function UrlForm({
   onCreated,
   onCancel,
 }: {
-  onCreated: (skill: Skill) => void;
+  onCreated: (skill: Skill | null) => void;
   onCancel: () => void;
 }) {
   const { t } = useT("skills");
@@ -315,10 +315,11 @@ function UrlForm({
     try {
       if (isBatchUrl(trimmed)) {
         const summary = await api.importSkillsBatch({ url: trimmed });
-        const first = summary.skills[0];
+        const first = summary.skills[0] ?? null;
         if (first) seedAfterCreate(qc, wsId, first);
+        qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
         toast.success(t(($) => $.create.url.toast_imported_batch, { count: summary.imported }));
-        onCreated(first ?? ({} as Skill));
+        onCreated(first);
       } else {
         const skill = await api.importSkill({ url: trimmed });
         seedAfterCreate(qc, wsId, skill);
@@ -455,8 +456,8 @@ export function CreateSkillDialog({
   const { t } = useT("skills");
   const [method, setMethod] = useState<Method>("chooser");
 
-  const handleCreated = (skill: Skill) => {
-    onCreated?.(skill);
+  const handleCreated = (skill: Skill | null) => {
+    if (skill) onCreated?.(skill);
     onClose();
   };
 

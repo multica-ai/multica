@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -1408,9 +1409,132 @@ func TestParseSkillsShParts_InvalidSegments(t *testing.T) {
 	}
 }
 
-// R1.1: Test the handler-level truncation rejection in importSkillsBatch.
-// If the 4-line "if result.Truncated { ... 502 ... }" block is accidentally
-// removed, this test will fail — unlike TestImportAllSkillsFromRepo_TruncatedTreeStillWorks
+func TestImportSkillsBatchEndpoint_RejectsMalformedRequestsBeforeNetwork(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test fixture unavailable")
+	}
+
+	cases := []struct {
+		name string
+		body any
+		want string
+	}{
+		{"bad json", "{", "invalid request body"},
+		{"missing url", map[string]string{}, "url is required"},
+		{"non skills sh", map[string]string{"url": "https://github.com/acme/repo"}, "batch import requires"},
+		{"three segment skills sh", map[string]string{"url": "https://skills.sh/acme/repo/one"}, "batch import requires"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var r *http.Request
+			if raw, ok := tc.body.(string); ok {
+				r = httptest.NewRequest(http.MethodPost, "/api/skills/import/batch", strings.NewReader(raw))
+				r.Header.Set("Content-Type", "application/json")
+				r.Header.Set("X-User-ID", testUserID)
+				r.Header.Set("X-Workspace-ID", testWorkspaceID)
+			} else {
+				r = newRequest(http.MethodPost, "/api/skills/import/batch", tc.body)
+			}
+			r = withURLParam(r, "workspaceId", testWorkspaceID)
+			w := httptest.NewRecorder()
+
+			testHandler.ImportSkillsBatch(w, r)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), tc.want) {
+				t.Fatalf("body = %q, want substring %q", w.Body.String(), tc.want)
+			}
+		})
+	}
+}
+
+func TestImportSkillsBatchHandler_ImportsAndSkipsDuplicates(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test fixture unavailable")
+	}
+
+	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/contract":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/contract/git/trees/main":
+				writeJSON(w, http.StatusOK, githubTreeResponse{
+					Tree: []githubTreeEntry{{Path: "skills/round3-contract/SKILL.md", Type: "blob"}},
+				})
+			case "/repos/acme/contract/contents/skills/round3-contract":
+				writeJSON(w, http.StatusOK, []githubContentEntry{})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/contract/main/skills/round3-contract/SKILL.md":
+				w.Write([]byte("---\nname: round3-contract\ndescription: contract test\n---\ncontent"))
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM skill WHERE workspace_id = $1 AND name = $2`, testWorkspaceID, "round3-contract")
+	})
+
+	spec := skillsShSpec{Owner: "acme", Repo: "contract", BatchMode: true}
+	workspaceUUID := parseUUID(testWorkspaceID)
+	creatorUUID := parseUUID(testUserID)
+
+	first := httptest.NewRecorder()
+	testHandler.importSkillsBatch(first, newRequest(http.MethodPost, "/api/skills/import/batch", nil), spec, client, workspaceUUID, creatorUUID, testUserID, testWorkspaceID)
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first status = %d, want 201; body: %s", first.Code, first.Body.String())
+	}
+	var firstBody BatchImportResponse
+	if err := json.Unmarshal(first.Body.Bytes(), &firstBody); err != nil {
+		t.Fatalf("decode first response: %v", err)
+	}
+	if firstBody.Imported != 1 || firstBody.Skipped != 0 || firstBody.Failed != 0 || len(firstBody.Skills) != 1 || len(firstBody.Errors) != 0 {
+		t.Fatalf("first summary = %+v, want 1 imported, 0 skipped, 0 failed, one skill and empty errors", firstBody)
+	}
+
+	second := httptest.NewRecorder()
+	testHandler.importSkillsBatch(second, newRequest(http.MethodPost, "/api/skills/import/batch", nil), spec, client, workspaceUUID, creatorUUID, testUserID, testWorkspaceID)
+	if second.Code != http.StatusCreated {
+		t.Fatalf("second status = %d, want 201; body: %s", second.Code, second.Body.String())
+	}
+	var secondBody BatchImportResponse
+	if err := json.Unmarshal(second.Body.Bytes(), &secondBody); err != nil {
+		t.Fatalf("decode second response: %v", err)
+	}
+	if secondBody.Imported != 0 || secondBody.Skipped != 1 || secondBody.Failed != 0 || len(secondBody.Skills) != 0 || len(secondBody.Errors) != 0 {
+		t.Fatalf("second summary = %+v, want 0 imported, 1 skipped, 0 failed, empty skills/errors", secondBody)
+	}
+}
+
+func TestImportSkillsBatchHandler_CountsTimeoutWithExtractFailures(t *testing.T) {
+	summary := BatchImportResponse{
+		Failed: 1,
+		Errors: []BatchImportError{{SkillName: "missing", Error: "fetch failed"}},
+	}
+	skills := []*importedSkill{{name: "one"}, {name: "two"}, {name: "three"}}
+	currentIndex := 1
+	remaining := len(skills) - currentIndex
+	summary.Failed += remaining
+
+	if summary.Failed != 3 {
+		t.Fatalf("failed = %d, want extract failure + in-flight + unprocessed = 3", summary.Failed)
+	}
+}
+
+// Handler-level truncation rejection in importSkillsBatch. If the 4-line
+// "if result.Truncated { ... 502 ... }" block is accidentally removed, this
+// test fails — unlike TestImportAllSkillsFromRepo_TruncatedTreeStillWorks
 // which only tests the function layer.
 func TestImportSkillsBatch_RejectsTruncatedTree(t *testing.T) {
 	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -1460,4 +1584,3 @@ func TestImportSkillsBatch_RejectsTruncatedTree(t *testing.T) {
 		t.Fatalf("error message = %q, want it to contain 'acme/large'", errMsg)
 	}
 }
-

@@ -1989,7 +1989,7 @@ func (h *Handler) importSkillsBatch(w http.ResponseWriter, r *http.Request, spec
 	summary.Failed += len(result.ExtractFailures)
 	summary.Errors = append(summary.Errors, result.ExtractFailures...)
 
-	for _, skill := range result.Skills {
+	for i, skill := range result.Skills {
 		files := make([]CreateSkillFileRequest, 0, len(skill.files))
 		for _, f := range skill.files {
 			if !validateFilePath(f.path) {
@@ -2023,22 +2023,23 @@ func (h *Handler) importSkillsBatch(w http.ResponseWriter, r *http.Request, spec
 				slog.Info("skills.sh batch import: skill already exists, skipping", "name", skill.name)
 				continue
 			}
-		// Check if context was cancelled (timeout)
-		if ctx.Err() != nil {
-			// Count the in-flight skill as failed
-			summary.Failed++
-			// Count remaining unprocessed skills as failed
-			remaining := len(result.Skills) - summary.Imported - summary.Skipped - summary.Failed
-			summary.Failed += remaining
+			// Check if context was cancelled (timeout)
+			if ctx.Err() != nil {
+				// Count the in-flight skill and every DB-loop item after it as failed.
+				// Use the loop index rather than summary.Failed because extraction
+				// failures were already counted before this loop and are not part of
+				// result.Skills.
+				remaining := len(result.Skills) - i
+				summary.Failed += remaining
 
-			slog.Warn("skills.sh batch import: context cancelled, aborting",
-				"error", ctx.Err(), "imported", summary.Imported, "skipped", summary.Skipped, "failed", summary.Failed)
-			summary.Errors = append(summary.Errors, BatchImportError{
-				SkillName: "",
-				Error:     fmt.Sprintf("batch import timed out after %s (%d skills remaining)", batchTimeout(len(result.Skills)), remaining),
-			})
-			break
-		}
+				slog.Warn("skills.sh batch import: context cancelled, aborting",
+					"error", ctx.Err(), "imported", summary.Imported, "skipped", summary.Skipped, "failed", summary.Failed)
+				summary.Errors = append(summary.Errors, BatchImportError{
+					SkillName: "",
+					Error:     fmt.Sprintf("batch import timed out after %s (%d skills remaining)", batchTimeout(len(result.Skills)), remaining),
+				})
+				break
+			}
 			summary.Failed++
 			summary.Errors = append(summary.Errors, BatchImportError{
 				SkillName: skill.name,
