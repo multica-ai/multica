@@ -860,6 +860,34 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 
 	loopStart := time.Now()
 	triedAgents := map[string]struct{}{}
+
+	// Local-path affinity filter: if any candidate's issue belongs to a
+	// project that has local_path resources, only runtimes whose daemon_id
+	// matches one of those resources are allowed to claim tasks for that
+	// project. Build the affinity map once before the loop so we don't
+	// query per-candidate.
+	localPathAffinity, err := s.buildLocalPathAffinityMap(ctx, tasks)
+	if err != nil {
+		// Non-fatal: log and proceed without affinity filtering. A DB
+		// glitch shouldn't block claiming — the worst case is a task
+		// runs on the "wrong" runtime and the agent can't access the
+		// local path, which the agent will surface as an error.
+		slog.Warn("claim_for_runtime: failed to build local_path affinity map", "error", err)
+		localPathAffinity = nil
+	}
+
+	// Resolve runtime's daemon_id for affinity matching.
+	var runtimeDaemonID string
+	if localPathAffinity != nil {
+		rt, err := s.Queries.GetAgentRuntime(ctx, runtimeID)
+		if err != nil {
+			slog.Warn("claim_for_runtime: failed to get runtime daemon_id", "error", err)
+			localPathAffinity = nil
+		} else {
+			runtimeDaemonID = rt.DaemonID.String
+		}
+	}
+
 	var claimed *db.AgentTaskQueue
 	for _, candidate := range tasks {
 		agentKey := util.UUIDToString(candidate.AgentID)
@@ -868,6 +896,11 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 		}
 		triedAgents[agentKey] = struct{}{}
 		tried++
+
+		// Skip candidates that fail the local-path affinity check.
+		if localPathAffinity != nil && !s.checkLocalPathAffinity(candidate.IssueID, runtimeDaemonID, localPathAffinity) {
+			continue
+		}
 
 		task, err := s.ClaimTask(ctx, candidate.AgentID)
 		if err != nil {
@@ -2130,4 +2163,101 @@ func agentToMap(a db.Agent) map[string]any {
 		"archived_at":          util.TimestampToPtr(a.ArchivedAt),
 		"archived_by":          util.UUIDToPtr(a.ArchivedBy),
 	}
+}
+
+// localPathAffinityMap maps issue_id → set of daemon_ids that are allowed to
+// claim tasks for that issue's project. Only populated when a project has
+// local_path resources; issues whose project has no local_path resources
+// are absent from the map (meaning: no affinity constraint).
+type localPathAffinityMap struct {
+	// issues maps issue_id → set of allowed daemon_ids.
+	issues map[string]map[string]struct{}
+}
+
+// buildLocalPathAffinityMap constructs the issue→daemon_id affinity map from
+// the candidate task list. It resolves issue→project→local_path resource
+// daemon_ids in two batch queries (one for issues→projects, one for
+// projects→local_path resources) rather than per-candidate queries.
+func (s *TaskService) buildLocalPathAffinityMap(ctx context.Context, candidates []db.AgentTaskQueue) (*localPathAffinityMap, error) {
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+
+	// Collect unique issue IDs from candidates.
+	issueIDs := make([]pgtype.UUID, 0, len(candidates))
+	seen := map[string]struct{}{}
+	for _, c := range candidates {
+		key := util.UUIDToString(c.IssueID)
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			issueIDs = append(issueIDs, c.IssueID)
+		}
+	}
+
+	// Resolve issue → project in one batch.
+	issueProjects, err := s.Queries.GetProjectIDsByIssues(ctx, issueIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(issueProjects) == 0 {
+		return nil, nil // no issues have projects → no affinity constraints
+	}
+
+	// Collect unique project IDs.
+	projectIDs := make([]pgtype.UUID, 0, len(issueProjects))
+	seenProj := map[string]struct{}{}
+	for _, ip := range issueProjects {
+		key := util.UUIDToString(ip.ProjectID)
+		if _, ok := seenProj[key]; !ok {
+			seenProj[key] = struct{}{}
+			projectIDs = append(projectIDs, ip.ProjectID)
+		}
+	}
+
+	// Resolve project → local_path daemon_ids in one batch.
+	projectDaemonIDs, err := s.Queries.ListLocalPathDaemonIDsByProjects(ctx, projectIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(projectDaemonIDs) == 0 {
+		return nil, nil // no projects have local_path resources → no affinity constraints
+	}
+
+	// Build project → set of daemon_ids.
+	projMap := map[string]map[string]struct{}{}
+	for _, pd := range projectDaemonIDs {
+		pk := util.UUIDToString(pd.ProjectID)
+		if projMap[pk] == nil {
+			projMap[pk] = map[string]struct{}{}
+		}
+		projMap[pk][pd.DaemonID] = struct{}{}
+	}
+
+	// Build issue → set of daemon_ids (via project).
+	issueMap := map[string]map[string]struct{}{}
+	for _, ip := range issueProjects {
+		ik := util.UUIDToString(ip.IssueID)
+		pk := util.UUIDToString(ip.ProjectID)
+		if daemons, ok := projMap[pk]; ok {
+			issueMap[ik] = daemons
+		}
+	}
+
+	if len(issueMap) == 0 {
+		return nil, nil
+	}
+	return &localPathAffinityMap{issues: issueMap}, nil
+}
+
+// checkLocalPathAffinity returns true if the runtime's daemon_id is allowed to
+// claim a task for the given issue. If the issue's project has no local_path
+// resources (absent from the map), it returns true (no constraint).
+func (s *TaskService) checkLocalPathAffinity(issueID pgtype.UUID, daemonID string, affinity *localPathAffinityMap) bool {
+	key := util.UUIDToString(issueID)
+	allowedDaemons, ok := affinity.issues[key]
+	if !ok {
+		return true // no local_path affinity for this issue
+	}
+	_, allowed := allowedDaemons[daemonID]
+	return allowed
 }

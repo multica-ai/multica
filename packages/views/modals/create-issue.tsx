@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "../navigation";
 import {
@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
-import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType } from "@multica/core/types";
+import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, LocalPathResourceRef } from "@multica/core/types";
 import {
   DialogContent,
   DialogTitle,
@@ -43,6 +43,7 @@ import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-stor
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
+import { projectResourcesOptions } from "@multica/core/projects";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import {
   api,
@@ -139,6 +140,23 @@ export function ManualCreatePanel({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
+
+  // Local-path affinity: when a project has local_path resources, only
+  // agents on the matching daemon can be assigned.
+  const { data: projectResources = [] } = useQuery({
+    ...projectResourcesOptions(wsId, projectId ?? ""),
+    enabled: !!projectId,
+  });
+  const localPathDaemonIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const r of projectResources) {
+      if (r.resource_type === "local_path") {
+        const ref = r.resource_ref as LocalPathResourceRef;
+        if (ref.daemon_id) ids.push(ref.daemon_id);
+      }
+    }
+    return ids;
+  }, [projectResources]);
 
   // File upload — collect attachment IDs so we can link them after issue creation.
   const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
@@ -490,6 +508,7 @@ export function ManualCreatePanel({
                   u.assignee_type ?? undefined,
                   u.assignee_id ?? undefined,
                 )}
+                localPathDaemonIds={localPathDaemonIds.length > 0 ? localPathDaemonIds : undefined}
                 triggerRender={<PillButton />}
                 align="start"
               />

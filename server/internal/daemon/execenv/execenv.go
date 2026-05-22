@@ -38,6 +38,7 @@ type PrepareParams struct {
 	Provider       string            // agent provider (determines runtime config and skill injection paths)
 	CodexVersion   string            // detected Codex CLI version (only used when Provider == "codex")
 	OpenclawBin    string            // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
+	DaemonID       string            // this daemon's UUID — used to match local_path resources for symlinking
 	Task           TaskContextForEnv // context data for writing files
 }
 
@@ -163,6 +164,9 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
 	}
 
+	// Symlink local_path project resources whose daemon_id matches this daemon.
+	symlinkLocalPaths(workDir, params.DaemonID, params.Task.ProjectResources, logger)
+
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(envRoot, "codex-home")
@@ -202,6 +206,7 @@ type ReuseParams struct {
 	Provider     string
 	CodexVersion string            // only used when Provider == "codex"
 	OpenclawBin  string            // only used when Provider == "openclaw"; empty = PATH lookup
+	DaemonID     string            // this daemon's UUID — used to match local_path resources for symlinking
 	Task         TaskContextForEnv // refreshed context files / skills
 }
 
@@ -222,6 +227,9 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if err := writeContextFiles(params.WorkDir, params.Provider, params.Task); err != nil {
 		logger.Warn("execenv: refresh context files failed", "error", err)
 	}
+
+	// Re-symlink local_path project resources whose daemon_id matches this daemon.
+	symlinkLocalPaths(params.WorkDir, params.DaemonID, params.Task.ProjectResources, logger)
 
 	// Restore CodexHome for Codex provider — the per-task codex-home directory
 	// lives alongside the workdir. Re-run prepareCodexHomeWithOpts to ensure

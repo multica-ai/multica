@@ -12,6 +12,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { projectResourcesOptions } from "@multica/core/projects";
 import {
   useQuickCreateStore,
   type QuickCreateActorType,
@@ -26,7 +27,7 @@ import {
 } from "@multica/core/runtimes";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { formatShortcut, modKey, enterKey } from "@multica/core/platform";
-import type { Agent, Squad } from "@multica/core/types";
+import type { Agent, Squad, LocalPathResourceRef } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
 import { PillButton } from "../common/pill-button";
 import { ProjectPicker } from "../projects/components/project-picker";
@@ -111,9 +112,57 @@ export function AgentCreatePanel({
       ),
     [agents, userId, memberRole],
   );
+
+  // Project selection — defaults to the last project the user picked in this
+  // workspace. `data?.project_id` lets the modal opener seed a one-shot
+  // override (e.g. a future "+ Issue" button on a project page); it does NOT
+  // replace the persisted default.
+  const lastProjectId = useQuickCreateStore((s) => s.lastProjectId);
+  const setLastProjectId = useQuickCreateStore((s) => s.setLastProjectId);
+  const [projectId, setProjectId] = useState<string | null>(() => {
+    const seed = (data?.project_id as string | undefined) ?? lastProjectId;
+    return seed ?? null;
+  });
+
+  // Local-path affinity: when a project has local_path resources, only
+  // agents on the matching daemon can be assigned. Filtered agents are
+  // hidden from the actor picker entirely.
+  const { data: projectResources = [] } = useQuery({
+    ...projectResourcesOptions(wsId, projectId ?? ""),
+    enabled: !!projectId,
+  });
+  const localPathDaemonIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const r of projectResources) {
+      if (r.resource_type === "local_path") {
+        const ref = r.resource_ref as LocalPathResourceRef;
+        if (ref.daemon_id) ids.push(ref.daemon_id);
+      }
+    }
+    return ids;
+  }, [projectResources]);
+
+  // Daemon CLI version gate.
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
+  const runtimeDaemonMap = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const r of runtimes) {
+      map.set(r.id, r.daemon_id ?? null);
+    }
+    return map;
+  }, [runtimes]);
+  const affinityFilteredAgents = useMemo(() => {
+    if (localPathDaemonIds.length === 0) return visibleAgents;
+    const allowed = new Set(localPathDaemonIds);
+    return visibleAgents.filter((a) => {
+      const daemonId = a.runtime_id ? runtimeDaemonMap.get(a.runtime_id) : null;
+      return !daemonId || allowed.has(daemonId);
+    });
+  }, [visibleAgents, localPathDaemonIds, runtimeDaemonMap]);
+
   const visibleAgentIds = useMemo(
-    () => new Set(visibleAgents.map((a) => a.id)),
-    [visibleAgents],
+    () => new Set(affinityFilteredAgents.map((a) => a.id)),
+    [affinityFilteredAgents],
   );
   const visibleSquads = useMemo(
     () =>
@@ -126,8 +175,6 @@ export function AgentCreatePanel({
   const lastActorType = useQuickCreateStore((s) => s.lastActorType);
   const lastActorId = useQuickCreateStore((s) => s.lastActorId);
   const setLastActor = useQuickCreateStore((s) => s.setLastActor);
-  const lastProjectId = useQuickCreateStore((s) => s.lastProjectId);
-  const setLastProjectId = useQuickCreateStore((s) => s.setLastProjectId);
   const promptDraft = useQuickCreateStore((s) => s.prompt);
   const setPrompt = useQuickCreateStore((s) => s.setPrompt);
   const clearPrompt = useQuickCreateStore((s) => s.clearPrompt);
@@ -165,11 +212,11 @@ export function AgentCreatePanel({
       resolveActor("agent", dataAgent) ||
       resolveActor("squad", dataSquad) ||
       resolveActor(lastActorType, lastActorId) ||
-      (visibleAgents[0]
-        ? ({ type: "agent", id: visibleAgents[0].id } as const)
+      (affinityFilteredAgents[0]
+        ? ({ type: "agent", id: affinityFilteredAgents[0].id } as const)
         : null)
     );
-  }, [resolveActor, data?.agent_id, data?.squad_id, lastActorType, lastActorId, visibleAgents]);
+  }, [resolveActor, data?.agent_id, data?.squad_id, lastActorType, lastActorId, affinityFilteredAgents]);
 
   const [actor, setActor] = useState<ActorSelection | null>(() => seedActor());
 
@@ -181,25 +228,18 @@ export function AgentCreatePanel({
 
   const selectedAgent = useMemo<Agent | undefined>(() => {
     if (!actor) return undefined;
-    if (actor.type === "agent") return visibleAgents.find((a) => a.id === actor.id);
+    if (actor.type === "agent") return affinityFilteredAgents.find((a) => a.id === actor.id);
     const squad = visibleSquads.find((s) => s.id === actor.id);
     if (!squad) return undefined;
-    return visibleAgents.find((a) => a.id === squad.leader_id);
-  }, [actor, visibleAgents, visibleSquads]);
+    return affinityFilteredAgents.find((a) => a.id === squad.leader_id);
+  }, [actor, affinityFilteredAgents, visibleSquads]);
 
   const selectedSquad = useMemo<Squad | undefined>(() => {
     if (actor?.type !== "squad") return undefined;
     return visibleSquads.find((s) => s.id === actor.id);
   }, [actor, visibleSquads]);
 
-  // Project selection — defaults to the last project the user picked in this
-  // workspace. `data?.project_id` lets the modal opener seed a one-shot
-  // override (e.g. a future "+ Issue" button on a project page); it does NOT
-  // replace the persisted default.
-  const [projectId, setProjectId] = useState<string | null>(() => {
-    const seed = (data?.project_id as string | undefined) ?? lastProjectId;
-    return seed ?? null;
-  });
+  // Project selection — already declared above with local-path affinity.
 
   // Stale-id sweep. Once the project list query has actually resolved
   // (`isSuccess` — distinct from "data is the empty default during loading"),
@@ -223,7 +263,6 @@ export function AgentCreatePanel({
   // (git-describe shape) are exempted inside checkQuickCreateCliVersion
   // — frontend and server share the same signal there, so they agree by
   // construction across web/desktop/staging without comparing env flags.
-  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const selectedRuntime = useMemo(
     () =>
       selectedAgent?.runtime_id
@@ -409,7 +448,7 @@ export function AgentCreatePanel({
         <div className="px-5 pt-1 pb-2 shrink-0">
           <ActorPicker
             actor={actor}
-            visibleAgents={visibleAgents}
+            visibleAgents={affinityFilteredAgents}
             visibleSquads={visibleSquads}
             selectedAgent={selectedAgent}
             selectedSquad={selectedSquad}

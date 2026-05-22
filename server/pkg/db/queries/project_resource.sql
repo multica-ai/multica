@@ -34,3 +34,13 @@ SELECT project_id, count(*)::bigint AS resource_count
 FROM project_resource
 WHERE project_id = ANY(sqlc.arg('project_ids')::uuid[])
 GROUP BY project_id;
+
+-- name: ListLocalPathDaemonIDsByProjects :many
+-- Returns (project_id, daemon_id) pairs for every local_path resource attached
+-- to any of the given project IDs. Used by the claim-time affinity filter to
+-- decide whether a runtime's daemon_id matches a project's local_path resource.
+SELECT project_id, (resource_ref->>'daemon_id')::text AS daemon_id
+FROM project_resource
+WHERE project_id = ANY(sqlc.arg('project_ids')::uuid[])
+  AND resource_type = 'local_path'
+  AND resource_ref->>'daemon_id' IS NOT NULL;

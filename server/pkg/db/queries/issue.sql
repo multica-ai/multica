@@ -64,6 +64,15 @@ LIMIT $2 OFFSET $3;
 SELECT * FROM issue
 WHERE id = $1;
 
+-- name: GetProjectIDsByIssues :many
+-- Returns (issue_id, project_id) pairs for a set of issues. Used by the
+-- claim-time affinity filter to resolve project_id from a candidate task's
+-- issue_id. Issues without a project are excluded.
+SELECT id AS issue_id, project_id
+FROM issue
+WHERE id = ANY(sqlc.arg('issue_ids')::uuid[])
+  AND project_id IS NOT NULL;
+
 -- name: GetIssueInWorkspace :one
 SELECT * FROM issue
 WHERE id = $1 AND workspace_id = $2;

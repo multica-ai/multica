@@ -366,7 +366,8 @@
       "search_placeholder": "分配给...",
       "members_group": "成员",
       "agents_group": "智能体",
-      "squads_group": "小队"
+      "squads_group": "小队",
+      "local_path_affinity_disabled": "该智能体所在的机器无法访问项目的本地路径"
     },
     "start_date": {
       "trigger_label": "开始日期",

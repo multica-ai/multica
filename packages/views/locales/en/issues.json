@@ -375,7 +375,8 @@
       "search_placeholder": "Assign to...",
       "members_group": "Members",
       "agents_group": "Agents",
-      "squads_group": "Squads"
+      "squads_group": "Squads",
+      "local_path_affinity_disabled": "This agent's machine does not have access to the project's local path"
     },
     "start_date": {
       "trigger_label": "Start date",

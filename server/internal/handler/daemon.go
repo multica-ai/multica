@@ -170,6 +170,13 @@ type DaemonRegisterRequest struct {
 	// UI, the upsert query preserves that override on subsequent
 	// daemon reconnects (see UpsertAgentRuntime in runtime.sql).
 	Timezone string `json:"timezone"`
+	// LocalPaths lists absolute directory paths available on this daemon's
+	// machine. When a project has a local_path resource whose daemon_id
+	// matches this daemon, only this daemon's runtimes can claim tasks for
+	// that project. Omitted or empty means no local paths declared.
+	LocalPaths []struct {
+		Path string `json:"path"`
+	} `json:"local_paths"`
 	Runtimes []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
@@ -345,6 +352,12 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			"launched_by": req.LaunchedBy,
 		})
 
+		// Marshal local_paths as JSONB for the agent_runtime.local_paths column.
+		var localPathsJSON []byte
+		if len(req.LocalPaths) > 0 {
+			localPathsJSON, _ = json.Marshal(req.LocalPaths)
+		}
+
 		row, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
 			WorkspaceID: wsUUID,
 			DaemonID:    strToText(req.DaemonID),
@@ -356,6 +369,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			Metadata:    metadata,
 			OwnerID:     ownerID,
 			Timezone:    normalizeRuntimeTimezone(req.Timezone),
+			LocalPaths:  localPathsJSON,
 		})
 		if err != nil {
 			h.Analytics.Capture(analytics.RuntimeFailed(
@@ -387,6 +401,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			OwnerID:        row.OwnerID,
 			LegacyDaemonID: row.LegacyDaemonID,
 			Timezone:       row.Timezone,
+			LocalPaths:     row.LocalPaths,
 		}
 
 		// Inserted is false for normal daemon reconnects/upserts, so

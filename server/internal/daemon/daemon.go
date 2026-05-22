@@ -743,6 +743,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		"cli_version":       d.cfg.CLIVersion,
 		"launched_by":       d.cfg.LaunchedBy,
 		"timezone":          detectLocalTimezone(),
+		"local_paths":       d.cfg.LocalPaths,
 		"runtimes":          runtimes,
 	}
 
@@ -2326,6 +2327,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Provider:     provider,
 			CodexVersion: codexVersion,
 			OpenclawBin:  openclawBin,
+			DaemonID:     d.cfg.DaemonID,
 			Task:         taskCtx,
 		}, d.logger)
 	}
@@ -2339,6 +2341,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Provider:       provider,
 			CodexVersion:   codexVersion,
 			OpenclawBin:    openclawBin,
+			DaemonID:       d.cfg.DaemonID,
 			Task:           taskCtx,
 		}, d.logger)
 		if err != nil {

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"os/exec"
@@ -81,6 +82,16 @@ type Config struct {
 	AgentIdleWatchdog              time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
 	ClaudeArgs                     []string
 	CodexArgs                      []string
+	// LocalPaths lists absolute directory paths available on this daemon's
+	// machine. When a project has a local_path resource whose daemon_id
+	// matches this daemon, only this daemon's runtimes can claim tasks for
+	// that project. Populated from MULTICA_LOCAL_PATHS (comma-separated).
+	LocalPaths []LocalPathEntry
+}
+
+// LocalPathEntry represents a single local directory path reported by the daemon.
+type LocalPathEntry struct {
+	Path string `json:"path"`
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -384,6 +395,12 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		autoUpdateInterval = overrides.AutoUpdateCheckInterval
 	}
 
+	// Local paths: comma-separated absolute directory paths declared via
+	// MULTICA_LOCAL_PATHS. Only paths that actually exist on disk are
+	// included; missing paths are logged and skipped so a stale config on
+	// one machine doesn't block startup.
+	localPaths := parseLocalPaths(os.Getenv("MULTICA_LOCAL_PATHS"))
+
 	return Config{
 		ServerBaseURL:                  serverBaseURL,
 		DaemonID:                       daemonID,
@@ -411,6 +428,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		AgentIdleWatchdog:              agentIdleWatchdog,
 		ClaudeArgs:                     claudeArgs,
 		CodexArgs:                      codexArgs,
+		LocalPaths:                     localPaths,
 	}, nil
 }
 
@@ -514,6 +532,34 @@ func patternsFromEnv(name string, defaults []string) []string {
 			continue
 		}
 		out = append(out, p)
+	}
+	return out
+}
+
+// parseLocalPaths parses a comma-separated list of absolute directory paths
+// from the MULTICA_LOCAL_PATHS env var. Only absolute paths that exist on disk
+// are returned; non-absolute or missing paths are logged and skipped.
+func parseLocalPaths(raw string) []LocalPathEntry {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]LocalPathEntry, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if !filepath.IsAbs(p) {
+			slog.Warn("MULTICA_LOCAL_PATHS: skipping non-absolute path", "path", p)
+			continue
+		}
+		if _, err := os.Stat(p); err != nil {
+			slog.Warn("MULTICA_LOCAL_PATHS: skipping missing path", "path", p, "error", err)
+			continue
+		}
+		out = append(out, LocalPathEntry{Path: p})
 	}
 	return out
 }

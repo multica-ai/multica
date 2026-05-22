@@ -75,6 +75,8 @@ export type {
   ProjectResource,
   ProjectResourceType,
   GithubRepoResourceRef,
+  LocalPathResourceRef,
+  ProjectResourceRef,
   CreateProjectResourceRequest,
   ListProjectResourcesResponse,
 } from "./project";

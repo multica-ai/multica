@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, FolderGit, Plus, Trash2 } from "lucide-react";
+import { ChevronRight, FolderGit, FolderOpen, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   projectResourcesOptions,
@@ -11,8 +11,10 @@ import {
 } from "@multica/core/projects";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import type {
   GithubRepoResourceRef,
+  LocalPathResourceRef,
   ProjectResource,
 } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -30,9 +32,9 @@ import { useT } from "../../i18n";
 
 // Project Resources sidebar section.
 //
-// Today only renders github_repo, but the rendering layer is type-dispatched
-// so adding a new type means: (1) extend the API validator, (2) add a render
-// case here. No changes to the schema or query layer.
+// Renders github_repo and local_path resources. The rendering layer is
+// type-dispatched so adding a new type means: (1) extend the API validator,
+// (2) add a render case here. No changes to the schema or query layer.
 export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
@@ -46,10 +48,19 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const createResource = useCreateProjectResource(wsId, projectId);
   const deleteResource = useDeleteProjectResource(wsId, projectId);
 
+  // Fetch online runtimes for the local_path daemon picker.
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
+  const onlineRuntimes = runtimes.filter((r) => r.status === "online");
+
   const attachedUrls = new Set(
     resources
       .filter((r) => r.resource_type === "github_repo")
       .map((r) => (r.resource_ref as GithubRepoResourceRef).url),
+  );
+  const attachedPaths = new Set(
+    resources
+      .filter((r) => r.resource_type === "local_path")
+      .map((r) => (r.resource_ref as LocalPathResourceRef).path),
   );
 
   const handleAttach = async (url: string) => {
@@ -57,6 +68,19 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
       await createResource.mutateAsync({
         resource_type: "github_repo",
         resource_ref: { url },
+      });
+      toast.success(t(($) => $.resources.toast_attached));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : t(($) => $.resources.toast_attach_failed);
+      toast.error(msg);
+    }
+  };
+
+  const handleAddLocalPath = async (path: string, daemonId: string) => {
+    try {
+      await createResource.mutateAsync({
+        resource_type: "local_path",
+        resource_ref: { path, daemon_id: daemonId },
       });
       toast.success(t(($) => $.resources.toast_attached));
     } catch (err) {
@@ -100,6 +124,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
             <ResourceRow
               key={resource.id}
               resource={resource}
+              runtimes={onlineRuntimes}
               onRemove={() => handleRemove(resource)}
             />
           ))}
@@ -126,9 +151,6 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                     const isAttached = attachedUrls.has(repo.url);
                     const isDisabled = isAttached || createResource.isPending;
                     return (
-                      // Use aria-disabled instead of the native `disabled` attribute so
-                      // hover events still reach the tooltip trigger on attached rows
-                      // (browsers suppress pointer events on disabled form controls).
                       <button
                         key={repo.url}
                         type="button"
@@ -165,6 +187,17 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                   setAddOpen(false);
                 }}
               />
+              {onlineRuntimes.length > 0 && (
+                <LocalPathForm
+                  attachedPaths={attachedPaths}
+                  runtimes={onlineRuntimes}
+                  onSubmit={async (path, daemonId) => {
+                    await handleAddLocalPath(path, daemonId);
+                    setAddOpen(false);
+                  }}
+                  disabled={createResource.isPending}
+                />
+              )}
             </PopoverContent>
           </Popover>
         </div>
@@ -175,9 +208,11 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
 
 function ResourceRow({
   resource,
+  runtimes,
   onRemove,
 }: {
   resource: ProjectResource;
+  runtimes: Array<{ id: string; daemon_id: string | null; name: string; device_info: string }>;
   onRemove: () => void;
 }) {
   const { t } = useT("projects");
@@ -201,6 +236,37 @@ function ResourceRow({
           />
           <TooltipContent side="top">{ref.url}</TooltipContent>
         </Tooltip>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
+          title={t(($) => $.resources.remove_tooltip)}
+        >
+          <Trash2 className="size-3 text-muted-foreground" />
+        </button>
+      </div>
+    );
+  }
+  if (resource.resource_type === "local_path") {
+    const ref = resource.resource_ref as LocalPathResourceRef;
+    const runtime = runtimes.find((r) => r.daemon_id === ref.daemon_id);
+    const machineName = runtime ? machineLabel(runtime) : ref.daemon_id.slice(0, 8);
+    return (
+      <div className="flex items-center gap-2 text-xs group">
+        <FolderOpen className="size-3.5 text-muted-foreground shrink-0" />
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span className="truncate flex-1">
+                {resource.label || ref.path}
+              </span>
+            }
+          />
+          <TooltipContent side="top">{ref.path}</TooltipContent>
+        </Tooltip>
+        <span className="text-[10px] text-muted-foreground shrink-0">
+          {machineName}
+        </span>
         <button
           type="button"
           onClick={onRemove}
@@ -267,6 +333,110 @@ function CustomRepoForm({
       >
         {t(($) => $.resources.url_submit)}
       </Button>
+    </form>
+  );
+}
+
+// machineLabel extracts a human-readable machine name from a runtime.
+// The backend formats device_info as "hostname · version" and name as
+// "Provider (hostname)", so we prefer the hostname from device_info.
+function machineLabel(rt: { name: string; device_info: string }): string {
+  // device_info is "<hostname> · <version>"; take the hostname.
+  if (rt.device_info) {
+    const host = rt.device_info.split(" · ")[0];
+    if (host) return host;
+  }
+  // Fallback: extract "(hostname)" from runtime name like "Claude (hostname)"
+  const match = rt.name.match(/\(([^)]+)\)$/);
+  if (match && match[1]) return match[1];
+  return rt.name;
+}
+
+// buildRuntimeMachines groups a list of runtimes by daemon_id so the UI
+// shows one entry per physical machine instead of one per runtime.
+function buildRuntimeMachines(
+  runtimes: Array<{ id: string; daemon_id: string | null; name: string; device_info: string }>,
+) {
+  const map = new Map<string, { daemonId: string; label: string }>();
+  for (const r of runtimes) {
+    if (!r.daemon_id || map.has(r.daemon_id)) continue;
+    map.set(r.daemon_id, { daemonId: r.daemon_id, label: machineLabel(r) });
+  }
+  return Array.from(map.values());
+}
+
+function LocalPathForm({
+  attachedPaths,
+  runtimes,
+  onSubmit,
+  disabled,
+}: {
+  attachedPaths: Set<string>;
+  runtimes: Array<{ id: string; daemon_id: string | null; name: string; device_info: string }>;
+  onSubmit: (path: string, daemonId: string) => Promise<void> | void;
+  disabled: boolean;
+}) {
+  const { t } = useT("projects");
+  const [path, setPath] = useState("");
+  const machines = buildRuntimeMachines(runtimes);
+  const [daemonId, setDaemonId] = useState(() => machines[0]?.daemonId ?? "");
+  const [submitting, setSubmitting] = useState(false);
+
+  const isAttached = path.trim() && attachedPaths.has(path.trim());
+  const canSubmit = path.trim() && daemonId && !isAttached && !disabled && !submitting;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = path.trim();
+    if (!trimmed || !daemonId || !canSubmit) return;
+    setSubmitting(true);
+    try {
+      await onSubmit(trimmed, daemonId);
+      setPath("");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-1.5 pt-1 border-t">
+      <div className="text-[10px] font-medium text-muted-foreground">
+        Local path
+      </div>
+      <input
+        type="text"
+        value={path}
+        onChange={(e) => setPath(e.target.value)}
+        placeholder="/absolute/path/to/project"
+        className="w-full bg-transparent text-xs px-2 py-1 outline-none placeholder:text-muted-foreground"
+      />
+      <div className="flex items-center gap-1.5">
+        <select
+          value={daemonId}
+          onChange={(e) => setDaemonId(e.target.value)}
+          className="flex-1 bg-transparent text-xs px-2 py-1 outline-none border border-border rounded-md"
+        >
+          {machines.map((m) => (
+            <option key={m.daemonId} value={m.daemonId}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+        <Button
+          type="submit"
+          size="sm"
+          variant="ghost"
+          className="h-6 px-2 text-xs shrink-0"
+          disabled={!canSubmit}
+        >
+          {t(($) => $.resources.url_submit)}
+        </Button>
+      </div>
+      {isAttached && (
+        <p className="text-[10px] text-muted-foreground">
+          {t(($) => $.resources.attached_badge)}
+        </p>
+      )}
     </form>
   );
 }

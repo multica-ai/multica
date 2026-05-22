@@ -9,6 +9,7 @@ import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, squadListOptions, assigneeFrequencyOptions } from "@multica/core/workspace/queries";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import {
   PropertyPicker,
@@ -46,6 +47,8 @@ export function AssigneePicker({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
+  disabledAgentIds,
+  localPathDaemonIds,
 }: {
   assigneeType: IssueAssigneeType | null;
   assigneeId: string | null;
@@ -55,6 +58,12 @@ export function AssigneePicker({
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
+  /** Agent IDs that should be shown as disabled (e.g. wrong machine for
+   *  local_path affinity). Omit or empty = no extra restrictions. */
+  disabledAgentIds?: Set<string>;
+  /** Daemon IDs from the project's local_path resources. When non-empty,
+   *  agents whose runtime's daemon_id is NOT in this list are disabled. */
+  localPathDaemonIds?: string[];
 }) {
   const { t } = useT("issues");
   const [internalOpen, setInternalOpen] = useState(false);
@@ -68,6 +77,29 @@ export function AssigneePicker({
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const { data: frequency = [] } = useQuery(assigneeFrequencyOptions(wsId));
   const { getActorName } = useActorName();
+
+  // Resolve local_path affinity: agents whose runtime's daemon_id is NOT
+  // in localPathDaemonIds are disabled. Only query runtimes when needed.
+  const { data: affinityRuntimes = [] } = useQuery({
+    ...runtimeListOptions(wsId),
+    enabled: !!localPathDaemonIds && localPathDaemonIds.length > 0,
+  });
+  const affinityDisabledAgentIds = useMemo(() => {
+    if (!localPathDaemonIds || localPathDaemonIds.length === 0) return undefined;
+    const allowed = new Set(localPathDaemonIds);
+    const runtimeDaemonMap = new Map<string, string | null>();
+    for (const r of affinityRuntimes) {
+      runtimeDaemonMap.set(r.id, r.daemon_id ?? null);
+    }
+    const disabled = new Set<string>();
+    for (const a of agents) {
+      const daemonId = a.runtime_id ? runtimeDaemonMap.get(a.runtime_id) : null;
+      if (daemonId && !allowed.has(daemonId)) {
+        disabled.add(a.id);
+      }
+    }
+    return disabled.size > 0 ? disabled : undefined;
+  }, [localPathDaemonIds, affinityRuntimes, agents]);
 
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
@@ -175,13 +207,17 @@ export function AssigneePicker({
                   ? memberRole
                   : null,
             });
-            const allowed = decision.allowed;
+            const affinityDisabled = (disabledAgentIds?.has(a.id) ?? false) || (affinityDisabledAgentIds?.has(a.id) ?? false);
+            const allowed = decision.allowed && !affinityDisabled;
+            const affinityTooltip = affinityDisabled
+              ? t(($) => $.pickers.assignee.local_path_affinity_disabled)
+              : undefined;
             return (
               <PickerItem
                 key={a.id}
                 selected={isSelected("agent", a.id)}
                 disabled={!allowed}
-                tooltip={!allowed ? decision.message : undefined}
+                tooltip={!allowed ? (affinityTooltip || decision.message) : undefined}
                 onClick={() => {
                   if (!allowed) return;
                   onUpdate({

@@ -71,6 +71,17 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 			out += " — " + label
 		}
 		return out
+	case "local_path":
+		var payload struct {
+			Path     string `json:"path"`
+			DaemonID string `json:"daemon_id"`
+		}
+		_ = json.Unmarshal(r.ResourceRef, &payload)
+		out := fmt.Sprintf("**Local path**: `%s`", payload.Path)
+		if label != "" {
+			out += " — " + label
+		}
+		return out
 	default:
 		ref := string(r.ResourceRef)
 		if ref == "" {
@@ -251,6 +262,19 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			}
 			b.WriteString("\nResources are pointers — open them only when relevant to the task. ")
 			b.WriteString("For `github_repo` resources, use `multica repo checkout <url>` to fetch the code. Add `--ref <branch-or-sha>` when a task or handoff names an exact revision.\n\n")
+			// Add local_path-specific guidance when applicable.
+			hasLocalPath := false
+			for _, r := range ctx.ProjectResources {
+				if r.ResourceType == "local_path" {
+					hasLocalPath = true
+					break
+				}
+			}
+			if hasLocalPath {
+				b.WriteString("Local project directories are symlinked at `local/<basename>` in your working directory. ")
+				b.WriteString("Read and edit files directly — the local path is already on this machine. ")
+				b.WriteString("Do NOT run `multica repo checkout` for `local_path` directories.\n\n")
+			}
 		} else {
 			b.WriteString("This project has no resources attached yet.\n\n")
 		}

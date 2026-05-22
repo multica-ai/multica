@@ -27,6 +27,8 @@ export interface RuntimeDevice {
   /** Defaults to "private" when the backend predates the visibility flag. */
   visibility: RuntimeVisibility;
   timezone: string;
+  /** Local paths declared by the daemon (JSON array of {path: "..."} or null) */
+  local_paths?: Array<{ path: string }> | null;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;

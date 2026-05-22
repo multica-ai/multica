@@ -32,8 +32,9 @@ INSERT INTO agent_runtime (
     metadata,
     owner_id,
     timezone,
-    last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, @timezone, now())
+    last_seen_at,
+    local_paths
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, @timezone, now(), @local_paths)
 ON CONFLICT (workspace_id, daemon_id, provider)
 DO UPDATE SET
     name = EXCLUDED.name,
@@ -43,7 +44,8 @@ DO UPDATE SET
     metadata = EXCLUDED.metadata,
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
-    updated_at = now()
+    updated_at = now(),
+    local_paths = EXCLUDED.local_paths
 RETURNING *, (xmax = 0) AS inserted;
 
 -- name: LockTaskUsageDailyRollup :exec

@@ -32,9 +32,12 @@ type AgentRuntimeResponse struct {
 	// 083 and canUseRuntimeForAgent.
 	Visibility string  `json:"visibility"`
 	Timezone   string  `json:"timezone"`
-	LastSeenAt *string `json:"last_seen_at"`
-	CreatedAt  string  `json:"created_at"`
-	UpdatedAt  string  `json:"updated_at"`
+	// LocalPaths is the JSON array of {path: "..."} objects reported by the
+	// daemon, or null/empty when no local paths are declared.
+	LocalPaths json.RawMessage `json:"local_paths,omitempty"`
+	LastSeenAt *string         `json:"last_seen_at"`
+	CreatedAt  string          `json:"created_at"`
+	UpdatedAt  string          `json:"updated_at"`
 }
 
 func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
@@ -60,6 +63,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		OwnerID:      uuidToPtr(rt.OwnerID),
 		Visibility:   rt.Visibility,
 		Timezone:     rt.Timezone,
+		LocalPaths:   json.RawMessage(rt.LocalPaths),
 		LastSeenAt:   timestampToPtr(rt.LastSeenAt),
 		CreatedAt:    timestampToString(rt.CreatedAt),
 		UpdatedAt:    timestampToString(rt.UpdatedAt),
