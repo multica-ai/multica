@@ -313,6 +313,47 @@ func TestCreateLocalCLIMessage_CommandUserInputStoresTranscriptOnly(t *testing.T
 	}
 }
 
+func TestCreateLocalCLIMessage_CommentableCommandUserInputCreatesReply(t *testing.T) {
+	ctx := context.Background()
+	issue := createIssueForLocalRunTest(t, "in_progress")
+	run := createLocalRunForTest(t, issue.ID, map[string]any{
+		"cli_name":      "claude",
+		"work_dir":      "/tmp/project",
+		"comments_mode": "thread",
+	})
+	runID := run["id"].(string)
+	topCommentID := run["top_comment_id"].(string)
+	content := "/plan 帮我规划实现方案"
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/local-runs/"+runID+"/messages", map[string]any{
+		"type":    "user_input",
+		"content": content,
+		"input": map[string]any{
+			"command":       true,
+			"slash_command": "plan",
+			"slash_args":    "帮我规划实现方案",
+			"commentable":   true,
+		},
+	})
+	req = withLocalRunWorkspace(req)
+	req = withURLParam(req, "runId", runID)
+	testHandler.CreateLocalCLIMessage(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateLocalCLIMessage: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var replyCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM comment WHERE issue_id = $1 AND parent_id = $2 AND content = $3
+	`, issue.ID, topCommentID, content).Scan(&replyCount); err != nil {
+		t.Fatalf("count replies: %v", err)
+	}
+	if replyCount != 1 {
+		t.Fatalf("reply comments = %d, want 1", replyCount)
+	}
+}
+
 func TestCreateLocalCLIMessage_CodexProposedPlanCreatesLocalDisplayReply(t *testing.T) {
 	ctx := context.Background()
 	issue := createIssueForLocalRunTest(t, "in_progress")

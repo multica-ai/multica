@@ -452,18 +452,26 @@ func (t *claudeTranscriptTracker) mapUserLineLocked(session *claudeTrackedSessio
 
 func (t *claudeTranscriptTracker) recordClaudeUserPromptLocked(session *claudeTrackedSession, content, key string) {
 	content = strings.TrimSpace(content)
-	commentable := content != "" && !t.isBootstrap(content) && !isSlashInput(content)
+	slash, isSlash := parseSlashInput(content)
+	commentable := content != "" && !t.isBootstrap(content) && (!isSlash || slash.Args != "")
 	t.currentTurnReply = commentable
 	if !commentable {
 		return
+	}
+	input := map[string]any{
+		"session_id": session.sessionID,
+	}
+	if isSlash {
+		input["command"] = true
+		input["slash_command"] = slash.Command
+		input["slash_args"] = slash.Args
+		input["commentable"] = true
 	}
 	t.post(localCLIMessage{
 		Type:      "user_input",
 		Content:   content,
 		SourceKey: t.sourceKey(session, key, "user"),
-		Input: map[string]any{
-			"session_id": session.sessionID,
-		},
+		Input:     input,
 	})
 }
 
