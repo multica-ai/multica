@@ -325,11 +325,11 @@ setup_server() {
     if [ "$(uname -s)" = "Darwin" ]; then
       sed -i '' "s/^JWT_SECRET=.*/JWT_SECRET=$jwt/" .env
       sed -i '' "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$pgpass/" .env
-      sed -i '' "s|^DATABASE_URL=postgres://[^:]*:[^@]*@|DATABASE_URL=postgres://multica:${pgpass}@|" .env
+      sed -i '' -E "s#^(DATABASE_URL=postgres://[^:]+:)[^@]+(@.*)#\1${pgpass}\2#" .env
     else
       sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$jwt/" .env
       sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$pgpass/" .env
-      sed -i "s|^DATABASE_URL=postgres://[^:]*:[^@]*@|DATABASE_URL=postgres://multica:${pgpass}@|" .env
+      sed -i -E "s#^(DATABASE_URL=postgres://[^:]+:)[^@]+(@.*)#\1${pgpass}\2#" .env
     fi
     ok "Generated .env with random JWT_SECRET and POSTGRES_PASSWORD"
   else
