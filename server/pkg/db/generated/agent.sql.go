@@ -869,6 +869,8 @@ SELECT
     p.is_leader_task
 FROM agent_task_queue p
 WHERE p.id = $1
+ON CONFLICT (parent_task_id) WHERE parent_task_id IS NOT NULL DO UPDATE
+SET parent_task_id = EXCLUDED.parent_task_id
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task
 `
 

@@ -172,6 +172,88 @@ func TestClassifyPoisonedError(t *testing.T) {
 	}
 }
 
+func TestClassifyTransientError(t *testing.T) {
+	cases := []struct {
+		name       string
+		errMsg     string
+		wantOK     bool
+		wantReason string
+	}{
+		{
+			name:       "sqlite database locked",
+			errMsg:     "agent failed: database is locked",
+			wantOK:     true,
+			wantReason: FailureReasonAgentTransient,
+		},
+		{
+			name:       "provider empty output",
+			errMsg:     "kimi returned empty output",
+			wantOK:     true,
+			wantReason: FailureReasonAgentTransient,
+		},
+		{
+			name:       "openclaw no parseable output",
+			errMsg:     "openclaw returned no parseable output",
+			wantOK:     true,
+			wantReason: FailureReasonAgentTransient,
+		},
+		{
+			name:       "temporary provider interruption",
+			errMsg:     "stream interrupted: connection reset by peer",
+			wantOK:     true,
+			wantReason: FailureReasonAgentTransient,
+		},
+		{
+			name:       "provider overload",
+			errMsg:     `API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`,
+			wantOK:     true,
+			wantReason: FailureReasonAgentTransient,
+		},
+		{
+			name:   "auth failure is permanent",
+			errMsg: `API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"invalid api key"}}`,
+			wantOK: false,
+		},
+		{
+			name:   "permission failure is permanent",
+			errMsg: "permission denied while opening repository",
+			wantOK: false,
+		},
+		{
+			name:   "configuration failure is permanent",
+			errMsg: "configuration error: model is not configured",
+			wantOK: false,
+		},
+		{
+			name:   "content policy failure is permanent",
+			errMsg: "content policy blocked this request",
+			wantOK: false,
+		},
+		{
+			name:   "invalid request remains poisoned permanent",
+			errMsg: `API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"Could not process image"}}`,
+			wantOK: false,
+		},
+		{
+			name:   "ordinary agent error is permanent",
+			errMsg: "tests failed in auth_test.go",
+			wantOK: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reason, ok := classifyTransientError(tc.errMsg)
+			if ok != tc.wantOK {
+				t.Fatalf("classifyTransientError(%q) ok=%v, want %v", tc.errMsg, ok, tc.wantOK)
+			}
+			if ok && reason != tc.wantReason {
+				t.Fatalf("classifyTransientError(%q) reason=%q, want %q", tc.errMsg, reason, tc.wantReason)
+			}
+		})
+	}
+}
+
 func TestClassifyResumeUnsafeTimeout(t *testing.T) {
 	cases := []struct {
 		name       string
