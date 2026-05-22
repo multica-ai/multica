@@ -1503,6 +1503,9 @@ func TestCreateIssueRejectsMalformedAttachmentIDBeforeWrite(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("CreateIssue: expected 400 for malformed attachment_ids, got %d: %s", w.Code, w.Body.String())
 	}
+	if !strings.Contains(w.Body.String(), "attachment_ids[0] is not a valid UUID") {
+		t.Fatalf("CreateIssue: expected indexed attachment_ids error, got %s", w.Body.String())
+	}
 
 	var after int
 	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&after); err != nil {
@@ -1510,6 +1513,74 @@ func TestCreateIssueRejectsMalformedAttachmentIDBeforeWrite(t *testing.T) {
 	}
 	if after != before {
 		t.Fatalf("CreateIssue: malformed attachment_ids should not create issue, count before=%d after=%d", before, after)
+	}
+}
+
+func TestCreateIssueWithLabelIDs(t *testing.T) {
+	labelW := httptest.NewRecorder()
+	labelReq := newRequest("POST", "/api/labels", map[string]any{
+		"name":  "create-with-label",
+		"color": "#10b981",
+	})
+	testHandler.CreateLabel(labelW, labelReq)
+	if labelW.Code != http.StatusCreated {
+		t.Fatalf("CreateLabel: expected 201, got %d: %s", labelW.Code, labelW.Body.String())
+	}
+	var label LabelResponse
+	json.NewDecoder(labelW.Body).Decode(&label)
+	t.Cleanup(func() {
+		w := httptest.NewRecorder()
+		req := newRequest("DELETE", "/api/labels/"+label.ID, nil)
+		req = withURLParam(req, "id", label.ID)
+		testHandler.DeleteLabel(w, req)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":     "Create issue with labels",
+		"label_ids": []string{label.ID},
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	defer func() {
+		cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+		cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+		testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+	}()
+	if created.Labels == nil || len(*created.Labels) != 1 {
+		t.Fatalf("CreateIssue: expected 1 label in response, got %+v", created.Labels)
+	}
+	if (*created.Labels)[0].ID != label.ID {
+		t.Fatalf("CreateIssue: expected label id %s, got %s", label.ID, (*created.Labels)[0].ID)
+	}
+}
+
+func TestCreateIssueRejectsUnknownLabelIDBeforeWrite(t *testing.T) {
+	var before int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&before); err != nil {
+		t.Fatalf("count issues before: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":     "Unknown label issue",
+		"label_ids": []string{"11111111-1111-1111-1111-111111111111"},
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("CreateIssue: expected 404 for unknown label_ids, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var after int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&after); err != nil {
+		t.Fatalf("count issues after: %v", err)
+	}
+	if after != before {
+		t.Fatalf("CreateIssue: unknown label_ids should not create issue, count before=%d after=%d", before, after)
 	}
 }
 

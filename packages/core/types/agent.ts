@@ -26,7 +26,6 @@ export interface RuntimeDevice {
   owner_id: string | null;
   /** Defaults to "private" when the backend predates the visibility flag. */
   visibility: RuntimeVisibility;
-  timezone: string;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;
@@ -40,6 +39,7 @@ export type AgentRuntime = RuntimeDevice;
 export type TaskFailureReason =
   | "agent_error"
   | "timeout"
+  | "codex_semantic_inactivity"
   | "runtime_offline"
   | "runtime_recovery"
   | "manual";

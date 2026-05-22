@@ -83,7 +83,13 @@ func truncateForSummary(s string, maxRunes int) string {
 	return string(rs[:maxRunes]) + "…"
 }
 
-const taskAnalyticsContextCacheMax = 4096
+const (
+	taskAnalyticsContextCacheMax = 4096
+	// claimResponseRecoveryWindow must exceed daemon client.Timeout for
+	// /tasks/claim (30s) plus /tasks/{id}/start (30s) plus scheduling slack, so
+	// an in-flight StartTask cannot be reclaimed and double-dispatched.
+	claimResponseRecoveryWindow = 90 * time.Second
+)
 
 // mentionRe matches markdown mention links like [@name](mention://agent/uuid)
 // so they can be stripped from trigger summaries — the agent name adds noise
@@ -397,7 +403,7 @@ func taskErrorType(reason string) string {
 	switch reason {
 	case "runtime_offline", "runtime_recovery":
 		return "runtime"
-	case "timeout":
+	case "timeout", "codex_semantic_inactivity":
 		return "timeout"
 	case "iteration_limit", "agent_fallback_message":
 		return "agent_output"
@@ -891,6 +897,27 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	}()
 
 	runtimeKey := util.UUIDToString(runtimeID)
+	// Check this before EmptyClaim: a lost claim response moves the task out of
+	// `queued`, so the empty-queued cache cannot represent recoverability.
+	stale, err := s.Queries.ReclaimStaleDispatchedTaskForRuntime(ctx, db.ReclaimStaleDispatchedTaskForRuntimeParams{
+		RuntimeID:         runtimeID,
+		ClaimRecoverySecs: claimResponseRecoveryWindow.Seconds(),
+	})
+	if err == nil {
+		outcome = "reclaimed_dispatched"
+		claimedFlag = true
+		slog.Info("stale dispatched task reclaimed",
+			"task_id", util.UUIDToString(stale.ID),
+			"runtime_id", runtimeKey,
+			"agent_id", util.UUIDToString(stale.AgentID),
+		)
+		return &stale, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		outcome = "error_reclaim_dispatched"
+		return nil, fmt.Errorf("reclaim stale dispatched task: %w", err)
+	}
+
 	if s.EmptyClaim.IsEmpty(ctx, runtimeKey) {
 		outcome = "empty_cache_hit"
 		return nil, nil
@@ -1200,7 +1227,9 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		}
 		task = t
 
-		if t.ChatSessionID.Valid {
+		// Keep resume-unsafe sessions on the task row for observability, but
+		// do not promote them to the chat-level resume pointer.
+		if t.ChatSessionID.Valid && !resumeUnsafeFailureReason(failureReason) {
 			// Pin the chat_session's runtime_id alongside the session_id so the
 			// next claim can apply the runtime-guard. Both fields move together:
 			// when there's no session_id to record, leave runtime_id untouched
@@ -1326,18 +1355,30 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // etc.) are intentionally excluded — those are real problems that the user
 // should see, not infrastructure flakiness.
 var retryableReasons = map[string]bool{
-	"runtime_offline":  true,
-	"runtime_recovery": true,
-	"timeout":          true,
+	"runtime_offline":           true,
+	"runtime_recovery":          true,
+	"timeout":                   true,
+	"codex_semantic_inactivity": true,
+}
+
+func resumeUnsafeFailureReason(reason string) bool {
+	switch reason {
+	// Keep in sync with GetLastTaskSession / GetLastChatTaskSession and
+	// CreateRetryTask's fresh-session CASE WHEN.
+	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "codex_semantic_inactivity":
+		return true
+	default:
+		return false
+	}
 }
 
 // MaybeRetryFailedTask spawns a fresh queued attempt for a recently-failed
 // task when the failure was infrastructure-shaped (daemon crash, runtime
 // went offline, dispatch/run timeout) and the task hasn't exhausted its
 // max_attempts budget. The child task inherits agent/runtime/issue/chat
-// links and the parent's session_id/work_dir so the agent can resume the
-// conversation when the backend supports it. Returns the new task, or nil
-// when no retry was created.
+// links and, for resume-safe failures, the parent's session_id/work_dir so
+// the agent can resume the conversation when the backend supports it. Returns
+// the new task, or nil when no retry was created.
 //
 // Autopilot tasks are NOT auto-retried here; the autopilot scheduler owns
 // its own re-run cadence and we don't want to double-fire it.

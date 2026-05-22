@@ -318,6 +318,55 @@ func TestUploadFile_RejectsForeignChatSession(t *testing.T) {
 	}
 }
 
+func TestValidateMultipartParts(t *testing.T) {
+	parts, err := validateMultipartParts(11, 5, []multipartCompletedPartRequest{
+		{PartNumber: 2, ETag: `"etag-2"`, SizeBytes: 5},
+		{PartNumber: 1, ETag: `"etag-1"`, SizeBytes: 5},
+		{PartNumber: 3, ETag: `"etag-3"`, SizeBytes: 1},
+	})
+	if err != nil {
+		t.Fatalf("validateMultipartParts returned error: %v", err)
+	}
+	if len(parts) != 3 || parts[0].PartNumber != 1 || parts[1].PartNumber != 2 || parts[2].PartNumber != 3 {
+		t.Fatalf("parts not sorted by part number: %+v", parts)
+	}
+}
+
+func TestValidateMultipartPartsRejectsWrongSize(t *testing.T) {
+	_, err := validateMultipartParts(11, 5, []multipartCompletedPartRequest{
+		{PartNumber: 1, ETag: `"etag-1"`, SizeBytes: 5},
+		{PartNumber: 2, ETag: `"etag-2"`, SizeBytes: 5},
+		{PartNumber: 3, ETag: `"etag-3"`, SizeBytes: 5},
+	})
+	if err == nil {
+		t.Fatal("expected wrong final part size to be rejected")
+	}
+}
+
+func TestUploadObjectKeyWithPrefix(t *testing.T) {
+	got := uploadObjectKeyWithPrefix("/multica/dev/", "ws-1", "user-1", "att-1", "report.pdf")
+	want := "multica/dev/workspaces/ws-1/att-1.pdf"
+	if got != want {
+		t.Fatalf("uploadObjectKeyWithPrefix() = %q, want %q", got, want)
+	}
+}
+
+func TestUploadObjectKeyWithPrefixForUserUpload(t *testing.T) {
+	got := uploadObjectKeyWithPrefix("multica/dev", "", "user-1", "att-1", "avatar.png")
+	want := "multica/dev/users/user-1/att-1.png"
+	if got != want {
+		t.Fatalf("uploadObjectKeyWithPrefix() = %q, want %q", got, want)
+	}
+}
+
+func TestWorkspaceObjectKeyPrefixWithConfiguredPrefix(t *testing.T) {
+	got := workspaceObjectKeyPrefix("/multica/dev/", "ws-1")
+	want := "multica/dev/workspaces/ws-1/"
+	if got != want {
+		t.Fatalf("workspaceObjectKeyPrefix() = %q, want %q", got, want)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // GetAttachmentContent tests (preview proxy)
 // ---------------------------------------------------------------------------
@@ -359,30 +408,30 @@ func newPreviewRequest(t *testing.T, attachmentID, workspaceID string) (*http.Re
 }
 
 func TestListAttachmentsOnlyReturnsIssueLevelAttachments(t *testing.T) {
-ctx := context.Background()
+	ctx := context.Background()
 
-var issueID string
-if err := testPool.QueryRow(ctx, `
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
 INSERT INTO issue (workspace_id, title, creator_id, creator_type)
 VALUES ($1, 'attachment list scope test', $2, 'member')
 RETURNING id
 `, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
-t.Fatalf("create issue: %v", err)
-}
-t.Cleanup(func() {
-testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
-})
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
 
-var commentID string
-if err := testPool.QueryRow(ctx, `
+	var commentID string
+	if err := testPool.QueryRow(ctx, `
 INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content)
 VALUES ($1, $2, 'member', $3, 'comment with attachment')
 RETURNING id
 `, issueID, testWorkspaceID, testUserID).Scan(&commentID); err != nil {
-t.Fatalf("create comment: %v", err)
-}
+		t.Fatalf("create comment: %v", err)
+	}
 
-if _, err := testPool.Exec(ctx, `
+	if _, err := testPool.Exec(ctx, `
 INSERT INTO attachment (
 workspace_id, issue_id, comment_id, uploader_type, uploader_id,
 filename, url, content_type, size_bytes
@@ -391,33 +440,33 @@ VALUES
 ($1, $2, NULL, 'member', $3, 'issue-only.txt', 'https://cdn.example.com/issue-only.txt', 'text/plain', 10),
 ($1, $2, $4, 'member', $3, 'comment-linked.txt', 'https://cdn.example.com/comment-linked.txt', 'text/plain', 20)
 `, testWorkspaceID, issueID, testUserID, commentID); err != nil {
-t.Fatalf("create attachments: %v", err)
-}
+		t.Fatalf("create attachments: %v", err)
+	}
 
-req := httptest.NewRequest("GET", "/api/issues/"+issueID+"/attachments", nil)
-req = withURLParam(req, "id", issueID)
-req.Header.Set("X-User-ID", testUserID)
-req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req := httptest.NewRequest("GET", "/api/issues/"+issueID+"/attachments", nil)
+	req = withURLParam(req, "id", issueID)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
 
-w := httptest.NewRecorder()
-testHandler.ListAttachments(w, req)
-if w.Code != http.StatusOK {
-t.Fatalf("ListAttachments: expected 200, got %d: %s", w.Code, w.Body.String())
-}
+	w := httptest.NewRecorder()
+	testHandler.ListAttachments(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListAttachments: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
 
-var resp []AttachmentResponse
-if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-t.Fatalf("decode response: %v; body: %s", err, w.Body.String())
-}
-if len(resp) != 1 {
-t.Fatalf("expected only issue-level attachment, got %d: %#v", len(resp), resp)
-}
-if resp[0].Filename != "issue-only.txt" {
-t.Fatalf("expected issue-only attachment, got %q", resp[0].Filename)
-}
-if resp[0].CommentID != nil {
-t.Fatalf("expected issue-level attachment comment_id to be nil, got %v", *resp[0].CommentID)
-}
+	var resp []AttachmentResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v; body: %s", err, w.Body.String())
+	}
+	if len(resp) != 1 {
+		t.Fatalf("expected only issue-level attachment, got %d: %#v", len(resp), resp)
+	}
+	if resp[0].Filename != "issue-only.txt" {
+		t.Fatalf("expected issue-only attachment, got %q", resp[0].Filename)
+	}
+	if resp[0].CommentID != nil {
+		t.Fatalf("expected issue-level attachment comment_id to be nil, got %v", *resp[0].CommentID)
+	}
 }
 
 func TestGetAttachmentContent_HappyPath_Markdown(t *testing.T) {
@@ -564,4 +613,3 @@ func TestIsTextPreviewable(t *testing.T) {
 		})
 	}
 }
-

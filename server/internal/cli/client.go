@@ -322,144 +322,116 @@ type AttachmentResponse struct {
 	CreatedAt   string `json:"created_at"`
 }
 
-// UploadFile uploads a file via multipart form to /api/upload-file.
-// It returns the attachment ID from the server response.
-func (c *APIClient) UploadFile(ctx context.Context, fileData []byte, filename string, issueID string) (string, error) {
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-
-	part, err := writer.CreateFormFile("file", filepath.Base(filename))
-	if err != nil {
-		return "", fmt.Errorf("create form file: %w", err)
-	}
-	if _, err := part.Write(fileData); err != nil {
-		return "", fmt.Errorf("write file data: %w", err)
-	}
-
-	if issueID != "" {
-		if err := writer.WriteField("issue_id", issueID); err != nil {
-			return "", fmt.Errorf("write issue_id field: %w", err)
-		}
-	}
-
-	if err := writer.Close(); err != nil {
-		return "", fmt.Errorf("close multipart writer: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/upload-file", &body)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	c.setHeaders(req)
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respData, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", fmt.Errorf("upload file returned %d: %s", resp.StatusCode, strings.TrimSpace(string(respData)))
-	}
-
-	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode upload response: %w", err)
-	}
-
-	id, _ := result["id"].(string)
-	if id == "" {
-		return "", fmt.Errorf("upload response missing attachment id")
-	}
-	return id, nil
+type directUploadInitiateResponse struct {
+	AttachmentID string            `json:"attachment_id"`
+	ObjectKey    string            `json:"object_key"`
+	UploadURL    string            `json:"upload_url"`
+	Headers      map[string]string `json:"headers"`
+	UploadToken  string            `json:"upload_token"`
+	ExpiresAt    string            `json:"expires_at"`
 }
 
-// UploadFileToIssue uploads a file and associates it with an issue.
-// It returns the attachment ID and CDN URL from the server response.
-// Unlike UploadFile, it returns the URL so callers can rewrite description
-// references that point to the old attachment.
-func (c *APIClient) UploadFileToIssue(ctx context.Context, fileData []byte, filename string, issueID string) (string, string, error) {
+type multipartUploadInitiateResponse struct {
+	SessionID     string            `json:"session_id"`
+	AttachmentID  string            `json:"attachment_id"`
+	ObjectKey     string            `json:"object_key"`
+	UploadID      string            `json:"upload_id"`
+	Headers       map[string]string `json:"headers"`
+	PartSizeBytes int64             `json:"part_size_bytes"`
+	PartCount     int32             `json:"part_count"`
+	ExpiresAt     string            `json:"expires_at"`
+}
+
+type multipartUploadSignPartsResponse struct {
+	Parts []struct {
+		PartNumber int32             `json:"part_number"`
+		UploadURL  string            `json:"upload_url"`
+		Headers    map[string]string `json:"headers"`
+	} `json:"parts"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+type multipartCompletedPart struct {
+	PartNumber int32  `json:"part_number"`
+	ETag       string `json:"etag"`
+	SizeBytes  int64  `json:"size_bytes"`
+}
+
+const multipartUploadThresholdBytes = 64 << 20
+const multipartUploadPartSizeBytes = 16 << 20
+const multipartUploadMaxRetries = 3
+
+func (c *APIClient) uploadFileMultipart(ctx context.Context, fileData []byte, filename string, issueID string) (AttachmentResponse, error) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
 	part, err := writer.CreateFormFile("file", filepath.Base(filename))
 	if err != nil {
-		return "", "", fmt.Errorf("create form file: %w", err)
+		return AttachmentResponse{}, fmt.Errorf("create form file: %w", err)
 	}
 	if _, err := part.Write(fileData); err != nil {
-		return "", "", fmt.Errorf("write file data: %w", err)
+		return AttachmentResponse{}, fmt.Errorf("write file data: %w", err)
 	}
+
 	if issueID != "" {
 		if err := writer.WriteField("issue_id", issueID); err != nil {
-			return "", "", fmt.Errorf("write issue_id field: %w", err)
+			return AttachmentResponse{}, fmt.Errorf("write issue_id field: %w", err)
 		}
 	}
+
 	if err := writer.Close(); err != nil {
-		return "", "", fmt.Errorf("close multipart writer: %w", err)
+		return AttachmentResponse{}, fmt.Errorf("close multipart writer: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/upload-file", &body)
 	if err != nil {
-		return "", "", err
+		return AttachmentResponse{}, err
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	c.setHeaders(req)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return "", "", err
+		return AttachmentResponse{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
 		respData, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", "", fmt.Errorf("upload file returned %d: %s", resp.StatusCode, strings.TrimSpace(string(respData)))
+		return AttachmentResponse{}, fmt.Errorf("upload file returned %d: %s", resp.StatusCode, strings.TrimSpace(string(respData)))
 	}
 
 	var result AttachmentResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", "", fmt.Errorf("decode upload response: %w", err)
+		return AttachmentResponse{}, fmt.Errorf("decode upload response: %w", err)
 	}
-	if result.URL == "" {
-		return "", "", fmt.Errorf("upload response missing attachment url")
-	}
-	if result.ID == "" {
-		return "", "", fmt.Errorf("upload response missing attachment id")
-	}
-	return result.ID, result.URL, nil
+	return result, nil
 }
 
-// UploadFileWithURL uploads a file via multipart form to /api/upload-file
-// without associating it with an issue or comment. It decodes the full
-// AttachmentResponse and returns the attachment ID and URL.
-func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, filename string) (string, string, error) {
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-
-	part, err := writer.CreateFormFile("file", filepath.Base(filename))
+func (c *APIClient) uploadFileDirect(ctx context.Context, fileData []byte, filename string, issueID string) (AttachmentResponse, error) {
+	if issueID == "" {
+		return AttachmentResponse{}, &HTTPError{Method: http.MethodPost, Path: "/api/attachments/upload/initiate", StatusCode: http.StatusNotImplemented, Body: "direct upload requires workspace attachment context"}
+	}
+	var initiate directUploadInitiateResponse
+	err := c.PostJSON(ctx, "/api/attachments/upload/initiate", map[string]any{
+		"filename":        filepath.Base(filename),
+		"content_type":    "application/octet-stream",
+		"size_bytes":      int64(len(fileData)),
+		"issue_id":        issueID,
+		"comment_id":      nil,
+		"chat_session_id": nil,
+	}, &initiate)
 	if err != nil {
-		return "", "", fmt.Errorf("create form file: %w", err)
-	}
-	if _, err := part.Write(fileData); err != nil {
-		return "", "", fmt.Errorf("write file data: %w", err)
+		return AttachmentResponse{}, err
 	}
 
-	if err := writer.Close(); err != nil {
-		return "", "", fmt.Errorf("close multipart writer: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/upload-file", &body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, initiate.UploadURL, bytes.NewReader(fileData))
 	if err != nil {
-		return "", "", err
+		return AttachmentResponse{}, err
 	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	c.setHeaders(req)
-
-	// Use a client that respects the context deadline for slow uploads
-	// (e.g. avatar uploads with 5MB files). The default 15s HTTP client
-	// timeout shadows any longer context deadline.
+	for key, value := range initiate.Headers {
+		req.Header.Set(key, value)
+	}
 	httpClient := c.HTTPClient
 	if deadline, ok := ctx.Deadline(); ok {
 		remaining := time.Until(deadline)
@@ -469,28 +441,191 @@ func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, file
 			httpClient = &clientCopy
 		}
 	}
-
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return "", "", err
+		return AttachmentResponse{}, err
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode >= 400 {
 		respData, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", "", fmt.Errorf("upload file returned %d: %s", resp.StatusCode, strings.TrimSpace(string(respData)))
+		return AttachmentResponse{}, fmt.Errorf("direct upload PUT returned %d: %s", resp.StatusCode, strings.TrimSpace(string(respData)))
 	}
 
 	var result AttachmentResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", "", fmt.Errorf("decode upload response: %w", err)
+	if err := c.PostJSON(ctx, "/api/attachments/upload/complete", map[string]string{
+		"upload_token": initiate.UploadToken,
+	}, &result); err != nil {
+		return AttachmentResponse{}, err
+	}
+	return result, nil
+}
+
+func (c *APIClient) abortMultipartUpload(ctx context.Context, sessionID string) {
+	_ = c.PostJSON(ctx, "/api/attachments/upload/multipart/abort", map[string]string{
+		"session_id": sessionID,
+	}, nil)
+}
+
+func (c *APIClient) uploadMultipartPart(ctx context.Context, uploadURL string, headers map[string]string, data []byte) (string, error) {
+	var lastErr error
+	for attempt := 1; attempt <= multipartUploadMaxRetries; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL, bytes.NewReader(data))
+		if err != nil {
+			return "", err
+		}
+		for key, value := range headers {
+			req.Header.Set(key, value)
+		}
+		httpClient := c.HTTPClient
+		if deadline, ok := ctx.Deadline(); ok {
+			remaining := time.Until(deadline)
+			if remaining > httpClient.Timeout {
+				clientCopy := *httpClient
+				clientCopy.Timeout = remaining
+				httpClient = &clientCopy
+			}
+		}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			lastErr = fmt.Errorf("multipart upload part returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+			continue
+		}
+		etag := resp.Header.Get("ETag")
+		if etag == "" {
+			etag = resp.Header.Get("etag")
+		}
+		if etag == "" {
+			lastErr = fmt.Errorf("multipart upload part missing ETag")
+			continue
+		}
+		return etag, nil
+	}
+	return "", lastErr
+}
+
+func (c *APIClient) uploadFileMultipartDirect(ctx context.Context, fileData []byte, filename string, issueID string) (AttachmentResponse, error) {
+	if issueID == "" {
+		return AttachmentResponse{}, &HTTPError{Method: http.MethodPost, Path: "/api/attachments/upload/multipart/initiate", StatusCode: http.StatusNotImplemented, Body: "multipart upload requires workspace attachment context"}
+	}
+	var initiate multipartUploadInitiateResponse
+	err := c.PostJSON(ctx, "/api/attachments/upload/multipart/initiate", map[string]any{
+		"filename":        filepath.Base(filename),
+		"content_type":    "application/octet-stream",
+		"size_bytes":      int64(len(fileData)),
+		"part_size_bytes": int64(multipartUploadPartSizeBytes),
+		"issue_id":        issueID,
+		"comment_id":      nil,
+		"chat_session_id": nil,
+	}, &initiate)
+	if err != nil {
+		return AttachmentResponse{}, err
+	}
+
+	completed := make([]multipartCompletedPart, 0, initiate.PartCount)
+	for partNumber := int32(1); partNumber <= initiate.PartCount; partNumber++ {
+		var signed multipartUploadSignPartsResponse
+		if err := c.PostJSON(ctx, "/api/attachments/upload/multipart/sign-parts", map[string]any{
+			"session_id":   initiate.SessionID,
+			"part_numbers": []int32{partNumber},
+		}, &signed); err != nil {
+			c.abortMultipartUpload(ctx, initiate.SessionID)
+			return AttachmentResponse{}, err
+		}
+		if len(signed.Parts) == 0 {
+			c.abortMultipartUpload(ctx, initiate.SessionID)
+			return AttachmentResponse{}, fmt.Errorf("multipart upload signing returned no part URL")
+		}
+		start := int64(partNumber-1) * initiate.PartSizeBytes
+		end := start + initiate.PartSizeBytes
+		if end > int64(len(fileData)) {
+			end = int64(len(fileData))
+		}
+		partData := fileData[start:end]
+		etag, err := c.uploadMultipartPart(ctx, signed.Parts[0].UploadURL, signed.Parts[0].Headers, partData)
+		if err != nil {
+			c.abortMultipartUpload(ctx, initiate.SessionID)
+			return AttachmentResponse{}, err
+		}
+		completed = append(completed, multipartCompletedPart{
+			PartNumber: partNumber,
+			ETag:       etag,
+			SizeBytes:  int64(len(partData)),
+		})
+	}
+
+	var result AttachmentResponse
+	if err := c.PostJSON(ctx, "/api/attachments/upload/multipart/complete", map[string]any{
+		"session_id": initiate.SessionID,
+		"parts":      completed,
+	}, &result); err != nil {
+		c.abortMultipartUpload(ctx, initiate.SessionID)
+		return AttachmentResponse{}, err
+	}
+	return result, nil
+}
+
+func (c *APIClient) uploadFile(ctx context.Context, fileData []byte, filename string, issueID string, requireID bool) (AttachmentResponse, error) {
+	var result AttachmentResponse
+	var err error
+	if len(fileData) >= multipartUploadThresholdBytes {
+		result, err = c.uploadFileMultipartDirect(ctx, fileData, filename, issueID)
+	} else {
+		result, err = c.uploadFileDirect(ctx, fileData, filename, issueID)
+	}
+	if err != nil {
+		if httpErr, ok := err.(*HTTPError); !ok || httpErr.StatusCode != http.StatusNotImplemented {
+			return AttachmentResponse{}, err
+		}
+		result, err = c.uploadFileMultipart(ctx, fileData, filename, issueID)
+		if err != nil {
+			return AttachmentResponse{}, err
+		}
 	}
 	if result.URL == "" {
-		return "", "", fmt.Errorf("upload response missing attachment url")
+		return AttachmentResponse{}, fmt.Errorf("upload response missing attachment url")
 	}
-	// Allow empty ID: the server returns id="" in the fallback path where
-	// S3 upload succeeded but the attachment DB record failed. The file
-	// is still usable via its URL.
+	if requireID && result.ID == "" {
+		return AttachmentResponse{}, fmt.Errorf("upload response missing attachment id")
+	}
+	return result, nil
+}
+
+// UploadFile uploads a file and returns the attachment ID from the server response.
+func (c *APIClient) UploadFile(ctx context.Context, fileData []byte, filename string, issueID string) (string, error) {
+	result, err := c.uploadFile(ctx, fileData, filename, issueID, true)
+	if err != nil {
+		return "", err
+	}
+	if result.ID == "" {
+		return "", fmt.Errorf("upload response missing attachment id")
+	}
+	return result.ID, nil
+}
+
+// UploadFileToIssue uploads a file and associates it with an issue.
+// It returns the attachment ID and CDN URL from the server response.
+// Unlike UploadFile, it returns the URL so callers can rewrite description
+// references that point to the old attachment.
+func (c *APIClient) UploadFileToIssue(ctx context.Context, fileData []byte, filename string, issueID string) (string, string, error) {
+	result, err := c.uploadFile(ctx, fileData, filename, issueID, true)
+	if err != nil {
+		return "", "", err
+	}
+	return result.ID, result.URL, nil
+}
+
+// UploadFileWithURL uploads a file and returns the attachment ID and URL.
+func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, filename string) (string, string, error) {
+	result, err := c.uploadFile(ctx, fileData, filename, "", false)
+	if err != nil {
+		return "", "", err
+	}
 	return result.ID, result.URL, nil
 }
 

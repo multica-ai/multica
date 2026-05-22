@@ -24,9 +24,11 @@ const mockCreateIssue = vi.hoisted(() => vi.fn());
 const mockSetDraft = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
+const mockCreateLabel = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
+const mockUploadWithToast = vi.hoisted(() => vi.fn());
 const mockProjects = vi.hoisted(() => ({
   list: [{ id: "proj-1", title: "Default Project" }],
 }));
@@ -86,6 +88,18 @@ vi.mock("@multica/core/projects/queries", () => ({
   }),
 }));
 
+vi.mock("@multica/core/labels", () => ({
+  labelListOptions: (wsId: string) => ({
+    queryKey: ["labels", wsId],
+    queryFn: () =>
+      Promise.resolve([
+        { id: "label-1", name: "bug", color: "#ef4444" },
+        { id: "label-2", name: "feature", color: "#22c55e" },
+      ]),
+  }),
+  useCreateLabel: () => ({ mutate: mockCreateLabel, isPending: false }),
+}));
+
 vi.mock("@multica/core/issues/stores/draft-store", () => ({
   useIssueDraftStore: Object.assign(
     (selector?: (state: typeof mockDraftStore) => unknown) =>
@@ -105,7 +119,7 @@ vi.mock("@multica/core/issues/mutations", () => ({
 }));
 
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
-  useFileUpload: () => ({ uploadWithToast: vi.fn() }),
+  useFileUpload: () => ({ uploadWithToast: mockUploadWithToast }),
 }));
 
 // Hoisted ApiError class so both the vi.mock factory and the tests below
@@ -149,7 +163,7 @@ vi.mock("@multica/core/api", async () => {
 });
 
 vi.mock("../editor", () => {
-  const ContentEditor = forwardRef(({ defaultValue, onUpdate, placeholder }: any, ref: any) => {
+  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onUploadFile, placeholder }: any, ref: any) => {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
     useImperativeHandle(ref, () => ({
@@ -158,19 +172,26 @@ vi.mock("../editor", () => {
         valueRef.current = "";
         setValue("");
       },
-      uploadFile: vi.fn(),
+      uploadFile: (file: File) => onUploadFile?.(file),
       uploadFiles: vi.fn(),
     }));
     return (
-      <textarea
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => {
-          valueRef.current = e.target.value;
-          setValue(e.target.value);
-          onUpdate?.(e.target.value);
-        }}
-      />
+      <>
+        <textarea
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => {
+            valueRef.current = e.target.value;
+            setValue(e.target.value);
+            onUpdate?.(e.target.value);
+          }}
+        />
+        {onUploadFile && (
+          <button type="button" onClick={() => onUploadFile(new File(["test"], "editor-test.txt"))}>
+            Editor upload file
+          </button>
+        )}
+      </>
     );
   });
   ContentEditor.displayName = "ContentEditor";
@@ -241,6 +262,7 @@ vi.mock("@multica/ui/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
   TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
 vi.mock("@multica/ui/components/ui/button", () => ({
@@ -329,6 +351,11 @@ describe("CreateIssueModal", () => {
     mockSetKeepOpen.mockImplementation((v: boolean) => {
       mockQuickCreateStore.keepOpen = v;
     });
+    mockCreateLabel.mockImplementation(
+      (_data: { name: string; color: string }, opts?: { onSuccess?: (label: { id: string }) => void }) => {
+        opts?.onSuccess?.({ id: "label-new" });
+      },
+    );
     // Reset the shared draft mock so per-test assignee seeding (squad / agent)
     // doesn't leak into the next test in the suite.
     mockDraftStore.draft.assigneeType = undefined;
@@ -339,6 +366,7 @@ describe("CreateIssueModal", () => {
       title: "Ship create issue regression coverage",
       status: "todo",
     });
+    mockUploadWithToast.mockResolvedValue(null);
   });
 
   it("shows success feedback with a direct path to the new issue", async () => {
@@ -364,6 +392,8 @@ describe("CreateIssueModal", () => {
         due_date: undefined,
         attachment_ids: undefined,
         parent_issue_id: undefined,
+        project_id: "proj-1",
+        label_ids: undefined,
         project_id: "proj-1",
       });
     });
@@ -412,6 +442,8 @@ describe("CreateIssueModal", () => {
         due_date: undefined,
         attachment_ids: undefined,
         parent_issue_id: undefined,
+        project_id: "proj-1",
+        label_ids: undefined,
         project_id: "proj-1",
       });
     });
@@ -476,6 +508,72 @@ describe("CreateIssueModal", () => {
 
     expect(mockCreateIssue).not.toHaveBeenCalled();
     expect(mockToastError).toHaveBeenCalledWith("Select a project before creating an issue.");
+  });
+
+  it("rejects an upload result with an empty attachment id before submit", async () => {
+    const user = userEvent.setup();
+    mockUploadWithToast.mockResolvedValue({
+      id: "",
+      url: "https://cdn.example.test/orphan.txt",
+      download_url: "https://cdn.example.test/orphan.txt",
+      filename: "orphan.txt",
+      link: "https://cdn.example.test/orphan.txt",
+    });
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Editor upload file" }));
+    await user.type(screen.getByPlaceholderText("Issue title"), "Do not submit invalid attachment");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    expect(mockUploadWithToast).toHaveBeenCalledTimes(1);
+    expect(mockToastError).toHaveBeenCalledWith("Attachment upload failed. Try again.");
+    expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({
+      attachment_ids: undefined,
+    }));
+  });
+
+  it("sends selected existing labels in create request", async () => {
+    const user = userEvent.setup();
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Issue with existing label");
+    await user.click(screen.getByLabelText("Select labels"));
+    await user.click(screen.getByRole("button", { name: /bug/i }));
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Issue with existing label",
+          label_ids: ["label-1"],
+        }),
+      );
+    });
+  });
+
+  it("supports creating a new label inline and attaches it on create", async () => {
+    const user = userEvent.setup();
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Issue with new label");
+    await user.click(screen.getByLabelText("Select labels"));
+    await user.type(screen.getByPlaceholderText("Search or type a new label"), "critical");
+    await user.click(screen.getByRole("button", { name: /Create label "critical"/i }));
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "critical" }),
+        expect.any(Object),
+      );
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Issue with new label",
+          label_ids: ["label-new"],
+        }),
+      );
+    });
   });
 
   // Manual → agent must forward the picked project so the new modal pins to

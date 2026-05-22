@@ -58,6 +58,78 @@ FROM descendants
 ORDER BY created_at ASC, id ASC
 LIMIT @row_limit;
 
+-- name: ListThreadCommentsForIssuePaged :many
+-- Same root-walk + descendants expansion as ListThreadCommentsForIssue, but
+-- returns root + only the @reply_limit most recent replies (per the
+-- (created_at, id) composite key). When @has_cursor=TRUE only replies with
+-- (created_at, id) < (@before_at, @before_id) are eligible — that is the
+-- cursor for scrolling *within* a thread.
+--
+-- Root is unconditional: it is included regardless of @reply_limit (even 0)
+-- and regardless of the cursor. A reader landing on a long thread needs the
+-- root for the "what is this thread about" context, even if every reply has
+-- been paginated past.
+--
+-- Reply selection happens DESC (newest replies first) so the cursor walks
+-- toward older replies; the outer SELECT then re-sorts the combined output
+-- ASC so the body stays chronological (oldest → newest), matching every
+-- other comment list path.
+WITH RECURSIVE root_of AS (
+    SELECT c.id, c.parent_id
+    FROM comment c
+    WHERE c.id = @anchor_id AND c.issue_id = @issue_id AND c.workspace_id = @workspace_id
+    UNION ALL
+    SELECT p.id, p.parent_id
+    FROM comment p
+    JOIN root_of r ON p.id = r.parent_id
+),
+thread_root AS (
+    SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1
+),
+descendants AS (
+    SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
+           c.created_at, c.updated_at, c.parent_id, c.workspace_id,
+           c.resolved_at, c.resolved_by_type, c.resolved_by_id
+    FROM comment c
+    JOIN thread_root tr ON c.id = tr.id
+    UNION
+    SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
+           c.created_at, c.updated_at, c.parent_id, c.workspace_id,
+           c.resolved_at, c.resolved_by_type, c.resolved_by_id
+    FROM comment c
+    JOIN descendants d ON c.parent_id = d.id
+    WHERE c.issue_id = @issue_id AND c.workspace_id = @workspace_id
+),
+reply_page AS (
+    SELECT d.id, d.issue_id, d.author_type, d.author_id, d.content, d.type,
+           d.created_at, d.updated_at, d.parent_id, d.workspace_id,
+           d.resolved_at, d.resolved_by_type, d.resolved_by_id
+    FROM descendants d
+    WHERE d.id NOT IN (SELECT id FROM thread_root)
+      AND (
+          @has_cursor::boolean = FALSE
+          OR (d.created_at, d.id) < (@before_at::timestamptz, @before_id::uuid)
+      )
+    ORDER BY d.created_at DESC, d.id DESC
+    LIMIT @reply_limit
+)
+SELECT id, issue_id, author_type, author_id, content, type,
+       created_at, updated_at, parent_id, workspace_id,
+       resolved_at, resolved_by_type, resolved_by_id
+FROM (
+    SELECT d.id, d.issue_id, d.author_type, d.author_id, d.content, d.type,
+           d.created_at, d.updated_at, d.parent_id, d.workspace_id,
+           d.resolved_at, d.resolved_by_type, d.resolved_by_id
+    FROM descendants d
+    JOIN thread_root tr ON d.id = tr.id
+    UNION ALL
+    SELECT id, issue_id, author_type, author_id, content, type,
+           created_at, updated_at, parent_id, workspace_id,
+           resolved_at, resolved_by_type, resolved_by_id
+    FROM reply_page
+) combined
+ORDER BY created_at ASC, id ASC;
+
 -- name: ListRecentThreadCommentsForIssue :many
 -- Returns the N most recently active threads (root + every descendant) rather
 -- than the N most recent rows. A thread's "last activity" is MAX(created_at)

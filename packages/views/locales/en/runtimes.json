@@ -101,7 +101,6 @@
     "diagnostics_title": "Diagnostics",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "Visibility",
-    "diagnostics_timezone": "Timezone",
     "visibility_label": {
       "private": "Private",
       "public": "Public"
@@ -112,10 +111,6 @@
     },
     "visibility_toast_updated": "Visibility set to {{visibility}}",
     "visibility_toast_failed": "Failed to update visibility",
-    "timezone_browser_suffix": " (browser)",
-    "timezone_hint": "Token-usage charts on this runtime bucket dates by this timezone.",
-    "timezone_toast_updated": "Timezone updated to {{tz}}",
-    "timezone_toast_failed": "Failed to update timezone",
     "delete_dialog": {
       "title": "Delete Runtime",
       "description": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
@@ -159,6 +154,46 @@
     "success_description": "Your computer is online and ready. Create an agent and it can start picking up tasks here.",
     "view_runtime": "View runtime",
     "create_agent": "Create an agent"
+  },
+  "cloud_runtime": {
+    "action": "Cloud Runtime",
+    "title": "Cloud Runtime",
+    "description": "Launch a managed cloud node and watch its Fleet status.",
+    "create_title": "New node",
+    "create_hint": "Choose a name, instance type, and disk size. Fleet applies the rest.",
+    "nodes_title": "Fleet nodes",
+    "refresh": "Refresh",
+    "nodes_empty": "No cloud nodes",
+    "nodes_failed": "Cloud Runtime unavailable",
+    "nodes_failed_hint": "Fleet did not return a node list.",
+    "node_fallback_name": "Cloud node",
+    "create": "Create node",
+    "creating": "Creating...",
+    "cancel": "Cancel",
+    "toast_created": "Cloud Runtime node created",
+    "toast_create_failed": "Failed to create Cloud Runtime node",
+    "delete": "Delete node",
+    "delete_confirm": "Are you sure you want to delete this cloud node? This action cannot be undone.",
+    "toast_deleted": "Cloud node deleted",
+    "toast_delete_failed": "Failed to delete cloud node",
+    "fields": {
+      "name": "Name",
+      "instance_type": "Instance type",
+      "region": "Region",
+      "disk_size": "Disk size GiB",
+      "image_id": "AMI ID",
+      "subnet_id": "Subnet ID",
+      "key_name": "Key pair",
+      "bootstrap_pat": "Bootstrap PAT"
+    },
+    "placeholders": {
+      "name": "cloud-dev-01",
+      "key_name": "dev-key"
+    },
+    "validation": {
+      "instance_type_required": "Instance type is required",
+      "disk_size_invalid": "Disk size must be a positive integer"
+    }
   },
   "update": {
     "cli_version_label": "CLI Version:",

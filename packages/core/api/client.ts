@@ -150,6 +150,11 @@ import type {
   SquadMemberStatusListResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
+import type {
+  CloudRuntimeNode,
+  CreateCloudRuntimeNodeRequest,
+  ListCloudRuntimeNodesParams,
+} from "../runtimes/cloud-runtime";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
@@ -160,6 +165,8 @@ import {
   AttachmentResponseSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
+  CloudRuntimeNodeListSchema,
+  CloudRuntimeNodeSchema,
   CreateAgentFromTemplateResponseSchema,
   DashboardAgentRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
@@ -174,6 +181,8 @@ import {
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_ATTACHMENT,
+  EMPTY_CLOUD_RUNTIME_NODE,
+  EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
@@ -187,6 +196,10 @@ import {
   ListWebhookDeliveriesResponseSchema,
   OnboardingNoRuntimeBootstrapResponseSchema,
   OnboardingRuntimeBootstrapResponseSchema,
+  RuntimeHourlyActivityListSchema,
+  RuntimeUsageByAgentListSchema,
+  RuntimeUsageByHourListSchema,
+  RuntimeUsageListSchema,
   SquadMemberStatusListResponseSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
@@ -218,6 +231,40 @@ export interface LoginResponse {
   token: string;
   user: User;
 }
+
+interface DirectUploadInitiateResponse {
+  attachment_id: string;
+  object_key: string;
+  upload_url: string;
+  headers?: Record<string, string>;
+  upload_token: string;
+  expires_at: string;
+}
+
+interface MultipartUploadInitiateResponse {
+  session_id: string;
+  attachment_id: string;
+  object_key: string;
+  upload_id: string;
+  headers?: Record<string, string>;
+  part_size_bytes: number;
+  part_count: number;
+  expires_at: string;
+}
+
+interface MultipartUploadSignPartsResponse {
+  parts: Array<{
+    part_number: number;
+    upload_url: string;
+    headers?: Record<string, string>;
+  }>;
+  expires_at: string;
+}
+
+const MULTIPART_UPLOAD_THRESHOLD_BYTES = 64 * 1024 * 1024;
+const MULTIPART_UPLOAD_PART_SIZE_BYTES = 16 * 1024 * 1024;
+const MULTIPART_UPLOAD_CONCURRENCY = 3;
+const MULTIPART_UPLOAD_MAX_RETRIES = 3;
 
 export interface OnboardingRuntimeBootstrapResponse {
   workspace_id: string;
@@ -466,9 +513,12 @@ export class ApiClient {
     completion_path?: OnboardingCompletionPath;
     workspace_id?: string;
   }): Promise<User> {
-    return this.fetch("/api/me/onboarding/complete", {
+    const raw = await this.fetch<unknown>("/api/me/onboarding/complete", {
       method: "POST",
       body: payload ? JSON.stringify(payload) : undefined,
+    });
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "POST /api/me/onboarding/complete",
     });
   }
 
@@ -513,18 +563,24 @@ export class ApiClient {
     email: string;
     reason?: string;
   }): Promise<User> {
-    return this.fetch("/api/me/onboarding/cloud-waitlist", {
+    const raw = await this.fetch<unknown>("/api/me/onboarding/cloud-waitlist", {
       method: "POST",
       body: JSON.stringify(payload),
+    });
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "POST /api/me/onboarding/cloud-waitlist",
     });
   }
 
   async patchOnboarding(payload: {
     questionnaire?: Record<string, unknown>;
   }): Promise<User> {
-    return this.fetch("/api/me/onboarding", {
+    const raw = await this.fetch<unknown>("/api/me/onboarding", {
       method: "PATCH",
       body: JSON.stringify(payload),
+    });
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "PATCH /api/me/onboarding",
     });
   }
 
@@ -685,6 +741,9 @@ export class ApiClient {
     if (params?.include_no_project) search.set("include_no_project", "true");
     if (params?.label_ids?.length) search.set("label_ids", params.label_ids.join(","));
     if (params?.involves_user_id) search.set("involves_user_id", params.involves_user_id);
+    if (params?.metadata && Object.keys(params.metadata).length > 0) {
+      search.set("metadata", JSON.stringify(params.metadata));
+    }
     if (params?.open_only) search.set("open_only", "true");
     if (params?.scheduled) search.set("scheduled", "true");
     const path = `/api/issues?${search}`;
@@ -707,6 +766,9 @@ export class ApiClient {
     if (params.creator_id) search.set("creator_id", params.creator_id);
     if (params.project_id) search.set("project_id", params.project_id);
     if (params.involves_user_id) search.set("involves_user_id", params.involves_user_id);
+    if (params.metadata && Object.keys(params.metadata).length > 0) {
+      search.set("metadata", JSON.stringify(params.metadata));
+    }
     if (params.assignee_filters?.length) {
       search.set("assignee_filters", params.assignee_filters.map((f) => `${f.type}:${f.id}`).join(","));
     }
@@ -967,11 +1029,13 @@ export class ApiClient {
     workspace_id?: string;
     include_archived?: boolean;
     owner?: "me";
+    slim?: boolean;
   }): Promise<Agent[]> {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.include_archived) search.set("include_archived", "true");
     if (params?.owner === "me") search.set("owner", "me");
+    if (params?.slim) search.set("slim", "true");
     return this.fetch(`/api/agents?${search}`);
   }
 
@@ -1082,13 +1146,56 @@ export class ApiClient {
     return this.fetch(`/api/runtimes?${search}`);
   }
 
+  async listCloudRuntimeNodes(
+    params?: ListCloudRuntimeNodesParams,
+  ): Promise<CloudRuntimeNode[]> {
+    const search = new URLSearchParams();
+    if (params?.limit !== undefined) search.set("limit", String(params.limit));
+    if (params?.offset !== undefined) search.set("offset", String(params.offset));
+    const query = search.toString();
+    const raw = await this.fetch<unknown>(
+      `/api/cloud-runtime/nodes${query ? `?${query}` : ""}`,
+    );
+    return parseWithFallback(
+      raw,
+      CloudRuntimeNodeListSchema,
+      EMPTY_CLOUD_RUNTIME_NODE_LIST,
+      { endpoint: "GET /api/cloud-runtime/nodes" },
+    );
+  }
+
+  async createCloudRuntimeNode(
+    data: CreateCloudRuntimeNodeRequest,
+  ): Promise<CloudRuntimeNode> {
+    const res = await this.fetchRaw("/api/cloud-runtime/nodes", {
+      method: "POST",
+      body: JSON.stringify(data),
+      extraHeaders: { "Content-Type": "application/json" },
+    });
+    const raw = await res.json() as unknown;
+    return parseWithFallback(
+      raw,
+      CloudRuntimeNodeSchema,
+      EMPTY_CLOUD_RUNTIME_NODE,
+      { endpoint: "POST /api/cloud-runtime/nodes" },
+    );
+  }
+
+  async deleteCloudRuntimeNode(nodeId: string): Promise<void> {
+    await this.fetchRaw("/api/cloud-runtime/nodes", {
+      method: "DELETE",
+      body: JSON.stringify({ id: nodeId }),
+      extraHeaders: { "Content-Type": "application/json" },
+    });
+  }
+
   async deleteRuntime(runtimeId: string): Promise<void> {
     await this.fetch(`/api/runtimes/${runtimeId}`, { method: "DELETE" });
   }
 
   async updateRuntime(
     runtimeId: string,
-    patch: { timezone?: string; visibility?: "private" | "public" },
+    patch: { visibility?: "private" | "public" },
   ): Promise<AgentRuntime> {
     return this.fetch(`/api/runtimes/${runtimeId}`, {
       method: "PATCH",
@@ -1096,14 +1203,41 @@ export class ApiClient {
     });
   }
 
-  async getRuntimeUsage(runtimeId: string, params?: { days?: number }): Promise<RuntimeUsage[]> {
+  async getRuntimeUsage(
+    runtimeId: string,
+    params?: { days?: number; tz?: string },
+  ): Promise<RuntimeUsage[]> {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));
-    return this.fetch(`/api/runtimes/${runtimeId}/usage?${search}`);
+    // `tz` drives the calendar-day boundary for the trend chart (Viewing
+    // layer). Caller-supplied; the backend falls back to user.timezone /
+    // UTC if omitted.
+    if (params?.tz) search.set("tz", params.tz);
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/usage?${search}`,
+    );
+    return parseWithFallback<RuntimeUsage[]>(raw, RuntimeUsageListSchema, [], {
+      endpoint: "GET /api/runtimes/:id/usage",
+    });
   }
 
-  async getRuntimeTaskActivity(runtimeId: string): Promise<RuntimeHourlyActivity[]> {
-    return this.fetch(`/api/runtimes/${runtimeId}/activity`);
+  async getRuntimeTaskActivity(
+    runtimeId: string,
+    params?: { tz?: string },
+  ): Promise<RuntimeHourlyActivity[]> {
+    // Hour-of-day heatmap follows the viewer's tz, like the other reports on
+    // this page. Pass the viewer's IANA zone so the server buckets correctly.
+    const search = new URLSearchParams();
+    if (params?.tz) search.set("tz", params.tz);
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/activity?${search}`,
+    );
+    return parseWithFallback<RuntimeHourlyActivity[]>(
+      raw,
+      RuntimeHourlyActivityListSchema,
+      [],
+      { endpoint: "GET /api/runtimes/:id/activity" },
+    );
   }
 
   async getLocalTaskTrace(
@@ -1171,20 +1305,38 @@ export class ApiClient {
 
   async getRuntimeUsageByAgent(
     runtimeId: string,
-    params?: { days?: number },
+    params?: { days?: number; tz?: string },
   ): Promise<RuntimeUsageByAgent[]> {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));
-    return this.fetch(`/api/runtimes/${runtimeId}/usage/by-agent?${search}`);
+    if (params?.tz) search.set("tz", params.tz);
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/usage/by-agent?${search}`,
+    );
+    return parseWithFallback<RuntimeUsageByAgent[]>(
+      raw,
+      RuntimeUsageByAgentListSchema,
+      [],
+      { endpoint: "GET /api/runtimes/:id/usage/by-agent" },
+    );
   }
 
   async getRuntimeUsageByHour(
     runtimeId: string,
-    params?: { days?: number },
+    params?: { days?: number; tz?: string },
   ): Promise<RuntimeUsageByHour[]> {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));
-    return this.fetch(`/api/runtimes/${runtimeId}/usage/by-hour?${search}`);
+    if (params?.tz) search.set("tz", params.tz);
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/usage/by-hour?${search}`,
+    );
+    return parseWithFallback<RuntimeUsageByHour[]>(
+      raw,
+      RuntimeUsageByHourListSchema,
+      [],
+      { endpoint: "GET /api/runtimes/:id/usage/by-hour" },
+    );
   }
 
   async pingRuntime(runtimeId: string): Promise<RuntimePing> {
@@ -1207,11 +1359,12 @@ export class ApiClient {
   // ---------------------------------------------------------------------------
 
   async getDashboardUsageDaily(
-    params: { days?: number; project_id?: string | null },
+    params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardUsageDaily[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
+    if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/usage/daily?${search}`);
     return parseWithFallback<DashboardUsageDaily[]>(
       raw,
@@ -1222,11 +1375,12 @@ export class ApiClient {
   }
 
   async getDashboardUsageByAgent(
-    params: { days?: number; project_id?: string | null },
+    params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardUsageByAgent[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
+    if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/usage/by-agent?${search}`);
     return parseWithFallback<DashboardUsageByAgent[]>(
       raw,
@@ -1297,11 +1451,14 @@ export class ApiClient {
   }
 
   async getDashboardAgentRunTime(
-    params: { days?: number; project_id?: string | null },
+    params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardAgentRunTime[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
+    // `tz` aligns the "last N days" cutoff with the viewer's calendar,
+    // matching the per-agent token card.
+    if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/agent-runtime?${search}`);
     return parseWithFallback<DashboardAgentRunTime[]>(
       raw,
@@ -1312,11 +1469,14 @@ export class ApiClient {
   }
 
   async getDashboardRunTimeDaily(
-    params: { days?: number; project_id?: string | null },
+    params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardRunTimeDaily[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
+    // `tz` cuts the day buckets in the viewer's calendar so Time / Tasks
+    // align with the Cost / Tokens charts.
+    if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/runtime/daily?${search}`);
     return parseWithFallback<DashboardRunTimeDaily[]>(
       raw,
@@ -1788,35 +1948,143 @@ export class ApiClient {
     file: File,
     opts?: { issueId?: string; commentId?: string; chatSessionId?: string },
   ): Promise<Attachment> {
-    const formData = new FormData();
-    formData.append("file", file);
-    if (opts?.issueId) formData.append("issue_id", opts.issueId);
-    if (opts?.commentId) formData.append("comment_id", opts.commentId);
-    if (opts?.chatSessionId) formData.append("chat_session_id", opts.chatSessionId);
+    const uploadOpts = opts ?? {};
+    if (file.size >= MULTIPART_UPLOAD_THRESHOLD_BYTES) {
+      return this.uploadFileMultipartDirect(file, uploadOpts);
+    }
+    return this.uploadFileDirect(file, uploadOpts);
+  }
 
-    const rid = createRequestId();
-    const start = Date.now();
-    const requestToken = this.token;
-    this.logger.info("→ POST /api/upload-file", { rid });
-
-    const res = await fetch(`${this.baseUrl}/api/upload-file`, {
+  private async uploadFileMultipartDirect(
+    file: File,
+    opts: { issueId?: string; commentId?: string; chatSessionId?: string },
+  ): Promise<Attachment> {
+    const initiate = await this.fetch<MultipartUploadInitiateResponse>("/api/attachments/upload/multipart/initiate", {
       method: "POST",
-      headers: this.authHeaders(),
-      body: formData,
-      credentials: "include",
+      body: JSON.stringify({
+        filename: file.name,
+        content_type: file.type || "application/octet-stream",
+        size_bytes: file.size,
+        part_size_bytes: MULTIPART_UPLOAD_PART_SIZE_BYTES,
+        issue_id: opts.issueId ?? null,
+        comment_id: opts.commentId ?? null,
+        chat_session_id: opts.chatSessionId ?? null,
+      }),
     });
 
-    if (!res.ok) {
-      if (res.status === 401) this.handleUnauthorized(requestToken);
-      const message = await this.parseErrorMessage(res, `Upload failed: ${res.status}`);
-      this.logger.error(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms`, error: message });
-      throw new Error(message);
+    const partSize = initiate.part_size_bytes;
+    const uploadedParts: Array<{ part_number: number; etag: string; size_bytes: number }> = [];
+    let nextPart = 1;
+
+    const uploadPart = async (partNumber: number): Promise<void> => {
+      const signed = await this.fetch<MultipartUploadSignPartsResponse>("/api/attachments/upload/multipart/sign-parts", {
+        method: "POST",
+        body: JSON.stringify({
+          session_id: initiate.session_id,
+          part_numbers: [partNumber],
+        }),
+      });
+      const part = signed.parts[0];
+      if (!part) throw new Error("Multipart upload signing returned no part URL");
+      const start = (partNumber - 1) * partSize;
+      const end = Math.min(start + partSize, file.size);
+      const blob = file.slice(start, end);
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= MULTIPART_UPLOAD_MAX_RETRIES; attempt += 1) {
+        try {
+          const res = await fetch(part.upload_url, {
+            method: "PUT",
+            headers: part.headers ?? {},
+            body: blob,
+          });
+          if (!res.ok) {
+            throw new Error(`Multipart part upload failed: ${res.status}`);
+          }
+          const etag = res.headers.get("ETag") ?? res.headers.get("etag") ?? "";
+          if (!etag) throw new Error("Multipart part upload missing ETag");
+          uploadedParts.push({
+            part_number: partNumber,
+            etag,
+            size_bytes: blob.size,
+          });
+          return;
+        } catch (err) {
+          lastError = err;
+          if (attempt === MULTIPART_UPLOAD_MAX_RETRIES) break;
+        }
+      }
+      throw lastError instanceof Error ? lastError : new Error("Multipart part upload failed");
+    };
+
+    const workers = Array.from({ length: Math.min(MULTIPART_UPLOAD_CONCURRENCY, initiate.part_count) }, async () => {
+      while (nextPart <= initiate.part_count) {
+        const partNumber = nextPart;
+        nextPart += 1;
+        await uploadPart(partNumber);
+      }
+    });
+
+    try {
+      await Promise.all(workers);
+    } catch (err) {
+      await this.abortMultipartUpload(initiate.session_id);
+      throw err;
     }
 
-    this.logger.info(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms` });
-    const raw = (await res.json()) as unknown;
+    const raw = await this.fetch<unknown>("/api/attachments/upload/multipart/complete", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: initiate.session_id,
+        parts: uploadedParts.sort((a, b) => a.part_number - b.part_number),
+      }),
+    });
     return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
-      endpoint: "POST /api/upload-file",
+      endpoint: "POST /api/attachments/upload/multipart/complete",
+    });
+  }
+
+  private async abortMultipartUpload(sessionId: string): Promise<void> {
+    try {
+      await this.fetch<void>("/api/attachments/upload/multipart/abort", {
+        method: "POST",
+        body: JSON.stringify({ session_id: sessionId }),
+      });
+    } catch (err) {
+      this.logger.warn("Failed to abort multipart upload", { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private async uploadFileDirect(
+    file: File,
+    opts: { issueId?: string; commentId?: string; chatSessionId?: string },
+  ): Promise<Attachment> {
+    const initiate = await this.fetch<DirectUploadInitiateResponse>("/api/attachments/upload/initiate", {
+      method: "POST",
+      body: JSON.stringify({
+        filename: file.name,
+        content_type: file.type || "application/octet-stream",
+        size_bytes: file.size,
+        issue_id: opts.issueId ?? null,
+        comment_id: opts.commentId ?? null,
+        chat_session_id: opts.chatSessionId ?? null,
+      }),
+    });
+
+    const putRes = await fetch(initiate.upload_url, {
+      method: "PUT",
+      headers: initiate.headers ?? {},
+      body: file,
+    });
+    if (!putRes.ok) {
+      throw new Error(`Direct upload failed: ${putRes.status}`);
+    }
+
+    const raw = await this.fetch<unknown>("/api/attachments/upload/complete", {
+      method: "POST",
+      body: JSON.stringify({ upload_token: initiate.upload_token }),
+    });
+    return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
+      endpoint: "POST /api/attachments/upload/complete",
     });
   }
 
