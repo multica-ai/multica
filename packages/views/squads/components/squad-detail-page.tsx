@@ -6,6 +6,7 @@ import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { isImeComposing } from "@multica/core/utils";
 import { useTimeAgo } from "../../i18n";
@@ -370,7 +371,7 @@ function SquadHeaderAvatar({ squad, initials }: { squad: Squad; initials: string
     <ActorAvatarBase
       name={squad.name}
       initials={initials}
-      avatarUrl={squad.avatar_url}
+      avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
       size={16}
       className="rounded"
     />
@@ -422,7 +423,7 @@ function SquadAvatarEditor({
           <ActorAvatarBase
             name={squad.name}
             initials={initials}
-            avatarUrl={squad.avatar_url}
+            avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
             size={64}
             className="rounded-none"
           />

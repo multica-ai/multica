@@ -36,6 +36,7 @@ import {
   skillDetailOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
@@ -165,7 +166,7 @@ function UsedBySection({ agents }: { agents: Agent[] }) {
           <ActorAvatar
             name={a.name}
             initials={a.name.slice(0, 2).toUpperCase()}
-            avatarUrl={a.avatar_url}
+            avatarUrl={resolvePublicFileUrl(a.avatar_url)}
             isAgent
             size={22}
           />
@@ -730,7 +731,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                     <ActorAvatar
                       name={creator.name}
                       initials={creator.name.slice(0, 2).toUpperCase()}
-                      avatarUrl={creator.avatar_url}
+                      avatarUrl={resolvePublicFileUrl(creator.avatar_url)}
                       size={14}
                     />
                     {t(($) => $.detail.subline.by_creator, { name: creator.name })}
