@@ -33,6 +33,10 @@ const (
 	defaultCodexSemanticInactivityTimeout = 10 * time.Minute
 )
 
+// CodexSemanticInactivityMarker prefixes timeout errors emitted when Codex
+// stops making semantic progress while the process is still alive.
+const CodexSemanticInactivityMarker = "codex semantic inactivity timeout"
+
 // codexBackend implements Backend by spawning `codex app-server --listen stdio://`
 // and communicating via JSON-RPC 2.0 over stdin/stdout.
 type codexBackend struct {
@@ -225,15 +229,16 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		}
 
 		// 3. Send turn and wait for completion
-		approvalPolicy := codexApprovalPolicy(c.onApproval)
-		_, err = c.request(runCtx, "turn/start", map[string]any{
+		turnParams := map[string]any{
 			"threadId": threadID,
 			"input": []map[string]any{
 				{"type": "text", "text": prompt},
 			},
-			"approvalPolicy":    approvalPolicy,
-			"approvalsReviewer": codexApprovalsReviewer(approvalPolicy),
-		})
+			"approvalPolicy":    codexApprovalPolicy(c.onApproval),
+			"approvalsReviewer": codexApprovalsReviewer(codexApprovalPolicy(c.onApproval)),
+		}
+		applyCodexReasoningEffort(turnParams, opts.ThinkingLevel)
+		_, err = c.request(runCtx, "turn/start", turnParams)
 		if err != nil {
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
@@ -269,8 +274,8 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			case <-semanticTimer.C:
 				waitingForTurn = false
 				finalStatus = "timeout"
-				finalError = fmt.Sprintf("codex semantic inactivity timeout after %s without agent progress (last activity: %s)", semanticInactivityTimeout, lastSemanticActivityDescription)
-				b.cfg.Logger.Warn("codex semantic inactivity timeout",
+				finalError = fmt.Sprintf("%s after %s without agent progress (last activity: %s)", CodexSemanticInactivityMarker, semanticInactivityTimeout, lastSemanticActivityDescription)
+				b.cfg.Logger.Warn(CodexSemanticInactivityMarker,
 					"pid", cmd.Process.Pid,
 					"thread_id", threadID,
 					"turn_id", c.turnID,
@@ -358,14 +363,16 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 	if priorThreadID := opts.ResumeSessionID; priorThreadID != "" {
 		// thread/resume reuses the thread's persisted model and reasoning
 		// effort; only override fields the daemon actually cares about.
-		resumeResult, err := c.request(ctx, "thread/resume", map[string]any{
+		resumeParams := map[string]any{
 			"threadId":              priorThreadID,
 			"cwd":                   opts.Cwd,
 			"model":                 nilIfEmpty(opts.Model),
 			"developerInstructions": nilIfEmpty(opts.SystemPrompt),
 			"approvalPolicy":        approvalPolicy,
 			"approvalsReviewer":     approvalsReviewer,
-		})
+		}
+		applyCodexReasoningEffort(resumeParams, opts.ThinkingLevel)
+		resumeResult, err := c.request(ctx, "thread/resume", resumeParams)
 		if err == nil {
 			if threadID := extractThreadID(resumeResult); threadID != "" {
 				return threadID, true, nil
@@ -376,7 +383,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		}
 	}
 
-	startResult, err := c.request(ctx, "thread/start", map[string]any{
+	startParams := map[string]any{
 		"model":                  nilIfEmpty(opts.Model),
 		"modelProvider":          nil,
 		"profile":                nil,
@@ -391,7 +398,9 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"includeApplyPatchTool":  nil,
 		"experimentalRawEvents":  false,
 		"persistExtendedHistory": true,
-	})
+	}
+	applyCodexReasoningEffort(startParams, opts.ThinkingLevel)
+	startResult, err := c.request(ctx, "thread/start", startParams)
 	if err != nil {
 		return "", false, fmt.Errorf("codex thread/start failed: %w", err)
 	}
@@ -417,6 +426,39 @@ func codexApprovalsReviewer(approvalPolicy any) any {
 		return nil
 	}
 	return "user"
+}
+
+// applyCodexReasoningEffort writes the per-agent thinking_level into a
+// Codex app-server request. The three points — thread/start.config,
+// thread/resume.config, turn/start.effort — all flow through this helper
+// so any future protocol/key change touches one site rather than three
+// (per Trump's MUL-2339 review constraint).
+//
+// The shape is detected from the params keys:
+//   - turn/start always carries `input`, and the schema exposes the
+//     reasoning override as the top-level `effort` field.
+//   - thread/start and thread/resume nest it under
+//     `config.model_reasoning_effort`.
+//
+// Empty `level` is a no-op: we deliberately do NOT emit a key when the
+// caller didn't request an override, so the upstream defaults (config
+// file, account-scoped model preference) stay in charge. This also
+// guarantees `effort: ""` never reaches the CLI — Codex rejects empty
+// strings on this field.
+func applyCodexReasoningEffort(params map[string]any, level string) {
+	if params == nil || level == "" {
+		return
+	}
+	if _, isTurnStart := params["input"]; isTurnStart {
+		params["effort"] = level
+		return
+	}
+	cfg, _ := params["config"].(map[string]any)
+	if cfg == nil {
+		cfg = map[string]any{}
+	}
+	cfg["model_reasoning_effort"] = level
+	params["config"] = cfg
 }
 
 func resetTimer(timer *time.Timer, d time.Duration) {

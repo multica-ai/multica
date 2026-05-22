@@ -13,13 +13,21 @@ import { createTabRouter } from "../routes";
 
 export interface Tab {
   id: string;
-  /** Every tab path is workspace-scoped: `/{workspaceSlug}/{route}/...`. */
+  /** Every tab path is workspace-scoped: `/{workspaceSlug}` or `/{workspaceSlug}/{route}/...`. */
   path: string;
   title: string;
   icon: string;
   router: DataRouter;
   historyIndex: number;
   historyLength: number;
+  /**
+   * Pinned tabs render at the left of the tab bar as icon-only, suppress the
+   * X close button, and turn any `navigation.push()` originating in them into
+   * an `openInNewTab()` so they stay parked on their original path. Pinning
+   * is invariant-preserving: pinned tabs always come before unpinned tabs in
+   * a workspace's `tabs` array; `togglePin` / `moveTab` enforce this.
+   */
+  pinned: boolean;
 }
 
 export interface WorkspaceTabGroup {
@@ -78,8 +86,20 @@ interface TabStore {
   updateTab: (tabId: string, patch: Partial<Pick<Tab, "path" | "title" | "icon">>) => void;
   /** Patch history tracking of a tab. Finds across groups. */
   updateTabHistory: (tabId: string, historyIndex: number, historyLength: number) => void;
-  /** Reorder within the active workspace's group only. */
+  /**
+   * Reorder within the active workspace's group only. Clamped so a tab can
+   * never cross the pinned / unpinned boundary — a drag that would move a
+   * pinned tab into the unpinned zone (or vice versa) is dropped at the
+   * boundary instead. This keeps the "pinned tabs first" invariant without
+   * requiring callers to know about it.
+   */
   moveTab: (fromIndex: number, toIndex: number) => void;
+  /**
+   * Flip a tab's pinned state. Pinning moves it to the end of the pinned
+   * zone; unpinning moves it to the start of the unpinned zone. Both
+   * preserve the "pinned tabs before unpinned tabs" invariant.
+   */
+  togglePin: (tabId: string) => void;
   /**
    * After the workspace list arrives/changes (login, realtime delete), drop
    * any tab group whose slug is no longer in `validSlugs`, and repoint
@@ -115,14 +135,15 @@ const ROUTE_ICONS: Record<string, string> = {
 /**
  * Resolve a route icon from a pathname.
  *
- * Tab paths are always workspace-scoped: `/{slug}/{route}/...`, so the route
- * segment lives at index 1. Pre-workspace flows (create, invite) are rendered
- * by the window overlay, never as tabs.
+ * Tab paths are always workspace-scoped: `/{slug}` or `/{slug}/{route}/...`.
+ * Pre-workspace flows (create, invite) are rendered by the window overlay,
+ * never as tabs.
  *
  * Title is NOT determined here — it comes from document.title.
  */
 export function resolveRouteIcon(pathname: string): string {
   const segments = pathname.split("/").filter(Boolean);
+  if (segments.length === 1) return "CircleUser";
   return ROUTE_ICONS[segments[1] ?? ""] ?? "ListTodo";
 }
 
@@ -191,17 +212,25 @@ function makeTab(path: string, title: string, icon: string): Tab {
     router: createTabRouter(path),
     historyIndex: 0,
     historyLength: 1,
+    pinned: false,
   };
 }
 
-/** Default entry point for a workspace — its issues list. */
+/** Index of the first unpinned tab in a group (== pinned count). */
+function pinnedBoundary(tabs: Tab[]): number {
+  let i = 0;
+  while (i < tabs.length && tabs[i].pinned) i++;
+  return i;
+}
+
+/** Default entry point for a workspace — the blank workspace home. */
 function defaultPathFor(slug: string): string {
-  return `/${slug}/issues`;
+  return `/${slug}`;
 }
 
 function defaultTabFor(slug: string): Tab {
   const path = defaultPathFor(slug);
-  return makeTab(path, "Issues", resolveRouteIcon(path));
+  return makeTab(path, "Workspace", resolveRouteIcon(path));
 }
 
 // ---------------------------------------------------------------------------
@@ -247,7 +276,7 @@ export const useTabStore = create<TabStore>()(
             desiredPath && sanitizeTabPath(desiredPath) === desiredPath
               ? desiredPath
               : defaultPathFor(slug);
-          const tab = makeTab(seedPath, "Issues", resolveRouteIcon(seedPath));
+          const tab = makeTab(seedPath, "Workspace", resolveRouteIcon(seedPath));
           set({
             activeWorkspaceSlug: slug,
             byWorkspace: {
@@ -274,7 +303,7 @@ export const useTabStore = create<TabStore>()(
               });
               return;
             }
-            const tab = makeTab(clean, "Issues", resolveRouteIcon(clean));
+            const tab = makeTab(clean, "Workspace", resolveRouteIcon(clean));
             set({
               activeWorkspaceSlug: slug,
               byWorkspace: {
@@ -454,13 +483,59 @@ export const useTabStore = create<TabStore>()(
         if (!activeWorkspaceSlug) return;
         const group = byWorkspace[activeWorkspaceSlug];
         if (!group) return;
+        if (fromIndex < 0 || fromIndex >= group.tabs.length) return;
+
+        // Clamp the drop position to within the source tab's group (pinned vs
+        // unpinned) so the "pinned tabs first" invariant survives drag-reorder.
+        // Pinned zone is [0, boundary); unpinned zone is [boundary, length).
+        const boundary = pinnedBoundary(group.tabs);
+        const source = group.tabs[fromIndex];
+        let clampedTo: number;
+        if (source.pinned) {
+          // boundary is exclusive upper bound for pinned-zone indices.
+          clampedTo = Math.max(0, Math.min(toIndex, boundary - 1));
+        } else {
+          clampedTo = Math.max(boundary, Math.min(toIndex, group.tabs.length - 1));
+        }
+        if (clampedTo === fromIndex) return;
         set({
           byWorkspace: {
             ...byWorkspace,
             [activeWorkspaceSlug]: {
               ...group,
-              tabs: arrayMove(group.tabs, fromIndex, toIndex),
+              tabs: arrayMove(group.tabs, fromIndex, clampedTo),
             },
+          },
+        });
+      },
+
+      togglePin(tabId) {
+        const { byWorkspace } = get();
+        const hit = findTabLocation(byWorkspace, tabId);
+        if (!hit) return;
+        const { slug, group, index } = hit;
+        const current = group.tabs[index];
+        const nextTab: Tab = { ...current, pinned: !current.pinned };
+
+        // Remove from current position, then insert at the new zone boundary:
+        //   pinning   → end of pinned zone (just before first unpinned tab)
+        //   unpinning → start of unpinned zone (right after last pinned tab)
+        const withoutCurrent = [
+          ...group.tabs.slice(0, index),
+          ...group.tabs.slice(index + 1),
+        ];
+        const newBoundary = pinnedBoundary(withoutCurrent);
+        const insertAt = newBoundary;
+        const nextTabs = [
+          ...withoutCurrent.slice(0, insertAt),
+          nextTab,
+          ...withoutCurrent.slice(insertAt),
+        ];
+
+        set({
+          byWorkspace: {
+            ...byWorkspace,
+            [slug]: { ...group, tabs: nextTabs },
           },
         });
       },
@@ -498,17 +573,23 @@ export const useTabStore = create<TabStore>()(
     }),
     {
       name: "multica_tabs",
-      version: 2,
+      version: 3,
       storage: createJSONStorage(() => createPersistStorage(defaultStorage)),
       migrate: (persistedState, version) => {
         // v1 → v2: flat `tabs` array → per-workspace grouping.
         // Tabs whose path isn't workspace-scoped (root `/`, login, etc.)
         // are dropped — they have no workspace to belong to, and the new
         // model's invariant is "every tab lives in a workspace group".
-        if (version < 2 && persistedState && typeof persistedState === "object") {
-          return migrateV1ToV2(persistedState as Partial<V1Persisted>);
+        let state = persistedState;
+        if (version < 2 && state && typeof state === "object") {
+          state = migrateV1ToV2(state as Partial<V1Persisted>);
         }
-        return persistedState as V2Persisted;
+        // v2 → v3: introduce `Tab.pinned`. Existing tabs default to
+        // unpinned; pin ordering invariant trivially holds (no pinned tabs).
+        if (version < 3 && state && typeof state === "object") {
+          state = migrateV2ToV3(state as V2Persisted);
+        }
+        return state as V3Persisted;
       },
       partialize: (state) => ({
         activeWorkspaceSlug: state.activeWorkspaceSlug,
@@ -518,15 +599,19 @@ export const useTabStore = create<TabStore>()(
             {
               activeTabId: group.activeTabId,
               tabs: group.tabs.map(
-                ({ router: _router, historyIndex: _hi, historyLength: _hl, ...rest }) =>
-                  rest,
+                ({
+                  router: _router,
+                  historyIndex: _hi,
+                  historyLength: _hl,
+                  ...rest
+                }) => rest,
               ),
             },
           ]),
         ),
       }),
       merge: (persistedState, currentState) => {
-        const persisted = persistedState as Partial<V2Persisted> | undefined;
+        const persisted = persistedState as Partial<V3Persisted> | undefined;
         if (!persisted?.byWorkspace) return currentState;
 
         const byWorkspace: Record<string, WorkspaceTabGroup> = {};
@@ -553,9 +638,14 @@ export const useTabStore = create<TabStore>()(
               router: createTabRouter(clean),
               historyIndex: 0,
               historyLength: 1,
+              pinned: pTab.pinned === true,
             });
           }
           if (tabs.length === 0) continue;
+          // Enforce the "pinned first" invariant on rehydration in case a
+          // user (or a buggy older write) persisted the pinned tabs out of
+          // order. Stable sort preserves intra-group order.
+          tabs.sort((a, b) => (a.pinned === b.pinned ? 0 : a.pinned ? -1 : 1));
           const activeTabId = tabs.some((t) => t.id === pGroup.activeTabId)
             ? pGroup.activeTabId
             : tabs[0].id;
@@ -604,6 +694,38 @@ interface V2PersistedGroup {
 interface V2Persisted {
   activeWorkspaceSlug: string | null;
   byWorkspace: Record<string, V2PersistedGroup>;
+}
+
+interface V3PersistedTab {
+  id: string;
+  path: string;
+  title: string;
+  icon: string;
+  pinned: boolean;
+}
+
+interface V3PersistedGroup {
+  tabs: V3PersistedTab[];
+  activeTabId: string;
+}
+
+interface V3Persisted {
+  activeWorkspaceSlug: string | null;
+  byWorkspace: Record<string, V3PersistedGroup>;
+}
+
+export function migrateV2ToV3(v2: V2Persisted): V3Persisted {
+  const byWorkspace: Record<string, V3PersistedGroup> = {};
+  for (const [slug, group] of Object.entries(v2.byWorkspace ?? {})) {
+    byWorkspace[slug] = {
+      activeTabId: group.activeTabId,
+      tabs: group.tabs.map((t) => ({ ...t, pinned: false })),
+    };
+  }
+  return {
+    activeWorkspaceSlug: v2.activeWorkspaceSlug ?? null,
+    byWorkspace,
+  };
 }
 
 export function migrateV1ToV2(v1: Partial<V1Persisted>): V2Persisted {

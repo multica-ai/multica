@@ -51,6 +51,7 @@ export const issueKeys = {
   reactions: (issueId: string) => ["issues", "reactions", issueId] as const,
   subscribers: (issueId: string) =>
     ["issues", "subscribers", issueId] as const,
+  usageAll: () => ["issues", "usage"] as const,
   usage: (issueId: string) => ["issues", "usage", issueId] as const,
   /** Issue-level attachments — used by the description editor so its
    *  inline file-card / image NodeViews can re-sign download URLs at
@@ -345,6 +346,8 @@ export function issueUsageOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.usage(issueId),
     queryFn: () => api.getIssueUsage(issueId),
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -365,6 +368,8 @@ export function issueTaskRunsOptions(issueId: string) {
     queryKey: issueKeys.taskRuns(issueId),
     queryFn: () => api.listTasksByIssue(issueId),
     enabled: !!issueId,
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 }
 

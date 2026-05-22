@@ -424,6 +424,9 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
           canAssignAgentToIssue(a, { userId, role: myRole }).allowed,
       )
       .map((a) => ({ id: a.id, label: a.name, type: "agent" as const }));
+    const ownAgentIds = agents
+      .filter((a) => userId !== null && a.owner_id === userId)
+      .map((a) => a.id);
 
     const squadItems: MentionItem[] = squads
       .filter((s) => !s.archived_at && (s.name.toLowerCase().includes(q) || matchesPinyin(s.name, q)))
@@ -436,6 +439,7 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
     const userItems = sortUserItemsByRecency(
       [...memberItems, ...agentItems, ...squadItems],
       recency,
+      { ownAgentIds },
     );
 
     // Cached issues give an instant first paint; MentionList adds server
@@ -448,7 +452,7 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
       )
       .map(issueToMention);
 
-    return [...allItem, ...userItems, ...issueItems];
+    return [...userItems, ...allItem, ...issueItems];
   }
 
   return {

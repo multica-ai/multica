@@ -1,5 +1,11 @@
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
+import {
+  agentActivityKeys,
+  agentRunCountsKeys,
+  agentTaskSnapshotKeys,
+  agentTasksKeys,
+} from "../agents/queries";
 import { chatKeys } from "../chat/queries";
 import { issueKeys } from "../issues/queries";
 import { workspaceKeys } from "../workspace/queries";
@@ -12,6 +18,8 @@ import type {
 import {
   applyChatDoneToCache,
   applyWorkspaceUpdatedToCache,
+  createWorkspaceTaskInvalidator,
+  invalidateWorkspaceTaskQueries,
 } from "./use-realtime-sync";
 
 const sessionId = "session-1";
@@ -199,5 +207,71 @@ describe("applyWorkspaceUpdatedToCache", () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: issueKeys.all(wsId),
     });
+  });
+});
+
+describe("workspace task invalidation", () => {
+  const wsId = "ws-1";
+
+  it("invalidates task-related high-volume queries as active-only refetches", () => {
+    const qc = createQueryClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    invalidateWorkspaceTaskQueries(qc, wsId);
+
+    expect(invalidate).toHaveBeenCalledTimes(7);
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: agentTaskSnapshotKeys.list(wsId),
+      refetchType: "active",
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: agentActivityKeys.last30d(wsId),
+      refetchType: "active",
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: agentRunCountsKeys.last30d(wsId),
+      refetchType: "active",
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: agentTasksKeys.all(wsId),
+      refetchType: "active",
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: issueKeys.tasksAll(),
+      refetchType: "active",
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: issueKeys.usageAll(),
+      refetchType: "active",
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: workspaceKeys.squads(wsId),
+      refetchType: "active",
+    });
+  });
+
+  it("debounces repeated task lifecycle events per workspace", () => {
+    vi.useFakeTimers();
+    try {
+      const qc = createQueryClient();
+      const invalidate = vi.spyOn(qc, "invalidateQueries");
+      const invalidator = createWorkspaceTaskInvalidator(qc, 2500);
+
+      invalidator.schedule(wsId);
+      vi.advanceTimersByTime(1000);
+      invalidator.schedule(wsId);
+      vi.advanceTimersByTime(1000);
+      invalidator.schedule(wsId);
+      vi.advanceTimersByTime(2499);
+
+      expect(invalidate).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1);
+
+      expect(invalidate).toHaveBeenCalledTimes(7);
+      invalidator.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -39,7 +39,6 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { TimezoneSelect } from "../../common/timezone-select";
 import { AppLink } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
 import { formatLastSeen } from "../utils";
@@ -520,16 +519,6 @@ function DiagnosticsCard({
             <VisibilityReadout runtime={runtime} />
           )}
         </div>
-        <div className="border-t pt-3">
-          <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
-            {t(($) => $.detail.diagnostics_timezone)}
-          </div>
-          {canDelete ? (
-            <TimezoneEditor runtime={runtime} />
-          ) : (
-            <TimezoneReadout runtime={runtime} />
-          )}
-        </div>
         {isLocal && (
           <div className="border-t pt-3">
             <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
@@ -679,61 +668,5 @@ function VisibilityChoice({
       />
       <TooltipContent>{tooltip}</TooltipContent>
     </Tooltip>
-  );
-}
-
-function TimezoneReadout({ runtime }: { runtime: AgentRuntime }) {
-  const { t } = useT("runtimes");
-  return (
-    <div className="space-y-1.5">
-      <div className="rounded-md border bg-muted/30 px-2 py-1.5 font-mono text-xs">
-        {runtime.timezone || "UTC"}
-      </div>
-      <p className="text-[11px] leading-snug text-muted-foreground">
-        {t(($) => $.detail.timezone_hint)}
-      </p>
-    </div>
-  );
-}
-
-// TimezoneEditor renders the current runtime tz, a dropdown of supported IANA
-// zones (plus the runtime's current value if it is unusual), and commits the
-// change via PATCH /api/runtimes/:id. We deliberately don't gate this behind a
-// separate "edit" mode because the change is reversible.
-function TimezoneEditor({ runtime }: { runtime: AgentRuntime }) {
-  const { t } = useT("runtimes");
-  const wsId = useWorkspaceId();
-  const updateRuntime = useUpdateRuntime(wsId);
-  const current = runtime.timezone || "UTC";
-
-  const handleTimezoneChange = (next: string) => {
-    if (next === current) return;
-    updateRuntime.mutate(
-      { runtimeId: runtime.id, patch: { timezone: next } },
-      {
-        onSuccess: () =>
-          toast.success(t(($) => $.detail.timezone_toast_updated, { tz: next })),
-        onError: (err) =>
-          toast.error(
-            err instanceof Error && err.message
-              ? err.message
-              : t(($) => $.detail.timezone_toast_failed),
-          ),
-      },
-    );
-  };
-
-  return (
-    <div className="space-y-1.5">
-      <TimezoneSelect
-        value={current}
-        onValueChange={handleTimezoneChange}
-        browserSuffix={t(($) => $.detail.timezone_browser_suffix)}
-        disabled={updateRuntime.isPending}
-      />
-      <p className="text-[11px] leading-snug text-muted-foreground">
-        {t(($) => $.detail.timezone_hint)}
-      </p>
-    </div>
   );
 }

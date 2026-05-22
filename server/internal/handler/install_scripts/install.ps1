@@ -1,22 +1,46 @@
 # Multica CLI installer for Windows PowerShell
 # Usage:
 #   irm https://multica.wujieai.com/install.ps1 | iex
+#   irm https://multica.wujieai.com/install.ps1 | iex -Restart
 #   $env:MULTICA_VERSION = "0.3.1-514-gc59dc875"; irm https://multica.wujieai.com/install.ps1 | iex
 #
 # Environment variables:
 #   MULTICA_VERSION   — install a specific version instead of latest
 #   MULTICA_DIR       — installation directory (default: ~/.multica/bin)
 #   MULTICA_SERVER    — server URL (default: https://multica.wujieai.com)
+#   MULTICA_CHANNEL   — release channel: prod (default) or test
 
+param(
+    [switch]$Restart
+)
 $ErrorActionPreference = "Stop"
 
 # --- Configuration ---
 $DefaultServer = "https://multica.wujieai.com"
-$OBSBase = "https://multica.obs.cn-east-3.myhuaweicloud.com/cli/releases"
-$ManifestURL = "https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json"
+$OBSHost = "https://multica.obs.cn-east-3.myhuaweicloud.com"
+$Channel = if ($env:MULTICA_CHANNEL) { $env:MULTICA_CHANNEL } else { "" }
 $InstallDir = if ($env:MULTICA_DIR) { $env:MULTICA_DIR } else { Join-Path $HOME ".multica\bin" }
 $ServerURL = if ($env:MULTICA_SERVER) { $env:MULTICA_SERVER } else { $DefaultServer }
 $Version = $env:MULTICA_VERSION
+
+# Resolve OBS paths based on channel
+switch ($Channel) {
+    "" {
+        $Channel = "prod"
+        $OBSPrefix = "cli"
+    }
+    "prod" {
+        $OBSPrefix = "cli"
+    }
+    "test" {
+        $OBSPrefix = "cli-test"
+    }
+    default {
+        Exit-Fatal "Unsupported channel: $Channel (supported: prod, test)"
+    }
+}
+$OBSBase = "$OBSHost/$OBSPrefix/releases"
+$ManifestURL = "$OBSHost/$OBSPrefix/manifest.json"
 
 # --- Helpers ---
 function Write-Info  { param($msg) Write-Host "[info]  $msg" -ForegroundColor Blue }
@@ -41,7 +65,11 @@ function Get-LatestVersion {
 
     # Try server endpoint first
     try {
-        $version = (Invoke-RestMethod -Uri "$ServerURL/install/latest-cli-version" -TimeoutSec 10).Trim()
+        $versionEndpoint = "$ServerURL/install/latest-cli-version"
+        if ($Channel -eq "test") {
+            $versionEndpoint = "$versionEndpoint?channel=test"
+        }
+        $version = (Invoke-RestMethod -Uri $versionEndpoint -TimeoutSec 10).Trim()
         if ($version) {
             return $version.TrimStart("v")
         }
@@ -88,6 +116,36 @@ function Install-MulticaCLI {
     Write-Host ""
     Write-Info "Multica CLI Installer (Windows)"
     Write-Host ""
+
+    $multica = Join-Path $InstallDir "multica.exe"
+    if ($Restart -and (Test-Path $multica)) {
+        Write-Info "Updating CLI binary to latest version..."
+        $arch = Get-Arch
+        $os = "windows"
+        if (-not $Version) { $Version = Get-LatestVersion } else { $Version = $Version.TrimStart("v") }
+        $filename = "multica-cli-$Version-$os-$arch.zip"
+        $url = "$OBSBase/$filename"
+        Write-Info "Downloading Multica CLI v$Version for $os/$arch..."
+        $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "multica-install-$(Get-Random)"
+        New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
+        try {
+            Invoke-WebRequest -Uri $url -OutFile (Join-Path $tmpDir $filename) -UseBasicParsing
+            Expand-Archive -Path (Join-Path $tmpDir $filename) -DestinationPath $tmpDir -Force
+            $binary = Get-ChildItem -Path $tmpDir -Recurse -Filter "multica.exe" | Select-Object -First 1
+            Copy-Item -Path $binary.FullName -Destination $multica -Force
+        } finally {
+            Remove-Item -Path $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        Write-Ok "CLI binary updated"
+        Write-Info "Restarting daemon..."
+        & $multica daemon stop 2>$null
+        Start-Sleep -Seconds 1
+        try { & $multica daemon start 2>$null; Write-Ok "Daemon started" }
+        catch { Write-Warn "Failed to start daemon. Run manually: multica daemon start" }
+        Write-Host ""
+        Write-Ok "Multica CLI updated successfully!"
+        return
+    }
 
     $arch = Get-Arch
     $os = "windows"
@@ -163,6 +221,13 @@ function Install-MulticaCLI {
     & $multica config set server_url $ServerURL 2>$null
     & $multica config set app_url $ServerURL 2>$null
     Write-Ok "Server configured: $ServerURL"
+
+    # Configure test channel update manifest
+    if ($Channel -eq "test") {
+        Write-Info "Configuring update manifest for test channel..."
+        & $multica config set update_manifest_url $ManifestURL 2>$null
+        Write-Ok "Update manifest set to test channel: $ManifestURL"
+    }
 
     # Restart daemon
     Write-Info "Restarting daemon..."

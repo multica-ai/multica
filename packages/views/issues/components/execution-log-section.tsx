@@ -114,8 +114,8 @@ export function ExecutionLogSection({ issueId, onHighlightComment }: ExecutionLo
   const { data: tasks = [] } = useQuery({
     queryKey: issueKeys.tasks(issueId),
     queryFn: () => api.listTasksByIssue(issueId),
-    staleTime: 30_000,
-    refetchOnWindowFocus: true,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const agentColorMap = useAgentColorMap(tasks);

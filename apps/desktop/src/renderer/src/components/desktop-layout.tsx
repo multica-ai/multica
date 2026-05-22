@@ -13,7 +13,6 @@ import { ModalRegistry } from "@multica/views/modals/registry";
 import { AppSidebar } from "@multica/views/layout";
 import { SearchCommand, SearchTrigger } from "@multica/views/search";
 import { ChatFab, ChatWindow } from "@multica/views/chat";
-import { StarterContentPrompt } from "@multica/views/onboarding";
 import { WorkspaceSlugProvider, paths, useCurrentWorkspace } from "@multica/core/paths";
 import { getCurrentSlug, subscribeToCurrentSlug } from "@multica/core/platform";
 import { useDesktopUnreadBadge } from "@multica/views/platform";
@@ -169,7 +168,6 @@ export function DesktopShell() {
         </div>
         {slug && <ModalRegistry />}
         {slug && <SearchCommand />}
-        {slug && <StarterContentPrompt />}
         <WindowOverlay />
       </WorkspaceSlugProvider>
     </DesktopNavigationProvider>

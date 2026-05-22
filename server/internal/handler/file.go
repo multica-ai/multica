@@ -453,18 +453,12 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		att, err := h.Queries.CreateAttachment(r.Context(), params)
 		if err != nil {
 			slog.Error("failed to create attachment record", "error", err)
-			// S3 upload succeeded but DB record failed — still return the link
-			// so the file is usable. Log the error for investigation.
-		} else {
-			writeJSON(w, http.StatusOK, h.attachmentToResponse(att))
+			h.deleteS3Object(r.Context(), link)
+			writeError(w, http.StatusInternalServerError, "failed to create attachment record")
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]string{
-			"id":       "",
-			"url":      link,
-			"filename": header.Filename,
-		})
+		writeJSON(w, http.StatusOK, h.attachmentToResponse(att))
 		return
 	}
 

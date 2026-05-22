@@ -17,7 +17,6 @@ import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } 
 import { CSS } from "@dnd-kit/utilities";
 import {
   Inbox,
-  ListTodo,
   Bot,
   Monitor,
   ChevronDown,
@@ -105,7 +104,6 @@ const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
 type NavKey =
   | "inbox"
   | "myIssues"
-  | "issues"
   | "projects"
   | "autopilots"
   | "agents"
@@ -120,7 +118,6 @@ type NavKey =
 type NavLabelKey =
   | "inbox"
   | "my_issues"
-  | "issues"
   | "projects"
   | "autopilots"
   | "agents"
@@ -137,7 +134,6 @@ const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] 
 ];
 
 const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
-  { key: "issues", labelKey: "issues", icon: ListTodo },
   { key: "projects", labelKey: "projects", icon: FolderKanban },
   { key: "autopilots", labelKey: "autopilots", icon: Zap },
   { key: "agents", labelKey: "agents", icon: Bot },
@@ -431,7 +427,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         ? list.find((w) => w.id === invitation.workspace_id)
         : null;
       if (joined) {
-        push(paths.workspace(joined.slug).issues());
+        push(paths.workspace(joined.slug).root());
       }
     },
   });
@@ -518,7 +514,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <DropdownMenuItem
                         key={ws.id}
                         render={
-                          <AppLink href={paths.workspace(ws.slug).issues()} />
+                          <AppLink href={paths.workspace(ws.slug).root()} />
                         }
                       >
                         <WorkspaceAvatar name={ws.name} size="sm" />

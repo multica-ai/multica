@@ -301,7 +301,9 @@ func (r *localRunReporter) loop() {
 	path := "/api/local-runs/" + url.PathEscape(r.runID) + "/messages"
 	for msg := range r.ch {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		_ = r.client.PostJSON(ctx, path, msg, nil)
+		if err := r.client.PostJSON(ctx, path, msg, nil); err != nil {
+			fmt.Fprintf(os.Stderr, "multica: failed to sync local run message: %v\n", err)
+		}
 		cancel()
 	}
 }

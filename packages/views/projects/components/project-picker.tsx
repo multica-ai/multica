@@ -21,6 +21,7 @@ export function ProjectPicker({
   triggerRender,
   align = "start",
   defaultOpen = false,
+  allowClear = true,
 }: {
   projectId: string | null;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
@@ -29,6 +30,8 @@ export function ProjectPicker({
   /** Open the dropdown on first mount. Used by progressive-disclosure
    *  sidebars so a newly-added field immediately enters edit state. */
   defaultOpen?: boolean;
+  /** Hide the remove action when the caller requires every issue to stay in a project. */
+  allowClear?: boolean;
 }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
@@ -56,8 +59,8 @@ export function ProjectPicker({
             {p.id === projectId && <Check className="ml-auto h-3.5 w-3.5 shrink-0" />}
           </DropdownMenuItem>
         ))}
-        {projects.length > 0 && projectId && <DropdownMenuSeparator />}
-        {projectId && (
+        {allowClear && projects.length > 0 && projectId && <DropdownMenuSeparator />}
+        {allowClear && projectId && (
           <DropdownMenuItem onClick={() => onUpdate({ project_id: null })}>
             <X className="h-3.5 w-3.5 text-muted-foreground" />
             {t(($) => $.picker.remove)}

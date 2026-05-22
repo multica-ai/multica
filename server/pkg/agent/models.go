@@ -29,6 +29,37 @@ type Model struct {
 	Label    string `json:"label"`
 	Provider string `json:"provider,omitempty"`
 	Default  bool   `json:"default,omitempty"`
+	// Thinking advertises the runtime's reasoning/effort catalog for this
+	// model. nil means the runtime/model has no thinking-level control
+	// (or the daemon couldn't discover one); the UI hides its picker. The
+	// catalog is per-model because Codex's `codex debug models` is itself
+	// per-model and Claude's `--effort` superset has known per-model gaps
+	// (`xhigh` is Opus-only, `max` is session-only). See MUL-2339.
+	Thinking *ModelThinking `json:"thinking,omitempty"`
+}
+
+// ModelThinking carries the per-model reasoning/effort catalog
+// surfaced by an agent runtime. Values are runtime-native — Codex
+// emits "none|minimal|low|medium|high|xhigh"; Claude emits
+// "low|medium|high|xhigh|max". The frontend renders SupportedLevels
+// as-is so what users see matches each CLI's own UI.
+type ModelThinking struct {
+	SupportedLevels []ThinkingLevel `json:"supported_levels"`
+	// DefaultLevel is the value the runtime picks when no override is
+	// provided. Empty means "the runtime picks, we don't know" — the
+	// UI shows "Default" as a generic option.
+	DefaultLevel string `json:"default_level,omitempty"`
+}
+
+// ThinkingLevel is one entry in a ModelThinking.SupportedLevels list.
+// Value is the literal token passed to the CLI (Claude `--effort <value>`
+// or Codex `model_reasoning_effort=<value>`); Label is a display string;
+// Description is optional helper copy lifted from the upstream catalog
+// when available (Codex's `description` field).
+type ThinkingLevel struct {
+	Value       string `json:"value"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
 }
 
 // modelCache memoizes dynamic discovery calls so repeated UI loads
@@ -51,14 +82,24 @@ const modelCacheTTL = 60 * time.Second
 // openclaw) it shells out with caching and falls back to the static
 // list on failure.
 //
+// For claude and codex, the static catalog is augmented with per-model
+// thinking-level options discovered from the local CLI (see
+// discoverClaudeThinking / discoverCodexThinking). Discovery failures
+// silently leave Thinking == nil on each entry, which the UI treats
+// as "no picker for this model" rather than blocking model selection.
+//
 // executablePath lets the caller point at a non-default binary; pass
 // "" to use the provider's default name on PATH.
 func ListModels(ctx context.Context, providerType, executablePath string) ([]Model, error) {
 	switch providerType {
 	case "claude":
-		return claudeStaticModels(), nil
+		models := claudeStaticModels()
+		annotateClaudeThinking(ctx, models, executablePath)
+		return models, nil
 	case "codex":
-		return codexStaticModels(), nil
+		models := codexStaticModels()
+		annotateCodexThinking(ctx, models, executablePath)
+		return models, nil
 	case "gemini":
 		return geminiStaticModels(), nil
 	case "cursor":

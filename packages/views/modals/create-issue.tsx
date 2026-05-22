@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "../navigation";
 import {
@@ -13,6 +13,7 @@ import {
   Maximize2,
   Minimize2,
   MoreHorizontal,
+  Tag,
   X as XIcon,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
@@ -29,21 +30,24 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
 import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
 import { BacklogAgentHintContent } from "../issues/components/backlog-agent-hint-dialog";
 import { ProjectPicker } from "../projects/components/project-picker";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { labelListOptions, useCreateLabel } from "@multica/core/labels";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { useAuthStore } from "@multica/core/auth";
 import {
   api,
   ApiError,
@@ -55,6 +59,21 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { PillButton } from "../common/pill-button";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const INLINE_LABEL_COLORS = [
+  "#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6",
+  "#3b82f6", "#6366f1", "#a855f7", "#ec4899", "#64748b",
+] as const;
+
+function pickInlineLabelColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  }
+  return INLINE_LABEL_COLORS[hash % INLINE_LABEL_COLORS.length] ?? INLINE_LABEL_COLORS[0]!;
+}
 
 // ---------------------------------------------------------------------------
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
@@ -96,6 +115,7 @@ export function ManualCreatePanel({
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
+  const currentUserId = useAuthStore((s) => s.user?.id);
 
   const [title, setTitle] = useState(draft.title);
   const [formResetKey, setFormResetKey] = useState(0);
@@ -110,13 +130,13 @@ export function ManualCreatePanel({
     if (data && "assignee_type" in data) {
       return (data.assignee_type as IssueAssigneeType | null) ?? undefined;
     }
-    return draft.assigneeType;
+    return draft.assigneeType ?? (currentUserId ? "member" : undefined);
   });
   const [assigneeId, setAssigneeId] = useState<string | undefined>(() => {
     if (data && "assignee_id" in data) {
       return (data.assignee_id as string | null) ?? undefined;
     }
-    return draft.assigneeId;
+    return draft.assigneeId ?? currentUserId;
   });
   const [startDate, setStartDate] = useState<string | null>(draft.startDate);
   const [dueDate, setDueDate] = useState<string | null>(draft.dueDate);
@@ -134,19 +154,45 @@ export function ManualCreatePanel({
   // Fetch parent issue details for the chip (status/identifier/title).
   // List cache usually has it already, so this resolves synchronously.
   const wsId = useWorkspaceId();
+  const { data: projects = [], isSuccess: projectsLoaded } = useQuery(
+    projectListOptions(wsId),
+  );
+  const initialProjectId = (data?.project_id as string | undefined) || undefined;
+  const defaultProjectId = useMemo(() => {
+    if (
+      initialProjectId &&
+      (!projectsLoaded || projects.some((p) => p.id === initialProjectId))
+    ) {
+      return initialProjectId;
+    }
+    if (!projectsLoaded || projects.length !== 1) return undefined;
+    return projects[0]?.id;
+  }, [initialProjectId, projectsLoaded, projects]);
+  useEffect(() => {
+    if (!projectsLoaded) return;
+    if (projectId && projects.some((p) => p.id === projectId)) return;
+    setProjectId(defaultProjectId);
+  }, [projectsLoaded, projects, projectId, defaultProjectId]);
   const { data: parentIssue } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
+  const { data: workspaceLabels = [] } = useQuery(labelListOptions(wsId));
+  const createLabelMutation = useCreateLabel();
+  const [labelIds, setLabelIds] = useState<string[]>([]);
+  const [labelSearch, setLabelSearch] = useState("");
 
   // File upload — collect attachment IDs so we can link them after issue creation.
   const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
   const { uploadWithToast } = useFileUpload(api);
   const handleUpload = async (file: File) => {
     const result = await uploadWithToast(file);
-    if (result) {
-      setAttachmentIds((prev) => [...prev, result.id]);
+    if (!result) return null;
+    if (!UUID_RE.test(result.id)) {
+      toast.error(t(($) => $.create_issue.attachment_upload_failed));
+      return null;
     }
+    setAttachmentIds((prev) => [...prev, result.id]);
     return result;
   };
 
@@ -163,6 +209,39 @@ export function ManualCreatePanel({
 
   const createIssueMutation = useCreateIssue();
   const updateIssueMutation = useUpdateIssue();
+  const labelSearchTrimmed = labelSearch.trim();
+  const filteredLabels = useMemo(() => {
+    const q = labelSearchTrimmed.toLowerCase();
+    if (!q) return workspaceLabels;
+    return workspaceLabels.filter((label) => label.name.toLowerCase().includes(q));
+  }, [workspaceLabels, labelSearchTrimmed]);
+  const canCreateLabel = useMemo(() => {
+    if (!labelSearchTrimmed || createLabelMutation.isPending) return false;
+    const q = labelSearchTrimmed.toLowerCase();
+    return !workspaceLabels.some((label) => label.name.toLowerCase() === q);
+  }, [createLabelMutation.isPending, labelSearchTrimmed, workspaceLabels]);
+
+  const createInlineLabel = () => {
+    if (!canCreateLabel) return;
+    const name = labelSearchTrimmed;
+    createLabelMutation.mutate(
+      { name, color: pickInlineLabelColor(name) },
+      {
+        onSuccess: (label) => {
+          setLabelIds((prev) => (prev.includes(label.id) ? prev : [...prev, label.id]));
+          setLabelSearch("");
+        },
+        onError: (err: unknown) => {
+          toast.error(
+            err instanceof Error && err.message
+              ? err.message
+              : t(($) => $.create_issue.create_label_failed),
+          );
+        },
+      },
+    );
+  };
+
   const resetForNextIssue = () => {
     setTitle("");
     setStatus("todo");
@@ -172,6 +251,7 @@ export function ManualCreatePanel({
     setStartDate(null);
     setDueDate(null);
     setProjectId(undefined);
+    setLabelIds([]);
     setParentIssueId(undefined);
     setChildIssues([]);
     setAttachmentIds([]);
@@ -191,6 +271,15 @@ export function ManualCreatePanel({
 
   const handleSubmit = async () => {
     if (!title.trim() || submitting) return;
+    if (!projectId) {
+      toast.error(t(($) => $.create_issue.project_required));
+      return;
+    }
+    const validAttachmentIds = attachmentIds.filter((id) => UUID_RE.test(id));
+    if (validAttachmentIds.length !== attachmentIds.length) {
+      toast.error(t(($) => $.create_issue.attachment_state_invalid));
+      return;
+    }
     setSubmitting(true);
     try {
       const issue = await createIssueMutation.mutateAsync({
@@ -202,9 +291,10 @@ export function ManualCreatePanel({
         assignee_id: assigneeId,
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
-        attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
+        attachment_ids: validAttachmentIds.length > 0 ? validAttachmentIds : undefined,
         parent_issue_id: parentIssueId,
         project_id: projectId,
+        label_ids: labelIds.length > 0 ? labelIds : undefined,
       });
 
       // Link queued children to the new parent. Deferred to after create
@@ -516,7 +606,77 @@ export function ManualCreatePanel({
                 onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
                 triggerRender={<PillButton />}
                 align="start"
+                allowClear={false}
               />
+
+              {/* Labels */}
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <PillButton aria-label={t(($) => $.create_issue.labels_aria)}>
+                      <Tag className="size-3.5" />
+                      <span>
+                        {labelIds.length > 0
+                          ? t(($) => $.create_issue.labels_count, { count: labelIds.length })
+                          : t(($) => $.create_issue.labels)}
+                      </span>
+                    </PillButton>
+                  }
+                />
+                <DropdownMenuContent align="start" className="w-56">
+                  <div className="px-2 py-1.5">
+                    <input
+                      value={labelSearch}
+                      onChange={(e) => setLabelSearch(e.target.value)}
+                      onKeyDown={(e) => {
+                        // Prevent DropdownMenu typeahead/hotkeys from swallowing
+                        // alphanumeric input while typing into the search box.
+                        e.stopPropagation();
+                      }}
+                      placeholder={t(($) => $.create_issue.labels_search_placeholder)}
+                      className="h-8 w-full rounded-md border bg-background px-2 text-xs outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  </div>
+                  {canCreateLabel && (
+                    <DropdownMenuItem onClick={createInlineLabel}>
+                      <span className="truncate">
+                        {t(($) => $.create_issue.create_label_action, { name: labelSearchTrimmed })}
+                      </span>
+                    </DropdownMenuItem>
+                  )}
+                  {filteredLabels.length === 0 ? (
+                    <DropdownMenuItem disabled>
+                      {workspaceLabels.length === 0
+                        ? t(($) => $.create_issue.no_labels)
+                        : t(($) => $.create_issue.no_labels_found)}
+                    </DropdownMenuItem>
+                  ) : (
+                    filteredLabels.map((label) => {
+                      const selected = labelIds.includes(label.id);
+                      return (
+                        <DropdownMenuItem
+                          key={label.id}
+                          onClick={() =>
+                            setLabelIds((prev) =>
+                              prev.includes(label.id)
+                                ? prev.filter((id) => id !== label.id)
+                                : [...prev, label.id],
+                            )
+                          }
+                        >
+                          <span
+                            className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: label.color }}
+                            aria-hidden
+                          />
+                          <span className="flex-1 truncate">{label.name}</span>
+                          {selected ? <Check className="h-3.5 w-3.5" /> : null}
+                        </DropdownMenuItem>
+                      );
+                    })
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
 
               {/* Parent chip — appears when parent is set.
                   Placed before the ⋯ so it wraps to a new line with ⋯ if
@@ -668,9 +828,18 @@ export function ManualCreatePanel({
                   />
                   {t(($) => $.create_issue.create_another)}
                 </label>
-                <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
-                  {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
-                </Button>
+                {!title.trim() ? (
+                  <TooltipProvider delay={200}>
+                    <Tooltip>
+                      <TooltipTrigger render={<span><Button size="sm" onClick={handleSubmit} disabled>{t(($) => $.create_issue.submit)}</Button></span>} />
+                      <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                ) : (
+                  <Button size="sm" onClick={handleSubmit} disabled={submitting}>
+                    {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
+                  </Button>
+                )}
               </div>
             </div>
           </>

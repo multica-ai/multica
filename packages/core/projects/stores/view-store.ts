@@ -33,11 +33,15 @@ export const PROJECT_SORT_DEFAULT_DIRECTION: Record<
   title: "asc",
 };
 
+export type ProjectViewMode = "compact" | "comfortable";
+
 export interface ProjectViewState {
   sortBy: ProjectSortField;
   sortDirection: ProjectSortDirection;
   setSortBy: (field: ProjectSortField) => void;
   setSortDirection: (direction: ProjectSortDirection) => void;
+  viewMode: ProjectViewMode;
+  setViewMode: (mode: ProjectViewMode) => void;
 }
 
 export const useProjectViewStore = create<ProjectViewState>()(
@@ -47,6 +51,8 @@ export const useProjectViewStore = create<ProjectViewState>()(
       sortDirection: "desc",
       setSortBy: (sortBy) => set({ sortBy }),
       setSortDirection: (sortDirection) => set({ sortDirection }),
+      viewMode: "compact",
+      setViewMode: (mode) => set({ viewMode: mode }),
     }),
     {
       name: "multica_projects_view",
@@ -54,9 +60,14 @@ export const useProjectViewStore = create<ProjectViewState>()(
       partialize: (state) => ({
         sortBy: state.sortBy,
         sortDirection: state.sortDirection,
+        viewMode: state.viewMode,
       }),
-    },
-  ),
+      merge: (persisted, current) => {
+        if (!persisted) return { ...current, viewMode: "compact" };
+        return { ...current, ...(persisted as Partial<ProjectViewState>) };
+      },
+    }
+  )
 );
 
 registerForWorkspaceRehydration(() => useProjectViewStore.persist.rehydrate());

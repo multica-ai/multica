@@ -113,17 +113,6 @@
     "step1_label": "安装 Multica CLI",
     "step2_label": "启动守护进程"
   },
-  "starter_content": {
-    "title": "欢迎 —— 要不要添加入门 task？",
-    "description_prefix": "一个 ",
-    "description_term": "上手指南",
-    "description_suffix": " 项目，包含若干简短 task，带你了解 Multica 中的智能体、issue 和上下文是怎么工作的。",
-    "dismiss_action": "从空白工作区开始",
-    "import_action": "添加入门 task",
-    "success_toast": "入门 task 已添加，看一下侧边栏",
-    "import_failed": "导入失败，请重试",
-    "dismiss_failed": "跳过失败，请重试"
-  },
   "cloud_waitlist": {
     "intro_main": "云运行时尚未上线。留下邮箱，上线时通过邮件通知你。",
     "intro_warning": "提示：没有运行时，智能体无法执行 task —— 如果现在跳过，工作区会是只读状态，直到你回来安装一个。",

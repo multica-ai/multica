@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import {
   ArrowUpCircle,
   Globe,
-  Lock,
   MoreHorizontal,
   Trash2,
 } from "lucide-react";
@@ -41,6 +40,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { workloadConfig } from "../../agents/presence";
 import { ProviderLogo } from "./provider-logo";
 import { HealthIcon, useHealthLabel } from "./shared";
@@ -231,36 +231,22 @@ function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
   );
 }
 
-// VisibilityBadge — small chip next to the runtime name showing whether
-// the runtime is shareable (public) or owner-only (private). Older backends
-// that don't ship the visibility field render the strict default (private).
+// Only public is worth a badge — private is the default and rendering a
+// `🔒 Private` chip on every row turns the whole column into noise.
 function VisibilityBadge({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");
-  const isPublic = runtime.visibility === "public";
-  const Icon = isPublic ? Globe : Lock;
-  const label = isPublic
-    ? t(($) => $.detail.visibility_label.public)
-    : t(($) => $.detail.visibility_label.private);
-  const tooltip = isPublic
-    ? t(($) => $.detail.visibility_hint.public)
-    : t(($) => $.detail.visibility_hint.private);
+  if (runtime.visibility !== "public") return null;
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <span
-            className={`shrink-0 inline-flex items-center gap-0.5 rounded px-1 text-[10px] font-medium ${
-              isPublic
-                ? "bg-info/10 text-info"
-                : "bg-muted text-muted-foreground"
-            }`}
-          >
-            <Icon className="h-2.5 w-2.5" />
-            {label}
+          <span className="shrink-0 inline-flex items-center gap-0.5 rounded bg-info/10 px-1 text-[10px] font-medium text-info">
+            <Globe className="h-2.5 w-2.5" />
+            {t(($) => $.detail.visibility_label.public)}
           </span>
         }
       />
-      <TooltipContent>{tooltip}</TooltipContent>
+      <TooltipContent>{t(($) => $.detail.visibility_hint.public)}</TooltipContent>
     </Tooltip>
   );
 }
@@ -348,13 +334,17 @@ const COST_CELL_DAYS = 14;
 
 function CostCell({ runtimeId }: { runtimeId: string }) {
   const { t } = useT("runtimes");
+  const tz = useViewingTimezone();
   const { data: usage = [] } = useQuery(
-    runtimeUsageOptions(runtimeId, COST_CELL_DAYS),
+    runtimeUsageOptions(runtimeId, COST_CELL_DAYS, tz),
   );
-  const cost7d = useMemo(() => computeCostInWindow(usage, 7), [usage]);
+  const cost7d = useMemo(
+    () => computeCostInWindow(usage, 7, tz),
+    [usage, tz],
+  );
   const costPrev7d = useMemo(
-    () => computeCostInWindow(usage, 7, 7),
-    [usage],
+    () => computeCostInWindow(usage, 7, tz, 7),
+    [usage, tz],
   );
   const delta = pctChange(cost7d, costPrev7d);
 
@@ -424,11 +414,6 @@ function CliCell({
 
   return (
     <div className="flex min-w-0 items-center gap-1 text-xs">
-      {isManaged && (
-        <span className="shrink-0 rounded-sm bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">
-          {t(($) => $.list.cli_managed_badge)}
-        </span>
-      )}
       <span
         className={`truncate font-mono ${
           hasUpdate ? "text-warning" : "text-muted-foreground"

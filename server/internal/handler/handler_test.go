@@ -1126,6 +1126,162 @@ func TestAutopilotCreatedIssueCreatorIsAssigneeAgent(t *testing.T) {
 	}
 }
 
+func TestAutopilotCreateIssueAssociatesConfiguredProject(t *testing.T) {
+	ctx := context.Background()
+	title := fmt.Sprintf("Autopilot project issue %d", time.Now().UnixNano())
+	var autopilotID, issueID, projectID string
+	defer func() {
+		if issueID != "" {
+			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		}
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+		if projectID != "" {
+			testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID)
+		}
+	}()
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id::text
+	`, testWorkspaceID, "Autopilot project target").Scan(&projectID); err != nil {
+		t.Fatalf("create project fixture: %v", err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":                "Project-linked autopilot",
+		"assignee_id":          agentID,
+		"execution_mode":       "create_issue",
+		"issue_title_template": title,
+		"project_id":           projectID,
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var autopilot AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
+		t.Fatalf("decode autopilot: %v", err)
+	}
+	autopilotID = autopilot.ID
+	if autopilot.ProjectID == nil || *autopilot.ProjectID != projectID {
+		t.Fatalf("autopilot project_id = %v, want %q", autopilot.ProjectID, projectID)
+	}
+
+	queries := db.New(testPool)
+	ap, err := queries.GetAutopilot(ctx, parseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("GetAutopilot: %v", err)
+	}
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	if run == nil || !run.IssueID.Valid {
+		t.Fatalf("dispatch run = %+v, want linked issue", run)
+	}
+	issueID = uuidToString(run.IssueID)
+
+	var issueProjectID *string
+	if err := testPool.QueryRow(ctx, `
+		SELECT project_id::text
+		FROM issue
+		WHERE id = $1
+	`, issueID).Scan(&issueProjectID); err != nil {
+		t.Fatalf("load created issue project: %v", err)
+	}
+	if issueProjectID == nil || *issueProjectID != projectID {
+		t.Fatalf("created issue project_id = %v, want %q", issueProjectID, projectID)
+	}
+}
+
+func TestUpdateAutopilotCanSetAndClearProject(t *testing.T) {
+	ctx := context.Background()
+	var autopilotID, projectID string
+	defer func() {
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+		if projectID != "" {
+			testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID)
+		}
+	}()
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id::text
+	`, testWorkspaceID, "Autopilot update project target").Scan(&projectID); err != nil {
+		t.Fatalf("create project fixture: %v", err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":          "Project update autopilot",
+		"assignee_id":    agentID,
+		"execution_mode": "create_issue",
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created autopilot: %v", err)
+	}
+	autopilotID = created.ID
+	if created.ProjectID != nil {
+		t.Fatalf("new autopilot project_id = %v, want nil", created.ProjectID)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("PATCH", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, map[string]any{
+		"project_id": projectID,
+	})
+	req = withURLParam(req, "id", autopilotID)
+	testHandler.UpdateAutopilot(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAutopilot set project: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var updated AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode updated autopilot: %v", err)
+	}
+	if updated.ProjectID == nil || *updated.ProjectID != projectID {
+		t.Fatalf("updated project_id = %v, want %q", updated.ProjectID, projectID)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("PATCH", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, map[string]any{
+		"project_id": nil,
+	})
+	req = withURLParam(req, "id", autopilotID)
+	testHandler.UpdateAutopilot(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAutopilot clear project: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cleared AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&cleared); err != nil {
+		t.Fatalf("decode cleared autopilot: %v", err)
+	}
+	if cleared.ProjectID != nil {
+		t.Fatalf("cleared project_id = %v, want nil", cleared.ProjectID)
+	}
+}
+
 // TestCreateIssueRejectsNonexistentMemberAssignee covers the bug where any
 // well-formed UUID was accepted as assignee_id without checking workspace
 // membership.
@@ -1347,6 +1503,9 @@ func TestCreateIssueRejectsMalformedAttachmentIDBeforeWrite(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("CreateIssue: expected 400 for malformed attachment_ids, got %d: %s", w.Code, w.Body.String())
 	}
+	if !strings.Contains(w.Body.String(), "attachment_ids[0] is not a valid UUID") {
+		t.Fatalf("CreateIssue: expected indexed attachment_ids error, got %s", w.Body.String())
+	}
 
 	var after int
 	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&after); err != nil {
@@ -1354,6 +1513,74 @@ func TestCreateIssueRejectsMalformedAttachmentIDBeforeWrite(t *testing.T) {
 	}
 	if after != before {
 		t.Fatalf("CreateIssue: malformed attachment_ids should not create issue, count before=%d after=%d", before, after)
+	}
+}
+
+func TestCreateIssueWithLabelIDs(t *testing.T) {
+	labelW := httptest.NewRecorder()
+	labelReq := newRequest("POST", "/api/labels", map[string]any{
+		"name":  "create-with-label",
+		"color": "#10b981",
+	})
+	testHandler.CreateLabel(labelW, labelReq)
+	if labelW.Code != http.StatusCreated {
+		t.Fatalf("CreateLabel: expected 201, got %d: %s", labelW.Code, labelW.Body.String())
+	}
+	var label LabelResponse
+	json.NewDecoder(labelW.Body).Decode(&label)
+	t.Cleanup(func() {
+		w := httptest.NewRecorder()
+		req := newRequest("DELETE", "/api/labels/"+label.ID, nil)
+		req = withURLParam(req, "id", label.ID)
+		testHandler.DeleteLabel(w, req)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":     "Create issue with labels",
+		"label_ids": []string{label.ID},
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	defer func() {
+		cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+		cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+		testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+	}()
+	if created.Labels == nil || len(*created.Labels) != 1 {
+		t.Fatalf("CreateIssue: expected 1 label in response, got %+v", created.Labels)
+	}
+	if (*created.Labels)[0].ID != label.ID {
+		t.Fatalf("CreateIssue: expected label id %s, got %s", label.ID, (*created.Labels)[0].ID)
+	}
+}
+
+func TestCreateIssueRejectsUnknownLabelIDBeforeWrite(t *testing.T) {
+	var before int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&before); err != nil {
+		t.Fatalf("count issues before: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":     "Unknown label issue",
+		"label_ids": []string{"11111111-1111-1111-1111-111111111111"},
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("CreateIssue: expected 404 for unknown label_ids, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var after int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&after); err != nil {
+		t.Fatalf("count issues after: %v", err)
+	}
+	if after != before {
+		t.Fatalf("CreateIssue: unknown label_ids should not create issue, count before=%d after=%d", before, after)
 	}
 }
 
@@ -1723,16 +1950,6 @@ func TestRequestBodyUUIDFieldsRejectMalformed(t *testing.T) {
 				},
 			}),
 			handle: testHandler.DaemonRegister,
-		},
-		{
-			name: "import starter content workspace_id",
-			req: newRequest("POST", "/api/onboarding/starter-content/import", map[string]any{
-				"workspace_id": "not-a-uuid",
-				"project": map[string]any{
-					"title": "Getting Started",
-				},
-			}),
-			handle: testHandler.ImportStarterContent,
 		},
 	}
 

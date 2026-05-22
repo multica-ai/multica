@@ -142,15 +142,15 @@ func TestBuildQuickCreatePromptProjectPinning(t *testing.T) {
 		}
 	}
 
-	// Without a project, the prompt must keep the legacy "omit" instruction
-	// so the agent doesn't accidentally start passing --project on plain
-	// quick-create runs.
+	// Without a project, the prompt must avoid pinning a specific project.
+	// The CLI will now default only when the workspace has one project, or
+	// fail with the available project list when there are multiple choices.
 	plain := buildQuickCreatePrompt(Task{QuickCreatePrompt: "fix the login button color"})
 	if !strings.Contains(plain, "**project**: omit") {
 		t.Errorf("buildQuickCreatePrompt without project must keep the omit instruction, got:\n%s", plain)
 	}
-	if strings.Contains(plain, "--project") {
-		t.Errorf("buildQuickCreatePrompt without project must NOT mention --project, got:\n%s", plain)
+	if strings.Contains(plain, "--project \"") {
+		t.Errorf("buildQuickCreatePrompt without project must NOT pin a project id, got:\n%s", plain)
 	}
 }
 
@@ -200,12 +200,13 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 	}
 }
 
-// TestBuildPromptCommentTriggerPromotesThreadReads pins MUL-2387: the
-// per-turn prompt for a comment-triggered task must steer the agent at the
-// thread-aware reads first (--thread anchored on the trigger comment id,
-// then --recent N as a fallback with cursor guidance) instead of the legacy
-// "dump the entire comment list" recipe. Locking this in test stops the
-// guidance from decaying back to a full-flat-dump on prompt edits.
+// TestBuildPromptCommentTriggerPromotesThreadReads pins MUL-2387 + MUL-2421:
+// the per-turn prompt for a comment-triggered task must default the trigger
+// thread read to `--thread <id> --tail 30` (so long threads don't dump
+// hundreds of replies into the agent's context) and explain reply-cursor
+// pagination for older replies. --recent N stays as the cross-thread
+// fallback. Locking this in test stops the guidance from decaying back to
+// either the legacy full-flat-dump or the unbounded `--thread` recipe.
 func TestBuildPromptCommentTriggerPromotesThreadReads(t *testing.T) {
 	const (
 		issueID   = "issue-thread-1"
@@ -218,21 +219,26 @@ func TestBuildPromptCommentTriggerPromotesThreadReads(t *testing.T) {
 		TriggerAuthorType:     "member",
 		TriggerAuthorName:     "Bohan",
 	}
-	out := BuildPrompt(task, "claude")
+	out := BuildPrompt(task)
 
 	mustContain := []string{
-		// Thread-first read pinned by trigger comment id.
+		// Thread-first read pinned by trigger comment id, capped via --tail 30.
 		"--thread " + triggerID,
-		"`multica issue comment list " + issueID + " --thread " + triggerID + " --output json`",
-		// --recent fallback uses the documented default N=20.
+		"--tail 30",
+		"`multica issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json`",
+		// Reply cursor walks older replies inside the same thread.
+		"Next reply cursor:",
+		"--before-id <reply-id>",
+		// --recent stays as the cross-thread background fallback.
 		"--recent 20 --output json",
 		// Cursor walks via the stderr line the CLI emits, not invented flags.
-		"Next thread cursor:",
+		"Next thread cursor",
 		"--before",
 		"--before-id",
-		// --since is preserved as an additional, combinable knob.
+		// --since is preserved as an additional, combinable knob (now scoped
+		// to the post-MUL-2421 mode names).
 		"--since",
-		"may combine with `--thread` or `--recent`",
+		"may combine with `--thread --tail` or `--recent`",
 		// Discourage the unfiltered full dump on long-running issues.
 		"Avoid the unfiltered",
 		"wastes context",
@@ -249,6 +255,12 @@ func TestBuildPromptCommentTriggerPromotesThreadReads(t *testing.T) {
 	if strings.Contains(out, "returns all comments for the issue (server caps at 2000)") {
 		t.Errorf("buildCommentPrompt still carries the legacy full-dump phrasing")
 	}
+	// The pre-MUL-2421 unbounded `--thread` recipe (no --tail) is also a
+	// regression target: it dumps the entire thread on long threads, which
+	// is exactly what --tail 30 is meant to bound.
+	if strings.Contains(out, "--thread "+triggerID+" --output json") {
+		t.Errorf("buildCommentPrompt regressed to unbounded --thread recipe (no --tail) — long threads will overflow context\n--- output ---\n%s", out)
+	}
 }
 
 // TestBuildPromptDefaultMentionsRecent pins that the catch-all fallback
@@ -257,7 +269,7 @@ func TestBuildPromptCommentTriggerPromotesThreadReads(t *testing.T) {
 // to the flat dump, even though it cannot anchor a --thread without a
 // trigger comment id.
 func TestBuildPromptDefaultMentionsRecent(t *testing.T) {
-	out := BuildPrompt(Task{IssueID: "issue-default-1"}, "claude")
+	out := BuildPrompt(Task{IssueID: "issue-default-1"})
 	for _, s := range []string{
 		"--recent 20 --output json",
 		"Next thread cursor:",

@@ -1,4 +1,4 @@
-export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueReaction } from "./issue";
+export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueMetadata, IssueMetadataValue, IssueReaction } from "./issue";
 export type {
   Agent,
   AgentStatus,
@@ -50,6 +50,8 @@ export type {
   RuntimeUpdateStatus,
   CLIUpdateManifest,
   RuntimeModel,
+  RuntimeModelThinking,
+  RuntimeModelThinkingLevel,
   RuntimeModelListRequest,
   RuntimeModelListStatus,
   RuntimeModelsResult,
@@ -133,6 +135,7 @@ export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,
+  AutopilotAssigneeType,
   AutopilotTrigger,
   AutopilotTriggerKind,
   AutopilotRun,
