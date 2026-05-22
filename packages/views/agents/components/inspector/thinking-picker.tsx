@@ -16,26 +16,26 @@ import { useT } from "../../../i18n";
  * discovered, so the value/label pairs match each CLI's own UI (`Low`,
  * `Extra high`, …) verbatim; never normalised across providers.
  *
- * The empty string is the "use model default" sentinel and renders as
- * "Default" in the chip, with the discovered `default_level` (when
- * present) badged inside the popover so the user can see what they'll
- * get if they clear.
+ * Empty string is the "no override" sentinel: the backend omits the
+ * effort flag entirely and the upstream CLI's own config / built-in
+ * default decides what the model runs at. We render that state as
+ * "Follow CLI config" rather than singling out one level as the
+ * factory default, because the actual default at runtime is owned by
+ * the user's local CLI install, not by Multica's catalog.
  */
 export function ThinkingPicker({
   value,
   levels,
-  defaultLevel,
   canEdit = true,
   onChange,
 }: {
-  /** Persisted thinking_level — "" means "use model default". */
+  /** Persisted thinking_level — "" means "follow local CLI config". */
   value: string;
-  /** Supported levels for the current (runtime, model) pair. Caller has
-   *  already verified the list is non-empty before mounting this picker. */
+  /** Supported levels for the current (runtime, model) pair. Usually
+   *  non-empty when the row is shown, but the stale-orphan clear path
+   *  in ThinkingPropRow mounts the picker with an empty list plus a
+   *  persisted value so the user can see and clear the dangling token. */
   levels: RuntimeModelThinkingLevel[];
-  /** Level the runtime uses when no override is sent. Surfaced as a badge
-   *  in the popover. */
-  defaultLevel?: string;
   /** When false, render a static read-only display and skip the popover. */
   canEdit?: boolean;
   onChange: (next: string) => Promise<void> | void;
@@ -96,23 +96,26 @@ export function ThinkingPicker({
           key={l.value}
           selected={l.value === value}
           onClick={() => void select(l.value)}
-          tooltip={l.description || (l.label !== l.value ? `${l.label} · ${l.value}` : l.value)}
         >
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <span className="truncate font-medium">{l.label}</span>
-              {l.value === defaultLevel && (
-                <span className="shrink-0 rounded bg-primary/10 px-1 text-[10px] font-medium text-primary">
-                  {t(($) => $.pickers.thinking_default_badge)}
-                </span>
-              )}
-            </div>
+          {/* PickerItem wraps children in a flex `<span>`. Putting a
+              `<div>` inside that <span> is block-in-inline (invalid HTML5)
+              and triggers browser quirks that shift descendant x-position.
+              Use a `<span>` with explicit `block` + `text-left` so layout
+              is deterministic across rows regardless of whether the label
+              row has the `default` badge sibling. */}
+          {/* No model-factory-default badge here on purpose: when the
+              picker is "Follow CLI config" (value === ""), Multica omits
+              `--effort` and the local CLI config decides — the model's
+              factory default is irrelevant to what actually fires, so
+              flagging one option as "default" was misleading. */}
+          <span className="block min-w-0 flex-1 text-left">
+            <span className="truncate text-[13px] font-medium">{l.label}</span>
             {l.description && (
-              <div className="truncate text-[10px] text-muted-foreground">
+              <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
                 {l.description}
-              </div>
+              </span>
             )}
-          </div>
+          </span>
         </PickerItem>
       ))}
 
