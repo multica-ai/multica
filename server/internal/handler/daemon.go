@@ -171,7 +171,7 @@ type DaemonRegisterRequest struct {
 	// daemon reconnects (see UpsertAgentRuntime in runtime.sql).
 	Timezone   string `json:"timezone"`
 	HealthPort int    `json:"health_port"` // local daemon health/trace port
-	Runtimes []struct {
+	Runtimes   []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
@@ -1180,24 +1180,24 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			Model:         agent.Model.String,
 			ThinkingLevel: agent.ThinkingLevel.String,
 			RuntimeConfig: agent.RuntimeConfig,
-	}
-
-	// Resolve the runtime owner's profile description so the daemon can
-	// inject "## Requesting User" into the brief. Empty fields short-circuit
-	// the heading entirely on the daemon side; cloud / system runtimes with
-	// no owner stay anonymous. Failure here must not block claim — the agent
-	// can still run without the user-context section.
-	if runtime.OwnerID.Valid {
-		if owner, err := h.Queries.GetUser(r.Context(), runtime.OwnerID); err == nil {
-			resp.RequestingUserName = owner.Name
-			resp.RequestingUserProfileDescription = owner.ProfileDescription
-		} else {
-			slog.Debug("failed to load runtime owner for brief injection",
-				"runtime_id", runtimeID,
-				"owner_id", uuidToString(runtime.OwnerID),
-				"error", err,
-			)
 		}
+
+		// Resolve the runtime owner's profile description so the daemon can
+		// inject "## Requesting User" into the brief. Empty fields short-circuit
+		// the heading entirely on the daemon side; cloud / system runtimes with
+		// no owner stay anonymous. Failure here must not block claim — the agent
+		// can still run without the user-context section.
+		if runtime.OwnerID.Valid {
+			if owner, err := h.Queries.GetUser(r.Context(), runtime.OwnerID); err == nil {
+				resp.RequestingUserName = owner.Name
+				resp.RequestingUserProfileDescription = owner.ProfileDescription
+			} else {
+				slog.Debug("failed to load runtime owner for brief injection",
+					"runtime_id", runtimeID,
+					"owner_id", uuidToString(runtime.OwnerID),
+					"error", err,
+				)
+			}
 		}
 	}
 
@@ -1212,31 +1212,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 
-			// Squad-leader briefing injection: when the issue is assigned
-			// to a squad and the claiming agent is that squad's current
-			// leader, append a full briefing (Operating Protocol + Roster
-			// + user Instructions) to the agent's own Instructions. We
-			// append (not replace) so per-agent instructions remain
-			// authoritative for general behavior; the squad briefing
-			// stacks on top as task-specific squad context.
-			if resp.Agent != nil && issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid {
-				if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
-					ID:          issue.AssigneeID,
-					WorkspaceID: issue.WorkspaceID,
-				}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
-					if strings.TrimSpace(resp.Agent.Instructions) == "" {
-						resp.Agent.Instructions = briefing
-					} else {
-						resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
-					}
-					slog.Debug("injected squad leader briefing",
-						"squad_id", uuidToString(squad.ID),
-						"squad_name", squad.Name,
-						"leader_agent_id", resp.Agent.ID,
-					)
-				}
-			}
+			// Squad-leader briefing injection for issue-bound tasks. This
+			// covers both the issue assignee=squad path and plain comment
+			// @squad mentions, where the issue assignee may remain a member
+			// but task.context carries the mentioned squad id.
+			h.injectIssueSquadLeaderBriefing(r.Context(), &resp, *task, issue)
 
 			var projectRepos []RepoData
 			if issue.ProjectID.Valid {
@@ -1516,22 +1496,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						ID:          squadUUID,
 						WorkspaceID: wsUUID,
 					}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
-						if strings.TrimSpace(resp.Agent.Instructions) == "" {
-							resp.Agent.Instructions = briefing
-						} else {
-							resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
-						}
-						// Surface the squad identity to the daemon so the
-						// quick-create prompt defaults the new issue's
-						// assignee to the squad, not the leader agent.
-						resp.SquadID = uuidToString(squad.ID)
-						resp.SquadName = squad.Name
-						slog.Debug("injected squad leader briefing for quick-create",
-							"squad_id", uuidToString(squad.ID),
-							"squad_name", squad.Name,
-							"leader_agent_id", resp.Agent.ID,
-						)
+						h.appendSquadLeaderBriefing(r.Context(), &resp, squad, "quick-create")
 					}
 				}
 			}
@@ -1568,6 +1533,68 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})
+}
+
+func (h *Handler) injectIssueSquadLeaderBriefing(ctx context.Context, resp *AgentTaskResponse, task db.AgentTaskQueue, issue db.Issue) {
+	if resp == nil || resp.Agent == nil {
+		return
+	}
+	if squad, ok := h.squadFromTaskContext(ctx, task, issue.WorkspaceID); ok {
+		if uuidToString(squad.LeaderID) == resp.Agent.ID {
+			h.appendSquadLeaderBriefing(ctx, resp, squad, "task-context")
+			return
+		}
+	}
+	if issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid {
+		if squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+			ID:          issue.AssigneeID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err == nil {
+			h.appendSquadLeaderBriefing(ctx, resp, squad, "issue-assignee")
+		}
+	}
+}
+
+func (h *Handler) squadFromTaskContext(ctx context.Context, task db.AgentTaskQueue, workspaceID pgtype.UUID) (db.Squad, bool) {
+	if task.Context == nil {
+		return db.Squad{}, false
+	}
+	var cfg service.TaskContext
+	if err := json.Unmarshal(task.Context, &cfg); err != nil || strings.TrimSpace(cfg.SquadID) == "" {
+		return db.Squad{}, false
+	}
+	squadUUID, err := util.ParseUUID(cfg.SquadID)
+	if err != nil {
+		return db.Squad{}, false
+	}
+	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+		ID:          squadUUID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return db.Squad{}, false
+	}
+	return squad, true
+}
+
+func (h *Handler) appendSquadLeaderBriefing(ctx context.Context, resp *AgentTaskResponse, squad db.Squad, source string) {
+	if resp == nil || resp.Agent == nil || uuidToString(squad.LeaderID) != resp.Agent.ID {
+		return
+	}
+	briefing := buildSquadLeaderBriefing(ctx, h.Queries, squad)
+	if strings.TrimSpace(resp.Agent.Instructions) == "" {
+		resp.Agent.Instructions = briefing
+	} else {
+		resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
+	}
+	resp.SquadID = uuidToString(squad.ID)
+	resp.SquadName = squad.Name
+	slog.Debug("injected squad leader briefing",
+		"squad_id", uuidToString(squad.ID),
+		"squad_name", squad.Name,
+		"leader_agent_id", resp.Agent.ID,
+		"source", source,
+	)
 }
 
 // ListPendingTasksByRuntime returns queued/dispatched tasks for a runtime.
