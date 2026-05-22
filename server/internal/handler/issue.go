@@ -1417,10 +1417,11 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 // instead of letting it default. The frontend remembers the user's last
 // pick per workspace, so frequent users skip retyping "in project X".
 type QuickCreateIssueRequest struct {
-	AgentID   string `json:"agent_id,omitempty"`
-	SquadID   string `json:"squad_id,omitempty"`
-	Prompt    string `json:"prompt"`
-	ProjectID string `json:"project_id,omitempty"`
+	AgentID       string `json:"agent_id,omitempty"`
+	SquadID       string `json:"squad_id,omitempty"`
+	Prompt        string `json:"prompt"`
+	ProjectID     string `json:"project_id,omitempty"`
+	ParentIssueID string `json:"parent_issue_id,omitempty"`
 }
 
 // QuickCreateIssueResponse echoes the queued task id so the frontend can
@@ -1567,7 +1568,25 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		projectUUID = pid
 	}
 
-	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID)
+	// Optional parent_issue_id — validate the issue exists in this workspace
+	// so the agent's --parent flag targets a real issue.
+	var parentIssueUUID pgtype.UUID
+	if strings.TrimSpace(req.ParentIssueID) != "" {
+		pid, ok := parseUUIDOrBadRequest(w, req.ParentIssueID, "parent_issue_id")
+		if !ok {
+			return
+		}
+		if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			ID:          pid,
+			WorkspaceID: wsUUID,
+		}); err != nil {
+			writeError(w, http.StatusBadRequest, "parent issue not found")
+			return
+		}
+		parentIssueUUID = pid
+	}
+
+	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID, parentIssueUUID)
 	if err != nil {
 		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue quick-create task")
@@ -2242,7 +2261,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Trigger the assigned agent when a member moves an issue out of backlog.
 	// Backlog acts as a parking lot — moving to an active status signals the
 	// issue is ready for work.
-	if statusChanged && !assigneeChanged && actorType == "member" &&
+	isSelfStatusChange := actorType == "agent" && issue.AssigneeType.String == "agent" && uuidToString(issue.AssigneeID) == actorID
+	if statusChanged && !assigneeChanged && !isSelfStatusChange &&
 		prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
 		if h.isAgentAssigneeReady(r.Context(), issue) {
 			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
@@ -2668,7 +2688,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Trigger agent when moving out of backlog (batch).
-		if statusChanged && !assigneeChanged && actorType == "member" &&
+		isSelfStatusChange := actorType == "agent" && issue.AssigneeType.String == "agent" && uuidToString(issue.AssigneeID) == actorID
+		if statusChanged && !assigneeChanged && !isSelfStatusChange &&
 			prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
 			if h.isAgentAssigneeReady(r.Context(), issue) {
 				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)

@@ -731,7 +731,8 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// the user is talking to someone else, not requesting work from the assignee.
 	// Also skip when replying in a member-started thread without mentioning the
 	// assignee — the user is continuing a member-to-member conversation.
-	if authorType == "member" && h.shouldEnqueueOnComment(r.Context(), issue) &&
+	isSelfComment := authorType == "agent" && issue.AssigneeType.String == "agent" && uuidToString(issue.AssigneeID) == authorID
+	if !isSelfComment && h.shouldEnqueueOnComment(r.Context(), issue) &&
 		!h.commentMentionsOthersButNotAssignee(comment.Content, issue) &&
 		!h.isReplyToMemberThread(r.Context(), parentComment, comment.Content, issue) {
 		// Always use the current comment as the trigger so the agent reads
