@@ -38,6 +38,7 @@ export type AgentRuntime = RuntimeDevice;
 // the agent presence derivation and the UI failure-message lookup.
 export type TaskFailureReason =
   | "agent_error"
+  | "agent_transient"
   | "timeout"
   | "codex_semantic_inactivity"
   | "runtime_offline"

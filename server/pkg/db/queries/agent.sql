@@ -141,6 +141,8 @@ SELECT
     p.is_leader_task
 FROM agent_task_queue p
 WHERE p.id = $1
+ON CONFLICT (parent_task_id) WHERE parent_task_id IS NOT NULL DO UPDATE
+SET parent_task_id = EXCLUDED.parent_task_id
 RETURNING *;
 
 -- name: CancelAgentTasksByIssue :many

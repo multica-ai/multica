@@ -296,6 +296,166 @@ func TestCreateRetryTaskKeepsOrdinaryTimeoutSession(t *testing.T) {
 	}
 }
 
+func TestMaybeRetryFailedTaskTransientCreatesNextAttempt(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	var parentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			started_at, completed_at, failure_reason, attempt, max_attempts
+		)
+		VALUES ($1, $2, $3, 'failed', 0,
+		        now() - interval '1 minute', now(), 'agent_transient', 1, 2)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&parentID); err != nil {
+		t.Fatalf("insert transient parent task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	hub := realtime.NewHub()
+	go hub.Run()
+	bus := events.New()
+	taskService := service.NewTaskService(queries, nil, hub, bus)
+
+	parent, err := queries.GetAgentTask(ctx, pgtype.UUID{Bytes: parseUUIDBytes(parentID), Valid: true})
+	if err != nil {
+		t.Fatalf("load parent task: %v", err)
+	}
+
+	child, err := taskService.MaybeRetryFailedTask(ctx, parent)
+	if err != nil {
+		t.Fatalf("MaybeRetryFailedTask failed: %v", err)
+	}
+	if child == nil {
+		t.Fatal("expected transient failure to create retry child, got nil")
+	}
+	if child.Attempt != 2 {
+		t.Fatalf("child attempt = %d, want 2", child.Attempt)
+	}
+	if got := util.UUIDToString(child.ParentTaskID); got != parentID {
+		t.Fatalf("child parent_task_id = %s, want %s", got, parentID)
+	}
+}
+
+func TestMaybeRetryFailedTaskDoesNotRetryPermanentOrExhaustedFailures(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+	queries := db.New(testPool)
+	hub := realtime.NewHub()
+	go hub.Run()
+	bus := events.New()
+	taskService := service.NewTaskService(queries, nil, hub, bus)
+
+	cases := []struct {
+		name        string
+		reason      string
+		attempt     int
+		maxAttempts int
+	}{
+		{name: "permanent agent error", reason: "agent_error", attempt: 1, maxAttempts: 2},
+		{name: "auth failure", reason: "api_invalid_request", attempt: 1, maxAttempts: 2},
+		{name: "budget exhausted", reason: "agent_transient", attempt: 2, maxAttempts: 2},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var parentID string
+			if err := testPool.QueryRow(ctx, `
+				INSERT INTO agent_task_queue (
+					agent_id, runtime_id, issue_id, status, priority,
+					started_at, completed_at, failure_reason, attempt, max_attempts
+				)
+				VALUES ($1, $2, $3, 'failed', 0,
+				        now() - interval '1 minute', now(), $4, $5, $6)
+				RETURNING id
+			`, agentID, runtimeID, issueID, tc.reason, tc.attempt, tc.maxAttempts).Scan(&parentID); err != nil {
+				t.Fatalf("insert parent task: %v", err)
+			}
+
+			parent, err := queries.GetAgentTask(ctx, pgtype.UUID{Bytes: parseUUIDBytes(parentID), Valid: true})
+			if err != nil {
+				t.Fatalf("load parent task: %v", err)
+			}
+			child, err := taskService.MaybeRetryFailedTask(ctx, parent)
+			if err != nil {
+				t.Fatalf("MaybeRetryFailedTask failed: %v", err)
+			}
+			if child != nil {
+				t.Fatalf("expected no retry child, got %s", util.UUIDToString(child.ID))
+			}
+
+			var childCount int
+			if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM agent_task_queue WHERE parent_task_id = $1`, parentID).Scan(&childCount); err != nil {
+				t.Fatalf("count retry children: %v", err)
+			}
+			if childCount != 0 {
+				t.Fatalf("retry children = %d, want 0", childCount)
+			}
+		})
+	}
+}
+
+func TestCreateRetryTaskIsIdempotentForDuplicateCompletions(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	var parentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			started_at, completed_at, failure_reason, attempt, max_attempts
+		)
+		VALUES ($1, $2, $3, 'failed', 0,
+		        now() - interval '1 minute', now(), 'agent_transient', 1, 2)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&parentID); err != nil {
+		t.Fatalf("insert transient parent task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	parentUUID := pgtype.UUID{Bytes: parseUUIDBytes(parentID), Valid: true}
+	first, err := queries.CreateRetryTask(ctx, parentUUID)
+	if err != nil {
+		t.Fatalf("first CreateRetryTask failed: %v", err)
+	}
+	second, err := queries.CreateRetryTask(ctx, parentUUID)
+	if err != nil {
+		t.Fatalf("second CreateRetryTask failed: %v", err)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("duplicate retry creation returned different tasks: first=%s second=%s",
+			util.UUIDToString(first.ID), util.UUIDToString(second.ID))
+	}
+
+	var childCount int
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM agent_task_queue WHERE parent_task_id = $1`, parentID).Scan(&childCount); err != nil {
+		t.Fatalf("count retry children: %v", err)
+	}
+	if childCount != 1 {
+		t.Fatalf("retry children = %d, want 1", childCount)
+	}
+}
+
 // TestGetLastTaskSessionExcludesLegacyAPI400 is the MUL-1921 legacy
 // regression: pre-fix rows are tagged failure_reason='agent_error' even
 // though their error text contains the canonical Anthropic 400
