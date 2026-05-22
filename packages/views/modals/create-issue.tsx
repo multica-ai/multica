@@ -13,6 +13,7 @@ import {
   Maximize2,
   Minimize2,
   MoreHorizontal,
+  Tag,
   X as XIcon,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
@@ -39,6 +40,7 @@ import { ProjectPicker } from "../projects/components/project-picker";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { labelListOptions } from "@multica/core/labels";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
@@ -162,6 +164,8 @@ export function ManualCreatePanel({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
+  const { data: workspaceLabels = [] } = useQuery(labelListOptions(wsId));
+  const [labelIds, setLabelIds] = useState<string[]>([]);
 
   // File upload — collect attachment IDs so we can link them after issue creation.
   const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
@@ -199,6 +203,7 @@ export function ManualCreatePanel({
     setStartDate(null);
     setDueDate(null);
     setProjectId(undefined);
+    setLabelIds([]);
     setParentIssueId(undefined);
     setChildIssues([]);
     setAttachmentIds([]);
@@ -241,6 +246,7 @@ export function ManualCreatePanel({
         attachment_ids: validAttachmentIds.length > 0 ? validAttachmentIds : undefined,
         parent_issue_id: parentIssueId,
         project_id: projectId,
+        label_ids: labelIds.length > 0 ? labelIds : undefined,
       });
 
       // Link queued children to the new parent. Deferred to after create
@@ -554,6 +560,53 @@ export function ManualCreatePanel({
                 align="start"
                 allowClear={false}
               />
+
+              {/* Labels */}
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <PillButton aria-label={t(($) => $.create_issue.labels_aria)}>
+                      <Tag className="size-3.5" />
+                      <span>
+                        {labelIds.length > 0
+                          ? t(($) => $.create_issue.labels_count, { count: labelIds.length })
+                          : t(($) => $.create_issue.labels)}
+                      </span>
+                    </PillButton>
+                  }
+                />
+                <DropdownMenuContent align="start" className="w-56">
+                  {workspaceLabels.length === 0 ? (
+                    <DropdownMenuItem disabled>
+                      {t(($) => $.create_issue.no_labels)}
+                    </DropdownMenuItem>
+                  ) : (
+                    workspaceLabels.map((label) => {
+                      const selected = labelIds.includes(label.id);
+                      return (
+                        <DropdownMenuItem
+                          key={label.id}
+                          onClick={() =>
+                            setLabelIds((prev) =>
+                              prev.includes(label.id)
+                                ? prev.filter((id) => id !== label.id)
+                                : [...prev, label.id],
+                            )
+                          }
+                        >
+                          <span
+                            className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: label.color }}
+                            aria-hidden
+                          />
+                          <span className="flex-1 truncate">{label.name}</span>
+                          {selected ? <Check className="h-3.5 w-3.5" /> : null}
+                        </DropdownMenuItem>
+                      );
+                    })
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
 
               {/* Parent chip — appears when parent is set.
                   Placed before the ⋯ so it wraps to a new line with ⋯ if

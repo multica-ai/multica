@@ -87,6 +87,17 @@ vi.mock("@multica/core/projects/queries", () => ({
   }),
 }));
 
+vi.mock("@multica/core/labels", () => ({
+  labelListOptions: (wsId: string) => ({
+    queryKey: ["labels", wsId],
+    queryFn: () =>
+      Promise.resolve([
+        { id: "label-1", name: "bug", color: "#ef4444" },
+        { id: "label-2", name: "feature", color: "#22c55e" },
+      ]),
+  }),
+}));
+
 vi.mock("@multica/core/issues/stores/draft-store", () => ({
   useIssueDraftStore: Object.assign(
     (selector?: (state: typeof mockDraftStore) => unknown) =>
@@ -375,6 +386,8 @@ describe("CreateIssueModal", () => {
         attachment_ids: undefined,
         parent_issue_id: undefined,
         project_id: "proj-1",
+        label_ids: undefined,
+        project_id: "proj-1",
       });
     });
 
@@ -422,6 +435,8 @@ describe("CreateIssueModal", () => {
         due_date: undefined,
         attachment_ids: undefined,
         parent_issue_id: undefined,
+        project_id: "proj-1",
+        label_ids: undefined,
         project_id: "proj-1",
       });
     });
