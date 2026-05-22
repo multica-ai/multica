@@ -265,6 +265,32 @@ func (q *Queries) CreateTargetedNotificationDelivery(ctx context.Context, arg Cr
 	return i, err
 }
 
+const existsDeliveryByCommentAndChannel = `-- name: ExistsDeliveryByCommentAndChannel :one
+SELECT EXISTS (
+    SELECT 1
+    FROM notification_delivery nd
+    JOIN notification_event ne ON ne.id = nd.notification_event_id
+    WHERE ne.recipient_user_id = $1
+      AND ne.comment_id = $2
+      AND nd.channel = $3
+      AND nd.status IN ('pending', 'sent')
+      AND nd.created_at > now() - interval '60 seconds'
+) AS "exists"
+`
+
+type ExistsDeliveryByCommentAndChannelParams struct {
+	RecipientUserID pgtype.UUID `json:"recipient_user_id"`
+	CommentID       pgtype.UUID `json:"comment_id"`
+	Channel         string      `json:"channel"`
+}
+
+func (q *Queries) ExistsDeliveryByCommentAndChannel(ctx context.Context, arg ExistsDeliveryByCommentAndChannelParams) (bool, error) {
+	row := q.db.QueryRow(ctx, existsDeliveryByCommentAndChannel, arg.RecipientUserID, arg.CommentID, arg.Channel)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const existsOpenclawWeixinDeliveryByComment = `-- name: ExistsOpenclawWeixinDeliveryByComment :one
 SELECT EXISTS (
     SELECT 1

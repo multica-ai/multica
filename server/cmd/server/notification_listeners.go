@@ -298,6 +298,24 @@ func recordMentionDingTalkDelivery(
 	event db.NotificationEvent,
 	payloadSnapshot []byte,
 ) {
+	if event.CommentID.Valid {
+		exists, err := queries.ExistsDeliveryByCommentAndChannel(ctx, db.ExistsDeliveryByCommentAndChannelParams{
+			RecipientUserID: event.RecipientUserID,
+			CommentID:       event.CommentID,
+			Channel:         "dingtalk",
+		})
+		if err != nil {
+			slog.Error("failed to check dingtalk dedup",
+				"recipient_id", recipientID,
+				"comment_id", util.UUIDToString(event.CommentID),
+				"error", err,
+			)
+		}
+		if exists {
+			return
+		}
+	}
+
 	prefs, err := queries.ListNotificationChannelPreferencesByUser(ctx, parseUUID(recipientID))
 	if err != nil {
 		slog.Error("failed to load notification preferences for dingtalk delivery",
@@ -384,6 +402,24 @@ func recordDingTalkTaskDelivery(
 	event db.NotificationEvent,
 	payloadSnapshot []byte,
 ) {
+	if event.CommentID.Valid {
+		exists, err := queries.ExistsDeliveryByCommentAndChannel(ctx, db.ExistsDeliveryByCommentAndChannelParams{
+			RecipientUserID: event.RecipientUserID,
+			CommentID:       event.CommentID,
+			Channel:         "dingtalk",
+		})
+		if err != nil {
+			slog.Error("failed to check dingtalk task dedup",
+				"recipient_id", recipientID,
+				"comment_id", util.UUIDToString(event.CommentID),
+				"error", err,
+			)
+		}
+		if exists {
+			return
+		}
+	}
+
 	prefs, err := queries.ListNotificationChannelPreferencesByUser(ctx, parseUUID(recipientID))
 	if err != nil {
 		slog.Error("failed to load notification preferences for dingtalk task delivery",
