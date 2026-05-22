@@ -1,9 +1,63 @@
 package daemon
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestExpandCustomEnvValueWithHome(t *testing.T) {
+	t.Parallel()
+
+	home := filepath.Join(string(filepath.Separator), "home", "alice")
+	cases := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{
+			name:  "tilde slash path",
+			value: "~/.claude-personal",
+			want:  filepath.Join(home, ".claude-personal"),
+		},
+		{
+			name:  "bare tilde",
+			value: "~",
+			want:  home,
+		},
+		{
+			name:  "tilde slash root",
+			value: "~/",
+			want:  home,
+		},
+		{
+			name:  "non-leading tilde",
+			value: "/tmp/~/.claude-personal",
+			want:  "/tmp/~/.claude-personal",
+		},
+		{
+			name:  "shell variable",
+			value: "$HOME/.claude-personal",
+			want:  "$HOME/.claude-personal",
+		},
+		{
+			name:  "named user tilde",
+			value: "~alice/.claude-personal",
+			want:  "~alice/.claude-personal",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := expandCustomEnvValueWithHome(tc.value, home)
+			if got != tc.want {
+				t.Errorf("expandCustomEnvValueWithHome(%q, %q) = %q, want %q", tc.value, home, got, tc.want)
+			}
+		})
+	}
+}
 
 func TestParseFlexDuration(t *testing.T) {
 	t.Parallel()

@@ -2395,7 +2395,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				d.logger.Warn("custom_env: blocked key skipped", "key", k)
 				continue
 			}
-			agentEnv[k] = v
+			agentEnv[k] = expandCustomEnvValue(v)
 		}
 	}
 	backend, err := agent.New(provider, agent.Config{

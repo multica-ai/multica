@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -16,6 +17,25 @@ func envOrDefault(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func expandCustomEnvValue(value string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return value
+	}
+	return expandCustomEnvValueWithHome(value, home)
+}
+
+func expandCustomEnvValueWithHome(value, home string) string {
+	switch {
+	case value == "~":
+		return home
+	case strings.HasPrefix(value, "~/"):
+		return filepath.Join(home, strings.TrimPrefix(value, "~/"))
+	default:
+		return value
+	}
 }
 
 func durationFromEnv(key string, fallback time.Duration) (time.Duration, error) {
