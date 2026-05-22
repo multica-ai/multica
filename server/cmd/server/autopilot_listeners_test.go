@@ -305,12 +305,6 @@ func TestManualTriggerDoesNotErrorOnPostAdmissionSkip(t *testing.T) {
 //   2. previous_failure_reason preserves the original failure_reason.
 //   3. failure_reason is cleared on recovery.
 //   4. cancelled/blocked does NOT overwrite an already-terminal run's failure_reason.
-
-// TestSyncRunFromIssue_RecoveryAndGuard locks in MYW-1917 regression coverage:
-//   1. failed/skipped runs recover to completed when the linked issue moves to done/in_review.
-//   2. previous_failure_reason preserves the original failure_reason.
-//   3. failure_reason is cleared on recovery.
-//   4. cancelled/blocked does NOT overwrite an already-terminal run's failure_reason.
 func TestSyncRunFromIssue_RecoveryAndGuard(t *testing.T) {
 	ctx := context.Background()
 	queries := db.New(testPool)
@@ -375,9 +369,9 @@ func TestSyncRunFromIssue_RecoveryAndGuard(t *testing.T) {
 
 		autopilotSvc.SyncRunFromIssue(ctx, dbIssue)
 
-		updatedRun, err := queries.GetAutopilotRunByIssue(ctx, run.IssueID)
+		updatedRun, err := queries.GetAutopilotRun(ctx, run.ID)
 		if err != nil {
-			t.Fatalf("GetAutopilotRunByIssue: %v", err)
+			t.Fatalf("GetAutopilotRun: %v", err)
 		}
 		if updatedRun.Status != "completed" {
 			t.Fatalf("expected status completed, got %q", updatedRun.Status)
@@ -409,9 +403,9 @@ func TestSyncRunFromIssue_RecoveryAndGuard(t *testing.T) {
 
 		autopilotSvc.SyncRunFromIssue(ctx, dbIssue)
 
-		updatedRun, err := queries.GetAutopilotRunByIssue(ctx, run.IssueID)
+		updatedRun, err := queries.GetAutopilotRun(ctx, run.ID)
 		if err != nil {
-			t.Fatalf("GetAutopilotRunByIssue: %v", err)
+			t.Fatalf("GetAutopilotRun: %v", err)
 		}
 		if updatedRun.Status != "completed" {
 			t.Fatalf("expected status completed, got %q", updatedRun.Status)

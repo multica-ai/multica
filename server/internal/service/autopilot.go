@@ -351,7 +351,7 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 			return
 		}
 		if wasFailed {
-			slog.Info("autopilot run recovered from failed to completed via issue sync",
+			slog.Info("autopilot run recovered from terminal to completed via issue sync",
 				"run_id", util.UUIDToString(run.ID),
 				"issue_id", util.UUIDToString(issue.ID),
 				"previous_status", run.Status,
