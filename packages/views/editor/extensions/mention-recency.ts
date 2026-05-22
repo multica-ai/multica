@@ -90,8 +90,15 @@ export function getRecencyMap(workspaceId: string): RecencyMap {
 export function sortUserItemsByRecency(
   items: MentionItem[],
   recency: RecencyMap,
+  options: { ownAgentIds?: Iterable<string> } = {},
 ): MentionItem[] {
+  const ownAgentIds = new Set(options.ownAgentIds ?? []);
+
   return [...items].sort((a, b) => {
+    const aOwnAgent = a.type === "agent" && ownAgentIds.has(a.id);
+    const bOwnAgent = b.type === "agent" && ownAgentIds.has(b.id);
+    if (aOwnAgent !== bOwnAgent) return aOwnAgent ? -1 : 1;
+
     const ra = recency[recencyKey(a)] ?? 0;
     const rb = recency[recencyKey(b)] ?? 0;
     if (ra !== rb) return rb - ra;
