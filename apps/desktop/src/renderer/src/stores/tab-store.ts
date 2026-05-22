@@ -13,7 +13,7 @@ import { createTabRouter } from "../routes";
 
 export interface Tab {
   id: string;
-  /** Every tab path is workspace-scoped: `/{workspaceSlug}/{route}/...`. */
+  /** Every tab path is workspace-scoped: `/{workspaceSlug}` or `/{workspaceSlug}/{route}/...`. */
   path: string;
   title: string;
   icon: string;
@@ -135,14 +135,15 @@ const ROUTE_ICONS: Record<string, string> = {
 /**
  * Resolve a route icon from a pathname.
  *
- * Tab paths are always workspace-scoped: `/{slug}/{route}/...`, so the route
- * segment lives at index 1. Pre-workspace flows (create, invite) are rendered
- * by the window overlay, never as tabs.
+ * Tab paths are always workspace-scoped: `/{slug}` or `/{slug}/{route}/...`.
+ * Pre-workspace flows (create, invite) are rendered by the window overlay,
+ * never as tabs.
  *
  * Title is NOT determined here — it comes from document.title.
  */
 export function resolveRouteIcon(pathname: string): string {
   const segments = pathname.split("/").filter(Boolean);
+  if (segments.length === 1) return "CircleUser";
   return ROUTE_ICONS[segments[1] ?? ""] ?? "ListTodo";
 }
 
@@ -222,14 +223,14 @@ function pinnedBoundary(tabs: Tab[]): number {
   return i;
 }
 
-/** Default entry point for a workspace — its issues list. */
+/** Default entry point for a workspace — the blank workspace home. */
 function defaultPathFor(slug: string): string {
-  return `/${slug}/issues`;
+  return `/${slug}`;
 }
 
 function defaultTabFor(slug: string): Tab {
   const path = defaultPathFor(slug);
-  return makeTab(path, "Issues", resolveRouteIcon(path));
+  return makeTab(path, "Workspace", resolveRouteIcon(path));
 }
 
 // ---------------------------------------------------------------------------
@@ -275,7 +276,7 @@ export const useTabStore = create<TabStore>()(
             desiredPath && sanitizeTabPath(desiredPath) === desiredPath
               ? desiredPath
               : defaultPathFor(slug);
-          const tab = makeTab(seedPath, "Issues", resolveRouteIcon(seedPath));
+          const tab = makeTab(seedPath, "Workspace", resolveRouteIcon(seedPath));
           set({
             activeWorkspaceSlug: slug,
             byWorkspace: {
@@ -302,7 +303,7 @@ export const useTabStore = create<TabStore>()(
               });
               return;
             }
-            const tab = makeTab(clean, "Issues", resolveRouteIcon(clean));
+            const tab = makeTab(clean, "Workspace", resolveRouteIcon(clean));
             set({
               activeWorkspaceSlug: slug,
               byWorkspace: {

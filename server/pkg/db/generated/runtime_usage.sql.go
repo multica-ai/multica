@@ -30,8 +30,8 @@ type GetRuntimeTaskHourlyActivityRow struct {
 	Count int32 `json:"count"`
 }
 
-// Hour-of-day distribution for queue starts. Bucketed in the runtime's
-// local tz so "this runtime is busy in the afternoon" actually means
+// Hour-of-day distribution for queue starts. Bucketed in the viewer's
+// tz so "this runtime is busy in the afternoon" actually means
 // the operator's afternoon, not UTC's.
 func (q *Queries) GetRuntimeTaskHourlyActivity(ctx context.Context, arg GetRuntimeTaskHourlyActivityParams) ([]GetRuntimeTaskHourlyActivityRow, error) {
 	rows, err := q.db.Query(ctx, getRuntimeTaskHourlyActivity, arg.RuntimeID, arg.Tz)
@@ -92,8 +92,8 @@ type GetRuntimeUsageByHourRow struct {
 // (same reason as ListRuntimeUsageByAgent above). Hours with zero activity
 // are omitted; the client fills the 24-bucket axis.
 //
-// Hours are extracted in the runtime's local tz via @tz so afternoon
-// work bucketed at UTC 06:00 lands in 14:00 for a UTC+8 runtime.
+// Hours are extracted in the viewer's tz via @tz so afternoon
+// work bucketed at UTC 06:00 lands in 14:00 for a UTC+8 viewer.
 func (q *Queries) GetRuntimeUsageByHour(ctx context.Context, arg GetRuntimeUsageByHourParams) ([]GetRuntimeUsageByHourRow, error) {
 	rows, err := q.db.Query(ctx, getRuntimeUsageByHour, arg.RuntimeID, arg.Tz, arg.Since)
 	if err != nil {
@@ -124,19 +124,18 @@ func (q *Queries) GetRuntimeUsageByHour(ctx context.Context, arg GetRuntimeUsage
 
 const listRuntimeUsage = `-- name: ListRuntimeUsage :many
 SELECT
-    DATE(tu.created_at AT TIME ZONE $2::text) AS date,
-    tu.provider,
-    tu.model,
-    SUM(tu.input_tokens)::bigint AS input_tokens,
-    SUM(tu.output_tokens)::bigint AS output_tokens,
-    SUM(tu.cache_read_tokens)::bigint AS cache_read_tokens,
-    SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens
-FROM task_usage tu
-JOIN agent_task_queue atq ON atq.id = tu.task_id
-WHERE atq.runtime_id = $1
-  AND tu.created_at >= $3::timestamptz
-GROUP BY DATE(tu.created_at AT TIME ZONE $2::text), tu.provider, tu.model
-ORDER BY DATE(tu.created_at AT TIME ZONE $2::text) DESC, tu.provider, tu.model
+    DATE(bucket_hour AT TIME ZONE $2::text) AS date,
+    provider,
+    model,
+    SUM(input_tokens)::bigint        AS input_tokens,
+    SUM(output_tokens)::bigint       AS output_tokens,
+    SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(cache_write_tokens)::bigint  AS cache_write_tokens
+FROM task_usage_hourly
+WHERE runtime_id = $1
+  AND bucket_hour >= $3::timestamptz
+GROUP BY DATE(bucket_hour AT TIME ZONE $2::text), provider, model
+ORDER BY DATE(bucket_hour AT TIME ZONE $2::text) DESC, provider, model
 `
 
 type ListRuntimeUsageParams struct {
@@ -155,13 +154,14 @@ type ListRuntimeUsageRow struct {
 	CacheWriteTokens int64       `json:"cache_write_tokens"`
 }
 
-// Reads from raw `task_usage`, bucketed by the runtime's local calendar
-// date via @tz (IANA name, e.g. 'Asia/Shanghai'). The Go layer resolves
-// @tz from agent_runtime.timezone and computes @since as start-of-day-N
-// already in that zone, so the cutoff can stay as a plain timestamptz.
-// This is the always-correct fallback path; used when
-// USAGE_DAILY_ROLLUP_ENABLED is false (or the rollup hasn't been
-// deployed yet).
+// Reads from the UTC-bucketed `task_usage_hourly` rollup table,
+// aggregated to per-(date, provider, model) under the
+// caller-supplied @tz. Powers the trend chart on the runtime detail
+// page and the per-row cost cell on the runtimes list.
+//
+// @tz is required, even if the caller intends "UTC", so the bucket
+// cast is unambiguous — `bucket_hour` is UTC and the caller picks the
+// calendar boundary per request.
 func (q *Queries) ListRuntimeUsage(ctx context.Context, arg ListRuntimeUsageParams) ([]ListRuntimeUsageRow, error) {
 	rows, err := q.db.Query(ctx, listRuntimeUsage, arg.RuntimeID, arg.Tz, arg.Since)
 	if err != nil {
@@ -248,85 +248,6 @@ func (q *Queries) ListRuntimeUsageByAgent(ctx context.Context, arg ListRuntimeUs
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
 			&i.TaskCount,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listRuntimeUsageDaily = `-- name: ListRuntimeUsageDaily :many
-SELECT
-    bucket_date AS date,
-    provider,
-    model,
-    SUM(input_tokens)::bigint AS input_tokens,
-    SUM(output_tokens)::bigint AS output_tokens,
-    SUM(cache_read_tokens)::bigint AS cache_read_tokens,
-    SUM(cache_write_tokens)::bigint AS cache_write_tokens
-FROM task_usage_daily
-WHERE runtime_id = $1
-  AND bucket_date >= (($3::timestamptz AT TIME ZONE $2::text)::date)
-GROUP BY bucket_date, provider, model
-ORDER BY bucket_date DESC, provider, model
-`
-
-type ListRuntimeUsageDailyParams struct {
-	RuntimeID pgtype.UUID        `json:"runtime_id"`
-	Tz        string             `json:"tz"`
-	Since     pgtype.Timestamptz `json:"since"`
-}
-
-type ListRuntimeUsageDailyRow struct {
-	Date             pgtype.Date `json:"date"`
-	Provider         string      `json:"provider"`
-	Model            string      `json:"model"`
-	InputTokens      int64       `json:"input_tokens"`
-	OutputTokens     int64       `json:"output_tokens"`
-	CacheReadTokens  int64       `json:"cache_read_tokens"`
-	CacheWriteTokens int64       `json:"cache_write_tokens"`
-}
-
-// Reads from the `task_usage_daily` rollup table maintained by
-// rollup_task_usage_daily() (scheduled every 5 min via pg_cron, or any
-// equivalent external scheduler that calls the function). Same shape as
-// ListRuntimeUsage above. Today's bucket may lag the raw table by up to
-// ~10 min (5 min cron period + 5 min rollup safety lag); intentional.
-//
-// Only used when USAGE_DAILY_ROLLUP_ENABLED is true AND deploy has
-// verified that the rollup is fresh (see task_usage_rollup_lag_seconds
-// helper from migration 076).
-//
-// bucket_date is already materialized in the runtime's tz (migration
-// 082). The cutoff still needs @tz because DATE(timestamptz) would cast in
-// the Postgres session timezone; positive-offset runtimes would otherwise
-// include one extra UTC day.
-//
-// The PK on task_usage_daily already collapses to one row per
-// (bucket_date, runtime_id, provider, model), but SUM/GROUP BY is kept
-// so future schema changes (extra dimensions promoted into the table)
-// don't silently change query semantics.
-func (q *Queries) ListRuntimeUsageDaily(ctx context.Context, arg ListRuntimeUsageDailyParams) ([]ListRuntimeUsageDailyRow, error) {
-	rows, err := q.db.Query(ctx, listRuntimeUsageDaily, arg.RuntimeID, arg.Tz, arg.Since)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListRuntimeUsageDailyRow{}
-	for rows.Next() {
-		var i ListRuntimeUsageDailyRow
-		if err := rows.Scan(
-			&i.Date,
-			&i.Provider,
-			&i.Model,
-			&i.InputTokens,
-			&i.OutputTokens,
-			&i.CacheReadTokens,
-			&i.CacheWriteTokens,
 		); err != nil {
 			return nil, err
 		}

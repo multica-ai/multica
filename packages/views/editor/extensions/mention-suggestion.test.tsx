@@ -94,6 +94,7 @@ describe("createMentionSuggestion", () => {
   beforeEach(() => {
     searchIssuesMock.mockReset();
     authState.userId = "u-current";
+    window.localStorage.clear();
   });
 
   it("returns members and agents synchronously without waiting for the server search", () => {
@@ -216,6 +217,63 @@ describe("createMentionSuggestion", () => {
     const agentIds = result.filter((i) => i.type === "agent").map((i) => i.id);
 
     expect(agentIds).toContain("allowed-private");
+  });
+
+  it("puts the current user's own agents before members and All members", () => {
+    const qc = fakeQc({
+      members: [
+        { user_id: "u-current", name: "CurrentUser", role: "member" },
+        { user_id: "u1", name: "Alice", role: "member" },
+      ],
+      agents: [
+        {
+          id: "shared-agent",
+          name: "Aardvark Shared",
+          archived_at: null,
+          visibility: "workspace",
+          owner_id: "u-other",
+        },
+        {
+          id: "own-agent",
+          name: "My Agent",
+          archived_at: null,
+          visibility: "private",
+          owner_id: "u-current",
+        },
+      ],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
+    const result = config.items!({ query: "", editor: {} as never }) as MentionItem[];
+
+    expect(result[0]).toMatchObject({ type: "agent", id: "own-agent" });
+    expect(result.findIndex((i) => i.type === "all")).toBeGreaterThan(0);
+  });
+
+  it("keeps All members out of the default first position without matching own agents", () => {
+    const qc = fakeQc({
+      members: [
+        { user_id: "u-current", name: "CurrentUser", role: "member" },
+        { user_id: "u1", name: "Alice", role: "member" },
+      ],
+      agents: [
+        {
+          id: "shared-agent",
+          name: "Aardvark Shared",
+          archived_at: null,
+          visibility: "workspace",
+          owner_id: "u-other",
+        },
+      ],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
+    const result = config.items!({ query: "", editor: {} as never }) as MentionItem[];
+
+    expect(result[0]?.type).not.toBe("all");
+    expect(result.some((i) => i.type === "all")).toBe(true);
   });
 
   it("calls searchIssues with include_closed=true so done issues are findable", async () => {

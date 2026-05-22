@@ -8,6 +8,7 @@
 #   MULTICA_VERSION   — install a specific version instead of latest
 #   MULTICA_DIR       — installation directory (default: ~/.multica/bin)
 #   MULTICA_SERVER    — server URL (default: https://multica.wujieai.com)
+#   MULTICA_CHANNEL   — release channel: prod (default) or test
 
 param(
     [switch]$Restart
@@ -16,11 +17,30 @@ $ErrorActionPreference = "Stop"
 
 # --- Configuration ---
 $DefaultServer = "https://multica.wujieai.com"
-$OBSBase = "https://multica.obs.cn-east-3.myhuaweicloud.com/cli/releases"
-$ManifestURL = "https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json"
+$OBSHost = "https://multica.obs.cn-east-3.myhuaweicloud.com"
+$Channel = if ($env:MULTICA_CHANNEL) { $env:MULTICA_CHANNEL } else { "" }
 $InstallDir = if ($env:MULTICA_DIR) { $env:MULTICA_DIR } else { Join-Path $HOME ".multica\bin" }
 $ServerURL = if ($env:MULTICA_SERVER) { $env:MULTICA_SERVER } else { $DefaultServer }
 $Version = $env:MULTICA_VERSION
+
+# Resolve OBS paths based on channel
+switch ($Channel) {
+    "" {
+        $Channel = "prod"
+        $OBSPrefix = "cli"
+    }
+    "prod" {
+        $OBSPrefix = "cli"
+    }
+    "test" {
+        $OBSPrefix = "cli-test"
+    }
+    default {
+        Exit-Fatal "Unsupported channel: $Channel (supported: prod, test)"
+    }
+}
+$OBSBase = "$OBSHost/$OBSPrefix/releases"
+$ManifestURL = "$OBSHost/$OBSPrefix/manifest.json"
 
 # --- Helpers ---
 function Write-Info  { param($msg) Write-Host "[info]  $msg" -ForegroundColor Blue }
@@ -45,7 +65,11 @@ function Get-LatestVersion {
 
     # Try server endpoint first
     try {
-        $version = (Invoke-RestMethod -Uri "$ServerURL/install/latest-cli-version" -TimeoutSec 10).Trim()
+        $versionEndpoint = "$ServerURL/install/latest-cli-version"
+        if ($Channel -eq "test") {
+            $versionEndpoint = "$versionEndpoint?channel=test"
+        }
+        $version = (Invoke-RestMethod -Uri $versionEndpoint -TimeoutSec 10).Trim()
         if ($version) {
             return $version.TrimStart("v")
         }
@@ -197,6 +221,13 @@ function Install-MulticaCLI {
     & $multica config set server_url $ServerURL 2>$null
     & $multica config set app_url $ServerURL 2>$null
     Write-Ok "Server configured: $ServerURL"
+
+    # Configure test channel update manifest
+    if ($Channel -eq "test") {
+        Write-Info "Configuring update manifest for test channel..."
+        & $multica config set update_manifest_url $ManifestURL 2>$null
+        Write-Ok "Update manifest set to test channel: $ManifestURL"
+    }
 
     # Restart daemon
     Write-Info "Restarting daemon..."

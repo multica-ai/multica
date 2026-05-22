@@ -82,7 +82,9 @@ export function mergeMentionTargets(
 export function sortMentionTargetsByFrequency(
   targets: WorkspaceMentionTarget[],
   frequency: MentionFrequencyEntry[],
+  options: { ownAgentIds?: Iterable<string> } = {},
 ): WorkspaceMentionTarget[] {
+  const ownAgentIds = new Set(options.ownAgentIds ?? []);
   const rank = new Map(
     frequency.map((entry) => [
       `${entry.actor_type}:${entry.actor_id}`,
@@ -94,6 +96,15 @@ export function sortMentionTargetsByFrequency(
   );
 
   return [...targets].sort((a, b) => {
+    const aOwnAgent = a.type === "agent" && ownAgentIds.has(a.id);
+    const bOwnAgent = b.type === "agent" && ownAgentIds.has(b.id);
+    if (aOwnAgent !== bOwnAgent) return aOwnAgent ? -1 : 1;
+
+    if (a.type === "all" || b.type === "all") {
+      if (a.type === b.type) return 0;
+      return a.type === "all" ? 1 : -1;
+    }
+
     const aRank = rank.get(`${a.type}:${a.id}`);
     const bRank = rank.get(`${b.type}:${b.id}`);
     if (aRank || bRank) {

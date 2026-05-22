@@ -117,6 +117,7 @@
     "title_placeholder": "Issue title",
     "description_placeholder": "Add description...",
     "more_options_aria": "More options",
+    "title_required": "Enter a title to create",
     "submit": "Create Issue",
     "submitting": "Creating...",
     "toast_created": "Issue created",

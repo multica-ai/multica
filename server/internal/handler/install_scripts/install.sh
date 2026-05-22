@@ -3,18 +3,20 @@
 # Usage:
 #   curl -fsSL https://multica.wujieai.com/install.sh | sh
 #   curl -fsSL https://multica.wujieai.com/install.sh | sh -s -- --version 0.3.1-514-gc59dc875
+#   curl -fsSL https://multica.wujieai.com/install.sh | sh -s -- --channel test
 #   MULTICA_VERSION=0.3.1-514-gc59dc875 sh install.sh
 #
 # Environment variables:
 #   MULTICA_VERSION   — install a specific version instead of latest
 #   MULTICA_DIR       — installation directory (default: ~/.multica/bin)
 #   MULTICA_SERVER    — server URL (default: https://multica.wujieai.com)
+#   MULTICA_CHANNEL   — release channel: prod (default) or test
 set -e
 
 # --- Configuration ---
 DEFAULT_SERVER="https://multica.wujieai.com"
-OBS_BASE="https://multica.obs.cn-east-3.myhuaweicloud.com/cli/releases"
-MANIFEST_URL="https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json"
+OBS_HOST="https://multica.obs.cn-east-3.myhuaweicloud.com"
+CHANNEL="${MULTICA_CHANNEL:-}"
 INSTALL_DIR="${MULTICA_DIR:-$HOME/.multica/bin}"
 SERVER_URL="${MULTICA_SERVER:-$DEFAULT_SERVER}"
 
@@ -52,13 +54,18 @@ while [ $# -gt 0 ]; do
             RESTART_ONLY=true
             shift
             ;;
+        --channel)
+            CHANNEL="$2"
+            shift 2
+            ;;
         --help|-h)
-            echo "Usage: install.sh [--version VERSION] [--dir DIR] [--server URL]"
+            echo "Usage: install.sh [--version VERSION] [--dir DIR] [--server URL] [--channel CHANNEL] [--restart]"
             echo ""
             echo "Options:"
             echo "  --version VERSION   Install a specific CLI version"
             echo "  --dir DIR           Installation directory (default: ~/.multica/bin)"
             echo "  --server URL        Multica server URL (default: $DEFAULT_SERVER)"
+            echo "  --channel CHANNEL   Release channel: prod (default) or test"
             exit 0
             ;;
         *)
@@ -81,6 +88,21 @@ detect_login_shell() {
   fi
 }
 
+# --- Resolve OBS paths based on channel ---
+case "$CHANNEL" in
+    ""|prod)
+        CHANNEL="prod"
+        OBS_PREFIX="cli"
+        ;;
+    test)
+        OBS_PREFIX="cli-test"
+        ;;
+    *)
+        die "Unsupported channel: $CHANNEL (supported: prod, test)"
+        ;;
+esac
+OBS_BASE="${OBS_HOST}/${OBS_PREFIX}/releases"
+MANIFEST_URL="${OBS_HOST}/${OBS_PREFIX}/manifest.json"
 
 # --- Detect OS and architecture ---
 detect_platform() {
@@ -121,7 +143,11 @@ fetch_latest_version() {
     info "Fetching latest CLI version..."
 
     # Try the server endpoint first (returns plain text, no JSON parsing needed)
-    VERSION=$(curl -fsSL "${SERVER_URL}/install/latest-cli-version" 2>/dev/null | tr -d '[:space:]') || true
+    version_endpoint="${SERVER_URL}/install/latest-cli-version"
+    if [ "$CHANNEL" = "test" ]; then
+        version_endpoint="${version_endpoint}?channel=test"
+    fi
+    VERSION=$(curl -fsSL "$version_endpoint" 2>/dev/null | tr -d '[:space:]') || true
 
     if [ -z "$VERSION" ]; then
         # Fallback: parse manifest.json from OBS
@@ -404,6 +430,11 @@ main() {
     download_and_install
     configure_path
     configure_server
+    if [ "$CHANNEL" = "test" ]; then
+        info "Configuring update manifest for test channel..."
+        "${INSTALL_DIR}/multica" config set update_manifest_url "$MANIFEST_URL" 2>/dev/null || true
+        ok "Update manifest set to test channel: ${MANIFEST_URL}"
+    fi
     restart_daemon
     print_summary
 }
