@@ -455,7 +455,9 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 		"on_conflict": onConflict,
 	}
 
-	isBatch := strings.Contains(importURL, "skills.sh") && strings.Count(strings.TrimSuffix(importURL, "/"), "/") <= 3
+	// Detect batch mode (skills.sh/owner/repo). Count URL path segments
+	// instead of raw slashes so https:// does not misroute canonical URLs.
+	isBatch := isSkillsShBatchImportURL(importURL)
 	timeout := 60 * time.Second
 	endpoint := "/api/skills/import"
 
@@ -536,9 +538,9 @@ func printSkillImportResult(cmd *cobra.Command, result map[string]any, isBatch b
 	}
 
 	if isBatch {
-		imported := int(result["imported"].(float64))
-		skipped := int(result["skipped"].(float64))
-		failed := int(result["failed"].(float64))
+		imported := intVal(result, "imported")
+		skipped := intVal(result, "skipped")
+		failed := intVal(result, "failed")
 		fmt.Printf("Batch import complete: %d imported, %d skipped, %d failed\n", imported, skipped, failed)
 		return nil
 	}
@@ -619,6 +621,38 @@ func runSkillSearch(cmd *cobra.Command, args []string) error {
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
+}
+
+func isSkillsShBatchImportURL(raw string) bool {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return false
+	}
+	if !strings.Contains(strings.ToLower(trimmed), "skills.sh") {
+		return false
+	}
+	parseTarget := trimmed
+	if !strings.Contains(parseTarget, "://") {
+		parseTarget = "https://" + parseTarget
+	}
+	parsed, err := url.Parse(parseTarget)
+	if err != nil {
+		return false
+	}
+	if !strings.EqualFold(parsed.Hostname(), "skills.sh") {
+		return false
+	}
+	parts := strings.FieldsFunc(strings.Trim(parsed.EscapedPath(), "/"), func(r rune) bool {
+		return r == '/'
+	})
+	return len(parts) == 2
+}
+
+func intVal(m map[string]any, key string) int {
+	if v, ok := m[key].(float64); ok {
+		return int(v)
+	}
+	return 0
 }
 
 // ---------------------------------------------------------------------------
