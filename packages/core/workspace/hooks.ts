@@ -114,12 +114,12 @@ export function useWorkspaceMentionTargets(wsId: string) {
         agents,
         { userId, role },
       );
-      const all = targets.find((target) => target.type === "all");
-      const mentionable = targets.filter((target) => target.type !== "all");
-      return [
-        ...(all ? [all] : []),
-        ...sortMentionTargetsByFrequency(mentionable, mentionFrequency),
-      ];
+      const ownAgentIds = agents
+        .filter((agent) => userId !== null && agent.owner_id === userId)
+        .map((agent) => agent.id);
+      return sortMentionTargetsByFrequency(targets, mentionFrequency, {
+        ownAgentIds,
+      });
     },
     [agents, members, mentionFrequency, role, userId],
   );

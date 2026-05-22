@@ -40,6 +40,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { workloadConfig } from "../../agents/presence";
 import { ProviderLogo } from "./provider-logo";
 import { HealthIcon, useHealthLabel } from "./shared";
@@ -333,13 +334,17 @@ const COST_CELL_DAYS = 14;
 
 function CostCell({ runtimeId }: { runtimeId: string }) {
   const { t } = useT("runtimes");
+  const tz = useViewingTimezone();
   const { data: usage = [] } = useQuery(
-    runtimeUsageOptions(runtimeId, COST_CELL_DAYS),
+    runtimeUsageOptions(runtimeId, COST_CELL_DAYS, tz),
   );
-  const cost7d = useMemo(() => computeCostInWindow(usage, 7), [usage]);
+  const cost7d = useMemo(
+    () => computeCostInWindow(usage, 7, tz),
+    [usage, tz],
+  );
   const costPrev7d = useMemo(
-    () => computeCostInWindow(usage, 7, 7),
-    [usage],
+    () => computeCostInWindow(usage, 7, tz, 7),
+    [usage, tz],
   );
   const delta = pctChange(cost7d, costPrev7d);
 

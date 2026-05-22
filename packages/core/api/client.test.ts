@@ -222,6 +222,109 @@ describe("ApiClient", () => {
     expect(headers["X-Client-OS"]).toBeUndefined();
   });
 
+  it("uses the Cloud Runtime node API contract and forwards bootstrap PAT on create", async () => {
+    const node = {
+      id: "node-1",
+      owner_id: "user-1",
+      instance_id: "i-0123456789abcdef0",
+      region: "us-west-2",
+      instance_type: "g5.xlarge",
+      image_id: "ami-1",
+      subnet_id: "subnet-1",
+      name: "gpu-dev-01",
+      status: "launching",
+      tags: {},
+      metadata: {},
+      created_at: "2026-05-21T08:30:00Z",
+      updated_at: "2026-05-21T08:30:00Z",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(node), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.listCloudRuntimeNodes({ limit: 20, offset: 5 });
+    await client.createCloudRuntimeNode(
+      { instance_type: "g5.xlarge", name: "gpu-dev-01" },
+    );
+
+    const listCall = fetchMock.mock.calls[0]!;
+    const createCall = fetchMock.mock.calls[1]!;
+    expect(listCall[0]).toBe(
+      "https://api.example.test/api/cloud-runtime/nodes?limit=20&offset=5",
+    );
+    expect((listCall[1]!.headers as Record<string, string>)["X-User-PAT"]).toBeUndefined();
+    expect(createCall[0]).toBe(
+      "https://api.example.test/api/cloud-runtime/nodes",
+    );
+    expect(createCall[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        instance_type: "g5.xlarge",
+        name: "gpu-dev-01",
+      }),
+    });
+    expect((createCall[1]!.headers as Record<string, string>)["X-User-PAT"]).toBeUndefined();
+  });
+
+  it("falls back when Cloud Runtime node responses drift", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ id: 123 }]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 123 }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.listCloudRuntimeNodes()).resolves.toEqual([]);
+    await expect(
+      client.createCloudRuntimeNode({ instance_type: "g5.xlarge" }),
+    ).resolves.toMatchObject({ id: "", status: "" });
+  });
+
+  it("deleteCloudRuntimeNode sends DELETE with JSON body containing node id", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(null, { status: 204 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.deleteCloudRuntimeNode("node-abc-123");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, opts] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://api.example.test/api/cloud-runtime/nodes");
+    expect(opts).toMatchObject({
+      method: "DELETE",
+      body: JSON.stringify({ id: "node-abc-123" }),
+    });
+    expect((opts.headers as Record<string, string>)["Content-Type"]).toBe(
+      "application/json",
+    );
+  });
+
   describe("getAttachment", () => {
     it("returns the parsed attachment for a well-formed response", async () => {
       vi.stubGlobal(
@@ -334,7 +437,12 @@ describe("ApiClient", () => {
   describe("chat attachment wiring", () => {
     it("uploadFile includes chat_session_id in the FormData body", async () => {
       const fetchMock = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ id: "att-1", url: "https://cdn/x" }), {
+        new Response(JSON.stringify({
+          id: "att-1",
+          url: "https://cdn/x",
+          download_url: "https://cdn/x",
+          filename: "hi.png",
+        }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
@@ -354,6 +462,23 @@ describe("ApiClient", () => {
       expect(body.get("chat_session_id")).toBe("session-123");
       expect(body.get("issue_id")).toBeNull();
       expect(body.get("comment_id")).toBeNull();
+    });
+
+    it("uploadFile rejects malformed success responses instead of returning an empty attachment", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({ id: "", url: "https://cdn/x", filename: "hi.png" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const file = new File(["hi"], "hi.png", { type: "image/png" });
+
+      await expect(client.uploadFile(file)).rejects.toThrow("Invalid upload response");
     });
 
     it("sendChatMessage serialises attachment_ids onto the JSON body when present", async () => {

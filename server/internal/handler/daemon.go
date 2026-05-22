@@ -171,7 +171,7 @@ type DaemonRegisterRequest struct {
 	// daemon reconnects (see UpsertAgentRuntime in runtime.sql).
 	Timezone   string `json:"timezone"`
 	HealthPort int    `json:"health_port"` // local daemon health/trace port
-	Runtimes   []struct {
+	Runtimes []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
@@ -184,24 +184,6 @@ type daemonWorkspaceReposResponse struct {
 	Repos        []RepoData      `json:"repos"`
 	ReposVersion string          `json:"repos_version"`
 	Settings     json.RawMessage `json:"settings,omitempty"`
-}
-
-// normalizeRuntimeTimezone validates and normalizes the IANA timezone string
-// reported by a daemon during registration. The stored column is NOT NULL with
-// a 'UTC' default so any unparseable, blank, or trivially-invalid value is
-// quietly downgraded to "UTC" rather than rejected: a misconfigured daemon
-// host shouldn't take down registration just because its tz string is junk.
-// Real validation happens on the user-driven PATCH path where we surface the
-// error.
-func normalizeRuntimeTimezone(tz string) string {
-	tz = strings.TrimSpace(tz)
-	if tz == "" {
-		return "UTC"
-	}
-	if _, err := time.LoadLocation(tz); err != nil {
-		return "UTC"
-	}
-	return tz
 }
 
 func normalizeWorkspaceRepos(repos []RepoData) []RepoData {
@@ -357,7 +339,6 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			DeviceInfo:  deviceInfo,
 			Metadata:    metadata,
 			OwnerID:     ownerID,
-			Timezone:    normalizeRuntimeTimezone(req.Timezone),
 		})
 		if err != nil {
 			h.Analytics.Capture(analytics.RuntimeFailed(
@@ -388,7 +369,6 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt:      row.UpdatedAt,
 			OwnerID:        row.OwnerID,
 			LegacyDaemonID: row.LegacyDaemonID,
-			Timezone:       row.Timezone,
 		}
 
 		// Inserted is false for normal daemon reconnects/upserts, so
@@ -1374,26 +1354,28 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
-			// Resume chat sessions only when the stored pointer was produced
-			// by the same runtime as the claiming task. When the chat_session
-			// pointer is missing (legacy NULL runtime_id), stale (last task
-			// failed before reporting completion), or runtime-mismatched, fall
-			// back to the most recent task row that recorded a session_id —
-			// otherwise a single failed turn would silently drop the entire
-			// conversation memory on the next message. The fallback also
-			// requires runtime to match.
-			if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
-				resp.PriorSessionID = cs.SessionID.String
-			}
-			if cs.WorkDir.Valid {
-				resp.PriorWorkDir = cs.WorkDir.String
-			}
-			if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil && prior.SessionID.Valid {
-				if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
-					resp.PriorSessionID = prior.SessionID.String
+			if !task.ForceFreshSession {
+				// Resume chat sessions only when the stored pointer was produced
+				// by the same runtime as the claiming task. When the chat_session
+				// pointer is missing (legacy NULL runtime_id), stale (last task
+				// failed before reporting completion), or runtime-mismatched, fall
+				// back to the most recent task row that recorded a session_id —
+				// otherwise a single failed turn would silently drop the entire
+				// conversation memory on the next message. The fallback also
+				// requires runtime to match.
+				if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
+					resp.PriorSessionID = cs.SessionID.String
 				}
-				if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
-					resp.PriorWorkDir = prior.WorkDir.String
+				if cs.WorkDir.Valid {
+					resp.PriorWorkDir = cs.WorkDir.String
+				}
+				if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil && prior.SessionID.Valid {
+					if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
+						resp.PriorSessionID = prior.SessionID.String
+					}
+					if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
+						resp.PriorWorkDir = prior.WorkDir.String
+					}
 				}
 			}
 			// Load the latest user message for the chat prompt, plus any

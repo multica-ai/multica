@@ -27,6 +27,7 @@ const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
+const mockUploadWithToast = vi.hoisted(() => vi.fn());
 const mockProjects = vi.hoisted(() => ({
   list: [{ id: "proj-1", title: "Default Project" }],
 }));
@@ -105,7 +106,7 @@ vi.mock("@multica/core/issues/mutations", () => ({
 }));
 
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
-  useFileUpload: () => ({ uploadWithToast: vi.fn() }),
+  useFileUpload: () => ({ uploadWithToast: mockUploadWithToast }),
 }));
 
 // Hoisted ApiError class so both the vi.mock factory and the tests below
@@ -149,7 +150,7 @@ vi.mock("@multica/core/api", async () => {
 });
 
 vi.mock("../editor", () => {
-  const ContentEditor = forwardRef(({ defaultValue, onUpdate, placeholder }: any, ref: any) => {
+  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onUploadFile, placeholder }: any, ref: any) => {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
     useImperativeHandle(ref, () => ({
@@ -158,19 +159,26 @@ vi.mock("../editor", () => {
         valueRef.current = "";
         setValue("");
       },
-      uploadFile: vi.fn(),
+      uploadFile: (file: File) => onUploadFile?.(file),
       uploadFiles: vi.fn(),
     }));
     return (
-      <textarea
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => {
-          valueRef.current = e.target.value;
-          setValue(e.target.value);
-          onUpdate?.(e.target.value);
-        }}
-      />
+      <>
+        <textarea
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => {
+            valueRef.current = e.target.value;
+            setValue(e.target.value);
+            onUpdate?.(e.target.value);
+          }}
+        />
+        {onUploadFile && (
+          <button type="button" onClick={() => onUploadFile(new File(["test"], "editor-test.txt"))}>
+            Editor upload file
+          </button>
+        )}
+      </>
     );
   });
   ContentEditor.displayName = "ContentEditor";
@@ -241,6 +249,7 @@ vi.mock("@multica/ui/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
   TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
 vi.mock("@multica/ui/components/ui/button", () => ({
@@ -339,6 +348,7 @@ describe("CreateIssueModal", () => {
       title: "Ship create issue regression coverage",
       status: "todo",
     });
+    mockUploadWithToast.mockResolvedValue(null);
   });
 
   it("shows success feedback with a direct path to the new issue", async () => {
@@ -476,6 +486,29 @@ describe("CreateIssueModal", () => {
 
     expect(mockCreateIssue).not.toHaveBeenCalled();
     expect(mockToastError).toHaveBeenCalledWith("Select a project before creating an issue.");
+  });
+
+  it("rejects an upload result with an empty attachment id before submit", async () => {
+    const user = userEvent.setup();
+    mockUploadWithToast.mockResolvedValue({
+      id: "",
+      url: "https://cdn.example.test/orphan.txt",
+      download_url: "https://cdn.example.test/orphan.txt",
+      filename: "orphan.txt",
+      link: "https://cdn.example.test/orphan.txt",
+    });
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Editor upload file" }));
+    await user.type(screen.getByPlaceholderText("Issue title"), "Do not submit invalid attachment");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    expect(mockUploadWithToast).toHaveBeenCalledTimes(1);
+    expect(mockToastError).toHaveBeenCalledWith("Attachment upload failed. Try again.");
+    expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({
+      attachment_ids: undefined,
+    }));
   });
 
   // Manual → agent must forward the picked project so the new modal pins to

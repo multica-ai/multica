@@ -1,6 +1,10 @@
 package daemon
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
+)
 
 // FailureReason values for tasks whose session is "poisoned" — i.e.
 // resuming the same conversation on a follow-up task would deterministically
@@ -16,10 +20,15 @@ import "strings"
 //     invalid_request_error (oversized payload, malformed image, etc.).
 //     The bad message is already baked into the conversation history, so
 //     every resume hits the same 400. Detected via classifyPoisonedError.
+//   - Timeout-side: Codex reported semantic inactivity after the session got
+//     stuck without agent progress. Resuming that Codex session can replay the
+//     same stuck state, while a fresh manual rerun may succeed. Detected via
+//     classifyResumeUnsafeTimeout.
 const (
-	FailureReasonIterationLimit    = "iteration_limit"
-	FailureReasonAgentFallbackMsg  = "agent_fallback_message"
-	FailureReasonAPIInvalidRequest = "api_invalid_request"
+	FailureReasonIterationLimit          = "iteration_limit"
+	FailureReasonAgentFallbackMsg        = "agent_fallback_message"
+	FailureReasonAPIInvalidRequest       = "api_invalid_request"
+	FailureReasonCodexSemanticInactivity = "codex_semantic_inactivity"
 )
 
 // poisonedOutputMaxLen caps how long an output can be and still be
@@ -95,6 +104,20 @@ func classifyPoisonedError(errMsg string) (string, bool) {
 	// the request body — i.e. the conversation history — is the problem.
 	if strings.Contains(lowered, "invalid_request_error") && strings.Contains(lowered, "400") {
 		return FailureReasonAPIInvalidRequest, true
+	}
+	return "", false
+}
+
+// classifyResumeUnsafeTimeout reports whether a timeout means the recorded
+// session should not be resumed. Keep this intentionally provider-specific:
+// ordinary daemon/backend timeouts are infrastructure-shaped and should keep
+// the resume pointer so retries can continue the in-flight conversation.
+func classifyResumeUnsafeTimeout(provider, errMsg string) (string, bool) {
+	if strings.ToLower(strings.TrimSpace(provider)) != "codex" || errMsg == "" {
+		return "", false
+	}
+	if strings.Contains(strings.ToLower(errMsg), strings.ToLower(agent.CodexSemanticInactivityMarker)) {
+		return FailureReasonCodexSemanticInactivity, true
 	}
 	return "", false
 }
