@@ -584,14 +584,24 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Remove archived agents so the FK constraint (ON DELETE RESTRICT) won't block deletion.
+	// Best-effort: remove archived agents so the FK constraint (ON DELETE
+	// RESTRICT) on agent.runtime_id won't block runtime deletion. If this
+	// fails — e.g. an archived agent is a squad leader and
+	// squad.leader_id has ON DELETE RESTRICT — log the error but continue.
+	// The agents are already archived and inert; blocking runtime deletion
+	// on their clean-up is worse than leaving them behind.
 	if err := h.Queries.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
-		return
+		slog.Warn("failed to delete archived agents during runtime teardown",
+			"runtime_id", uuidToString(rt.ID), "error", err)
 	}
 
 	if err := h.Queries.DeleteAgentRuntime(r.Context(), rt.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to delete runtime")
+		// The archived-agent cleanup above is best-effort, but if the runtime
+		// row itself can't be deleted (agents still reference it via FK), that's
+		// a real failure — the runtime would reappear on next refetch.
+		slog.Warn("runtime row deletion failed after archived-agent cleanup",
+			"runtime_id", uuidToString(rt.ID), "error", err)
+		writeError(w, http.StatusConflict, "runtime has archived agents that cannot be removed (e.g. squad leaders). Remove squad references first, then retry.")
 		return
 	}
 
