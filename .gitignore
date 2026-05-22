@@ -65,6 +65,8 @@ apps/mobile/**/*.mobileprovision
 .claude/
 .tool-versions
 .deepseek/
+.codegraph/
+.mcp.json
 
 # feature tracking
 _features/
