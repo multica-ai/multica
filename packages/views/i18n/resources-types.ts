@@ -25,6 +25,7 @@ import type modals from "../locales/en/modals.json";
 import type runtimes from "../locales/en/runtimes.json";
 import type layout from "../locales/en/layout.json";
 import type usage from "../locales/en/usage.json";
+import type agentDashboard from "../locales/en/agent-dashboard.json";
 import type squads from "../locales/en/squads.json";
 
 // Module augmentation enables i18next v26 selector API across the monorepo:
@@ -65,6 +66,7 @@ declare global {
     runtimes: typeof runtimes;
     layout: typeof layout;
     usage: typeof usage;
+    "agent-dashboard": typeof agentDashboard;
     squads: typeof squads;
   }
 }

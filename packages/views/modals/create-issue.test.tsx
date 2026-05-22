@@ -394,7 +394,6 @@ describe("CreateIssueModal", () => {
         parent_issue_id: undefined,
         project_id: "proj-1",
         label_ids: undefined,
-        project_id: "proj-1",
       });
     });
 
@@ -444,7 +443,6 @@ describe("CreateIssueModal", () => {
         parent_issue_id: undefined,
         project_id: "proj-1",
         label_ids: undefined,
-        project_id: "proj-1",
       });
     });
 

@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  AgentRunDashboardSchema,
+  AgentRunDashboardRunDetailSchema,
   DashboardAgentRunTimeListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
   DuplicateIssueErrorBodySchema,
+  EMPTY_AGENT_RUN_DASHBOARD,
+  EMPTY_AGENT_RUN_DETAIL,
   EMPTY_USER,
   ListIssuesResponseSchema,
   RuntimeHourlyActivityListSchema,
@@ -221,5 +225,35 @@ describe("dashboard + runtime usage schema drift", () => {
       { date: "2026-05-19", region: "us-east" },
     ]);
     expect((parsed[0] as Record<string, unknown>).region).toBe("us-east");
+  });
+});
+
+describe("agent run dashboard schemas", () => {
+  it("falls back to empty dashboard data for malformed payloads", () => {
+    const out = parseWithFallback(
+      {
+        summary: { total_runs: "oops" },
+        daily: null,
+      },
+      AgentRunDashboardSchema,
+      EMPTY_AGENT_RUN_DASHBOARD,
+      { endpoint: "GET /api/dashboard/agent-runs" },
+    );
+
+    expect(out).toEqual(EMPTY_AGENT_RUN_DASHBOARD);
+  });
+
+  it("falls back to empty run detail data for malformed payloads", () => {
+    const out = parseWithFallback(
+      {
+        run: { id: 123 },
+        timeline: null,
+      },
+      AgentRunDashboardRunDetailSchema,
+      EMPTY_AGENT_RUN_DETAIL,
+      { endpoint: "GET /api/dashboard/agent-runs/{taskId}" },
+    );
+
+    expect(out).toEqual(EMPTY_AGENT_RUN_DETAIL);
   });
 });
