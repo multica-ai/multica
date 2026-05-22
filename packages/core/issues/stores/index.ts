@@ -4,6 +4,10 @@ export {
   openCreateIssueWithPreference,
   type CreateMode,
 } from "./create-mode-store";
+export {
+  useIssueCreatePreferencesStore,
+  type IssueDuplicatePolicy,
+} from "./create-preferences-store";
 export { useIssueDraftStore } from "./draft-store";
 export {
   useRecentIssuesStore,

@@ -17,6 +17,12 @@
       "browser_suffix": "（浏览器）",
       "hint": "用于仪表盘、图表和「今天」标签。这是个人偏好，在你的所有工作区中通用。",
       "sync_failed": "保存时区偏好失败。"
+    },
+    "issue_create": {
+      "title": "issue 创建",
+      "description": "你在当前浏览器中创建 issue 时使用的个人默认设置。",
+      "allow_duplicate_label": "允许创建同名 issue",
+      "allow_duplicate_hint": "跳过同名确认，直接创建 issue。"
     }
   },
   "page": {

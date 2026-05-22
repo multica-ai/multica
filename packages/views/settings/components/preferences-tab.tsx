@@ -9,6 +9,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
+import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { Switch } from "@multica/ui/components/ui/switch";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -19,6 +21,7 @@ import {
 import { useLocaleAdapter } from "@multica/core/i18n/react";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
+import { useIssueCreatePreferencesStore } from "@multica/core/issues/stores/create-preferences-store";
 import { browserTimezone, timezoneOptions } from "../../common/timezone-select";
 import { useT } from "../../i18n";
 
@@ -102,6 +105,8 @@ export function PreferencesTab() {
   const { t, i18n } = useT("settings");
   const localeAdapter = useLocaleAdapter();
   const user = useAuthStore((s) => s.user);
+  const duplicatePolicy = useIssueCreatePreferencesStore((s) => s.duplicatePolicy);
+  const setDuplicatePolicy = useIssueCreatePreferencesStore((s) => s.setDuplicatePolicy);
 
   // i18next.language can be a region-tagged BCP-47 string (e.g. "en-US",
   // "zh-Hans-CN") returned by intl-localematcher. Normalize to a supported
@@ -235,6 +240,39 @@ export function PreferencesTab() {
             );
           })}
         </div>
+      </section>
+
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-sm font-semibold">
+            {t(($) => $.preferences.issue_create.title)}
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            {t(($) => $.preferences.issue_create.description)}
+          </p>
+        </div>
+
+        <Card>
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5 pr-4">
+                <p className="text-sm font-medium">
+                  {t(($) => $.preferences.issue_create.allow_duplicate_label)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t(($) => $.preferences.issue_create.allow_duplicate_hint)}
+                </p>
+              </div>
+              <Switch
+                aria-label={t(($) => $.preferences.issue_create.allow_duplicate_label)}
+                checked={duplicatePolicy === "allow"}
+                onCheckedChange={(checked) =>
+                  setDuplicatePolicy(checked ? "allow" : "confirm")
+                }
+              />
+            </div>
+          </CardContent>
+        </Card>
       </section>
 
       <TimezoneSection />
