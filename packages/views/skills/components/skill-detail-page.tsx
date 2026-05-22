@@ -510,6 +510,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
             variant="ghost"
             size="xs"
             render={<AppLink href={paths.skills()} />}
+            nativeButton={false}
           >
             <ArrowLeft className="h-3 w-3" />
             {t(($) => $.detail.all_skills)}
@@ -556,11 +557,13 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
           variant="ghost"
           size="xs"
           render={<AppLink href={paths.skills()} />}
+          nativeButton={false}
+          className="shrink-0"
         >
           <ArrowLeft className="h-3 w-3" />
           {t(($) => $.detail.all_skills)}
         </Button>
-        <ChevronRight className="h-3 w-3 text-muted-foreground" />
+        <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
         <span className="truncate font-mono text-xs text-foreground">
           {skill.name}
         </span>
@@ -613,9 +616,9 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       )}
 
       {/* Body: file tree | editor | sidebar */}
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 min-h-0 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
         {/* File tree */}
-        <aside className="flex w-56 shrink-0 flex-col border-r">
+        <aside className="flex max-h-44 w-full shrink-0 flex-col border-b md:max-h-none md:w-56 md:border-b-0 md:border-r">
           <div className="flex h-10 shrink-0 items-center justify-between border-b px-3">
             <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
               {t(($) => $.detail.files_label, { count: totalFileCount(skill) })}
@@ -671,9 +674,9 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         </aside>
 
         {/* Editor */}
-        <section className="flex min-w-0 flex-1 flex-col">
+        <section className="flex min-h-[32rem] min-w-0 shrink-0 flex-col md:min-h-0 md:flex-1 md:shrink">
           {/* Name + description + subline */}
-          <div className="space-y-2 border-b px-5 py-4">
+          <div className="space-y-2 border-b px-4 py-4 sm:px-5">
             <Input
               value={name}
               readOnly={!canEdit}
@@ -770,7 +773,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
             <div
               role="status"
               aria-live="polite"
-              className="flex items-center gap-2 border-t bg-muted/30 px-4 py-2"
+              className="flex flex-wrap items-center gap-2 border-t bg-muted/30 px-4 py-2"
             >
               <span className="h-1.5 w-1.5 rounded-full bg-brand" />
               <span className="text-xs text-muted-foreground">
@@ -809,7 +812,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         </section>
 
         {/* Sidebar */}
-        <aside className="flex w-72 shrink-0 flex-col gap-4 overflow-y-auto border-l bg-muted/20 px-4 py-4">
+        <aside className="flex w-full shrink-0 flex-col gap-4 border-t bg-muted/20 px-4 py-4 md:w-72 md:overflow-y-auto md:border-l md:border-t-0">
           <div>
             <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               {t(($) => $.detail.sidebar.metadata)}

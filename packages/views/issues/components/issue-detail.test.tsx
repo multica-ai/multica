@@ -405,6 +405,7 @@ const mockIssue: Issue = {
   position: 0,
   start_date: null,
   due_date: "2026-06-01T00:00:00Z",
+  metadata: {},
   created_at: "2026-01-15T00:00:00Z",
   updated_at: "2026-01-20T00:00:00Z",
 };
@@ -664,6 +665,69 @@ describe("IssueDetail (shared)", () => {
 
     expect(screen.queryByTestId("panel-group")).not.toBeInTheDocument();
     expect(screen.queryByText("Properties")).not.toBeInTheDocument();
+  });
+
+  it("hides metadata content from the sidebar and shows a button when the bag has keys", async () => {
+    // Metadata is agent-facing; the sidebar only exposes a button that opens
+    // the raw JSON on demand. Keys are NOT rendered inline anywhere.
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      metadata: {
+        pr_url: "https://example.com/pr/1",
+        pipeline_status: "running",
+      },
+    });
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      // Trigger label includes a "· N" count so users can see payload size
+      // before clicking — accept any count via regex.
+      expect(screen.getByRole("button", { name: /^Metadata\b/ })).toBeInTheDocument();
+    });
+
+    // Key names are not rendered in the sidebar prior to opening the dialog.
+    expect(screen.queryByText("pr_url")).not.toBeInTheDocument();
+    expect(screen.queryByText("pipeline_status")).not.toBeInTheDocument();
+  });
+
+  it("opens a dialog with formatted JSON when the Metadata button is clicked", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      metadata: {
+        pr_url: "https://example.com/pr/1",
+        pipeline_status: "running",
+      },
+    });
+
+    renderIssueDetail();
+
+    const button = await screen.findByRole("button", { name: /^Metadata\b/ });
+    fireEvent.click(button);
+
+    // The dialog renders a <pre> containing the formatted JSON; checking the
+    // exact serialized payload also verifies the indent / structure.
+    const expected = JSON.stringify(
+      { pr_url: "https://example.com/pr/1", pipeline_status: "running" },
+      null,
+      2,
+    );
+    await waitFor(() => {
+      const pre = document.querySelector("pre");
+      expect(pre).not.toBeNull();
+      expect(pre!.textContent).toBe(expected);
+    });
+  });
+
+  it("hides the Metadata button entirely when the bag is empty", async () => {
+    // Default fixture already has metadata: {}, asserted explicitly here.
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Details")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole("button", { name: /^Metadata\b/ })).not.toBeInTheDocument();
   });
 
   it("renders Details section with Created by and dates", async () => {

@@ -32,7 +32,7 @@ import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { useT } from "../i18n";
 import { useNavigation } from "../navigation";
 import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
-import { withFragmentNavShim } from "./utils/iframe-fragment-nav";
+import { HtmlPreviewBody } from "./html-preview-body";
 
 const PREVIEW_HEIGHT = "h-[480px]";
 const ERROR_PLACEHOLDER_HEIGHT = "h-20";
@@ -51,17 +51,17 @@ export function HtmlAttachmentPreview({
   onDownload,
 }: HtmlAttachmentPreviewProps) {
   const { t } = useT("editor");
+  // Subscribe to the same React Query cache key the body consumes so the
+  // toolbar can pin itself open during error. Re-subscribing is free — the
+  // useQuery dedupe means no extra fetch.
   const query = useAttachmentHtmlText(attachmentId);
+  const isError = !query.isLoading && (!!query.error || !query.data?.text);
   // useWorkspaceSlug — NOT useWorkspacePaths. The Paths-bound variant throws
   // when there's no slug; we want to render gracefully (just hide the
   // new-tab button) when the component is somehow mounted outside a
   // workspace route.
   const slug = useWorkspaceSlug();
   const navigation = useNavigation();
-
-  const text = query.data?.text;
-  const isLoading = query.isLoading;
-  const isError = !isLoading && (!!query.error || !text);
 
   // Only enable the new-tab button when the workspace slug is resolvable —
   // outside a workspace context the path is meaningless. Prefer desktop's
@@ -85,36 +85,13 @@ export function HtmlAttachmentPreview({
       className="group/html-preview relative my-1"
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {isLoading ? (
-        <div
-          className={cn(
-            "flex items-center justify-center rounded-md border border-border bg-muted/30 text-xs text-muted-foreground",
-            PREVIEW_HEIGHT,
-          )}
-        >
-          {t(($) => $.attachment.preview_loading)}
-        </div>
-      ) : isError ? (
-        <div
-          className={cn(
-            "flex items-center rounded-md border border-border bg-muted/30 px-3 text-xs text-muted-foreground",
-            ERROR_PLACEHOLDER_HEIGHT,
-          )}
-          data-testid="html-attachment-preview-error"
-        >
-          <span className="truncate">{t(($) => $.attachment.preview_failed)}</span>
-        </div>
-      ) : (
-        <iframe
-          srcDoc={withFragmentNavShim(text)}
-          sandbox="allow-scripts"
-          title={filename}
-          className={cn(
-            "block w-full rounded-md border border-border bg-background",
-            PREVIEW_HEIGHT,
-          )}
-        />
-      )}
+      <HtmlPreviewBody
+        source={{ kind: "attachment", attachmentId }}
+        title={filename}
+        className={PREVIEW_HEIGHT}
+        placeholderClassName={isError ? ERROR_PLACEHOLDER_HEIGHT : PREVIEW_HEIGHT}
+        errorTestId="html-attachment-preview-error"
+      />
       <div
         className={cn(
           "absolute right-2 top-2 flex items-center gap-0.5 rounded-md border border-border bg-background/95 p-0.5 shadow-sm transition-opacity",

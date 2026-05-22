@@ -10,13 +10,13 @@ import { StepUseCase } from "./step-use-case";
 const TEST_RESOURCES = { en: { common: enCommon, onboarding: enOnboarding } };
 
 const EMPTY: QuestionnaireAnswers = {
-  source: null,
+  source: [],
   source_other: null,
   source_skipped: false,
   role: null,
   role_other: null,
   role_skipped: false,
-  use_case: null,
+  use_case: [],
   use_case_other: null,
   use_case_skipped: false,
   version: 2,
@@ -39,21 +39,32 @@ function renderStep(answers: QuestionnaireAnswers = EMPTY) {
   return { onChange, onAdvance, onSkip };
 }
 
-describe("StepUseCase", () => {
+describe("StepUseCase (multi-select)", () => {
   beforeEach(() => vi.restoreAllMocks());
 
-  it("selecting a use case patches the slug and clears Other/skip", async () => {
+  it("clicking a use case appends it to the array", async () => {
     const user = userEvent.setup();
     const { onChange, onAdvance } = renderStep();
 
-    await user.click(screen.getByRole("radio", { name: /ship code/i }));
+    await user.click(screen.getByRole("checkbox", { name: /ship code/i }));
 
     expect(onChange).toHaveBeenCalledWith({
-      use_case: "ship_code",
-      use_case_other: null,
+      use_case: ["ship_code"],
       use_case_skipped: false,
     });
     expect(onAdvance).not.toHaveBeenCalled();
+  });
+
+  it("clicking an already-selected use case removes it (toggle)", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderStep({ ...EMPTY, use_case: ["ship_code"] });
+
+    await user.click(screen.getByRole("checkbox", { name: /ship code/i }));
+
+    expect(onChange).toHaveBeenCalledWith({
+      use_case: [],
+      use_case_skipped: false,
+    });
   });
 
   it("Skip clears slot and marks use_case_skipped", async () => {
@@ -63,7 +74,7 @@ describe("StepUseCase", () => {
     await user.click(screen.getByRole("button", { name: /skip/i }));
 
     expect(onChange).toHaveBeenCalledWith({
-      use_case: null,
+      use_case: [],
       use_case_other: null,
       use_case_skipped: true,
     });
@@ -74,9 +85,9 @@ describe("StepUseCase", () => {
     const user = userEvent.setup();
     const { onChange } = renderStep();
 
-    await user.click(screen.getByRole("radio", { name: /^other$/i }));
+    await user.click(screen.getByRole("checkbox", { name: /^other$/i }));
     expect(onChange).toHaveBeenCalledWith({
-      use_case: "other",
+      use_case: ["other"],
       use_case_skipped: false,
     });
 

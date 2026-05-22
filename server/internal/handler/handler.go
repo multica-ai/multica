@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -16,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -48,27 +50,6 @@ type Config struct {
 	AllowSignup         bool
 	AllowedEmails       []string
 	AllowedEmailDomains []string
-	// UseDailyRollupForRuntimeUsage routes ListRuntimeUsage to the
-	// task_usage_daily rollup table when true. Default false: the read
-	// path stays on the raw task_usage stream so rollup-related issues
-	// (pg_cron not running, backfill not yet performed, watermark stuck)
-	// can never make the dashboard return empty/stale data. Operators
-	// flip this on per environment AFTER:
-	//   1) migrations 072..076 applied,
-	//   2) backfill_task_usage_daily ran successfully,
-	//   3) cron job scheduled and task_usage_rollup_lag_seconds() < 900.
-	UseDailyRollupForRuntimeUsage bool
-	// UseDailyRollupForDashboard routes the workspace `/dashboard` page's
-	// token-aggregation reads to `task_usage_dashboard_daily` (migration
-	// 084). Mirrors UseDailyRollupForRuntimeUsage above with the same
-	// fail-safe default (false → raw scan). Operators flip per
-	// environment AFTER:
-	//   1) migration 084 applied,
-	//   2) `backfill_task_usage_dashboard_daily` succeeded and stamped
-	//      the dashboard rollup watermark,
-	//   3) cron job scheduled (`rollup_task_usage_dashboard_daily`) and
-	//      `task_usage_dashboard_rollup_lag_seconds()` < 900.
-	UseDailyRollupForDashboard bool
 	// PublicURL is the absolute base URL the API is reachable at from the
 	// public internet, with no trailing slash (e.g. "https://app.multica.ai").
 	// Used only to build webhook_url responses for autopilot webhook triggers
@@ -87,6 +68,16 @@ type Config struct {
 	// webhook limiter from being bypassed by a spoofed XFF on deployments
 	// without a header-stripping reverse proxy in front.
 	TrustedProxies []netip.Prefix
+	// CloudRuntimeFleetURL enables the SaaS-only remote Fleet adapter when set.
+	// Empty keeps self-hosted deployments explicit: cloud runtime endpoints
+	// return 503 instead of attempting to dial a hard-coded private service.
+	CloudRuntimeFleetURL     string
+	CloudRuntimeFleetTimeout time.Duration
+}
+
+type cloudRuntimeProxy interface {
+	Enabled() bool
+	Do(ctx context.Context, req cloudruntime.Request) (*cloudruntime.Response, error)
 }
 
 type Handler struct {
@@ -113,6 +104,7 @@ type Handler struct {
 	MembershipCache       *auth.MembershipCache
 	WebhookRateLimiter    WebhookRateLimiter
 	WebhookIPRateLimiter  WebhookRateLimiter
+	CloudRuntime          cloudRuntimeProxy
 	cfg                   Config
 }
 
@@ -154,7 +146,11 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		Analytics:             analyticsClient,
 		WebhookRateLimiter:    NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
 		WebhookIPRateLimiter:  NewMemoryWebhookIPRateLimiter(DefaultWebhookIPRateLimit()),
-		cfg:                   cfg,
+		CloudRuntime: cloudruntime.NewClient(cloudruntime.Config{
+			BaseURL: cfg.CloudRuntimeFleetURL,
+			Timeout: cfg.CloudRuntimeFleetTimeout,
+		}),
+		cfg: cfg,
 	}
 }
 
@@ -263,6 +259,14 @@ func isNotFound(err error) bool {
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// isCheckViolation reports whether err is a PostgreSQL CHECK constraint
+// violation (SQLSTATE 23514). Used to translate column-level CHECK failures
+// into a 4xx instead of a generic 500.
+func isCheckViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23514"
 }
 
 func requestUserID(r *http.Request) string {

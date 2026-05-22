@@ -11,6 +11,12 @@
       "english": "English",
       "chinese": "中文",
       "sync_failed": "语言已在本设备保存，但同步到账号失败。其他设备可能仍显示旧语言。"
+    },
+    "timezone": {
+      "title": "查看时区",
+      "browser_suffix": "（浏览器）",
+      "hint": "用于仪表盘、图表和「今天」标签。这是个人偏好，在你的所有工作区中通用。",
+      "sync_failed": "保存时区偏好失败。"
     }
   },
   "page": {
@@ -228,6 +234,22 @@
     "manage_hint": "只有管理员和所有者可以管理代码仓库。",
     "toast_saved": "已保存代码仓库",
     "toast_save_failed": "保存代码仓库失败"
+  },
+  "desktop": {
+    "tabs": {
+      "updates": "更新"
+    },
+    "updates": {
+      "title": "更新",
+      "description": "桌面端每小时以及启动后不久会自动检查新版本，并在后台下载。更新就绪后会提示你重启。",
+      "current_version": "当前版本",
+      "check_section_title": "检查更新",
+      "check_section_description": "立即检查更新，而不是等待下一次自动轮询。可用的更新会在后台下载，就绪时弹出重启提示。",
+      "up_to_date": "已是最新版本。",
+      "downloading": "v{{version}} 正在后台下载——准备好安装时会通知你。",
+      "check_now": "立即检查",
+      "checking": "检查中..."
+    }
   },
   "members": {
     "section_title": "成员（{{count}}）",

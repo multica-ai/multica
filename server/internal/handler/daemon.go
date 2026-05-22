@@ -161,15 +161,6 @@ type DaemonRegisterRequest struct {
 	DeviceName      string   `json:"device_name"`
 	CLIVersion      string   `json:"cli_version"` // multica CLI version
 	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
-	// Timezone is the daemon host's IANA timezone (e.g. "Asia/Shanghai"),
-	// detected client-side from time.Local. The server stores it on each
-	// agent_runtime row created for this daemon so token-usage rollups
-	// bucket by the operator's local calendar day instead of UTC. Empty
-	// or invalid values fall back to "UTC". The value is set ONLY on
-	// first-time registration; once a user overrides the tz via the web
-	// UI, the upsert query preserves that override on subsequent
-	// daemon reconnects (see UpsertAgentRuntime in runtime.sql).
-	Timezone string `json:"timezone"`
 	Runtimes []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
@@ -183,24 +174,6 @@ type daemonWorkspaceReposResponse struct {
 	Repos        []RepoData      `json:"repos"`
 	ReposVersion string          `json:"repos_version"`
 	Settings     json.RawMessage `json:"settings,omitempty"`
-}
-
-// normalizeRuntimeTimezone validates and normalizes the IANA timezone string
-// reported by a daemon during registration. The stored column is NOT NULL with
-// a 'UTC' default so any unparseable, blank, or trivially-invalid value is
-// quietly downgraded to "UTC" rather than rejected: a misconfigured daemon
-// host shouldn't take down registration just because its tz string is junk.
-// Real validation happens on the user-driven PATCH path where we surface the
-// error.
-func normalizeRuntimeTimezone(tz string) string {
-	tz = strings.TrimSpace(tz)
-	if tz == "" {
-		return "UTC"
-	}
-	if _, err := time.LoadLocation(tz); err != nil {
-		return "UTC"
-	}
-	return tz
 }
 
 func normalizeWorkspaceRepos(repos []RepoData) []RepoData {
@@ -355,7 +328,6 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			DeviceInfo:  deviceInfo,
 			Metadata:    metadata,
 			OwnerID:     ownerID,
-			Timezone:    normalizeRuntimeTimezone(req.Timezone),
 		})
 		if err != nil {
 			h.Analytics.Capture(analytics.RuntimeFailed(
@@ -386,7 +358,6 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt:      row.UpdatedAt,
 			OwnerID:        row.OwnerID,
 			LegacyDaemonID: row.LegacyDaemonID,
-			Timezone:       row.Timezone,
 		}
 
 		// Inserted is false for normal daemon reconnects/upserts, so

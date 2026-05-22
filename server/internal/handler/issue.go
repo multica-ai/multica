@@ -46,8 +46,12 @@ type IssueResponse struct {
 	DueDate       *string                 `json:"due_date"`
 	CreatedAt     string                  `json:"created_at"`
 	UpdatedAt     string                  `json:"updated_at"`
-	Reactions     []IssueReactionResponse `json:"reactions,omitempty"`
-	Attachments   []AttachmentResponse    `json:"attachments,omitempty"`
+	// Metadata is the per-issue KV map (see issue_metadata.go). Always emitted
+	// (empty object when unset) so frontend code can `issue.metadata[key]`
+	// without nil-guarding the parent field.
+	Metadata    map[string]any          `json:"metadata"`
+	Reactions   []IssueReactionResponse `json:"reactions,omitempty"`
+	Attachments []AttachmentResponse    `json:"attachments,omitempty"`
 	// Labels are bulk-attached by list/detail endpoints so the client can render
 	// chips without an N+1 round-trip per row. Pointer + omitempty so paths that
 	// don't load labels (e.g. UpdateIssue, batch UpdateIssues, the issue:updated
@@ -79,6 +83,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
+		Metadata:      parseIssueMetadata(i.Metadata),
 	}
 }
 
@@ -105,6 +110,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
+		Metadata:      parseIssueMetadata(i.Metadata),
 	}
 }
 
@@ -161,6 +167,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
+		Metadata:      parseIssueMetadata(i.Metadata),
 	}
 }
 
@@ -755,6 +762,11 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		involvesUserFilter = id
 	}
 
+	metadataFilter, ok := parseMetadataFilterParam(w, r.URL.Query().Get("metadata"))
+	if !ok {
+		return
+	}
+
 	// open_only=true returns all non-done/cancelled issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
@@ -765,6 +777,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			CreatorID:      creatorFilter,
 			ProjectID:      projectFilter,
 			InvolvesUserID: involvesUserFilter,
+			MetadataFilter: metadataFilter,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -832,6 +845,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		ProjectID:      projectFilter,
 		InvolvesUserID: involvesUserFilter,
 		Scheduled:      scheduledFilter,
+		MetadataFilter: metadataFilter,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -849,6 +863,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		ProjectID:      projectFilter,
 		InvolvesUserID: involvesUserFilter,
 		Scheduled:      scheduledFilter,
+		MetadataFilter: metadataFilter,
 	})
 	if err != nil {
 		total = int64(len(issues))
@@ -1041,6 +1056,11 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(id)))
 	}
+	if filter, ok := parseMetadataFilterParam(w, r.URL.Query().Get("metadata")); !ok {
+		return
+	} else if filter != nil {
+		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(filter))))
+	}
 	// Mirror the involves_user_id 4-branch UNION from sqlc's ListIssues /
 	// ListOpenIssues / CountIssues. ListGroupedIssues is a hand-written dynamic
 	// SQL builder that does not share parameters with sqlc, so the fragment is
@@ -1182,7 +1202,7 @@ WITH ranked AS (
 		i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.position, i.due_date, i.created_at, i.updated_at,
-		i.number, i.project_id,
+		i.number, i.project_id, i.metadata,
 		COUNT(*) OVER (PARTITION BY i.assignee_type, i.assignee_id) AS group_total,
 		ROW_NUMBER() OVER (
 			PARTITION BY i.assignee_type, i.assignee_id
@@ -1195,7 +1215,7 @@ SELECT
 	id, workspace_id, title, description, status, priority,
 	assignee_type, assignee_id, creator_type, creator_id,
 	parent_issue_id, position, due_date, created_at, updated_at,
-	number, project_id, group_total
+	number, project_id, metadata, group_total
 FROM ranked
 WHERE rn > %s AND rn <= %s + %s
 ORDER BY
@@ -1238,6 +1258,7 @@ ORDER BY
 			&row.UpdatedAt,
 			&row.Number,
 			&row.ProjectID,
+			&row.Metadata,
 			&row.GroupTotal,
 		); err != nil {
 			slog.Warn("ListGroupedIssues scan failed", "error", err)

@@ -33,6 +33,12 @@ export interface QuestionOption {
  * not in a sticky bottom footer — the form usually only fills the top
  * third of the viewport, and a footer pinned to the page bottom left a
  * large dead zone between the options and the action buttons.
+ *
+ * Supports both single-select (`multiSelect=false`, the default — Role)
+ * and multi-select (`multiSelect=true` — Source, Use case). The
+ * contract is always an array of selected slugs and an `onAnswer(slug)`
+ * callback fired when a card is clicked; the parent decides whether to
+ * replace (single) or toggle (multi) the selection in its own state.
  */
 export function StepQuestion({
   step,
@@ -40,7 +46,7 @@ export function StepQuestion({
   eyebrow,
   question,
   options,
-  selectedSlug,
+  selectedSlugs,
   otherValue,
   onOtherChange,
   otherPlaceholder,
@@ -48,22 +54,25 @@ export function StepQuestion({
   onAdvance,
   onSkip,
   onBack,
+  multiSelect = false,
 }: {
   step: OnboardingStep;
   number: number;
   eyebrow?: string;
   question: string;
   options: readonly QuestionOption[];
-  selectedSlug: string | null;
+  selectedSlugs: readonly string[];
   otherValue: string;
   onOtherChange: (value: string) => void;
   otherPlaceholder: string;
-  /** Record the selection in the parent — does NOT advance. */
+  /** Record the click in the parent — does NOT advance. Parent
+   *  decides replace vs. toggle based on its own multi/single mode. */
   onAnswer: (slug: string) => void;
   /** Commit the current selection and move to the next step. */
   onAdvance: () => void;
   onSkip: () => void;
   onBack?: () => void;
+  multiSelect?: boolean;
 }) {
   const { t } = useT("onboarding");
   const [pendingOther, setPendingOther] = useState(false);
@@ -81,22 +90,43 @@ export function StepQuestion({
     onAnswer(option.slug);
   };
 
-  const selectedOption = options.find((o) => o.slug === selectedSlug) ?? null;
-  const otherActive = selectedOption?.isOther || pendingOther;
+  const otherOption = options.find((o) => o.isOther) ?? null;
+  const otherSelected = otherOption
+    ? selectedSlugs.includes(otherOption.slug)
+    : false;
+  const otherActive = otherSelected || pendingOther;
   const otherFilled = (otherValue ?? "").trim().length > 0;
   // Continue is enabled when:
-  //   - a non-Other option is selected, OR
+  //   - at least one non-Other option is selected, OR
   //   - Other is selected AND the free-text input has content.
-  const canContinue = selectedSlug !== null && (!otherActive || otherFilled);
+  // In multi-select Other can stack with regular picks; we treat the
+  // non-Other selections as sufficient to advance even if Other's
+  // text is empty.
+  const hasNonOtherSelection = selectedSlugs.some(
+    (slug) => slug !== otherOption?.slug,
+  );
+  const canContinue =
+    selectedSlugs.length > 0 &&
+    (hasNonOtherSelection || !otherActive || otherFilled);
 
   const confirmAdvance = () => {
     if (canContinue) onAdvance();
   };
 
-  const selectedLabel = selectedOption?.label ?? null;
+  // Footer label:
+  //   - single select: name the picked option ("hint_selected").
+  //   - multi-select with 1 pick: same.
+  //   - multi-select with >1 pick: show count via the existing
+  //     "hint_continue" key (locale-friendly, doesn't grow a new key
+  //     just for "N selected").
+  const singlePicked =
+    selectedSlugs.length === 1
+      ? options.find((o) => o.slug === selectedSlugs[0]) ?? null
+      : null;
+  const singlePickedLabel = singlePicked?.label ?? null;
   const footerHint = canContinue
-    ? selectedLabel
-      ? t(($) => $.step_runtime.hint_selected, { name: selectedLabel })
+    ? singlePickedLabel
+      ? t(($) => $.step_runtime.hint_selected, { name: singlePickedLabel })
       : t(($) => $.step_question.hint_continue)
     : t(($) => $.step_question.hint_pick);
 
@@ -140,7 +170,7 @@ export function StepQuestion({
           </h1>
 
           <fieldset
-            role="radiogroup"
+            role={multiSelect ? "group" : "radiogroup"}
             aria-label={question}
             className="mt-10 m-0 grid grid-cols-1 gap-3 p-0 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
           >
@@ -156,14 +186,16 @@ export function StepQuestion({
                   onOtherChange={onOtherChange}
                   onConfirm={confirmAdvance}
                   placeholder={otherPlaceholder}
+                  mode={multiSelect ? "checkbox" : "radio"}
                 />
               ) : (
                 <IconOptionCard
                   key={option.slug}
                   icon={option.icon}
                   label={option.label}
-                  selected={selectedSlug === option.slug && !otherActive}
+                  selected={selectedSlugs.includes(option.slug)}
                   onSelect={() => handleSelect(option)}
+                  mode={multiSelect ? "checkbox" : "radio"}
                 />
               ),
             )}
