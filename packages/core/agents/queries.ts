@@ -28,16 +28,15 @@ export const agentAllowedPrincipalKeys = {
 // workspace; all agent dots / hover cards / list rows derive presence from
 // this cache with zero additional network traffic.
 //
-// The 30s staleTime is a safety net only; the primary freshness signal is
-// WS task events, which invalidate this query immediately. Without WS,
-// presence still updates within 30s on focus / mount.
+// WS task events are the primary freshness signal. Keep focus-based refetch
+// disabled so tab switches do not fan out large workspace-level GETs.
 export function agentTaskSnapshotOptions(wsId: string) {
   return queryOptions({
     queryKey: agentTaskSnapshotKeys.list(wsId),
     queryFn: () => api.getAgentTaskSnapshot(),
-    staleTime: 30 * 1000,
+    staleTime: 60 * 1000,
     gcTime: 5 * 60 * 1000,
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -45,15 +44,15 @@ export function agentTaskSnapshotOptions(wsId: string) {
 // completed_at. One fetch backs both the Agents-list sparkline (which
 // only uses the trailing 7 buckets via `summarizeActivityWindow`) and
 // the agent detail "Last 30 days" panel. WS task lifecycle events
-// invalidate this query in useRealtimeSync; the staleTime is a
-// tab-focus safety net.
+// invalidate this query in useRealtimeSync; focus refetch is disabled to
+// avoid multi-tab request bursts.
 export function agentActivity30dOptions(wsId: string) {
   return queryOptions({
     queryKey: agentActivityKeys.last30d(wsId),
     queryFn: () => api.getWorkspaceAgentActivity30d(),
-    staleTime: 60 * 1000,
+    staleTime: 5 * 60 * 1000,
     gcTime: 5 * 60 * 1000,
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -63,9 +62,9 @@ export function agentRunCounts30dOptions(wsId: string) {
   return queryOptions({
     queryKey: agentRunCountsKeys.last30d(wsId),
     queryFn: () => api.getWorkspaceAgentRunCounts(),
-    staleTime: 60 * 1000,
+    staleTime: 5 * 60 * 1000,
     gcTime: 5 * 60 * 1000,
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -92,9 +91,9 @@ export function agentTasksOptions(wsId: string, agentId: string) {
   return queryOptions({
     queryKey: agentTasksKeys.detail(wsId, agentId),
     queryFn: () => api.listAgentTasks(agentId),
-    staleTime: 30 * 1000,
+    staleTime: 60 * 1000,
     gcTime: 5 * 60 * 1000,
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
   });
 }
 
