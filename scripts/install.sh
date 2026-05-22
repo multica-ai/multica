@@ -321,13 +321,15 @@ setup_server() {
     cp .env.example .env
     local jwt pgpass
     jwt=$(openssl rand -hex 32)
-    pgpass=$(openssl rand -hex 16)
+    pgpass=$(openssl rand -hex 24)
     if [ "$(uname -s)" = "Darwin" ]; then
       sed -i '' "s/^JWT_SECRET=.*/JWT_SECRET=$jwt/" .env
       sed -i '' "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$pgpass/" .env
+      sed -i '' "s|^DATABASE_URL=postgres://[^:]*:[^@]*@|DATABASE_URL=postgres://multica:${pgpass}@|" .env
     else
       sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$jwt/" .env
       sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$pgpass/" .env
+      sed -i "s|^DATABASE_URL=postgres://[^:]*:[^@]*@|DATABASE_URL=postgres://multica:${pgpass}@|" .env
     fi
     ok "Generated .env with random JWT_SECRET and POSTGRES_PASSWORD"
   else
