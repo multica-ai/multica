@@ -309,3 +309,157 @@ func TestAutopilotDispatchFansOutSubscribersToIssue(t *testing.T) {
 		t.Fatalf("subscriber reason = %q, want %q", subscriberReason, "autopilot")
 	}
 }
+
+// TestAutopilotDispatchNotifiesSubscribersOnCreate locks in the OQ3 promise
+// from the RFC ("reason='autopilot' 与 reason='manual' 一致，订阅事件全收"):
+// when an autopilot creates an issue, each template subscriber must land in
+// the recipient's inbox with type='issue_subscribed' pointing at the new
+// issue. Without this, subscribers would only see comment/status updates
+// after the fact and miss the creation event itself — flagged in PR #3060
+// review by the Emacs agent.
+func TestAutopilotDispatchNotifiesSubscribersOnCreate(t *testing.T) {
+	ctx := context.Background()
+	title := fmt.Sprintf("Autopilot subscriber inbox %d", time.Now().UnixNano())
+	var autopilotID, issueID string
+	defer func() {
+		if issueID != "" {
+			testPool.Exec(ctx, `DELETE FROM inbox_item WHERE issue_id = $1`, issueID)
+			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		}
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+	}()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":                "Subscriber inbox autopilot",
+		"assignee_id":          agentID,
+		"execution_mode":       "create_issue",
+		"issue_title_template": title,
+		"subscribers": []map[string]any{
+			{"user_type": "member", "user_id": testUserID},
+		},
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var autopilot AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
+		t.Fatalf("decode autopilot: %v", err)
+	}
+	autopilotID = autopilot.ID
+
+	queries := db.New(testPool)
+	ap, err := queries.GetAutopilot(ctx, parseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("GetAutopilot: %v", err)
+	}
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	if run == nil || !run.IssueID.Valid {
+		t.Fatalf("dispatch run = %+v, want linked issue", run)
+	}
+	issueID = uuidToString(run.IssueID)
+
+	var inboxCount int
+	var inboxType, inboxTitle string
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM inbox_item
+		WHERE issue_id = $1 AND recipient_id = $2 AND type = 'issue_subscribed'
+	`, issueID, testUserID).Scan(&inboxCount); err != nil {
+		t.Fatalf("count inbox rows: %v", err)
+	}
+	if inboxCount != 1 {
+		t.Fatalf("inbox_item rows for subscriber = %d, want 1", inboxCount)
+	}
+
+	if err := testPool.QueryRow(ctx, `
+		SELECT type, title FROM inbox_item
+		WHERE issue_id = $1 AND recipient_id = $2 AND type = 'issue_subscribed'
+	`, issueID, testUserID).Scan(&inboxType, &inboxTitle); err != nil {
+		t.Fatalf("load inbox row: %v", err)
+	}
+	if inboxType != "issue_subscribed" {
+		t.Fatalf("inbox type = %q, want issue_subscribed", inboxType)
+	}
+	if inboxTitle != title {
+		t.Fatalf("inbox title = %q, want %q (issue title)", inboxTitle, title)
+	}
+}
+
+// TestAutopilotDispatchSkipsInboxWhenNoSubscribers asserts the no-op path:
+// an autopilot with an empty subscriber template must NOT create any inbox
+// rows on dispatch — otherwise we'd be paging the workspace on every quiet
+// autopilot run. The corresponding issue_subscriber rows are also expected
+// to be absent (other-reason rows like creator/assignee are filtered out by
+// the WHERE type = 'issue_subscribed' clause).
+func TestAutopilotDispatchSkipsInboxWhenNoSubscribers(t *testing.T) {
+	ctx := context.Background()
+	title := fmt.Sprintf("Autopilot no-subscriber inbox %d", time.Now().UnixNano())
+	var autopilotID, issueID string
+	defer func() {
+		if issueID != "" {
+			testPool.Exec(ctx, `DELETE FROM inbox_item WHERE issue_id = $1`, issueID)
+			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		}
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+	}()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":                "No-subscriber autopilot",
+		"assignee_id":          agentID,
+		"execution_mode":       "create_issue",
+		"issue_title_template": title,
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var autopilot AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
+		t.Fatalf("decode autopilot: %v", err)
+	}
+	autopilotID = autopilot.ID
+
+	queries := db.New(testPool)
+	ap, err := queries.GetAutopilot(ctx, parseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("GetAutopilot: %v", err)
+	}
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	if run == nil || !run.IssueID.Valid {
+		t.Fatalf("dispatch run = %+v, want linked issue", run)
+	}
+	issueID = uuidToString(run.IssueID)
+
+	var inboxCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM inbox_item
+		WHERE issue_id = $1 AND type = 'issue_subscribed'
+	`, issueID).Scan(&inboxCount); err != nil {
+		t.Fatalf("count inbox rows: %v", err)
+	}
+	if inboxCount != 0 {
+		t.Fatalf("issue_subscribed inbox rows = %d, want 0 (no subscribers)", inboxCount)
+	}
+}
