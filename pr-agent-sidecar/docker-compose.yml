@@ -4,6 +4,8 @@ services:
     container_name: pr-agent-sidecar
     restart: unless-stopped
     env_file: .env
+    volumes:
+      - /Users/rtk-agent/Downloads/multica-pr-agent-dev-zap.2026-05-22.private-key.pem:/run/secrets/github-app.pem
     networks: [multica-bridge]
 
   cloudflared:
