@@ -1568,25 +1568,7 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		projectUUID = pid
 	}
 
-	// Optional parent_issue_id — validate the issue exists in this workspace
-	// so the agent's --parent flag targets a real issue.
-	var parentIssueUUID pgtype.UUID
-	if strings.TrimSpace(req.ParentIssueID) != "" {
-		pid, ok := parseUUIDOrBadRequest(w, req.ParentIssueID, "parent_issue_id")
-		if !ok {
-			return
-		}
-		if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
-			ID:          pid,
-			WorkspaceID: wsUUID,
-		}); err != nil {
-			writeError(w, http.StatusBadRequest, "parent issue not found")
-			return
-		}
-		parentIssueUUID = pid
-	}
-
-	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID, parentIssueUUID)
+	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID)
 	if err != nil {
 		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue quick-create task")
