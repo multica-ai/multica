@@ -7,16 +7,26 @@
 #   MULTICA_VERSION   — install a specific version instead of latest
 #   MULTICA_DIR       — installation directory (default: ~/.multica/bin)
 #   MULTICA_SERVER    — server URL (default: https://multica.wujieai.com)
+#   MULTICA_CHANNEL   — release channel: prod (default) or test
 
 $ErrorActionPreference = "Stop"
 
 # --- Configuration ---
 $DefaultServer = "https://multica.wujieai.com"
-$OBSBase = "https://multica.obs.cn-east-3.myhuaweicloud.com/cli/releases"
-$ManifestURL = "https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json"
+$OBSHost = "https://multica.obs.cn-east-3.myhuaweicloud.com"
+$Channel = if ($env:MULTICA_CHANNEL) { $env:MULTICA_CHANNEL } else { "" }
 $InstallDir = if ($env:MULTICA_DIR) { $env:MULTICA_DIR } else { Join-Path $HOME ".multica\bin" }
 $ServerURL = if ($env:MULTICA_SERVER) { $env:MULTICA_SERVER } else { $DefaultServer }
 $Version = $env:MULTICA_VERSION
+
+# Resolve OBS paths based on channel
+if ($Channel -eq "test") {
+    $OBSPrefix = "cli-test"
+} else {
+    $OBSPrefix = "cli"
+}
+$OBSBase = "$OBSHost/$OBSPrefix/releases"
+$ManifestURL = "$OBSHost/$OBSPrefix/manifest.json"
 
 # --- Helpers ---
 function Write-Info  { param($msg) Write-Host "[info]  $msg" -ForegroundColor Blue }
@@ -163,6 +173,13 @@ function Install-MulticaCLI {
     & $multica config set server_url $ServerURL 2>$null
     & $multica config set app_url $ServerURL 2>$null
     Write-Ok "Server configured: $ServerURL"
+
+    # Configure test channel update manifest
+    if ($Channel -eq "test") {
+        Write-Info "Configuring update manifest for test channel..."
+        & $multica config set update_manifest_url $ManifestURL 2>$null
+        Write-Ok "Update manifest set to test channel: $ManifestURL"
+    }
 
     # Restart daemon
     Write-Info "Restarting daemon..."
