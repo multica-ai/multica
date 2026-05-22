@@ -147,7 +147,7 @@ function ReadonlyLink({
   );
 }
 
-function CodeCopyButton({ code }: { code: string }) {
+function CodeBlockHeader({ language, code }: { language?: string; code: string }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(async () => {
     await navigator.clipboard.writeText(code);
@@ -155,14 +155,18 @@ function CodeCopyButton({ code }: { code: string }) {
     setTimeout(() => setCopied(false), 2000);
   }, [code]);
   return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      className="absolute top-1.5 right-1.5 z-10 flex h-6 w-6 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover/code:opacity-100"
-      title="Copy code"
-    >
-      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-    </button>
+    <div className="flex items-center justify-between rounded-t-md border-b border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
+      <span>{language || "code"}</span>
+      <button
+        type="button"
+        onClick={handleCopy}
+        className="flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors hover:bg-muted hover:text-foreground"
+        title="Copy code"
+      >
+        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+        <span>{copied ? "Copied" : "Copy"}</span>
+      </button>
+    </div>
   );
 }
 
@@ -269,7 +273,7 @@ function buildComponents(): Partial<Components> {
           return <>{children}</>;
         }
       }
-      // Extract text content for copy button
+      // Extract text content and language for header bar
       const codeEl = (node?.children ?? []).find(
         (child: any) => child.type === "element" && child.tagName === "code"
       ) as any;
@@ -280,10 +284,13 @@ function buildComponents(): Partial<Components> {
             .join("")
             .replace(/\n$/, "")
         : "";
+      const classNames: string[] = codeEl?.properties?.className ?? [];
+      const langClass = classNames.find((cls: string) => cls.startsWith("language-"));
+      const language = langClass?.replace("language-", "");
       return (
-        <div className="group/code relative">
-          {codeText && <CodeCopyButton code={codeText} />}
-          <pre>{children}</pre>
+        <div className="rounded-md border border-border overflow-hidden my-2">
+          {codeText && <CodeBlockHeader language={language} code={codeText} />}
+          <pre className="!mt-0 !rounded-t-none !border-0">{children}</pre>
         </div>
       );
     },
