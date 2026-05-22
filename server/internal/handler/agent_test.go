@@ -209,6 +209,13 @@ func TestWorkspaceAlwaysRedactEnv(t *testing.T) {
 	}
 }
 
+func resetWorkspaceSettings(t *testing.T, workspaceID string) {
+	t.Helper()
+	if _, err := testPool.Exec(context.Background(), "UPDATE workspace SET settings = '{}'::jsonb WHERE id = $1", workspaceID); err != nil {
+		t.Logf("warning: failed to reset workspace settings: %v", err)
+	}
+}
+
 func TestGetAgent_AlwaysRedactEnv_OwnerSeesRedacted(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -219,9 +226,7 @@ func TestGetAgent_AlwaysRedactEnv_OwnerSeesRedacted(t *testing.T) {
 	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = '{"always_redact_env": true}' WHERE id = $1`, testWorkspaceID); err != nil {
 		t.Fatalf("failed to set workspace settings: %v", err)
 	}
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `UPDATE workspace SET settings = NULL WHERE id = $1`, testWorkspaceID)
-	})
+	t.Cleanup(func() { resetWorkspaceSettings(t, testWorkspaceID) })
 
 	agentID := createHandlerTestAgent(t, "redact-get-test-agent", nil)
 	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{"SECRET_KEY": "super-secret"}' WHERE id = $1`, agentID); err != nil {
@@ -261,9 +266,7 @@ func TestListAgents_AlwaysRedactEnv_OwnerSeesRedacted(t *testing.T) {
 	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = '{"always_redact_env": true}' WHERE id = $1`, testWorkspaceID); err != nil {
 		t.Fatalf("failed to set workspace settings: %v", err)
 	}
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `UPDATE workspace SET settings = NULL WHERE id = $1`, testWorkspaceID)
-	})
+	t.Cleanup(func() { resetWorkspaceSettings(t, testWorkspaceID) })
 
 	agentName := "redact-list-test-agent"
 	agentID := createHandlerTestAgent(t, agentName, nil)
@@ -312,7 +315,7 @@ func TestGetAgent_DefaultNoRedactForOwner(t *testing.T) {
 	ctx := context.Background()
 
 	// Ensure workspace has no always_redact_env policy (guards against test-order leakage).
-	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = NULL WHERE id = $1`, testWorkspaceID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = '{}'::jsonb WHERE id = $1`, testWorkspaceID); err != nil {
 		t.Fatalf("failed to clear workspace settings: %v", err)
 	}
 
