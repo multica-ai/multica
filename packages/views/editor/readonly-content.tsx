@@ -16,7 +16,7 @@
  * - Rendering mentions with the same IssueMentionCard component and .mention class
  */
 
-import { isValidElement, memo, useMemo, useRef } from "react";
+import { isValidElement, memo, useCallback, useMemo, useRef, useState } from "react";
 import ReactMarkdown, {
   defaultUrlTransform,
   type Components,
@@ -29,6 +29,7 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { createLowlight, common } from "lowlight";
 import { toHtml } from "hast-util-to-html";
+import { Copy, Check } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import type { Attachment } from "@multica/core/types";
@@ -146,6 +147,25 @@ function ReadonlyLink({
   );
 }
 
+function CodeCopyButton({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = useCallback(async () => {
+    await navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [code]);
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="absolute top-1.5 right-1.5 z-10 flex h-6 w-6 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover/code:opacity-100"
+      title="Copy code"
+    >
+      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  );
+}
+
 function buildComponents(): Partial<Components> {
   return {
     // Links — route mention:// to mention components, others show preview card
@@ -242,23 +262,30 @@ function buildComponents(): Partial<Components> {
     // renderer above so the outer `<pre>` does not wrap them — this is the
     // standard two-layer pattern used to escape react-markdown's default
     // `<pre><code>` envelope.
-    pre: ({ children }) => {
-      // react-markdown calls `pre` BEFORE invoking the `code` renderer —
-      // `children` is the unrendered `<code>` element from the AST. So we
-      // identify "this block was meant to be unwrapped" by inspecting the
-      // child's className (`language-mermaid`, `language-html`), not by
-      // checking `children.type === MermaidDiagram`, which never matches.
-      //
-      // Match by exact class token: a substring `includes("language-html")`
-      // would also fire on neighboring languages like `language-htmlbars`
-      // and silently strip their <pre> wrapper.
+    pre: ({ children, node }) => {
       if (isValidElement(children)) {
         const childProps = children.props as { className?: string };
         if (PRE_UNWRAP_RE.test(childProps.className ?? "")) {
           return <>{children}</>;
         }
       }
-      return <pre>{children}</pre>;
+      // Extract text content for copy button
+      const codeEl = (node?.children ?? []).find(
+        (child: any) => child.type === "element" && child.tagName === "code"
+      ) as any;
+      const codeText = codeEl
+        ? (codeEl.children as any[])
+            .filter((n: any) => n.type === "text")
+            .map((n: any) => n.value as string)
+            .join("")
+            .replace(/\n$/, "")
+        : "";
+      return (
+        <div className="group/code relative">
+          {codeText && <CodeCopyButton code={codeText} />}
+          <pre>{children}</pre>
+        </div>
+      );
     },
   };
 }
