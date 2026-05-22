@@ -21,6 +21,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	if len(cfg.RepoAllowlist) == 0 {
+		slog.Warn("REPO_ALLOWLIST empty — accepting webhooks from any repo where the App is installed")
+	} else {
+		slog.Info("repo allowlist configured", "repos", len(cfg.RepoAllowlist))
+	}
+
 	srv := NewServer(cfg)
 
 	app, err := NewGitHubApp(cfg.GitHubAppID, cfg.GitHubAppPrivateKey)

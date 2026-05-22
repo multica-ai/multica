@@ -64,19 +64,20 @@ func LoadConfig() (*Config, error) {
 	}
 	c.SidecarPublicURL = strings.TrimRight(c.SidecarPublicURL, "/")
 
-	allowlist, err := requireString("REPO_ALLOWLIST")
-	if err != nil {
-		return nil, err
-	}
-	c.RepoAllowlist = parseAllowlist(allowlist)
-	if len(c.RepoAllowlist) == 0 {
-		return nil, fmt.Errorf("REPO_ALLOWLIST: must contain at least one owner/repo")
-	}
+	// REPO_ALLOWLIST is optional. Empty/unset = accept webhooks from any repo
+	// where the GitHub App is installed. Set a comma-separated list of
+	// owner/repo to restrict.
+	c.RepoAllowlist = parseAllowlist(os.Getenv("REPO_ALLOWLIST"))
 
 	return c, nil
 }
 
+// RepoAllowed returns true if fullName is in the allowlist, or if the
+// allowlist is empty (allow-all mode).
 func (c *Config) RepoAllowed(fullName string) bool {
+	if len(c.RepoAllowlist) == 0 {
+		return true
+	}
 	_, ok := c.RepoAllowlist[fullName]
 	return ok
 }
