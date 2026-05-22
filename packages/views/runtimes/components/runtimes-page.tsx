@@ -29,6 +29,7 @@ import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { cn } from "@multica/ui/lib/utils";
 import { PageHeader } from "../../layout/page-header";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
+import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
 import { ProviderLogo } from "./provider-logo";
 import { RuntimeList, buildWorkloadIndex } from "./runtime-list";
 import {
@@ -51,12 +52,22 @@ interface RuntimesPageProps {
   /** Desktop-only controls shown when the local machine is selected. */
   localMachineActions?: React.ReactNode;
   /**
+   * Desktop-only signal: this host always owns a local machine, even
+   * when no runtime is currently registered (daemon stopped, not yet
+   * started, or runtime GC'd). When true, a placeholder local row is
+   * synthesized so `localMachineActions` (the daemon Start button) is
+   * always reachable. Web omits this.
+   */
+  hasLocalMachine?: boolean;
+  /**
    * Desktop-only signal: the bundled daemon is still booting / hasn't
    * registered with the server yet. Forwarded so the empty state can show
    * a "starting" indicator instead of the static "register a runtime" hint
    * during the boot window. Web omits this.
    */
   bootstrapping?: boolean;
+  /** Web SaaS-only Cloud Runtime entrypoint. Defaults off for self-hosted builds. */
+  cloudRuntimeEnabled?: boolean;
 }
 
 // Re-render every 30s so derived health (recently_lost → offline transitions)
@@ -74,7 +85,9 @@ export function RuntimesPage({
   localDaemonId,
   localMachineName,
   localMachineActions,
+  hasLocalMachine,
   bootstrapping,
+  cloudRuntimeEnabled = false,
 }: RuntimesPageProps = {}) {
   const isLoading = useAuthStore((s) => s.isLoading);
   const wsId = useWorkspaceId();
@@ -94,6 +107,7 @@ export function RuntimesPage({
     setSelectedMachineId(id);
   }, []);
   const [showConnectDialog, setShowConnectDialog] = useState(false);
+  const [showCloudRuntimeDialog, setShowCloudRuntimeDialog] = useState(false);
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_runtimes_layout",
   });
@@ -125,8 +139,16 @@ export function RuntimesPage({
         localDaemonId,
         localMachineName,
         workloadByRuntimeId: workloadIndex,
+        ensureLocalMachine: hasLocalMachine,
       }),
-    [runtimes, now, localDaemonId, localMachineName, workloadIndex],
+    [
+      runtimes,
+      now,
+      localDaemonId,
+      localMachineName,
+      workloadIndex,
+      hasLocalMachine,
+    ],
   );
 
   const machineCounts = useMemo(() => runtimeMachineCounts(machines), [machines]);
@@ -161,13 +183,17 @@ export function RuntimesPage({
   if (isLoading || fetching) return <RuntimesPageSkeleton />;
 
   const totalCount = runtimes.length;
-  const showEmpty = totalCount === 0 && !bootstrapping;
+  // Desktop always has a synthesized local machine row, so the
+  // "register a runtime" empty state would hide the Start button.
+  const showEmpty = totalCount === 0 && !bootstrapping && !hasLocalMachine;
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       <PageHeaderBar
         totalCount={totalCount}
         onConnectRemote={() => setShowConnectDialog(true)}
+        cloudRuntimeEnabled={cloudRuntimeEnabled}
+        onOpenCloudRuntime={() => setShowCloudRuntimeDialog(true)}
       />
 
       {showEmpty ? (
@@ -244,6 +270,9 @@ export function RuntimesPage({
       {showConnectDialog && (
         <ConnectRemoteDialog onClose={() => setShowConnectDialog(false)} />
       )}
+      {cloudRuntimeEnabled && showCloudRuntimeDialog && (
+        <CloudRuntimeDialog onClose={() => setShowCloudRuntimeDialog(false)} />
+      )}
     </div>
   );
 }
@@ -256,9 +285,13 @@ export function RuntimesPage({
 function PageHeaderBar({
   totalCount,
   onConnectRemote,
+  cloudRuntimeEnabled,
+  onOpenCloudRuntime,
 }: {
   totalCount: number;
   onConnectRemote: () => void;
+  cloudRuntimeEnabled: boolean;
+  onOpenCloudRuntime: () => void;
 }) {
   const { t } = useT("runtimes");
   return (
@@ -272,10 +305,23 @@ function PageHeaderBar({
           </span>
         )}
       </div>
-      <Button type="button" size="sm" onClick={onConnectRemote}>
-        <Plus className="h-3 w-3" />
-        {t(($) => $.page.connect_remote)}
-      </Button>
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        {cloudRuntimeEnabled && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={onOpenCloudRuntime}
+          >
+            <Cloud className="h-3 w-3" />
+            {t(($) => $.cloud_runtime.action)}
+          </Button>
+        )}
+        <Button type="button" size="sm" onClick={onConnectRemote}>
+          <Plus className="h-3 w-3" />
+          {t(($) => $.page.connect_remote)}
+        </Button>
+      </div>
     </PageHeader>
   );
 }

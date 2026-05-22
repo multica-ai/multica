@@ -1044,13 +1044,23 @@ func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtyp
 
 func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, workspaceID string) {
 	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-		ID:     issue.ID,
-		Status: "done",
+		ID:          issue.ID,
+		Status:      "done",
+		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
 		slog.Warn("github: advance issue to done failed", "err", err)
 		return
 	}
+
+	// Fire the platform parent-notification path on the same transition the
+	// HTTP UpdateIssue / BatchUpdateIssues paths use. A merged PR is one of
+	// the most common ways a sub-issue actually reaches `done`, and skipping
+	// it here would leave the parent silent for the dominant completion path.
+	// notifyParentOfChildDone re-checks every guard (prev != done, parent
+	// exists, parent not terminal), so calling it unconditionally is safe.
+	h.notifyParentOfChildDone(ctx, issue, updated)
+
 	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
 	resp := issueToResponse(updated, prefix)
 	h.publish(protocol.EventIssueUpdated, workspaceID, "system", "", map[string]any{

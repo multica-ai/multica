@@ -23,6 +23,7 @@ import { ProgressRing } from "./progress-ring";
 import type { ChildProgress } from "./list-row";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
+import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { useT } from "../../i18n";
 
 function formatDate(date: string): string {
@@ -105,8 +106,11 @@ export const BoardCardContent = memo(function BoardCardContent({
 
   return (
     <div className="rounded-lg border-[0.5px] border-border bg-card py-3 px-2.5 shadow-[0_3px_6px_-2px_rgba(0,0,0,0.02),0_1px_1px_0_rgba(0,0,0,0.04)] transition-colors group-hover/card:border-accent group-hover/card:bg-accent group-data-[popup-open]/card:border-accent group-data-[popup-open]/card:bg-accent">
-      {/* Row 1: Identifier */}
-      <p className="text-xs text-muted-foreground">{issue.identifier}</p>
+      {/* Row 1: Identifier + agent activity indicator (top-right) */}
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">{issue.identifier}</p>
+        <IssueAgentActivityIndicator issueId={issue.id} />
+      </div>
 
       {/* Row 2: Title */}
       <p className="mt-1 text-sm font-medium leading-snug line-clamp-2">

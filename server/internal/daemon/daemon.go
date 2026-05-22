@@ -742,7 +742,6 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		"device_name":       d.cfg.DeviceName,
 		"cli_version":       d.cfg.CLIVersion,
 		"launched_by":       d.cfg.LaunchedBy,
-		"timezone":          detectLocalTimezone(),
 		"runtimes":          runtimes,
 	}
 
@@ -755,41 +754,6 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	}
 	d.logger.Debug("register response", "workspace_id", workspaceID, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos), "repos_version", resp.ReposVersion)
 	return resp, nil
-}
-
-// detectLocalTimezone returns an IANA zone name for the daemon host, used as
-// the initial value of agent_runtime.timezone on first registration. The
-// server treats any unparseable value as "UTC", but we still try harder here
-// because we'd rather a real "Asia/Shanghai" than a silent UTC fallback.
-// Short abbreviations like "EST" are intentionally ignored: they lose DST
-// rules and are a poor reporting timezone.
-func detectLocalTimezone() string {
-	if tz, ok := canonicalTimezoneName(os.Getenv("TZ")); ok {
-		return tz
-	}
-	if data, err := os.ReadFile("/etc/timezone"); err == nil {
-		if tz, ok := canonicalTimezoneName(string(data)); ok {
-			return tz
-		}
-	}
-	if tz, ok := canonicalTimezoneName(time.Local.String()); ok {
-		return tz
-	}
-	return "UTC"
-}
-
-func canonicalTimezoneName(raw string) (string, bool) {
-	tz := strings.TrimSpace(raw)
-	if tz == "" || tz == "Local" {
-		return "", false
-	}
-	if tz != "UTC" && !strings.Contains(tz, "/") {
-		return "", false
-	}
-	if _, err := time.LoadLocation(tz); err != nil {
-		return "", false
-	}
-	return tz, true
 }
 
 func newWorkspaceState(workspaceID string, runtimeIDs []string, reposVersion string, repos []RepoData, settings json.RawMessage) *workspaceState {
@@ -1379,22 +1343,49 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	}
 
 	// Wire format matches handler.ModelEntry. Use a struct (not
-	// map[string]string) so the Default bool round-trips — without
-	// it the UI loses its "default" badge on the advertised pick.
+	// map[string]string) so the Default bool and the per-model
+	// Thinking catalog round-trip — without it the UI loses its
+	// "default" badge on the advertised pick and the thinking-level
+	// picker for claude/codex (MUL-2339).
+	type thinkingLevelWire struct {
+		Value       string `json:"value"`
+		Label       string `json:"label"`
+		Description string `json:"description,omitempty"`
+	}
+	type modelThinkingWire struct {
+		SupportedLevels []thinkingLevelWire `json:"supported_levels"`
+		DefaultLevel    string              `json:"default_level,omitempty"`
+	}
 	type modelWire struct {
-		ID       string `json:"id"`
-		Label    string `json:"label"`
-		Provider string `json:"provider,omitempty"`
-		Default  bool   `json:"default,omitempty"`
+		ID       string             `json:"id"`
+		Label    string             `json:"label"`
+		Provider string             `json:"provider,omitempty"`
+		Default  bool               `json:"default,omitempty"`
+		Thinking *modelThinkingWire `json:"thinking,omitempty"`
 	}
 	wire := make([]modelWire, 0, len(models))
 	for _, m := range models {
-		wire = append(wire, modelWire{
+		entry := modelWire{
 			ID:       m.ID,
 			Label:    m.Label,
 			Provider: m.Provider,
 			Default:  m.Default,
-		})
+		}
+		if m.Thinking != nil {
+			levels := make([]thinkingLevelWire, 0, len(m.Thinking.SupportedLevels))
+			for _, lvl := range m.Thinking.SupportedLevels {
+				levels = append(levels, thinkingLevelWire{
+					Value:       lvl.Value,
+					Label:       lvl.Label,
+					Description: lvl.Description,
+				})
+			}
+			entry.Thinking = &modelThinkingWire{
+				SupportedLevels: levels,
+				DefaultLevel:    m.Thinking.DefaultLevel,
+			}
+		}
+		wire = append(wire, entry)
 	}
 	d.reportModelListResult(ctx, rt, requestID, map[string]any{
 		"status":    "completed",
@@ -2452,6 +2443,38 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if model == "" {
 		model = entry.Model
 	}
+	thinkingLevel := ""
+	if task.Agent != nil {
+		thinkingLevel = task.Agent.ThinkingLevel
+	}
+	// Per-model guard: the server validates the literal token against the
+	// provider's enum, but per-model gaps (Claude's `xhigh` on a non-Opus
+	// model, Codex's per-model `supported_reasoning_levels`) only resolve
+	// here, against the daemon's local CLI catalog. Invalid combinations
+	// log a warning and drop the level rather than failing the task, so a
+	// stale persisted value never blocks execution. Empty model is passed
+	// through unchanged — ValidateThinkingLevel resolves it to the
+	// provider's default model internally so default-model tasks aren't
+	// misjudged. Discovery errors fail open: if we can't list models, we
+	// keep the persisted level and let the CLI surface any objection.
+	if thinkingLevel != "" {
+		ok, err := agent.ValidateThinkingLevel(ctx, provider, entry.Path, model, thinkingLevel)
+		if err != nil {
+			taskLog.Warn("thinking_level: catalog lookup failed; passing through",
+				"provider", provider,
+				"model", model,
+				"thinking_level", thinkingLevel,
+				"error", err,
+			)
+		} else if !ok {
+			taskLog.Warn("thinking_level: not valid for this (provider, model); skipping injection",
+				"provider", provider,
+				"model", model,
+				"thinking_level", thinkingLevel,
+			)
+			thinkingLevel = ""
+		}
+	}
 	execOpts := agent.ExecOptions{
 		Cwd:                       env.WorkDir,
 		Model:                     model,
@@ -2461,6 +2484,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ExtraArgs:                 extraArgs,
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
+		ThinkingLevel:             thinkingLevel,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
@@ -2606,13 +2630,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if comment == "" {
 			comment = fmt.Sprintf("%s timed out after %s", provider, d.cfg.AgentTimeout)
 		}
+		failureReason := "timeout"
+		if reason, ok := classifyResumeUnsafeTimeout(provider, comment); ok {
+			taskLog.Warn("agent timed out with resume-unsafe session, classifying as blocked",
+				"failure_reason", reason,
+			)
+			failureReason = reason
+		}
 		return TaskResult{
 			Status:        "blocked",
 			Comment:       comment,
 			SessionID:     result.SessionID,
 			WorkDir:       env.WorkDir,
 			EnvRoot:       env.RootDir,
-			FailureReason: "timeout",
+			FailureReason: failureReason,
 			Usage:         usageEntries,
 		}, nil
 	case "idle_watchdog":

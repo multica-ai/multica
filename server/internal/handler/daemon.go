@@ -161,15 +161,6 @@ type DaemonRegisterRequest struct {
 	DeviceName      string   `json:"device_name"`
 	CLIVersion      string   `json:"cli_version"` // multica CLI version
 	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
-	// Timezone is the daemon host's IANA timezone (e.g. "Asia/Shanghai"),
-	// detected client-side from time.Local. The server stores it on each
-	// agent_runtime row created for this daemon so token-usage rollups
-	// bucket by the operator's local calendar day instead of UTC. Empty
-	// or invalid values fall back to "UTC". The value is set ONLY on
-	// first-time registration; once a user overrides the tz via the web
-	// UI, the upsert query preserves that override on subsequent
-	// daemon reconnects (see UpsertAgentRuntime in runtime.sql).
-	Timezone string `json:"timezone"`
 	Runtimes []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
@@ -183,24 +174,6 @@ type daemonWorkspaceReposResponse struct {
 	Repos        []RepoData      `json:"repos"`
 	ReposVersion string          `json:"repos_version"`
 	Settings     json.RawMessage `json:"settings,omitempty"`
-}
-
-// normalizeRuntimeTimezone validates and normalizes the IANA timezone string
-// reported by a daemon during registration. The stored column is NOT NULL with
-// a 'UTC' default so any unparseable, blank, or trivially-invalid value is
-// quietly downgraded to "UTC" rather than rejected: a misconfigured daemon
-// host shouldn't take down registration just because its tz string is junk.
-// Real validation happens on the user-driven PATCH path where we surface the
-// error.
-func normalizeRuntimeTimezone(tz string) string {
-	tz = strings.TrimSpace(tz)
-	if tz == "" {
-		return "UTC"
-	}
-	if _, err := time.LoadLocation(tz); err != nil {
-		return "UTC"
-	}
-	return tz
 }
 
 func normalizeWorkspaceRepos(repos []RepoData) []RepoData {
@@ -355,7 +328,6 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			DeviceInfo:  deviceInfo,
 			Metadata:    metadata,
 			OwnerID:     ownerID,
-			Timezone:    normalizeRuntimeTimezone(req.Timezone),
 		})
 		if err != nil {
 			h.Analytics.Capture(analytics.RuntimeFailed(
@@ -386,7 +358,6 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt:      row.UpdatedAt,
 			OwnerID:        row.OwnerID,
 			LegacyDaemonID: row.LegacyDaemonID,
-			Timezone:       row.Timezone,
 		}
 
 		// Inserted is false for normal daemon reconnects/upserts, so
@@ -1143,14 +1114,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
 		resp.Agent = &TaskAgentData{
-			ID:           uuidToString(agent.ID),
-			Name:         agent.Name,
-			Instructions: agent.Instructions,
-			Skills:       skills,
-			CustomEnv:    customEnv,
-			CustomArgs:   customArgs,
-			McpConfig:    mcpConfig,
-			Model:        agent.Model.String,
+			ID:            uuidToString(agent.ID),
+			Name:          agent.Name,
+			Instructions:  agent.Instructions,
+			Skills:        skills,
+			CustomEnv:     customEnv,
+			CustomArgs:    customArgs,
+			McpConfig:     mcpConfig,
+			Model:         agent.Model.String,
+			ThinkingLevel: agent.ThinkingLevel.String,
 		}
 	}
 
@@ -1325,26 +1297,28 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
-			// Resume chat sessions only when the stored pointer was produced
-			// by the same runtime as the claiming task. When the chat_session
-			// pointer is missing (legacy NULL runtime_id), stale (last task
-			// failed before reporting completion), or runtime-mismatched, fall
-			// back to the most recent task row that recorded a session_id —
-			// otherwise a single failed turn would silently drop the entire
-			// conversation memory on the next message. The fallback also
-			// requires runtime to match.
-			if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
-				resp.PriorSessionID = cs.SessionID.String
-			}
-			if cs.WorkDir.Valid {
-				resp.PriorWorkDir = cs.WorkDir.String
-			}
-			if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil && prior.SessionID.Valid {
-				if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
-					resp.PriorSessionID = prior.SessionID.String
+			if !task.ForceFreshSession {
+				// Resume chat sessions only when the stored pointer was produced
+				// by the same runtime as the claiming task. When the chat_session
+				// pointer is missing (legacy NULL runtime_id), stale (last task
+				// failed before reporting completion), or runtime-mismatched, fall
+				// back to the most recent task row that recorded a session_id —
+				// otherwise a single failed turn would silently drop the entire
+				// conversation memory on the next message. The fallback also
+				// requires runtime to match.
+				if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
+					resp.PriorSessionID = cs.SessionID.String
 				}
-				if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
-					resp.PriorWorkDir = prior.WorkDir.String
+				if cs.WorkDir.Valid {
+					resp.PriorWorkDir = cs.WorkDir.String
+				}
+				if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil && prior.SessionID.Valid {
+					if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
+						resp.PriorSessionID = prior.SessionID.String
+					}
+					if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
+						resp.PriorWorkDir = prior.WorkDir.String
+					}
 				}
 			}
 			// Load the latest user message for the chat prompt, plus any
@@ -2007,8 +1981,12 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 // Verifies the task belongs to the caller's workspace.
 func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
+	taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task_id")
+	if !ok {
+		return
+	}
 
-	task, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskID))
+	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "task not found")
 		return
@@ -2032,11 +2010,11 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		messages, queryErr = h.Queries.ListTaskMessagesSince(r.Context(), db.ListTaskMessagesSinceParams{
-			TaskID: parseUUID(taskID),
+			TaskID: taskUUID,
 			Seq:    int32(sinceSeq),
 		})
 	} else {
-		messages, queryErr = h.Queries.ListTaskMessages(r.Context(), parseUUID(taskID))
+		messages, queryErr = h.Queries.ListTaskMessages(r.Context(), taskUUID)
 	}
 	if queryErr != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list task messages")

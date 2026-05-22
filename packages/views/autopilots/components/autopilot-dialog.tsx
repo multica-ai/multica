@@ -10,6 +10,7 @@ import {
   Clock,
   Copy,
   FilePlus2,
+  FolderKanban,
   Maximize2,
   Minimize2,
   Play,
@@ -38,6 +39,7 @@ import { TimezonePicker } from "./pickers/timezone-picker";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
+import { projectListOptions } from "@multica/core/projects/queries";
 import {
   useCreateAutopilot,
   useCreateAutopilotTrigger,
@@ -53,6 +55,8 @@ import type {
 } from "@multica/core/types";
 import { TitleEditor, ContentEditor } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { ProjectPicker } from "../../projects/components/project-picker";
+import { ProjectIcon } from "../../projects/components/project-icon";
 import { AgentPicker, type AssigneeSelection } from "./pickers/agent-picker";
 import {
   getDefaultTriggerConfig,
@@ -72,6 +76,7 @@ import { formatSchedulePartialFailureToast } from "./autopilot-dialog-toast";
 export interface AutopilotInitial {
   title: string;
   description: string;
+  project_id: string | null;
   assignee_type: AutopilotAssigneeType;
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
@@ -245,6 +250,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const wsId = useWorkspaceId();
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const [isExpanded, setIsExpanded] = useState(false);
 
   const isCreate = props.mode === "create";
@@ -254,6 +260,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
   const [title, setTitle] = useState(initial.title ?? "");
   const [description, setDescription] = useState(initial.description ?? "");
+  const [projectId, setProjectId] = useState<string | null>(initial.project_id ?? null);
   const [assigneeType, setAssigneeType] = useState<AutopilotAssigneeType>(
     initial.assignee_type ?? "agent",
   );
@@ -311,6 +318,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
     const agent = agents.find((a) => a.id === assigneeId);
     return agent ? { name: agent.name, description: agent.description } : null;
   }, [agents, squads, assigneeId, assigneeType]);
+  const selectedProject = useMemo(
+    () => projects.find((project) => project.id === projectId) ?? null,
+    [projects, projectId],
+  );
 
   const handleAssigneeChange = (next: AssigneeSelection) => {
     setAssigneeType(next.type);
@@ -340,6 +351,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         const autopilot = await createAutopilot.mutateAsync({
           title: title.trim(),
           description: description.trim() || undefined,
+          project_id: executionMode === "create_issue" ? projectId : null,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
@@ -387,6 +399,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           id: props.autopilotId,
           title: title.trim(),
           description: description.trim() || null,
+          project_id: executionMode === "create_issue" ? projectId : null,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
@@ -575,6 +588,14 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
             <OutputModeSection mode={executionMode} onChange={setExecutionMode} />
 
+            {executionMode === "create_issue" && (
+              <ProjectSection
+                projectId={projectId}
+                selectedProject={selectedProject}
+                onChange={setProjectId}
+              />
+            )}
+
             {isCreate && (
               <TriggerKindSection kind={triggerKind} onChange={setTriggerKind} />
             )}
@@ -749,6 +770,49 @@ function OutputModeSection({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function ProjectSection({
+  projectId,
+  selectedProject,
+  onChange,
+}: {
+  projectId: string | null;
+  selectedProject: { title: string; icon: string | null } | null;
+  onChange: (projectId: string | null) => void;
+}) {
+  const { t } = useT("autopilots");
+  return (
+    <div>
+      <SectionLabel>{t(($) => $.dialog.section_project)}</SectionLabel>
+      <ProjectPicker
+        projectId={projectId}
+        onUpdate={(updates) => onChange(updates.project_id ?? null)}
+        align="start"
+        triggerRender={
+          <button
+            type="button"
+            className={cn(
+              "w-full flex items-center gap-2.5 rounded-md border bg-background px-3 py-2 text-left",
+              "hover:bg-accent/40 transition-colors cursor-pointer",
+            )}
+          >
+            {selectedProject ? (
+              <ProjectIcon project={selectedProject} size="md" />
+            ) : (
+              <span className="inline-flex size-5 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                <FolderKanban className="size-3.5" />
+              </span>
+            )}
+            <span className="flex-1 min-w-0 truncate text-sm font-medium">
+              {selectedProject?.title ?? t(($) => $.dialog.no_project)}
+            </span>
+            <ChevronDown className="size-3.5 text-muted-foreground shrink-0" />
+          </button>
+        }
+      />
     </div>
   );
 }

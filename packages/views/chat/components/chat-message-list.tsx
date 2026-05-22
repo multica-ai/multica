@@ -19,7 +19,7 @@ import {
 import { ChevronRight, ChevronDown, Brain, AlertCircle, AlertTriangle, Copy } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { useAutoScroll } from "@multica/ui/hooks/use-auto-scroll";
-import { taskMessagesOptions } from "@multica/core/chat/queries";
+import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
 import { Markdown } from "@multica/views/common/markdown";
 import { copyMarkdown } from "../../editor";
 import { AttachmentList } from "../../issues/components/comment-card";
@@ -67,9 +67,10 @@ export function ChatMessageList({
   // Live timeline for the in-flight task. useRealtimeSync keeps this cache
   // current via setQueryData on task:message events.
   const showLiveTimeline = !!pendingTaskId && !pendingAlreadyPersisted;
+  const canFetchLiveTimeline = isTaskMessageTaskId(pendingTaskId) && !pendingAlreadyPersisted;
   const { data: liveTaskMessages } = useQuery({
     ...taskMessagesOptions(pendingTaskId ?? ""),
-    enabled: showLiveTimeline,
+    enabled: canFetchLiveTimeline,
   });
   const liveTimeline: ChatTimelineItem[] = (liveTaskMessages ?? []).map(toTimelineItem);
   const hasLive = showLiveTimeline && liveTimeline.length > 0;
@@ -179,13 +180,14 @@ function AssistantMessage({
   isPending: boolean;
 }) {
   const taskId = message.task_id;
+  const canFetchTaskMessages = isTaskMessageTaskId(taskId);
 
   // Use the shared taskMessagesOptions so this cache entry is the same one
   // seeded by useRealtimeSync during task execution — zero refetch when the
   // task finishes, since WS already populated it.
   const { data: taskMessages } = useQuery({
     ...taskMessagesOptions(taskId ?? ""),
-    enabled: !!taskId,
+    enabled: canFetchTaskMessages,
   });
 
   const timeline: ChatTimelineItem[] = (taskMessages ?? []).map(toTimelineItem);
@@ -621,4 +623,3 @@ function ErrorRow({ item }: { item: ChatTimelineItem }) {
 }
 
 // ─── Shared ──────────────────────────────────────────────────────────────
-

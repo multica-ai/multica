@@ -101,6 +101,11 @@ import type {
   SquadMemberStatusListResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
+import type {
+  CloudRuntimeNode,
+  CreateCloudRuntimeNodeRequest,
+  ListCloudRuntimeNodesParams,
+} from "../runtimes/cloud-runtime";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
@@ -111,6 +116,8 @@ import {
   AttachmentResponseSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
+  CloudRuntimeNodeListSchema,
+  CloudRuntimeNodeSchema,
   CreateAgentFromTemplateResponseSchema,
   DashboardAgentRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
@@ -119,6 +126,8 @@ import {
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_ATTACHMENT,
+  EMPTY_CLOUD_RUNTIME_NODE,
+  EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
@@ -130,8 +139,10 @@ import {
   GroupedIssuesResponseSchema,
   ListIssuesResponseSchema,
   ListWebhookDeliveriesResponseSchema,
-  OnboardingNoRuntimeBootstrapResponseSchema,
-  OnboardingRuntimeBootstrapResponseSchema,
+  RuntimeHourlyActivityListSchema,
+  RuntimeUsageByAgentListSchema,
+  RuntimeUsageByHourListSchema,
+  RuntimeUsageListSchema,
   SquadMemberStatusListResponseSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
@@ -163,30 +174,6 @@ export interface LoginResponse {
   token: string;
   user: User;
 }
-
-export interface OnboardingRuntimeBootstrapResponse {
-  workspace_id: string;
-  agent_id: string;
-  issue_id: string;
-}
-
-const EMPTY_ONBOARDING_RUNTIME_BOOTSTRAP_RESPONSE:
-  OnboardingRuntimeBootstrapResponse = {
-  workspace_id: "",
-  agent_id: "",
-  issue_id: "",
-};
-
-export interface OnboardingNoRuntimeBootstrapResponse {
-  workspace_id: string;
-  issue_id: string;
-}
-
-const EMPTY_ONBOARDING_NO_RUNTIME_BOOTSTRAP_RESPONSE:
-  OnboardingNoRuntimeBootstrapResponse = {
-  workspace_id: "",
-  issue_id: "",
-};
 
 export class ApiError extends Error {
   readonly status: number;
@@ -393,65 +380,37 @@ export class ApiClient {
     completion_path?: OnboardingCompletionPath;
     workspace_id?: string;
   }): Promise<User> {
-    return this.fetch("/api/me/onboarding/complete", {
+    const raw = await this.fetch<unknown>("/api/me/onboarding/complete", {
       method: "POST",
       body: payload ? JSON.stringify(payload) : undefined,
     });
-  }
-
-  async bootstrapOnboardingRuntime(payload: {
-    workspace_id: string;
-    runtime_id: string;
-  }): Promise<OnboardingRuntimeBootstrapResponse> {
-    const raw = await this.fetch<unknown>(
-      "/api/me/onboarding/runtime-bootstrap",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-      },
-    );
-    return parseWithFallback(
-      raw,
-      OnboardingRuntimeBootstrapResponseSchema,
-      EMPTY_ONBOARDING_RUNTIME_BOOTSTRAP_RESPONSE,
-      { endpoint: "POST /api/me/onboarding/runtime-bootstrap" },
-    );
-  }
-
-  async bootstrapOnboardingNoRuntime(payload: {
-    workspace_id: string;
-  }): Promise<OnboardingNoRuntimeBootstrapResponse> {
-    const raw = await this.fetch<unknown>(
-      "/api/me/onboarding/no-runtime-bootstrap",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-      },
-    );
-    return parseWithFallback(
-      raw,
-      OnboardingNoRuntimeBootstrapResponseSchema,
-      EMPTY_ONBOARDING_NO_RUNTIME_BOOTSTRAP_RESPONSE,
-      { endpoint: "POST /api/me/onboarding/no-runtime-bootstrap" },
-    );
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "POST /api/me/onboarding/complete",
+    });
   }
 
   async joinCloudWaitlist(payload: {
     email: string;
     reason?: string;
   }): Promise<User> {
-    return this.fetch("/api/me/onboarding/cloud-waitlist", {
+    const raw = await this.fetch<unknown>("/api/me/onboarding/cloud-waitlist", {
       method: "POST",
       body: JSON.stringify(payload),
+    });
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "POST /api/me/onboarding/cloud-waitlist",
     });
   }
 
   async patchOnboarding(payload: {
     questionnaire?: Record<string, unknown>;
   }): Promise<User> {
-    return this.fetch("/api/me/onboarding", {
+    const raw = await this.fetch<unknown>("/api/me/onboarding", {
       method: "PATCH",
       body: JSON.stringify(payload),
+    });
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "PATCH /api/me/onboarding",
     });
   }
 
@@ -478,6 +437,9 @@ export class ApiClient {
     if (params?.creator_id) search.set("creator_id", params.creator_id);
     if (params?.project_id) search.set("project_id", params.project_id);
     if (params?.involves_user_id) search.set("involves_user_id", params.involves_user_id);
+    if (params?.metadata && Object.keys(params.metadata).length > 0) {
+      search.set("metadata", JSON.stringify(params.metadata));
+    }
     if (params?.open_only) search.set("open_only", "true");
     if (params?.scheduled) search.set("scheduled", "true");
     const path = `/api/issues?${search}`;
@@ -500,6 +462,9 @@ export class ApiClient {
     if (params.creator_id) search.set("creator_id", params.creator_id);
     if (params.project_id) search.set("project_id", params.project_id);
     if (params.involves_user_id) search.set("involves_user_id", params.involves_user_id);
+    if (params.metadata && Object.keys(params.metadata).length > 0) {
+      search.set("metadata", JSON.stringify(params.metadata));
+    }
     if (params.assignee_filters?.length) {
       search.set("assignee_filters", params.assignee_filters.map((f) => `${f.type}:${f.id}`).join(","));
     }
@@ -806,13 +771,56 @@ export class ApiClient {
     return this.fetch(`/api/runtimes?${search}`);
   }
 
+  async listCloudRuntimeNodes(
+    params?: ListCloudRuntimeNodesParams,
+  ): Promise<CloudRuntimeNode[]> {
+    const search = new URLSearchParams();
+    if (params?.limit !== undefined) search.set("limit", String(params.limit));
+    if (params?.offset !== undefined) search.set("offset", String(params.offset));
+    const query = search.toString();
+    const raw = await this.fetch<unknown>(
+      `/api/cloud-runtime/nodes${query ? `?${query}` : ""}`,
+    );
+    return parseWithFallback(
+      raw,
+      CloudRuntimeNodeListSchema,
+      EMPTY_CLOUD_RUNTIME_NODE_LIST,
+      { endpoint: "GET /api/cloud-runtime/nodes" },
+    );
+  }
+
+  async createCloudRuntimeNode(
+    data: CreateCloudRuntimeNodeRequest,
+  ): Promise<CloudRuntimeNode> {
+    const res = await this.fetchRaw("/api/cloud-runtime/nodes", {
+      method: "POST",
+      body: JSON.stringify(data),
+      extraHeaders: { "Content-Type": "application/json" },
+    });
+    const raw = await res.json() as unknown;
+    return parseWithFallback(
+      raw,
+      CloudRuntimeNodeSchema,
+      EMPTY_CLOUD_RUNTIME_NODE,
+      { endpoint: "POST /api/cloud-runtime/nodes" },
+    );
+  }
+
+  async deleteCloudRuntimeNode(instanceId: string): Promise<void> {
+    await this.fetchRaw("/api/cloud-runtime/nodes", {
+      method: "DELETE",
+      body: JSON.stringify({ instance_id: instanceId }),
+      extraHeaders: { "Content-Type": "application/json" },
+    });
+  }
+
   async deleteRuntime(runtimeId: string): Promise<void> {
     await this.fetch(`/api/runtimes/${runtimeId}`, { method: "DELETE" });
   }
 
   async updateRuntime(
     runtimeId: string,
-    patch: { timezone?: string; visibility?: "private" | "public" },
+    patch: { visibility?: "private" | "public" },
   ): Promise<AgentRuntime> {
     return this.fetch(`/api/runtimes/${runtimeId}`, {
       method: "PATCH",
@@ -820,32 +828,77 @@ export class ApiClient {
     });
   }
 
-  async getRuntimeUsage(runtimeId: string, params?: { days?: number }): Promise<RuntimeUsage[]> {
+  async getRuntimeUsage(
+    runtimeId: string,
+    params?: { days?: number; tz?: string },
+  ): Promise<RuntimeUsage[]> {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));
-    return this.fetch(`/api/runtimes/${runtimeId}/usage?${search}`);
+    // `tz` drives the calendar-day boundary for the trend chart (Viewing
+    // layer). Caller-supplied; the backend falls back to user.timezone /
+    // UTC if omitted.
+    if (params?.tz) search.set("tz", params.tz);
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/usage?${search}`,
+    );
+    return parseWithFallback<RuntimeUsage[]>(raw, RuntimeUsageListSchema, [], {
+      endpoint: "GET /api/runtimes/:id/usage",
+    });
   }
 
-  async getRuntimeTaskActivity(runtimeId: string): Promise<RuntimeHourlyActivity[]> {
-    return this.fetch(`/api/runtimes/${runtimeId}/activity`);
+  async getRuntimeTaskActivity(
+    runtimeId: string,
+    params?: { tz?: string },
+  ): Promise<RuntimeHourlyActivity[]> {
+    // Hour-of-day heatmap follows the viewer's tz, like the other reports on
+    // this page. Pass the viewer's IANA zone so the server buckets correctly.
+    const search = new URLSearchParams();
+    if (params?.tz) search.set("tz", params.tz);
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/activity?${search}`,
+    );
+    return parseWithFallback<RuntimeHourlyActivity[]>(
+      raw,
+      RuntimeHourlyActivityListSchema,
+      [],
+      { endpoint: "GET /api/runtimes/:id/activity" },
+    );
   }
 
   async getRuntimeUsageByAgent(
     runtimeId: string,
-    params?: { days?: number },
+    params?: { days?: number; tz?: string },
   ): Promise<RuntimeUsageByAgent[]> {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));
-    return this.fetch(`/api/runtimes/${runtimeId}/usage/by-agent?${search}`);
+    if (params?.tz) search.set("tz", params.tz);
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/usage/by-agent?${search}`,
+    );
+    return parseWithFallback<RuntimeUsageByAgent[]>(
+      raw,
+      RuntimeUsageByAgentListSchema,
+      [],
+      { endpoint: "GET /api/runtimes/:id/usage/by-agent" },
+    );
   }
 
   async getRuntimeUsageByHour(
     runtimeId: string,
-    params?: { days?: number },
+    params?: { days?: number; tz?: string },
   ): Promise<RuntimeUsageByHour[]> {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));
-    return this.fetch(`/api/runtimes/${runtimeId}/usage/by-hour?${search}`);
+    if (params?.tz) search.set("tz", params.tz);
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/usage/by-hour?${search}`,
+    );
+    return parseWithFallback<RuntimeUsageByHour[]>(
+      raw,
+      RuntimeUsageByHourListSchema,
+      [],
+      { endpoint: "GET /api/runtimes/:id/usage/by-hour" },
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -856,11 +909,12 @@ export class ApiClient {
   // ---------------------------------------------------------------------------
 
   async getDashboardUsageDaily(
-    params: { days?: number; project_id?: string | null },
+    params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardUsageDaily[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
+    if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/usage/daily?${search}`);
     return parseWithFallback<DashboardUsageDaily[]>(
       raw,
@@ -871,11 +925,12 @@ export class ApiClient {
   }
 
   async getDashboardUsageByAgent(
-    params: { days?: number; project_id?: string | null },
+    params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardUsageByAgent[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
+    if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/usage/by-agent?${search}`);
     return parseWithFallback<DashboardUsageByAgent[]>(
       raw,
@@ -886,11 +941,14 @@ export class ApiClient {
   }
 
   async getDashboardAgentRunTime(
-    params: { days?: number; project_id?: string | null },
+    params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardAgentRunTime[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
+    // `tz` aligns the "last N days" cutoff with the viewer's calendar,
+    // matching the per-agent token card.
+    if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/agent-runtime?${search}`);
     return parseWithFallback<DashboardAgentRunTime[]>(
       raw,
@@ -901,11 +959,14 @@ export class ApiClient {
   }
 
   async getDashboardRunTimeDaily(
-    params: { days?: number; project_id?: string | null },
+    params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardRunTimeDaily[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
     if (params.project_id) search.set("project_id", params.project_id);
+    // `tz` cuts the day buckets in the viewer's calendar so Time / Tasks
+    // align with the Cost / Tokens charts.
+    if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/runtime/daily?${search}`);
     return parseWithFallback<DashboardRunTimeDaily[]>(
       raw,
@@ -1023,9 +1084,10 @@ export class ApiClient {
     });
   }
 
-  async rerunIssue(issueId: string): Promise<AgentTask> {
+  async rerunIssue(issueId: string, taskId?: string): Promise<AgentTask> {
     return this.fetch(`/api/issues/${issueId}/rerun`, {
       method: "POST",
+      body: JSON.stringify(taskId ? { task_id: taskId } : {}),
     });
   }
 

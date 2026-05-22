@@ -3083,13 +3083,13 @@ func TestBuildMetaSkillContentOmitsRequestingUserWhenEmpty(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigCommentTriggerThreadFirstReads locks in MUL-2387:
-// the runtime config's comment-triggered Workflow section must steer the
-// agent at the thread-aware reads from PR #2787 first (--thread anchored on
-// the trigger comment id, then --recent N with the stderr cursor for
-// pagination) rather than the legacy "dump the whole comment list" recipe.
-// The Available Commands core line also has to surface the new flags so the
-// agent has a single place to discover them.
+// TestInjectRuntimeConfigCommentTriggerThreadFirstReads locks in
+// MUL-2387 + MUL-2421: the runtime config's comment-triggered Workflow
+// section must steer the agent at thread-aware reads first, default the
+// trigger thread to `--thread <id> --tail 30` (bounded), and explain the
+// reply-cursor walk for older replies. `--recent N` stays as the
+// cross-thread fallback. The Available Commands core line also has to
+// surface the `--tail` flag so the agent has a single place to discover it.
 func TestInjectRuntimeConfigCommentTriggerThreadFirstReads(t *testing.T) {
 	t.Parallel()
 
@@ -3112,19 +3112,24 @@ func TestInjectRuntimeConfigCommentTriggerThreadFirstReads(t *testing.T) {
 	s := string(data)
 
 	// Workflow step 2 must read the trigger's thread with --thread anchored
-	// on the exact trigger comment id from this task.
+	// on the exact trigger comment id from this task, bounded to --tail 30.
 	for _, want := range []string{
 		"--thread " + triggerID,
-		"multica issue comment list " + issueID + " --thread " + triggerID + " --output json",
-		// --recent fallback at the documented default N=20.
+		"--tail 30",
+		"multica issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json",
+		// Reply cursor walks older replies inside the same thread.
+		"Next reply cursor:",
+		"--before-id <reply-id>",
+		// --recent fallback at the documented default N=20 for cross-thread context.
 		"multica issue comment list " + issueID + " --recent 20 --output json",
 		// Cursor walks via the stderr line the CLI emits, not invented flags.
-		"Next thread cursor:",
+		"Next thread cursor",
 		"--before",
 		"--before-id",
-		// --since is still available and combinable.
+		// --since is still available and combinable (now scoped to the
+		// post-MUL-2421 mode names).
 		"--since",
-		"may combine with `--thread` or `--recent`",
+		"may combine with `--thread --tail` or `--recent`",
 		// Explicit pushback on the legacy full-dump recipe so the model has
 		// no reason to fall back to it on long issues.
 		"Avoid the unfiltered",
@@ -3139,8 +3144,10 @@ func TestInjectRuntimeConfigCommentTriggerThreadFirstReads(t *testing.T) {
 	// single discovery point for non-workflow CLI use cases).
 	for _, want := range []string{
 		"[--thread <comment-id>",
-		"--recent N [--before <ts> --before-id <root-id>]",
-		"Next thread cursor:",
+		"--tail N",
+		"--recent N",
+		"Next reply cursor",
+		"Next thread cursor",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("Available Commands core line missing %q\n---\n%s", want, s)
@@ -3150,6 +3157,11 @@ func TestInjectRuntimeConfigCommentTriggerThreadFirstReads(t *testing.T) {
 	// The legacy step-2 phrasing this PR replaces must not regress.
 	if strings.Contains(s, "read the conversation (returns all comments, capped server-side at 2000)") {
 		t.Errorf("comment-triggered Workflow still carries the legacy full-dump phrasing\n---\n%s", s)
+	}
+	// The pre-MUL-2421 unbounded `--thread` recipe (no --tail) is also a
+	// regression target: it dumps the entire thread on long threads.
+	if strings.Contains(s, "multica issue comment list "+issueID+" --thread "+triggerID+" --output json") {
+		t.Errorf("comment-triggered Workflow regressed to unbounded --thread recipe (no --tail) — long threads will overflow context\n---\n%s", s)
 	}
 }
 
@@ -3203,4 +3215,274 @@ func TestInjectRuntimeConfigAssignmentTriggerMentionsRecent(t *testing.T) {
 			t.Errorf("assignment Workflow regressed to replacement-style --recent phrasing %q\n---\n%s", banned, s)
 		}
 	}
+}
+
+// TestInjectRuntimeConfigIssueMetadataSectionScope locks in MUL-2017:
+// the `## Issue Metadata` section (semantic guide + recommended keys +
+// pin/clear rules) and the `metadata list` workflow step are emitted only
+// when the task carries a real issue id (comment-triggered or
+// assignment-triggered). Chat / quick-create / run-only autopilot don't
+// have an issue, so injecting the section there would just guarantee a
+// failed CLI call on every entry. The discovery line in Available
+// Commands → Core is global and must appear everywhere so that the agent
+// can still reach the commands if a future workflow path needs them.
+func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
+	t.Parallel()
+
+	// Discovery lines in Available Commands → Core must appear in EVERY
+	// runtime config, regardless of trigger type. These are the single
+	// discovery point for the CLI when an agent decides to read or write
+	// metadata outside the numbered workflow.
+	coreDiscoveryLines := []string{
+		"multica issue metadata list <issue-id>",
+		"multica issue metadata set <issue-id> --key <k> --value <v> [--type string|number|bool]",
+		"multica issue metadata delete <issue-id> --key <k>",
+	}
+
+	type wantSection struct {
+		// sentinel substrings that MUST appear when the Issue Metadata
+		// section is in scope
+		present []string
+		// substrings that MUST NOT appear (would mean the section leaked
+		// into a context where there's no issue id to act on)
+		absent []string
+	}
+
+	withSection := wantSection{
+		present: []string{
+			"## Issue Metadata",
+			"high-signal scratchpad",
+			"**Read on entry.**",
+			"**Write on exit.**",
+			"**What NOT to pin.**",
+			"**Recommended keys**",
+			// Recommended-key list — both lea's killer-use-case keys
+			// (pr_number, pipeline_status) and the broader set from
+			// review must be named so the workspace converges on shared
+			// vocabulary.
+			"pr_url",
+			"pr_number",
+			"pipeline_status",
+			"deploy_url",
+			"external_issue_url",
+			"waiting_on",
+			"blocked_reason",
+			"decision",
+			// Safety boundaries — these are the negative rules that
+			// keep metadata from rotting into a second description /
+			// log dump.
+			"No secrets, tokens, or API keys",
+			"No logs",
+			"runtime bookkeeping",
+			"snake_case ASCII",
+		},
+	}
+	withoutSection := wantSection{
+		// We can't simply require `multica issue metadata list` absent
+		// because the Available Commands → Core discovery line is
+		// global (it uses `<issue-id>` placeholder text). What MUST be
+		// absent is the semantic section itself plus the workflow-step
+		// pointer back to it.
+		absent: []string{
+			"## Issue Metadata",
+			"high-signal scratchpad",
+			"**Read on entry.**",
+			"**Write on exit.**",
+			"See the `## Issue Metadata` section above",
+		},
+	}
+
+	cases := []struct {
+		name     string
+		ctx      TaskContextForEnv
+		provider string
+		filename string
+		// workflowStepPresent is matched when the section is in scope —
+		// each entry must appear in the workflow numbered list to prove
+		// the metadata read step is wired in.
+		workflowStepPresent []string
+		// workflowAbsent is matched in non-issue contexts to guarantee
+		// no metadata-list step leaked into a workflow that has no
+		// issue id.
+		workflowAbsent []string
+		want           wantSection
+	}{
+		{
+			name: "comment_triggered",
+			ctx: TaskContextForEnv{
+				IssueID:          "issue-md-1",
+				TriggerCommentID: "comment-md-1",
+			},
+			provider: "claude",
+			filename: "CLAUDE.md",
+			workflowStepPresent: []string{
+				"multica issue metadata list issue-md-1 --output json",
+				"See the `## Issue Metadata` section above",
+				// Exit step must show both write and delete, not just
+				// "set" — stale-key cleanup is the half that keeps
+				// metadata from rotting.
+				"multica issue metadata set",
+				"multica issue metadata delete",
+				"Before exiting",
+			},
+			want: withSection,
+		},
+		{
+			name:                "assignment_triggered",
+			ctx:                 TaskContextForEnv{IssueID: "issue-md-2"},
+			provider:            "claude",
+			filename:            "CLAUDE.md",
+			workflowStepPresent: []string{
+				"multica issue metadata list issue-md-2 --output json",
+				"See the `## Issue Metadata` section above",
+				"multica issue metadata set",
+				"multica issue metadata delete",
+				"Before exiting",
+			},
+			want: withSection,
+		},
+		{
+			name: "quick_create_no_metadata_section",
+			ctx: TaskContextForEnv{
+				QuickCreatePrompt: "create a task about X",
+			},
+			provider: "codex",
+			filename: "AGENTS.md",
+			want:     withoutSection,
+		},
+		{
+			name: "run_only_autopilot_no_metadata_section",
+			ctx: TaskContextForEnv{
+				AutopilotRunID: "run-md-1",
+				AutopilotID:    "autopilot-md-1",
+			},
+			provider: "codex",
+			filename: "AGENTS.md",
+			want:     withoutSection,
+		},
+		{
+			name: "chat_no_metadata_section",
+			ctx: TaskContextForEnv{
+				ChatSessionID: "chat-md-1",
+			},
+			provider: "claude",
+			filename: "CLAUDE.md",
+			want:     withoutSection,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			if _, err := InjectRuntimeConfig(dir, tc.provider, tc.ctx); err != nil {
+				t.Fatalf("InjectRuntimeConfig failed: %v", err)
+			}
+			data, err := os.ReadFile(filepath.Join(dir, tc.filename))
+			if err != nil {
+				t.Fatalf("read %s: %v", tc.filename, err)
+			}
+			s := string(data)
+
+			// Global Core discovery lines apply everywhere.
+			for _, want := range coreDiscoveryLines {
+				if !strings.Contains(s, want) {
+					t.Errorf("Available Commands → Core missing %q\n---\n%s", want, s)
+				}
+			}
+
+			for _, want := range tc.want.present {
+				if !strings.Contains(s, want) {
+					t.Errorf("expected %q in %s output\n---\n%s", want, tc.name, s)
+				}
+			}
+			for _, banned := range tc.want.absent {
+				if strings.Contains(s, banned) {
+					t.Errorf("%s output should NOT contain %q\n---\n%s", tc.name, banned, s)
+				}
+			}
+			for _, want := range tc.workflowStepPresent {
+				if !strings.Contains(s, want) {
+					t.Errorf("workflow step missing %q in %s\n---\n%s", want, tc.name, s)
+				}
+			}
+			for _, banned := range tc.workflowAbsent {
+				if strings.Contains(s, banned) {
+					t.Errorf("%s workflow should NOT contain %q\n---\n%s", tc.name, banned, s)
+				}
+			}
+		})
+	}
+}
+
+// TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged guarantees
+// that the new metadata wiring does not break the codex-specific comment
+// formatting rules (HEREDOC on Linux, --content-file on Windows). The
+// comment-formatting block lives below the metadata write step in the
+// workflow, so any reordering or accidental absorption of the codex
+// section would surface here.
+func TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged(t *testing.T) {
+	t.Parallel()
+
+	oldGOOS := runtimeGOOS
+	t.Cleanup(func() { runtimeGOOS = oldGOOS })
+
+	t.Run("linux_heredoc", func(t *testing.T) {
+		runtimeGOOS = "linux"
+		dir := t.TempDir()
+		ctx := TaskContextForEnv{
+			IssueID:          "issue-md-codex",
+			TriggerCommentID: "comment-md-codex",
+		}
+		if _, err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
+			t.Fatalf("InjectRuntimeConfig failed: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+		if err != nil {
+			t.Fatalf("read AGENTS.md: %v", err)
+		}
+		s := string(data)
+
+		// Metadata wiring is present...
+		if !strings.Contains(s, "## Issue Metadata") {
+			t.Fatalf("Issue Metadata section missing\n---\n%s", s)
+		}
+		if !strings.Contains(s, "multica issue metadata list issue-md-codex --output json") {
+			t.Fatalf("metadata list step missing\n---\n%s", s)
+		}
+		// ...AND the codex-specific stdin-only rule is still emitted.
+		if !strings.Contains(s, "always use `--content-stdin` with a HEREDOC") {
+			t.Fatalf("codex linux HEREDOC rule missing\n---\n%s", s)
+		}
+		// ...AND the per-turn reply instruction still points at this
+		// turn's trigger comment id.
+		if !strings.Contains(s, "--parent comment-md-codex") {
+			t.Fatalf("reply instruction lost trigger comment id\n---\n%s", s)
+		}
+	})
+
+	t.Run("windows_content_file", func(t *testing.T) {
+		runtimeGOOS = "windows"
+		dir := t.TempDir()
+		ctx := TaskContextForEnv{
+			IssueID:          "issue-md-codex-win",
+			TriggerCommentID: "comment-md-codex-win",
+		}
+		if _, err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
+			t.Fatalf("InjectRuntimeConfig failed: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+		if err != nil {
+			t.Fatalf("read AGENTS.md: %v", err)
+		}
+		s := string(data)
+
+		if !strings.Contains(s, "## Issue Metadata") {
+			t.Fatalf("Issue Metadata section missing on windows\n---\n%s", s)
+		}
+		if !strings.Contains(s, "always write the comment body to a UTF-8 file") {
+			t.Fatalf("codex Windows --content-file rule missing\n---\n%s", s)
+		}
+	})
 }

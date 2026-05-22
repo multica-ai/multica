@@ -54,6 +54,8 @@ type UserResponse struct {
 	Email                   string          `json:"email"`
 	AvatarURL               *string         `json:"avatar_url"`
 	Language                *string         `json:"language"`
+	// Pinned IANA tz; nil = no preference (use browser-detected tz).
+	Timezone                *string         `json:"timezone"`
 	OnboardedAt             *string         `json:"onboarded_at"`
 	OnboardingQuestionnaire json.RawMessage `json:"onboarding_questionnaire"`
 	StarterContentState     *string         `json:"starter_content_state"`
@@ -82,6 +84,7 @@ func userToResponse(u db.User) UserResponse {
 		Email:                   u.Email,
 		AvatarURL:               textToPtr(u.AvatarUrl),
 		Language:                textToPtr(u.Language),
+		Timezone:                textToPtr(u.Timezone),
 		OnboardedAt:             timestampToPtr(u.OnboardedAt),
 		OnboardingQuestionnaire: json.RawMessage(q),
 		StarterContentState:     textToPtr(u.StarterContentState),
@@ -434,6 +437,8 @@ type UpdateMeRequest struct {
 	AvatarURL          *string `json:"avatar_url"`
 	Language           *string `json:"language"`
 	ProfileDescription *string `json:"profile_description"`
+	// IANA tz to pin; "" clears back to NULL; nil leaves untouched.
+	Timezone *string `json:"timezone"`
 }
 
 type GoogleLoginRequest struct {
@@ -688,6 +693,20 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.ProfileDescription = pgtype.Text{String: desc, Valid: true}
+	}
+
+	if req.Timezone != nil {
+		// Valid=false → column untouched; Valid=true + "" → clear to
+		// NULL; Valid=true + IANA → set. Three-way semantics enforced
+		// in the UpdateUser SQL CASE.
+		tz := strings.TrimSpace(*req.Timezone)
+		if tz != "" {
+			if loc, err := time.LoadLocation(tz); err != nil || loc == nil {
+				writeError(w, http.StatusBadRequest, "invalid timezone")
+				return
+			}
+		}
+		params.Timezone = pgtype.Text{String: tz, Valid: true}
 	}
 
 	updatedUser, err := h.Queries.UpdateUser(r.Context(), params)

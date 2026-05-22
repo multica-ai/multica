@@ -7,7 +7,7 @@ import {
   patchIssueInBuckets,
 } from "./cache-helpers";
 import { cleanupDeletedIssueCaches } from "./delete-cache";
-import type { Issue, IssueLabelsResponse, Label } from "../types";
+import type { Issue, IssueLabelsResponse, IssueMetadata, Label } from "../types";
 import type { ListIssuesCache } from "../types";
 
 export function onIssueCreated(
@@ -131,6 +131,30 @@ export function onIssueLabelsChanged(
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+}
+
+/**
+ * Apply a metadata snapshot to the issue detail + list + my-issues caches.
+ * The server emits this whenever a single key is set or deleted, so the
+ * payload is always the FULL post-mutation map — we replace, not merge.
+ *
+ * Used for the read-only metadata strip in issue detail. Updates that arrive
+ * while no view is mounted still keep the caches accurate so the next render
+ * shows the latest state without a refetch.
+ */
+export function onIssueMetadataChanged(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  metadata: IssueMetadata,
+) {
+  qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
+    old ? patchIssueInBuckets(old, issueId, { metadata }) : old,
+  );
+  qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
+    old ? { ...old, metadata } : old,
+  );
+  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
 }
 
 export function onIssueDeleted(
