@@ -152,6 +152,72 @@ spec:
                   name: multica-bot-secrets
                   key: GITEE_TOKEN
                   optional: true
+            - name: S3_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: S3_BUCKET
+                  optional: true
+            - name: S3_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: S3_REGION
+                  optional: true
+            - name: S3_KEY_PREFIX
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: S3_KEY_PREFIX
+                  optional: true
+            - name: S3_FORCE_PATH_STYLE
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: S3_FORCE_PATH_STYLE
+                  optional: true
+            - name: AWS_ENDPOINT_URL
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: AWS_ENDPOINT_URL
+                  optional: true
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: AWS_ACCESS_KEY_ID
+                  optional: true
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: AWS_SECRET_ACCESS_KEY
+                  optional: true
+            - name: CLOUDFRONT_KEY_PAIR_ID
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: CLOUDFRONT_KEY_PAIR_ID
+                  optional: true
+            - name: CLOUDFRONT_PRIVATE_KEY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: CLOUDFRONT_PRIVATE_KEY_SECRET
+                  optional: true
+            - name: CLOUDFRONT_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: CLOUDFRONT_PRIVATE_KEY
+                  optional: true
+            - name: CLOUDFRONT_DOMAIN
+              valueFrom:
+                secretKeyRef:
+                  name: multica-bot-secrets
+                  key: CLOUDFRONT_DOMAIN
+                  optional: true
             - name: COOKIE_DOMAIN
               value: .wujieai.com
             - name: LOCAL_UPLOAD_DIR
