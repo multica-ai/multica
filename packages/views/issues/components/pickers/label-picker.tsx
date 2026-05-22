@@ -33,6 +33,8 @@ interface LabelPickerProps {
   width?: string;
   trigger?: React.ReactNode;
   triggerRender?: React.ReactElement;
+  appendAddTrigger?: boolean;
+  addTriggerLabel?: string;
   /** Open the picker on first mount. Used by progressive-disclosure
    *  sidebars so a newly-added field immediately enters edit state. */
   defaultOpen?: boolean;
@@ -79,6 +81,8 @@ export function LabelPicker({
   width = "w-80",
   trigger: customTrigger,
   triggerRender,
+  appendAddTrigger = false,
+  addTriggerLabel,
   defaultOpen = false,
 }: LabelPickerProps) {
   const { t } = useT("issues");
@@ -153,6 +157,7 @@ export function LabelPicker({
   };
 
   const hasLabels = attachedLabels.length > 0;
+  const addLabelText = addTriggerLabel ?? t(($) => $.pickers.label.trigger_label);
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -182,6 +187,15 @@ export function LabelPicker({
                   onRemove={() => detach.mutate(l.id)}
                 />
               ))}
+              {appendAddTrigger && (
+                <span
+                  className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-dashed border-border bg-muted/40 text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-accent hover:text-foreground"
+                  aria-label={addLabelText}
+                  title={addLabelText}
+                >
+                  <Plus className="h-3 w-3" />
+                </span>
+              )}
             </>
           ) : (
             <>

@@ -57,21 +57,40 @@ vi.mock("../../i18n", () => ({
       selector({
         card: { update_failed: "Update failed" },
         priority: { high: "High" },
+        pickers: { label: { trigger_label: "Add label" } },
       }),
   }),
 }));
 
-vi.mock("./pickers", () => ({
-  LabelPicker: ({ issueId, labels }: { issueId: string; labels?: unknown[] }) => (
-    <div data-testid="label-picker">
-      {issueId}:{labels?.length ?? 0}
-    </div>
-  ),
-  PriorityPicker: () => null,
-  AssigneePicker: () => null,
-  StartDatePicker: () => null,
-  DueDatePicker: () => null,
-}));
+vi.mock("./pickers", async () => {
+  const { createPortal } = await import("react-dom");
+
+  return {
+    LabelPicker: ({
+      issueId,
+      labels,
+      appendAddTrigger,
+      addTriggerLabel,
+    }: {
+      issueId: string;
+      labels?: unknown[];
+      appendAddTrigger?: boolean;
+      addTriggerLabel?: string;
+    }) => (
+      <>
+        <div data-testid="label-picker">
+          {issueId}:{labels?.length ?? 0}
+          {appendAddTrigger ? <span data-testid="label-picker-add-trigger">{addTriggerLabel}</span> : null}
+        </div>
+        {createPortal(<input data-testid="portal-label-input" />, document.body)}
+      </>
+    ),
+    PriorityPicker: () => null,
+    AssigneePicker: () => null,
+    StartDatePicker: () => null,
+    DueDatePicker: () => null,
+  };
+});
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
@@ -120,12 +139,22 @@ describe("BoardCardContent labels", () => {
     );
 
     expect(screen.getByTestId("label-picker")).toHaveTextContent("issue-1:1");
+    expect(screen.getByTestId("label-picker-add-trigger")).toHaveTextContent("Add label");
   });
 
   it("keeps the editable label picker visible when no labels are set", () => {
     render(<BoardCardContent editable issue={makeIssue()} />);
 
     expect(screen.getByTestId("label-picker")).toHaveTextContent("issue-1:0");
+  });
+
+  it("does not prevent default events from portaled label management inputs", () => {
+    render(<BoardCardContent editable issue={makeIssue()} />);
+
+    const mouseDown = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    screen.getByTestId("portal-label-input").dispatchEvent(mouseDown);
+
+    expect(mouseDown.defaultPrevented).toBe(false);
   });
 });
 

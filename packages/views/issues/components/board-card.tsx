@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, memo } from "react";
+import { useCallback, memo, useRef } from "react";
 import { AppLink } from "../../navigation";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
@@ -45,12 +45,15 @@ function descriptionPreview(markdown: string): string {
 
 /** Stops event from bubbling to Link/drag handlers */
 function PickerWrapper({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
   const stop = (e: React.SyntheticEvent) => {
     e.stopPropagation();
-    e.preventDefault();
+    if (ref.current?.contains(e.target as Node)) {
+      e.preventDefault();
+    }
   };
   return (
-    <div onClick={stop} onMouseDown={stop} onPointerDown={stop}>
+    <div ref={ref} onClick={stop} onMouseDown={stop} onPointerDown={stop}>
       {children}
     </div>
   );
@@ -133,7 +136,14 @@ export const BoardCardContent = memo(function BoardCardContent({
           {showLabels &&
             (editable ? (
               <PickerWrapper>
-                <LabelPicker issueId={issue.id} labels={labels} align="start" width="w-72" />
+                <LabelPicker
+                  issueId={issue.id}
+                  labels={labels}
+                  align="start"
+                  width="w-72"
+                  appendAddTrigger
+                  addTriggerLabel={t(($) => $.pickers.label.trigger_label)}
+                />
               </PickerWrapper>
             ) : (
               labels.map((label) => (
