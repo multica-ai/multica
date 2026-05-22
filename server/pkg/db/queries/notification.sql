@@ -140,3 +140,15 @@ DO UPDATE SET
     render_mode = EXCLUDED.render_mode,
     updated_at = now()
 RETURNING *;
+
+-- name: ExistsOpenclawWeixinDeliveryByComment :one
+SELECT EXISTS (
+    SELECT 1
+    FROM notification_delivery nd
+    JOIN notification_event ne ON ne.id = nd.notification_event_id
+    WHERE ne.recipient_user_id = $1
+      AND ne.comment_id = $2
+      AND nd.channel = 'openclaw_weixin'
+      AND nd.status IN ('pending', 'sent')
+      AND nd.created_at > now() - interval '60 seconds'
+) AS "exists";

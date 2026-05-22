@@ -18,16 +18,17 @@ const (
 // defaultIMSummaryMaxChars is the maximum rune count for a compact IM summary.
 const defaultIMSummaryMaxChars = 80
 
-// eventTypeLabels maps internal event types to Chinese UI labels for IM notifications.
+// eventTypeLabels maps internal event types to emoji labels for IM notifications.
 var eventTypeLabels = map[string]string{
-	"task_completed": "任务完成",
-	"task_failed":    "任务失败",
-	"mentioned":      "被@",
-	"new_comment":    "新回复",
-	"replied":        "新回复",
+	"task_completed": "✅",
+	"task_failed":    "❌",
+	"mentioned":      "💬",
+	"new_comment":    "↩️",
+	"replied":        "↩️",
+	"issue_assigned": "📋",
 }
 
-// EventTypeLabel returns the Chinese label for a notification event type.
+// EventTypeLabel returns the emoji/label for a notification event type.
 func EventTypeLabel(eventType string) string {
 	if label, ok := eventTypeLabels[eventType]; ok {
 		return label
@@ -253,7 +254,7 @@ func ResolveRenderMode(userPref, channelDefault RenderMode, body string) RenderM
 // --- Compact renderer for IM channels ---
 
 // BuildCompactIMNotification builds a single-line compact notification for IM channels.
-// Format: [{事件类型}] {actor_name} [{issue_identifier}]({issue_link}): {summary}
+// Format: {emoji} {actor_name} [{issue_identifier}]({issue_link}): {summary}
 func BuildCompactIMNotification(eventType, actorName, issueIdentifier, issueLink, summary string) string {
 	label := EventTypeLabel(eventType)
 	actorName = strings.TrimSpace(actorName)
@@ -262,7 +263,7 @@ func BuildCompactIMNotification(eventType, actorName, issueIdentifier, issueLink
 	summary = strings.TrimSpace(summary)
 
 	var parts []string
-	parts = append(parts, "["+label+"]")
+	parts = append(parts, label)
 
 	if actorName != "" {
 		parts = append(parts, actorName)

@@ -596,6 +596,23 @@ func recordOpenclawWeixinDelivery(
 		return
 	}
 
+	if event.CommentID.Valid {
+		exists, err := queries.ExistsOpenclawWeixinDeliveryByComment(ctx, db.ExistsOpenclawWeixinDeliveryByCommentParams{
+			RecipientUserID: event.RecipientUserID,
+			CommentID:       event.CommentID,
+		})
+		if err != nil {
+			slog.Error("failed to check openclaw_weixin dedup",
+				"recipient_id", recipientID,
+				"comment_id", util.UUIDToString(event.CommentID),
+				"error", err,
+			)
+		}
+		if exists {
+			return
+		}
+	}
+
 	bindings, err := queries.ListExternalAccountBindingsByUser(ctx, parseUUID(recipientID))
 	if err != nil {
 		slog.Error("failed to load external account bindings for openclaw_weixin delivery",

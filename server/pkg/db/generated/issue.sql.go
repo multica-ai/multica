@@ -900,15 +900,15 @@ WHERE i.workspace_id = $1
     OR (i.creator_type || ':' || i.creator_id::text) = ANY($9::text[])
   )
   AND ($10::uuid IS NULL OR i.project_id = $10)
+  AND ($11::jsonb IS NULL OR i.metadata @> $11::jsonb)
   AND (
     (
-      COALESCE(cardinality($11::uuid[]), 0) = 0
-      AND $12::boolean IS NOT TRUE
+      COALESCE(cardinality($12::uuid[]), 0) = 0
+      AND $13::boolean IS NOT TRUE
     )
-    OR ($12::boolean IS TRUE AND i.project_id IS NULL)
-    OR (i.project_id = ANY($11::uuid[]))
+    OR ($13::boolean IS TRUE AND i.project_id IS NULL)
+    OR (i.project_id = ANY($12::uuid[]))
   )
-  AND ($13::jsonb IS NULL OR i.metadata @> $13::jsonb)
   AND (
     $14::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
@@ -955,9 +955,9 @@ type ListOpenIssuesParams struct {
 	CreatorID         pgtype.UUID   `json:"creator_id"`
 	CreatorPairs      []string      `json:"creator_pairs"`
 	ProjectID         pgtype.UUID   `json:"project_id"`
+	MetadataFilter    []byte        `json:"metadata_filter"`
 	ProjectIds        []pgtype.UUID `json:"project_ids"`
 	IncludeNoProject  pgtype.Bool   `json:"include_no_project"`
-	MetadataFilter    []byte        `json:"metadata_filter"`
 	InvolvesUserID    pgtype.UUID   `json:"involves_user_id"`
 }
 
@@ -997,9 +997,9 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 		arg.CreatorID,
 		arg.CreatorPairs,
 		arg.ProjectID,
+		arg.MetadataFilter,
 		arg.ProjectIds,
 		arg.IncludeNoProject,
-		arg.MetadataFilter,
 		arg.InvolvesUserID,
 	)
 	if err != nil {
