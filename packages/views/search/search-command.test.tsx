@@ -28,6 +28,7 @@ const {
   mockPush,
   mockSearchIssues,
   mockSearchProjects,
+  mockSearchChatSessions,
   mockRecentItems,
   mockAllIssues,
   mockSetTheme,
@@ -42,6 +43,7 @@ const {
   mockPush: vi.fn(),
   mockSearchIssues: vi.fn(),
   mockSearchProjects: vi.fn(),
+  mockSearchChatSessions: vi.fn(),
   mockRecentItems: { current: [] as Array<{ id: string; visitedAt: number }> },
   mockAllIssues: { current: [] as Array<Record<string, unknown>> },
   mockSetTheme: vi.fn(),
@@ -69,6 +71,7 @@ vi.mock("@multica/core/api", () => ({
   api: {
     searchIssues: mockSearchIssues,
     searchProjects: mockSearchProjects,
+    searchChatSessions: mockSearchChatSessions,
   },
 }));
 
@@ -172,6 +175,7 @@ describe("SearchCommand", () => {
     mockPush.mockReset();
     mockSearchIssues.mockReset().mockResolvedValue({ issues: [] });
     mockSearchProjects.mockReset().mockResolvedValue({ projects: [] });
+    mockSearchChatSessions.mockReset().mockResolvedValue({ chat_sessions: [], total: 0 });
     mockRecentItems.current = [];
     mockAllIssues.current = [];
     mockSetTheme.mockReset();
@@ -480,6 +484,90 @@ describe("SearchCommand", () => {
       ).toBeInTheDocument();
     });
     expect(screen.getByLabelText("Current theme")).toBeInTheDocument();
+  });
+
+  it("renders Chat Sessions group with matched snippet and navigates to the inbox deeplink", async () => {
+    const user = userEvent.setup();
+    mockSearchChatSessions.mockResolvedValue({
+      chat_sessions: [
+        {
+          chat_session_id: "session-1",
+          title: "Roadmap kickoff",
+          agent_id: "agent-1",
+          matched_snippet: "We agreed to ship the roadmap on Friday",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      total: 1,
+    });
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "roadmap");
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat Sessions")).toBeInTheDocument();
+      expect(
+        screen.getByText((_, el) => el?.textContent === "Roadmap kickoff" && el?.tagName === "SPAN"),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText(
+        (_, el) =>
+          el?.textContent === "We agreed to ship the roadmap on Friday" &&
+          el?.tagName === "SPAN",
+      ),
+    ).toBeInTheDocument();
+    expect(mockSearchChatSessions).toHaveBeenCalledWith(
+      expect.objectContaining({ q: "roadmap", limit: 10 }),
+    );
+
+    const item = await screen.findByText(
+      (_, el) => el?.textContent === "Roadmap kickoff" && el?.tagName === "SPAN",
+    );
+    await user.click(item);
+
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/inbox?chat=session-1");
+    expect(useSearchStore.getState().open).toBe(false);
+  });
+
+  it("hides Chat Sessions group when the backend returns no matches", async () => {
+    const user = userEvent.setup();
+    mockSearchIssues.mockResolvedValue({
+      issues: [
+        { id: "issue-1", identifier: "MUL-1", title: "Some issue", status: "todo", match_source: "title" },
+      ],
+    });
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "issue");
+
+    await waitFor(() => {
+      expect(screen.getByText("Issues")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Chat Sessions")).not.toBeInTheDocument();
+  });
+
+  it("renders other results even when the chat search endpoint fails", async () => {
+    const user = userEvent.setup();
+    mockSearchChatSessions.mockRejectedValue(new Error("backend offline"));
+    mockSearchIssues.mockResolvedValue({
+      issues: [
+        { id: "issue-1", identifier: "MUL-1", title: "Survives chat failure", status: "todo", match_source: "title" },
+      ],
+    });
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "survives");
+
+    await waitFor(() => {
+      expect(
+        screen.getByText((_, el) => el?.textContent === "Survives chat failure" && el?.tagName === "SPAN"),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Chat Sessions")).not.toBeInTheDocument();
   });
 
   it("filters out recent items not present in query cache", () => {

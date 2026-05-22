@@ -31,6 +31,8 @@ import type {
   MemberWithUser,
   SearchIssueResult,
   SearchProjectResult,
+  // CEREBRO-PATCH(chat-search-cerebro-ui): FIR-902 — Chat Sessions group in Cmd+K.
+  SearchChatSessionResult,
 } from "@multica/core/types";
 import { api } from "@multica/core/api";
 import {
@@ -152,7 +154,10 @@ interface CommandItem {
 interface SearchResults {
   issues: SearchIssueResult[];
   projects: SearchProjectResult[];
+  chatSessions: SearchChatSessionResult[];
 }
+
+const EMPTY_RESULTS: SearchResults = { issues: [], projects: [], chatSessions: [] };
 
 export function SearchCommand() {
   const { t } = useT("search");
@@ -189,7 +194,7 @@ export function SearchCommand() {
   );
 
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResults>({ issues: [], projects: [] });
+  const [results, setResults] = useState<SearchResults>(EMPTY_RESULTS);
   const [isLoading, setIsLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -345,6 +350,7 @@ export function SearchCommand() {
   const hasResults =
     results.issues.length > 0 ||
     results.projects.length > 0 ||
+    results.chatSessions.length > 0 ||
     filteredMembers.length > 0;
 
   // Global Cmd+K / Ctrl+K shortcut
@@ -385,7 +391,7 @@ export function SearchCommand() {
   useEffect(() => {
     if (!open) {
       setQuery("");
-      setResults({ issues: [], projects: [] });
+      setResults(EMPTY_RESULTS);
       setIsLoading(false);
     }
   }, [open]);
@@ -395,7 +401,7 @@ export function SearchCommand() {
     if (abortRef.current) abortRef.current.abort();
 
     if (!q.trim()) {
-      setResults({ issues: [], projects: [] });
+      setResults(EMPTY_RESULTS);
       setIsLoading(false);
       return;
     }
@@ -405,7 +411,8 @@ export function SearchCommand() {
       const controller = new AbortController();
       abortRef.current = controller;
       try {
-        const [issueRes, projectRes] = await Promise.all([
+        // CEREBRO-PATCH(chat-search-cerebro-ui): FIR-902 — third Promise.all leg for Cmd+K chat-session search.
+        const [issueRes, projectRes, chatRes] = await Promise.all([
           api.searchIssues({
             q: q.trim(),
             limit: 20,
@@ -418,11 +425,17 @@ export function SearchCommand() {
             include_closed: true,
             signal: controller.signal,
           }),
+          api.searchChatSessions({
+            q: q.trim(),
+            limit: 10,
+            signal: controller.signal,
+          }).catch(() => ({ chat_sessions: [], total: 0 })),
         ]);
         if (!controller.signal.aborted) {
           setResults({
             issues: issueRes.issues,
             projects: projectRes.projects,
+            chatSessions: chatRes.chat_sessions,
           });
           setIsLoading(false);
         }
@@ -448,6 +461,9 @@ export function SearchCommand() {
       if (value.startsWith("project:")) {
         // value is "project:<id>" — slice off the 8-char prefix to extract the id.
         push(p.projectDetail(value.slice(8)));
+      } else if (value.startsWith("chat:")) {
+        // CEREBRO-PATCH(chat-search-cerebro-ui): FIR-902 — open chat session via inbox ?chat= deeplink.
+        push(`${p.inbox()}?chat=${encodeURIComponent(value.slice(5))}`);
       } else {
         push(p.issueDetail(value));
       }
@@ -705,6 +721,40 @@ export function SearchCommand() {
                           </span>
                         </div>
                       )}
+                  </CommandPrimitive.Item>
+                ))}
+              </CommandPrimitive.Group>
+            )}
+
+            {/* CEREBRO-PATCH(chat-search-cerebro-ui): FIR-902 — Chat Sessions group in Cmd+K. */}
+            {!isLoading && results.chatSessions.length > 0 && (
+              <CommandPrimitive.Group
+                heading={t(($) => $.groups.chat_sessions)}
+                className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
+              >
+                {results.chatSessions.map((session) => (
+                  <CommandPrimitive.Item
+                    key={`chat:${session.chat_session_id}`}
+                    value={`chat:${session.chat_session_id}`}
+                    onSelect={handleSelect}
+                    className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="truncate">
+                        <HighlightText text={session.title} query={query} />
+                      </span>
+                    </div>
+                    {session.matched_snippet && (
+                      <div className="flex items-start gap-2 pl-[26px]">
+                        <span className="text-xs text-muted-foreground truncate">
+                          <HighlightText
+                            text={session.matched_snippet}
+                            query={query}
+                          />
+                        </span>
+                      </div>
+                    )}
                   </CommandPrimitive.Item>
                 ))}
               </CommandPrimitive.Group>

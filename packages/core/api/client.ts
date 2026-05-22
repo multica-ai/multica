@@ -6,6 +6,8 @@ import type {
   ListIssuesResponse,
   SearchIssuesResponse,
   SearchProjectsResponse,
+  // CEREBRO-PATCH(chat-search-cerebro-client): FIR-902 — Cmd+K chat-session search.
+  SearchChatSessionsResponse,
   UpdateMeRequest,
   CreateMemberRequest,
   UpdateMemberRequest,
@@ -1175,6 +1177,14 @@ export class ApiClient {
     if (params.offset !== undefined) search.set("offset", String(params.offset));
     if (params.include_closed) search.set("include_closed", "true");
     return this.fetch(`/api/projects/search?${search}`, params.signal ? { signal: params.signal } : undefined);
+  }
+
+  // CEREBRO-PATCH(chat-search-cerebro-client): FIR-902 — Cmd+K chat-session search via JEH-901 backend.
+  async searchChatSessions(params: { q: string; limit?: number; offset?: number; signal?: AbortSignal }): Promise<SearchChatSessionsResponse> {
+    const search = new URLSearchParams({ q: params.q });
+    if (params.limit !== undefined) search.set("limit", String(params.limit));
+    if (params.offset !== undefined) search.set("offset", String(params.offset));
+    return this.fetch(`/api/chat/sessions/search?${search}`, params.signal ? { signal: params.signal } : undefined);
   }
 
   async getIssue(id: string): Promise<Issue> {

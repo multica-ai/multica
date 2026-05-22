@@ -4,12 +4,14 @@
   "placeholder": "输入命令或关键词搜索...",
   "_comment_1326": "CEREBRO-PATCH(search-page-1326): JEH-1326 — open_page key for full search page action",
   "open_page": "打开页面",
+  "_comment_chat_search": "CEREBRO-PATCH(chat-search-cerebro-ui): FIR-902 — chat_sessions group heading for Cmd+K.",
   "groups": {
     "pages": "页面",
     "commands": "命令",
     "members": "成员",
     "projects": "项目",
     "issues": "issue",
+    "chat_sessions": "对话",
     "recent": "最近"
   },
   "pages": {

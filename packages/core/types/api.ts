@@ -138,6 +138,20 @@ export interface SearchProjectsResponse {
   total: number;
 }
 
+// CEREBRO-PATCH(chat-search-cerebro-types): FIR-902 — Cmd+K chat-session search hit.
+export interface SearchChatSessionResult {
+  chat_session_id: string;
+  title: string;
+  agent_id: string;
+  matched_snippet?: string;
+  created_at: string;
+}
+
+export interface SearchChatSessionsResponse {
+  chat_sessions: SearchChatSessionResult[];
+  total: number;
+}
+
 export interface UpdateMeRequest {
   name?: string;
   avatar_url?: string;
