@@ -825,6 +825,7 @@ export function IssueDetail({
   highlightCommentId,
 }: IssueDetailProps) {
   const { t, i18n } = useT("issues");
+  const timeAgo = useTimeAgo();
   // `issueId` is the raw route param — may be a UUID *or* a human-readable
   // identifier (e.g. "OPE-460") when the URL has been canonicalized.  We keep
   // it around only for the initial detail query (the API accepts both formats)

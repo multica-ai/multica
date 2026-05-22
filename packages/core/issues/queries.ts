@@ -12,7 +12,8 @@ import { BOARD_STATUSES } from "./config";
 
 export const issueKeys = {
   all: (wsId: string) => ["issues", wsId] as const,
-  list: (wsId: string) => [...issueKeys.all(wsId), "list"] as const,
+  list: (wsId: string, filter?: IssueListFilter) =>
+    [...issueKeys.all(wsId), "list", ...(filter ? [filter] : [])] as const,
   assigneeGroupsAll: (wsId: string) =>
     [...issueKeys.all(wsId), "assignee-groups"] as const,
   assigneeGroups: (wsId: string, filter: AssigneeGroupedIssuesFilter) =>
@@ -63,12 +64,32 @@ export const issueKeys = {
    *  the global WS task: prefix path so any task lifecycle event refreshes
    *  every per-issue list, regardless of which issue is currently mounted. */
   tasksAll: () => ["issues", "tasks"] as const,
+  taskRuns: (issueId: string) => ["issues", "task-runs", issueId] as const,
+  listAll: (wsId: string) => [...issueKeys.all(wsId), "list"] as const,
+  usageAll: () => ["issues", "usage"] as const,
+  taskMessages: (taskId: string) => ["task-messages", taskId] as const,
 };
 
-export type MyIssuesFilter = Pick<
+export type IssueListFilter = Pick<
   ListIssuesParams,
-  "assignee_id" | "assignee_ids" | "creator_id" | "project_id" | "involves_user_id"
->;
+  | "assignee_id"
+  | "assignee_ids"
+  | "assignee_types"
+  | "assignees"
+  | "include_no_assignee"
+  | "creator_id"
+  | "creators"
+  | "project_id"
+  | "project_ids"
+  | "include_no_project"
+  | "label_ids"
+  | "involves_user_id"
+  | "priorities"
+> & {
+  statuses?: readonly IssueStatus[];
+};
+
+export type MyIssuesFilter = IssueListFilter;
 
 export type AssigneeGroupedIssuesFilter = Omit<
   ListGroupedIssuesParams,
@@ -91,14 +112,27 @@ export function flattenIssueBuckets(data: ListIssuesCache) {
   return out;
 }
 
-async function fetchFirstPages(filter: MyIssuesFilter = {}): Promise<ListIssuesCache> {
+function resolveFetchStatuses(filter: IssueListFilter): readonly IssueStatus[] {
+  if (!filter.statuses?.length) return PAGINATED_STATUSES;
+  const allowed = new Set<IssueStatus>(PAGINATED_STATUSES);
+  return filter.statuses.filter((status) => allowed.has(status));
+}
+
+function stripBucketOnlyFilters(filter: IssueListFilter): Omit<IssueListFilter, "statuses"> {
+  const { statuses: _statuses, ...params } = filter;
+  return params;
+}
+
+async function fetchFirstPages(filter: IssueListFilter = {}): Promise<ListIssuesCache> {
+  const statuses = resolveFetchStatuses(filter);
+  const params = stripBucketOnlyFilters(filter);
   const responses = await Promise.all(
-    PAGINATED_STATUSES.map((status) =>
-      api.listIssues({ status, limit: ISSUE_PAGE_SIZE, offset: 0, ...filter }),
+    statuses.map((status) =>
+      api.listIssues({ status, limit: ISSUE_PAGE_SIZE, offset: 0, ...params }),
     ),
   );
   const byStatus: ListIssuesCache["byStatus"] = {};
-  PAGINATED_STATUSES.forEach((status, i) => {
+  statuses.forEach((status, i) => {
     const res = responses[i]!;
     byStatus[status] = { issues: res.issues, total: res.total };
   });
@@ -210,10 +244,11 @@ async function fetchAllMyAssigneeGroups(
  * Fetches the first page of each paginated status in parallel. Use
  * {@link useLoadMoreByStatus} to paginate a specific status into the cache.
  */
-export function issueListOptions(wsId: string) {
+export function issueListOptions(wsId: string, filter?: IssueListFilter) {
+  const requestFilter = filter ?? {};
   return queryOptions({
-    queryKey: issueKeys.list(wsId),
-    queryFn: () => fetchFirstPages(),
+    queryKey: issueKeys.list(wsId, filter),
+    queryFn: () => fetchFirstPages(requestFilter),
     select: flattenIssueBuckets,
   });
 }
@@ -368,10 +403,13 @@ export function childIssuesOptions(wsId: string, id: string) {
  * entries per issue) it added complexity without a UX win and broke reply
  * threads at page boundaries.
  */
-export function issueTimelineOptions(issueId: string) {
+export function issueTimelineOptions(issueId: string, aroundCommentId?: string) {
   return queryOptions({
-    queryKey: issueKeys.timeline(issueId),
-    queryFn: () => api.listTimeline(issueId),
+    queryKey: [...issueKeys.timeline(issueId), aroundCommentId] as const,
+    queryFn: () =>
+      aroundCommentId
+        ? api.listTimeline(issueId, { mode: "around", id: aroundCommentId })
+        : api.listTimeline(issueId),
   });
 }
 
@@ -407,5 +445,23 @@ export function issueAttachmentsOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.attachments(issueId),
     queryFn: () => api.listAttachments(issueId),
+  });
+}
+
+export function issueTaskRunsOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.taskRuns(issueId),
+    queryFn: () => api.listTasksByIssue(issueId),
+    enabled: !!issueId,
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function taskMessagesOptions(taskId: string) {
+  return queryOptions({
+    queryKey: issueKeys.taskMessages(taskId),
+    queryFn: () => api.listTaskMessages(taskId),
+    enabled: !!taskId,
   });
 }

@@ -30,7 +30,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { useT } from "../i18n";
 import { useNavigation } from "../navigation";
-import { CodeBlockIframe } from "./code-block-iframe";
+import { HtmlPreviewBody } from "./html-preview-body";
 import { CodeBlockStatic } from "./code-block-static";
 import {
   HtmlArtifactPreviewModal,
@@ -57,7 +57,7 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
   const [view, setView] = useState<"preview" | "source">("preview");
   const [previewOpen, setPreviewOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
+  const [_fullscreen, setFullscreen] = useState(false);
 
   const handleCopy = async () => {
     if (!html) return;

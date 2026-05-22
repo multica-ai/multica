@@ -24,6 +24,7 @@ import { ListView } from "./list-view";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import { useT } from "../../i18n";
 import { buildIssueListServerFilter } from "../utils/server-filter";
+import { filterIssues } from "../utils/filter";
 
 export function IssuesPage() {
   const { t } = useT("issues");

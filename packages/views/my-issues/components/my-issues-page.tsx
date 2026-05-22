@@ -18,7 +18,7 @@ import { ListView } from "../../issues/components/list-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { myIssueAssigneeGroupsOptions, myIssueListOptions, myAllIssuesListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter, type MyIssuesFilter } from "@multica/core/issues/queries";
+import { myIssueAssigneeGroupsOptions, myIssueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter, type MyIssuesFilter } from "@multica/core/issues/queries";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-store";
@@ -26,6 +26,7 @@ import { PageHeader } from "../../layout/page-header";
 import { useT } from "../../i18n";
 import { MyIssuesHeader } from "./my-issues-header";
 import { buildIssueListServerFilter } from "../../issues/utils/server-filter";
+import { filterIssues } from "../../issues/utils/filter";
 
 export function MyIssuesPage() {
   const { t } = useT("my-issues");
@@ -104,8 +105,8 @@ export function MyIssuesPage() {
   // For the "my" scope, use the combined query that fetches both assigned and
   // created issues. For all other scopes, use the single-filter query.
   const { data: myIssuesMy = [] } = useQuery({
-    ...myAllIssuesListOptions(wsId, user?.id ?? "", serverFilter),
-    enabled: scope === "my" && !!user,
+    ...myIssueListOptions(wsId, "all", serverFilter, user?.id),
+    enabled: scope === "all" && !!user,
   });
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
     () => ({
@@ -135,7 +136,7 @@ export function MyIssuesPage() {
         return assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [];
       }
       // For the "my" scope, use combined (assigned+created) issues; otherwise use status query
-      if (scope === "my" && myIssuesMy.length > 0) return myIssuesMy;
+      if (scope === "all" && myIssuesMy.length > 0) return myIssuesMy;
       return statusIssuesQuery.data ?? [];
     },
     [assigneeGroupsQuery.data, statusIssuesQuery.data, usesAssigneeBoard, scope, myIssuesMy],

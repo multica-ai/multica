@@ -270,23 +270,10 @@ export interface OnboardingRuntimeBootstrapResponse {
   issue_id: string;
 }
 
-const EMPTY_ONBOARDING_RUNTIME_BOOTSTRAP_RESPONSE:
-  OnboardingRuntimeBootstrapResponse = {
-  workspace_id: "",
-  agent_id: "",
-  issue_id: "",
-};
-
 export interface OnboardingNoRuntimeBootstrapResponse {
   workspace_id: string;
   issue_id: string;
 }
-
-const EMPTY_ONBOARDING_NO_RUNTIME_BOOTSTRAP_RESPONSE:
-  OnboardingNoRuntimeBootstrapResponse = {
-  workspace_id: "",
-  issue_id: "",
-};
 
 export class ApiError extends Error {
   readonly status: number;

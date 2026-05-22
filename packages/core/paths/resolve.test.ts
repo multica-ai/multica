@@ -12,6 +12,7 @@ function makeWs(slug: string): Workspace {
     context: null,
     settings: {},
     repos: [],
+    wiki_content: null,
     issue_prefix: slug.toUpperCase(),
     created_at: "",
     updated_at: "",

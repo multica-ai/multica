@@ -492,7 +492,7 @@ function PastRow({
 }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
-  const [retrying, setRetrying] = useState(false);
+  const [_retrying, _setRetrying] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
