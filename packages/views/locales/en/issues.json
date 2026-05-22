@@ -350,7 +350,8 @@
     "cancel": "Cancel"
   },
   "card": {
-    "update_failed": "Failed to update issue"
+    "update_failed": "Failed to update issue",
+    "updated_ago": "Updated {{time}}"
   },
   "actions": {
     "status": "Status",

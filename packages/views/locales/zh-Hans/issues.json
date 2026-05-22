@@ -340,7 +340,8 @@
     "cancel": "取消"
   },
   "card": {
-    "update_failed": "更新 issue 失败"
+    "update_failed": "更新 issue 失败",
+    "updated_ago": "更新于 {{time}}"
   },
   "actions": {
     "status": "状态",
