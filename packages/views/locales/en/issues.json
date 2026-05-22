@@ -80,10 +80,12 @@
     "tooltip_board": "Board view",
     "tooltip_list": "List view",
     "tooltip_gantt": "Gantt view",
+    "tooltip_swimlane": "Swimlane view",
     "section": "View",
     "board": "Board",
     "list": "List",
-    "gantt": "Gantt"
+    "gantt": "Gantt",
+    "swimlane": "Swimlane"
   },
   "gantt": {
     "header_issue": "Issue",
@@ -121,6 +123,10 @@
   "list": {
     "empty_status": "No issues",
     "add_issue_tooltip": "Add issue"
+  },
+  "swimlane": {
+    "parent_column": "Parent",
+    "no_parent": "No parent"
   },
   "board": {
     "hidden_columns_label": "Hidden columns",

@@ -19,6 +19,7 @@ import {
   User,
   UserMinus,
   UserPen,
+  Waves,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -995,6 +996,8 @@ export function IssueDisplayControls({
                           <Columns3 className="size-3.5" />
                         ) : viewMode === "gantt" && allowGantt ? (
                           <ChartGantt className="size-3.5" />
+                        ) : viewMode === "swimlane" ? (
+                          <Waves className="size-3.5" />
                         ) : (
                           <List className="size-3.5" />
                         )}
@@ -1002,6 +1005,8 @@ export function IssueDisplayControls({
                           ? t(($) => $.view.board)
                           : viewMode === "gantt" && allowGantt
                           ? t(($) => $.view.gantt)
+                          : viewMode === "swimlane"
+                          ? t(($) => $.view.swimlane)
                           : t(($) => $.view.list)}
                       </Button>
                     }
@@ -1013,6 +1018,8 @@ export function IssueDisplayControls({
                   ? t(($) => $.view.tooltip_board)
                   : viewMode === "gantt" && allowGantt
                   ? t(($) => $.view.tooltip_gantt)
+                  : viewMode === "swimlane"
+                  ? t(($) => $.view.tooltip_swimlane)
                   : t(($) => $.view.tooltip_list)}
               </TooltipContent>
             </Tooltip>
@@ -1033,6 +1040,10 @@ export function IssueDisplayControls({
                     {t(($) => $.view.gantt)}
                   </DropdownMenuItem>
                 )}
+                <DropdownMenuItem onClick={() => act.setViewMode("swimlane")}>
+                  <Waves />
+                  {t(($) => $.view.swimlane)}
+                </DropdownMenuItem>
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>

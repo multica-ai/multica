@@ -78,10 +78,12 @@
     "tooltip_board": "看板视图",
     "tooltip_list": "列表视图",
     "tooltip_gantt": "甘特图",
+    "tooltip_swimlane": "泳道视图",
     "section": "视图",
     "board": "看板",
     "list": "列表",
-    "gantt": "甘特图"
+    "gantt": "甘特图",
+    "swimlane": "泳道"
   },
   "gantt": {
     "header_issue": "Issue",
@@ -119,6 +121,10 @@
   "list": {
     "empty_status": "无 issue",
     "add_issue_tooltip": "新建 issue"
+  },
+  "swimlane": {
+    "parent_column": "父级",
+    "no_parent": "无父级"
   },
   "board": {
     "hidden_columns_label": "隐藏的列",

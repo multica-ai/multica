@@ -13,6 +13,7 @@ import {
   List,
   SignalHigh,
   SlidersHorizontal,
+  Waves,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -425,6 +426,8 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
                     <Button variant="outline" size="icon-sm" className="text-muted-foreground">
                       {viewMode === "board" ? (
                         <Columns3 className="size-4" />
+                      ) : viewMode === "swimlane" ? (
+                        <Waves className="size-4" />
                       ) : (
                         <List className="size-4" />
                       )}
@@ -434,7 +437,11 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
               }
             />
             <TooltipContent side="bottom">
-              {viewMode === "board" ? t(($) => $.header.view_board) : t(($) => $.header.view_list)}
+              {viewMode === "board"
+                ? t(($) => $.header.view_board)
+                : viewMode === "swimlane"
+                ? t(($) => $.header.view_swimlane)
+                : t(($) => $.header.view_list)}
             </TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end" className="w-auto">
@@ -447,6 +454,10 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
               <DropdownMenuItem onClick={() => act.setViewMode("list")}>
                 <List />
                 {t(($) => $.header.view_list_short)}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => act.setViewMode("swimlane")}>
+                <Waves />
+                {t(($) => $.header.view_swimlane_short)}
               </DropdownMenuItem>
             </DropdownMenuGroup>
           </DropdownMenuContent>

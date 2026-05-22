@@ -16,6 +16,7 @@ import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-contex
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
+import { SwimLaneView } from "../../issues/components/swimlane-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -160,7 +161,7 @@ export function MyIssuesPage() {
 
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
-    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position">, onSettled?: () => void) => {
+    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position" | "parent_issue_id">, onSettled?: () => void) => {
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
         {
@@ -254,6 +255,13 @@ export function MyIssuesPage() {
                 childProgressMap={childProgressMap}
                 myIssuesScope={scope}
                 myIssuesFilter={filter}
+              />
+            ) : viewMode === "swimlane" ? (
+              <SwimLaneView
+                issues={issues}
+                visibleStatuses={visibleStatuses}
+                onMoveIssue={handleMoveIssue}
+                childProgressMap={childProgressMap}
               />
             ) : (
               <ListView

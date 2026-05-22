@@ -22,6 +22,7 @@ import { PageHeader } from "../../layout/page-header";
 import { IssuesHeader } from "./issues-header";
 import { BoardView } from "./board-view";
 import { ListView } from "./list-view";
+import { SwimLaneView } from "./swimlane-view";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
@@ -148,7 +149,7 @@ export function IssuesPage() {
 
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
-    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position">, onSettled?: () => void) => {
+    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position" | "parent_issue_id">, onSettled?: () => void) => {
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
         {
@@ -213,6 +214,13 @@ export function IssuesPage() {
                 assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
                 visibleStatuses={visibleStatuses}
                 hiddenStatuses={hiddenStatuses}
+                onMoveIssue={handleMoveIssue}
+                childProgressMap={childProgressMap}
+              />
+            ) : viewMode === "swimlane" ? (
+              <SwimLaneView
+                issues={issues}
+                visibleStatuses={visibleStatuses}
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
               />
