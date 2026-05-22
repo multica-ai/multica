@@ -256,23 +256,25 @@ func shellQuote(s string) string {
 }
 
 type claudeTranscriptTracker struct {
-	reporter         *localRunReporter
-	usageReporter    *localRunUsageReporter
-	cwd              string
-	bootstrap        string
-	startedAt        time.Time
-	tickerInterval   time.Duration
-	mu               sync.Mutex
-	sessions         map[string]*claudeTrackedSession
-	seen             map[string]bool
-	usageSeen        map[string]bool
-	usageTotals      map[string]localCLIUsage
-	toolByID         map[string]string
-	currentTurnReply bool
-	done             chan struct{}
-	stopped          chan struct{}
-	startOnce        sync.Once
-	closeOnce        sync.Once
+	reporter              *localRunReporter
+	usageReporter         *localRunUsageReporter
+	cwd                   string
+	bootstrap             string
+	startedAt             time.Time
+	tickerInterval        time.Duration
+	mu                    sync.Mutex
+	sessions              map[string]*claudeTrackedSession
+	seen                  map[string]bool
+	usageSeen             map[string]bool
+	usageTotals           map[string]localCLIUsage
+	toolByID              map[string]string
+	currentTurnReply      bool
+	lastAssistantText     string
+	lastAssistantFinalKey string
+	done                  chan struct{}
+	stopped               chan struct{}
+	startOnce             sync.Once
+	closeOnce             sync.Once
 }
 
 type claudeTrackedSession struct {
@@ -405,6 +407,8 @@ func (t *claudeTranscriptTracker) mapLineLocked(session *claudeTrackedSession, r
 		t.mapUserLineLocked(session, raw, key)
 	case "assistant":
 		t.mapAssistantLineLocked(session, raw, key)
+	case "system":
+		t.mapSystemLineLocked(raw)
 	case "result":
 		t.mapResultLineLocked(session, raw, key)
 	}
@@ -522,14 +526,32 @@ func (t *claudeTranscriptTracker) mapAssistantLineLocked(session *claudeTrackedS
 		Content:   content,
 		SourceKey: t.sourceKey(session, key, "text"),
 	})
+	t.lastAssistantText = content
+	t.lastAssistantFinalKey = t.sourceKey(session, key, "final")
 	if t.currentTurnReply && claudeStopReason(msg) == "end_turn" && !isStatusOnly(content) {
-		t.post(localCLIMessage{
-			Type:      "final",
-			Content:   content,
-			SourceKey: t.sourceKey(session, key, "final"),
-		})
-		t.currentTurnReply = false
+		t.postClaudeFinalLocked(content, t.lastAssistantFinalKey)
 	}
+}
+
+func (t *claudeTranscriptTracker) mapSystemLineLocked(raw map[string]any) {
+	if stringValue(raw["subtype"]) != "turn_duration" || !t.currentTurnReply || isTrue(raw["isMeta"]) {
+		return
+	}
+	if t.lastAssistantText == "" || isStatusOnly(t.lastAssistantText) {
+		return
+	}
+	t.postClaudeFinalLocked(t.lastAssistantText, t.lastAssistantFinalKey)
+}
+
+func (t *claudeTranscriptTracker) postClaudeFinalLocked(content, sourceKey string) {
+	t.post(localCLIMessage{
+		Type:      "final",
+		Content:   content,
+		SourceKey: sourceKey,
+	})
+	t.currentTurnReply = false
+	t.lastAssistantText = ""
+	t.lastAssistantFinalKey = ""
 }
 
 func (t *claudeTranscriptTracker) recordClaudeUsageLocked(session *claudeTrackedSession, msg map[string]any, key string) {

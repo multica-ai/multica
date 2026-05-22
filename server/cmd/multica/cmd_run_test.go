@@ -991,6 +991,31 @@ func TestClaudeTranscriptTrackerFinalUsesEndTurnAssistantText(t *testing.T) {
 	}
 }
 
+func TestClaudeTranscriptTrackerFinalUsesTurnDurationFallback(t *testing.T) {
+	tmp := t.TempDir()
+	sessionPath := filepath.Join(tmp, "sess-1.jsonl")
+	if err := os.WriteFile(sessionPath, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	tracker := newClaudeTranscriptTracker(reporter, nil, tmp, "", time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
+	tracker.ObserveSessionHook(claudeSessionHookPayload{SessionID: "sess-1", TranscriptPath: sessionPath, Cwd: tmp})
+
+	writeClaudeJSONLLines(t, sessionPath, []string{
+		`{"type":"user","uuid":"u1","timestamp":"2026-05-14T12:00:01Z","message":{"role":"user","content":"<command-name>/plan</command-name>\n<command-args>帮我规划实现方案</command-args>"}}`,
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-05-14T12:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"方案如下。"}]}}`,
+		`{"type":"system","subtype":"turn_duration","timestamp":"2026-05-14T12:00:03Z","isMeta":false}`,
+	})
+	tracker.Sync()
+	reporter.Close()
+
+	finals := finalMessages(poster.messages())
+	if len(finals) != 1 || finals[0].Content != "方案如下。" {
+		t.Fatalf("finals = %+v, want turn_duration fallback final", finals)
+	}
+}
+
 func TestClaudeTranscriptTrackerSkipsLocalCommandPseudoUserLines(t *testing.T) {
 	tmp := t.TempDir()
 	sessionPath := filepath.Join(tmp, "sess-1.jsonl")
