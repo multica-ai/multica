@@ -880,6 +880,38 @@ func TestClaudeTranscriptTrackerMapsSlashCommandWithArgsAsUserInput(t *testing.T
 	}
 }
 
+func TestClaudeTranscriptTrackerMapsStructuredSlashCommandWithArgsAsUserInputAndFinal(t *testing.T) {
+	tmp := t.TempDir()
+	sessionPath := filepath.Join(tmp, "sess-1.jsonl")
+	if err := os.WriteFile(sessionPath, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	tracker := newClaudeTranscriptTracker(reporter, nil, tmp, "", time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
+	tracker.ObserveSessionHook(claudeSessionHookPayload{SessionID: "sess-1", TranscriptPath: sessionPath, Cwd: tmp})
+
+	writeClaudeJSONLLines(t, sessionPath, []string{
+		`{"type":"user","uuid":"u1","timestamp":"2026-05-14T12:00:01Z","message":{"role":"user","content":"<command-name>/plan</command-name>\n<command-args>帮我规划实现方案</command-args>"}}`,
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-05-14T12:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"方案如下。"}],"stop_reason":"end_turn"}}`,
+	})
+	tracker.Sync()
+	reporter.Close()
+
+	messages := poster.messages()
+	inputs := userInputMessages(messages)
+	if len(inputs) != 1 || inputs[0].Content != "/plan 帮我规划实现方案" {
+		t.Fatalf("inputs = %+v, want structured slash command with args recorded", inputs)
+	}
+	if inputs[0].Input["command"] != true || inputs[0].Input["slash_command"] != "plan" || inputs[0].Input["slash_args"] != "帮我规划实现方案" || inputs[0].Input["commentable"] != true {
+		t.Fatalf("input metadata = %+v, want commentable slash metadata", inputs[0].Input)
+	}
+	finals := finalMessages(messages)
+	if len(finals) != 1 || finals[0].Content != "方案如下。" {
+		t.Fatalf("finals = %+v, want end_turn assistant text as final", finals)
+	}
+}
+
 func TestClaudeTranscriptTrackerSkipsSlashCommandWithoutArgs(t *testing.T) {
 	tmp := t.TempDir()
 	sessionPath := filepath.Join(tmp, "sess-1.jsonl")

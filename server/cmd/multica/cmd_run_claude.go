@@ -418,8 +418,11 @@ func (t *claudeTranscriptTracker) mapUserLineLocked(session *claudeTrackedSessio
 	blocks := claudeContentBlocks(msg["content"])
 	if len(blocks) == 0 {
 		if content := strings.TrimSpace(stringValue(msg["content"])); content != "" {
-			if isClaudeLocalCommandUserContent(content) {
-				return
+			if commandContent, ok := claudeLocalCommandUserContent(content); ok {
+				if commandContent == "" {
+					return
+				}
+				content = commandContent
 			}
 			t.recordClaudeUserPromptLocked(session, content, key)
 		}
@@ -574,21 +577,45 @@ func (t *claudeTranscriptTracker) recordClaudeUsageLocked(session *claudeTracked
 	t.usageReporter.Report(total)
 }
 
-func isClaudeLocalCommandUserContent(content string) bool {
+func claudeLocalCommandUserContent(content string) (string, bool) {
 	content = strings.TrimSpace(content)
 	if content == "" {
-		return false
+		return "", false
 	}
 	for _, prefix := range []string{
 		"<local-command-caveat>",
-		"<command-name>",
 		"<local-command-stdout>",
 	} {
 		if strings.HasPrefix(content, prefix) {
-			return true
+			return "", true
 		}
 	}
-	return false
+	if !strings.HasPrefix(content, "<command-name>") {
+		return "", false
+	}
+	name := strings.TrimSpace(claudeTaggedContent(content, "command-name"))
+	args := strings.TrimSpace(claudeTaggedContent(content, "command-args"))
+	if args == "" {
+		return "", true
+	}
+	if !strings.HasPrefix(name, "/") {
+		name = "/" + name
+	}
+	return strings.TrimSpace(name + " " + args), true
+}
+
+func isClaudeLocalCommandUserContent(content string) bool {
+	_, ok := claudeLocalCommandUserContent(content)
+	return ok
+}
+
+func claudeTaggedContent(content, tag string) string {
+	re := regexp.MustCompile(`(?s)<` + regexp.QuoteMeta(tag) + `>(.*?)</` + regexp.QuoteMeta(tag) + `>`)
+	match := re.FindStringSubmatch(content)
+	if len(match) < 2 {
+		return ""
+	}
+	return match[1]
 }
 
 func claudeStopReason(msg map[string]any) string {
