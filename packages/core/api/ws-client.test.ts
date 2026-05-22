@@ -6,6 +6,7 @@ import { WSClient } from "./ws-client";
 // upgrade URL construction, which is what carries client identity.
 class FakeWebSocket {
   static lastUrl: string | null = null;
+  static lastInstance: FakeWebSocket | null = null;
   // Fields read by WSClient.connect()/disconnect(), all no-op here.
   onopen: (() => void) | null = null;
   onmessage: ((ev: { data: string }) => void) | null = null;
@@ -14,6 +15,7 @@ class FakeWebSocket {
   readyState = 0;
   constructor(url: string) {
     FakeWebSocket.lastUrl = url;
+    FakeWebSocket.lastInstance = this;
   }
   close() {}
   send() {}
@@ -22,6 +24,7 @@ class FakeWebSocket {
 describe("WSClient", () => {
   beforeEach(() => {
     FakeWebSocket.lastUrl = null;
+    FakeWebSocket.lastInstance = null;
     vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
   });
 
@@ -68,5 +71,60 @@ describe("WSClient", () => {
     expect(url.searchParams.get("client_platform")).toBe("cli");
     expect(url.searchParams.has("client_version")).toBe(false);
     expect(url.searchParams.has("client_os")).toBe(false);
+  });
+
+  it("truncates the logged payload when an unparseable frame is large", () => {
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const ws = new WSClient("ws://example.test/ws", { logger });
+    ws.connect();
+
+    const huge = "x".repeat(5000);
+    FakeWebSocket.lastInstance!.onmessage?.({ data: huge });
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    const [, summary] = logger.warn.mock.calls[0] as [string, string];
+    expect(summary.length).toBeLessThan(huge.length);
+    expect(summary).toContain("truncated");
+    expect(summary).toContain("5000");
+    expect(summary.startsWith("x".repeat(200))).toBe(true);
+  });
+
+  it("logs and skips malformed frames without breaking later messages", () => {
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const ws = new WSClient("ws://example.test/ws", { logger });
+    const handler = vi.fn();
+    ws.on("issue:updated", handler);
+    ws.connect();
+
+    expect(() => {
+      FakeWebSocket.lastInstance!.onmessage?.({ data: `{"type":"issue` });
+    }).not.toThrow();
+
+    FakeWebSocket.lastInstance!.onmessage?.({
+      data: JSON.stringify({
+        type: "issue:updated",
+        payload: { id: "issue-1" },
+      }),
+    });
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "ws: received unparseable message",
+      `{"type":"issue`,
+    );
+    expect(handler).toHaveBeenCalledWith(
+      { id: "issue-1" },
+      undefined,
+      undefined,
+    );
   });
 });

@@ -7,6 +7,7 @@ import {
   aggregateByWeek,
   aggregateCostByModel,
   collectUnmappedModels,
+  computeCostInWindow,
   estimateCost,
   isModelPriced,
   sliceWindow,
@@ -601,5 +602,82 @@ describe("aggregateByWeek", () => {
       expect(w.input).toBe(0);
       expect(w.output).toBe(0);
     }
+  });
+});
+
+// computeCostInWindow drives the runtime-list cost cell and its ↑/↓ delta.
+// The `tz` argument was inserted as the THIRD positional parameter (before
+// `offsetDays`) in the timezone-architecture RFC — a positional-arg slip
+// here is otherwise silent, so the window math, the end-exclusive boundary,
+// the offset shift, and the tz-of-"today" all need explicit coverage.
+describe("computeCostInWindow", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // claude-sonnet-4-6 is priced at $3 / 1M input tokens, so a row with
+  // 1M input tokens contributes exactly $3.
+  function priced(date: string, inputTokens: number): RuntimeUsage {
+    return {
+      runtime_id: "r",
+      date,
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      input_tokens: inputTokens,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+    };
+  }
+
+  it("sums cost over the trailing daysBack window, end-exclusive of today", () => {
+    // 2026-05-19 23:00 UTC is already 2026-05-20 in Asia/Shanghai, so
+    // "today" is 2026-05-20 and the 7-day window is [2026-05-13, 2026-05-20).
+    vi.setSystemTime(new Date("2026-05-19T23:00:00Z"));
+    const rows = [
+      priced("2026-05-12", 1_000_000), // before window — excluded
+      priced("2026-05-13", 1_000_000), // window start — included
+      priced("2026-05-19", 1_000_000), // included
+      priced("2026-05-20", 1_000_000), // today — excluded (end-exclusive)
+    ];
+    expect(computeCostInWindow(rows, 7, "Asia/Shanghai")).toBeCloseTo(6, 5);
+  });
+
+  it("offsetDays shifts the window back to the prior period", () => {
+    // today = 2026-05-20; offsetDays=7, daysBack=7 → window [05-06, 05-13).
+    vi.setSystemTime(new Date("2026-05-20T12:00:00Z"));
+    const rows = [
+      priced("2026-05-05", 1_000_000), // before prior window — excluded
+      priced("2026-05-06", 1_000_000), // prior window start — included
+      priced("2026-05-12", 1_000_000), // included
+      priced("2026-05-13", 1_000_000), // in the current window, not prior — excluded
+    ];
+    expect(computeCostInWindow(rows, 7, "UTC", 7)).toBeCloseTo(6, 5);
+  });
+
+  it("reads 'today' in the supplied tz, not the host clock", () => {
+    // Host clock is 2026-05-19 in UTC but already 2026-05-20 in Shanghai.
+    // A row dated 2026-05-19 falls inside the 1-day window only when the
+    // tz pushes "today" forward to 2026-05-20.
+    vi.setSystemTime(new Date("2026-05-19T20:00:00Z"));
+    const rows = [priced("2026-05-19", 1_000_000)];
+    expect(computeCostInWindow(rows, 1, "UTC")).toBe(0); // today=05-19, window [05-18,05-19)
+    expect(computeCostInWindow(rows, 1, "Asia/Shanghai")).toBeCloseTo(3, 5);
+  });
+
+  it("returns 0 for an unpriced model rather than NaN", () => {
+    vi.setSystemTime(new Date("2026-05-20T12:00:00Z"));
+    const rows: RuntimeUsage[] = [
+      { ...priced("2026-05-19", 1_000_000), model: "totally-made-up-model" },
+    ];
+    expect(computeCostInWindow(rows, 7, "UTC")).toBe(0);
+  });
+
+  it("returns 0 for an empty row set", () => {
+    vi.setSystemTime(new Date("2026-05-20T12:00:00Z"));
+    expect(computeCostInWindow([], 7, "UTC")).toBe(0);
   });
 });
