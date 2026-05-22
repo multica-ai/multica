@@ -170,7 +170,7 @@ INSERT INTO autopilot_run (
 ) VALUES (
     $1, $4, $2, $3, $5,
     $6
-) RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
+) RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, previous_failure_reason
 `
 
 type CreateAutopilotRunParams struct {
@@ -214,6 +214,7 @@ func (q *Queries) CreateAutopilotRun(ctx context.Context, arg CreateAutopilotRun
 		&i.Result,
 		&i.CreatedAt,
 		&i.SquadID,
+		&i.PreviousFailureReason,
 	)
 	return i, err
 }
@@ -424,7 +425,7 @@ func (q *Queries) GetAutopilotInWorkspace(ctx context.Context, arg GetAutopilotI
 }
 
 const getAutopilotRun = `-- name: GetAutopilotRun :one
-SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id FROM autopilot_run
+SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, previous_failure_reason FROM autopilot_run
 WHERE id = $1
 `
 
@@ -446,14 +447,16 @@ func (q *Queries) GetAutopilotRun(ctx context.Context, id pgtype.UUID) (Autopilo
 		&i.Result,
 		&i.CreatedAt,
 		&i.SquadID,
+		&i.PreviousFailureReason,
 	)
 	return i, err
 }
 
 const getAutopilotRunByIssue = `-- name: GetAutopilotRunByIssue :one
 
-SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id FROM autopilot_run
-WHERE issue_id = $1 AND status IN ('issue_created', 'running')
+SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, previous_failure_reason FROM autopilot_run
+WHERE issue_id = $1 AND status IN ('issue_created', 'running', 'failed', 'skipped')
+ORDER BY created_at DESC, id DESC
 LIMIT 1
 `
 
@@ -478,6 +481,7 @@ func (q *Queries) GetAutopilotRunByIssue(ctx context.Context, issueID pgtype.UUI
 		&i.Result,
 		&i.CreatedAt,
 		&i.SquadID,
+		&i.PreviousFailureReason,
 	)
 	return i, err
 }
@@ -564,7 +568,7 @@ func (q *Queries) GetWebhookTriggerByToken(ctx context.Context, webhookToken pgt
 }
 
 const listAutopilotRuns = `-- name: ListAutopilotRuns :many
-SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id FROM autopilot_run
+SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, previous_failure_reason FROM autopilot_run
 WHERE autopilot_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -600,6 +604,7 @@ func (q *Queries) ListAutopilotRuns(ctx context.Context, arg ListAutopilotRunsPa
 			&i.Result,
 			&i.CreatedAt,
 			&i.SquadID,
+			&i.PreviousFailureReason,
 		); err != nil {
 			return nil, err
 		}
@@ -1104,9 +1109,13 @@ func (q *Queries) UpdateAutopilotLastRunAt(ctx context.Context, id pgtype.UUID) 
 
 const updateAutopilotRunCompleted = `-- name: UpdateAutopilotRunCompleted :one
 UPDATE autopilot_run
-SET status = 'completed', completed_at = now(), result = $2
+SET status = 'completed',
+    completed_at = now(),
+    result = $2,
+    previous_failure_reason = COALESCE(previous_failure_reason, failure_reason),
+    failure_reason = NULL
 WHERE id = $1
-RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
+RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, previous_failure_reason
 `
 
 type UpdateAutopilotRunCompletedParams struct {
@@ -1132,6 +1141,7 @@ func (q *Queries) UpdateAutopilotRunCompleted(ctx context.Context, arg UpdateAut
 		&i.Result,
 		&i.CreatedAt,
 		&i.SquadID,
+		&i.PreviousFailureReason,
 	)
 	return i, err
 }
@@ -1140,7 +1150,7 @@ const updateAutopilotRunFailed = `-- name: UpdateAutopilotRunFailed :one
 UPDATE autopilot_run
 SET status = 'failed', completed_at = now(), failure_reason = $2
 WHERE id = $1
-RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
+RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, previous_failure_reason
 `
 
 type UpdateAutopilotRunFailedParams struct {
@@ -1166,6 +1176,7 @@ func (q *Queries) UpdateAutopilotRunFailed(ctx context.Context, arg UpdateAutopi
 		&i.Result,
 		&i.CreatedAt,
 		&i.SquadID,
+		&i.PreviousFailureReason,
 	)
 	return i, err
 }
@@ -1174,7 +1185,7 @@ const updateAutopilotRunIssueCreated = `-- name: UpdateAutopilotRunIssueCreated 
 UPDATE autopilot_run
 SET status = 'issue_created', issue_id = $2
 WHERE id = $1
-RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
+RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, previous_failure_reason
 `
 
 type UpdateAutopilotRunIssueCreatedParams struct {
@@ -1200,6 +1211,7 @@ func (q *Queries) UpdateAutopilotRunIssueCreated(ctx context.Context, arg Update
 		&i.Result,
 		&i.CreatedAt,
 		&i.SquadID,
+		&i.PreviousFailureReason,
 	)
 	return i, err
 }
@@ -1208,7 +1220,7 @@ const updateAutopilotRunRunning = `-- name: UpdateAutopilotRunRunning :one
 UPDATE autopilot_run
 SET status = 'running', task_id = $2
 WHERE id = $1
-RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
+RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, previous_failure_reason
 `
 
 type UpdateAutopilotRunRunningParams struct {
@@ -1234,6 +1246,7 @@ func (q *Queries) UpdateAutopilotRunRunning(ctx context.Context, arg UpdateAutop
 		&i.Result,
 		&i.CreatedAt,
 		&i.SquadID,
+		&i.PreviousFailureReason,
 	)
 	return i, err
 }
@@ -1242,7 +1255,7 @@ const updateAutopilotRunSkipped = `-- name: UpdateAutopilotRunSkipped :one
 UPDATE autopilot_run
 SET status = 'skipped', completed_at = now(), failure_reason = $2
 WHERE id = $1
-RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
+RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, previous_failure_reason
 `
 
 type UpdateAutopilotRunSkippedParams struct {
@@ -1274,6 +1287,7 @@ func (q *Queries) UpdateAutopilotRunSkipped(ctx context.Context, arg UpdateAutop
 		&i.Result,
 		&i.CreatedAt,
 		&i.SquadID,
+		&i.PreviousFailureReason,
 	)
 	return i, err
 }
@@ -1285,7 +1299,7 @@ SET status = 'skipped',
     failure_reason = $2,
     result = $3
 WHERE id = $1
-RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
+RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, previous_failure_reason
 `
 
 type UpdateAutopilotRunSkippedWithResultParams struct {
@@ -1312,6 +1326,7 @@ func (q *Queries) UpdateAutopilotRunSkippedWithResult(ctx context.Context, arg U
 		&i.Result,
 		&i.CreatedAt,
 		&i.SquadID,
+		&i.PreviousFailureReason,
 	)
 	return i, err
 }

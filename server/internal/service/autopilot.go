@@ -361,6 +361,10 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 		s.captureAutopilotRunCompleted(autopilot, updatedRun)
 		s.publishRunDone(wsID, updatedRun, "completed")
 	case "cancelled", "blocked":
+		// Don't overwrite an already-terminal run's original failure_reason.
+		if run.Status == "failed" || run.Status == "skipped" || run.Status == "completed" {
+			return
+		}
 		reason := "issue " + issue.Status
 		updatedRun, err := s.Queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
 			ID:            run.ID,

@@ -299,3 +299,193 @@ func TestManualTriggerDoesNotErrorOnPostAdmissionSkip(t *testing.T) {
 		t.Fatalf("expected run status 'skipped', got %q", run.Status)
 	}
 }
+
+// TestSyncRunFromIssue_RecoveryAndGuard locks in MYW-1917 regression coverage:
+//   1. failed/skipped runs recover to completed when the linked issue moves to done/in_review.
+//   2. previous_failure_reason preserves the original failure_reason.
+//   3. failure_reason is cleared on recovery.
+//   4. cancelled/blocked does NOT overwrite an already-terminal run's failure_reason.
+
+// TestSyncRunFromIssue_RecoveryAndGuard locks in MYW-1917 regression coverage:
+//   1. failed/skipped runs recover to completed when the linked issue moves to done/in_review.
+//   2. previous_failure_reason preserves the original failure_reason.
+//   3. failure_reason is cleared on recovery.
+//   4. cancelled/blocked does NOT overwrite an already-terminal run's failure_reason.
+func TestSyncRunFromIssue_RecoveryAndGuard(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+
+	createIssueAutopilot := func(t *testing.T, title string) (db.Autopilot, db.AutopilotRun) {
+		t.Helper()
+		ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+			WorkspaceID:        parseUUID(testWorkspaceID),
+			Title:              title,
+			Description:        pgtype.Text{String: "MYW-1917 regression test", Valid: true},
+			AssigneeType:       "agent",
+			AssigneeID:         parseUUID(agentID),
+			Status:             "active",
+			ExecutionMode:      "create_issue",
+			IssueTitleTemplate: pgtype.Text{String: "test", Valid: true},
+			CreatedByType:      "member",
+			CreatedByID:        parseUUID(testUserID),
+		})
+		if err != nil {
+			t.Fatalf("CreateAutopilot: %v", err)
+		}
+		t.Cleanup(func() {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
+		})
+
+		run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+		if err != nil {
+			t.Fatalf("DispatchAutopilot: %v", err)
+		}
+		return ap, *run
+	}
+
+	t.Run("failed_run_recovers_to_completed", func(t *testing.T) {
+		_, run := createIssueAutopilot(t, "MYW-1917 recover failed")
+
+		// Simulate the run being marked failed (e.g. by a timeout or cancellation attempt).
+		_, err := testPool.Exec(ctx,
+			`UPDATE autopilot_run SET status = 'failed', completed_at = now(), failure_reason = 'issue cancelled' WHERE issue_id = $1`,
+			run.IssueID,
+		)
+		if err != nil {
+			t.Fatalf("mark run failed: %v", err)
+		}
+
+		// Issue later completes.
+		dbIssue, err := queries.GetIssue(ctx, run.IssueID)
+		if err != nil {
+			t.Fatalf("GetIssue: %v", err)
+		}
+		dbIssue.Status = "done"
+
+		autopilotSvc.SyncRunFromIssue(ctx, dbIssue)
+
+		updatedRun, err := queries.GetAutopilotRunByIssue(ctx, run.IssueID)
+		if err != nil {
+			t.Fatalf("GetAutopilotRunByIssue: %v", err)
+		}
+		if updatedRun.Status != "completed" {
+			t.Fatalf("expected status completed, got %q", updatedRun.Status)
+		}
+		if updatedRun.FailureReason.Valid {
+			t.Fatalf("expected failure_reason cleared, got %q", updatedRun.FailureReason.String)
+		}
+		if !updatedRun.PreviousFailureReason.Valid || updatedRun.PreviousFailureReason.String != "issue cancelled" {
+			t.Fatalf("expected previous_failure_reason 'issue cancelled', got %+v", updatedRun.PreviousFailureReason)
+		}
+	})
+
+	t.Run("skipped_run_recovers_to_completed", func(t *testing.T) {
+		_, run := createIssueAutopilot(t, "MYW-1917 recover skipped")
+
+		_, err := testPool.Exec(ctx,
+			`UPDATE autopilot_run SET status = 'skipped', completed_at = now(), failure_reason = 'runtime offline' WHERE issue_id = $1`,
+			run.IssueID,
+		)
+		if err != nil {
+			t.Fatalf("mark run skipped: %v", err)
+		}
+
+		dbIssue, err := queries.GetIssue(ctx, run.IssueID)
+		if err != nil {
+			t.Fatalf("GetIssue: %v", err)
+		}
+		dbIssue.Status = "in_review"
+
+		autopilotSvc.SyncRunFromIssue(ctx, dbIssue)
+
+		updatedRun, err := queries.GetAutopilotRunByIssue(ctx, run.IssueID)
+		if err != nil {
+			t.Fatalf("GetAutopilotRunByIssue: %v", err)
+		}
+		if updatedRun.Status != "completed" {
+			t.Fatalf("expected status completed, got %q", updatedRun.Status)
+		}
+		if updatedRun.FailureReason.Valid {
+			t.Fatalf("expected failure_reason cleared, got %q", updatedRun.FailureReason.String)
+		}
+		if !updatedRun.PreviousFailureReason.Valid || updatedRun.PreviousFailureReason.String != "runtime offline" {
+			t.Fatalf("expected previous_failure_reason 'runtime offline', got %+v", updatedRun.PreviousFailureReason)
+		}
+	})
+
+	t.Run("cancelled_does_not_overwrite_failed_run", func(t *testing.T) {
+		_, run := createIssueAutopilot(t, "MYW-1917 cancel guard")
+
+		_, err := testPool.Exec(ctx,
+			`UPDATE autopilot_run SET status = 'failed', completed_at = now(), failure_reason = 'original timeout' WHERE issue_id = $1`,
+			run.IssueID,
+		)
+		if err != nil {
+			t.Fatalf("mark run failed: %v", err)
+		}
+
+		dbIssue, err := queries.GetIssue(ctx, run.IssueID)
+		if err != nil {
+			t.Fatalf("GetIssue: %v", err)
+		}
+		dbIssue.Status = "cancelled"
+
+		autopilotSvc.SyncRunFromIssue(ctx, dbIssue)
+
+		updatedRun, err := queries.GetAutopilotRunByIssue(ctx, run.IssueID)
+		if err != nil {
+			t.Fatalf("GetAutopilotRunByIssue: %v", err)
+		}
+		if updatedRun.Status != "failed" {
+			t.Fatalf("expected status still failed, got %q", updatedRun.Status)
+		}
+		if !updatedRun.FailureReason.Valid || updatedRun.FailureReason.String != "original timeout" {
+			t.Fatalf("expected failure_reason preserved as 'original timeout', got %+v", updatedRun.FailureReason)
+		}
+		if updatedRun.PreviousFailureReason.Valid {
+			t.Fatalf("expected no previous_failure_reason, got %q", updatedRun.PreviousFailureReason.String)
+		}
+	})
+
+	t.Run("blocked_does_not_overwrite_skipped_run", func(t *testing.T) {
+		_, run := createIssueAutopilot(t, "MYW-1917 block guard")
+
+		_, err := testPool.Exec(ctx,
+			`UPDATE autopilot_run SET status = 'skipped', completed_at = now(), failure_reason = 'admission skip' WHERE issue_id = $1`,
+			run.IssueID,
+		)
+		if err != nil {
+			t.Fatalf("mark run skipped: %v", err)
+		}
+
+		dbIssue, err := queries.GetIssue(ctx, run.IssueID)
+		if err != nil {
+			t.Fatalf("GetIssue: %v", err)
+		}
+		dbIssue.Status = "blocked"
+
+		autopilotSvc.SyncRunFromIssue(ctx, dbIssue)
+
+		updatedRun, err := queries.GetAutopilotRunByIssue(ctx, run.IssueID)
+		if err != nil {
+			t.Fatalf("GetAutopilotRunByIssue: %v", err)
+		}
+		if updatedRun.Status != "skipped" {
+			t.Fatalf("expected status still skipped, got %q", updatedRun.Status)
+		}
+		if !updatedRun.FailureReason.Valid || updatedRun.FailureReason.String != "admission skip" {
+			t.Fatalf("expected failure_reason preserved as 'admission skip', got %+v", updatedRun.FailureReason)
+		}
+	})
+}
