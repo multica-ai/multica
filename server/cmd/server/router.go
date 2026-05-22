@@ -347,6 +347,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)
 		r.Post("/api/cli-token", h.IssueCliToken)
 		r.Post("/api/upload-file", h.UploadFile)
+		r.Post("/api/attachments/upload/initiate", h.InitiateAttachmentUpload)
+		r.Post("/api/attachments/upload/complete", h.CompleteAttachmentUpload)
+		r.Post("/api/attachments/upload/multipart/initiate", h.InitiateMultipartAttachmentUpload)
+		r.Post("/api/attachments/upload/multipart/sign-parts", h.SignMultipartAttachmentUploadParts)
+		r.Post("/api/attachments/upload/multipart/complete", h.CompleteMultipartAttachmentUpload)
+		r.Post("/api/attachments/upload/multipart/abort", h.AbortMultipartAttachmentUpload)
 		r.Post("/api/feedback", h.CreateFeedback)
 
 		r.Route("/api/workspaces", func(r chi.Router) {

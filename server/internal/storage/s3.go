@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -17,11 +19,13 @@ import (
 )
 
 type S3Storage struct {
-	client      *s3.Client
-	bucket      string
-	region      string // used to construct virtual-hosted-style public URLs when no CDN/endpoint is set
-	cdnDomain   string // if set, returned URLs use this instead of bucket name
-	endpointURL string // if set, use path-style URLs (e.g. MinIO)
+	client         *s3.Client
+	bucket         string
+	region         string // used to construct virtual-hosted-style public URLs when no CDN/endpoint is set
+	cdnDomain      string // if set, returned URLs use this instead of bucket name
+	endpointURL    string // optional S3-compatible endpoint
+	forcePathStyle bool   // true for path-style endpoints such as MinIO; false for virtual-hosted endpoints such as OBS
+	keyPrefix      string // optional prefix prepended to generated object keys
 }
 
 // NewS3StorageFromEnv creates an S3Storage from environment variables.
@@ -30,6 +34,8 @@ type S3Storage struct {
 // Environment variables:
 //   - S3_BUCKET (required)
 //   - S3_REGION (default: us-west-2)
+//   - S3_KEY_PREFIX (optional; prefixes generated object keys)
+//   - S3_FORCE_PATH_STYLE (default: true when AWS_ENDPOINT_URL is set)
 //   - AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (optional; falls back to default credential chain)
 func NewS3StorageFromEnv() *S3Storage {
 	bucket := os.Getenv("S3_BUCKET")
@@ -55,6 +61,12 @@ func NewS3StorageFromEnv() *S3Storage {
 
 	accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
 	secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
+	if accessKey == "" {
+		accessKey = os.Getenv("HUAWEICLOUD_OBS_AK")
+	}
+	if secretKey == "" {
+		secretKey = os.Getenv("HUAWEICLOUD_OBS_SK")
+	}
 	if accessKey != "" && secretKey != "" {
 		opts = append(opts, config.WithCredentialsProvider(
 			credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
@@ -68,28 +80,64 @@ func NewS3StorageFromEnv() *S3Storage {
 	}
 
 	cdnDomain := os.Getenv("CLOUDFRONT_DOMAIN")
+	keyPrefix := normalizeS3KeyPrefix(os.Getenv("S3_KEY_PREFIX"))
 
 	endpointURL := os.Getenv("AWS_ENDPOINT_URL")
+	if endpointURL == "" {
+		endpointURL = os.Getenv("HUAWEICLOUD_OBS_ENDPOINT")
+	}
+	forcePathStyle := endpointURL != "" && parseS3ForcePathStyle(os.Getenv("S3_FORCE_PATH_STYLE"))
 	s3Opts := []func(*s3.Options){}
 	if endpointURL != "" {
 		s3Opts = append(s3Opts, func(o *s3.Options) {
 			o.BaseEndpoint = aws.String(endpointURL)
-			o.UsePathStyle = true
+			o.UsePathStyle = forcePathStyle
 		})
 	}
 
-	slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "cdn_domain", cdnDomain, "endpoint_url", endpointURL)
+	slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "cdn_domain", cdnDomain, "endpoint_url", endpointURL, "force_path_style", forcePathStyle, "key_prefix", keyPrefix)
 	return &S3Storage{
-		client:      s3.NewFromConfig(cfg, s3Opts...),
-		bucket:      bucket,
-		region:      region,
-		cdnDomain:   cdnDomain,
-		endpointURL: endpointURL,
+		client:         s3.NewFromConfig(cfg, s3Opts...),
+		bucket:         bucket,
+		region:         region,
+		cdnDomain:      cdnDomain,
+		endpointURL:    endpointURL,
+		forcePathStyle: forcePathStyle,
+		keyPrefix:      keyPrefix,
 	}
+}
+
+func (s *S3Storage) PublicURL(key string) string {
+	return s.uploadedURL(key)
+}
+
+func (s *S3Storage) KeyPrefix() string {
+	return s.keyPrefix
 }
 
 func (s *S3Storage) CdnDomain() string {
 	return s.cdnDomain
+}
+
+func normalizeS3KeyPrefix(prefix string) string {
+	prefix = strings.TrimSpace(prefix)
+	prefix = strings.Trim(prefix, "/")
+	if prefix == "." {
+		return ""
+	}
+	return prefix
+}
+
+func parseS3ForcePathStyle(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "1", "t", "true", "y", "yes", "on":
+		return true
+	case "0", "f", "false", "n", "no", "off":
+		return false
+	default:
+		slog.Warn("invalid S3_FORCE_PATH_STYLE value; defaulting to true", "value", value)
+		return true
+	}
 }
 
 // looksLikeS3Hostname returns true when the configured S3_BUCKET value looks
@@ -116,9 +164,14 @@ func (s *S3Storage) storageClass() types.StorageClass {
 //	"https://my-bucket.s3.us-east-1.amazonaws.com/uploads/x/y.png" → "uploads/x/y.png"
 func (s *S3Storage) KeyFromURL(rawURL string) string {
 	if s.endpointURL != "" {
-		prefix := strings.TrimRight(s.endpointURL, "/") + "/" + s.bucket + "/"
-		if strings.HasPrefix(rawURL, prefix) {
-			return strings.TrimPrefix(rawURL, prefix)
+		prefixes := []string{strings.TrimRight(s.endpointURL, "/") + "/" + s.bucket + "/"}
+		if prefix, ok := virtualHostedEndpointPrefix(s.endpointURL, s.bucket); ok {
+			prefixes = append(prefixes, prefix)
+		}
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(rawURL, prefix) {
+				return strings.TrimPrefix(rawURL, prefix)
+			}
 		}
 	}
 
@@ -172,6 +225,27 @@ func (s *S3Storage) GetReader(ctx context.Context, key string) (io.ReadCloser, e
 	return out.Body, nil
 }
 
+func (s *S3Storage) HeadObject(ctx context.Context, key string) (ObjectInfo, error) {
+	if key == "" {
+		return ObjectInfo{}, fmt.Errorf("s3 HeadObject: empty key")
+	}
+	out, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return ObjectInfo{}, fmt.Errorf("s3 HeadObject: %w", err)
+	}
+	info := ObjectInfo{}
+	if out.ContentLength != nil {
+		info.SizeBytes = *out.ContentLength
+	}
+	if out.ContentType != nil {
+		info.ContentType = *out.ContentType
+	}
+	return info, nil
+}
+
 // Delete removes an object from S3. Errors are logged but not fatal.
 func (s *S3Storage) Delete(ctx context.Context, key string) {
 	if key == "" {
@@ -194,7 +268,6 @@ func (s *S3Storage) DeleteKeys(ctx context.Context, keys []string) {
 }
 
 func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error) {
-	safe := sanitizeFilename(filename)
 	disposition := "attachment"
 	if isInlineContentType(contentType) {
 		disposition = "inline"
@@ -204,7 +277,7 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 		Key:                aws.String(key),
 		Body:               bytes.NewReader(data),
 		ContentType:        aws.String(contentType),
-		ContentDisposition: aws.String(fmt.Sprintf(`%s; filename="%s"`, disposition, safe)),
+		ContentDisposition: aws.String(contentDisposition(disposition, filename)),
 		CacheControl:       aws.String("max-age=432000,public"),
 		StorageClass:       s.storageClass(),
 	})
@@ -212,6 +285,116 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 		return "", fmt.Errorf("s3 PutObject: %w", err)
 	}
 	return s.uploadedURL(key), nil
+}
+
+func (s *S3Storage) CreatePresignedPutURL(ctx context.Context, key string, contentType string, filename string, expires time.Duration) (string, map[string]string, error) {
+	disposition := "attachment"
+	if isInlineContentType(contentType) {
+		disposition = "inline"
+	}
+	input := &s3.PutObjectInput{
+		Bucket:             aws.String(s.bucket),
+		Key:                aws.String(key),
+		ContentType:        aws.String(contentType),
+		ContentDisposition: aws.String(contentDisposition(disposition, filename)),
+		CacheControl:       aws.String("max-age=432000,public"),
+		StorageClass:       s.storageClass(),
+	}
+	presigner := s3.NewPresignClient(s.client)
+	out, err := presigner.PresignPutObject(ctx, input, func(o *s3.PresignOptions) {
+		o.Expires = expires
+	})
+	if err != nil {
+		return "", nil, fmt.Errorf("s3 presign PutObject: %w", err)
+	}
+	headers := map[string]string{}
+	for key, values := range out.SignedHeader {
+		if len(values) > 0 {
+			headers[key] = values[0]
+		}
+	}
+	return out.URL, headers, nil
+}
+
+func (s *S3Storage) CreateMultipartUpload(ctx context.Context, key string, contentType string, filename string, _ time.Duration) (string, map[string]string, error) {
+	disposition := "attachment"
+	if isInlineContentType(contentType) {
+		disposition = "inline"
+	}
+	out, err := s.client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
+		Bucket:             aws.String(s.bucket),
+		Key:                aws.String(key),
+		ContentType:        aws.String(contentType),
+		ContentDisposition: aws.String(contentDisposition(disposition, filename)),
+		CacheControl:       aws.String("max-age=432000,public"),
+		StorageClass:       s.storageClass(),
+	})
+	if err != nil {
+		return "", nil, fmt.Errorf("s3 CreateMultipartUpload: %w", err)
+	}
+	if out.UploadId == nil || *out.UploadId == "" {
+		return "", nil, fmt.Errorf("s3 CreateMultipartUpload: missing upload id")
+	}
+	return *out.UploadId, map[string]string{}, nil
+}
+
+func (s *S3Storage) CreatePresignedUploadPartURL(ctx context.Context, key string, uploadID string, partNumber int32, expires time.Duration) (string, map[string]string, error) {
+	input := &s3.UploadPartInput{
+		Bucket:     aws.String(s.bucket),
+		Key:        aws.String(key),
+		UploadId:   aws.String(uploadID),
+		PartNumber: aws.Int32(partNumber),
+	}
+	presigner := s3.NewPresignClient(s.client)
+	out, err := presigner.PresignUploadPart(ctx, input, func(o *s3.PresignOptions) {
+		o.Expires = expires
+	})
+	if err != nil {
+		return "", nil, fmt.Errorf("s3 presign UploadPart: %w", err)
+	}
+	headers := map[string]string{}
+	for key, values := range out.SignedHeader {
+		if len(values) > 0 {
+			headers[key] = values[0]
+		}
+	}
+	return out.URL, headers, nil
+}
+
+func (s *S3Storage) CompleteMultipartUpload(ctx context.Context, key string, uploadID string, parts []MultipartUploadPart) error {
+	completed := make([]types.CompletedPart, 0, len(parts))
+	for _, part := range parts {
+		partNumber := part.PartNumber
+		etag := part.ETag
+		completed = append(completed, types.CompletedPart{
+			PartNumber: aws.Int32(partNumber),
+			ETag:       aws.String(etag),
+		})
+	}
+	_, err := s.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
+		Bucket:   aws.String(s.bucket),
+		Key:      aws.String(key),
+		UploadId: aws.String(uploadID),
+		MultipartUpload: &types.CompletedMultipartUpload{
+			Parts: completed,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("s3 CompleteMultipartUpload: %w", err)
+	}
+	return nil
+}
+
+func (s *S3Storage) AbortMultipartUpload(ctx context.Context, key string, uploadID string) error {
+	_, err := s.client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
+		Bucket:   aws.String(s.bucket),
+		Key:      aws.String(key),
+		UploadId: aws.String(uploadID),
+	})
+	if err != nil {
+		return fmt.Errorf("s3 AbortMultipartUpload: %w", err)
+	}
+	return nil
 }
 
 // uploadedURL returns the URL stored for client consumption after an upload.
@@ -231,10 +414,43 @@ func (s *S3Storage) uploadedURL(key string) string {
 		return fmt.Sprintf("https://%s/%s", s.cdnDomain, key)
 	}
 	if s.endpointURL != "" {
+		if s.forcePathStyle {
+			return fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpointURL, "/"), s.bucket, key)
+		}
+		if rawURL, ok := virtualHostedEndpointURL(s.endpointURL, s.bucket, key); ok {
+			return rawURL
+		}
 		return fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpointURL, "/"), s.bucket, key)
 	}
 	if strings.Contains(s.bucket, ".") {
 		return fmt.Sprintf("https://s3.%s.amazonaws.com/%s/%s", s.region, s.bucket, key)
 	}
 	return fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s.bucket, s.region, key)
+}
+
+func virtualHostedEndpointURL(endpointURL string, bucket string, key string) (string, bool) {
+	parsed, err := url.Parse(endpointURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", false
+	}
+	host := parsed.Host
+	if parsed.Path != "" && parsed.Path != "/" {
+		return "", false
+	}
+	parsed.Host = bucket + "." + host
+	parsed.Path = "/" + key
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String(), true
+}
+
+func virtualHostedEndpointPrefix(endpointURL string, bucket string) (string, bool) {
+	parsed, err := url.Parse(endpointURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", false
+	}
+	if parsed.Path != "" && parsed.Path != "/" {
+		return "", false
+	}
+	return parsed.Scheme + "://" + bucket + "." + parsed.Host + "/", true
 }

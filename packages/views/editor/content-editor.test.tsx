@@ -8,6 +8,7 @@ const editorState = vi.hoisted(() => ({
   isFocused: false,
   isDestroyed: false,
   markdown: "",
+  hasActiveUploads: false,
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -34,7 +35,10 @@ const editorRef = vi.hoisted<{ current: unknown }>(() => ({ current: null }));
 const onCreateFired = vi.hoisted(() => ({ value: false }));
 
 vi.mock("@tiptap/react", () => ({
-  useEditor: (options: { onCreate?: (args: { editor: unknown }) => void }) => {
+  useEditor: (options: {
+    onCreate?: (args: { editor: unknown }) => void;
+    onUpdate?: (args: { editor: unknown }) => void;
+  }) => {
     if (!editorRef.current) {
       editorRef.current = {
         get isFocused() {
@@ -51,9 +55,15 @@ vi.mock("@tiptap/react", () => ({
         },
         getMarkdown: () => editorState.markdown,
         state: {
-          doc: { content: { size: 0 } },
+          doc: {
+            content: { size: 0 },
+            descendants: (callback: (node: { attrs: { uploading?: boolean } }) => boolean | undefined) => {
+              callback({ attrs: { uploading: editorState.hasActiveUploads } });
+            },
+          },
           selection: { empty: true, from: 0, to: 0 },
         },
+        __triggerUpdate: () => options?.onUpdate?.({ editor: editorRef.current }),
       };
     }
     if (!onCreateFired.value) {
@@ -77,8 +87,10 @@ describe("ContentEditor", () => {
     editorState.isFocused = false;
     editorState.isDestroyed = false;
     editorState.markdown = "";
+    editorState.hasActiveUploads = false;
     editorRef.current = null;
     onCreateFired.value = false;
+    vi.useRealTimers();
   });
 
   it("focuses the editor when clicking the empty container area", () => {
@@ -183,5 +195,19 @@ describe("ContentEditor", () => {
     rerender(<ContentEditor defaultValue={"same content\n"} />);
 
     expect(mockSetContent).not.toHaveBeenCalled();
+  });
+
+  it("does not emit markdown while an upload placeholder is still active", () => {
+    vi.useFakeTimers();
+    const onUpdate = vi.fn();
+    editorState.markdown = "!file[claude-code-main.zip]()";
+    editorState.hasActiveUploads = true;
+
+    render(<ContentEditor onUpdate={onUpdate} debounceMs={100} />);
+
+    (editorRef.current as { __triggerUpdate: () => void }).__triggerUpdate();
+    vi.advanceTimersByTime(100);
+
+    expect(onUpdate).not.toHaveBeenCalled();
   });
 });

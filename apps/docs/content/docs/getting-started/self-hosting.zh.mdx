@@ -218,8 +218,11 @@ For file uploads and attachments, configure S3 and (optionally) CloudFront:
 |----------|-------------|
 | `S3_BUCKET` | Bucket name only (e.g. `my-bucket`). Do **not** include the `.s3.<region>.amazonaws.com` suffix — the server constructs the public URL from `S3_BUCKET` + `S3_REGION` |
 | `S3_REGION` | AWS region (default: `us-west-2`). Must match the bucket's actual region — used for both SDK signing and public URLs |
+| `S3_KEY_PREFIX` | Optional object key prefix for all uploads, e.g. `multica-attachments/dev` stores files under `multica-attachments/dev/workspaces/...` |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Static credentials. When both are unset, the AWS SDK default credential chain is used |
-| `AWS_ENDPOINT_URL` | Custom S3-compatible endpoint (e.g. MinIO, R2, B2). Setting this switches to path-style URLs |
+| `AWS_ENDPOINT_URL` | Custom S3-compatible endpoint (e.g. MinIO, R2, B2, Huawei OBS) |
+| `S3_FORCE_PATH_STYLE` | Defaults to `true` when `AWS_ENDPOINT_URL` is set. Keep `true` for MinIO-style endpoints; set `false` for Huawei OBS so presigned URLs use `https://<bucket>.obs.<region>.myhuaweicloud.com/<key>` |
+| `HUAWEICLOUD_OBS_AK` / `HUAWEICLOUD_OBS_SK` / `HUAWEICLOUD_OBS_ENDPOINT` | Huawei OBS aliases. Used only when the matching `AWS_*` variables are unset |
 | `CLOUDFRONT_DOMAIN` | CloudFront distribution domain — when set, public URLs use this host instead of the S3 host |
 | `CLOUDFRONT_KEY_PAIR_ID` | CloudFront key pair ID for signed URLs |
 | `CLOUDFRONT_PRIVATE_KEY` | CloudFront private key (PEM format) |

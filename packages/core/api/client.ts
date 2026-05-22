@@ -226,6 +226,40 @@ export interface LoginResponse {
   user: User;
 }
 
+interface DirectUploadInitiateResponse {
+  attachment_id: string;
+  object_key: string;
+  upload_url: string;
+  headers?: Record<string, string>;
+  upload_token: string;
+  expires_at: string;
+}
+
+interface MultipartUploadInitiateResponse {
+  session_id: string;
+  attachment_id: string;
+  object_key: string;
+  upload_id: string;
+  headers?: Record<string, string>;
+  part_size_bytes: number;
+  part_count: number;
+  expires_at: string;
+}
+
+interface MultipartUploadSignPartsResponse {
+  parts: Array<{
+    part_number: number;
+    upload_url: string;
+    headers?: Record<string, string>;
+  }>;
+  expires_at: string;
+}
+
+const MULTIPART_UPLOAD_THRESHOLD_BYTES = 64 * 1024 * 1024;
+const MULTIPART_UPLOAD_PART_SIZE_BYTES = 16 * 1024 * 1024;
+const MULTIPART_UPLOAD_CONCURRENCY = 3;
+const MULTIPART_UPLOAD_MAX_RETRIES = 3;
+
 export interface OnboardingRuntimeBootstrapResponse {
   workspace_id: string;
   agent_id: string;
@@ -1869,43 +1903,144 @@ export class ApiClient {
     file: File,
     opts?: { issueId?: string; commentId?: string; chatSessionId?: string },
   ): Promise<Attachment> {
-    const formData = new FormData();
-    formData.append("file", file);
-    if (opts?.issueId) formData.append("issue_id", opts.issueId);
-    if (opts?.commentId) formData.append("comment_id", opts.commentId);
-    if (opts?.chatSessionId) formData.append("chat_session_id", opts.chatSessionId);
+    const uploadOpts = opts ?? {};
+    if (file.size >= MULTIPART_UPLOAD_THRESHOLD_BYTES) {
+      return this.uploadFileMultipartDirect(file, uploadOpts);
+    }
+    return this.uploadFileDirect(file, uploadOpts);
+  }
 
-    const rid = createRequestId();
-    const start = Date.now();
-    const requestToken = this.token;
-    this.logger.info("→ POST /api/upload-file", { rid });
-
-    const res = await fetch(`${this.baseUrl}/api/upload-file`, {
+  private async uploadFileMultipartDirect(
+    file: File,
+    opts: { issueId?: string; commentId?: string; chatSessionId?: string },
+  ): Promise<Attachment> {
+    const initiate = await this.fetch<MultipartUploadInitiateResponse>("/api/attachments/upload/multipart/initiate", {
       method: "POST",
-      headers: this.authHeaders(),
-      body: formData,
-      credentials: "include",
+      body: JSON.stringify({
+        filename: file.name,
+        content_type: file.type || "application/octet-stream",
+        size_bytes: file.size,
+        part_size_bytes: MULTIPART_UPLOAD_PART_SIZE_BYTES,
+        issue_id: opts.issueId ?? null,
+        comment_id: opts.commentId ?? null,
+        chat_session_id: opts.chatSessionId ?? null,
+      }),
     });
 
-    if (!res.ok) {
-      if (res.status === 401) this.handleUnauthorized(requestToken);
-      const message = await this.parseErrorMessage(res, `Upload failed: ${res.status}`);
-      this.logger.error(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms`, error: message });
-      throw new Error(message);
+    const partSize = initiate.part_size_bytes;
+    const uploadedParts: Array<{ part_number: number; etag: string; size_bytes: number }> = [];
+    let nextPart = 1;
+
+    const uploadPart = async (partNumber: number): Promise<void> => {
+      const signed = await this.fetch<MultipartUploadSignPartsResponse>("/api/attachments/upload/multipart/sign-parts", {
+        method: "POST",
+        body: JSON.stringify({
+          session_id: initiate.session_id,
+          part_numbers: [partNumber],
+        }),
+      });
+      const part = signed.parts[0];
+      if (!part) throw new Error("Multipart upload signing returned no part URL");
+      const start = (partNumber - 1) * partSize;
+      const end = Math.min(start + partSize, file.size);
+      const blob = file.slice(start, end);
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= MULTIPART_UPLOAD_MAX_RETRIES; attempt += 1) {
+        try {
+          const res = await fetch(part.upload_url, {
+            method: "PUT",
+            headers: part.headers ?? {},
+            body: blob,
+          });
+          if (!res.ok) {
+            throw new Error(`Multipart part upload failed: ${res.status}`);
+          }
+          const etag = res.headers.get("ETag") ?? res.headers.get("etag") ?? "";
+          if (!etag) throw new Error("Multipart part upload missing ETag");
+          uploadedParts.push({
+            part_number: partNumber,
+            etag,
+            size_bytes: blob.size,
+          });
+          return;
+        } catch (err) {
+          lastError = err;
+          if (attempt === MULTIPART_UPLOAD_MAX_RETRIES) break;
+        }
+      }
+      throw lastError instanceof Error ? lastError : new Error("Multipart part upload failed");
+    };
+
+    const workers = Array.from({ length: Math.min(MULTIPART_UPLOAD_CONCURRENCY, initiate.part_count) }, async () => {
+      while (nextPart <= initiate.part_count) {
+        const partNumber = nextPart;
+        nextPart += 1;
+        await uploadPart(partNumber);
+      }
+    });
+
+    try {
+      await Promise.all(workers);
+    } catch (err) {
+      await this.abortMultipartUpload(initiate.session_id);
+      throw err;
     }
 
-    this.logger.info(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms` });
-    const raw = (await res.json()) as unknown;
-    const parsed = AttachmentResponseSchema.safeParse(raw);
-    if (!parsed.success || !parsed.data.id) {
-      this.logger.error("Invalid upload response from /api/upload-file", {
-        rid,
-        issues: parsed.success ? undefined : parsed.error.issues,
-        received: raw,
+    const raw = await this.fetch<unknown>("/api/attachments/upload/multipart/complete", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: initiate.session_id,
+        parts: uploadedParts.sort((a, b) => a.part_number - b.part_number),
+      }),
+    });
+    return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
+      endpoint: "POST /api/attachments/upload/multipart/complete",
+    });
+  }
+
+  private async abortMultipartUpload(sessionId: string): Promise<void> {
+    try {
+      await this.fetch<void>("/api/attachments/upload/multipart/abort", {
+        method: "POST",
+        body: JSON.stringify({ session_id: sessionId }),
       });
-      throw new Error("Invalid upload response");
+    } catch (err) {
+      this.logger.warn("Failed to abort multipart upload", { error: err instanceof Error ? err.message : String(err) });
     }
-    return { ...EMPTY_ATTACHMENT, ...parsed.data };
+  }
+
+  private async uploadFileDirect(
+    file: File,
+    opts: { issueId?: string; commentId?: string; chatSessionId?: string },
+  ): Promise<Attachment> {
+    const initiate = await this.fetch<DirectUploadInitiateResponse>("/api/attachments/upload/initiate", {
+      method: "POST",
+      body: JSON.stringify({
+        filename: file.name,
+        content_type: file.type || "application/octet-stream",
+        size_bytes: file.size,
+        issue_id: opts.issueId ?? null,
+        comment_id: opts.commentId ?? null,
+        chat_session_id: opts.chatSessionId ?? null,
+      }),
+    });
+
+    const putRes = await fetch(initiate.upload_url, {
+      method: "PUT",
+      headers: initiate.headers ?? {},
+      body: file,
+    });
+    if (!putRes.ok) {
+      throw new Error(`Direct upload failed: ${putRes.status}`);
+    }
+
+    const raw = await this.fetch<unknown>("/api/attachments/upload/complete", {
+      method: "POST",
+      body: JSON.stringify({ upload_token: initiate.upload_token }),
+    });
+    return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
+      endpoint: "POST /api/attachments/upload/complete",
+    });
   }
 
   // Chat Sessions
