@@ -147,6 +147,18 @@ vi.mock("@multica/core/issues/config", () => ({
     blocked: { label: "Blocked", iconColor: "text-destructive", hoverBg: "hover:bg-destructive/10" },
     cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
   },
+  isIssueStatus: (status: string) =>
+    ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"].includes(status),
+  getStatusConfig: (status: string) =>
+    ({
+      backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
+      todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
+      in_progress: { label: "In Progress", iconColor: "text-warning", hoverBg: "hover:bg-warning/10" },
+      in_review: { label: "In Review", iconColor: "text-success", hoverBg: "hover:bg-success/10" },
+      done: { label: "Done", iconColor: "text-info", hoverBg: "hover:bg-info/10" },
+      blocked: { label: "Blocked", iconColor: "text-destructive", hoverBg: "hover:bg-destructive/10" },
+      cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
+    })[status] ?? { label: "Unknown", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
   PRIORITY_ORDER: ["urgent", "high", "medium", "low", "none"],
   PRIORITY_CONFIG: {
     urgent: { label: "Urgent", bars: 4, color: "text-destructive" },
@@ -485,6 +497,12 @@ describe("IssuesPage (shared)", () => {
     mockViewState.grouping = "status";
     mockViewState.statusFilters = [];
     mockViewState.priorityFilters = [];
+    mockViewState.assigneeFilters = [];
+    mockViewState.includeNoAssignee = false;
+    mockViewState.creatorFilters = [];
+    mockViewState.projectFilters = [];
+    mockViewState.includeNoProject = false;
+    mockViewState.labelFilters = [];
     mockScope = "all";
   });
 
@@ -555,6 +573,51 @@ describe("IssuesPage (shared)", () => {
     expect(mockListIssues).not.toHaveBeenCalled();
   });
 
+  it("requests only selected status buckets with server-side filters", async () => {
+    mockViewState.statusFilters = ["done"];
+    mockViewState.priorityFilters = ["high"];
+    mockViewState.assigneeFilters = [{ type: "member", id: "user-1" }];
+    mockViewState.creatorFilters = [{ type: "agent", id: "agent-1" }];
+    mockViewState.projectFilters = ["project-1"];
+    mockViewState.labelFilters = ["label-1"];
+    mockListIssues.mockResolvedValue({ issues: [], total: 0 });
+
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findByText("No issues yet");
+    expect(mockListIssues).toHaveBeenCalledTimes(1);
+    expect(mockListIssues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "done",
+        limit: 50,
+        offset: 0,
+        priorities: ["high"],
+        assignees: [{ type: "member", id: "user-1" }],
+        creators: [{ type: "agent", id: "agent-1" }],
+        project_ids: ["project-1"],
+        label_ids: ["label-1"],
+      }),
+    );
+    expect(mockListIssues).not.toHaveBeenCalledWith(
+      expect.objectContaining({ status: "todo" }),
+    );
+  });
+
+  it("sends scope filters to the list endpoint instead of filtering the first page locally", async () => {
+    mockScope = "agents";
+    mockViewState.viewMode = "list";
+    mockListIssues.mockResolvedValue({ issues: [], total: 0 });
+
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findByText("No issues yet");
+    expect(mockListIssues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assignee_types: ["agent", "squad"],
+      }),
+    );
+  });
+
   it("shows workspace breadcrumb with 'Issues' label", async () => {
     mockListIssues.mockImplementation((params: any) =>
       Promise.resolve({
@@ -591,8 +654,16 @@ describe("IssuesPage (shared)", () => {
     mockViewState.viewMode = "list";
     mockListIssues.mockImplementation((params: any) =>
       Promise.resolve({
-        issues: mockIssues.filter((i) => i.status === params?.status),
-        total: mockIssues.filter((i) => i.status === params?.status).length,
+        issues: mockIssues.filter(
+          (i) =>
+            i.status === params?.status &&
+            params?.assignee_types?.includes(i.assignee_type),
+        ),
+        total: mockIssues.filter(
+          (i) =>
+            i.status === params?.status &&
+            params?.assignee_types?.includes(i.assignee_type),
+        ).length,
       }),
     );
     renderWithQuery(<IssuesPage />);
@@ -609,8 +680,16 @@ describe("IssuesPage (shared)", () => {
     mockViewState.viewMode = "list";
     mockListIssues.mockImplementation((params: any) =>
       Promise.resolve({
-        issues: mockIssues.filter((i) => i.status === params?.status),
-        total: mockIssues.filter((i) => i.status === params?.status).length,
+        issues: mockIssues.filter(
+          (i) =>
+            i.status === params?.status &&
+            params?.assignee_types?.includes(i.assignee_type),
+        ),
+        total: mockIssues.filter(
+          (i) =>
+            i.status === params?.status &&
+            params?.assignee_types?.includes(i.assignee_type),
+        ).length,
       }),
     );
     renderWithQuery(<IssuesPage />);

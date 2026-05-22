@@ -28,25 +28,25 @@ import (
 
 // IssueResponse is the JSON response for an issue.
 type IssueResponse struct {
-	ID            string                  `json:"id"`
-	WorkspaceID   string                  `json:"workspace_id"`
-	Number        int32                   `json:"number"`
-	Identifier    string                  `json:"identifier"`
-	Title         string                  `json:"title"`
-	Description   *string                 `json:"description"`
-	Status        string                  `json:"status"`
-	Priority      string                  `json:"priority"`
-	AssigneeType  *string                 `json:"assignee_type"`
-	AssigneeID    *string                 `json:"assignee_id"`
-	CreatorType   string                  `json:"creator_type"`
-	CreatorID     string                  `json:"creator_id"`
-	ParentIssueID *string                 `json:"parent_issue_id"`
-	ProjectID     *string                 `json:"project_id"`
-	Position      float64                 `json:"position"`
-	StartDate     *string                 `json:"start_date"`
-	DueDate       *string                 `json:"due_date"`
-	CreatedAt     string                  `json:"created_at"`
-	UpdatedAt     string                  `json:"updated_at"`
+	ID            string  `json:"id"`
+	WorkspaceID   string  `json:"workspace_id"`
+	Number        int32   `json:"number"`
+	Identifier    string  `json:"identifier"`
+	Title         string  `json:"title"`
+	Description   *string `json:"description"`
+	Status        string  `json:"status"`
+	Priority      string  `json:"priority"`
+	AssigneeType  *string `json:"assignee_type"`
+	AssigneeID    *string `json:"assignee_id"`
+	CreatorType   string  `json:"creator_type"`
+	CreatorID     string  `json:"creator_id"`
+	ParentIssueID *string `json:"parent_issue_id"`
+	ProjectID     *string `json:"project_id"`
+	Position      float64 `json:"position"`
+	StartDate     *string `json:"start_date"`
+	DueDate       *string `json:"due_date"`
+	CreatedAt     string  `json:"created_at"`
+	UpdatedAt     string  `json:"updated_at"`
 	// Metadata is the per-issue KV map (see issue_metadata.go). Always emitted
 	// (empty object when unset) so frontend code can `issue.metadata[key]`
 	// without nil-guarding the parent field.
@@ -770,6 +770,18 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	var assigneeTypesFilter []string
+	if rawTypes := r.URL.Query().Get("assignee_types"); rawTypes != "" {
+		for _, raw := range strings.Split(rawTypes, ",") {
+			if s := strings.TrimSpace(raw); s != "" {
+				if !isIssueActorType(s) {
+					writeError(w, http.StatusBadRequest, "invalid assignee_types")
+					return
+				}
+				assigneeTypesFilter = append(assigneeTypesFilter, s)
+			}
+		}
+	}
 	var assigneeFilter pgtype.UUID
 	if a := r.URL.Query().Get("assignee_id"); a != "" {
 		id, ok := parseUUIDOrBadRequest(w, a, "assignee_id")
@@ -826,6 +838,10 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("include_no_project") == "true" {
 		includeNoProject = pgtype.Bool{Bool: true, Valid: true}
 	}
+	labelIdsFilter, ok := parseUUIDListFilter(w, r.URL.Query().Get("label_ids"), "label_ids")
+	if !ok {
+		return
+	}
 	// involves_user_id widens the assignee filter to surface issues where the
 	// user is the indirect assignee (their owned agent, or a squad they belong
 	// to / lead / have an agent inside). Direct member-assignment is excluded
@@ -851,6 +867,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID:       wsUUID,
 			Priority:          priorityFilter,
 			Priorities:        priorityFilters,
+			AssigneeTypes:     assigneeTypesFilter,
 			AssigneeID:        assigneeFilter,
 			AssigneeIds:       assigneeIdsFilter,
 			AssigneePairs:     assigneePairs,
@@ -860,6 +877,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			ProjectID:         projectFilter,
 			ProjectIds:        projectIdsFilter,
 			IncludeNoProject:  includeNoProject,
+			LabelIds:          labelIdsFilter,
 			MetadataFilter:    metadataFilter,
 			InvolvesUserID:    involvesUserFilter,
 		})
@@ -924,6 +942,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		Status:            statusFilter,
 		Priority:          priorityFilter,
 		Priorities:        priorityFilters,
+		AssigneeTypes:     assigneeTypesFilter,
 		AssigneeID:        assigneeFilter,
 		AssigneeIds:       assigneeIdsFilter,
 		AssigneePairs:     assigneePairs,
@@ -933,6 +952,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		ProjectID:         projectFilter,
 		ProjectIds:        projectIdsFilter,
 		IncludeNoProject:  includeNoProject,
+		LabelIds:          labelIdsFilter,
 		MetadataFilter:    metadataFilter,
 		InvolvesUserID:    involvesUserFilter,
 		Scheduled:         scheduledFilter,
@@ -948,6 +968,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		Status:            statusFilter,
 		Priority:          priorityFilter,
 		Priorities:        priorityFilters,
+		AssigneeTypes:     assigneeTypesFilter,
 		AssigneeID:        assigneeFilter,
 		AssigneeIds:       assigneeIdsFilter,
 		AssigneePairs:     assigneePairs,
@@ -957,6 +978,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		ProjectID:         projectFilter,
 		ProjectIds:        projectIdsFilter,
 		IncludeNoProject:  includeNoProject,
+		LabelIds:          labelIdsFilter,
 		MetadataFilter:    metadataFilter,
 		InvolvesUserID:    involvesUserFilter,
 		Scheduled:         scheduledFilter,

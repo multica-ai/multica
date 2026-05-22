@@ -13,6 +13,7 @@ WHERE i.workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (COALESCE(cardinality(sqlc.narg('priorities')::text[]), 0) = 0 OR i.priority = ANY(sqlc.narg('priorities')::text[]))
+  AND (COALESCE(cardinality(sqlc.narg('assignee_types')::text[]), 0) = 0 OR i.assignee_type = ANY(sqlc.narg('assignee_types')::text[]))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
   AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR i.assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
   AND (
@@ -36,6 +37,15 @@ WHERE i.workspace_id = $1
     )
     OR (sqlc.narg('include_no_project')::boolean IS TRUE AND i.project_id IS NULL)
     OR (i.project_id = ANY(sqlc.narg('project_ids')::uuid[]))
+  )
+  AND (
+    COALESCE(cardinality(sqlc.narg('label_ids')::uuid[]), 0) = 0
+    OR EXISTS (
+      SELECT 1
+      FROM issue_to_label itl
+      WHERE itl.issue_id = i.id
+        AND itl.label_id = ANY(sqlc.narg('label_ids')::uuid[])
+    )
   )
   AND (sqlc.narg('scheduled')::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)
@@ -157,6 +167,7 @@ WHERE i.workspace_id = $1
   AND i.status NOT IN ('done', 'cancelled')
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (COALESCE(cardinality(sqlc.narg('priorities')::text[]), 0) = 0 OR i.priority = ANY(sqlc.narg('priorities')::text[]))
+  AND (COALESCE(cardinality(sqlc.narg('assignee_types')::text[]), 0) = 0 OR i.assignee_type = ANY(sqlc.narg('assignee_types')::text[]))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
   AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR i.assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
   AND (
@@ -181,6 +192,15 @@ WHERE i.workspace_id = $1
     )
     OR (sqlc.narg('include_no_project')::boolean IS TRUE AND i.project_id IS NULL)
     OR (i.project_id = ANY(sqlc.narg('project_ids')::uuid[]))
+  )
+  AND (
+    COALESCE(cardinality(sqlc.narg('label_ids')::uuid[]), 0) = 0
+    OR EXISTS (
+      SELECT 1
+      FROM issue_to_label itl
+      WHERE itl.issue_id = i.id
+        AND itl.label_id = ANY(sqlc.narg('label_ids')::uuid[])
+    )
   )
   AND (
     sqlc.narg('involves_user_id')::uuid IS NULL
@@ -223,6 +243,7 @@ WHERE i.workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (COALESCE(cardinality(sqlc.narg('priorities')::text[]), 0) = 0 OR i.priority = ANY(sqlc.narg('priorities')::text[]))
+  AND (COALESCE(cardinality(sqlc.narg('assignee_types')::text[]), 0) = 0 OR i.assignee_type = ANY(sqlc.narg('assignee_types')::text[]))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
   AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR i.assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
   AND (
@@ -246,6 +267,15 @@ WHERE i.workspace_id = $1
     )
     OR (sqlc.narg('include_no_project')::boolean IS TRUE AND i.project_id IS NULL)
     OR (i.project_id = ANY(sqlc.narg('project_ids')::uuid[]))
+  )
+  AND (
+    COALESCE(cardinality(sqlc.narg('label_ids')::uuid[]), 0) = 0
+    OR EXISTS (
+      SELECT 1
+      FROM issue_to_label itl
+      WHERE itl.issue_id = i.id
+        AND itl.label_id = ANY(sqlc.narg('label_ids')::uuid[])
+    )
   )
   AND (sqlc.narg('scheduled')::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)

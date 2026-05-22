@@ -20,6 +20,7 @@ export function onIssueCreated(
   qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
     old ? addIssueToBuckets(old, issue) : old,
   );
+  qc.invalidateQueries({ queryKey: issueKeys.listAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
@@ -56,6 +57,7 @@ export function onIssueUpdated(
   qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
     old ? patchIssueInBuckets(old, issue.id, issue) : old,
   );
+  qc.invalidateQueries({ queryKey: issueKeys.listAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   patchIssueDetailQueries(qc, wsId, issue.id, issue);
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
@@ -111,6 +113,7 @@ export function onIssueLabelsChanged(
   qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
     old ? patchIssueInBuckets(old, issueId, { labels }) : old,
   );
+  qc.invalidateQueries({ queryKey: issueKeys.listAll(wsId) });
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, labels } : old,
   );

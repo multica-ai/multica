@@ -99,38 +99,48 @@ WHERE i.workspace_id = $1
   AND ($2::text IS NULL OR i.status = $2)
   AND ($3::text IS NULL OR i.priority = $3)
   AND (COALESCE(cardinality($4::text[]), 0) = 0 OR i.priority = ANY($4::text[]))
-  AND ($5::uuid IS NULL OR i.assignee_id = $5)
-  AND ($6::uuid[] IS NULL OR i.assignee_id = ANY($6::uuid[]))
+  AND (COALESCE(cardinality($5::text[]), 0) = 0 OR i.assignee_type = ANY($5::text[]))
+  AND ($6::uuid IS NULL OR i.assignee_id = $6)
+  AND ($7::uuid[] IS NULL OR i.assignee_id = ANY($7::uuid[]))
   AND (
     (
-      COALESCE(cardinality($7::text[]), 0) = 0
-      AND $8::boolean IS NOT TRUE
+      COALESCE(cardinality($8::text[]), 0) = 0
+      AND $9::boolean IS NOT TRUE
     )
-    OR ($8::boolean IS TRUE AND i.assignee_id IS NULL)
-    OR (i.assignee_id IS NOT NULL AND (i.assignee_type || ':' || i.assignee_id::text) = ANY($7::text[]))
+    OR ($9::boolean IS TRUE AND i.assignee_id IS NULL)
+    OR (i.assignee_id IS NOT NULL AND (i.assignee_type || ':' || i.assignee_id::text) = ANY($8::text[]))
   )
-  AND ($9::uuid IS NULL OR i.creator_id = $9)
+  AND ($10::uuid IS NULL OR i.creator_id = $10)
   AND (
-    COALESCE(cardinality($10::text[]), 0) = 0
-    OR (i.creator_type || ':' || i.creator_id::text) = ANY($10::text[])
+    COALESCE(cardinality($11::text[]), 0) = 0
+    OR (i.creator_type || ':' || i.creator_id::text) = ANY($11::text[])
   )
-  AND ($11::uuid IS NULL OR i.project_id = $11)
+  AND ($12::uuid IS NULL OR i.project_id = $12)
   AND (
     (
-      COALESCE(cardinality($12::uuid[]), 0) = 0
-      AND $13::boolean IS NOT TRUE
+      COALESCE(cardinality($13::uuid[]), 0) = 0
+      AND $14::boolean IS NOT TRUE
     )
-    OR ($13::boolean IS TRUE AND i.project_id IS NULL)
-    OR (i.project_id = ANY($12::uuid[]))
+    OR ($14::boolean IS TRUE AND i.project_id IS NULL)
+    OR (i.project_id = ANY($13::uuid[]))
   )
-  AND ($14::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
-  AND ($15::jsonb IS NULL OR i.metadata @> $15::jsonb)
   AND (
-    $16::uuid IS NULL
+    COALESCE(cardinality($15::uuid[]), 0) = 0
+    OR EXISTS (
+      SELECT 1
+      FROM issue_to_label itl
+      WHERE itl.issue_id = i.id
+        AND itl.label_id = ANY($15::uuid[])
+    )
+  )
+  AND ($16::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
+  AND ($17::jsonb IS NULL OR i.metadata @> $17::jsonb)
+  AND (
+    $18::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
            WHERE a.workspace_id = $1
-             AND a.owner_id     = $16::uuid
+             AND a.owner_id     = $18::uuid
     ))
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
           SELECT sm.squad_id
@@ -138,14 +148,14 @@ WHERE i.workspace_id = $1
             JOIN squad s ON s.id = sm.squad_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'member'
-             AND sm.member_id   = $16::uuid
+             AND sm.member_id   = $18::uuid
           UNION
           SELECT s.id
             FROM squad s
             JOIN agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
              AND a.workspace_id = $1
-             AND a.owner_id     = $16::uuid
+             AND a.owner_id     = $18::uuid
           UNION
           SELECT sm.squad_id
             FROM squad_member sm
@@ -154,7 +164,7 @@ WHERE i.workspace_id = $1
            WHERE s.workspace_id = $1
              AND sm.member_type = 'agent'
              AND a.workspace_id = $1
-             AND a.owner_id     = $16::uuid
+             AND a.owner_id     = $18::uuid
     ))
   )
 `
@@ -164,6 +174,7 @@ type CountIssuesParams struct {
 	Status            pgtype.Text   `json:"status"`
 	Priority          pgtype.Text   `json:"priority"`
 	Priorities        []string      `json:"priorities"`
+	AssigneeTypes     []string      `json:"assignee_types"`
 	AssigneeID        pgtype.UUID   `json:"assignee_id"`
 	AssigneeIds       []pgtype.UUID `json:"assignee_ids"`
 	AssigneePairs     []string      `json:"assignee_pairs"`
@@ -173,6 +184,7 @@ type CountIssuesParams struct {
 	ProjectID         pgtype.UUID   `json:"project_id"`
 	ProjectIds        []pgtype.UUID `json:"project_ids"`
 	IncludeNoProject  pgtype.Bool   `json:"include_no_project"`
+	LabelIds          []pgtype.UUID `json:"label_ids"`
 	Scheduled         pgtype.Bool   `json:"scheduled"`
 	MetadataFilter    []byte        `json:"metadata_filter"`
 	InvolvesUserID    pgtype.UUID   `json:"involves_user_id"`
@@ -185,6 +197,7 @@ func (q *Queries) CountIssues(ctx context.Context, arg CountIssuesParams) (int64
 		arg.Status,
 		arg.Priority,
 		arg.Priorities,
+		arg.AssigneeTypes,
 		arg.AssigneeID,
 		arg.AssigneeIds,
 		arg.AssigneePairs,
@@ -194,6 +207,7 @@ func (q *Queries) CountIssues(ctx context.Context, arg CountIssuesParams) (int64
 		arg.ProjectID,
 		arg.ProjectIds,
 		arg.IncludeNoProject,
+		arg.LabelIds,
 		arg.Scheduled,
 		arg.MetadataFilter,
 		arg.InvolvesUserID,
@@ -705,38 +719,48 @@ WHERE i.workspace_id = $1
   AND ($4::text IS NULL OR i.status = $4)
   AND ($5::text IS NULL OR i.priority = $5)
   AND (COALESCE(cardinality($6::text[]), 0) = 0 OR i.priority = ANY($6::text[]))
-  AND ($7::uuid IS NULL OR i.assignee_id = $7)
-  AND ($8::uuid[] IS NULL OR i.assignee_id = ANY($8::uuid[]))
+  AND (COALESCE(cardinality($7::text[]), 0) = 0 OR i.assignee_type = ANY($7::text[]))
+  AND ($8::uuid IS NULL OR i.assignee_id = $8)
+  AND ($9::uuid[] IS NULL OR i.assignee_id = ANY($9::uuid[]))
   AND (
     (
-      COALESCE(cardinality($9::text[]), 0) = 0
-      AND $10::boolean IS NOT TRUE
+      COALESCE(cardinality($10::text[]), 0) = 0
+      AND $11::boolean IS NOT TRUE
     )
-    OR ($10::boolean IS TRUE AND i.assignee_id IS NULL)
-    OR (i.assignee_id IS NOT NULL AND (i.assignee_type || ':' || i.assignee_id::text) = ANY($9::text[]))
+    OR ($11::boolean IS TRUE AND i.assignee_id IS NULL)
+    OR (i.assignee_id IS NOT NULL AND (i.assignee_type || ':' || i.assignee_id::text) = ANY($10::text[]))
   )
-  AND ($11::uuid IS NULL OR i.creator_id = $11)
+  AND ($12::uuid IS NULL OR i.creator_id = $12)
   AND (
-    COALESCE(cardinality($12::text[]), 0) = 0
-    OR (i.creator_type || ':' || i.creator_id::text) = ANY($12::text[])
+    COALESCE(cardinality($13::text[]), 0) = 0
+    OR (i.creator_type || ':' || i.creator_id::text) = ANY($13::text[])
   )
-  AND ($13::uuid IS NULL OR i.project_id = $13)
+  AND ($14::uuid IS NULL OR i.project_id = $14)
   AND (
     (
-      COALESCE(cardinality($14::uuid[]), 0) = 0
-      AND $15::boolean IS NOT TRUE
+      COALESCE(cardinality($15::uuid[]), 0) = 0
+      AND $16::boolean IS NOT TRUE
     )
-    OR ($15::boolean IS TRUE AND i.project_id IS NULL)
-    OR (i.project_id = ANY($14::uuid[]))
+    OR ($16::boolean IS TRUE AND i.project_id IS NULL)
+    OR (i.project_id = ANY($15::uuid[]))
   )
-  AND ($16::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
-  AND ($17::jsonb IS NULL OR i.metadata @> $17::jsonb)
   AND (
-    $18::uuid IS NULL
+    COALESCE(cardinality($17::uuid[]), 0) = 0
+    OR EXISTS (
+      SELECT 1
+      FROM issue_to_label itl
+      WHERE itl.issue_id = i.id
+        AND itl.label_id = ANY($17::uuid[])
+    )
+  )
+  AND ($18::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
+  AND ($19::jsonb IS NULL OR i.metadata @> $19::jsonb)
+  AND (
+    $20::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
            WHERE a.workspace_id = $1
-             AND a.owner_id     = $18::uuid
+             AND a.owner_id     = $20::uuid
     ))
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
           SELECT sm.squad_id
@@ -744,14 +768,14 @@ WHERE i.workspace_id = $1
             JOIN squad s ON s.id = sm.squad_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'member'
-             AND sm.member_id   = $18::uuid
+             AND sm.member_id   = $20::uuid
           UNION
           SELECT s.id
             FROM squad s
             JOIN agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
              AND a.workspace_id = $1
-             AND a.owner_id     = $18::uuid
+             AND a.owner_id     = $20::uuid
           UNION
           SELECT sm.squad_id
             FROM squad_member sm
@@ -760,7 +784,7 @@ WHERE i.workspace_id = $1
            WHERE s.workspace_id = $1
              AND sm.member_type = 'agent'
              AND a.workspace_id = $1
-             AND a.owner_id     = $18::uuid
+             AND a.owner_id     = $20::uuid
     ))
   )
 ORDER BY i.position ASC, i.created_at DESC
@@ -774,6 +798,7 @@ type ListIssuesParams struct {
 	Status            pgtype.Text   `json:"status"`
 	Priority          pgtype.Text   `json:"priority"`
 	Priorities        []string      `json:"priorities"`
+	AssigneeTypes     []string      `json:"assignee_types"`
 	AssigneeID        pgtype.UUID   `json:"assignee_id"`
 	AssigneeIds       []pgtype.UUID `json:"assignee_ids"`
 	AssigneePairs     []string      `json:"assignee_pairs"`
@@ -783,6 +808,7 @@ type ListIssuesParams struct {
 	ProjectID         pgtype.UUID   `json:"project_id"`
 	ProjectIds        []pgtype.UUID `json:"project_ids"`
 	IncludeNoProject  pgtype.Bool   `json:"include_no_project"`
+	LabelIds          []pgtype.UUID `json:"label_ids"`
 	Scheduled         pgtype.Bool   `json:"scheduled"`
 	MetadataFilter    []byte        `json:"metadata_filter"`
 	InvolvesUserID    pgtype.UUID   `json:"involves_user_id"`
@@ -824,6 +850,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 		arg.Status,
 		arg.Priority,
 		arg.Priorities,
+		arg.AssigneeTypes,
 		arg.AssigneeID,
 		arg.AssigneeIds,
 		arg.AssigneePairs,
@@ -833,6 +860,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 		arg.ProjectID,
 		arg.ProjectIds,
 		arg.IncludeNoProject,
+		arg.LabelIds,
 		arg.Scheduled,
 		arg.MetadataFilter,
 		arg.InvolvesUserID,
@@ -884,37 +912,47 @@ WHERE i.workspace_id = $1
   AND i.status NOT IN ('done', 'cancelled')
   AND ($2::text IS NULL OR i.priority = $2)
   AND (COALESCE(cardinality($3::text[]), 0) = 0 OR i.priority = ANY($3::text[]))
-  AND ($4::uuid IS NULL OR i.assignee_id = $4)
-  AND ($5::uuid[] IS NULL OR i.assignee_id = ANY($5::uuid[]))
+  AND (COALESCE(cardinality($4::text[]), 0) = 0 OR i.assignee_type = ANY($4::text[]))
+  AND ($5::uuid IS NULL OR i.assignee_id = $5)
+  AND ($6::uuid[] IS NULL OR i.assignee_id = ANY($6::uuid[]))
   AND (
     (
-      COALESCE(cardinality($6::text[]), 0) = 0
-      AND $7::boolean IS NOT TRUE
+      COALESCE(cardinality($7::text[]), 0) = 0
+      AND $8::boolean IS NOT TRUE
     )
-    OR ($7::boolean IS TRUE AND i.assignee_id IS NULL)
-    OR (i.assignee_id IS NOT NULL AND (i.assignee_type || ':' || i.assignee_id::text) = ANY($6::text[]))
+    OR ($8::boolean IS TRUE AND i.assignee_id IS NULL)
+    OR (i.assignee_id IS NOT NULL AND (i.assignee_type || ':' || i.assignee_id::text) = ANY($7::text[]))
   )
-  AND ($8::uuid IS NULL OR i.creator_id = $8)
+  AND ($9::uuid IS NULL OR i.creator_id = $9)
   AND (
-    COALESCE(cardinality($9::text[]), 0) = 0
-    OR (i.creator_type || ':' || i.creator_id::text) = ANY($9::text[])
+    COALESCE(cardinality($10::text[]), 0) = 0
+    OR (i.creator_type || ':' || i.creator_id::text) = ANY($10::text[])
   )
-  AND ($10::uuid IS NULL OR i.project_id = $10)
-  AND ($11::jsonb IS NULL OR i.metadata @> $11::jsonb)
+  AND ($11::uuid IS NULL OR i.project_id = $11)
+  AND ($12::jsonb IS NULL OR i.metadata @> $12::jsonb)
   AND (
     (
-      COALESCE(cardinality($12::uuid[]), 0) = 0
-      AND $13::boolean IS NOT TRUE
+      COALESCE(cardinality($13::uuid[]), 0) = 0
+      AND $14::boolean IS NOT TRUE
     )
-    OR ($13::boolean IS TRUE AND i.project_id IS NULL)
-    OR (i.project_id = ANY($12::uuid[]))
+    OR ($14::boolean IS TRUE AND i.project_id IS NULL)
+    OR (i.project_id = ANY($13::uuid[]))
   )
   AND (
-    $14::uuid IS NULL
+    COALESCE(cardinality($15::uuid[]), 0) = 0
+    OR EXISTS (
+      SELECT 1
+      FROM issue_to_label itl
+      WHERE itl.issue_id = i.id
+        AND itl.label_id = ANY($15::uuid[])
+    )
+  )
+  AND (
+    $16::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
            WHERE a.workspace_id = $1
-             AND a.owner_id     = $14::uuid
+             AND a.owner_id     = $16::uuid
     ))
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
           SELECT sm.squad_id
@@ -922,14 +960,14 @@ WHERE i.workspace_id = $1
             JOIN squad s ON s.id = sm.squad_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'member'
-             AND sm.member_id   = $14::uuid
+             AND sm.member_id   = $16::uuid
           UNION
           SELECT s.id
             FROM squad s
             JOIN agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
              AND a.workspace_id = $1
-             AND a.owner_id     = $14::uuid
+             AND a.owner_id     = $16::uuid
           UNION
           SELECT sm.squad_id
             FROM squad_member sm
@@ -938,7 +976,7 @@ WHERE i.workspace_id = $1
            WHERE s.workspace_id = $1
              AND sm.member_type = 'agent'
              AND a.workspace_id = $1
-             AND a.owner_id     = $14::uuid
+             AND a.owner_id     = $16::uuid
     ))
   )
 ORDER BY i.position ASC, i.created_at DESC
@@ -948,6 +986,7 @@ type ListOpenIssuesParams struct {
 	WorkspaceID       pgtype.UUID   `json:"workspace_id"`
 	Priority          pgtype.Text   `json:"priority"`
 	Priorities        []string      `json:"priorities"`
+	AssigneeTypes     []string      `json:"assignee_types"`
 	AssigneeID        pgtype.UUID   `json:"assignee_id"`
 	AssigneeIds       []pgtype.UUID `json:"assignee_ids"`
 	AssigneePairs     []string      `json:"assignee_pairs"`
@@ -958,6 +997,7 @@ type ListOpenIssuesParams struct {
 	MetadataFilter    []byte        `json:"metadata_filter"`
 	ProjectIds        []pgtype.UUID `json:"project_ids"`
 	IncludeNoProject  pgtype.Bool   `json:"include_no_project"`
+	LabelIds          []pgtype.UUID `json:"label_ids"`
 	InvolvesUserID    pgtype.UUID   `json:"involves_user_id"`
 }
 
@@ -990,6 +1030,7 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 		arg.WorkspaceID,
 		arg.Priority,
 		arg.Priorities,
+		arg.AssigneeTypes,
 		arg.AssigneeID,
 		arg.AssigneeIds,
 		arg.AssigneePairs,
@@ -1000,6 +1041,7 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 		arg.MetadataFilter,
 		arg.ProjectIds,
 		arg.IncludeNoProject,
+		arg.LabelIds,
 		arg.InvolvesUserID,
 	)
 	if err != nil {

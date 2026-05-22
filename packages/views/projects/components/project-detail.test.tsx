@@ -160,7 +160,7 @@ describe("ProjectIssuesContent", () => {
     expect(mockBoardView).not.toHaveBeenCalled();
   });
 
-  it("overrides board column counts when project issues are filtered by priority", () => {
+  it("passes server-filtered project issues through without local priority filtering", () => {
     viewState.priorityFilters = ["high"];
 
     render(
@@ -192,16 +192,10 @@ describe("ProjectIssuesContent", () => {
       />,
     );
 
-    expect(mockBoardView).toHaveBeenCalledWith(
-      expect.objectContaining({
-        issues: expect.arrayContaining([
-          expect.objectContaining({ id: "issue-1" }),
-        ]),
-        columnCounts: expect.objectContaining({
-          todo: 1,
-          done: 0,
-        }),
-      }),
+    const props = mockBoardView.mock.calls[0]?.[0];
+    expect(props.columnCounts).toBeUndefined();
+    expect(props.issues.map((i: Issue) => i.id)).toEqual(
+      expect.arrayContaining(["issue-1", "issue-2", "issue-3"]),
     );
   });
 });

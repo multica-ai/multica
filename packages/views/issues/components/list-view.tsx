@@ -7,7 +7,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { Button } from "@multica/ui/components/ui/button";
 import type { Issue, IssueStatus } from "@multica/core/types";
 import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import type { MyIssuesFilter } from "@multica/core/issues/queries";
+import type { IssueListFilter } from "@multica/core/issues/queries";
 import { useModalStore } from "@multica/core/modals";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -32,7 +32,7 @@ export function ListView({
   childProgressMap?: Map<string, ChildProgress>;
   /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
   myIssuesScope?: string;
-  myIssuesFilter?: MyIssuesFilter;
+  myIssuesFilter?: IssueListFilter;
   /** When set, the per-section "+" pre-fills the project on the create form. */
   projectId?: string;
 }) {
@@ -62,7 +62,7 @@ export function ListView({
     [visibleStatuses, listCollapsedStatuses]
   );
 
-  const myIssuesOpts = myIssuesScope
+  const issueListTarget = myIssuesScope || myIssuesFilter
     ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
     : undefined;
 
@@ -88,7 +88,7 @@ export function ListView({
             status={status}
             issues={issuesByStatus.get(status) ?? []}
             childProgressMap={childProgressMap}
-            myIssuesOpts={myIssuesOpts}
+            issueListTarget={issueListTarget}
             projectId={projectId}
           />
         ))}
@@ -101,13 +101,13 @@ function StatusAccordionItem({
   status,
   issues,
   childProgressMap,
-  myIssuesOpts,
+  issueListTarget,
   projectId,
 }: {
   status: IssueStatus;
   issues: Issue[];
   childProgressMap: Map<string, ChildProgress>;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  issueListTarget?: { scope?: string; filter?: IssueListFilter };
   projectId?: string;
 }) {
   const { t } = useT("issues");
@@ -116,7 +116,7 @@ function StatusAccordionItem({
   const deselect = useIssueSelectionStore((s) => s.deselect);
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
     status,
-    myIssuesOpts,
+    issueListTarget,
   );
 
   const issueIds = issues.map((i) => i.id);

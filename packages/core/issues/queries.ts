@@ -11,7 +11,9 @@ import { BOARD_STATUSES } from "./config";
 
 export const issueKeys = {
   all: (wsId: string) => ["issues", wsId] as const,
-  list: (wsId: string) => [...issueKeys.all(wsId), "list"] as const,
+  listAll: (wsId: string) => [...issueKeys.all(wsId), "list"] as const,
+  list: (wsId: string, filter?: IssueListFilter) =>
+    filter ? ([...issueKeys.listAll(wsId), filter] as const) : issueKeys.listAll(wsId),
   assigneeGroupsAll: (wsId: string) =>
     [...issueKeys.all(wsId), "assignee-groups"] as const,
   assigneeGroups: (wsId: string, filter: AssigneeGroupedIssuesFilter) =>
@@ -68,10 +70,26 @@ export const issueKeys = {
   taskMessages: (taskId: string) => ["task-messages", taskId] as const,
 };
 
-export type MyIssuesFilter = Pick<
+export type IssueListFilter = Pick<
   ListIssuesParams,
-  "assignee_id" | "assignee_ids" | "creator_id" | "project_id" | "involves_user_id"
->;
+  | "assignee_id"
+  | "assignee_ids"
+  | "assignee_types"
+  | "assignees"
+  | "include_no_assignee"
+  | "creator_id"
+  | "creators"
+  | "project_id"
+  | "project_ids"
+  | "include_no_project"
+  | "label_ids"
+  | "involves_user_id"
+  | "priorities"
+> & {
+  statuses?: readonly IssueStatus[];
+};
+
+export type MyIssuesFilter = IssueListFilter;
 
 export type AssigneeGroupedIssuesFilter = Omit<
   ListGroupedIssuesParams,
@@ -94,14 +112,27 @@ export function flattenIssueBuckets(data: ListIssuesCache) {
   return out;
 }
 
-async function fetchFirstPages(filter: MyIssuesFilter = {}): Promise<ListIssuesCache> {
+function resolveFetchStatuses(filter: IssueListFilter): readonly IssueStatus[] {
+  if (!filter.statuses?.length) return PAGINATED_STATUSES;
+  const allowed = new Set<IssueStatus>(PAGINATED_STATUSES);
+  return filter.statuses.filter((status) => allowed.has(status));
+}
+
+function stripBucketOnlyFilters(filter: IssueListFilter): Omit<IssueListFilter, "statuses"> {
+  const { statuses: _statuses, ...params } = filter;
+  return params;
+}
+
+async function fetchFirstPages(filter: IssueListFilter = {}): Promise<ListIssuesCache> {
+  const statuses = resolveFetchStatuses(filter);
+  const params = stripBucketOnlyFilters(filter);
   const responses = await Promise.all(
-    PAGINATED_STATUSES.map((status) =>
-      api.listIssues({ status, limit: ISSUE_PAGE_SIZE, offset: 0, ...filter }),
+    statuses.map((status) =>
+      api.listIssues({ status, limit: ISSUE_PAGE_SIZE, offset: 0, ...params }),
     ),
   );
   const byStatus: ListIssuesCache["byStatus"] = {};
-  PAGINATED_STATUSES.forEach((status, i) => {
+  statuses.forEach((status, i) => {
     const res = responses[i]!;
     byStatus[status] = { issues: res.issues, total: res.total };
   });
@@ -136,10 +167,10 @@ function mergeIssueBuckets(a: ListIssuesCache, b: ListIssuesCache): ListIssuesCa
  * Fetch issues where the user is either the assignee or the creator.
  * Makes two parallel fetches and merges + deduplicates the results.
  */
-async function fetchMyIssues(userId: string): Promise<ListIssuesCache> {
+async function fetchMyIssues(userId: string, filter: IssueListFilter = {}): Promise<ListIssuesCache> {
   const [assigned, created] = await Promise.all([
-    fetchFirstPages({ assignee_id: userId }),
-    fetchFirstPages({ creator_id: userId }),
+    fetchFirstPages({ ...filter, assignee_id: userId }),
+    fetchFirstPages({ ...filter, creator_id: userId }),
   ]);
   return mergeIssueBuckets(assigned, created);
 }
@@ -153,10 +184,11 @@ async function fetchMyIssues(userId: string): Promise<ListIssuesCache> {
  * Fetches the first page of each paginated status in parallel. Use
  * {@link useLoadMoreByStatus} to paginate a specific status into the cache.
  */
-export function issueListOptions(wsId: string) {
+export function issueListOptions(wsId: string, filter?: IssueListFilter) {
+  const requestFilter = filter ?? {};
   return queryOptions({
-    queryKey: issueKeys.list(wsId),
-    queryFn: () => fetchFirstPages(),
+    queryKey: issueKeys.list(wsId, filter),
+    queryFn: () => fetchFirstPages(requestFilter),
     select: flattenIssueBuckets,
   });
 }
@@ -184,7 +216,7 @@ export function issueAssigneeGroupsOptions(
 export function myIssueListOptions(
   wsId: string,
   scope: string,
-  filter: MyIssuesFilter,
+  filter: IssueListFilter,
 ) {
   return queryOptions({
     queryKey: issueKeys.myList(wsId, scope, filter),
@@ -198,10 +230,14 @@ export function myIssueListOptions(
  * assignee or the creator, then merges and deduplicates the two result sets.
  * Used for the default "my" scope which shows all issues relevant to the user.
  */
-export function myAllIssuesListOptions(wsId: string, userId: string) {
+export function myAllIssuesListOptions(
+  wsId: string,
+  userId: string,
+  filter: IssueListFilter = {},
+) {
   return queryOptions({
-    queryKey: [...issueKeys.myAll(wsId), "my", userId],
-    queryFn: () => fetchMyIssues(userId),
+    queryKey: [...issueKeys.myAll(wsId), "my", userId, filter] as const,
+    queryFn: () => fetchMyIssues(userId, filter),
     select: flattenIssueBuckets,
   });
 }
