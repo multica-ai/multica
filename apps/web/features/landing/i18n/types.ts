@@ -27,6 +27,7 @@ export type LandingDict = {
     login: string;
     dashboard: string;
     changelog: string;
+    useCases: string;
   };
   hero: {
     headlineLine1: string;

@@ -8,6 +8,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     login: "Log in",
     dashboard: "Dashboard",
     changelog: "Changelog",
+    useCases: "Use cases",
   },
 
   hero: {
@@ -228,6 +229,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         links: [
           { label: "Features", href: "#features" },
           { label: "How it Works", href: "#how-it-works" },
+          { label: "Use cases", href: "/use-cases" },
           { label: "Changelog", href: "/changelog" },
           { label: "Download", href: "/download" },
         ],
