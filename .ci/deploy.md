@@ -15,13 +15,15 @@
 
 ### backend
 
-- Jenkins job: `multica-backend-prod-pipeline`
+- Jenkins job: `multica-backend-prod-pipeline`（prod环境）
+- Jenkins job: `multica-backend-test-pipeline`（test环境）
 - 部署目标: K3S
 - 产出要求: Jenkins build URL、部署结果、镜像 tag、代码 revision
 
 ### frontend
 
-- Jenkins job: `multica-frontend-prod-pipeline`
+- Jenkins job: `multica-frontend-prod-pipeline`（prod环境）
+- Jenkins job: `multica-frontend-test-pipeline`（test环境）
 - 部署目标: K3S
 - 产出要求: Jenkins build URL、部署结果、镜像 tag、代码 revision
 
@@ -31,7 +33,7 @@
 - 部署目标: OBS (`https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json`)
 - 产出要求: Jenkins build URL、CLI version、manifest URL、artifact/checksum 发布结果
 
-## 生产发布流程
+## 发布流程
 
 顺序固定为：
 
