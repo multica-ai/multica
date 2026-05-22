@@ -33,6 +33,7 @@ die()   { err "$1"; exit 1; }
 
 # --- Parse arguments ---
 VERSION="${MULTICA_VERSION:-}"
+RESTART_ONLY="${RESTART_ONLY:-false}"
 while [ $# -gt 0 ]; do
     case "$1" in
         --version|-v)
@@ -46,6 +47,10 @@ while [ $# -gt 0 ]; do
         --server)
             SERVER_URL="$2"
             shift 2
+            ;;
+        --restart)
+            RESTART_ONLY=true
+            shift
             ;;
         --help|-h)
             echo "Usage: install.sh [--version VERSION] [--dir DIR] [--server URL]"
@@ -62,6 +67,20 @@ while [ $# -gt 0 ]; do
             ;;
     esac
 done
+
+# --- Detect user's login shell ---
+detect_login_shell() {
+  if [ -n "${SHELL:-}" ]; then
+    printf '%s' "$SHELL"
+  elif command -v dscl >/dev/null 2>&1; then
+    dscl . -read "/Users/$USER" UserShell 2>/dev/null | awk '{print $NF}'
+  elif command -v getent >/dev/null 2>&1; then
+    getent passwd "$USER" 2>/dev/null | awk -F: '{print $NF}'
+  else
+    printf '/bin/zsh'
+  fi
+}
+
 
 # --- Detect OS and architecture ---
 detect_platform() {
@@ -298,16 +317,27 @@ configure_server() {
 }
 
 # --- Restart daemon ---
+# Uses the user's login shell so the daemon process inherits the full
+# login environment (PATH, Go, Node, etc.) rather than the potentially
+# stripped environment of a non-login shell.
 restart_daemon() {
     local multica_bin="${INSTALL_DIR}/multica"
+    local login_shell
+    login_shell="$(detect_login_shell)"
+    [ -n "$login_shell" ] || login_shell="/bin/zsh"
 
-    info "Restarting daemon..."
+    info "Restarting daemon (via ${login_shell} -l)..."
     "$multica_bin" daemon stop 2>/dev/null || true
     sleep 1
-    if "$multica_bin" daemon start 2>/dev/null; then
+    if "$login_shell" -l -c '"'"'cd / && '"$multica_bin"' daemon start'"'"' 2>/dev/null; then
         ok "Daemon started"
     else
-        warn "Failed to start daemon. You can start it manually: multica daemon start"
+        # Fall back to direct start for environments where -l is unavailable
+        if "$multica_bin" daemon start 2>/dev/null; then
+            ok "Daemon started (direct)"
+        else
+            warn "Failed to start daemon. You can start it manually: multica daemon start"
+        fi
     fi
 }
 
@@ -331,9 +361,35 @@ print_summary() {
 
 # --- Main ---
 main() {
+    local multica_bin="${INSTALL_DIR}/multica"
+
     echo ""
     info "Multica CLI Installer"
     echo ""
+
+    # --restart: update binary & restart daemon, no full install
+    if [ "$RESTART_ONLY" = "true" ]; then
+        if [ ! -x "$multica_bin" ]; then
+            die "Multica CLI not found at ${multica_bin}. Run without --restart for full install."
+        fi
+        info "Updating CLI binary to latest version..."
+        check_deps
+        detect_platform
+        if [ -z "$VERSION" ]; then
+            fetch_latest_version
+        else
+            VERSION="${VERSION#v}"
+        fi
+        download_and_install
+        # re-run codesign if macOS
+        if [ "$(uname -s)" = "Darwin" ]; then
+            codesign --force --sign - "$multica_bin" 2>/dev/null || true
+        fi
+        ok "CLI binary updated"
+        restart_daemon
+        print_summary
+        return
+    fi
 
     check_deps
     detect_platform
