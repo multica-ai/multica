@@ -58,6 +58,8 @@ import { PillButton } from "../common/pill-button";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 // ---------------------------------------------------------------------------
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
 // DialogContent + everything inside; the surrounding `<Dialog>` is owned by
@@ -166,9 +168,12 @@ export function ManualCreatePanel({
   const { uploadWithToast } = useFileUpload(api);
   const handleUpload = async (file: File) => {
     const result = await uploadWithToast(file);
-    if (result) {
-      setAttachmentIds((prev) => [...prev, result.id]);
+    if (!result) return null;
+    if (!UUID_RE.test(result.id)) {
+      toast.error(t(($) => $.create_issue.attachment_upload_failed));
+      return null;
     }
+    setAttachmentIds((prev) => [...prev, result.id]);
     return result;
   };
 
@@ -217,6 +222,11 @@ export function ManualCreatePanel({
       toast.error(t(($) => $.create_issue.project_required));
       return;
     }
+    const validAttachmentIds = attachmentIds.filter((id) => UUID_RE.test(id));
+    if (validAttachmentIds.length !== attachmentIds.length) {
+      toast.error(t(($) => $.create_issue.attachment_state_invalid));
+      return;
+    }
     setSubmitting(true);
     try {
       const issue = await createIssueMutation.mutateAsync({
@@ -228,7 +238,7 @@ export function ManualCreatePanel({
         assignee_id: assigneeId,
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
-        attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
+        attachment_ids: validAttachmentIds.length > 0 ? validAttachmentIds : undefined,
         parent_issue_id: parentIssueId,
         project_id: projectId,
       });

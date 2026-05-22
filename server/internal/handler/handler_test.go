@@ -1503,6 +1503,9 @@ func TestCreateIssueRejectsMalformedAttachmentIDBeforeWrite(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("CreateIssue: expected 400 for malformed attachment_ids, got %d: %s", w.Code, w.Body.String())
 	}
+	if !strings.Contains(w.Body.String(), "attachment_ids[0] is not a valid UUID") {
+		t.Fatalf("CreateIssue: expected indexed attachment_ids error, got %s", w.Body.String())
+	}
 
 	var after int
 	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&after); err != nil {
