@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
-import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType } from "@multica/core/types";
+import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, Label } from "@multica/core/types";
 import {
   DialogContent,
   DialogTitle,
@@ -43,6 +43,7 @@ import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { issueDetailOptions } from "@multica/core/issues/queries";
+import { labelListOptions } from "@multica/core/labels/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { useAuthStore } from "@multica/core/auth";
@@ -56,6 +57,7 @@ import {
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { PillButton } from "../common/pill-button";
 import { IssuePickerModal } from "./issue-picker-modal";
+import { CreateIssueLabelPicker } from "./create-issue-label-picker";
 import { useT } from "../i18n";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -163,6 +165,22 @@ export function ManualCreatePanel({
     enabled: !!parentIssueId,
   });
 
+  // Label selection — inherited from parent issue when creating a sub-issue.
+  const [labelIds, setLabelIds] = useState<string[]>([]);
+  const { data: allLabels = [] } = useQuery(labelListOptions(wsId));
+  const parentInheritedRef = useRef(false);
+  useEffect(() => {
+    if (parentInheritedRef.current) return;
+    if (!parentIssue) return;
+    parentInheritedRef.current = true;
+    if (parentIssue.labels && parentIssue.labels.length > 0) {
+      setLabelIds(parentIssue.labels.map((l) => l.id));
+    }
+    if (parentIssue.project_id && !initialProjectId) {
+      setProjectId(parentIssue.project_id);
+    }
+  }, [parentIssue, initialProjectId]);
+
   // File upload — collect attachment IDs so we can link them after issue creation.
   const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
   const { uploadWithToast } = useFileUpload(api);
@@ -202,6 +220,8 @@ export function ManualCreatePanel({
     setParentIssueId(undefined);
     setChildIssues([]);
     setAttachmentIds([]);
+    setLabelIds([]);
+    parentInheritedRef.current = false;
     setDraft({
       title: "",
       description: "",
@@ -275,6 +295,13 @@ export function ManualCreatePanel({
                 }),
           );
         }
+      }
+
+      // Attach selected labels to the newly created issue.
+      if (labelIds.length > 0) {
+        await Promise.allSettled(
+          labelIds.map((lid) => api.attachLabel(issue.id, lid)),
+        );
       }
 
       setLastMode("manual");
@@ -553,6 +580,14 @@ export function ManualCreatePanel({
                 triggerRender={<PillButton />}
                 align="start"
                 allowClear={false}
+              />
+
+              {/* Labels */}
+              <CreateIssueLabelPicker
+                labels={allLabels}
+                selectedIds={labelIds}
+                onChange={setLabelIds}
+                align="start"
               />
 
               {/* Parent chip — appears when parent is set.
