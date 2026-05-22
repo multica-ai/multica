@@ -2036,7 +2036,7 @@ func (h *Handler) GetActiveTaskForIssue(w http.ResponseWriter, r *http.Request) 
 
 	resp := make([]AgentTaskResponse, len(tasks))
 	for i, t := range tasks {
-		resp[i] = taskToResponse(t)
+		resp[i] = taskToSlimResponse(t)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": resp})
@@ -2087,7 +2087,7 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]AgentTaskResponse, len(tasks))
 	for i, t := range tasks {
-		resp[i] = taskToResponse(t)
+		resp[i] = taskToSlimResponse(t)
 	}
 	localRuns, err := h.listLocalCLIRunsByIssue(r, issue)
 	if err != nil {

@@ -334,7 +334,12 @@ describe("ApiClient", () => {
   describe("chat attachment wiring", () => {
     it("uploadFile includes chat_session_id in the FormData body", async () => {
       const fetchMock = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ id: "att-1", url: "https://cdn/x" }), {
+        new Response(JSON.stringify({
+          id: "att-1",
+          url: "https://cdn/x",
+          download_url: "https://cdn/x",
+          filename: "hi.png",
+        }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
@@ -354,6 +359,23 @@ describe("ApiClient", () => {
       expect(body.get("chat_session_id")).toBe("session-123");
       expect(body.get("issue_id")).toBeNull();
       expect(body.get("comment_id")).toBeNull();
+    });
+
+    it("uploadFile rejects malformed success responses instead of returning an empty attachment", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({ id: "", url: "https://cdn/x", filename: "hi.png" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const file = new File(["hi"], "hi.png", { type: "image/png" });
+
+      await expect(client.uploadFile(file)).rejects.toThrow("Invalid upload response");
     });
 
     it("sendChatMessage serialises attachment_ids onto the JSON body when present", async () => {

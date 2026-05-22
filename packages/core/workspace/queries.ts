@@ -48,7 +48,7 @@ export function agentListOptions(wsId: string, owner?: "me") {
   return queryOptions({
     queryKey: owner === "me" ? workspaceKeys.agentsMine(wsId) : workspaceKeys.agents(wsId),
     queryFn: () =>
-      api.listAgents({ workspace_id: wsId, include_archived: true, owner }),
+      api.listAgents({ workspace_id: wsId, include_archived: true, owner, slim: true }),
   });
 }
 

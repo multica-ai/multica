@@ -13,6 +13,7 @@ import {
   useDetachLabel,
   useCreateLabel,
 } from "@multica/core/labels";
+import type { Label } from "@multica/core/types";
 import { LabelChip } from "../../../labels/label-chip";
 import { LabelsPanel } from "../labels-panel";
 import {
@@ -24,10 +25,16 @@ import { useT } from "../../../i18n";
 
 interface LabelPickerProps {
   issueId: string;
+  labels?: Label[];
   /** Optional controlled open state (for tests / cmd+k integration). */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   align?: "start" | "center" | "end";
+  width?: string;
+  trigger?: React.ReactNode;
+  triggerRender?: React.ReactElement;
+  appendAddTrigger?: boolean;
+  addTriggerLabel?: string;
   /** Open the picker on first mount. Used by progressive-disclosure
    *  sidebars so a newly-added field immediately enters edit state. */
   defaultOpen?: boolean;
@@ -67,9 +74,15 @@ function pickInlineColor(name: string): string {
  */
 export function LabelPicker({
   issueId,
+  labels,
   open: controlledOpen,
   onOpenChange,
   align = "start",
+  width = "w-80",
+  trigger: customTrigger,
+  triggerRender,
+  appendAddTrigger = false,
+  addTriggerLabel,
   defaultOpen = false,
 }: LabelPickerProps) {
   const { t } = useT("issues");
@@ -88,7 +101,11 @@ export function LabelPicker({
 
   const wsId = useWorkspaceId();
   const { data: allLabels = [] } = useQuery(labelListOptions(wsId));
-  const { data: attachedLabels = [] } = useQuery(issueLabelsOptions(wsId, issueId));
+  const initialLabels = useMemo(() => labels ? { labels } : undefined, [labels]);
+  const { data: attachedLabels = labels ?? [] } = useQuery({
+    ...issueLabelsOptions(wsId, issueId),
+    initialData: initialLabels,
+  });
 
   const attach = useAttachLabel(issueId);
   const detach = useDetachLabel(issueId);
@@ -140,6 +157,7 @@ export function LabelPicker({
   };
 
   const hasLabels = attachedLabels.length > 0;
+  const addLabelText = addTriggerLabel ?? t(($) => $.pickers.label.trigger_label);
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -149,18 +167,18 @@ export function LabelPicker({
           setOpen(v);
           if (!v) setFilter("");
         }}
-        width="w-80"
+        width={width}
         align={align}
         searchable
         searchPlaceholder={t(($) => $.pickers.label.search_placeholder)}
         onSearchChange={setFilter}
         triggerRender={
-          hasLabels ? (
+          triggerRender ?? (hasLabels ? (
             <div className="flex flex-wrap items-center gap-1 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors" />
-          ) : undefined
+          ) : undefined)
         }
         trigger={
-          hasLabels ? (
+          customTrigger ?? (hasLabels ? (
             <>
               {attachedLabels.map((l) => (
                 <LabelChip
@@ -169,13 +187,22 @@ export function LabelPicker({
                   onRemove={() => detach.mutate(l.id)}
                 />
               ))}
+              {appendAddTrigger && (
+                <span
+                  className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-dashed border-border bg-muted/40 text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-accent hover:text-foreground"
+                  aria-label={addLabelText}
+                  title={addLabelText}
+                >
+                  <Plus className="h-3 w-3" />
+                </span>
+              )}
             </>
           ) : (
             <>
               <Tag className="h-3.5 w-3.5 text-muted-foreground" />
               <span className="text-muted-foreground">{t(($) => $.pickers.label.trigger_label)}</span>
             </>
-          )
+          ))
         }
         footer={
           // Rendered outside the arrow-key listbox so keyboard nav doesn't
