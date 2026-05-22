@@ -182,6 +182,20 @@ export function ManualCreatePanel({
   const [labelIds, setLabelIds] = useState<string[]>([]);
   const [labelSearch, setLabelSearch] = useState("");
 
+  // Inherit labels and project from parent issue when creating a sub-issue.
+  const parentInheritedRef = useRef(false);
+  useEffect(() => {
+    if (parentInheritedRef.current) return;
+    if (!parentIssue) return;
+    parentInheritedRef.current = true;
+    if (parentIssue.labels && parentIssue.labels.length > 0) {
+      setLabelIds(parentIssue.labels.map((l) => l.id));
+    }
+    if (parentIssue.project_id && !initialProjectId) {
+      setProjectId(parentIssue.project_id);
+    }
+  }, [parentIssue, initialProjectId]);
+
   // File upload — collect attachment IDs so we can link them after issue creation.
   const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
   const { uploadWithToast } = useFileUpload(api);
@@ -252,6 +266,7 @@ export function ManualCreatePanel({
     setDueDate(null);
     setProjectId(undefined);
     setLabelIds([]);
+    parentInheritedRef.current = false;
     setParentIssueId(undefined);
     setChildIssues([]);
     setAttachmentIds([]);

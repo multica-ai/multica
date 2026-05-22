@@ -177,7 +177,7 @@ func TestBuildCompactIMNotification_TaskCompleted(t *testing.T) {
 		"https://multica.wujieai.com/openharness/issues/OPE-1005",
 		"验收 PASS，编译复现通过，Fork 特性保留",
 	)
-	expected := "[任务完成] guodage_tester_opus4.6 [OPE-1005](https://multica.wujieai.com/openharness/issues/OPE-1005): 验收 PASS，编译复现通过，Fork 特性保留"
+	expected := "✅ guodage_tester_opus4.6 [OPE-1005](https://multica.wujieai.com/openharness/issues/OPE-1005): 验收 PASS，编译复现通过，Fork 特性保留"
 	if got != expected {
 		t.Errorf("unexpected compact notification:\n  got:  %q\n  want: %q", got, expected)
 	}
@@ -191,7 +191,7 @@ func TestBuildCompactIMNotification_TaskFailed(t *testing.T) {
 		"https://multica.wujieai.com/openharness/issues/OPE-918",
 		"Gitee webhook 测试阻塞，缺真实 payload",
 	)
-	expected := "[任务失败] guodage_dev_opus4.6 [OPE-918](https://multica.wujieai.com/openharness/issues/OPE-918): Gitee webhook 测试阻塞，缺真实 payload"
+	expected := "❌ guodage_dev_opus4.6 [OPE-918](https://multica.wujieai.com/openharness/issues/OPE-918): Gitee webhook 测试阻塞，缺真实 payload"
 	if got != expected {
 		t.Errorf("unexpected compact notification:\n  got:  %q\n  want: %q", got, expected)
 	}
@@ -205,8 +205,8 @@ func TestBuildCompactIMNotification_Mentioned(t *testing.T) {
 		"https://multica.wujieai.com/openharness/issues/OPE-100",
 		"请帮忙看一下这个 Bug",
 	)
-	if !strings.HasPrefix(got, "[被@]") {
-		t.Errorf("expected [被@] prefix, got %q", got)
+	if !strings.HasPrefix(got, "💬") {
+		t.Errorf("expected 💬 prefix, got %q", got)
 	}
 	if !strings.Contains(got, "[OPE-100](") {
 		t.Errorf("expected issue link in compact notification, got %q", got)
@@ -282,7 +282,7 @@ func TestBuildCompactIMNotification_WithNotificationSummary(t *testing.T) {
 		"https://multica.wujieai.com/openharness/issues/OPE-544",
 		summary,
 	)
-	expected := "[任务完成] guodage_dev_opus4.6 [OPE-544](https://multica.wujieai.com/openharness/issues/OPE-544): 验收 PASS，所有测试通过"
+	expected := "✅ guodage_dev_opus4.6 [OPE-544](https://multica.wujieai.com/openharness/issues/OPE-544): 验收 PASS，所有测试通过"
 	if got != expected {
 		t.Errorf("unexpected compact notification with notification_summary:\n  got:  %q\n  want: %q", got, expected)
 	}
@@ -297,8 +297,8 @@ func TestBuildCompactIMNotification_TaskFailedWithSummary(t *testing.T) {
 		"https://multica.wujieai.com/openharness/issues/OPE-544",
 		summary,
 	)
-	if !strings.HasPrefix(got, "[任务失败]") {
-		t.Errorf("expected [任务失败] prefix, got %q", got)
+	if !strings.HasPrefix(got, "❌") {
+		t.Errorf("expected ❌ prefix, got %q", got)
 	}
 	if !strings.Contains(got, summary) {
 		t.Errorf("expected summary in notification, got %q", got)
