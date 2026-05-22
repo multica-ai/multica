@@ -75,6 +75,58 @@ func createQueueGapChild(t *testing.T, parentID, status string) IssueResponse {
 	return child
 }
 
+func createQueueGapProject(t *testing.T) ProjectResponse {
+	t.Helper()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title":     "queue-gap project " + time.Now().Format(time.RFC3339Nano),
+		"status":    "in_progress",
+		"lead_type": "member",
+		"lead_id":   testUserID,
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create project: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var project ProjectResponse
+	if err := json.NewDecoder(w.Body).Decode(&project); err != nil {
+		t.Fatalf("decode project: %v", err)
+	}
+
+	t.Cleanup(func() {
+		ctx := context.Background()
+		testPool.Exec(ctx, `DELETE FROM inbox_item WHERE issue_id IN (SELECT id FROM issue WHERE project_id = $1)`, project.ID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE project_id = $1`, project.ID)
+		testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, project.ID)
+	})
+
+	return project
+}
+
+func createQueueGapProjectIssue(t *testing.T, projectID, status string) IssueResponse {
+	t.Helper()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":      "queue-gap project issue " + status + " " + time.Now().Format(time.RFC3339Nano),
+		"status":     status,
+		"project_id": projectID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create project issue status=%q: expected 201, got %d: %s", status, w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&issue); err != nil {
+		t.Fatalf("decode project issue: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET assignee_type = NULL, assignee_id = NULL WHERE id = $1`, issue.ID); err != nil {
+		t.Fatalf("clear project issue assignee: %v", err)
+	}
+	return issue
+}
+
 func queueGapInboxItemsOn(t *testing.T, issueID string) []struct {
 	Type     string
 	Severity string
@@ -186,5 +238,47 @@ func TestQueueGapAlertSkippedWhenParentHasWaitingMetadata(t *testing.T) {
 	}
 	if got := countSystemCommentsOn(t, fx.parent.ID); got != 0 {
 		t.Fatalf("expected no queue_gap system comment while parent is explicitly waiting, got %d", got)
+	}
+}
+
+func TestProjectQueueGapAlertWhenLastRootIssueReturnsToReview(t *testing.T) {
+	project := createQueueGapProject(t)
+	trigger := createQueueGapProjectIssue(t, project.ID, "in_progress")
+
+	updateChildStatus(t, trigger.ID, "in_review")
+
+	items := queueGapInboxItemsOn(t, trigger.ID)
+	if len(items) != 1 {
+		t.Fatalf("expected exactly 1 project queue_gap inbox item on trigger issue, got %d", len(items))
+	}
+
+	var details map[string]any
+	if err := json.Unmarshal(items[0].Details, &details); err != nil {
+		t.Fatalf("decode queue_gap details: %v", err)
+	}
+	if details["scope"] != "project" {
+		t.Fatalf("expected project scope, got %#v", details["scope"])
+	}
+	if details["target_issue_id"] != trigger.ID {
+		t.Fatalf("expected target_issue_id %q, got %#v", trigger.ID, details["target_issue_id"])
+	}
+}
+
+func TestProjectQueueGapAlertSkippedWhenUnassignedRootIssueStillActive(t *testing.T) {
+	for _, activeStatus := range []string{"todo", "in_progress"} {
+		t.Run(activeStatus, func(t *testing.T) {
+			project := createQueueGapProject(t)
+			trigger := createQueueGapProjectIssue(t, project.ID, "in_progress")
+			active := createQueueGapProjectIssue(t, project.ID, activeStatus)
+
+			updateChildStatus(t, trigger.ID, "in_review")
+
+			if got := len(queueGapInboxItemsOn(t, trigger.ID)); got != 0 {
+				t.Fatalf("expected no project queue_gap while unassigned %s issue remains active, got %d", activeStatus, got)
+			}
+			if got := len(queueGapInboxItemsOn(t, active.ID)); got != 0 {
+				t.Fatalf("expected no queue_gap inbox on the unassigned active issue, got %d", got)
+			}
+		})
 	}
 }

@@ -77,7 +77,7 @@ func (h *Handler) notifyProjectQueueGap(ctx context.Context, prev, issue db.Issu
 	if project.Status != "in_progress" {
 		return
 	}
-	if h.projectHasAssignedActiveIssue(ctx, issue.ProjectID) || h.projectHasExplicitWait(ctx, issue.ProjectID) {
+	if h.projectHasActiveIssue(ctx, issue.ProjectID) || h.projectHasExplicitWait(ctx, issue.ProjectID) {
 		return
 	}
 	if h.hasOpenQueueGapInbox(ctx, issue.ID) {
@@ -290,7 +290,7 @@ func (h *Handler) hasOpenQueueGapInbox(ctx context.Context, issueID pgtype.UUID)
 	return exists
 }
 
-func (h *Handler) projectHasAssignedActiveIssue(ctx context.Context, projectID pgtype.UUID) bool {
+func (h *Handler) projectHasActiveIssue(ctx context.Context, projectID pgtype.UUID) bool {
 	var exists bool
 	if err := h.DB.QueryRow(ctx, `
 		SELECT EXISTS (
@@ -298,7 +298,6 @@ func (h *Handler) projectHasAssignedActiveIssue(ctx context.Context, projectID p
 			  FROM issue
 			 WHERE project_id = $1
 			   AND status IN ('todo', 'in_progress')
-			   AND assignee_id IS NOT NULL
 		)
 	`, projectID).Scan(&exists); err != nil {
 		slog.Warn("queue gap: failed to check active project issues", "project_id", uuidToString(projectID), "error", err)
