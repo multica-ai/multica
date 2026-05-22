@@ -158,7 +158,7 @@ func TestEnqueueMentionedAgentTasks_SelfMentionCrossIssueEnqueues(t *testing.T) 
 		t.Fatalf("before: expected 0 pending tasks on parent issue, got %d", got)
 	}
 
-	testHandler.enqueueMentionedAgentTasks(ctx, fx.IssueB, fx.CommentB, nil, "agent", fx.JID)
+	testHandler.enqueueMentionedAgentTasks(ctx, fx.IssueB, fx.CommentB, nil, "agent", fx.JID, nil)
 
 	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueBID); got != 1 {
 		t.Fatalf("after self-mention from another issue: expected 1 queued task on parent issue, got %d", got)
@@ -189,7 +189,7 @@ func TestEnqueueMentionedAgentTasks_SelfMentionWhileRunningQueuesFollowup(t *tes
 		t.Fatalf("before: expected 0 queued/dispatched tasks (only the running task), got %d", got)
 	}
 
-	testHandler.enqueueMentionedAgentTasks(ctx, fx.IssueA, fx.CommentA, nil, "agent", fx.JID)
+	testHandler.enqueueMentionedAgentTasks(ctx, fx.IssueA, fx.CommentA, nil, "agent", fx.JID, nil)
 
 	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueAID); got != 1 {
 		t.Fatalf("after self-mention while running: expected 1 new queued follow-up, got %d", got)
@@ -232,7 +232,7 @@ func TestEnqueueMentionedAgentTasks_SelfMentionDedupesAgainstPendingTask(t *test
 				t.Fatalf("before: expected 1 pre-existing %s task, got %d", tc.status, before)
 			}
 
-			testHandler.enqueueMentionedAgentTasks(ctx, fx.IssueA, fx.CommentA, nil, "agent", fx.JID)
+			testHandler.enqueueMentionedAgentTasks(ctx, fx.IssueA, fx.CommentA, nil, "agent", fx.JID, nil)
 
 			after := countQueuedOrDispatched(t, fx.JID, fx.IssueAID)
 			if after != 1 {

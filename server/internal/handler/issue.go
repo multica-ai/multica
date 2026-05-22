@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/issueguard"
@@ -1773,6 +1774,7 @@ type CreateIssueRequest struct {
 	StartDate     *string  `json:"start_date"`
 	DueDate       *string  `json:"due_date"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	LabelIDs      []string `json:"label_ids,omitempty"`
 	// OriginType / OriginID stamp the new issue with its provenance so
 	// platform-internal flows can deterministically locate it later. Only
 	// trusted callers should set these — currently the daemon CLI passes
@@ -1872,6 +1874,23 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	labelIDs, ok := parseUUIDSliceOrBadRequest(w, req.LabelIDs, "label_ids")
+	if !ok {
+		return
+	}
+	if len(labelIDs) > 1 {
+		dedup := make([]pgtype.UUID, 0, len(labelIDs))
+		seen := make(map[string]struct{}, len(labelIDs))
+		for _, id := range labelIDs {
+			key := uuidToString(id)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			dedup = append(dedup, id)
+		}
+		labelIDs = dedup
+	}
 
 	var startDate pgtype.Timestamptz
 	if req.StartDate != nil && *req.StartDate != "" {
@@ -1903,6 +1922,20 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 
 	qtx := h.Queries.WithTx(tx)
+	for _, labelID := range labelIDs {
+		if _, err := qtx.GetLabel(r.Context(), db.GetLabelParams{
+			ID: labelID, WorkspaceID: wsUUID,
+		}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "label not found")
+				return
+			}
+			slog.Warn("GetLabel in CreateIssue failed", append(logger.RequestAttrs(r), "error", err, "label_id", uuidToString(labelID))...)
+			writeError(w, http.StatusInternalServerError, "failed to create issue")
+			return
+		}
+	}
+
 	duplicate, foundDuplicate, err := issueguard.LockAndFindActiveDuplicate(r.Context(), qtx, wsUUID, projectID, parentIssueID, req.Title, req.AllowDuplicate)
 	if err != nil {
 		slog.Warn("duplicate issue guard failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
@@ -2001,6 +2034,17 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create issue: "+err.Error())
 		return
 	}
+	for _, labelID := range labelIDs {
+		if err := qtx.AttachLabelToIssue(r.Context(), db.AttachLabelToIssueParams{
+			IssueID:     issue.ID,
+			LabelID:     labelID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err != nil {
+			slog.Warn("AttachLabelToIssue in CreateIssue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", uuidToString(issue.ID), "label_id", uuidToString(labelID))...)
+			writeError(w, http.StatusInternalServerError, "failed to create issue")
+			return
+		}
+	}
 
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create issue")
@@ -2014,6 +2058,13 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
+	if len(labelIDs) > 0 {
+		labels := h.labelsByIssue(r.Context(), issue.WorkspaceID, []pgtype.UUID{issue.ID})[uuidToString(issue.ID)]
+		if labels == nil {
+			labels = []LabelResponse{}
+		}
+		resp.Labels = &labels
+	}
 
 	// Fetch linked attachments so they appear in the response.
 	if len(attachmentIDs) > 0 {

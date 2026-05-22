@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"net/url"
+	"path"
 	"strings"
 )
 
@@ -17,6 +19,40 @@ func sanitizeFilename(name string) string {
 		}
 	}
 	return b.String()
+}
+
+func contentDisposition(disposition, filename string) string {
+	safe := sanitizeFilename(filename)
+	fallback := asciiFilenameFallback(safe)
+	if fallback == "" {
+		fallback = "download"
+	}
+	if fallback == safe {
+		return disposition + `; filename="` + fallback + `"`
+	}
+	encoded := strings.ReplaceAll(url.PathEscape(safe), "+", "%20")
+	return disposition + `; filename="` + fallback + `"; filename*=UTF-8''` + encoded
+}
+
+func asciiFilenameFallback(name string) string {
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		if r >= 0x20 && r <= 0x7e && r != '"' && r != ';' && r != '\\' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	fallback := strings.TrimSpace(b.String())
+	if strings.Trim(fallback, "._") != "" {
+		return fallback
+	}
+	ext := path.Ext(fallback)
+	if ext != "" && strings.Trim(ext, "._") != "" {
+		return "download" + ext
+	}
+	return "download"
 }
 
 // isInlineContentType returns true for media types that browsers should
