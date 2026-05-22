@@ -203,14 +203,18 @@ func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
 	t.Parallel()
 
 	args := buildClaudeArgs(ExecOptions{}, slog.Default())
+	permissionMode := "bypassPermissions"
+	if os.Getuid() == 0 {
+		permissionMode = "ask"
+	}
 	expected := []string{
 		"-p",
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
 		"--strict-mcp-config",
-		"--permission-mode", "bypassPermissions",
 		"--disallowedTools", "AskUserQuestion",
+		"--permission-mode", permissionMode,
 	}
 
 	if len(args) != len(expected) {

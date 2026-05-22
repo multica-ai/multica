@@ -5,7 +5,6 @@ import (
 	"log/slog"
 
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -26,7 +25,7 @@ func registerAutopilotListeners(bus *events.Bus, svc *service.AutopilotService) 
 		if !statusChanged {
 			return
 		}
-		issue, ok := payload["issue"].(handler.IssueResponse)
+		issue, ok := extractIssueFields(payload["issue"])
 		if !ok {
 			return
 		}

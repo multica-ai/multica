@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
@@ -437,6 +438,50 @@ func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMe
 	return raw, nil
 }
 
+// deriveOpencodeGoModel maps opencode-* agent names to opencode-go models.
+// Numeric version groups are joined with dots, while family names keep hyphens.
+func deriveOpencodeGoModel(agentName string) (string, bool) {
+	model, ok := strings.CutPrefix(agentName, "opencode-")
+	if !ok || model == "" {
+		return "", false
+	}
+
+	parts := strings.Split(model, "-")
+	var b strings.Builder
+	for i, part := range parts {
+		if i > 0 {
+			sep := "-"
+			if isDigits(part) && endsWithDigit(parts[i-1]) {
+				sep = "."
+			}
+			b.WriteString(sep)
+		}
+		b.WriteString(part)
+	}
+
+	return "opencode-go/" + b.String(), true
+}
+
+func isDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] < '0' || value[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func endsWithDigit(value string) bool {
+	if value == "" {
+		return false
+	}
+	last := value[len(value)-1]
+	return last >= '0' && last <= '9'
+}
+
 func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 
@@ -487,6 +532,11 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid runtime_id")
 		return
+	}
+	if req.Model == "" && runtime.Provider == "opencode" {
+		if model, ok := deriveOpencodeGoModel(req.Name); ok {
+			req.Model = model
+		}
 	}
 
 	member, ok := h.workspaceMember(w, r, workspaceID)

@@ -96,7 +96,9 @@ services:
     depends_on:
       - backend
     ports:
-      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+      # Bind to Docker host bridge only; public HTTPS goes through Caddy.
+      # Avoid exposing the Next.js origin server directly to the internet.
+      - "172.17.0.1:${FRONTEND_PORT:-3000}:3000"
     environment:
       HOSTNAME: "0.0.0.0"
     restart: unless-stopped
