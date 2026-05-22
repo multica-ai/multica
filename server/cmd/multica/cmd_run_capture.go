@@ -21,21 +21,36 @@ func normalizeCapturedUserText(s string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func isSlashInput(content string) bool {
-	fields := strings.Fields(strings.TrimSpace(content))
+type slashInput struct {
+	Command string
+	Args    string
+}
+
+func parseSlashInput(content string) (slashInput, bool) {
+	trimmed := strings.TrimSpace(content)
+	fields := strings.Fields(trimmed)
 	if len(fields) == 0 || !strings.HasPrefix(fields[0], "/") {
-		return false
+		return slashInput{}, false
 	}
 	name := strings.TrimPrefix(fields[0], "/")
 	if name == "" || strings.Contains(name, "/") {
-		return false
+		return slashInput{}, false
 	}
 	switch name {
-	case "approvals", "clear", "compact", "diff", "exit", "help", "init", "mcp", "model", "new", "prompts", "quit", "resume", "review", "settings", "status":
-		return true
+	case "approvals", "clear", "compact", "diff", "exit", "help", "init", "mcp", "model", "new", "plan", "prompts", "quit", "resume", "review", "settings", "status":
+		args := ""
+		if len(trimmed) > len(fields[0]) {
+			args = strings.TrimSpace(trimmed[len(fields[0]):])
+		}
+		return slashInput{Command: name, Args: args}, true
 	default:
-		return false
+		return slashInput{}, false
 	}
+}
+
+func isSlashInput(content string) bool {
+	_, ok := parseSlashInput(content)
+	return ok
 }
 
 func isHan(r rune) bool {

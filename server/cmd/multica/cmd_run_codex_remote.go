@@ -604,22 +604,30 @@ func (m *codexAppServerMapper) recordStartedItem(params map[string]any) {
 
 func (m *codexAppServerMapper) recordUserMessage(threadID, turnID, itemID string, item map[string]any) {
 	content := strings.TrimSpace(codexAppServerItemText(item))
-	commentable := content != "" && !m.isBootstrap(content) && !isSlashInput(content)
+	slash, isSlash := parseSlashInput(content)
+	commentable := content != "" && !m.isBootstrap(content) && (!isSlash || slash.Args != "")
 	m.mu.Lock()
 	m.turnComment[turnID] = commentable
 	m.mu.Unlock()
 	if !commentable {
 		return
 	}
+	input := map[string]any{
+		"thread_id": threadID,
+		"turn_id":   turnID,
+		"item_id":   itemID,
+	}
+	if isSlash {
+		input["command"] = true
+		input["slash_command"] = slash.Command
+		input["slash_args"] = slash.Args
+		input["commentable"] = true
+	}
 	m.post(localCLIMessage{
 		Type:      "user_input",
 		Content:   content,
 		SourceKey: "thread:" + threadID + ":turn:" + turnID + ":user:" + itemID,
-		Input: map[string]any{
-			"thread_id": threadID,
-			"turn_id":   turnID,
-			"item_id":   itemID,
-		},
+		Input:     input,
 	})
 }
 

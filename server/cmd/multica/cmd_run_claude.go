@@ -256,23 +256,25 @@ func shellQuote(s string) string {
 }
 
 type claudeTranscriptTracker struct {
-	reporter         *localRunReporter
-	usageReporter    *localRunUsageReporter
-	cwd              string
-	bootstrap        string
-	startedAt        time.Time
-	tickerInterval   time.Duration
-	mu               sync.Mutex
-	sessions         map[string]*claudeTrackedSession
-	seen             map[string]bool
-	usageSeen        map[string]bool
-	usageTotals      map[string]localCLIUsage
-	toolByID         map[string]string
-	currentTurnReply bool
-	done             chan struct{}
-	stopped          chan struct{}
-	startOnce        sync.Once
-	closeOnce        sync.Once
+	reporter              *localRunReporter
+	usageReporter         *localRunUsageReporter
+	cwd                   string
+	bootstrap             string
+	startedAt             time.Time
+	tickerInterval        time.Duration
+	mu                    sync.Mutex
+	sessions              map[string]*claudeTrackedSession
+	seen                  map[string]bool
+	usageSeen             map[string]bool
+	usageTotals           map[string]localCLIUsage
+	toolByID              map[string]string
+	currentTurnReply      bool
+	lastAssistantText     string
+	lastAssistantFinalKey string
+	done                  chan struct{}
+	stopped               chan struct{}
+	startOnce             sync.Once
+	closeOnce             sync.Once
 }
 
 type claudeTrackedSession struct {
@@ -405,6 +407,8 @@ func (t *claudeTranscriptTracker) mapLineLocked(session *claudeTrackedSession, r
 		t.mapUserLineLocked(session, raw, key)
 	case "assistant":
 		t.mapAssistantLineLocked(session, raw, key)
+	case "system":
+		t.mapSystemLineLocked(raw)
 	case "result":
 		t.mapResultLineLocked(session, raw, key)
 	}
@@ -418,8 +422,11 @@ func (t *claudeTranscriptTracker) mapUserLineLocked(session *claudeTrackedSessio
 	blocks := claudeContentBlocks(msg["content"])
 	if len(blocks) == 0 {
 		if content := strings.TrimSpace(stringValue(msg["content"])); content != "" {
-			if isClaudeLocalCommandUserContent(content) {
-				return
+			if commandContent, ok := claudeLocalCommandUserContent(content); ok {
+				if commandContent == "" {
+					return
+				}
+				content = commandContent
 			}
 			t.recordClaudeUserPromptLocked(session, content, key)
 		}
@@ -452,18 +459,26 @@ func (t *claudeTranscriptTracker) mapUserLineLocked(session *claudeTrackedSessio
 
 func (t *claudeTranscriptTracker) recordClaudeUserPromptLocked(session *claudeTrackedSession, content, key string) {
 	content = strings.TrimSpace(content)
-	commentable := content != "" && !t.isBootstrap(content) && !isSlashInput(content)
+	slash, isSlash := parseSlashInput(content)
+	commentable := content != "" && !t.isBootstrap(content) && (!isSlash || slash.Args != "")
 	t.currentTurnReply = commentable
 	if !commentable {
 		return
+	}
+	input := map[string]any{
+		"session_id": session.sessionID,
+	}
+	if isSlash {
+		input["command"] = true
+		input["slash_command"] = slash.Command
+		input["slash_args"] = slash.Args
+		input["commentable"] = true
 	}
 	t.post(localCLIMessage{
 		Type:      "user_input",
 		Content:   content,
 		SourceKey: t.sourceKey(session, key, "user"),
-		Input: map[string]any{
-			"session_id": session.sessionID,
-		},
+		Input:     input,
 	})
 }
 
@@ -511,14 +526,32 @@ func (t *claudeTranscriptTracker) mapAssistantLineLocked(session *claudeTrackedS
 		Content:   content,
 		SourceKey: t.sourceKey(session, key, "text"),
 	})
+	t.lastAssistantText = content
+	t.lastAssistantFinalKey = t.sourceKey(session, key, "final")
 	if t.currentTurnReply && claudeStopReason(msg) == "end_turn" && !isStatusOnly(content) {
-		t.post(localCLIMessage{
-			Type:      "final",
-			Content:   content,
-			SourceKey: t.sourceKey(session, key, "final"),
-		})
-		t.currentTurnReply = false
+		t.postClaudeFinalLocked(content, t.lastAssistantFinalKey)
 	}
+}
+
+func (t *claudeTranscriptTracker) mapSystemLineLocked(raw map[string]any) {
+	if stringValue(raw["subtype"]) != "turn_duration" || !t.currentTurnReply || isTrue(raw["isMeta"]) {
+		return
+	}
+	if t.lastAssistantText == "" || isStatusOnly(t.lastAssistantText) {
+		return
+	}
+	t.postClaudeFinalLocked(t.lastAssistantText, t.lastAssistantFinalKey)
+}
+
+func (t *claudeTranscriptTracker) postClaudeFinalLocked(content, sourceKey string) {
+	t.post(localCLIMessage{
+		Type:      "final",
+		Content:   content,
+		SourceKey: sourceKey,
+	})
+	t.currentTurnReply = false
+	t.lastAssistantText = ""
+	t.lastAssistantFinalKey = ""
 }
 
 func (t *claudeTranscriptTracker) recordClaudeUsageLocked(session *claudeTrackedSession, msg map[string]any, key string) {
@@ -566,21 +599,45 @@ func (t *claudeTranscriptTracker) recordClaudeUsageLocked(session *claudeTracked
 	t.usageReporter.Report(total)
 }
 
-func isClaudeLocalCommandUserContent(content string) bool {
+func claudeLocalCommandUserContent(content string) (string, bool) {
 	content = strings.TrimSpace(content)
 	if content == "" {
-		return false
+		return "", false
 	}
 	for _, prefix := range []string{
 		"<local-command-caveat>",
-		"<command-name>",
 		"<local-command-stdout>",
 	} {
 		if strings.HasPrefix(content, prefix) {
-			return true
+			return "", true
 		}
 	}
-	return false
+	if !strings.HasPrefix(content, "<command-name>") {
+		return "", false
+	}
+	name := strings.TrimSpace(claudeTaggedContent(content, "command-name"))
+	args := strings.TrimSpace(claudeTaggedContent(content, "command-args"))
+	if args == "" {
+		return "", true
+	}
+	if !strings.HasPrefix(name, "/") {
+		name = "/" + name
+	}
+	return strings.TrimSpace(name + " " + args), true
+}
+
+func isClaudeLocalCommandUserContent(content string) bool {
+	_, ok := claudeLocalCommandUserContent(content)
+	return ok
+}
+
+func claudeTaggedContent(content, tag string) string {
+	re := regexp.MustCompile(`(?s)<` + regexp.QuoteMeta(tag) + `>(.*?)</` + regexp.QuoteMeta(tag) + `>`)
+	match := re.FindStringSubmatch(content)
+	if len(match) < 2 {
+		return ""
+	}
+	return match[1]
 }
 
 func claudeStopReason(msg map[string]any) string {
