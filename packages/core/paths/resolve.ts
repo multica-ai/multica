@@ -5,7 +5,7 @@ import { paths } from "./paths";
 /**
  * Priority:
  *   !hasOnboarded                         → /onboarding
- *   hasOnboarded && has workspace         → /<first.slug>/issues
+ *   hasOnboarded && has workspace         → /<first.slug>
  *   hasOnboarded && zero workspaces       → /workspaces/new
  *
  * `onboarded_at` is the single source of truth for whether the user has
@@ -29,7 +29,7 @@ export function resolvePostAuthDestination(
   }
   const first = workspaces[0];
   if (first) {
-    return paths.workspace(first.slug).issues();
+    return paths.workspace(first.slug).root();
   }
   return paths.newWorkspace();
 }

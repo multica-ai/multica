@@ -57,6 +57,7 @@ vi.mock("@/stores/tab-store", () => {
 vi.mock("@multica/core/paths", () => ({
   paths: {
     workspace: (slug: string) => ({
+      root: () => `/${slug}`,
       issues: () => `/${slug}/issues`,
     }),
   },
