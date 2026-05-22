@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -213,7 +214,7 @@ func parseUUIDSliceOrBadRequest(w http.ResponseWriter, ids []string, fieldName s
 	for i, id := range ids {
 		u, err := util.ParseUUID(id)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid "+fieldName)
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("%s[%d] is not a valid UUID", fieldName, i))
 			return nil, false
 		}
 		uuids[i] = u
