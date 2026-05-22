@@ -41,7 +41,6 @@ import (
 	cerebrogrouppermissions "github.com/multica-ai/multica/server/internal/cerebro/grouppermissions"
 	cerebroinbox "github.com/multica-ai/multica/server/internal/cerebro/inbox"
 	cerebromentiongate "github.com/multica-ai/multica/server/internal/cerebro/mentiongate"
-	cerebronotifications "github.com/multica-ai/multica/server/internal/cerebro/notifications"
 	// CEREBRO-PATCH(references-routes): JEH-837 issue references handler import.
 	cerebroreferences "github.com/multica-ai/multica/server/internal/cerebro/references"
 	// CEREBRO-PATCH(router-runtime-pause): cerebro runtime pause/unpause service.
@@ -237,11 +236,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// dispatch always-listening agents in channels.
 	channelListenSvc := cerebrochannels.New(cerebroQueries, queries, h.TaskService, bus)
 	h.ChannelListen = channelListenSvc
-	// CEREBRO-PATCH(cerebro-inbox-routes): cerebro-only inbox handlers
-	// (ListActiveIssueTasks; future folders/archive endpoints) live in their
-	// own package so this wiring line is the only conflict surface upstream
-	// merges hit.
-	cerebroNotificationsHandler := cerebronotifications.New(queries)
 	// CEREBRO-PATCH(cerebro-inbox-routes): mounts cerebro-only inbox actions
 	// (mute/unmute/mark-unread). Adding new endpoints here keeps the conflict
 	// surface to a single line per cerebro inbox feature.
@@ -1072,7 +1066,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListInbox)
 				r.Get("/unread-count", h.CountUnreadInbox)
 				// CEREBRO-PATCH(cerebro-inbox-routes): cerebro-only handler.
-				r.Get("/active-issue-tasks", cerebroNotificationsHandler.ListActiveIssueTasks)
+				r.Get("/active-issue-tasks", cerebroInboxHandler.ListActiveIssueTasks)
 				r.Post("/mark-all-read", h.MarkAllInboxRead)
 				r.Post("/archive-all", h.ArchiveAllInbox)
 				r.Post("/archive-all-read", h.ArchiveAllReadInbox)
@@ -1086,20 +1080,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// CEREBRO-PATCH(cerebro-inbox-unarchive): JEH-1166 — unarchive action from archived view.
 				r.Post("/{id}/unarchive", cerebroInboxHandler.UnarchiveInboxItem)
 
-				// Notifications (route='notifications'). Legacy nested routes
-				// CEREBRO-PATCH(cerebro-notifications-api): keep old list shape for existing clients.
-				r.Get("/notifications", h.ListInboxNotifications)
-				r.Get("/notifications/unread-count", h.CountUnreadNotifications)
-				r.Post("/notifications/mark-all-read", h.MarkAllNotificationsRead)
-				r.Post("/notifications/archive-all", h.ArchiveAllNotifications)
-			})
-
-			// CEREBRO-PATCH(cerebro-notifications-api): top-level REST API with cursor pagination.
-			r.Route("/api/notifications", func(r chi.Router) {
-				r.Get("/", h.ListNotifications)
-				r.Get("/unread-count", h.CountUnreadNotifications)
-				r.Patch("/{id}/read", h.MarkNotificationRead)
-				r.Patch("/read-all", h.MarkAllNotificationsRead)
 			})
 
 			// Notification preferences

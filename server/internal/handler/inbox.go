@@ -442,5 +442,5 @@ func (h *Handler) ArchiveCompletedInbox(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"count": count})
 }
 
-// ListActiveIssueTasks moved to server/internal/cerebro/notifications/handler.go
-// (cerebro-only handler — wired in router.go via cerebroNotificationsHandler).
+// ListActiveIssueTasks moved to server/internal/cerebro/inbox/handler.go
+// (cerebro-only handler — wired in router.go via cerebroInboxHandler).

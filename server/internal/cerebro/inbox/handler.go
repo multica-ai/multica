@@ -1,11 +1,6 @@
 // Package inbox holds cerebro-only HTTP handlers for the inbox feature
-// (mute / unmute / mark-unread). They live here so upstream merges of the
+// (active issue tasks / mute / unmute / mark-unread). They live here so upstream merges of the
 // upstream inbox handler don't conflict on cerebro-only routes.
-//
-// Pattern mirrors server/internal/cerebro/notifications/handler.go: own struct
-// with its own deps, package-private auth/response helpers, and a single
-// CEREBRO-PATCH(cerebro-inbox-routes) marker line in the router that wires
-// the routes in.
 package inbox
 
 import (
@@ -154,6 +149,40 @@ func (h *Handler) UnarchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, toResponse(item))
+}
+
+// ListActiveIssueTasks returns issue IDs in the current workspace that have
+// in-flight tasks. Drives the "agent is working" indicator on inbox rows.
+func (h *Handler) ListActiveIssueTasks(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	workspaceID := middleware.WorkspaceIDFromContext(r.Context())
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace id")
+		return
+	}
+	tasks, err := h.Upstream.ListActiveIssueTaskStatusesInWorkspace(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list active issue tasks")
+		return
+	}
+
+	ids := make([]string, 0, len(tasks))
+	out := make([]map[string]string, 0, len(tasks))
+	for _, task := range tasks {
+		issueID := util.UUIDToString(task.IssueID)
+		ids = append(ids, issueID)
+		out = append(out, map[string]string{
+			"issue_id": issueID,
+			"status":   task.Status,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"issue_ids": ids,
+		"tasks":     out,
+	})
 }
 
 func toResponse(i cerebrodb.InboxItem) inboxItemResponse {

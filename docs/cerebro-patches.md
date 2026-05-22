@@ -474,7 +474,6 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `notification-routing-test-cerebro` | server/cmd/server/notification_routing_test.go | 520 | Server cmd additions |
 | `notify-all-mobile-inbox` | server/cmd/server/notification_routing.go<br>server/cmd/server/notification_routing_test.go | 8 | JEH-737 master toggle: when `preferences.notifications.notify_all_mobile_inbox` is true, mobile channel resolution mirrors the inbox channel for the same key so every inbox item also fires a Web Push without curating the per-key matrix. |
 | `push-deep-link` | server/cmd/server/notification_listeners.go<br>server/cmd/server/notification_routing_test.go | 30 | Web Push payload `URL` now includes the workspace slug (`/<slug>/inbox?issue=<id>`) so tapping the notification deep-links to the inbox row that triggered it; old `/?issue=<id>` lost the query through the landing-page redirect. JEH-737. |
-| `notifications-handler` | server/internal/handler/notifications.go | 134 | Notification handler additions |
 | `orphan-task-test` | server/internal/handler/daemon_test.go | 0 | Cerebro orphan-task test additions |
 | `page-header-cerebro` | packages/views/layout/page-header.tsx | 1 | Layout cerebro additions |
 | `page-header-sticky` | packages/views/layout/page-header.tsx | 2 | JEH-821 — keep dashboard headers visible while mobile keyboard focus changes the visual viewport |
@@ -705,7 +704,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `autopilot-detail-nav-state` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | JEH-1766 — remove `editDialogOpen` state; edit button navigates to full-page edit. |
 | `autopilot-detail-nav-edit-button` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | JEH-1766 — Edit button navigates to `/autopilots/:id/edit` instead of opening dialog. |
 | `autopilot-detail-nav-no-dialog` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | JEH-1766 — remove edit dialog render block from detail page. |
-| `notification-events` | server/internal/handler/comment.go<br>server/internal/handler/issue.go<br>server/internal/service/task.go<br>server/pkg/db/queries/notification.sql | ~140 | JEH-1804/JEH-1805 — durable `notifications` rows are inserted in the same transaction as comment mentions, issue status/assignment changes, and terminal agent runs. Metadata is capped to issue title plus short snapshots. |
+| `comment-create-transaction` | server/internal/handler/comment.go | 1 | FIR-1914 follow-up: comment creation keeps the existing transaction shape after durable notification rows were removed. |
+| `issue-update-transaction` | server/internal/handler/issue.go | 1 | FIR-1914 follow-up: issue updates keep the existing transaction shape after durable notification rows were removed. |
 | `agent-avatar-generate` | server/internal/cerebro/agent_avatar/handler.go | 174 | JEH-1563 — net-new fork file: POST /api/agents/generate-avatar calls OpenRouter gpt-5-image-mini, uploads PNG to storage, returns URL. |
 | `agent-avatar-generate` | server/cmd/server/router.go | 2 | JEH-1563 — import cerebroagentavatar, instantiate handler with storage, mount POST /api/agents/generate-avatar. |
 | `agent-avatar-generate` | packages/core/api/client.ts | 4 | JEH-1563 — `generateAgentAvatar(agentName, customPrompt?)` method on ApiClient. |

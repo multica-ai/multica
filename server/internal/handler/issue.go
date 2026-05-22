@@ -19,7 +19,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
-	cnotifications "github.com/multica-ai/multica/server/internal/cerebro/notifications"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -2245,7 +2244,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Determine actor identity: agent (via X-Agent-ID header) or member.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
-	// CEREBRO-PATCH(notification-events): issue update + notification rows commit atomically.
+	// CEREBRO-PATCH(issue-update-transaction): keep issue updates atomic with side effects below.
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update issue")
@@ -2276,41 +2275,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	prevDueDate := timestampToPtr(prevIssue.DueDate)
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
-
-	if statusChanged {
-		subs, err := qtx.ListIssueSubscribers(r.Context(), issue.ID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to create status notifications")
-			return
-		}
-		if err := cnotifications.CreateForRecipients(r.Context(), qtx, cnotifications.Event{
-			WorkspaceID:   issue.WorkspaceID,
-			Type:          "issue.status_changed",
-			ReferenceID:   issue.ID,
-			ReferenceType: "issue",
-			Metadata: cnotifications.IssueMetadata(issue, map[string]any{
-				"status_fra": prevIssue.Status,
-				"status_til": issue.Status,
-			}),
-		}, cnotifications.RecipientsFromSubscribers(subs)); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to create status notifications")
-			return
-		}
-	}
-	if assigneeChanged && issue.AssigneeID.Valid && (issue.AssigneeType.String == "member" || issue.AssigneeType.String == "agent") {
-		if err := cnotifications.Create(r.Context(), qtx, cnotifications.Event{
-			WorkspaceID:   issue.WorkspaceID,
-			RecipientType: issue.AssigneeType.String,
-			RecipientID:   issue.AssigneeID,
-			Type:          "issue.assigned",
-			ReferenceID:   issue.ID,
-			ReferenceType: "issue",
-			Metadata:      cnotifications.IssueMetadata(issue, nil),
-		}); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to create assignment notification")
-			return
-		}
-	}
 
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update issue")
