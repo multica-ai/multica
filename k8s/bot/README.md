@@ -2,6 +2,12 @@
 
 These manifests are a deployable template for the `multica-bot` namespace.
 
+
+## Release model
+
+This directory contains the baseline Kubernetes manifests for the `multica-bot` namespace. Release/source-of-truth rules live in `.ci/deploy.md`; follow that file before changing image tags, env injection, or Jenkins-driven deployment behavior.
+
+
 ## Secret handling
 
 Do not commit real credentials into `k8s/bot/secret.yaml`. The checked-in file is an `envsubst` template that should be rendered from a local `.env.bot` file:

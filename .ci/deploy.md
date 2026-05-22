@@ -11,6 +11,36 @@
 3. **Release 最后创建**：只有 backend、frontend、CLI 三个组件都发布成功，并且版本校验通过后，才能创建或更新 Gitee Release。
 4. **不要让下游步骤自行猜版本**：尤其是 CLI Jenkins Job 不应只靠“最新 tag”推导发布版本；如果 Jenkins Job 暂未支持显式版本参数，发布流程必须在 Release 前校验 Jenkins 实际产物版本。
 
+
+## Source of truth：仓库配置、ENV 与 Jenkins
+
+1. **OPS / Agent 发布必须优先遵循本文件**：执行 Multica 发布前先阅读 `.ci/deploy.md`，再触发 Jenkins 或修改 K8S。不要绕过本文件直接根据历史命令发布。
+2. **`k8s/bot/*.yaml` 管 desired baseline**：namespace、service、ingress、PVC、probes、resources、env 引用、secret key template 等基础配置由仓库维护。
+3. **Jenkins 管 release artifact**：backend/frontend 的线上 image tag 由 Jenkins 发布流程构建并通过 `kubectl set image` 注入。仓库 manifest 里的 image tag 是模板/默认值，不代表线上当前版本。不要把 `0.BUILD_NUMBER`、rollout timestamp、deployment revision、resourceVersion、live deploy annotations 等 transient 字段同步回仓库。
+4. **ENV 注入应显式流程化**：如果某次发布需要依赖 `.env.bot` 中声明的个性化 ENV，应在发布流程中先渲染 `k8s/bot/secret.yaml` 并 apply 到目标 namespace，再 rollout backend/frontend。Agent 不需要理解每个 ENV 的业务含义，但必须保证 `.env.bot` → `multica-bot-secrets` 的注入步骤可追踪、可验证。
+5. **Secret value 不进仓库**：仓库只保存 `secret.yaml` 的 key template；真实值来自 Jenkins credentials / 发布环境的 `.env.bot`。
+6. **live 经验回流要走小 diff**：如果线上手动调整被确认为 desired state（例如资源 limit），只同步对应字段，并说明原因；不要整份 live dump 覆盖仓库 YAML。
+
+### ENV 注入建议流程
+
+当发布需要刷新环境变量时，Jenkins 应执行等价流程：
+
+```bash
+set -a
+source .env.bot
+set +a
+envsubst < k8s/bot/secret.yaml | kubectl apply -n multica-bot -f -
+kubectl rollout restart deployment/backend -n multica-bot
+kubectl rollout status deployment/backend -n multica-bot --timeout=180s
+```
+
+要求：
+
+- `.env.bot` 由 Jenkins credentials 或受控发布环境提供，不提交到 Git。
+- `secret.yaml` 新增/删除 key 必须走 PR。
+- 发布报告需要记录是否刷新 ENV、使用的 Jenkins credentials ID / 环境来源、目标 namespace，以及 rollout 结果。
+- 如果只发布镜像且 ENV 未变化，可以跳过 ENV apply，但要在发布报告中说明“ENV 未刷新”。
+
 ## 组件
 
 ### backend
