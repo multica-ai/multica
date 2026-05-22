@@ -1860,6 +1860,18 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		originID = oid
 	}
 
+	// Place the new issue at the top of its status column in manual sort order.
+	// Query the current minimum position for this workspace+status and subtract 1
+	// so the new issue always sorts first when the user is in "Manual" mode.
+	var minPos float64
+	if scanErr := tx.QueryRow(r.Context(),
+		`SELECT COALESCE(MIN(position), 0) FROM issue WHERE workspace_id = $1 AND status = $2`,
+		wsUUID, status,
+	).Scan(&minPos); scanErr != nil {
+		minPos = 0
+	}
+	newPosition := minPos - 1
+
 	var issue db.Issue
 	if originType.Valid {
 		issue, err = qtx.CreateIssueWithOrigin(r.Context(), db.CreateIssueWithOriginParams{
@@ -1873,7 +1885,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			CreatorType:   creatorType,
 			CreatorID:     parseUUID(actualCreatorID),
 			ParentIssueID: parentIssueID,
-			Position:      0,
+			Position:      newPosition,
 			StartDate:     startDate,
 			DueDate:       dueDate,
 			Number:        issueNumber,
@@ -1893,7 +1905,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			CreatorType:   creatorType,
 			CreatorID:     parseUUID(actualCreatorID),
 			ParentIssueID: parentIssueID,
-			Position:      0,
+			Position:      newPosition,
 			StartDate:     startDate,
 			DueDate:       dueDate,
 			Number:        issueNumber,
