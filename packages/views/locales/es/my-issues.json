@@ -1,0 +1,43 @@
+{
+  "page": {
+    "breadcrumb": "Mis Issues",
+    "workspace_fallback": "Workspace",
+    "empty_title": "No hay issues asignados a vos",
+    "empty_description": "Los issues que crees o te sean asignados aparecerán acá."
+  },
+  "header": {
+    "scope": {
+      "all_label": "Todos",
+      "all_description": "Asignados a mí, creados por mí, o que involucren mis agents y squads",
+      "assigned_label": "Asignados",
+      "assigned_description": "Issues asignados a mí",
+      "created_label": "Creados",
+      "created_description": "Issues que creé",
+      "agents_label": "Mis Agents y Squads",
+      "agents_description": "Issues asignados a mis agents"
+    },
+    "filter_button": "Filtrar",
+    "filter_status": "Estado",
+    "filter_priority": "Prioridad",
+    "issue_count_one": "{{count}} issue",
+    "issue_count_other": "{{count}} issues",
+    "reset_filters": "Limpiar todos los filtros",
+    "display_settings": "Configuración de vista",
+    "grouping": "Agrupar por",
+    "group_status": "Estado",
+    "group_assignee": "Asignatario",
+    "ordering": "Orden",
+    "ascending": "Ascendente",
+    "descending": "Descendente",
+    "card_properties": "Propiedades de tarjeta",
+    "view_board": "Vista de tablero",
+    "view_list": "Vista de lista",
+    "view_label": "Vista",
+    "view_board_short": "Tablero",
+    "view_list_short": "Lista",
+    "sort_manual": "Manual"
+  },
+  "errors": {
+    "move_failed": "Falló al mover el issue"
+  }
+}

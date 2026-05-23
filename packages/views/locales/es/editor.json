@@ -1,0 +1,75 @@
+{
+  "bubble_menu": {
+    "bold": "Negrita",
+    "italic": "Cursiva",
+    "strikethrough": "Tachado",
+    "code": "Código",
+    "link": "Enlace",
+    "list": "Lista",
+    "quote": "Cita",
+    "url_aria_label": "URL",
+    "heading_dropdown": {
+      "text": "Texto",
+      "normal_text": "Texto normal",
+      "heading_1": "Título 1",
+      "heading_2": "Título 2",
+      "heading_3": "Título 3"
+    },
+    "list_dropdown": {
+      "bullet_list": "Lista con viñetas",
+      "ordered_list": "Lista numerada"
+    },
+    "sub_issue": {
+      "tooltip": "Crear sub-issue desde la selección",
+      "created": "Creado {{identifier}}",
+      "create_failed": "Falló al crear el sub-issue"
+    }
+  },
+  "image": {
+    "view": "Ver imagen",
+    "download": "Descargar",
+    "copy_link": "Copiar enlace",
+    "delete": "Eliminar",
+    "link_copied": "Enlace copiado",
+    "copy_link_failed": "Falló al copiar el enlace"
+  },
+  "attachment": {
+    "download_failed": "No se pudo obtener un enlace de descarga. Intentá de nuevo en un momento.",
+    "preview": "Vista previa",
+    "preview_loading": "Cargando vista previa…",
+    "preview_failed": "No se pudo cargar la vista previa",
+    "preview_too_large": "El archivo es demasiado grande para la vista previa. Descargalo.",
+    "preview_unsupported": "Este tipo de archivo no se puede previsualizar.",
+    "close": "Cerrar",
+    "open_in_new_tab": "Abrir en nueva pestaña"
+  },
+  "link_hover": {
+    "copy_link": "Copiar enlace",
+    "open_link": "Abrir enlace",
+    "link_copied": "Enlace copiado",
+    "copy_failed": "Falló al copiar"
+  },
+  "mention": {
+    "group_users": "Usuarios",
+    "group_issues": "Issues",
+    "all_members": "Todos los miembros",
+    "searching": "Buscando...",
+    "no_results": "Sin resultados"
+  },
+  "code_block": {
+    "copy_code": "Copiar código",
+    "show_preview": "Mostrar vista previa",
+    "show_source": "Mostrar código fuente",
+    "fullscreen": "Pantalla completa"
+  },
+  "file_card": {
+    "uploading": "Subiendo {{filename}}"
+  },
+  "title_editor": {
+    "title_aria_label": "Título"
+  },
+  "mermaid": {
+    "render_error": "No se pudo renderizar el diagrama Mermaid.",
+    "rendering": "Renderizando diagrama…"
+  }
+}

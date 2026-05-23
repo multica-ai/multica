@@ -1,0 +1,71 @@
+{
+  "page": {
+    "title": "Bandeja de entrada",
+    "back": "Bandeja de entrada"
+  },
+  "menu": {
+    "mark_all_read": "Marcar todo como leído",
+    "archive_all": "Archivar todo",
+    "archive_all_read": "Archivar todo lo leído",
+    "archive_completed": "Archivar completados"
+  },
+  "list": {
+    "empty": "Sin notificaciones",
+    "mark_done_tooltip": "Marcar como hecho",
+    "archive_tooltip": "Archivar",
+    "time": {
+      "just_now": "recién",
+      "minutes": "{{count}}m",
+      "hours": "{{count}}h",
+      "days": "{{count}}d"
+    }
+  },
+  "detail": {
+    "select_prompt": "Seleccioná una notificación para ver detalles",
+    "empty": "Tu bandeja de entrada está vacía",
+    "original_input": "Entrada original",
+    "edit_advanced": "Editar como formulario avanzado",
+    "archive": "Archivar"
+  },
+  "types": {
+    "issue_assigned": "Asignado",
+    "unassigned": "Desasignado",
+    "assignee_changed": "Asignatario cambiado",
+    "status_changed": "Estado cambiado",
+    "priority_changed": "Prioridad cambiada",
+    "start_date_changed": "Fecha de inicio cambiada",
+    "due_date_changed": "Fecha de vencimiento cambiada",
+    "new_comment": "Nuevo comentario",
+    "mentioned": "Mencionado",
+    "review_requested": "Revisión solicitada",
+    "task_completed": "Tarea completada",
+    "task_failed": "Tarea fallida",
+    "agent_blocked": "Agent bloqueado",
+    "agent_completed": "Agent completó",
+    "reaction_added": "Reaccionó",
+    "quick_create_done": "Creado con agent",
+    "quick_create_failed": "Falló la creación con agent"
+  },
+  "labels": {
+    "set_status_to": "Estado cambiado a",
+    "set_priority_to": "Prioridad cambiada a",
+    "assigned_to": "Asignado a {{name}}",
+    "removed_assignee": "Asignatario eliminado",
+    "set_start_date_to": "Fecha de inicio establecida a {{date}}",
+    "removed_start_date": "Fecha de inicio eliminada",
+    "set_due_date_to": "Fecha de vencimiento establecida a {{date}}",
+    "removed_due_date": "Fecha de vencimiento eliminada",
+    "reacted_to_comment": "Reaccionó {{emoji}} a tu comentario",
+    "created_with_agent": "Creado con agent: {{identifier}}",
+    "failed_with_detail": "Falló: {{detail}}"
+  },
+  "errors": {
+    "mark_read_failed": "Falló al marcar como leído",
+    "archive_failed": "Falló al archivar",
+    "mark_done_failed": "Falló al marcar como hecho",
+    "mark_all_read_failed": "Falló al marcar todo como leído",
+    "archive_all_failed": "Falló al archivar todo",
+    "archive_all_read_failed": "Falló al archivar lo leído",
+    "archive_completed_failed": "Falló al archivar los completados"
+  }
+}
