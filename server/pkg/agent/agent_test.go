@@ -85,6 +85,16 @@ func TestDetectVersionFailsForMissingBinary(t *testing.T) {
 	}
 }
 
+func TestExtractOzDebugInfoVersion(t *testing.T) {
+	t.Parallel()
+
+	got := extractOzDebugInfoVersion(`Warp version: Some("v0.2026.04.08.08.36.stable_02")
+uname(1) output: Darwin test-host`)
+	if got != "Oz v0.2026.04.08.08.36.stable_02" {
+		t.Fatalf("extractOzDebugInfoVersion() = %q", got)
+	}
+}
+
 func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	t.Parallel()
 

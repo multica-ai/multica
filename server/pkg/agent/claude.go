@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -658,9 +659,44 @@ func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
 	hideAgentWindow(cmd)
 	data, err := cmd.Output()
 	if err != nil {
+		if filepath.Base(execPath) == "oz" {
+			if version, ok := detectOzVersionFromDebugInfo(ctx, execPath); ok {
+				return version, nil
+			}
+		}
 		return "", fmt.Errorf("detect version for %s: %w", execPath, err)
 	}
 	return extractVersionLine(string(data)), nil
+}
+
+func detectOzVersionFromDebugInfo(ctx context.Context, execPath string) (string, bool) {
+	cmd := exec.CommandContext(ctx, execPath, "dump-debug-info")
+	hideAgentWindow(cmd)
+	data, err := cmd.Output()
+	if err != nil {
+		return "", false
+	}
+	version := extractOzDebugInfoVersion(string(data))
+	if version == "" {
+		return "", false
+	}
+	return version, true
+}
+
+func extractOzDebugInfoVersion(raw string) string {
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "Warp version:") {
+			continue
+		}
+		start := strings.Index(line, `"`)
+		end := strings.LastIndex(line, `"`)
+		if start >= 0 && end > start {
+			return "Oz " + line[start+1:end]
+		}
+		return extractVersionLine(line)
+	}
+	return extractVersionLine(raw)
 }
 
 // extractVersionLine pulls the version line out of a `<cli> --version` capture,
