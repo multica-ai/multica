@@ -1,11 +1,11 @@
 ---
 title: AI coding tools matrix
-description: Multica supports 11 AI coding tools; they implement the same interface, but the capability details diverge significantly.
+description: Multica supports 12 AI coding tools; they implement the same interface, but the capability details diverge significantly.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica ships with built-in support for **11 AI coding tools**. They all implement the same interface — queue, dispatch, execute, return results — so you can drive any of them from the same Multica board. **But the capability details diverge significantly**: whether session resumption actually works, whether MCP is supported, where skill files live, how models are selected. This page is the full matrix.
+Multica ships with built-in support for **12 AI coding tools**. They all implement the same interface — queue, dispatch, execute, return results — so you can drive any of them from the same Multica board. **But the capability details diverge significantly**: whether session resumption actually works, whether MCP is supported, where skill files live, how models are selected. This page is the full matrix.
 
 For guidance on picking a tool when creating an agent, see [Creating and configuring agents](/agents-create).
 
@@ -24,12 +24,13 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 | **OpenCode** | SST | ✅ | ❌ | `.opencode/skills/` | Dynamic discovery |
 | **OpenClaw** | Open source | ✅ | ❌ | `.agent_context/skills/` (fallback) | Bound to the agent, can't be switched per task |
 | **Pi** | Inflection AI | ✅ (session is a file path) | ❌ | `.pi/skills/` | Dynamic discovery |
+| **Qwenpaw** | Qwen (Alibaba) | ✅ | ❌ | `.qwenpaw/skills/` | Dynamic discovery |
 
 ## What each tool is for
 
 ### Claude Code
 
-From Anthropic. **First choice for new users** — the most complete feature set: session resumption actually works, it's the **only one of the 11 that truly reads MCP configuration**, and it supports fine-tuning flags like `--max-turns` and `--append-system-prompt`. Requires an Anthropic API key.
+From Anthropic. **First choice for new users** — the most complete feature set: session resumption actually works, it's the **only one of the 12 that truly reads MCP configuration**, and it supports fine-tuning flags like `--max-turns` and `--append-system-prompt`. Requires an Anthropic API key.
 
 ### Codex
 
@@ -71,13 +72,17 @@ Open-source project, a CLI agent orchestrator. **Model is bound at the agent lay
 
 From Inflection AI, minimalist. **Session resumption is unusual** — the session ID is a file path on disk (`~/.pi/...`) rather than a string ID. In other tools, the resume id is a string returned by the CLI; in Pi, the resume id is the session file itself.
 
+### Qwenpaw
+
+From the Qwen team (Alibaba Cloud). Uses the ACP protocol over stdio via `qwenpaw acp`. Session resumption works through ACP `session/load`, model selection works through a `--model` flag, and skills are copied into `.qwenpaw/skills/` for native project-level discovery.
+
 ## Session resumption: who really supports it
 
 The session resumption mechanism is covered in [Tasks](/tasks#can-a-task-continue-from-the-previous-context). Here's the **exact current state** per tool:
 
 | Status | Tools | Meaning |
 |---|---|---|
-| ✅ Really works | Claude Code, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi | Pass the resume id and it continues from the previous context |
+| ✅ Really works | Claude Code, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi, Qwenpaw | Pass the resume id and it continues from the previous context |
 | ⚠️ Code exists but unreachable | Codex, Cursor | Resume paths exist in the code but aren't actually reached (Codex silently falls back; Cursor doesn't return session id) — **treat as unsupported** |
 | ❌ None | Gemini | The CLI has no resume mechanism |
 
@@ -85,7 +90,7 @@ The session resumption mechanism is covered in [Tasks](/tasks#can-a-task-continu
 
 ## MCP configuration: only Claude Code actually reads it
 
-**Of the 11 tools, only Claude Code actually consumes `mcp_config`**. The other 10 accept the field but **completely ignore it** — no error, no warning, the config just has no effect.
+**Of the 12 tools, only Claude Code actually consumes `mcp_config`**. The other 11 accept the field but **completely ignore it** — no error, no warning, the config just has no effect.
 
 <Callout type="warning">
 If you set `mcp_config` in an agent configuration but pick a tool other than Claude Code, your MCP servers have **no effect** on that agent. MCP integration currently covers Claude Code only.
@@ -105,6 +110,7 @@ Each tool uses **its own** skill discovery path. Before a task runs, the Multica
 | Kiro CLI | `.kiro/skills/` | ✅ Native |
 | OpenCode | `.opencode/skills/` | ✅ Native |
 | Pi | `.pi/skills/` | ✅ Native |
+| Qwenpaw | `.qwenpaw/skills/` | ✅ Native |
 | Gemini | `.agent_context/skills/` | ⚠️ Generic fallback |
 | Hermes | `.agent_context/skills/` | ⚠️ Generic fallback |
 | OpenClaw | `.agent_context/skills/` | ⚠️ Generic fallback |
