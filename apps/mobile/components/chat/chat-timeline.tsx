@@ -29,6 +29,11 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  groupConsecutiveSteps,
+  getGroupLabel,
+  getGroupIcon,
+} from "@/lib/step-grouping";
 
 interface Props {
   items: TaskMessagePayload[];
@@ -60,9 +65,13 @@ export function ChatTimeline({ items, isStreaming = false }: Props) {
       </CollapsibleTrigger>
       <CollapsibleContent>
         <View className="mt-1 rounded-lg border border-border bg-muted/20 px-2 py-1.5 gap-0.5">
-          {processSteps.map((item) => (
-            <StepRow key={`${item.task_id}-${item.seq}`} item={item} />
-          ))}
+          {groupConsecutiveSteps(processSteps).map((group, idx) =>
+            group.kind === "single" ? (
+              <StepRow key={`${group.item.task_id}-${group.item.seq}`} item={group.item} />
+            ) : (
+              <StepGroupRow key={`group-${group.type}-${idx}`} group={group} />
+            ),
+          )}
         </View>
       </CollapsibleContent>
     </Collapsible>
@@ -74,6 +83,38 @@ function StreamingDot() {
   // below may still be growing. Real "agent is alive" cue is StatusPill
   // (breathing dots) above; this is a quiet co-signal.
   return <View className="h-1.5 w-1.5 rounded-full bg-primary" />;
+}
+
+function StepGroupRow({
+  group,
+}: {
+  group: Extract<
+    import("@/lib/step-grouping").StepGroup,
+    { kind: "group" }
+  >;
+}) {
+  return (
+    <Collapsible>
+      <CollapsibleTrigger asChild>
+        <View className="py-0.5 flex-row items-start gap-1.5 active:opacity-70">
+          <Ionicons
+            name={getGroupIcon(group.type)}
+            size={12}
+            color="#a1a1aa"
+            style={{ marginTop: 2 }}
+          />
+          <Text className="text-xs text-muted-foreground">
+            {getGroupLabel(group.type, group.items.length)}
+          </Text>
+        </View>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        {group.items.map((item) => (
+          <StepRow key={`${item.task_id}-${item.seq}`} item={item} />
+        ))}
+      </CollapsibleContent>
+    </Collapsible>
+  );
 }
 
 function StepRow({ item }: { item: TaskMessagePayload }) {
