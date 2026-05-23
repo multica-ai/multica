@@ -259,13 +259,11 @@ func main() {
 	defer analyticsClient.Close()
 
 	queries := db.New(pool)
-	// CEREBRO-PATCH(remove-notification-listeners): Web Push delivery service
-	// is still used by /api/push/* handlers; notification event listeners were
-	// removed with the legacy notification stack.
+	// CEREBRO-PATCH(web-push-service): Web Push delivery service used by
+	// notification listeners + /api/push/* handlers.
 	pushSvc := service.NewPushService(queries)
 	hub.SetAuthorizer(newScopeAuthorizer(queries))
-	registerSubscriberListeners(bus, queries)
-	registerActivityListeners(bus, queries)
+	registerCoreEventListeners(bus, queries, pushSvc)
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server

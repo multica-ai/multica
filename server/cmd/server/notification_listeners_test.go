@@ -71,9 +71,54 @@ func createTestSubIssue(t *testing.T, workspaceID, creatorID, parentIssueID stri
 func newNotificationBus(t *testing.T, queries *db.Queries) *events.Bus {
 	t.Helper()
 	bus := events.New()
-	registerSubscriberListeners(bus, queries)
-	registerNotificationListeners(bus, queries, nil)
+	registerCoreEventListeners(bus, queries, nil)
 	return bus
+}
+
+func TestCoreEventListenerWiring_DeliversAgentCommentToHumanSubscriber(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerCoreEventListeners(bus, queries, nil)
+
+	agentID := "00000000-0000-0000-0000-aaaaaaaaaaaa"
+
+	subscriberEmail := "notif-agent-comment-subscriber@multica.ai"
+	subscriberID := createTestUser(t, subscriberEmail)
+	t.Cleanup(func() {
+		cleanupTestUser(t, subscriberEmail)
+		clearUserPrefs(t, subscriberID)
+	})
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+	addTestSubscriber(t, issueID, "member", subscriberID, "creator")
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "agent",
+		ActorID:     agentID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-000000000099",
+				IssueID:    issueID,
+				AuthorType: "agent",
+				AuthorID:   agentID,
+				Content:    stringPtr("agent handoff"),
+				Type:       "comment",
+			},
+			"issue_title":  "agent-comment-wiring",
+			"issue_status": "in_review",
+		},
+	})
+
+	items := inboxItemsByRoute(t, subscriberID, routeNotifications)
+	if len(items) != 1 || items[0].Type != "new_comment" {
+		t.Fatalf("expected agent comment to create one notifications-routed new_comment item, got %+v", items)
+	}
 }
 
 // TestNotification_IssueCreated_AssigneeNotified verifies that when an issue is
@@ -439,8 +484,8 @@ func TestNotification_AssigneeChanged(t *testing.T) {
 				AssigneeType: &newAssigneeType,
 				AssigneeID:   &newAssigneeID,
 			},
-			"assignee_changed":  true,
-			"status_changed":    false,
+			"assignee_changed":   true,
+			"status_changed":     false,
 			"prev_assignee_type": &oldAssigneeType,
 			"prev_assignee_id":   &oldAssigneeID,
 		},
