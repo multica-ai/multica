@@ -14,6 +14,7 @@ export interface FirtalGatewayWorkspaceSettings {
 
 export interface WorkspaceSettings extends Record<string, unknown> {
   firtal_gateway?: FirtalGatewayWorkspaceSettings;
+  started_issues_in_inbox?: boolean;
 }
 
 export interface Workspace {

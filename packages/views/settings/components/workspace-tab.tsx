@@ -133,6 +133,10 @@ export function WorkspaceTab() {
   const [description, setDescription] = useState(workspace?.description ?? "");
   const [context, setContext] = useState(workspace?.context ?? "");
   const [issuePrefix, setIssuePrefix] = useState(workspace?.issue_prefix ?? "");
+  const [startedIssuesInInbox, setStartedIssuesInInbox] = useState(
+    workspace?.settings?.started_issues_in_inbox === true,
+  );
+  const [savingWorkflow, setSavingWorkflow] = useState(false);
   const [saving, setSaving] = useState(false);
   const initialGatewaySettings = getFirtalGatewaySettings(workspace);
   const [gatewayEnabled, setGatewayEnabled] = useState(initialGatewaySettings.enabled === true);
@@ -177,6 +181,7 @@ export function WorkspaceTab() {
     setDescription(workspace?.description ?? "");
     setContext(workspace?.context ?? "");
     setIssuePrefix(workspace?.issue_prefix ?? "");
+    setStartedIssuesInInbox(workspace?.settings?.started_issues_in_inbox === true);
     const gatewaySettings = getFirtalGatewaySettings(workspace);
     setGatewayEnabled(gatewaySettings.enabled === true);
     setGatewayUrl(gatewaySettings.gateway_url ?? "");
@@ -234,6 +239,27 @@ export function WorkspaceTab() {
       return;
     }
     void performSave(false);
+  };
+
+  const handleSaveWorkflowSettings = async () => {
+    if (!workspace) return;
+    setSavingWorkflow(true);
+    try {
+      const updated = await api.updateWorkspace(workspace.id, {
+        settings: {
+          ...workspace.settings,
+          started_issues_in_inbox: startedIssuesInInbox,
+        },
+      });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+      );
+      toast.success(t(($) => $.workspace.workflow_toast_saved));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.workspace.workflow_toast_failed));
+    } finally {
+      setSavingWorkflow(false);
+    }
   };
 
   const handleSaveGatewaySettings = async () => {
@@ -426,6 +452,51 @@ export function WorkspaceTab() {
               >
                 <Save className="h-3 w-3" />
                 {saving ? t(($) => $.workspace.saving) : t(($) => $.workspace.save)}
+              </Button>
+            </div>
+            {!canManageWorkspace && (
+              <p className="text-xs text-muted-foreground">
+                {t(($) => $.workspace.manage_hint)}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold">{t(($) => $.workspace.workflow_section)}</h2>
+        </div>
+
+        <Card>
+          <CardContent className="space-y-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="started-issues-in-inbox" className="text-sm font-medium">
+                  {t(($) => $.workspace.started_issues_in_inbox_label)}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {t(($) => $.workspace.started_issues_in_inbox_hint)}
+                </p>
+              </div>
+              <Switch
+                id="started-issues-in-inbox"
+                checked={startedIssuesInInbox}
+                disabled={!canManageWorkspace || savingWorkflow}
+                onCheckedChange={setStartedIssuesInInbox}
+                aria-label={t(($) => $.workspace.started_issues_in_inbox_label)}
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                size="sm"
+                onClick={handleSaveWorkflowSettings}
+                disabled={!canManageWorkspace || savingWorkflow}
+              >
+                <Save className="h-3 w-3" />
+                {savingWorkflow ? t(($) => $.workspace.workflow_saving) : t(($) => $.workspace.workflow_save)}
               </Button>
             </div>
             {!canManageWorkspace && (

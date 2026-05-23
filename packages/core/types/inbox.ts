@@ -5,6 +5,7 @@ export type InboxSeverity = "action_required" | "attention" | "info";
 
 export type InboxItemType =
   | "issue_assigned"
+  | "issue_started"
   | "unassigned"
   | "assignee_changed"
   | "status_changed"

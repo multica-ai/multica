@@ -43,7 +43,7 @@ jobs:
         # ~73 i18next/no-literal-string violations on main that would
         # block every PR if lint were enforced). When the team is ready
         # to clean up the violations, add `lint` back to this command.
-        run: pnpm exec turbo build typecheck test
+        run: pnpm exec turbo build typecheck test --concurrency=1
 
   backend:
     runs-on: ubuntu-latest

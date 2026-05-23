@@ -268,6 +268,54 @@ func priorityLabel(p string) string {
 
 var emptyDetails = []byte("{}")
 
+const workspaceSettingStartedIssuesInInbox = "started_issues_in_inbox"
+
+func startedIssuesInInboxEnabled(ctx context.Context, queries *db.Queries, workspaceID string) bool {
+	ws, err := queries.GetWorkspace(ctx, parseUUID(workspaceID))
+	if err != nil || len(ws.Settings) == 0 {
+		return false
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(ws.Settings, &settings); err != nil {
+		slog.Warn("workspace settings unmarshal failed", "workspace_id", workspaceID, "error", err)
+		return false
+	}
+	enabled, _ := settings[workspaceSettingStartedIssuesInInbox].(bool)
+	return enabled
+}
+
+func issueStartsImmediately(status string) bool {
+	return status == "todo" || status == "in_progress"
+}
+
+func notifyCreatorIssueStarted(
+	ctx context.Context,
+	queries *db.Queries,
+	bus *events.Bus,
+	e events.Event,
+	issue handler.IssueResponse,
+) {
+	if issue.CreatorType != "member" || issue.CreatorID == "" {
+		return
+	}
+	if !issueStartsImmediately(issue.Status) || !startedIssuesInInboxEnabled(ctx, queries, issue.WorkspaceID) {
+		return
+	}
+	createInboxItemForChannel(ctx, queries, bus, inboxItemDraft{
+		WorkspaceID:   issue.WorkspaceID,
+		RecipientType: "member",
+		RecipientID:   issue.CreatorID,
+		IssueID:       issue.ID,
+		IssueStatus:   issue.Status,
+		NotifType:     "issue_started",
+		Severity:      "info",
+		Title:         issue.Title,
+		Body:          "",
+		Details:       emptyDetails,
+		Actor:         e,
+	}, routeInbox)
+}
+
 // parseMentions extracts mentions from markdown content.
 // Delegates to the shared util.ParseMentions and converts to the local type.
 func parseMentions(content string) []mention {
@@ -694,6 +742,8 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries, pushSvc
 
 		// Track who already got notified to avoid duplicates
 		skip := map[string]bool{e.ActorID: true}
+
+		notifyCreatorIssueStarted(ctx, queries, bus, e, issue)
 
 		// Direct notification to assignee
 		if issue.AssigneeType != nil && issue.AssigneeID != nil {

@@ -34,6 +34,26 @@ func cleanupInboxForIssue(t *testing.T, issueID string) {
 	testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE issue_id = $1`, issueID)
 }
 
+func createNotificationTestWorkspace(t *testing.T, settings string) string {
+	t.Helper()
+	ctx := context.Background()
+	var workspaceID string
+	err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, settings)
+		VALUES ('Notification Listener Workspace', 'notif-listener-' || substr(gen_random_uuid()::text, 1, 8), '', $1::jsonb)
+		RETURNING id
+	`, settings).Scan(&workspaceID)
+	if err != nil {
+		t.Fatalf("createNotificationTestWorkspace: %v", err)
+	}
+	return workspaceID
+}
+
+func cleanupNotificationTestWorkspace(t *testing.T, workspaceID string) {
+	t.Helper()
+	testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
+}
+
 // addTestSubscriber manually inserts a subscriber for an issue.
 func addTestSubscriber(t *testing.T, issueID, userType, userID, reason string) {
 	t.Helper()
@@ -186,6 +206,94 @@ func TestNotification_IssueCreated_AssigneeNotified(t *testing.T) {
 	// At least one inbox:new event should have been published
 	if len(inboxEvents) < 1 {
 		t.Fatal("expected at least 1 inbox:new event")
+	}
+}
+
+func TestNotification_IssueCreated_StartedIssueWorkspaceSettingNotifiesCreator(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	workspaceID := createNotificationTestWorkspace(t, `{"started_issues_in_inbox": true}`)
+	t.Cleanup(func() { cleanupNotificationTestWorkspace(t, workspaceID) })
+
+	issueID := createTestIssue(t, workspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: workspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: workspaceID,
+				Title:       "started issue inbox setting",
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+			},
+		},
+	})
+
+	items, err := queries.ListInboxItems(context.Background(), db.ListInboxItemsParams{
+		WorkspaceID:   util.MustParseUUID(workspaceID),
+		RecipientType: "member",
+		RecipientID:   util.MustParseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("ListInboxItems: %v", err)
+	}
+	if len(items) != 1 || items[0].Type != "issue_started" || items[0].Route != routeInbox {
+		t.Fatalf("expected one inbox-routed issue_started item, got %+v", items)
+	}
+}
+
+func TestNotification_IssueCreated_StartedIssueWorkspaceSettingSkipsBacklog(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	workspaceID := createNotificationTestWorkspace(t, `{"started_issues_in_inbox": true}`)
+	t.Cleanup(func() { cleanupNotificationTestWorkspace(t, workspaceID) })
+
+	issueID := createTestIssue(t, workspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: workspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: workspaceID,
+				Title:       "backlog issue inbox setting",
+				Status:      "backlog",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+			},
+		},
+	})
+
+	items, err := queries.ListInboxItems(context.Background(), db.ListInboxItemsParams{
+		WorkspaceID:   util.MustParseUUID(workspaceID),
+		RecipientType: "member",
+		RecipientID:   util.MustParseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("ListInboxItems: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected no inbox items for backlog issue, got %+v", items)
 	}
 }
 

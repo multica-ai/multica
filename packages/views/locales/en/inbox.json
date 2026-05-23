@@ -31,6 +31,7 @@
   },
   "types": {
     "issue_assigned": "Assigned",
+    "issue_started": "Started",
     "unassigned": "Unassigned",
     "assignee_changed": "Assignee changed",
     "status_changed": "Status changed",

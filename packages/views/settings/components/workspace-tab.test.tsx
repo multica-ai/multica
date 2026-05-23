@@ -15,6 +15,7 @@ const workspaceRef = vi.hoisted(() => ({
     slug: "test-workspace",
     description: "",
     context: "",
+    settings: {} as Record<string, unknown>,
     issue_prefix: "TES",
     repos: [] as { url: string }[],
   },
@@ -109,6 +110,7 @@ describe("WorkspaceTab — issue prefix editing", () => {
       slug: "test-workspace",
       description: "",
       context: "",
+      settings: {},
       issue_prefix: "TES",
       repos: [],
     };
@@ -116,7 +118,7 @@ describe("WorkspaceTab — issue prefix editing", () => {
     mockUpdateWorkspace.mockImplementation(
       async (
         _id: string,
-        payload: { issue_prefix?: string; name?: string },
+        payload: { issue_prefix?: string; name?: string; settings?: Record<string, unknown> },
       ) => ({
         ...workspaceRef.current,
         ...payload,
@@ -233,5 +235,22 @@ describe("WorkspaceTab — issue prefix editing", () => {
     membersRef.current = [{ user_id: "user-1", role: "member" }];
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
     expect(screen.getByPlaceholderText("TES")).toBeDisabled();
+  });
+
+  it("saves the started issues inbox preference", async () => {
+    const user = userEvent.setup();
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByRole("switch", { name: /Put newly started issues in the creator's Inbox/i }));
+    await user.click(screen.getByRole("button", { name: /^Save workflow$/ }));
+
+    await waitFor(() => {
+      expect(mockUpdateWorkspace).toHaveBeenCalledWith(
+        "workspace-1",
+        expect.objectContaining({
+          settings: expect.objectContaining({ started_issues_in_inbox: true }),
+        }),
+      );
+    });
   });
 });
