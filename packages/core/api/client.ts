@@ -123,6 +123,8 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  ListWebhookDeliveriesResponse,
+  WebhookDelivery,
   WorkSession,
   UserProfileResponse,
   UserProfileRequest,
@@ -161,15 +163,19 @@ import {
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
+  EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
+  EMPTY_WEBHOOK_DELIVERY,
   EMPTY_TIMELINE_ENTRIES,
   EMPTY_USER,
   GroupedIssuesResponseSchema,
   ListIssuesResponseSchema,
+  ListWebhookDeliveriesResponseSchema,
   OnboardingNoRuntimeBootstrapResponseSchema,
   OnboardingRuntimeBootstrapResponseSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
   UserSchema,
+  WebhookDeliveryResponseSchema,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -2779,6 +2785,52 @@ export class ApiClient {
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
+  }
+
+  async rotateAutopilotTriggerWebhookToken(autopilotId: string, triggerId: string): Promise<AutopilotTrigger> {
+    return this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}/rotate-webhook-token`, {
+      method: "POST",
+    });
+  }
+
+  async setAutopilotTriggerSigningSecret(
+    autopilotId: string,
+    triggerId: string,
+    signingSecret: string,
+  ): Promise<AutopilotTrigger> {
+    return this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}/signing-secret`, {
+      method: "PUT",
+      body: JSON.stringify({ signing_secret: signingSecret }),
+    });
+  }
+
+  async listAutopilotDeliveries(
+    autopilotId: string,
+    params?: { limit?: number; offset?: number },
+  ): Promise<ListWebhookDeliveriesResponse> {
+    const search = new URLSearchParams();
+    if (params?.limit) search.set("limit", params.limit.toString());
+    if (params?.offset) search.set("offset", params.offset.toString());
+    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/deliveries?${search}`);
+    return parseWithFallback(raw, ListWebhookDeliveriesResponseSchema, EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE, {
+      endpoint: "listAutopilotDeliveries",
+    });
+  }
+
+  async getAutopilotDelivery(autopilotId: string, deliveryId: string): Promise<WebhookDelivery> {
+    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/deliveries/${deliveryId}`);
+    return parseWithFallback(raw, WebhookDeliveryResponseSchema, EMPTY_WEBHOOK_DELIVERY, {
+      endpoint: "getAutopilotDelivery",
+    });
+  }
+
+  async replayAutopilotDelivery(autopilotId: string, deliveryId: string): Promise<WebhookDelivery> {
+    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/deliveries/${deliveryId}/replay`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, WebhookDeliveryResponseSchema, EMPTY_WEBHOOK_DELIVERY, {
+      endpoint: "replayAutopilotDelivery",
+    });
   }
 
   // Artifacts

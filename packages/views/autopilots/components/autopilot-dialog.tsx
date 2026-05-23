@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Copy,
   FilePlus2,
   Maximize2,
   Minimize2,
@@ -15,6 +16,7 @@ import {
   Rocket,
   X as XIcon,
   Zap,
+  Webhook,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -42,6 +44,8 @@ import {
   useUpdateAutopilot,
   useUpdateAutopilotTrigger,
 } from "@multica/core/autopilots/mutations";
+import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
+import { api } from "@multica/core/api";
 import type {
   AutopilotExecutionMode,
   AutopilotTrigger,
@@ -49,6 +53,7 @@ import type {
 import { TitleEditor, ContentEditor } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AgentPicker } from "./pickers/agent-picker";
+import { ProjectPicker } from "../../projects/components/project-picker";
 // CEREBRO-PATCH(autopilot-model-section-import): per-autopilot model override (JEH-1310).
 import { CerebroAutopilotModelSection } from "./cerebro-autopilot-model-section";
 // CEREBRO-PATCH(autopilot-privacy-section-import): owner-only autopilot toggle (JEH-1750).
@@ -72,6 +77,7 @@ export interface AutopilotInitial {
   description: string;
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
+  project_id?: string | null;
   // CEREBRO-PATCH(autopilot-model-initial): seed model picker on edit (JEH-1310).
   model?: string | null;
   // CEREBRO-PATCH(autopilot-privacy-initial): seed privacy toggle on edit (JEH-1750).
@@ -258,6 +264,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const [executionMode, setExecutionMode] = useState<AutopilotExecutionMode>(
     initial.execution_mode ?? "create_issue",
   );
+  const [projectId, setProjectId] = useState<string | null>(initial.project_id ?? null);
   // CEREBRO-PATCH(autopilot-model-state): per-autopilot model override (JEH-1310).
   const [modelOverride, setModelOverride] = useState<string | null>(initial.model ?? null);
   // CEREBRO-PATCH(autopilot-privacy-state): owner-only autopilot toggle (JEH-1750).
@@ -276,6 +283,9 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
     return getDefaultTriggerConfig();
   })();
   const [triggerConfig, setTriggerConfig] = useState<TriggerConfig>(initialCfg);
+  const initialTriggerKind: "schedule" | "webhook" = !isCreate && props.triggers[0]?.kind === "webhook" ? "webhook" : "schedule";
+  const [triggerKind, setTriggerKind] = useState<"schedule" | "webhook">(initialTriggerKind);
+  const [createdWebhookTrigger, setCreatedWebhookTrigger] = useState<AutopilotTrigger | null>(null);
 
   const initialCronRef = useRef(toCronExpression(initialCfg));
   const initialTimezoneRef = useRef(initialCfg.timezone);
@@ -314,24 +324,38 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           description: description.trim() || undefined,
           assignee_id: assigneeId,
           execution_mode: executionMode,
+          project_id: executionMode === "create_issue" ? projectId : null,
           // CEREBRO-PATCH(autopilot-model-create-submit): include model override (JEH-1310).
           ...(modelOverride ? { model: modelOverride } : {}),
           // CEREBRO-PATCH(autopilot-privacy-create-submit): include privacy flag (JEH-1750).
           is_private: isPrivate,
         });
-        let scheduleOk = true;
+        let triggerOk = true;
+        let webhookTrigger: AutopilotTrigger | null = null;
         try {
-          await createTrigger.mutateAsync({
-            autopilotId: autopilot.id,
-            kind: "schedule",
-            cron_expression: toCronExpression(triggerConfig),
-            timezone: triggerConfig.timezone,
-          });
+          if (triggerKind === "webhook") {
+            webhookTrigger = await createTrigger.mutateAsync({
+              autopilotId: autopilot.id,
+              kind: "webhook",
+            });
+          } else {
+            await createTrigger.mutateAsync({
+              autopilotId: autopilot.id,
+              kind: "schedule",
+              cron_expression: toCronExpression(triggerConfig),
+              timezone: triggerConfig.timezone,
+            });
+          }
         } catch {
-          scheduleOk = false;
+          triggerOk = false;
+        }
+        if (triggerKind === "webhook" && webhookTrigger) {
+          setCreatedWebhookTrigger(webhookTrigger);
+          toast.success(t(($) => $.dialog.toast_created));
+          return;
         }
         onOpenChange(false);
-        if (scheduleOk) toast.success(t(($) => $.dialog.toast_created));
+        if (triggerOk) toast.success(t(($) => $.dialog.toast_created));
         else toast.error(t(($) => $.dialog.toast_create_partial));
       } else {
         await updateAutopilot.mutateAsync({
@@ -340,13 +364,14 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           description: description.trim() || null,
           assignee_id: assigneeId,
           execution_mode: executionMode,
+          project_id: executionMode === "create_issue" ? projectId : null,
           // CEREBRO-PATCH(autopilot-model-update-submit): include model override; null clears (JEH-1310).
           model: modelOverride,
           // CEREBRO-PATCH(autopilot-privacy-update-submit): include privacy flag (JEH-1750).
           is_private: isPrivate,
         });
         let scheduleOk = true;
-        if (scheduleDirty && !schedulePillDisabled) {
+        if (triggerKind === "schedule" && scheduleDirty && !schedulePillDisabled) {
           const snapshottedTriggerId = firstTriggerIdRef.current;
           try {
             if (snapshottedTriggerId) {
@@ -507,22 +532,34 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
             <OutputModeSection mode={executionMode} onChange={setExecutionMode} />
 
+            {executionMode === "create_issue" && (
+              <ProjectSection projectId={projectId} onChange={setProjectId} />
+            )}
+
             {/* CEREBRO-PATCH(autopilot-model-section-render): model override picker (JEH-1310). */}
             <CerebroAutopilotModelSection value={modelOverride} onChange={setModelOverride} />
 
             {/* CEREBRO-PATCH(autopilot-privacy-section-render): owner-only autopilot toggle (JEH-1750). */}
             <AutopilotPrivacySection value={isPrivate} onChange={setIsPrivate} initialIsPrivate={initialIsPrivate} />
 
-            <ScheduleSection
-              config={triggerConfig}
-              onChange={setTriggerConfig}
-              disabled={schedulePillDisabled}
-              disabledReason={
-                schedulePillDisabled
-                  ? t(($) => $.dialog.schedule_disabled_reason)
-                  : undefined
-              }
-            />
+            {isCreate && (
+              <TriggerKindSection kind={triggerKind} onChange={setTriggerKind} />
+            )}
+
+            {triggerKind === "schedule" ? (
+              <ScheduleSection
+                config={triggerConfig}
+                onChange={setTriggerConfig}
+                disabled={schedulePillDisabled}
+                disabledReason={
+                  schedulePillDisabled
+                    ? t(($) => $.dialog.schedule_disabled_reason)
+                    : undefined
+                }
+              />
+            ) : (
+              <WebhookCreatedSection trigger={createdWebhookTrigger} />
+            )}
           </aside>
         </div>
 
@@ -549,6 +586,85 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function TriggerKindSection({
+  kind,
+  onChange,
+}: {
+  kind: "schedule" | "webhook";
+  onChange: (kind: "schedule" | "webhook") => void;
+}) {
+  const { t } = useT("autopilots");
+  return (
+    <div>
+      <SectionLabel>{t(($) => $.dialog.section_trigger_kind)}</SectionLabel>
+      <div className="grid grid-cols-2 gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant={kind === "schedule" ? "default" : "outline"}
+          onClick={() => onChange("schedule")}
+        >
+          <Clock className="mr-1.5 size-3.5" />
+          {t(($) => $.dialog.trigger_kind_schedule)}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={kind === "webhook" ? "default" : "outline"}
+          onClick={() => onChange("webhook")}
+        >
+          <Webhook className="mr-1.5 size-3.5" />
+          {t(($) => $.dialog.trigger_kind_webhook)}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function WebhookCreatedSection({ trigger }: { trigger: AutopilotTrigger | null }) {
+  const { t } = useT("autopilots");
+  const webhookUrl = trigger
+    ? buildAutopilotWebhookUrl({
+        trigger,
+        apiBaseUrl: api.getBaseUrl(),
+        currentOrigin: typeof window !== "undefined" ? window.location.origin : undefined,
+      })
+    : null;
+
+  return (
+    <div>
+      <SectionLabel>{t(($) => $.dialog.section_webhook)}</SectionLabel>
+      <div className="rounded-md border bg-background p-3 text-sm text-muted-foreground">
+        {!webhookUrl ? (
+          <p>{t(($) => $.dialog.webhook_help_create)}</p>
+        ) : (
+          <div className="space-y-2">
+            <p className="font-medium text-foreground">{t(($) => $.dialog.webhook_created_title)}</p>
+            <code className="block truncate rounded bg-muted px-2 py-1 text-xs">{webhookUrl}</code>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="w-full"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(webhookUrl);
+                  toast.success(t(($) => $.dialog.webhook_copied));
+                } catch {
+                  toast.error(t(($) => $.dialog.webhook_copy_failed));
+                }
+              }}
+            >
+              <Copy className="mr-1.5 size-3.5" />
+              {t(($) => $.dialog.copy_webhook_url)}
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -674,6 +790,25 @@ function OutputModeSection({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function ProjectSection({
+  projectId,
+  onChange,
+}: {
+  projectId: string | null;
+  onChange: (projectId: string | null) => void;
+}) {
+  const { t } = useT("autopilots");
+  return (
+    <div>
+      <SectionLabel>{t(($) => $.dialog.section_project)}</SectionLabel>
+      <ProjectPicker
+        projectId={projectId}
+        onUpdate={(updates) => onChange(updates.project_id ?? null)}
+      />
     </div>
   );
 }

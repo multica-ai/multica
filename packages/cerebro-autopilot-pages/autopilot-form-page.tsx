@@ -8,10 +8,12 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Copy,
   FilePlus2,
   Play,
   Rocket,
   Zap,
+  Webhook,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
@@ -35,6 +37,8 @@ import {
   useUpdateAutopilot,
   useUpdateAutopilotTrigger,
 } from "@multica/core/autopilots/mutations";
+import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
+import { api } from "@multica/core/api";
 import type {
   AutopilotExecutionMode,
   AutopilotTrigger,
@@ -42,6 +46,7 @@ import type {
 import { TitleEditor, ContentEditor } from "@multica/views/editor";
 import { ActorAvatar } from "@multica/views/common/actor-avatar";
 import { AgentPicker } from "@multica/views/autopilots/components/pickers/agent-picker";
+import { ProjectPicker } from "@multica/views/projects/components";
 import { PageHeader } from "@multica/views/layout/page-header";
 import { AppLink, useNavigation } from "@multica/views/navigation";
 import { CerebroAutopilotModelSection } from "@multica/views/autopilots/components/cerebro-autopilot-model-section";
@@ -390,6 +395,104 @@ function OutputModeSection({
   );
 }
 
+function ProjectSection({
+  projectId,
+  onChange,
+}: {
+  projectId: string | null;
+  onChange: (projectId: string | null) => void;
+}) {
+  const { t } = useT("autopilots");
+  return (
+    <div>
+      <SectionLabel>{t(($) => $.dialog.section_project)}</SectionLabel>
+      <ProjectPicker
+        projectId={projectId}
+        onUpdate={(updates) => onChange(updates.project_id ?? null)}
+      />
+    </div>
+  );
+}
+
+function TriggerKindSection({
+  kind,
+  onChange,
+}: {
+  kind: "schedule" | "webhook";
+  onChange: (kind: "schedule" | "webhook") => void;
+}) {
+  const { t } = useT("autopilots");
+  return (
+    <div>
+      <SectionLabel>{t(($) => $.dialog.section_trigger_kind)}</SectionLabel>
+      <div className="grid grid-cols-2 gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant={kind === "schedule" ? "default" : "outline"}
+          onClick={() => onChange("schedule")}
+        >
+          <Clock className="mr-1.5 size-3.5" />
+          {t(($) => $.dialog.trigger_kind_schedule)}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={kind === "webhook" ? "default" : "outline"}
+          onClick={() => onChange("webhook")}
+        >
+          <Webhook className="mr-1.5 size-3.5" />
+          {t(($) => $.dialog.trigger_kind_webhook)}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function WebhookCreatedSection({ trigger }: { trigger: AutopilotTrigger | null }) {
+  const { t } = useT("autopilots");
+  const webhookUrl = trigger
+    ? buildAutopilotWebhookUrl({
+        trigger,
+        apiBaseUrl: api.getBaseUrl(),
+        currentOrigin: typeof window !== "undefined" ? window.location.origin : undefined,
+      })
+    : null;
+
+  return (
+    <div>
+      <SectionLabel>{t(($) => $.dialog.section_webhook)}</SectionLabel>
+      <div className="rounded-md border bg-background p-3 text-sm text-muted-foreground">
+        {!webhookUrl ? (
+          <p>{t(($) => $.dialog.webhook_help_create)}</p>
+        ) : (
+          <div className="space-y-2">
+            <p className="font-medium text-foreground">{t(($) => $.dialog.webhook_created_title)}</p>
+            <code className="block truncate rounded bg-muted px-2 py-1 text-xs">{webhookUrl}</code>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="w-full"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(webhookUrl);
+                  toast.success(t(($) => $.dialog.webhook_copied));
+                } catch {
+                  toast.error(t(($) => $.dialog.webhook_copy_failed));
+                }
+              }}
+            >
+              <Copy className="mr-1.5 size-3.5" />
+              {t(($) => $.dialog.copy_webhook_url)}
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ScheduleSection({
   config,
   onChange,
@@ -536,6 +639,7 @@ interface FormBodyProps {
   initialDescription: string;
   initialAssigneeId: string;
   initialExecutionMode: AutopilotExecutionMode;
+  initialProjectId: string | null;
   initialModel: string | null;
   initialIsPrivate: boolean;
   initialTriggerConfig: TriggerConfig;
@@ -550,6 +654,7 @@ function AutopilotFormBody({
   initialDescription,
   initialAssigneeId,
   initialExecutionMode,
+  initialProjectId,
   initialModel,
   initialIsPrivate,
   initialTriggerConfig,
@@ -569,9 +674,13 @@ function AutopilotFormBody({
   const [description, setDescription] = useState(initialDescription);
   const [assigneeId, setAssigneeId] = useState<string>(initialAssigneeId);
   const [executionMode, setExecutionMode] = useState<AutopilotExecutionMode>(initialExecutionMode);
+  const [projectId, setProjectId] = useState<string | null>(initialProjectId);
   const [modelOverride, setModelOverride] = useState<string | null>(initialModel);
   const [isPrivate, setIsPrivate] = useState<boolean>(initialIsPrivate);
   const [triggerConfig, setTriggerConfig] = useState<TriggerConfig>(initialTriggerConfig);
+  const initialTriggerKind: "schedule" | "webhook" = !isCreate && triggers[0]?.kind === "webhook" ? "webhook" : "schedule";
+  const [triggerKind, setTriggerKind] = useState<"schedule" | "webhook">(initialTriggerKind);
+  const [createdWebhookTrigger, setCreatedWebhookTrigger] = useState<AutopilotTrigger | null>(null);
 
   const initialCronRef = useRef(toCronExpression(initialTriggerConfig));
   const initialTimezoneRef = useRef(initialTriggerConfig.timezone);
@@ -609,21 +718,35 @@ function AutopilotFormBody({
           description: description.trim() || undefined,
           assignee_id: assigneeId,
           execution_mode: executionMode,
+          project_id: executionMode === "create_issue" ? projectId : null,
           ...(modelOverride ? { model: modelOverride } : {}),
           is_private: isPrivate,
         });
-        let scheduleOk = true;
+        let triggerOk = true;
+        let webhookTrigger: AutopilotTrigger | null = null;
         try {
-          await createTrigger.mutateAsync({
-            autopilotId: autopilot.id,
-            kind: "schedule",
-            cron_expression: toCronExpression(triggerConfig),
-            timezone: triggerConfig.timezone,
-          });
+          if (triggerKind === "webhook") {
+            webhookTrigger = await createTrigger.mutateAsync({
+              autopilotId: autopilot.id,
+              kind: "webhook",
+            });
+          } else {
+            await createTrigger.mutateAsync({
+              autopilotId: autopilot.id,
+              kind: "schedule",
+              cron_expression: toCronExpression(triggerConfig),
+              timezone: triggerConfig.timezone,
+            });
+          }
         } catch {
-          scheduleOk = false;
+          triggerOk = false;
         }
-        if (scheduleOk) toast.success(t(($) => $.dialog.toast_created));
+        if (triggerKind === "webhook" && webhookTrigger) {
+          setCreatedWebhookTrigger(webhookTrigger);
+          toast.success(t(($) => $.dialog.toast_created));
+          return;
+        }
+        if (triggerOk) toast.success(t(($) => $.dialog.toast_created));
         else toast.error(t(($) => $.dialog.toast_create_partial));
         router.push(wsPaths.autopilotDetail(autopilot.id));
       } else {
@@ -633,11 +756,12 @@ function AutopilotFormBody({
           description: description.trim() || null,
           assignee_id: assigneeId,
           execution_mode: executionMode,
+          project_id: executionMode === "create_issue" ? projectId : null,
           model: modelOverride,
           is_private: isPrivate,
         });
         let scheduleOk = true;
-        if (scheduleDirty && !schedulePillDisabled) {
+        if (triggerKind === "schedule" && scheduleDirty && !schedulePillDisabled) {
           const snapshottedTriggerId = firstTriggerIdRef.current;
           try {
             if (snapshottedTriggerId) {
@@ -764,20 +888,32 @@ function AutopilotFormBody({
 
           <OutputModeSection mode={executionMode} onChange={setExecutionMode} />
 
+          {executionMode === "create_issue" && (
+            <ProjectSection projectId={projectId} onChange={setProjectId} />
+          )}
+
           <CerebroAutopilotModelSection value={modelOverride} onChange={setModelOverride} />
 
           <AutopilotPrivacySection value={isPrivate} onChange={setIsPrivate} initialIsPrivate={initialIsPrivate} />
 
-          <ScheduleSection
-            config={triggerConfig}
-            onChange={setTriggerConfig}
-            disabled={schedulePillDisabled}
-            disabledReason={
-              schedulePillDisabled
-                ? t(($) => $.dialog.schedule_disabled_reason)
-                : undefined
-            }
-          />
+          {isCreate && (
+            <TriggerKindSection kind={triggerKind} onChange={setTriggerKind} />
+          )}
+
+          {triggerKind === "schedule" ? (
+            <ScheduleSection
+              config={triggerConfig}
+              onChange={setTriggerConfig}
+              disabled={schedulePillDisabled}
+              disabledReason={
+                schedulePillDisabled
+                  ? t(($) => $.dialog.schedule_disabled_reason)
+                  : undefined
+              }
+            />
+          ) : (
+            <WebhookCreatedSection trigger={createdWebhookTrigger} />
+          )}
 
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground pt-2">
             <Zap className="size-3.5 text-amber-500 shrink-0" />
@@ -810,6 +946,7 @@ export function AutopilotCreatePage({ templateId }: { templateId?: string }) {
       initialDescription={tpl?.description ?? ""}
       initialAssigneeId=""
       initialExecutionMode="create_issue"
+      initialProjectId={null}
       initialModel={null}
       initialIsPrivate={false}
       initialTriggerConfig={initialTriggerConfig}
@@ -875,6 +1012,7 @@ export function AutopilotEditPage({ autopilotId }: { autopilotId: string }) {
       initialDescription={autopilot.description ?? ""}
       initialAssigneeId={autopilot.assignee_id}
       initialExecutionMode={autopilot.execution_mode as AutopilotExecutionMode}
+      initialProjectId={autopilot.project_id ?? null}
       initialModel={(autopilot as any).model ?? null}
       initialIsPrivate={(autopilot as any).is_private ?? false}
       initialTriggerConfig={initialTriggerConfig}
