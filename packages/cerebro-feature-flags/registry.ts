@@ -30,6 +30,7 @@ export type CerebroFlagKey =
   | "cerebro_grants"
   | "cerebro_move_comment_to_subissue"
   | "cerebro_agent_passes"
+  | "cerebro_references"
   // CEREBRO-PATCH(agent-avatar-generate): JEH-1563
   | "cerebro_agent_avatar";
 
@@ -65,6 +66,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_grants: false,
   cerebro_move_comment_to_subissue: true,
   cerebro_agent_passes: true,
+  cerebro_references: true,
   // CEREBRO-PATCH(agent-avatar-generate): JEH-1563
   cerebro_agent_avatar: true,
 };
@@ -217,6 +219,12 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Agent passes admin",
     description:
       "Enable the workspace agent-pass admin page at /:workspace/agent-passes — issue, list, and revoke agent passes (machine-readable mandates that scope what an agent may do on an issue). Owner/admin only. JEH-1731.",
+  },
+  {
+    key: "cerebro_references",
+    label: "Issue references",
+    description:
+      "Show the references section on issue detail — link GitHub PRs and other external objects to an issue, with live updates and a registry-driven 'add reference' dialog. JEH-838b.",
   },
   // CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation feature flag.
   {

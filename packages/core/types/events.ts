@@ -99,7 +99,11 @@ export type WSEventType =
   | "github_installation:deleted"
   | "pull_request:linked"
   | "pull_request:updated"
-  | "pull_request:unlinked";
+  | "pull_request:unlinked"
+  // CEREBRO-PATCH(cerebro-reference-events): JEH-838b — issue reference CRUD WS events.
+  | "cerebro.issue_reference.created"
+  | "cerebro.issue_reference.updated"
+  | "cerebro.issue_reference.deleted";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;

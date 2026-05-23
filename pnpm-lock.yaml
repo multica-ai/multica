@@ -201,6 +201,9 @@ importers:
       '@multica/cerebro-realtime':
         specifier: workspace:*
         version: link:../../packages/cerebro-realtime
+      '@multica/cerebro-references':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-references
       '@multica/cerebro-runtime':
         specifier: workspace:*
         version: link:../../packages/cerebro-runtime
@@ -367,6 +370,9 @@ importers:
       '@multica/cerebro-realtime':
         specifier: workspace:*
         version: link:../../packages/cerebro-realtime
+      '@multica/cerebro-references':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-references
       '@multica/cerebro-runtime':
         specifier: workspace:*
         version: link:../../packages/cerebro-runtime
@@ -1528,6 +1534,9 @@ importers:
       '@multica/cerebro-groups':
         specifier: workspace:*
         version: link:../cerebro-groups
+      '@multica/cerebro-references':
+        specifier: workspace:*
+        version: link:../cerebro-references
       '@multica/core':
         specifier: workspace:*
         version: link:../core
@@ -1550,19 +1559,46 @@ importers:
       '@multica/core':
         specifier: workspace:*
         version: link:../core
+      '@multica/ui':
+        specifier: workspace:*
+        version: link:../ui
+      '@multica/views':
+        specifier: workspace:*
+        version: link:../views
       '@tanstack/react-query':
         specifier: 'catalog:'
         version: 5.100.11(react@19.2.3)
+      lucide-react:
+        specifier: 'catalog:'
+        version: 1.16.0(react@19.2.3)
       react:
         specifier: 'catalog:'
         version: 19.2.3
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
     devDependencies:
       '@multica/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      '@testing-library/jest-dom':
+        specifier: 'catalog:'
+        version: 6.9.1
+      '@testing-library/react':
+        specifier: 'catalog:'
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.15))(@types/react@19.2.15)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@testing-library/user-event':
+        specifier: 'catalog:'
+        version: 14.6.1(@testing-library/dom@10.4.1)
       '@types/react':
         specifier: ^19.2.0
         version: 19.2.15
+      '@vitejs/plugin-react':
+        specifier: 'catalog:'
+        version: 6.0.2(vite@8.0.14(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0))
+      jsdom:
+        specifier: 'catalog:'
+        version: 29.1.1(@noble/hashes@1.8.0)
       typescript:
         specifier: 'catalog:'
         version: 5.9.3

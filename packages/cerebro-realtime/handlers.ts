@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { WSClient } from "@multica/core/api/ws-client";
 import { getCurrentWsId } from "@multica/core/platform";
 import { artifactKeys } from "@multica/cerebro-artifacts/core";
+import { referenceKeys } from "@multica/cerebro-references/core";
 import { channelKeys } from "@multica/core/channels";
 import { chatKeys } from "@multica/core/chat/queries";
 import type { ChatSession } from "@multica/core/types";
@@ -112,6 +113,32 @@ export function registerCerebroHandlers(
     invalidateChannelList,
   );
 
+  // JEH-838b — issue references. Server emits the reference row (with
+  // issue_id) as the payload on create/update/delete. Invalidate the
+  // by-issue list so a reference added/removed by any client (or an agent
+  // via the API) reflects on the issue page without a refresh. Mirrors the
+  // artifact invalidation pattern above.
+  const invalidateReference = (p: unknown) => {
+    const payload = p as { issue_id?: string } | null;
+    const wsId = getCurrentWsId();
+    if (!wsId || !payload?.issue_id) return;
+    qc.invalidateQueries({
+      queryKey: referenceKeys.byIssue(wsId, payload.issue_id),
+    });
+  };
+  const unsubReferenceCreated = ws.on(
+    "cerebro.issue_reference.created",
+    invalidateReference,
+  );
+  const unsubReferenceUpdated = ws.on(
+    "cerebro.issue_reference.updated",
+    invalidateReference,
+  );
+  const unsubReferenceDeleted = ws.on(
+    "cerebro.issue_reference.deleted",
+    invalidateReference,
+  );
+
   // JEH-1006 — workspace groups settings list/members invalidation.
   const unsubGroups = registerCerebroGroupHandlers(ws, qc);
 
@@ -122,6 +149,9 @@ export function registerCerebroHandlers(
     unsubChatSessionUpdated();
     unsubChannelArchived();
     unsubChannelUnarchived();
+    unsubReferenceCreated();
+    unsubReferenceUpdated();
+    unsubReferenceDeleted();
     unsubGroups();
   };
 }

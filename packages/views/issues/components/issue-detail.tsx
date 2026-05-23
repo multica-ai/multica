@@ -4,7 +4,7 @@
 // CEREBRO-PATCH(channels-flag-gate): cerebro_channels feature flag controls channel/DM chrome
 
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
@@ -576,6 +576,8 @@ interface IssueDetailProps {
   highlightCommentId?: string;
   /** When true, the issue identifier+title in the breadcrumb links to the issue detail page. Used when this view is embedded (e.g. inbox) so users can navigate to the dedicated issue page. */
   linkSelfInBreadcrumb?: boolean;
+  // CEREBRO-PATCH(issue-detail-extensions-slot): JEH-838b — cerebro slot for issue-attached panels (references) rendered after attachments/artifacts. Apps supply the node.
+  extensions?: ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -583,7 +585,7 @@ interface IssueDetailProps {
 // ---------------------------------------------------------------------------
 
 // CEREBRO-PATCH(issue-detail-unarchive-toolbar): JEH-1321 — accept onUnarchive from host.
-export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, linkSelfInBreadcrumb = false }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, linkSelfInBreadcrumb = false, extensions }: IssueDetailProps) {
   const { t } = useT("issues");
   const id = issueId;
   const router = useNavigation();
@@ -2034,6 +2036,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           )}
 
           {!isChat && <ArtifactList issueId={issue.id} className="mt-3" />}
+
+          {/* CEREBRO-PATCH(issue-detail-extensions-slot): JEH-838b — cerebro issue-attached panels (references). */}
+          {!isChat && extensions}
 
           {/* Sub-issues — task-only. Channels and DMs don't carry the
               hierarchical breakdown that issues do, so skip both the

@@ -8,6 +8,7 @@ export type {
 export { referenceKeys } from "./keys";
 export {
   useIssueReferences,
+  useReferencesByObject,
   useAddReference,
   useUpdateReference,
   useDeleteReference,

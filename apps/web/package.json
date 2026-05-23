@@ -35,6 +35,7 @@
     "@multica/cerebro-preferences": "workspace:*",
     "@multica/cerebro-profile": "workspace:*",
     "@multica/cerebro-realtime": "workspace:*",
+    "@multica/cerebro-references": "workspace:*",
     "@multica/cerebro-runtime": "workspace:*",
     "@multica/cerebro-tasks": "workspace:*",
     "@multica/cerebro-ui": "workspace:*",
