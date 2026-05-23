@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { useHorizontalWheelNavigation } from "@/hooks/use-horizontal-wheel-navigation";
 import { useTabHistory } from "@/hooks/use-tab-history";
 import { useActiveTitleSync } from "@/hooks/use-tab-sync";
 import { useTabStore, resolveRouteIcon } from "@/stores/tab-store";
@@ -147,6 +148,7 @@ export function DesktopShell() {
   useInternalLinkHandler();
   useActiveTitleSync();
   useNativeNavigationGestures();
+  useHorizontalWheelNavigation();
 
   // Reactive read of current workspace slug from the platform singleton.
   // On first mount, slug is null until WorkspaceRouteLayout (inside the tab
@@ -173,7 +175,10 @@ export function DesktopShell() {
             <div className="flex flex-1 min-w-0 flex-col">
               <MainTopBar />
               {/* Content area with inset styling — relative so ChatWindow/ChatFab are constrained here */}
-              <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden mr-2 mb-2 ml-0.5 rounded-xl shadow-sm bg-background">
+              <div
+                data-page-navigation-surface
+                className="relative flex flex-1 min-h-0 flex-col overflow-hidden mr-2 mb-2 ml-0.5 rounded-xl shadow-sm bg-background"
+              >
                 <TabContent />
                 {slug && <ChatWindow />}
                 {slug && <ChatFab />}
