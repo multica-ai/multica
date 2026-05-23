@@ -165,6 +165,9 @@ importers:
       '@multica/cerebro-access':
         specifier: workspace:*
         version: link:../../packages/cerebro-access
+      '@multica/cerebro-agent-avatar':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-agent-avatar
       '@multica/cerebro-artifacts':
         specifier: workspace:*
         version: link:../../packages/cerebro-artifacts
@@ -322,6 +325,9 @@ importers:
       '@multica/cerebro-access':
         specifier: workspace:*
         version: link:../../packages/cerebro-access
+      '@multica/cerebro-agent-avatar':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-agent-avatar
       '@multica/cerebro-artifacts':
         specifier: workspace:*
         version: link:../../packages/cerebro-artifacts
@@ -615,6 +621,58 @@ importers:
       '@testing-library/user-event':
         specifier: 'catalog:'
         version: 14.6.1(@testing-library/dom@10.4.1)
+      '@types/react':
+        specifier: ^19.2.0
+        version: 19.2.15
+      '@vitejs/plugin-react':
+        specifier: 'catalog:'
+        version: 6.0.2(vite@8.0.14(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0))
+      jsdom:
+        specifier: 'catalog:'
+        version: 29.1.1(@noble/hashes@1.8.0)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@25.9.1)(jsdom@29.1.1(@noble/hashes@1.8.0))(msw@2.14.6(@types/node@25.9.1)(typescript@5.9.3))(vite@8.0.14(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0))
+
+  packages/cerebro-agent-avatar:
+    dependencies:
+      '@multica/cerebro-feature-flags':
+        specifier: workspace:*
+        version: link:../cerebro-feature-flags
+      '@multica/core':
+        specifier: workspace:*
+        version: link:../core
+      '@multica/ui':
+        specifier: workspace:*
+        version: link:../ui
+      '@multica/views':
+        specifier: workspace:*
+        version: link:../views
+      lucide-react:
+        specifier: 'catalog:'
+        version: 1.16.0(react@19.2.3)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.3
+      react-i18next:
+        specifier: 'catalog:'
+        version: 17.0.8(i18next@26.2.0(typescript@5.9.3))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(typescript@5.9.3)
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+    devDependencies:
+      '@multica/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@testing-library/jest-dom':
+        specifier: 'catalog:'
+        version: 6.9.1
+      '@testing-library/react':
+        specifier: 'catalog:'
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.15))(@types/react@19.2.15)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@types/react':
         specifier: ^19.2.0
         version: 19.2.15

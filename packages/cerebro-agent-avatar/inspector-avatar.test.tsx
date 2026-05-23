@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 
-// CEREBRO-PATCH(agent-avatar-generate): JEH-1879 — tests for the sibling that
-// wires CerebroAvatarPicker into the agent detail inspector. Asserts the two
+// Tests for the cerebro inspector avatar wrapper. Asserts the two
 // behaviours that matter at this boundary: read-only mode hides the picker,
 // and a successful generation flows through onUpdate as avatar_url.
 
@@ -9,10 +8,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import type { Agent } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
-import enCommon from "../../locales/en/common.json";
-import enAgents from "../../locales/en/agents.json";
+import enAvatar from "./locales/en.json";
 
-const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
+const TEST_RESOURCES = { en: { "cerebro-agent-avatar": enAvatar } };
 
 const generateAgentAvatar = vi.fn();
 vi.mock("@multica/core/api", () => ({
@@ -25,9 +23,15 @@ vi.mock("@multica/cerebro-feature-flags", () => ({
   useFeatureFlag: () => true,
 }));
 
-vi.mock("../../common/actor-avatar", () => ({
+vi.mock("@multica/views/common/actor-avatar", () => ({
   ActorAvatar: ({ actorId }: { actorId: string }) => (
     <div data-testid={`actor-avatar-${actorId}`} />
+  ),
+}));
+
+vi.mock("@multica/views/agents/components/avatar-picker", () => ({
+  AvatarPicker: ({ value }: { value: string | null }) => (
+    <div data-testid="avatar-picker" data-value={value ?? ""} />
   ),
 }));
 
@@ -35,7 +39,7 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
-import { CerebroInspectorAvatar } from "./cerebro-inspector-avatar";
+import { CerebroInspectorAvatar } from "./inspector-avatar";
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {

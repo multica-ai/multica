@@ -19,6 +19,7 @@ import { useWindowOverlayStore } from "./stores/window-overlay-store";
 import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
 import { RESOURCES } from "@multica/views/locales";
+import { CEREBRO_AGENT_AVATAR_RESOURCES } from "@multica/cerebro-agent-avatar/locales";
 
 
 function AppContent() {
@@ -307,7 +308,12 @@ export default function App() {
   );
   const locale = useMemo(() => pickLocale(localeAdapter), [localeAdapter]);
   const resources = useMemo(
-    () => ({ [locale]: RESOURCES[locale] }),
+    () => ({
+      [locale]: {
+        ...RESOURCES[locale],
+        "cerebro-agent-avatar": CEREBRO_AGENT_AVATAR_RESOURCES[locale],
+      },
+    }),
     [locale],
   );
 

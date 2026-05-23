@@ -1,0 +1,7 @@
+{
+  "generate_ai": "AI 生成",
+  "prompt_placeholder": "描述外观（可选）",
+  "generate_button": "生成",
+  "generating": "生成中…",
+  "generate_error": "头像生成失败"
+}

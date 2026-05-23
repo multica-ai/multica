@@ -1,17 +1,18 @@
 "use client";
 
-// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 — net-new cerebro sibling that
-// extends AvatarPicker with AI avatar generation via OpenRouter gpt-5-image-mini.
-// Not part of upstream multica.
+// Cerebro-only avatar picker: wraps the upstream AvatarPicker (manual upload)
+// with an optional AI generation trigger. Mounted from upstream zone via thin
+// imports in agent-detail-inspector.tsx and create-agent-dialog.tsx. See
+// docs/cerebro-patches.md (`agent-avatar-generate`).
 
 import { useState } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import { useT } from "@multica/views/i18n";
 import { api } from "@multica/core/api";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { cn } from "@multica/ui/lib/utils";
-import { AvatarPicker } from "./avatar-picker";
-import { useT } from "../../i18n";
+import { AvatarPicker } from "@multica/views/agents/components/avatar-picker";
 
 interface CerebroAvatarPickerProps {
   value: string | null;
@@ -34,7 +35,7 @@ export function CerebroAvatarPicker({
   agentName,
   size = 56,
 }: CerebroAvatarPickerProps) {
-  const { t } = useT("agents");
+  const { t } = useT("cerebro-agent-avatar");
   const enabled = useFeatureFlag("cerebro_agent_avatar");
   const [generating, setGenerating] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -52,9 +53,7 @@ export function CerebroAvatarPicker({
       setPrompt("");
     } catch (err) {
       toast.error(
-        err instanceof Error
-          ? err.message
-          : t(($) => $.create_dialog.avatar.generate_error),
+        err instanceof Error ? err.message : t(($) => $.generate_error),
       );
     } finally {
       setGenerating(false);
@@ -73,7 +72,7 @@ export function CerebroAvatarPicker({
               type="text"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder={t(($) => $.create_dialog.avatar.prompt_placeholder)}
+              placeholder={t(($) => $.prompt_placeholder)}
               className="h-7 w-full rounded border bg-background px-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               onKeyDown={(e) => {
                 if (e.key === "Enter") void handleGenerate();
@@ -95,9 +94,7 @@ export function CerebroAvatarPicker({
                 ) : (
                   <Sparkles className="h-3 w-3" />
                 )}
-                {generating
-                  ? t(($) => $.create_dialog.avatar.generating)
-                  : t(($) => $.create_dialog.avatar.generate_button)}
+                {generating ? t(($) => $.generating) : t(($) => $.generate_button)}
               </button>
               <button
                 type="button"
@@ -116,7 +113,7 @@ export function CerebroAvatarPicker({
             className="flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
           >
             <Sparkles className="h-3 w-3" />
-            {t(($) => $.create_dialog.avatar.generate_ai)}
+            {t(($) => $.generate_ai)}
           </button>
         )
       )}

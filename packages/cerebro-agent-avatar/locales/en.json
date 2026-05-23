@@ -1,0 +1,7 @@
+{
+  "generate_ai": "Generate AI",
+  "prompt_placeholder": "Describe the look (optional)",
+  "generate_button": "Generate",
+  "generating": "Generating…",
+  "generate_error": "Avatar generation failed"
+}

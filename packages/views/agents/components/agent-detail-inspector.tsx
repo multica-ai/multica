@@ -35,8 +35,8 @@ import { PropRow } from "../../common/prop-row";
 import { availabilityConfig } from "../presence";
 import { CharCounter } from "./char-counter";
 import { useT } from "../../i18n";
-// CEREBRO-PATCH(agent-avatar-generate): JEH-1879 use cerebro wrapper with AI generation.
-import { CerebroInspectorAvatar } from "./cerebro-inspector-avatar";
+// CEREBRO-PATCH(agent-avatar-generate): FIR-1918 relocated wrapper — see @multica/cerebro-agent-avatar.
+import { CerebroInspectorAvatar } from "@multica/cerebro-agent-avatar";
 import { ConcurrencyPicker } from "./inspector/concurrency-picker";
 import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";

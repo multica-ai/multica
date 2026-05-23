@@ -10,6 +10,7 @@ import {
   type SupportedLocale,
 } from "@multica/core/i18n";
 import { RESOURCES } from "@multica/views/locales";
+import { CEREBRO_AGENT_AVATAR_RESOURCES } from "@multica/cerebro-agent-avatar/locales";
 import "./globals.css";
 
 export const viewport: Viewport = {
@@ -103,7 +104,12 @@ export default async function RootLayout({
   const locale: SupportedLocale = isSupportedLocale(headerLocale)
     ? headerLocale
     : DEFAULT_LOCALE;
-  const resources = { [locale]: RESOURCES[locale] };
+  const resources = {
+    [locale]: {
+      ...RESOURCES[locale],
+      "cerebro-agent-avatar": CEREBRO_AGENT_AVATAR_RESOURCES[locale],
+    },
+  };
 
   return (
     <html

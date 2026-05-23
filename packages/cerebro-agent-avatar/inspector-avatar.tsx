@@ -1,14 +1,15 @@
 "use client";
 
-// CEREBRO-PATCH(agent-avatar-generate): JEH-1879 — net-new cerebro sibling.
 // Wraps CerebroAvatarPicker for the agent detail inspector so an existing
 // agent's avatar can be replaced via manual upload OR AI generation, with
 // the resulting URL persisted via the inspector's onUpdate hook. Mirrors the
-// affordance shipped in #483 for the create-agent dialog.
+// affordance shipped for the create-agent dialog (JEH-1563). Relocated from
+// the upstream zone under FIR-1918 — see docs/cerebro-patches.md
+// (`agent-avatar-generate`).
 
 import type { Agent } from "@multica/core/types";
-import { ActorAvatar } from "../../common/actor-avatar";
-import { CerebroAvatarPicker } from "./cerebro-avatar-picker";
+import { ActorAvatar } from "@multica/views/common/actor-avatar";
+import { CerebroAvatarPicker } from "./avatar-picker";
 
 interface CerebroInspectorAvatarProps {
   agent: Agent;

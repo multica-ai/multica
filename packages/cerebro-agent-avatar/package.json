@@ -1,0 +1,38 @@
+{
+  "name": "@multica/cerebro-agent-avatar",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./locales": "./locales/index.ts",
+    "./locales/en.json": "./locales/en.json",
+    "./locales/zh-Hans.json": "./locales/zh-Hans.json"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/core": "workspace:*",
+    "@multica/ui": "workspace:*",
+    "@multica/views": "workspace:*",
+    "sonner": "^2.0.7"
+  },
+  "peerDependencies": {
+    "lucide-react": "catalog:",
+    "react": "catalog:",
+    "react-i18next": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@types/react": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "jsdom": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

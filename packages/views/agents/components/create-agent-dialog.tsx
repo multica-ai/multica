@@ -7,8 +7,8 @@ import { ModelDropdown } from "./model-dropdown";
 import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
 import { InstructionsEditor } from "./instructions-editor";
 import { SkillMultiSelect } from "./skill-multi-select";
-// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 use cerebro wrapper with AI generation
-import { CerebroAvatarPicker as AvatarPicker } from "./cerebro-avatar-picker";
+// CEREBRO-PATCH(agent-avatar-generate): FIR-1918 relocated wrapper — see @multica/cerebro-agent-avatar.
+import { CerebroAvatarPicker as AvatarPicker } from "@multica/cerebro-agent-avatar";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { workspaceKeys } from "@multica/core/workspace/queries";

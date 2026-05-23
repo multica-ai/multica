@@ -1,5 +1,5 @@
 {
-  "_comment": "CEREBRO-PATCH(views-package-cerebro-deps): adds cerebro-* package deps (incl. cerebro-channels — JEH-718, cerebro-groups — JEH-1006, cerebro-pin-input — JEH-1065) + new exports for cerebro views",
+  "_comment": "CEREBRO-PATCH(views-package-cerebro-deps): adds cerebro-* package deps (incl. cerebro-channels — JEH-718, cerebro-groups — JEH-1006, cerebro-pin-input — JEH-1065) + new exports for cerebro views (incl. ./agents/components/avatar-picker — FIR-1918)",
   "name": "@multica/views",
   "version": "0.0.0",
   "private": true,
@@ -33,6 +33,7 @@
     "./my-issues": "./my-issues/index.ts",
     "./skills": "./skills/index.ts",
     "./agents": "./agents/index.ts",
+    "./agents/components/avatar-picker": "./agents/components/avatar-picker.tsx",
     "./members": "./members/index.ts",
     "./inbox": "./inbox/index.ts",
     "./inbox/components/inbox-list-item": "./inbox/components/inbox-list-item.tsx",

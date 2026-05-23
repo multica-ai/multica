@@ -2922,9 +2922,7 @@ export class ApiClient {
 
   // CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation via OpenRouter gpt-5-image-mini.
   async generateAgentAvatar(agentName: string, customPrompt?: string): Promise<{ url: string }> {
-    return this.fetch("/api/agents/generate-avatar", {
-      method: "POST",
-      body: JSON.stringify({ agent_name: agentName, custom_prompt: customPrompt }),
-    });
+    const body = JSON.stringify({ agent_name: agentName, custom_prompt: customPrompt });
+    return this.fetch("/api/agents/generate-avatar", { method: "POST", body });
   }
 }
