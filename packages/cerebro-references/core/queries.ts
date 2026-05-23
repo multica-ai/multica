@@ -32,6 +32,32 @@ export function useIssueReferences(issueId: string | null | undefined) {
   });
 }
 
+async function fetchReferencesByObject(
+  object: string,
+  refId: string,
+): Promise<IssueReference[]> {
+  const raw = await api.listCerebroReferencesByObject<ListResponse>(object, refId);
+  if (!raw || !Array.isArray(raw.references)) return [];
+  return raw.references;
+}
+
+// Reverse lookup: "which issues link to this object?" Powers the
+// references-by-object page. Keyed on (object, refId) so two different
+// objects don't share a cache slot.
+export function useReferencesByObject(
+  object: string | null | undefined,
+  refId: string | null | undefined,
+) {
+  const wsId = useWorkspaceId();
+  return useQuery({
+    queryKey: referenceKeys.byObject(wsId, object ?? "", refId ?? ""),
+    queryFn: () => fetchReferencesByObject(object as string, refId as string),
+    enabled: Boolean(wsId && object && refId),
+    staleTime: 15 * 1000,
+    placeholderData: (prev) => prev,
+  });
+}
+
 export function useAddReference(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
