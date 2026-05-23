@@ -1020,6 +1020,13 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 
 	slog.Info("task started", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskStarted(ctx, task)
+	// Tell every connected workspace WS client that this task transitioned
+	// dispatched → running. Without this, the workspace-wide
+	// `agentTaskSnapshot` query only refreshes on the 30s staleTime, so any
+	// UI that distinguishes "queued" from "running" (e.g. the issue-card
+	// agent activity indicator) lags by up to half a minute on the
+	// transition users care about most.
+	s.broadcastTaskEvent(ctx, protocol.EventTaskRunning, task)
 	return &task, nil
 }
 
@@ -1619,8 +1626,9 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 						)
 					} else if !hasActive {
 						if _, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-							ID:     t.IssueID,
-							Status: "todo",
+							ID:          t.IssueID,
+							Status:      "todo",
+							WorkspaceID: issue.WorkspaceID,
 						}); updateErr != nil {
 							slog.Warn("handle failed tasks: reset stuck issue failed",
 								"issue_id", issueKey,

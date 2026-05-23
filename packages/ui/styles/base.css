@@ -25,17 +25,38 @@
   animation: entrance-spin 0.6s ease-out forwards;
 }
 
-/* Onboarding: step / phase entry — 400ms fade + 4px rise.
- * Matches the design prototype's .fade-in. Applied on mount so every new
- * step (and intra-step phase switch, via key=phase remount) plays once.
- * `both` fill-mode commits the `from` styles pre-animation to avoid a
- * single-frame flash at natural state before the animation grabs. */
+/* Onboarding: step / phase entry — 400ms fade.
+ * Applied on mount so every new step (and intra-step phase switch, via
+ * key=phase remount) plays once. `both` fill-mode commits the `from`
+ * styles pre-animation to avoid a single-frame flash at natural state
+ * before the animation grabs.
+ *
+ * Earlier iteration also included a 4px translateY rise. Removed because
+ * the transform on h-full step roots was getting counted into the
+ * parent's scrollable overflow (web onboarding page + desktop
+ * WindowOverlay both wrap with overflow-y-auto), producing a brief
+ * scrollbar flash on each step entry. Pure opacity has no such side
+ * effect. */
 @keyframes onboarding-enter {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0; }
 }
 
 .animate-onboarding-enter {
   animation: onboarding-enter 0.4s ease both;
+}
+
+/* Welcome-after-onboarding Modal: emoji pops in with two quick scale
+ * bounces so the celebration registers visually without being
+ * disruptive. ~700ms total. */
+@keyframes welcome-emoji-pop {
+  0%   { transform: scale(0.4); opacity: 0; }
+  35%  { transform: scale(1.25); opacity: 1; }
+  55%  { transform: scale(0.92); }
+  75%  { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+.animate-welcome-emoji-pop {
+  animation: welcome-emoji-pop 0.7s cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
 /* Onboarding completion: success badge spring-pop.

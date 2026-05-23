@@ -107,7 +107,7 @@ import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
-import { timeAgo } from "@multica/core/utils";
+import { useTimeAgo } from "../../i18n";
 import { cn } from "@multica/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
@@ -596,12 +596,14 @@ function ActivityBlock({
   onToggle,
   getActorName,
   t,
+  timeAgo,
 }: {
   entries: TimelineEntry[];
   expanded: boolean;
   onToggle: () => void;
   getActorName: (type: string, id: string) => string;
   t: ActivityT;
+  timeAgo: (dateStr: string) => string;
 }) {
   if (!expanded) {
     const count = entries.length;
@@ -823,6 +825,7 @@ export function IssueDetail({
   highlightCommentId,
 }: IssueDetailProps) {
   const { t, i18n } = useT("issues");
+  const timeAgo = useTimeAgo();
   // `issueId` is the raw route param — may be a UUID *or* a human-readable
   // identifier (e.g. "OPE-460") when the URL has been canonicalized.  We keep
   // it around only for the initial detail query (the API accepts both formats)
@@ -2093,6 +2096,7 @@ export function IssueDetail({
         onToggle={() => toggleActivityBlock(item.id, expanded)}
         getActorName={getActorName}
         t={t}
+        timeAgo={timeAgo}
       />
     );
   };

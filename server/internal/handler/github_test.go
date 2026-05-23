@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -1334,5 +1335,145 @@ func TestGitHubInstallationBroadcastRedaction(t *testing.T) {
 	}
 	if _, present := generic["installation_id"]; present {
 		t.Errorf("installation_id leaked into broadcast JSON: %s", string(raw))
+	}
+}
+
+// TestWebhook_MergedPR_ChildWithParent_NotifiesParent guards the MUL-2538
+// must-fix: a merged PR is the dominant path by which a sub-issue actually
+// reaches `done`, and that path goes through advanceIssueToDone — not the
+// HTTP UpdateIssue / BatchUpdateIssues handlers that originally wired up
+// notifyParentOfChildDone. Without the helper call inside advanceIssueToDone,
+// the parent receives nothing when a child is closed by merging its PR.
+// This test fires a `pull_request closed merged` webhook against a child
+// issue and verifies the parent gets exactly one platform-generated system
+// comment with the child's real workspace identifier.
+func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "merge-parent-notify-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	// Create parent (open) + child (in_progress) pair.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "PR-merge parent " + time.Now().Format(time.RFC3339Nano),
+		"status": "in_progress",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue parent: %d %s", w.Code, w.Body.String())
+	}
+	var parent IssueResponse
+	json.NewDecoder(w.Body).Decode(&parent)
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":           "PR-merge child " + time.Now().Format(time.RFC3339Nano),
+		"status":          "in_progress",
+		"parent_issue_id": parent.ID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue child: %d %s", w.Code, w.Body.String())
+	}
+	var child IssueResponse
+	json.NewDecoder(w.Body).Decode(&child)
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id IN ($1, $2)`, child.ID, parent.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id IN ($1, $2)`, child.ID, parent.ID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id IN ($1, $2)`, child.ID, parent.ID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, child.ID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, parent.ID)
+	})
+
+	const installationID int64 = 88990011
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "merge-parent-acct",
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"action": "closed",
+		"pull_request": map[string]any{
+			"number":     4242,
+			"html_url":   "https://github.com/acme/widget/pull/4242",
+			"title":      "Fix " + child.Identifier,
+			"body":       "",
+			"state":      "closed",
+			"draft":      false,
+			"merged":     true,
+			"merged_at":  "2026-04-29T00:00:00Z",
+			"closed_at":  "2026-04-29T00:00:00Z",
+			"created_at": "2026-04-28T00:00:00Z",
+			"updated_at": "2026-04-29T00:00:00Z",
+			"head":       map[string]any{"ref": "fix/child"},
+			"user":       map[string]any{"login": "octocat", "avatar_url": ""},
+		},
+		"repository": map[string]any{
+			"name":  "widget",
+			"owner": map[string]any{"login": "acme"},
+		},
+		"installation": map[string]any{"id": installationID},
+	})
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+
+	w = httptest.NewRecorder()
+	req2 := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(body))
+	req2.Header.Set("X-GitHub-Event", "pull_request")
+	req2.Header.Set("X-Hub-Signature-256", sig)
+	testHandler.HandleGitHubWebhook(w, req2)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("webhook: expected 202, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	// Child must now be done (sanity check — the existing path).
+	updatedChild, err := testHandler.Queries.GetIssue(ctx, parseUUID(child.ID))
+	if err != nil {
+		t.Fatalf("GetIssue child: %v", err)
+	}
+	if updatedChild.Status != "done" {
+		t.Fatalf("expected child status 'done', got %q", updatedChild.Status)
+	}
+
+	// Parent must have received exactly one platform-generated system comment.
+	var sysCount int
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM comment WHERE issue_id = $1 AND author_type = 'system'`,
+		parent.ID,
+	).Scan(&sysCount); err != nil {
+		t.Fatalf("count system comments on parent: %v", err)
+	}
+	if sysCount != 1 {
+		t.Fatalf("expected 1 system comment on parent after PR-merge auto-done, got %d", sysCount)
+	}
+
+	var content string
+	if err := testPool.QueryRow(ctx,
+		`SELECT content FROM comment WHERE issue_id = $1 AND author_type = 'system' LIMIT 1`,
+		parent.ID,
+	).Scan(&content); err != nil {
+		t.Fatalf("read system comment: %v", err)
+	}
+	if !strings.Contains(content, child.Identifier) {
+		t.Errorf("system comment should reference child identifier %q, got: %s", child.Identifier, content)
+	}
+	// Parent has no assignee in this fixture, so the routing mentions stay
+	// absent. Behavior for assigned parents is covered in
+	// issue_child_done_test.go (MUL-2538 Option C).
+	for _, banned := range []string{"mention://agent/", "mention://member/", "mention://squad/"} {
+		if strings.Contains(content, banned) {
+			t.Errorf("system comment must not include %q mention (parent unassigned), got: %s", banned, content)
+		}
 	}
 }

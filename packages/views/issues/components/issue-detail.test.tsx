@@ -387,11 +387,6 @@ vi.mock("@multica/core/modals", () => ({
   ),
 }));
 
-// Mock core/utils
-vi.mock("@multica/core/utils", () => ({
-  timeAgo: () => "1d ago",
-}));
-
 // Mock core/hooks/use-file-upload
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
   useFileUpload: () => ({ uploadWithToast: vi.fn().mockResolvedValue("https://example.com/file.png") }),

@@ -148,6 +148,7 @@
     "subissue_of": "{{identifier}} 的子 issue",
     "subissue_chip": "子 issue：{{identifier}}",
     "parent_with_id": "父：{{identifier}}",
+    "set_start_date": "设置开始日期...",
     "set_parent": "设置父 issue...",
     "add_subissue": "添加子 issue...",
     "remove_parent": "移除父级",

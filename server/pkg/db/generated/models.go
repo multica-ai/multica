@@ -5,6 +5,8 @@
 package db
 
 import (
+	"net/netip"
+
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -248,6 +250,23 @@ type CommentReaction struct {
 	ActorID     pgtype.UUID        `json:"actor_id"`
 	Emoji       string             `json:"emoji"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type ContactSalesInquiry struct {
+	ID              pgtype.UUID        `json:"id"`
+	FirstName       string             `json:"first_name"`
+	LastName        string             `json:"last_name"`
+	BusinessEmail   string             `json:"business_email"`
+	CompanyName     string             `json:"company_name"`
+	CompanySize     string             `json:"company_size"`
+	CountryRegion   string             `json:"country_region"`
+	UseCase         string             `json:"use_case"`
+	Goals           string             `json:"goals"`
+	ConsentOutreach bool               `json:"consent_outreach"`
+	ConsentUpdates  bool               `json:"consent_updates"`
+	SubmitterIp     *netip.Addr        `json:"submitter_ip"`
+	UserAgent       string             `json:"user_agent"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
 type DaemonConnection struct {

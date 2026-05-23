@@ -182,6 +182,10 @@ type PatchUserOnboardingParams struct {
 	ID            pgtype.UUID `json:"id"`
 }
 
+// Partial update of the user's onboarding decision fields. Currently only the
+// questionnaire JSONB is patchable — the v2 attempt at persisting Step 3
+// runtime choice on the user row was reverted; that state now lives in a
+// frontend Zustand transient store.
 func (q *Queries) PatchUserOnboarding(ctx context.Context, arg PatchUserOnboardingParams) (User, error) {
 	row := q.db.QueryRow(ctx, patchUserOnboarding, arg.Questionnaire, arg.ID)
 	var i User

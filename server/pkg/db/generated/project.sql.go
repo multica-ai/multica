@@ -72,11 +72,17 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 }
 
 const deleteProject = `-- name: DeleteProject :exec
-DELETE FROM project WHERE id = $1
+DELETE FROM project WHERE id = $1 AND workspace_id = $2
 `
 
-func (q *Queries) DeleteProject(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteProject, id)
+type DeleteProjectParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Defense-in-depth: workspace_id is a SQL-layer tenant guard. See DeleteIssue.
+func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) error {
+	_, err := q.db.Exec(ctx, deleteProject, arg.ID, arg.WorkspaceID)
 	return err
 }
 
