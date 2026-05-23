@@ -1,8 +1,12 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/dagcore"
 	"github.com/multica-ai/multica/server/internal/daggraph"
@@ -146,4 +150,39 @@ func edgesToLinks(edges []daggraph.Edge) []dagcore.Link {
 		links[i] = dagcore.Link{FromID: e.From, ToID: e.To, Type: e.Type}
 	}
 	return links
+}
+
+// appendDAGEventAsync fires a DAG event append in a background goroutine.
+// Errors are logged but never block the caller or fail the HTTP response.
+func (h *Handler) appendDAGEventAsync(wsID string, recordID string, op dagcore.Operation, payload map[string]any, agentID string) {
+	if h.DAGService == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		wsUUID, err := parseUUIDLoose(wsID)
+		if err != nil {
+			slog.Warn("dag async: invalid workspace id", "workspace_id", wsID, "error", err)
+			return
+		}
+
+		event := dagcore.Event{
+			ID:        fmt.Sprintf("evt-%s-%d", recordID, time.Now().UnixNano()),
+			RecordIDs: []string{recordID},
+			AgentID:   agentID,
+			DVT: dagcore.DVT{
+				Dot:     dagcore.Dot{AgentID: agentID, Counter: 1},
+				Context: map[string]int64{agentID: 1},
+			},
+			Operation: op,
+			Payload:   payload,
+			Reason:    string(op) + " from issue handler",
+		}
+
+		if _, err := h.DAGService.AppendEvent(ctx, wsUUID, event); err != nil {
+			slog.Warn("dag async: append failed", "record_id", recordID, "operation", op, "error", err)
+		}
+	}()
 }

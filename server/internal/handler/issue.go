@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/dagcore"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -1911,6 +1912,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Project into DAG event log (fire-and-forget).
+	h.appendDAGEventAsync(issue.WorkspaceID.String(), issue.ID.String(), dagcore.OperationCreate, map[string]any{
+		"type":     "issue",
+		"status":   issue.Status,
+		"priority": issue.Priority,
+		"title":    issue.Title,
+	}, creatorID)
+
 	// Link any pre-uploaded attachments to this issue.
 	if len(attachmentIDs) > 0 {
 		h.linkAttachmentsByIssueIDs(r.Context(), issue.ID, issue.WorkspaceID, attachmentIDs)
@@ -2268,6 +2277,25 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
 	}
 
+	// Project update into DAG event log (fire-and-forget).
+	updatePayload := map[string]any{"type": "issue"}
+	if statusChanged {
+		updatePayload["status"] = issue.Status
+	}
+	if priorityChanged {
+		updatePayload["priority"] = issue.Priority
+	}
+	if titleChanged {
+		updatePayload["title"] = issue.Title
+	}
+	if assigneeChanged {
+		updatePayload["assignee_type"] = textToPtr(issue.AssigneeType)
+		updatePayload["assignee_id"] = uuidToString(issue.AssigneeID)
+	}
+	if len(updatePayload) > 1 {
+		h.appendDAGEventAsync(workspaceID, id, dagcore.OperationUpdate, updatePayload, userID)
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -2413,6 +2441,11 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 
 	h.deleteS3Objects(r.Context(), attachmentURLs)
 	userID := requestUserID(r)
+
+	// Project delete into DAG event log (fire-and-forget).
+	h.appendDAGEventAsync(uuidToString(issue.WorkspaceID), uuidToString(issue.ID), dagcore.OperationDelete, map[string]any{
+		"type": "issue",
+	}, userID)
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
 	// Always emit the resolved UUID — frontend caches key by UUID, so an
 	// identifier-style payload ("MUL-123") would leave stale entries on
