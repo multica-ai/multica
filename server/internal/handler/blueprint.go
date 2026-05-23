@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/blueprint"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -15,6 +16,12 @@ type ExportBlueprintRequest struct {
 	SquadIDs []string `json:"squad_ids"`
 	AgentIDs []string `json:"agent_ids"`
 	SkillIDs []string `json:"skill_ids"`
+}
+
+type PreviewBlueprintRequest struct {
+	Manifest        blueprint.Manifest         `json:"manifest"`
+	RuntimeMappings []blueprint.RuntimeMapping `json:"runtime_mappings"`
+	ProvidedEnv     []blueprint.ProvidedEnvVar `json:"provided_env"`
 }
 
 func (h *Handler) ExportBlueprint(w http.ResponseWriter, r *http.Request) {
@@ -184,6 +191,47 @@ func (h *Handler) ExportBlueprint(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, manifest)
 }
 
+func (h *Handler) PreviewBlueprint(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
+		return
+	}
+
+	var req PreviewBlueprintRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := blueprint.ValidateManifest(req.Manifest); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid blueprint manifest: "+err.Error())
+		return
+	}
+
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	for _, mapping := range req.RuntimeMappings {
+		if mapping.RuntimeID == "" {
+			continue
+		}
+		if _, ok := parseUUIDOrBadRequest(w, mapping.RuntimeID, "runtime_id"); !ok {
+			return
+		}
+	}
+
+	inventory, ok := h.blueprintPreviewInventory(w, r, wsUUID, req.RuntimeMappings, req.ProvidedEnv)
+	if !ok {
+		return
+	}
+	preview, err := blueprint.PreviewManifest(req.Manifest, inventory)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid blueprint manifest: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, preview)
+}
+
 func parseBlueprintExportIDs(w http.ResponseWriter, ids []string, fieldName string) ([]string, bool) {
 	out := make([]string, 0, len(ids))
 	for _, id := range ids {
@@ -280,4 +328,61 @@ func sourceSkillFromDB(s db.Skill) blueprint.SourceSkill {
 		Content:     s.Content,
 		Config:      config,
 	}
+}
+
+func (h *Handler) blueprintPreviewInventory(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, runtimeMappings []blueprint.RuntimeMapping, providedEnv []blueprint.ProvidedEnvVar) (blueprint.Inventory, bool) {
+	squads, err := h.Queries.ListAllSquads(r.Context(), workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load squads")
+		return blueprint.Inventory{}, false
+	}
+	agents, err := h.Queries.ListAllAgents(r.Context(), workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load agents")
+		return blueprint.Inventory{}, false
+	}
+	skills, err := h.Queries.ListSkillSummariesByWorkspace(r.Context(), workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load skills")
+		return blueprint.Inventory{}, false
+	}
+	runtimes, err := h.Queries.ListAgentRuntimes(r.Context(), workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load runtimes")
+		return blueprint.Inventory{}, false
+	}
+
+	inventory := blueprint.Inventory{
+		Squads:          make([]blueprint.ExistingResource, 0, len(squads)),
+		Agents:          make([]blueprint.ExistingResource, 0, len(agents)),
+		Skills:          make([]blueprint.ExistingResource, 0, len(skills)),
+		Runtimes:        make([]blueprint.ExistingRuntime, 0, len(runtimes)),
+		RuntimeMappings: runtimeMappings,
+		ProvidedEnv:     providedEnv,
+	}
+	for _, squad := range squads {
+		inventory.Squads = append(inventory.Squads, blueprint.ExistingResource{
+			ID:   uuidToString(squad.ID),
+			Name: squad.Name,
+		})
+	}
+	for _, agent := range agents {
+		inventory.Agents = append(inventory.Agents, blueprint.ExistingResource{
+			ID:   uuidToString(agent.ID),
+			Name: agent.Name,
+		})
+	}
+	for _, skill := range skills {
+		inventory.Skills = append(inventory.Skills, blueprint.ExistingResource{
+			ID:   uuidToString(skill.ID),
+			Name: skill.Name,
+		})
+	}
+	for _, runtime := range runtimes {
+		inventory.Runtimes = append(inventory.Runtimes, blueprint.ExistingRuntime{
+			ID:       uuidToString(runtime.ID),
+			Provider: runtime.Provider,
+		})
+	}
+	return inventory, true
 }
