@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"regexp"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -14,11 +15,18 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// CEREBRO-PATCH(mobile-push-dedupe): test seam for capturing mobile push
+// fanout and suppressing duplicate subscriber pushes when a mention wins.
+type mobilePushNotifier interface {
+	Enabled() bool
+	SendToUser(ctx context.Context, userID string, p service.Payload)
+}
+
 // pushNotifier is set once at register time. Used by notify* helpers to fan
 // inbox items out to the recipient's web-push subscriptions in addition to
 // the existing in-app inbox/realtime delivery. Nil-safe — Web Push is opt-in
 // per device, and not every deployment has VAPID keys configured.
-var pushNotifier *service.PushService
+var pushNotifier mobilePushNotifier
 
 // Apple Web Push enforces a hard ~4 KB ceiling on the encrypted payload.
 // After AES-128-GCM padding the plaintext budget shrinks to roughly 3 KB —
@@ -32,6 +40,12 @@ const (
 	pushTitleMaxRunes = 100
 	pushBodyMaxRunes  = 200
 )
+
+var pushMentionLinkRE = regexp.MustCompile(`\[@?([^\]]+)\]\(mention://[^)]+\)`)
+
+func stripMentionMarkdownForPush(s string) string {
+	return pushMentionLinkRE.ReplaceAllString(s, "@$1")
+}
 
 func truncateForPush(s string, max int) string {
 	if max <= 0 {
@@ -67,7 +81,7 @@ func pushItemToMember(ctx context.Context, queries *db.Queries, recipientType, r
 	transport := resolveChannelTransport(ctx, queries, recipientType, recipientID, channelMobile)
 	pushNotifier.SendToUser(ctx, recipientID, service.Payload{
 		Title:   truncateForPush(title, pushTitleMaxRunes),
-		Body:    truncateForPush(body, pushBodyMaxRunes),
+		Body:    truncateForPush(stripMentionMarkdownForPush(body), pushBodyMaxRunes),
 		URL:     pushDeepLinkURL(ctx, queries, workspaceID, issueID),
 		Tag:     "issue:" + issueID,
 		IssueID: issueID,
@@ -105,18 +119,19 @@ func pushDeepLinkURL(ctx context.Context, queries *db.Queries, workspaceID, issu
 // dispatchToMember to fan a single notification out across the channels the
 // user has chosen.
 type inboxItemDraft struct {
-	WorkspaceID   string
-	RecipientType string
-	RecipientID   string
-	IssueID       string
-	IssueStatus   string
-	NotifType     string
-	Severity      string
-	Title         string
-	Body          string
-	Details       []byte
-	Actor         events.Event
-	IsAssignee    bool
+	WorkspaceID        string
+	RecipientType      string
+	RecipientID        string
+	IssueID            string
+	IssueStatus        string
+	NotifType          string
+	Severity           string
+	Title              string
+	Body               string
+	Details            []byte
+	Actor              events.Event
+	IsAssignee         bool
+	SuppressMobilePush bool
 }
 
 // dispatchToMember resolves the recipient's per-channel preferences for this
@@ -158,7 +173,7 @@ func dispatchToMember(
 	// Mobile push fires only when something landed in the user's inbox or
 	// notifications page — push is a bell-ring on top of an existing item,
 	// not a standalone notification.
-	if created && resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelMobile, key) {
+	if created && !d.SuppressMobilePush && resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelMobile, key) {
 		pushItemToMember(ctx, queries, d.RecipientType, d.RecipientID, d.WorkspaceID, d.IssueID, d.NotifType, d.Title, d.Body)
 	}
 
@@ -495,10 +510,16 @@ func notifySubscribers(
 	body string,
 	details []byte,
 	assigneeMemberID string,
+	suppressMobilePushFor ...map[string]bool,
 ) {
+	suppressMobilePush := map[string]bool{}
+	if len(suppressMobilePushFor) > 0 && suppressMobilePushFor[0] != nil {
+		suppressMobilePush = suppressMobilePushFor[0]
+	}
+
 	notified := notifyIssueSubscribers(ctx, queries, bus,
 		issueID, issueID, issueStatus, workspaceID, e, exclude,
-		notifType, severity, title, body, details, assigneeMemberID)
+		notifType, severity, title, body, details, assigneeMemberID, suppressMobilePush)
 
 	// Only a small allowlist of event types bubbles to parent subscribers.
 	if !parentBubbleNotifTypes[notifType] {
@@ -530,7 +551,7 @@ func notifySubscribers(
 	parentID := util.UUIDToString(issue.ParentIssueID)
 	notifyIssueSubscribers(ctx, queries, bus,
 		parentID, issueID, issueStatus, workspaceID, e, parentExclude,
-		notifType, severity, title, body, details, assigneeMemberID)
+		notifType, severity, title, body, details, assigneeMemberID, suppressMobilePush)
 }
 
 // notifyIssueSubscribers sends inbox notifications to subscribers of
@@ -555,6 +576,7 @@ func notifyIssueSubscribers(
 	body string,
 	details []byte,
 	assigneeMemberID string,
+	suppressMobilePush map[string]bool,
 ) map[string]bool {
 	notified := map[string]bool{}
 
@@ -589,18 +611,19 @@ func notifyIssueSubscribers(
 
 		isAssignee := assigneeMemberID != "" && subID == assigneeMemberID
 		ok := dispatchToMember(ctx, queries, bus, inboxItemDraft{
-			WorkspaceID:   workspaceID,
-			RecipientType: "member",
-			RecipientID:   subID,
-			IssueID:       targetIssueID,
-			IssueStatus:   issueStatus,
-			NotifType:     notifType,
-			Severity:      severity,
-			Title:         title,
-			Body:          body,
-			Details:       details,
-			Actor:         e,
-			IsAssignee:    isAssignee,
+			WorkspaceID:        workspaceID,
+			RecipientType:      "member",
+			RecipientID:        subID,
+			IssueID:            targetIssueID,
+			IssueStatus:        issueStatus,
+			NotifType:          notifType,
+			Severity:           severity,
+			Title:              title,
+			Body:               body,
+			Details:            details,
+			Actor:              e,
+			IsAssignee:         isAssignee,
+			SuppressMobilePush: suppressMobilePush[subID],
 		})
 		if ok {
 			notified[subID] = true
@@ -655,21 +678,12 @@ func notifyDirect(
 	})
 }
 
-// notifyMentionedMembers creates inbox items for each @mentioned member,
-// excluding the actor and any IDs in the skip set. When an @all mention is
-// present, all workspace members are notified (excluding agents).
-func notifyMentionedMembers(
-	bus *events.Bus,
+func collectMentionedMemberIDs(
+	ctx context.Context,
 	queries *db.Queries,
-	e events.Event,
+	workspaceID string,
 	mentions []mention,
-	issueID string,
-	issueTitle string,
-	issueStatus string,
-	title string,
-	skip map[string]bool,
-	details []byte,
-) {
+) map[string]bool {
 	// Collect the set of member IDs to notify.
 	recipientIDs := map[string]bool{}
 
@@ -686,15 +700,34 @@ func notifyMentionedMembers(
 
 	// If @all is present, expand to all workspace members.
 	if hasAll {
-		members, err := queries.ListMembers(context.Background(), parseUUID(e.WorkspaceID))
+		members, err := queries.ListMembers(ctx, parseUUID(workspaceID))
 		if err != nil {
-			slog.Error("failed to list members for @all mention", "workspace_id", e.WorkspaceID, "error", err)
+			slog.Error("failed to list members for @all mention", "workspace_id", workspaceID, "error", err)
 		} else {
 			for _, m := range members {
 				recipientIDs[util.UUIDToString(m.UserID)] = true
 			}
 		}
 	}
+	return recipientIDs
+}
+
+// notifyMentionedMembers creates inbox items for each @mentioned member,
+// excluding the actor and any IDs in the skip set. When an @all mention is
+// present, all workspace members are notified (excluding agents).
+func notifyMentionedMembers(
+	bus *events.Bus,
+	queries *db.Queries,
+	e events.Event,
+	mentions []mention,
+	issueID string,
+	issueTitle string,
+	issueStatus string,
+	title string,
+	skip map[string]bool,
+	details []byte,
+) {
+	recipientIDs := collectMentionedMemberIDs(context.Background(), queries, e.WorkspaceID, mentions)
 
 	ctx := context.Background()
 	for id := range recipientIDs {
@@ -726,7 +759,11 @@ func notifyMentionedMembers(
 // within the HTTP request goroutine. Adding per-handler timeouts is a bus-level
 // concern — see events.Bus for future improvements.
 func registerNotificationListeners(bus *events.Bus, queries *db.Queries, pushSvc *service.PushService) {
-	pushNotifier = pushSvc
+	if pushSvc == nil {
+		pushNotifier = nil
+	} else {
+		pushNotifier = pushSvc
+	}
 	ctx := context.Background()
 
 	// issue:created — Direct notification to assignee if assignee != actor
@@ -987,13 +1024,18 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries, pushSvc
 			}
 		}
 
+		// Notify @mentions in comment content. Suppress only the duplicate
+		// subscriber mobile push for mentioned recipients; their new_comment
+		// inbox/notification item is still created, and the mentioned push wins.
+		mentions := parseMentions(commentContent)
+		suppressSubscriberMobilePush := collectMentionedMemberIDs(ctx, queries, e.WorkspaceID, mentions)
+		delete(suppressSubscriberMobilePush, e.ActorID)
+
 		notifySubscribers(ctx, queries, bus, issueID, issueStatus, e.WorkspaceID, e,
 			nil, "new_comment", "info",
 			issueTitle, commentContent,
-			commentDetails, commentAssigneeMemberID)
+			commentDetails, commentAssigneeMemberID, suppressSubscriberMobilePush)
 
-		// Notify @mentions in comment content.
-		mentions := parseMentions(commentContent)
 		if len(mentions) > 0 {
 			skip := map[string]bool{e.ActorID: true}
 			notifyMentionedMembers(bus, queries, e, mentions, issueID, issueTitle, issueStatus,
