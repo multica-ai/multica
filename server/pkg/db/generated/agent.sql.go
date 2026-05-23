@@ -445,6 +445,84 @@ func (q *Queries) CancelAgentTasksByTriggerComment(ctx context.Context, triggerC
 	return items, nil
 }
 
+const cancelQueuedTasksForClosedIssues = `-- name: CancelQueuedTasksForClosedIssues :many
+WITH victims AS (
+    SELECT atq.id, i.status AS issue_status
+    FROM agent_task_queue atq
+    JOIN issue i ON i.id = atq.issue_id
+    WHERE atq.status = 'queued'
+      AND i.status IN ('done', 'cancelled')
+    ORDER BY atq.created_at ASC
+    LIMIT $1::int
+    FOR UPDATE SKIP LOCKED
+)
+UPDATE agent_task_queue t
+SET status = 'cancelled',
+    completed_at = now(),
+    failure_reason = 'issue_closed',
+    error = 'linked issue was ' || v.issue_status
+FROM victims v
+WHERE t.id = v.id
+  AND t.status = 'queued'
+RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task
+`
+
+// Cancels queued tasks whose linked issues are done or cancelled.
+// This is the sweeper arm of the "linked issue closed but task still queued"
+// fix (MYW-2121): it catches cases where the issue reached a terminal status
+// through a path that did not cascade-cancel the task (e.g. API gap, race,
+// historical backlog).  Tasks are marked cancelled with an audit failure_reason
+// so they do not later expire as failed/queued_expired and pollute run stats.
+//
+// Concurrency safety: FOR UPDATE SKIP LOCKED + re-check status='queued' on
+// the outer UPDATE so a daemon claim racing in between selection and update
+// is not clobbered.  Capped per tick so a large backlog cannot monopolise DB.
+func (q *Queries) CancelQueuedTasksForClosedIssues(ctx context.Context, maxPerTick int32) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, cancelQueuedTasksForClosedIssues, maxPerTick)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const claimAgentTask = `-- name: ClaimAgentTask :one
 UPDATE agent_task_queue
 SET status = 'dispatched', dispatched_at = now()
