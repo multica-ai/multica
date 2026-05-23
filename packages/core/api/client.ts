@@ -21,6 +21,7 @@ import type {
   AgentEnvResponse,
   UpdateAgentEnvRequest,
   AgentTask,
+  CancelTaskResult,
   AgentActivityBucket,
   AgentRunCount,
   AgentRuntime,
@@ -1406,7 +1407,7 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/usage`);
   }
 
-  async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {
+  async cancelTask(issueId: string, taskId: string): Promise<CancelTaskResult> {
     return this.fetch(`/api/issues/${issueId}/tasks/${taskId}/cancel`, {
       method: "POST",
     });

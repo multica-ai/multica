@@ -1163,6 +1163,86 @@ func TestCancelTask_SameIssue_Succeeds(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("CancelTask with matching issueId/taskId: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
+
+	var resp CancelTaskResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode cancel response: %v", err)
+	}
+	if resp.CancelState != "cancelled" {
+		t.Fatalf("cancel_state: expected cancelled, got %q", resp.CancelState)
+	}
+	if resp.Task.ID != taskID || resp.Task.Status != "cancelled" {
+		t.Fatalf("task response mismatch: id=%q status=%q", resp.Task.ID, resp.Task.Status)
+	}
+}
+
+// TestCancelTask_SameIssueTerminal_ReturnsAlreadyTerminal verifies that a
+// cancel racing with normal completion is user-facing-idempotent: if the task
+// still belongs to this issue but is already terminal, the command succeeds
+// and tells the caller why no transition happened.
+func TestCancelTask_SameIssueTerminal_ReturnsAlreadyTerminal(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var issueID, taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'cancel-terminal-path', 'todo', 'medium', $2, 'member', 91004, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id, completed_at)
+		VALUES ($1, $2, 'completed', $3, now())
+		RETURNING id
+	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create terminal task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+issueID+"/tasks/"+taskID+"/cancel", nil)
+	req = withURLParams(req, "id", issueID, "taskId", taskID)
+
+	testHandler.CancelTask(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("CancelTask with terminal same-issue task: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp CancelTaskResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode cancel response: %v", err)
+	}
+	if resp.CancelState != "already_terminal" {
+		t.Fatalf("cancel_state: expected already_terminal, got %q", resp.CancelState)
+	}
+	if resp.Task.ID != taskID || resp.Task.Status != "completed" {
+		t.Fatalf("task response mismatch: id=%q status=%q", resp.Task.ID, resp.Task.Status)
+	}
+
+	var status string
+	if err := testPool.QueryRow(ctx,
+		`SELECT status FROM agent_task_queue WHERE id = $1`, taskID,
+	).Scan(&status); err != nil {
+		t.Fatalf("read task status: %v", err)
+	}
+	if status != "completed" {
+		t.Fatalf("terminal task status was mutated: expected 'completed', got %q", status)
+	}
 }
 
 // TestListTasksByIssue_CrossWorkspace_Returns404 verifies that task history
