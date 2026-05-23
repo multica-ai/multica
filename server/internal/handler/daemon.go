@@ -2126,15 +2126,32 @@ func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.TaskService.CancelTask(r.Context(), existing.ID)
+	result, err := h.TaskService.CancelTaskWithResult(r.Context(), existing.ID)
 	if err != nil {
 		slog.Warn("cancel task failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	slog.Info("task cancelled by user", "task_id", taskID, "issue_id", uuidToString(task.IssueID))
-	writeJSON(w, http.StatusOK, taskToResponse(*task, uuidToString(issue.WorkspaceID)))
+	slog.Info("task cancel requested by user",
+		"task_id", taskID,
+		"issue_id", uuidToString(result.Task.IssueID),
+		"cancel_state", string(result.CancelState),
+	)
+	writeJSON(w, http.StatusOK, CancelTaskResponse{
+		Task:        taskToResponse(result.Task, uuidToString(issue.WorkspaceID)),
+		CancelState: string(result.CancelState),
+		Message:     cancelTaskMessage(result.CancelState),
+	})
+}
+
+func cancelTaskMessage(state service.TaskCancelState) string {
+	switch state {
+	case service.TaskCancelStateAlreadyTerminal:
+		return "Task already finished"
+	default:
+		return "Task cancelled"
+	}
 }
 
 // ListTasksByIssue returns all tasks (any status) for an issue — used for execution history.

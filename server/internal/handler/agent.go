@@ -166,27 +166,27 @@ type AgentTaskResponse struct {
 	// as `## Workspace Context` so every agent running in this workspace —
 	// regardless of issue / chat / autopilot / quick-create — sees the same
 	// shared context. Empty when the workspace owner hasn't set it.
-	WorkspaceContext        string                `json:"workspace_context,omitempty"`
-	Status                  string                `json:"status"`
-	Priority                int32                 `json:"priority"`
-	DispatchedAt            *string               `json:"dispatched_at"`
-	StartedAt               *string               `json:"started_at"`
-	CompletedAt             *string               `json:"completed_at"`
-	Result                  any                   `json:"result"`
-	Error                   *string               `json:"error"`
-	FailureReason           string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
-	Attempt                 int32                 `json:"attempt"`
-	MaxAttempts             int32                 `json:"max_attempts"`
-	ParentTaskID            *string               `json:"parent_task_id,omitempty"`
-	Agent                   *TaskAgentData        `json:"agent,omitempty"`
-	Repos                   []RepoData            `json:"repos,omitempty"`
-	ProjectID               string                `json:"project_id,omitempty"`        // issue's project, when present
-	ProjectTitle            string                `json:"project_title,omitempty"`     // for surfacing in agent context
-	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"` // resources attached to the project
-	CreatedAt               string                `json:"created_at"`
-	PriorSessionID          string                `json:"prior_session_id,omitempty"`          // session ID from a previous task on same issue
-	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on same issue
-	WorkDir                 string                `json:"work_dir,omitempty"`                  // local working directory pinned for this task; populated once the daemon reports it
+	WorkspaceContext string                `json:"workspace_context,omitempty"`
+	Status           string                `json:"status"`
+	Priority         int32                 `json:"priority"`
+	DispatchedAt     *string               `json:"dispatched_at"`
+	StartedAt        *string               `json:"started_at"`
+	CompletedAt      *string               `json:"completed_at"`
+	Result           any                   `json:"result"`
+	Error            *string               `json:"error"`
+	FailureReason    string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	Attempt          int32                 `json:"attempt"`
+	MaxAttempts      int32                 `json:"max_attempts"`
+	ParentTaskID     *string               `json:"parent_task_id,omitempty"`
+	Agent            *TaskAgentData        `json:"agent,omitempty"`
+	Repos            []RepoData            `json:"repos,omitempty"`
+	ProjectID        string                `json:"project_id,omitempty"`        // issue's project, when present
+	ProjectTitle     string                `json:"project_title,omitempty"`     // for surfacing in agent context
+	ProjectResources []ProjectResourceData `json:"project_resources,omitempty"` // resources attached to the project
+	CreatedAt        string                `json:"created_at"`
+	PriorSessionID   string                `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
+	PriorWorkDir     string                `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
+	WorkDir          string                `json:"work_dir,omitempty"`         // local working directory pinned for this task; populated once the daemon reports it
 	// RelativeWorkDir is a privacy-safe display form of WorkDir intended for
 	// the UI. For standard tasks it strips the daemon's workspaces root so
 	// the user sees `<wsUUID>/<taskShort>/workdir`; for local_directory
@@ -197,28 +197,28 @@ type AgentTaskResponse struct {
 	// when WorkDir is empty, or when stripping leaves nothing. See
 	// relativeWorkDir() for the full rules. Older clients can still read
 	// WorkDir directly; newer UIs should prefer RelativeWorkDir.
-	RelativeWorkDir         string                `json:"relative_work_dir,omitempty"`
-	TriggerCommentID        *string               `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
-	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
-	TriggerSummary          *string               `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
-	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
-	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
-	NewCommentCount         int                   `json:"new_comment_count,omitempty"`         // trigger-thread comments since last run; excludes injected trigger + own comments; omitempty so old daemons ignore it
-	NewCommentsSince        string                `json:"new_comments_since,omitempty"`        // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it
-	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
-	ChatMessage             string                `json:"chat_message,omitempty"`              // user message for chat tasks
-	ChatMessageAttachments  []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`  // attachments on the user message — agent calls `multica attachment download <id>` per entry
-	AutopilotRunID          string                `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot-spawned tasks
-	AutopilotID             string                `json:"autopilot_id,omitempty"`              // autopilot that spawned this task
-	AutopilotTitle          string                `json:"autopilot_title,omitempty"`           // autopilot title used as task context
-	AutopilotDescription    string                `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
-	AutopilotSource         string                `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
-	AutopilotTriggerPayload json.RawMessage       `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
-	QuickCreatePrompt       string                `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
-	SquadID                 string                `json:"squad_id,omitempty"`                  // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
-	SquadName               string                `json:"squad_name,omitempty"`                // display name for the picker squad
-	ParentIssueID           string                `json:"parent_issue_id,omitempty"`           // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
-	ParentIssueIdentifier   string                `json:"parent_issue_identifier,omitempty"`   // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
+	RelativeWorkDir         string               `json:"relative_work_dir,omitempty"`
+	TriggerCommentID        *string              `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
+	TriggerCommentContent   string               `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
+	TriggerSummary          *string              `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
+	TriggerAuthorType       string               `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
+	TriggerAuthorName       string               `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
+	NewCommentCount         int                  `json:"new_comment_count,omitempty"`         // trigger-thread comments since last run; excludes injected trigger + own comments; omitempty so old daemons ignore it
+	NewCommentsSince        string               `json:"new_comments_since,omitempty"`        // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it
+	ChatSessionID           string               `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
+	ChatMessage             string               `json:"chat_message,omitempty"`              // user message for chat tasks
+	ChatMessageAttachments  []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"`  // attachments on the user message — agent calls `multica attachment download <id>` per entry
+	AutopilotRunID          string               `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot-spawned tasks
+	AutopilotID             string               `json:"autopilot_id,omitempty"`              // autopilot that spawned this task
+	AutopilotTitle          string               `json:"autopilot_title,omitempty"`           // autopilot title used as task context
+	AutopilotDescription    string               `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
+	AutopilotSource         string               `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
+	AutopilotTriggerPayload json.RawMessage      `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
+	QuickCreatePrompt       string               `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
+	SquadID                 string               `json:"squad_id,omitempty"`                  // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
+	SquadName               string               `json:"squad_name,omitempty"`                // display name for the picker squad
+	ParentIssueID           string               `json:"parent_issue_id,omitempty"`           // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
+	ParentIssueIdentifier   string               `json:"parent_issue_identifier,omitempty"`   // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
 	// RequestingUserName + RequestingUserProfileDescription mirror the user
 	// the agent is acting on behalf of (see daemon/types.go). v1 sources them
 	// from the runtime owner so they're populated for daemon runtimes and
@@ -237,6 +237,12 @@ type AgentTaskResponse struct {
 	// (cloud / system runtimes that pre-date per-task tokens); in that case
 	// the daemon falls back to its own credential. See MUL-2600.
 	AuthToken string `json:"auth_token,omitempty"`
+}
+
+type CancelTaskResponse struct {
+	Task        AgentTaskResponse `json:"task"`
+	CancelState string            `json:"cancel_state"`
+	Message     string            `json:"message"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata embedded in

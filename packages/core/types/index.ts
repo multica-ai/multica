@@ -5,6 +5,8 @@ export type {
   AgentRuntimeMode,
   AgentVisibility,
   AgentTask,
+  CancelTaskResult,
+  CancelTaskState,
   AgentActivityBucket,
   AgentRunCount,
   TaskFailureReason,

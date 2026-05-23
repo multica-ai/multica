@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Bot, ChevronDown, Clock, Loader2, Square } from "lucide-react";
 import { api } from "@multica/core/api";
+import { issueKeys } from "@multica/core/issues/queries";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import type { TaskMessagePayload } from "@multica/core/types/events";
 import type { AgentTask } from "@multica/core/types/agent";
@@ -54,6 +56,7 @@ interface AgentLiveCardProps {
 export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
+  const queryClient = useQueryClient();
   const [taskStates, setTaskStates] = useState<Map<string, TaskState>>(new Map());
   // Cancel confirmation is hoisted here (not per-card) so a single dialog
   // serves both the inline single banner and the multi-agent popover. A
@@ -239,13 +242,16 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
       toast.error(
         e instanceof Error ? e.message : t(($) => $.agent_live.cancel_failed),
       );
+    } finally {
+      void queryClient.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
+      reconcile();
       setCancellingIds((prev) => {
         const next = new Set(prev);
         next.delete(task.id);
         return next;
       });
     }
-  }, [cancelTarget, issueId, t]);
+  }, [cancelTarget, issueId, queryClient, reconcile, t]);
 
   if (taskStates.size === 0) return null;
 

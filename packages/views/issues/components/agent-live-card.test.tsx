@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent as rtlFireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { AgentTask } from "@multica/core/types/agent";
 import enCommon from "../../locales/en/common.json";
@@ -127,10 +128,13 @@ function fireEvent(event: string, payload: unknown) {
 }
 
 function renderCard(issueId = "issue-1") {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <AgentLiveCard issueId={issueId} />
-    </I18nProvider>,
+    <QueryClientProvider client={queryClient}>
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <AgentLiveCard issueId={issueId} />
+      </I18nProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -138,6 +142,7 @@ beforeEach(() => {
   wsHandlers.clear();
   wsReconnectCallbacks.clear();
   mockApi.getActiveTasksForIssue.mockReset();
+  mockApi.getActiveTasksForIssue.mockResolvedValue({ tasks: [] });
   mockApi.listTaskMessages.mockReset();
   mockApi.listTaskMessages.mockResolvedValue([]);
   mockApi.cancelTask.mockReset();
@@ -281,6 +286,39 @@ describe("AgentLiveCard queued rendering", () => {
       rtlFireEvent.click(screen.getByRole("button", { name: "Stop task" }));
     });
     expect(mockApi.cancelTask).toHaveBeenCalledWith("issue-1", "task-r");
+  });
+
+  it("reconciles after cancel so an already-terminal task does not leave a stale banner", async () => {
+    const runningTask = makeTask("task-r", { status: "running" });
+    mockApi.getActiveTasksForIssue
+      .mockResolvedValueOnce({ tasks: [runningTask] })
+      .mockResolvedValueOnce({ tasks: [] });
+    mockApi.cancelTask.mockResolvedValue({
+      task: makeTask("task-r", {
+        status: "completed",
+        completed_at: "2026-01-01T00:01:00Z",
+      }),
+      cancel_state: "already_terminal",
+      message: "Task already finished",
+    });
+
+    renderCard();
+
+    await waitFor(() => {
+      expect(screen.getByText(/is working/)).toBeTruthy();
+    });
+
+    await act(async () => {
+      rtlFireEvent.click(screen.getByText("Stop"));
+    });
+    await act(async () => {
+      rtlFireEvent.click(screen.getByRole("button", { name: "Stop task" }));
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/is working/)).toBeNull();
+    });
+    expect(mockApi.getActiveTasksForIssue).toHaveBeenCalledTimes(2);
   });
 
   it("Stop confirm dialog dismisses without cancelling when the user picks Keep running", async () => {
