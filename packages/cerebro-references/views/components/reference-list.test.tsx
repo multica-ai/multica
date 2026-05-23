@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import type React from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { WorkspaceSlugProvider } from "@multica/core/paths";
+import { NavigationProvider } from "@multica/views/navigation";
 import type { IssueReference } from "@multica/cerebro-references/core";
 
 // Drive the list from mocked query/mutation hooks; keep the rest of core
@@ -20,6 +23,28 @@ vi.mock("@multica/cerebro-references/core", async (importOriginal) => {
 });
 
 import { IssueReferenceList } from "./reference-list";
+
+const push = vi.fn();
+
+function renderWithRouting(ui: React.ReactElement) {
+  return render(
+    <WorkspaceSlugProvider slug="acme">
+      <NavigationProvider
+        value={{
+          push,
+          replace: vi.fn(),
+          back: vi.fn(),
+          pathname: "/acme/issues/issue-1",
+          searchParams: new URLSearchParams(),
+          openInNewTab: vi.fn(),
+          getShareableUrl: (path) => `https://app.test${path}`,
+        }}
+      >
+        {ui}
+      </NavigationProvider>
+    </WorkspaceSlugProvider>,
+  );
+}
 
 function makeRef(overrides: Partial<IssueReference> = {}): IssueReference {
   return {
@@ -43,11 +68,12 @@ describe("IssueReferenceList", () => {
   beforeEach(() => {
     mockUseIssueReferences.mockReset();
     mockDeleteMutate.mockReset();
+    push.mockReset();
   });
 
   it("renders the empty state with 0 references", () => {
     mockUseIssueReferences.mockReturnValue({ data: [], isLoading: false });
-    render(<IssueReferenceList issueId="issue-1" />);
+    renderWithRouting(<IssueReferenceList issueId="issue-1" />);
 
     expect(screen.getByText(/Link a GitHub PR/i)).toBeInTheDocument();
     expect(screen.queryByTestId("reference-row")).not.toBeInTheDocument();
@@ -58,7 +84,7 @@ describe("IssueReferenceList", () => {
       data: [makeRef({ metadata: { state: "open" } })],
       isLoading: false,
     });
-    render(<IssueReferenceList issueId="issue-1" />);
+    renderWithRouting(<IssueReferenceList issueId="issue-1" />);
 
     const rows = screen.getAllByTestId("reference-row");
     expect(rows).toHaveLength(1);
@@ -86,7 +112,7 @@ describe("IssueReferenceList", () => {
       ],
       isLoading: false,
     });
-    render(<IssueReferenceList issueId="issue-1" />);
+    renderWithRouting(<IssueReferenceList issueId="issue-1" />);
 
     expect(screen.getAllByTestId("reference-row")).toHaveLength(3);
     expect(
@@ -100,5 +126,21 @@ describe("IssueReferenceList", () => {
     // Two distinct object groups rendered.
     const unknownRow = screen.getByText("Linear LIN-7").closest("[data-testid='reference-row']");
     expect(unknownRow).toHaveAttribute("data-object", "linear_issue");
+  });
+
+  it("navigates from a state badge to the reverse lookup page", () => {
+    mockUseIssueReferences.mockReturnValue({
+      data: [makeRef({ metadata: { state: "merged" } })],
+      isLoading: false,
+    });
+    renderWithRouting(<IssueReferenceList issueId="issue-1" />);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Show issues with this reference",
+    }));
+
+    expect(push).toHaveBeenCalledWith(
+      "/acme/cerebro/references/github_pr/firtal-group%2Ffirtal-cerebro%2342",
+    );
   });
 });

@@ -55,6 +55,11 @@ export interface ListIssuesParams {
    * majority on the client.
    */
   scheduled?: boolean;
+  /**
+   * Cerebro edge-reference filter encoded as `<object>:<ref_id>`, for example
+   * `github_pr:firtal-group/firtal-cerebro#525`.
+   */
+  reference?: string;
 }
 
 export interface IssueActorRef {

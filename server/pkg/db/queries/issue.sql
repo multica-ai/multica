@@ -50,6 +50,17 @@ WHERE i.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
   AND (sqlc.narg('scheduled')::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)
+  -- CEREBRO-PATCH(issue-reference-filter): reference edge filter for cerebro_issue_reference.
+  AND (
+    sqlc.narg('reference_object')::text IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM cerebro_issue_reference cir
+      WHERE cir.issue_id = i.id
+        AND cir.object = sqlc.narg('reference_object')::text
+        AND cir.ref_id = sqlc.narg('reference_ref_id')::text
+    )
+  )
   AND (
     sqlc.narg('project_ids')::uuid[] IS NULL
     OR i.project_id = ANY(sqlc.narg('project_ids')::uuid[])
@@ -262,6 +273,17 @@ WHERE i.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
   AND (sqlc.narg('scheduled')::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)
+  -- CEREBRO-PATCH(issue-reference-filter-count): keep totals aligned with ListIssues.
+  AND (
+    sqlc.narg('reference_object')::text IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM cerebro_issue_reference cir
+      WHERE cir.issue_id = i.id
+        AND cir.object = sqlc.narg('reference_object')::text
+        AND cir.ref_id = sqlc.narg('reference_ref_id')::text
+    )
+  )
   AND (
     sqlc.narg('project_ids')::uuid[] IS NULL
     OR i.project_id = ANY(sqlc.narg('project_ids')::uuid[])
