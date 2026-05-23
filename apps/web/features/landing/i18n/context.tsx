@@ -4,12 +4,14 @@ import { createContext, useContext, useState, useCallback, useMemo } from "react
 import { useConfigStore } from "@multica/core/config";
 import { LOCALE_COOKIE } from "@multica/core/i18n";
 import { createEnDict } from "./en";
+import { createTrDict } from "./tr";
 import { createZhDict } from "./zh";
 import type { LandingDict, Locale } from "./types";
 
 const dictionaryFactories: Record<Locale, (allowSignup: boolean) => LandingDict> = {
   en: createEnDict,
   zh: createZhDict,
+  tr: createTrDict,
 };
 
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year

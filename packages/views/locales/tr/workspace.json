@@ -1,0 +1,30 @@
+{
+  "create_form": {
+    "name_label": "Çalışma alanı adı",
+    "name_placeholder": "Çalışma alanım",
+    "url_label": "Çalışma alanı URL'si",
+    "url_placeholder": "çalışma alanı-im",
+    "submit": "Çalışma alanı oluştur",
+    "submitting": "Oluşturuluyor...",
+    "errors": {
+      "slug_format": "Yalnızca küçük harfler, sayılar ve tireler",
+      "slug_taken": "Bu çalışma alanı URL'si zaten alınmış.",
+      "slug_reserved": "Bu çalışma alanı URL'si ayrılmış ve kullanılamaz.",
+      "slug_conflict_toast": "Farklı bir çalışma alanı URL'si seçin",
+      "create_failed": "Çalışma alanı oluşturulamadı"
+    }
+  },
+  "new_page": {
+    "back": "Geri",
+    "log_out": "Çıkış yap",
+    "title": "Multica'ya hoş geldiniz",
+    "description": "Sizin ve AI ekip arkadaşlarınızın yan yana çalıştığı tek çalışma alanı: issue'ları alırlar, yorum bırakırlar ve aynı bağlamı paylaşırlar.",
+    "invite_hint": "Çalışma alanınız hazır olduğunda ekip arkadaşlarınızı davet edebilirsiniz."
+  },
+  "no_access": {
+    "title": "Çalışma alanı kullanılamıyor",
+    "description": "Bu çalışma alanı yok veya erişiminiz yok.",
+    "go_to_workspaces": "Çalışma alanlarıime git",
+    "sign_in_different": "Farklı bir kullanıcı olarak oturum aç"
+  }
+}

@@ -20,12 +20,14 @@ describe("matchLocale", () => {
 
   it("matches a clean supported tag", () => {
     expect(matchLocale(["zh-Hans"])).toBe("zh-Hans");
+    expect(matchLocale(["tr"])).toBe("tr");
     expect(matchLocale(["en"])).toBe("en");
   });
 
   it("collapses region-tagged BCP-47 to the supported base", () => {
     expect(matchLocale(["en-US"])).toBe("en");
     expect(matchLocale(["zh-Hans-CN"])).toBe("zh-Hans");
+    expect(matchLocale(["tr-TR"])).toBe("tr");
   });
 
   it("falls back to DEFAULT_LOCALE when no candidate matches", () => {

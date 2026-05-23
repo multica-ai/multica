@@ -1,0 +1,296 @@
+{
+  "page": {
+    "title": "Çalışma ortamları",
+    "tagline": "Ajanlarınız için CLI oturumları çalıştıran makineler ve cloud workerlar.",
+    "learn_more": "Daha fazla bilgi →",
+    "connect_remote": "Bilgisayar ekle",
+    "search_placeholder": "Çalışma ortamı ara…",
+    "scope_mine": "Benimkiler",
+    "scope_all": "Tümü",
+    "live": "Canlı",
+    "live_tooltip": "Gerçek zamanlı güncellemeler · 75 sn'ye kadar offline algılama",
+    "filter_all": "Tümü",
+    "filter_all_description": "Bu görünümdeki tüm çalışma ortamları",
+    "empty": {
+      "title": "Henüz çalışma ortamı yok",
+      "hint": "Desktop bu bilgisayarı otomatik tarar. Başka bir makine kullanmak için — bir sunucu, dev box veya terminali olan herhangi bir bilgisayar — buradan ekleyin."
+    },
+    "no_matches": {
+      "title": "Eşleşme yok",
+      "with_query": "\"{{query}}\" ile eşleşen çalışma ortamı yok{{filterSuffix}}.",
+      "with_query_filter_suffix": " bu filtrede",
+      "no_query": "Bu filtreyle eşleşen çalışma ortamı yok.",
+      "try_widening": " Kapsamı genişletmeyi veya filtreleri temizlemeyi deneyin."
+    },
+    "bootstrapping": {
+      "title": "Local çalışma ortamı başlatılıyor…",
+      "hint": "Bu genellikle birkaç saniye sürer. Daemon çalışma alanına kaydoluyor."
+    }
+  },
+  "machine": {
+    "search_placeholder": "Makine ara…",
+    "filters": {
+      "all": "Tümü",
+      "online": "Online",
+      "issues": "Sorunlar"
+    },
+    "section_local": "Local",
+    "section_remote": "Remote",
+    "section_cloud": "Cloud",
+    "this_machine": "Bu Mac",
+    "local_badge": "Local · bu makine",
+    "runtime_count_one": "{{count}} çalışma ortamı",
+    "runtime_count_other": "{{count}} çalışma ortamı",
+    "busy_count_one": "{{count}} meşgul",
+    "busy_count_other": "{{count}} meşgul",
+    "no_matches_title": "Makine yok",
+    "no_matches_hint": "Geçerli arama veya filtreyle eşleşen makine yok.",
+    "select_machine": "Çalışma ortamlarıını incelemek için bir makine seçin.",
+    "metrics": {
+      "runtimes": "Çalışma ortamları",
+      "runtimes_hint_one": "{{count}} online",
+      "runtimes_hint_other": "{{count}} online",
+      "health": "Sağlık",
+      "health_clear": "Sorun yok",
+      "health_issues_one": "{{count}} sorun",
+      "health_issues_other": "{{count}} sorun",
+      "workload": "İş yükü",
+      "workload_value_idle": "Boşta",
+      "workload_idle": "Tümü boşta",
+      "workload_hint": "{{running}} çalışıyor · {{queued}} kuyrukta",
+      "cli": "CLI",
+      "cloud_worker": "Cloud worker",
+      "local_daemon": "Local daemon"
+    }
+  },
+  "health": {
+    "online": {
+      "label": "Online",
+      "description": "Son 45 sn içinde heartbeat alındı. Görev göndermeye hazır."
+    },
+    "recently_lost": {
+      "label": "Yakın zamanda koptu",
+      "description": "5 dakikadan kısa süre önce bağlantı koptu — çoğu zaman kısa bir ağ kesintisidir."
+    },
+    "offline": {
+      "label": "Offline",
+      "description": "5+ dakikadır heartbeat yok. Daemon'u yeniden başlatın veya host'u inceleyin."
+    },
+    "about_to_gc": {
+      "label": "GC yaklaşmış",
+      "description": "6+ gündür offline. Yeniden bağlanmazsa 7. günde otomatik silinir."
+    }
+  },
+  "detail": {
+    "all_runtimes": "Tüm çalışma ortamları",
+    "read_only": "Salt okunur",
+    "delete_button": "Çalışma ortamını sil",
+    "delete_disabled_tooltip": "Bu çalışma ortamı çalışan bir local daemon tarafından yönetiliyor ve birkaç saniye içinde kendini yeniden kaydedecek. Kalıcı olarak kaldırmak için daemon sürecini durdurun.",
+    "last_seen": "son görülme {{when}}",
+    "fact_owner": "Sahip",
+    "fact_device": "Cihaz",
+    "fact_runtime": "Çalışma ortamı",
+    "technical_details": "Teknik detaylar",
+    "fact_daemon_cli": "Daemon CLI",
+    "fact_daemon_id": "Daemon ID",
+    "serving_title": "Hizmet verdiği",
+    "serving_count_one": "{{count}} ajan",
+    "serving_count_other": "{{count}} ajan",
+    "no_agents": "Bu çalışma ortamına henüz bağlı ajan yok.",
+    "diagnostics_title": "Tanılama",
+    "diagnostics_cli": "CLI",
+    "diagnostics_visibility": "Görünürlük",
+    "visibility_label": {
+      "private": "Private",
+      "public": "Public"
+    },
+    "visibility_hint": {
+      "private": "Bu çalışma ortamı üzerinde yalnızca siz ve çalışma alanı adminleri ajan oluşturabilir.",
+      "public": "Bu çalışma ortamı üzerinde herhangi bir çalışma alanı üyesi ajan oluşturabilir."
+    },
+    "visibility_toast_updated": "Görünürlük {{visibility}} olarak ayarlandı",
+    "visibility_toast_failed": "Görünürlük güncellenemedi",
+    "delete_dialog": {
+      "title": "Çalışma ortamını Sil",
+      "description": "\"{{name}}\" çalışma ortamınını silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.",
+      "cancel": "İptal",
+      "confirm": "Sil",
+      "deleting": "Siliniyor..."
+    },
+    "toast_deleted": "Çalışma ortamı silindi",
+    "toast_delete_failed": "Çalışma ortamı silinemedi",
+    "running_chip_one": "· {{count}} çalışıyor",
+    "running_chip_other": "· {{count}} çalışıyor",
+    "queued_chip_one": "· {{count}} kuyrukta",
+    "queued_chip_other": "· {{count}} kuyrukta"
+  },
+  "detail_page": {
+    "not_found_title": "Çalışma ortamı bulunamadı",
+    "not_found_hint": "Silinmiş olabilir veya erişiminiz olmayabilir."
+  },
+  "running_one": "{{count}} çalışıyor",
+  "running_other": "{{count}} çalışıyor",
+  "queued_one": "{{count}} kuyrukta",
+  "queued_other": "{{count}} kuyrukta",
+  "connect": {
+    "title": "Bilgisayar ekle",
+    "description": "Eklemek istediğiniz bilgisayarda bu iki komutu çalıştırın. Daemon online olduğu anda algılayacağız.",
+    "step1_label": "Multica CLI'ı kur",
+    "step2_label": "Daemon'u başlat",
+    "step2_hint": "Oturum açmak için tarayıcı açar, sonra daemon'u arka planda çalışır durumda tutar.",
+    "live_listening": "Bilgisayarınız bekleniyor",
+    "live_listening_hint": "Daemon başlar başlamaz algılayacağız — genellikle bir dakikadan kısa sürer.",
+    "troubleshooting": "O bilgisayarda tarayıcı açılamıyor mu?",
+    "trouble_intro": "Tarayıcıyla oturum açmak yerine token kullanın. Bu, 2. adımın yerini alır ve terminaliniz olan her yerde çalışır.",
+    "trouble_token_hint_prefix": "Şuradan token oluşturun: ",
+    "trouble_token_hint_destination": "Ayarlar → Tokenlar",
+    "trouble_token_hint_suffix": ". Daemon yalnızca dışa bağlantı kurar — inbound port gerekmez.",
+    "trouble_check_status": "Durumu kontrol et",
+    "trouble_view_logs": "Logları görüntüle",
+    "copy_aria": "Kopyala",
+    "cancel": "İptal",
+    "success_title": "Bilgisayar bağlandı",
+    "success_description": "Bilgisayarınız online ve hazır. Bir ajan oluşturun; burada görev almaya başlayabilir.",
+    "view_runtime": "Çalışma ortamını görüntüle",
+    "create_agent": "Ajan oluştur"
+  },
+  "cloud_runtime": {
+    "action": "Cloud Çalışma ortamı",
+    "title": "Cloud Çalışma ortamı",
+    "description": "Yönetilen bir cloud node başlatın ve Fleet durumunu izleyin.",
+    "create_title": "Yeni node",
+    "create_hint": "Bir ad, instance type ve disk boyutu seçin. Gerisini Fleet uygular.",
+    "nodes_title": "Fleet nodeları",
+    "refresh": "Yenile",
+    "nodes_empty": "Cloud node yok",
+    "nodes_failed": "Cloud Çalışma ortamı kullanılamıyor",
+    "nodes_failed_hint": "Fleet node listesi döndürmedi.",
+    "node_fallback_name": "Cloud node",
+    "create": "Node oluştur",
+    "creating": "Oluşturuluyor...",
+    "cancel": "İptal",
+    "toast_created": "Cloud Çalışma ortamı node oluşturuldu",
+    "toast_create_failed": "Cloud Çalışma ortamı node oluşturulamadı",
+    "delete": "Node sil",
+    "delete_confirm": "Bu cloud node'u silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.",
+    "toast_deleted": "Cloud node silindi",
+    "toast_delete_failed": "Cloud node silinemedi",
+    "fields": {
+      "name": "Ad",
+      "instance_type": "Instance type",
+      "region": "Region",
+      "disk_size": "Disk size GiB",
+      "image_id": "AMI ID",
+      "subnet_id": "Subnet ID",
+      "key_name": "Key pair",
+      "bootstrap_pat": "Bootstrap PAT"
+    },
+    "placeholders": {
+      "name": "cloud-dev-01",
+      "key_name": "dev-key"
+    },
+    "validation": {
+      "instance_type_required": "Instance type zorunludur",
+      "disk_size_invalid": "Disk size pozitif bir tam sayı olmalıdır"
+    }
+  },
+  "update": {
+    "cli_version_label": "CLI Sürümü:",
+    "version_unknown": "bilinmiyor",
+    "managed_by_desktop": "Desktop tarafından yönetiliyor",
+    "managed_by_desktop_title": "CLI binary Multica Desktop tarafından yönetiliyor — CLI'ı yükseltmek için Desktop'ı güncelleyin.",
+    "latest": "En son",
+    "available": "mevcut",
+    "action": "Güncelle",
+    "retry": "Tekrar dene",
+    "unknown_error": "Bilinmeyen hata",
+    "initiate_failed": "Güncelleme başlatılamadı",
+    "status": {
+      "pending": "Daemon bekleniyor...",
+      "running": "Güncelleniyor...",
+      "completed": "Güncelleme tamamlandı. Daemon yeniden başlatılıyor...",
+      "failed": "Güncelleme başarısız",
+      "timeout": "Zaman aşımı"
+    }
+  },
+  "charts": {
+    "heatmap_less": "Daha az",
+    "heatmap_more": "Daha çok",
+    "tooltip_total": "Toplam"
+  },
+  "list": {
+    "col_runtime": "Çalışma ortamı",
+    "col_health": "Sağlık",
+    "col_owner": "Sahip",
+    "col_agents": "Ajanlar",
+    "col_workload": "İş yükü",
+    "col_cost": "Maliyet · 7g",
+    "col_cli": "CLI",
+    "cost_delta_flat": "sabit",
+    "cli_managed_badge": "Desktop",
+    "cli_update_available_aria": "Güncelleme mevcut",
+    "cli_update_available_tooltip": "Güncelleme mevcut: {{version}}",
+    "row_actions_aria": "Satır eylemleri",
+    "delete_action": "Sil",
+    "delete_permission_hint": "Bu çalışma ortamını yalnızca çalışma ortamı sahibi ve çalışma alanı adminleri silebilir",
+    "delete_admin_hint": "Bir çalışma ortamını yalnızca çalışma ortamı sahibi ve çalışma alanı adminleri silebilir."
+  },
+  "usage": {
+    "period_label": "Dönem",
+    "dimension_label": "Boyut",
+    "kpi_cost_label": "Maliyet · {{days}}G",
+    "kpi_cost_delta": "{{sign}}{{pct}}% önceki döneme göre",
+    "kpi_cache_label": "Cache tasarrufu · {{days}}G",
+    "kpi_cache_hint": "{{pct}}% hit · {{reads}} okuma",
+    "kpi_tokens_label": "Tokenlar · {{days}}G",
+    "kpi_tokens_hint": "girdi {{input}} · çıktı {{output}}",
+    "when_title": "Bu çalışma ortamı ne zaman harcadı",
+    "when_tab_daily": "Günlük",
+    "when_tab_weekly": "Haftalık",
+    "when_tab_heatmap": "Heatmap",
+    "daily_metric_cost": "Maliyet",
+    "daily_metric_tokens": "Tokenlar",
+    "weekly_partial_label": "{{range}} (kısmi · {{covered}} / 7 gün)",
+    "heatmap_caption": "Son 26 hafta · günlük $ yoğunluğu (dönem seçici burada yok sayılır)",
+    "legend_input": "Girdi",
+    "legend_output": "Çıktı",
+    "legend_cache_read": "Cache okuma",
+    "legend_cache_write": "Cache yazma",
+    "empty_no_usage": "Bu dönemde kullanım yok.",
+    "empty_pricing_missing": "Token kaydedildi ancak şu modeller için fiyatlandırma eksik:",
+    "empty_pricing_hint": "Maliyet toplamlarına dahil etmek için özel ücret belirleyin.",
+    "empty_zero_cost": "Token kaydedildi ancak maliyet hesaplaması $0 döndürdü.",
+    "unmapped_notice_one": "{{count}} model için bakımı yapılan fiyat yok — tokenları maliyet toplamlarından hariç tutulur.",
+    "unmapped_notice_other": "{{count}} model için bakımı yapılan fiyat yok — tokenları maliyet toplamlarından hariç tutulur.",
+    "custom_pricing": {
+      "open_button": "Özel fiyatları ayarla",
+      "title": "Özel model fiyatları",
+      "description": "Bakımı yapılan fiyatla birlikte gelmeyen modelleri fiyatlandırabilmemiz için milyon token başına ücretleri girin. Bu makinede lokal olarak saklanır.",
+      "empty": "Şu anda özel fiyat gerektiren model yok.",
+      "field_input": "Girdi",
+      "field_output": "Çıktı",
+      "field_cache_read": "Cache okuma",
+      "field_cache_write": "Cache yazma",
+      "unit_hint": "Tüm ücretler 1M token başına USD'dir. Override'ı kaldırmak için tüm alanları boş bırakın.",
+      "remove_aria": "Özel fiyatı kaldır",
+      "cancel": "İptal",
+      "save": "Kaydet"
+    },
+    "cost_by_title_agent": "Ajan bazında maliyet",
+    "cost_by_title_model": "Model bazında maliyet",
+    "cost_by_tab_agent": "Ajan bazında",
+    "cost_by_tab_model": "Model bazında",
+    "cost_by_caption_agent_one": "Bu çalışma ortamı üzerinde {{count}} ajan",
+    "cost_by_caption_agent_other": "Bu çalışma ortamı üzerinde {{count}} ajan",
+    "cost_by_caption_model_one": "{{count}} model kullanıldı",
+    "cost_by_caption_model_other": "{{count}} model kullanıldı",
+    "daily_breakdown_toggle": "Günlük döküm tablosu",
+    "table_date": "Tarih",
+    "table_model": "Model",
+    "table_input": "Girdi",
+    "table_output": "Çıktı",
+    "table_cache_r": "Cache R",
+    "table_cache_w": "Cache W",
+    "no_data": "Henüz kullanım verisi yok"
+  }
+}

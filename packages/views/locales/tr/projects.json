@@ -1,0 +1,97 @@
+{
+  "page": {
+    "title": "Projeler",
+    "new_project": "Yeni proje",
+    "empty": "Henüz proje yok",
+    "create_first": "İlk projenizi oluşturun",
+    "view_compact": "Kompakt",
+    "view_comfortable": "Rahat",
+    "search_placeholder": "Proje ara...",
+    "no_search_results": "Aramanızla eşleşen sonuç yok"
+  },
+  "table": {
+    "name": "Ad",
+    "priority": "Öncelik",
+    "status": "Durum",
+    "progress": "İlerleme",
+    "lead": "Lead",
+    "created": "Oluşturuldu"
+  },
+  "status": {
+    "planned": "Planlandı",
+    "in_progress": "Devam ediyor",
+    "paused": "Duraklatıldı",
+    "completed": "Tamamlandı",
+    "cancelled": "İptal edildi"
+  },
+  "priority": {
+    "urgent": "Acil",
+    "high": "Yüksek",
+    "medium": "Orta",
+    "low": "Düşük",
+    "none": "Öncelik yok"
+  },
+  "lead": {
+    "no_lead": "Lead yok",
+    "assign_placeholder": "Lead ata...",
+    "members_group": "Üyeler",
+    "agents_group": "Ajanlar",
+    "no_results": "Sonuç yok"
+  },
+  "relative_date": {
+    "today": "Bugün",
+    "one_day_ago": "1 gün önce",
+    "days_ago": "{{count}} gün önce",
+    "months_ago": "{{count}} ay önce"
+  },
+  "detail": {
+    "not_found": "Proje bulunamadı",
+    "breadcrumb_fallback": "Projeler",
+    "title_placeholder": "Proje başlığı",
+    "icon_tooltip": "İkonu değiştir",
+    "pin_tooltip": "Kenar çubuğuna sabitle",
+    "unpin_tooltip": "Kenar çubuğundan kaldır",
+    "sidebar_tooltip": "Kenar çubuğunu aç/kapat",
+    "copy_link": "Bağlantıyı kopyala",
+    "delete_action": "Proje sil",
+    "section_properties": "Özellikler",
+    "section_progress": "İlerleme",
+    "section_description": "Açıklama",
+    "description_placeholder": "Açıklama ekle...",
+    "empty_issues_title": "Bağlı issue yok",
+    "empty_issues_hint": "Yeni bir issue oluşturun veya mevcut issue'ları bu projeye atayın.",
+    "empty_issues_new_button": "Yeni Issue",
+    "no_issues_yet": "Henüz issue yok",
+    "toast_link_copied": "Bağlantı kopyalandı",
+    "toast_project_deleted": "Proje silindi",
+    "toast_move_issue_failed": "Issue taşınamadı"
+  },
+  "resources": {
+    "section_header": "Kaynaklar",
+    "empty": "Eklenmiş kaynak yok.",
+    "add_button": "Kaynak ekle",
+    "popover_title": "GitHub repo bağla",
+    "attached_badge": "bağlı",
+    "remove_tooltip": "Kaldır",
+    "url_placeholder": "https://github.com/owner/repo veya git@github.com:owner/repo.git",
+    "url_submit": "Ekle",
+    "toast_attached": "Repository bağlandı",
+    "toast_attach_failed": "Bağlanamadı",
+    "toast_removed": "Kaynak kaldırıldı",
+    "toast_remove_failed": "Kaynak kaldırılamadı"
+  },
+  "delete_dialog": {
+    "title": "Proje sil",
+    "description": "Bu proje silinecek. Issue'lar silinmez ancak bağlantıları kaldırılır.",
+    "confirm": "Sil",
+    "cancel": "İptal"
+  },
+  "picker": {
+    "no_project": "Proje yok",
+    "remove": "Projeden kaldır",
+    "empty": "Henüz proje yok"
+  },
+  "chip": {
+    "fallback_label": "Proje"
+  }
+}

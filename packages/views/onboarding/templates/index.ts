@@ -24,13 +24,14 @@ export {
 } from "./user-context";
 
 /**
- * Pick the EN or ZH content for the given user language. Maps any "zh*"
- * prefix to the Chinese variant; everything else falls back to English.
- * Mirrors the server-side `noRuntimeIssueDescription` logic.
+ * Pick persisted starter content for the given user language. Maps any "zh*"
+ * prefix to Chinese, "tr*" to Turkish, and everything else to English.
  */
 export function pickContentLang(
   language: string | null | undefined,
-): "en" | "zh" {
-  if (language && language.toLowerCase().startsWith("zh")) return "zh";
+): "en" | "zh" | "tr" {
+  const normalized = language?.toLowerCase();
+  if (normalized?.startsWith("zh")) return "zh";
+  if (normalized?.startsWith("tr")) return "tr";
   return "en";
 }

@@ -12,8 +12,8 @@
  */
 
 /**
- * Step 1 of the skip-path bundle. Bilingual so a Chinese user sees a
- * Chinese title on the board.
+ * Step 1 of the skip-path bundle. Localized so users see the title on the
+ * board in their selected language.
  *
  * Note: server's deprecation shim (`onboarding_shim.go:noRuntimeIssueTitle`)
  * still uses the bare English string for its title-based dedupe — that
@@ -23,6 +23,7 @@
 export const INSTALL_RUNTIME_ISSUE_TITLE = {
   en: "Step 1 — Connect a runtime to start using agents",
   zh: "第 1 步 —— 连接运行时,开始使用 agent",
+  tr: "1. adım — Ajanları kullanmaya başlamak için çalışma ortamı bağlayın",
 } as const;
 
 const en = `Welcome to Multica.
@@ -104,7 +105,46 @@ Kimi CLI 官方文档:https://moonshotai.github.io/kimi-cli/zh/guides/getting-st
 
 运行时连上后,你就可以创建 Multica Helper,开始一次有智能体参与的上手引导。`;
 
-export const INSTALL_RUNTIME_ISSUE_BODY = { en, zh } as const;
+const tr = `Multica'ya hoş geldiniz.
+
+Ajanların iş çalıştırabilmesi için önce bir çalışma ortamına ihtiyacı var. Bir çalışma ortamı kurarken Multica'yı hafif bir proje yönetimi çalışma alanı olarak kullanmaya başlayabilirsiniz.
+
+## Önce Multica'yı deneyin
+
+Çalışma ortamı hazır olmadan önce şunları yapabilirsiniz:
+
+1. Mevcut işiniz için bir proje oluşturun.
+2. Birkaç issue oluşturup Bekleyenler, Yapılacak, Devam ediyor ve Tamamlandı durumları arasında taşıyın.
+3. Issue'lara öncelik, etiket, yorum ve abonelik ekleyin.
+4. Atamaları ve mention'ları takip etmek için Gelen Kutusu'nu kullanın.
+
+Böylece önce proje yönetimi katmanını tanımış olursunuz. Çalışma ortamı bağlandığında ajanlar aynı issue'lar üzerinden çalışmaya başlayabilir.
+
+## İlk ajan çalışma ortamınızı kurun
+
+Tam rehber: https://multica.ai/docs/install-agent-runtime
+
+Türkçe kullanıcılar için en hızlı ilk yol Codex'tir:
+
+1. Node.js'in kurulu olduğundan emin olun.
+2. Codex'i kurun:
+   npm i -g @openai/codex
+3. Giriş yapın:
+   codex
+4. Terminalinizin Codex'i bulabildiğini doğrulayın:
+   which codex
+   codex --version
+5. Multica daemon'ı yeniden başlatın:
+   multica daemon restart
+   Desktop uygulamasını kullanıyorsanız uygulamayı yeniden başlatmanız yeterlidir.
+6. Çalışma Ortamları sayfasına dönüp yenileyin. Online bir Codex çalışma ortamı görmelisiniz.
+7. Bu çalışma ortamından ilk ajanınızı oluşturun, sonra bir issue'yu ajana atayıp durumunu Yapılacak yapın.
+
+Codex referansı: https://developers.openai.com/codex/cli
+
+Çalışma ortamı bağlandığında, rehberli ilk kullanım için Multica Helper'ı oluşturabilirsiniz.`;
+
+export const INSTALL_RUNTIME_ISSUE_BODY = { en, zh, tr } as const;
 
 /**
  * Prefix sentence for the follow-up comment posted on this issue (the one
@@ -118,4 +158,5 @@ export const INSTALL_RUNTIME_ISSUE_BODY = { en, zh } as const;
 export const FOLLOWUP_COMMENT_PREFIX = {
   en: "Your next step:",
   zh: "完成后的下一步：",
+  tr: "Sıradaki adımınız:",
 } as const;

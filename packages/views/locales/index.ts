@@ -47,6 +47,30 @@ import zhHansLayout from "./zh-Hans/layout.json";
 import zhHansUsage from "./zh-Hans/usage.json";
 import zhHansUi from "./zh-Hans/ui.json";
 import zhHansSquads from "./zh-Hans/squads.json";
+import trCommon from "./tr/common.json";
+import trAuth from "./tr/auth.json";
+import trSettings from "./tr/settings.json";
+import trIssues from "./tr/issues.json";
+import trAgents from "./tr/agents.json";
+import trEditor from "./tr/editor.json";
+import trOnboarding from "./tr/onboarding.json";
+import trInvite from "./tr/invite.json";
+import trLabels from "./tr/labels.json";
+import trMembers from "./tr/members.json";
+import trMyIssues from "./tr/my-issues.json";
+import trSearch from "./tr/search.json";
+import trInbox from "./tr/inbox.json";
+import trWorkspace from "./tr/workspace.json";
+import trProjects from "./tr/projects.json";
+import trAutopilots from "./tr/autopilots.json";
+import trSkills from "./tr/skills.json";
+import trChat from "./tr/chat.json";
+import trModals from "./tr/modals.json";
+import trRuntimes from "./tr/runtimes.json";
+import trLayout from "./tr/layout.json";
+import trUsage from "./tr/usage.json";
+import trUi from "./tr/ui.json";
+import trSquads from "./tr/squads.json";
 
 // Single source of truth for the resource bundle. Both apps (web layout +
 // desktop App.tsx) import from here so adding a locale or namespace happens
@@ -103,5 +127,31 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     usage: zhHansUsage,
     ui: zhHansUi,
     squads: zhHansSquads,
+  },
+  tr: {
+    common: trCommon,
+    auth: trAuth,
+    settings: trSettings,
+    issues: trIssues,
+    agents: trAgents,
+    editor: trEditor,
+    onboarding: trOnboarding,
+    invite: trInvite,
+    labels: trLabels,
+    members: trMembers,
+    "my-issues": trMyIssues,
+    search: trSearch,
+    inbox: trInbox,
+    workspace: trWorkspace,
+    projects: trProjects,
+    autopilots: trAutopilots,
+    skills: trSkills,
+    chat: trChat,
+    modals: trModals,
+    runtimes: trRuntimes,
+    layout: trLayout,
+    usage: trUsage,
+    ui: trUi,
+    squads: trSquads,
   },
 };

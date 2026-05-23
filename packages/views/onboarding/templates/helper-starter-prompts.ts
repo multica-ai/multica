@@ -17,8 +17,8 @@ export const STARTER_CARD_IDS = ["intro", "tour", "welcome_page"] as const;
 export type StarterCardId = (typeof STARTER_CARD_IDS)[number];
 
 interface StarterPrompt {
-  title: { en: string; zh: string };
-  prompt: { en: string; zh: string };
+  title: { en: string; zh: string; tr: string };
+  prompt: { en: string; zh: string; tr: string };
 }
 
 export const HELPER_STARTER_PROMPTS: Record<StarterCardId, StarterPrompt> = {
@@ -26,26 +26,31 @@ export const HELPER_STARTER_PROMPTS: Record<StarterCardId, StarterPrompt> = {
     title: {
       en: "Introduce Multica to me",
       zh: "简单介绍一下 Multica",
+      tr: "Bana Multica'yı tanıt",
     },
     prompt: {
       en: "Introduce Multica to me in 1–2 paragraphs. Cover what it is, the core concepts (workspace / issue / agent / runtime), and how it differs from tools like Linear or Jira.",
       zh: "用 1-2 段话简单介绍 Multica 给我。讲清楚它是什么、核心概念有哪些(workspace / issue / agent / runtime)、和 Linear / Jira 之类的工具核心区别在哪。",
+      tr: "Multica'yı bana 1-2 paragrafta tanıt. Ne olduğunu, temel kavramları (çalışma alanı / issue / ajan / çalışma ortamı) ve Linear ya da Jira gibi araçlardan nasıl ayrıldığını anlat.",
     },
   },
   tour: {
     title: {
       en: "Walk me through the core features",
       zh: "带我熟悉每个功能",
+      tr: "Temel özellikleri birlikte gezelim",
     },
     prompt: {
       en: "Walk me through Multica's core features — issue, agent, squad, autopilot, chat. Pick one realistic scenario I might run into and explain how all these pieces fit together.",
       zh: "陪我熟悉 Multica 的每个核心功能 —— issue、agent、squad、autopilot、chat。挑一个我可能用得上的真实场景,讲讲这几个东西是怎么配合的。",
+      tr: "Multica'nın temel özelliklerini birlikte gezelim: issue, ajan, ekip, autopilot ve chat. Karşıma çıkabilecek gerçekçi bir senaryo seç ve bu parçaların nasıl birlikte çalıştığını anlat.",
     },
   },
   welcome_page: {
     title: {
       en: "Show me what Multica can do for me — as slides",
       zh: "用 slides 介绍 Multica 能为我做什么",
+      tr: "Multica'nın bana neler katacağını slaytlarla göster",
     },
     prompt: {
       en: `Build me a single-file HTML slide deck that shows what Multica can do for me. Tailor it to my role and use case (see "About me" below). Paste the FULL HTML in a fenced \`\`\`html block in a comment on this issue so I can copy it straight out, save as \`multica-intro.html\`, and double-click to open it in a browser.
@@ -100,6 +105,32 @@ When done, also reply with a one-sentence summary of which scenarios you picked 
 - 左右方向键和空格切换,角落放一个小的页码指示。
 
 做完后再用一句话告诉我你为我挑了哪几个场景以及为什么。`,
+      tr: `Bana Multica'nın ne yapabileceğini gösteren tek dosyalık bir HTML slayt destesi hazırla. Rolüme ve kullanım senaryoma göre özelleştir (aşağıdaki "Hakkımda" bölümüne bak). Tam HTML'i bu issue'ya yorum olarak fenced bir \`\`\`html bloğunda yapıştır; doğrudan kopyalayıp \`multica-intro.html\` olarak kaydedip tarayıcıda açabileyim.
+
+**Format**
+- Tek, self-contained .html dosyası; tüm CSS / JS inline. Sıfır dependency, build tool yok, dış görsel yok (görselleri CSS ile üret: gradient, geometrik şekiller, inline SVG).
+- Toplam 5-8 slayt:
+  1. Başlık — "Multica [rolüm] için ne yapabilir"
+  2. Dört temel kavram — çalışma alanı / issue / ajan / çalışma ortamı, tek slayt
+  3-6. Kullanım senaryoma uyarlanmış 3-4 somut örnek; her biri "X yapmak istediğinde → Multica bunu böyle ele alır" formatında
+  7. Kapanış — tek ve somut bir sonraki adım
+
+**Viewport kuralları (zorunlu)**
+- Her \`.slide\`: \`height: 100vh; height: 100dvh; overflow: hidden;\`
+- Tüm font-size ve spacing değerleri \`clamp(min, preferred, max)\` kullansın; sabit px / rem kullanma.
+- Slayt yoğunluğu: 1 başlık + en fazla 4 bullet YA DA 1 başlık + 2 kısa paragraf. Taşarsa başka slayta böl.
+- \`prefers-reduced-motion: reduce\` değerine saygı göster (animasyonları kapat).
+
+**Estetik (AI slop görüntüsünden kaçın)**
+- Fontshare veya Google Fonts'tan ayırt edici bir font seç. Inter, Roboto, Arial veya sistem fontlarını kullanma.
+- CSS değişkenleriyle tutarlı bir palet kur: bir baskın renk + bir keskin vurgu rengi. Klişe "beyaz zemin üstünde mor gradient" görünümünden kaçın.
+- Arka planlar atmosfer katmalı: katmanlı gradient'ler veya geometrik desenler kullan; düz beyaz bırakma.
+- Animasyon: her slaytta staggered \`animation-delay\` kullanan tek, iyi kurgulanmış giriş animasyonu. Sadece CSS. Dağınık mikro etkileşimler olmasın.
+
+**Navigasyon**
+- ArrowLeft / ArrowRight ve Space ile ilerleme. Köşede küçük bir sayfa göstergesi.
+
+Bittiğinde, benim için hangi senaryoları seçtiğini ve nedenini tek cümleyle özetle.`,
     },
   },
 };

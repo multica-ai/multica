@@ -1,0 +1,43 @@
+{
+  "page": {
+    "breadcrumb": "Issue'larım",
+    "workspace_fallback": "Çalışma alanı",
+    "empty_title": "Size atanmış issue yok",
+    "empty_description": "Oluşturduğunuz veya size atanan issue'lar burada görünür."
+  },
+  "header": {
+    "scope": {
+      "all_label": "Tümü",
+      "all_description": "Bana atanmış, benim oluşturduğum veya ajan ve ekip'larımı içerenler",
+      "assigned_label": "Atanmış",
+      "assigned_description": "Bana atanmış issue'lar",
+      "created_label": "Oluşturulan",
+      "created_description": "Oluşturduğum issue'lar",
+      "agents_label": "Ajanlarım ve ekiplerim",
+      "agents_description": "Ajanlarıma atanmış issue'lar"
+    },
+    "filter_button": "Filtrele",
+    "filter_status": "Durum",
+    "filter_priority": "Öncelik",
+    "issue_count_one": "{{count}} issue",
+    "issue_count_other": "{{count}} issue",
+    "reset_filters": "Tüm filtreleri sıfırla",
+    "display_settings": "Görünüm ayarları",
+    "grouping": "Gruplama",
+    "group_status": "Durum",
+    "group_assignee": "Atanan",
+    "ordering": "Sıralama",
+    "ascending": "Artan",
+    "descending": "Azalan",
+    "card_properties": "Kart özellikleri",
+    "view_board": "Pano görünümü",
+    "view_list": "Liste görünümü",
+    "view_label": "Görünüm",
+    "view_board_short": "Pano",
+    "view_list_short": "Liste",
+    "sort_manual": "Manuel"
+  },
+  "errors": {
+    "move_failed": "Issue taşınamadı"
+  }
+}

@@ -17,15 +17,16 @@ const HELPER_AGENT_NAME = "Multica Helper";
  */
 
 /**
- * Step 2 of the skip-path bundle. Bilingual title.
+ * Step 2 of the skip-path bundle. Localized title.
  */
 export const CREATE_AGENT_GUIDE_ISSUE_TITLE = {
   en: "Step 2 — Create your first Multica Agent",
   zh: "第 2 步 —— 创建你的第一个 Multica Agent",
+  tr: "2. adım — İlk Multica ajanınızı oluşturun",
 } as const;
 
 interface BodyOpts {
-  lang: "en" | "zh";
+  lang: "en" | "zh" | "tr";
   installRuntimeIdentifier: string;
   installRuntimeId: string;
 }
@@ -34,6 +35,9 @@ export function getCreateAgentGuideBody(opts: BodyOpts): string {
   const mention = `[${opts.installRuntimeIdentifier}](mention://issue/${opts.installRuntimeId})`;
   if (opts.lang === "zh") {
     return zhBody(mention);
+  }
+  if (opts.lang === "tr") {
+    return trBody(mention);
   }
   return enBody(mention);
 }
@@ -120,4 +124,46 @@ ${HELPER_INSTRUCTIONS.zh}
 - **Squads** —— 可一起被分派的一组 agent。
 - **Autopilots** —— 定时或 webhook 触发的运行。
 - **文档** —— https://multica.ai/docs。`;
+}
+
+function trBody(installRuntimeMention: string): string {
+  return `Çalışma ortamınız online olduğunda (${installRuntimeMention} bölümüne bakın), ilk ajanınızı oluşturun: Multica Helper. Aşağıdaki prompt hazır; doğrudan kopyalayabilirsiniz.
+
+## 1. Yeni ajan ekranını açın
+
+Kenar çubuğunda **Ajanlar** bölümüne gidin → **Yeni Ajan**'a tıklayın.
+
+## 2. Az önce kurduğunuz çalışma ortamını seçin
+
+"Çalışma ortamı" alanında ilgili çalışma ortamını seçin. Hiçbir şey görünmüyorsa çalışma ortamı henüz online değildir; ${installRuntimeMention} içindeki kurulum adımlarını tamamlayın.
+
+## 3. Aşağıdaki blokları ilgili alanlara kopyalayın
+
+**Ad**
+\`\`\`md
+${HELPER_AGENT_NAME}
+\`\`\`
+
+**Açıklama**
+\`\`\`md
+${HELPER_DESCRIPTION.tr}
+\`\`\`
+
+**Talimatlar**
+\`\`\`md
+${HELPER_INSTRUCTIONS.tr}
+\`\`\`
+
+## 4. Kaydet → bir issue atayın
+
+**Oluştur**'a basın. Yeni ajan, çalışma alanı ajan listesinde görünür.
+
+Şimdi bir issue oluşturun (veya mevcut bir issue'yu yeniden atayın) → assignee = Multica Helper yapın → durumu **Yapılacak** olarak ayarlayın. Çalışma ortamı birkaç saniye içinde task'i alır ve çalışmaya başlar. İlerlemeyi issue'nun task panelinden izleyebilirsiniz.
+
+## Sonraki adımlar
+
+- **Skill'ler** — herhangi bir ajana bağlayabileceğiniz yeniden kullanılabilir talimat paketleri.
+- **Ekipler** — birlikte atanabilen ajan grupları.
+- **Autopilot'lar** — zamanlanmış veya webhook ile tetiklenen çalıştırmalar.
+- **Dokümanlar** — https://multica.ai/docs.`;
 }

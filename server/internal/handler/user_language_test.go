@@ -37,7 +37,7 @@ func TestUpdateMeAcceptsLanguage(t *testing.T) {
 	userID := newLanguageTestUser(t, "lang-set@multica.ai")
 
 	w := httptest.NewRecorder()
-	req := newPatchMeRequest(userID, `{"language":"zh-Hans"}`)
+	req := newPatchMeRequest(userID, `{"language":"tr"}`)
 	testHandler.UpdateMe(w, req)
 
 	if w.Code != http.StatusOK {
@@ -50,16 +50,16 @@ func TestUpdateMeAcceptsLanguage(t *testing.T) {
 	).Scan(&lang); err != nil {
 		t.Fatalf("lookup user: %v", err)
 	}
-	if lang == nil || *lang != "zh-Hans" {
-		t.Fatalf("expected language=zh-Hans, got %v", lang)
+	if lang == nil || *lang != "tr" {
+		t.Fatalf("expected language=tr, got %v", lang)
 	}
 
 	var resp map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if got, _ := resp["language"].(string); got != "zh-Hans" {
-		t.Fatalf("expected response language=zh-Hans, got %v", resp["language"])
+	if got, _ := resp["language"].(string); got != "tr" {
+		t.Fatalf("expected response language=tr, got %v", resp["language"])
 	}
 }
 

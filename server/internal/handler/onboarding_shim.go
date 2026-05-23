@@ -477,12 +477,19 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 	})
 }
 
-// noRuntimeIssueDescription picks the EN or ZH copy based on the user's
-// language preference. ZH selected on any "zh*" prefix (zh, zh-CN, zh-Hans).
-// Matches pre-v3 service.workspace_content.go behavior 1:1.
+// noRuntimeIssueDescription picks the copy based on the user's language
+// preference. ZH selected on any "zh*" prefix; TR selected on any "tr*" prefix.
+// The English title remains stable for old dedupe paths, but the persisted
+// body can follow the user's saved language.
 func noRuntimeIssueDescription(language pgtype.Text) string {
-	if language.Valid && strings.HasPrefix(language.String, "zh") {
-		return zhNoRuntimeIssueDescription()
+	if language.Valid {
+		lang := strings.ToLower(language.String)
+		if strings.HasPrefix(lang, "zh") {
+			return zhNoRuntimeIssueDescription()
+		}
+		if strings.HasPrefix(lang, "tr") {
+			return trNoRuntimeIssueDescription()
+		}
 	}
 	return enNoRuntimeIssueDescription()
 }
@@ -571,6 +578,49 @@ func zhNoRuntimeIssueDescription() string {
 		"Kimi CLI 官方文档：https://moonshotai.github.io/kimi-cli/zh/guides/getting-started.html",
 		"",
 		"运行时连上后，你就可以创建 Multica Helper，开始一次有智能体参与的上手引导。",
+	}, "\n")
+}
+
+func trNoRuntimeIssueDescription() string {
+	return strings.Join([]string{
+		"Multica'ya hoş geldiniz.",
+		"",
+		"Ajanların iş çalıştırabilmesi için önce bir çalışma ortamına ihtiyacı var. Bir çalışma ortamı kurarken Multica'yı hafif bir proje yönetimi çalışma alanı olarak kullanmaya başlayabilirsiniz.",
+		"",
+		"## Önce Multica'yı deneyin",
+		"",
+		"Çalışma ortamı hazır olmadan önce şunları yapabilirsiniz:",
+		"",
+		"1. Mevcut işiniz için bir proje oluşturun.",
+		"2. Birkaç issue oluşturup Bekleyenler, Yapılacak, Devam ediyor ve Tamamlandı durumları arasında taşıyın.",
+		"3. Issue'lara öncelik, etiket, yorum ve abonelik ekleyin.",
+		"4. Atamaları ve mention'ları takip etmek için Gelen Kutusu'nu kullanın.",
+		"",
+		"Böylece önce proje yönetimi katmanını tanımış olursunuz. Çalışma ortamı bağlandığında ajanlar aynı issue'lar üzerinden çalışmaya başlayabilir.",
+		"",
+		"## İlk ajan çalışma ortamınızı kurun",
+		"",
+		"Tam rehber: https://multica.ai/docs/install-agent-runtime",
+		"",
+		"Türkçe kullanıcılar için en hızlı ilk yol Codex'tir:",
+		"",
+		"1. Node.js'in kurulu olduğundan emin olun.",
+		"2. Codex'i kurun:",
+		"   npm i -g @openai/codex",
+		"3. Giriş yapın:",
+		"   codex",
+		"4. Terminalinizin Codex'i bulabildiğini doğrulayın:",
+		"   which codex",
+		"   codex --version",
+		"5. Multica daemon'ı yeniden başlatın:",
+		"   multica daemon restart",
+		"   Desktop uygulamasını kullanıyorsanız uygulamayı yeniden başlatmanız yeterlidir.",
+		"6. Çalışma Ortamları sayfasına dönüp yenileyin. Online bir Codex çalışma ortamı görmelisiniz.",
+		"7. Bu çalışma ortamından ilk ajanınızı oluşturun, sonra bir issue'yu ajana atayıp durumunu Yapılacak yapın.",
+		"",
+		"Codex referansı: https://developers.openai.com/codex/cli",
+		"",
+		"Çalışma ortamı bağlandığında, rehberli ilk kullanım için Multica Helper'ı oluşturabilirsiniz.",
 	}, "\n")
 }
 
