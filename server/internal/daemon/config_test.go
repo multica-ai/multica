@@ -330,6 +330,31 @@ func TestLoadConfig_AutoUpdate_NoFlagWinsOverCloudDefault(t *testing.T) {
 	}
 }
 
+func TestLoadConfigDiscoversAOFromPinnedPath(t *testing.T) {
+	stageFakeAgent(t)
+	aoPath := filepath.Join(t.TempDir(), "ao")
+	if err := os.WriteFile(aoPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake ao: %v", err)
+	}
+	t.Setenv("MULTICA_AO_PATH", aoPath)
+	t.Setenv("MULTICA_AO_MODEL", "codex")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got, ok := cfg.Agents["ao"]
+	if !ok {
+		t.Fatalf("AO agent entry missing from %#v", cfg.Agents)
+	}
+	if got.Path != aoPath || got.Model != "codex" {
+		t.Fatalf("AO agent entry = %#v, want path=%q model=codex", got, aoPath)
+	}
+}
+
 // TestResolveAgentsViaLoginShell_StripsAliasShadowing locks down the fix for
 // #2512: when the user's rc file declares an alias with the same name as the
 // agent CLI, the resolver must still return the real binary on PATH, not the

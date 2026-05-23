@@ -134,8 +134,18 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenclawAgents(ctx, executablePath)
 		})
+	case "ao":
+		return aoStaticModels(), nil
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q", providerType)
+	}
+}
+
+func aoStaticModels() []Model {
+	return []Model{
+		{ID: "default", Label: "AO default agent", Provider: "ao"},
+		{ID: "codex", Label: "AO Codex agent", Provider: "ao"},
+		{ID: "claude-code", Label: "AO Claude Code agent", Provider: "ao"},
 	}
 }
 

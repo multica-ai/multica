@@ -8,7 +8,7 @@ import (
 
 func TestListModelsStaticProviders(t *testing.T) {
 	ctx := context.Background()
-	for _, provider := range []string{"claude", "codex", "gemini", "cursor"} {
+	for _, provider := range []string{"ao", "claude", "codex", "gemini", "cursor"} {
 		got, err := ListModels(ctx, provider, "")
 		if err != nil {
 			t.Fatalf("ListModels(%q) error: %v", provider, err)
@@ -144,9 +144,9 @@ func TestInferCopilotProvider(t *testing.T) {
 		"raptor-mini":       "",
 		// negative cases: must not be misidentified as OpenAI
 		// reasoning series even though they start with `o`.
-		"opus-fake":         "",
-		"omni":              "",
-		"o":                 "",
+		"opus-fake": "",
+		"omni":      "",
+		"o":         "",
 	}
 	for id, want := range cases {
 		if got := inferCopilotProvider(id); got != want {
