@@ -105,6 +105,8 @@
   "trigger_row": {
     "disabled_badge": "Disabled",
     "next_label": "Next: {{date}}",
+    "webhook_copied": "Webhook URL copied",
+    "webhook_copy_failed": "Failed to copy webhook URL",
     "toast_deleted": "Trigger deleted",
     "toast_delete_failed": "Failed to delete trigger",
     "delete_dialog": {
@@ -117,11 +119,15 @@
   },
   "add_trigger_dialog": {
     "title": "Add Trigger",
+    "type_schedule": "Schedule",
+    "type_webhook": "Webhook",
     "label_field": "Label (optional)",
     "label_placeholder": "e.g. Weekday morning",
+    "webhook_help": "Multica will generate a webhook URL after you save. POST any JSON to it to fire this autopilot.",
     "submit": "Add trigger",
     "submitting": "Adding...",
     "toast_added": "Trigger added",
+    "toast_added_webhook": "Webhook trigger added",
     "toast_add_failed": "Failed to add trigger"
   },
   "dialog": {
@@ -153,8 +159,18 @@
     "section_assignee": "Assignee",
     "select_agent": "Select agent",
     "select_assignee": "Select agent or squad",
+    "section_project": "Project",
     "section_output_mode": "Output mode",
     "section_schedule": "Schedule",
+    "section_trigger_kind": "Trigger",
+    "trigger_kind_schedule": "Schedule",
+    "trigger_kind_webhook": "Webhook",
+    "section_webhook": "Webhook",
+    "webhook_help_create": "Multica will generate a webhook URL after this autopilot is created. POST any JSON to that URL to fire it.",
+    "webhook_created_title": "Webhook autopilot ready",
+    "copy_webhook_url": "Copy webhook URL",
+    "webhook_copied": "Webhook URL copied",
+    "webhook_copy_failed": "Failed to copy webhook URL",
     "cerebro_model": {
       "_comment": "CEREBRO-PATCH(autopilot-model-i18n-en): JEH-1310 — model picker labels.",
       "label": "Model override",
@@ -234,6 +250,62 @@
       "hours_minutes": "{{hours}}h {{minutes}}m",
       "minutes": "{{minutes}}m",
       "less_than_minute": "<1m"
+    }
+  },
+  "webhook_payload": {
+    "label": "Webhook event:",
+    "unknown_event": "webhook.received",
+    "payload": "Payload",
+    "content_type": "Content-Type: {{type}}",
+    "copy": "Copy",
+    "copied": "Webhook payload copied",
+    "copied_short": "Copied",
+    "copy_failed": "Failed to copy",
+    "truncated_marker": "[truncated - click Copy to get the full payload]"
+  },
+  "deliveries": {
+    "section_title": "Webhook Deliveries",
+    "empty": "No webhook deliveries yet. Send a POST to the webhook URL to see entries here.",
+    "row": {
+      "attempts": "{{count}}x attempts",
+      "replay_badge": "Replay"
+    },
+    "status": {
+      "queued": "Queued",
+      "dispatched": "Dispatched",
+      "rejected": "Rejected",
+      "ignored": "Ignored",
+      "failed": "Failed"
+    },
+    "signature": {
+      "not_required": "No signature",
+      "valid": "Signature valid",
+      "invalid": "Signature invalid",
+      "missing": "Signature missing"
+    },
+    "detail": {
+      "title": "Delivery",
+      "received_at": "Received",
+      "last_attempt_at": "Last attempt",
+      "attempt_count": "Attempts",
+      "response_status": "Response",
+      "dedupe_key": "Dedupe key",
+      "dedupe_source": "Dedupe source",
+      "content_type": "Content-Type",
+      "replayed_from": "Replayed from",
+      "error_label": "Error",
+      "raw_body": "Raw body",
+      "selected_headers": "Headers",
+      "response_body": "Response body"
+    },
+    "replay": {
+      "action": "Replay",
+      "in_progress": "Replaying...",
+      "toast_success": "Delivery replayed",
+      "toast_failed": "Replay failed",
+      "disabled_invalid_signature": "Can't replay - signature was invalid",
+      "disabled_rejected": "Can't replay a rejected delivery",
+      "disabled_queued": "Still queued - replay once it settles"
     }
   },
   "agent_picker": {

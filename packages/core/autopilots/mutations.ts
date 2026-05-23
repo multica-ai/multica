@@ -128,3 +128,47 @@ export function useDeleteAutopilotTrigger() {
     },
   });
 }
+
+export function useRotateAutopilotTriggerWebhookToken() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ autopilotId, triggerId }: { autopilotId: string; triggerId: string }) =>
+      api.rotateAutopilotTriggerWebhookToken(autopilotId, triggerId),
+    onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: autopilotKeys.detail(wsId, vars.autopilotId) });
+    },
+  });
+}
+
+export function useSetAutopilotTriggerSigningSecret() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({
+      autopilotId,
+      triggerId,
+      signingSecret,
+    }: {
+      autopilotId: string;
+      triggerId: string;
+      signingSecret: string;
+    }) => api.setAutopilotTriggerSigningSecret(autopilotId, triggerId, signingSecret),
+    onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: autopilotKeys.detail(wsId, vars.autopilotId) });
+    },
+  });
+}
+
+export function useReplayAutopilotDelivery() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ autopilotId, deliveryId }: { autopilotId: string; deliveryId: string }) =>
+      api.replayAutopilotDelivery(autopilotId, deliveryId),
+    onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: autopilotKeys.deliveries(wsId, vars.autopilotId) });
+      qc.invalidateQueries({ queryKey: autopilotKeys.runs(wsId, vars.autopilotId) });
+    },
+  });
+}

@@ -3,9 +3,11 @@
 // CEREBRO-PATCH(autopilots-autopilot-detail-page): cerebro modification of upstream file
 
 import { useState } from "react";
-import { Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil, Ban, ChevronDown, ChevronRight } from "lucide-react";
+import { Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil, Ban, ChevronDown, ChevronRight, Copy, Webhook } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions } from "@multica/core/autopilots/queries";
+import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
+import { api } from "@multica/core/api";
 import {
   useUpdateAutopilot,
   useDeleteAutopilot,
@@ -53,6 +55,7 @@ import { TranscriptButton } from "../../common/task-transcript";
 // CEREBRO-PATCH(autopilot-private-badge-import): owner-only autopilot badge (JEH-1750).
 import { PrivateBadge } from "@multica/cerebro-access/views";
 import { useT } from "../../i18n";
+import { WebhookDeliveriesSection } from "./webhook-deliveries-section";
 
 function formatDate(date: string): string {
   return new Date(date).toLocaleString(undefined, {
@@ -220,6 +223,11 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
   const deleteTrigger = useDeleteAutopilotTrigger();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const webhookUrl = buildAutopilotWebhookUrl({
+    trigger,
+    apiBaseUrl: api.getBaseUrl(),
+    currentOrigin: typeof window !== "undefined" ? window.location.origin : undefined,
+  });
 
   const handleDelete = async () => {
     setDeleting(true);
@@ -236,7 +244,11 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
 
   return (
     <div className="flex items-center gap-3 rounded-md border px-3 py-2">
-      <Clock className="h-4 w-4 shrink-0 text-muted-foreground" />
+      {trigger.kind === "webhook" ? (
+        <Webhook className="h-4 w-4 shrink-0 text-muted-foreground" />
+      ) : (
+        <Clock className="h-4 w-4 shrink-0 text-muted-foreground" />
+      )}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium capitalize">{trigger.kind}</span>
@@ -258,6 +270,29 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
         {trigger.next_run_at && (
           <div className="text-xs text-muted-foreground">
             {t(($) => $.trigger_row.next_label, { date: formatDate(trigger.next_run_at) })}
+          </div>
+        )}
+        {webhookUrl && (
+          <div className="mt-1 flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+              {webhookUrl}
+            </code>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="h-6 w-6 shrink-0"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(webhookUrl);
+                  toast.success(t(($) => $.trigger_row.webhook_copied));
+                } catch {
+                  toast.error(t(($) => $.trigger_row.webhook_copy_failed));
+                }
+              }}
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </Button>
           </div>
         )}
       </div>
@@ -309,26 +344,40 @@ function AddTriggerDialog({
   const { t } = useT("autopilots");
   const createTrigger = useCreateAutopilotTrigger();
   const [config, setConfig] = useState<TriggerConfig>(getDefaultTriggerConfig);
+  const [kind, setKind] = useState<"schedule" | "webhook">("schedule");
   const [label, setLabel] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async () => {
     if (submitting) return;
     const cronExpr = toCronExpression(config);
-    if (!cronExpr.trim()) return;
+    if (kind === "schedule" && !cronExpr.trim()) return;
     setSubmitting(true);
     try {
-      await createTrigger.mutateAsync({
-        autopilotId,
-        kind: "schedule",
-        cron_expression: cronExpr,
-        timezone: config.timezone || undefined,
-        label: label.trim() || undefined,
-      });
+      if (kind === "webhook") {
+        await createTrigger.mutateAsync({
+          autopilotId,
+          kind: "webhook",
+          label: label.trim() || undefined,
+        });
+      } else {
+        await createTrigger.mutateAsync({
+          autopilotId,
+          kind: "schedule",
+          cron_expression: cronExpr,
+          timezone: config.timezone || undefined,
+          label: label.trim() || undefined,
+        });
+      }
       onOpenChange(false);
       setConfig(getDefaultTriggerConfig());
+      setKind("schedule");
       setLabel("");
-      toast.success(t(($) => $.add_trigger_dialog.toast_added));
+      toast.success(
+        kind === "webhook"
+          ? t(($) => $.add_trigger_dialog.toast_added_webhook)
+          : t(($) => $.add_trigger_dialog.toast_added),
+      );
     } catch {
       toast.error(t(($) => $.add_trigger_dialog.toast_add_failed));
     } finally {
@@ -341,7 +390,33 @@ function AddTriggerDialog({
       <DialogContent className="max-w-sm">
         <DialogTitle>{t(($) => $.add_trigger_dialog.title)}</DialogTitle>
         <div className="space-y-4 pt-2">
-          <TriggerConfigSection config={config} onChange={setConfig} />
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={kind === "schedule" ? "default" : "outline"}
+              onClick={() => setKind("schedule")}
+            >
+              <Clock className="mr-1.5 h-3.5 w-3.5" />
+              {t(($) => $.add_trigger_dialog.type_schedule)}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={kind === "webhook" ? "default" : "outline"}
+              onClick={() => setKind("webhook")}
+            >
+              <Webhook className="mr-1.5 h-3.5 w-3.5" />
+              {t(($) => $.add_trigger_dialog.type_webhook)}
+            </Button>
+          </div>
+          {kind === "schedule" ? (
+            <TriggerConfigSection config={config} onChange={setConfig} />
+          ) : (
+            <div className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
+              {t(($) => $.add_trigger_dialog.webhook_help)}
+            </div>
+          )}
           <div>
             <label className="text-xs font-medium text-muted-foreground">
               {t(($) => $.add_trigger_dialog.label_field)}
@@ -433,6 +508,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   }
 
   const { autopilot, triggers } = data;
+  const hasWebhookTrigger = triggers.some((trig) => trig.kind === "webhook");
 
   const handleRunNow = async () => {
     try {
@@ -563,6 +639,8 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               </div>
             )}
           </section>
+
+          <WebhookDeliveriesSection autopilotId={autopilotId} hasWebhookTrigger={hasWebhookTrigger} />
 
           {/* Run History */}
           <section className="space-y-3">

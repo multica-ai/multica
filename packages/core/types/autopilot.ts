@@ -29,6 +29,7 @@ export interface Autopilot {
   last_run_at: string | null;
   created_at: string;
   updated_at: string;
+  project_id?: string | null;
   // CEREBRO-PATCH(private-autopilot-types): owner-only autopilot visibility flag (JEH-1749).
   is_private: boolean;
 }
@@ -42,6 +43,11 @@ export interface AutopilotTrigger {
   timezone: string | null;
   next_run_at: string | null;
   webhook_token: string | null;
+  webhook_path?: string | null;
+  webhook_url?: string | null;
+  provider?: string | null;
+  has_signing_secret?: boolean;
+  signing_secret_hint?: string | null;
   label: string | null;
   last_fired_at: string | null;
   created_at: string;
@@ -73,6 +79,7 @@ export interface CreateAutopilotRequest {
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
   issue_title_template?: string;
+  project_id?: string | null;
   // CEREBRO-PATCH(private-autopilot-request-types): allow UI/CLI clients to set privacy (JEH-1749).
   is_private?: boolean;
 }
@@ -87,6 +94,7 @@ export interface UpdateAutopilotRequest {
   status?: AutopilotStatus;
   execution_mode?: AutopilotExecutionMode;
   issue_title_template?: string | null;
+  project_id?: string | null;
   // CEREBRO-PATCH(private-autopilot-request-types): allow UI/CLI clients to update privacy (JEH-1749).
   is_private?: boolean;
 }
@@ -96,6 +104,7 @@ export interface CreateAutopilotTriggerRequest {
   cron_expression?: string;
   timezone?: string;
   label?: string;
+  provider?: string;
 }
 
 export interface UpdateAutopilotTriggerRequest {
@@ -117,5 +126,39 @@ export interface GetAutopilotResponse {
 
 export interface ListAutopilotRunsResponse {
   runs: AutopilotRun[];
+  total: number;
+}
+
+export type WebhookDeliveryStatus = "queued" | "dispatched" | "rejected" | "ignored" | "failed";
+
+export type WebhookSignatureStatus = "not_required" | "valid" | "invalid" | "missing";
+
+export interface WebhookDelivery {
+  id: string;
+  workspace_id: string;
+  autopilot_id: string;
+  trigger_id: string;
+  provider: string;
+  event: string;
+  dedupe_key: string | null;
+  dedupe_source: string | null;
+  signature_status: WebhookSignatureStatus | string;
+  status: WebhookDeliveryStatus | string;
+  attempt_count: number;
+  content_type: string | null;
+  response_status: number | null;
+  autopilot_run_id: string | null;
+  replayed_from_delivery_id: string | null;
+  error: string | null;
+  received_at: string;
+  last_attempt_at: string;
+  created_at: string;
+  selected_headers?: Record<string, unknown> | null;
+  raw_body?: string | null;
+  response_body?: string | null;
+}
+
+export interface ListWebhookDeliveriesResponse {
+  deliveries: WebhookDelivery[];
   total: number;
 }

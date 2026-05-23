@@ -105,6 +105,8 @@
   "trigger_row": {
     "disabled_badge": "已禁用",
     "next_label": "下次：{{date}}",
+    "webhook_copied": "Webhook URL 已复制",
+    "webhook_copy_failed": "复制 Webhook URL 失败",
     "toast_deleted": "已删除触发器",
     "toast_delete_failed": "删除触发器失败",
     "delete_dialog": {
@@ -117,11 +119,15 @@
   },
   "add_trigger_dialog": {
     "title": "添加触发器",
+    "type_schedule": "时间表",
+    "type_webhook": "Webhook",
     "label_field": "标签（可选）",
     "label_placeholder": "例如：工作日早晨",
+    "webhook_help": "保存后 Multica 会生成一个 webhook URL。向它 POST JSON 即可触发此自动化。",
     "submit": "添加触发器",
     "submitting": "添加中...",
     "toast_added": "已添加触发器",
+    "toast_added_webhook": "已添加 Webhook 触发器",
     "toast_add_failed": "添加触发器失败"
   },
   "dialog": {
@@ -153,8 +159,18 @@
     "section_assignee": "执行方",
     "select_agent": "选择智能体",
     "select_assignee": "选择智能体或小队",
+    "section_project": "项目",
     "section_output_mode": "输出模式",
     "section_schedule": "时间表",
+    "section_trigger_kind": "触发器",
+    "trigger_kind_schedule": "时间表",
+    "trigger_kind_webhook": "Webhook",
+    "section_webhook": "Webhook",
+    "webhook_help_create": "创建后 Multica 会生成一个 webhook URL。向该 URL POST JSON 即可触发。",
+    "webhook_created_title": "Webhook 自动化已就绪",
+    "copy_webhook_url": "复制 Webhook URL",
+    "webhook_copied": "Webhook URL 已复制",
+    "webhook_copy_failed": "复制 Webhook URL 失败",
     "cerebro_model": {
       "_comment": "CEREBRO-PATCH(autopilot-model-i18n-zh): JEH-1310 — model picker labels.",
       "label": "模型覆盖",
@@ -234,6 +250,62 @@
       "hours_minutes": "{{hours}} 小时 {{minutes}} 分",
       "minutes": "{{minutes}} 分",
       "less_than_minute": "不到 1 分"
+    }
+  },
+  "webhook_payload": {
+    "label": "Webhook 事件：",
+    "unknown_event": "webhook.received",
+    "payload": "Payload",
+    "content_type": "Content-Type: {{type}}",
+    "copy": "复制",
+    "copied": "Webhook payload 已复制",
+    "copied_short": "已复制",
+    "copy_failed": "复制失败",
+    "truncated_marker": "[已截断 - 点击复制获取完整 payload]"
+  },
+  "deliveries": {
+    "section_title": "Webhook 投递",
+    "empty": "暂无 webhook 投递。向 webhook URL 发送 POST 后会显示在这里。",
+    "row": {
+      "attempts": "{{count}} 次尝试",
+      "replay_badge": "重放"
+    },
+    "status": {
+      "queued": "排队中",
+      "dispatched": "已分发",
+      "rejected": "已拒绝",
+      "ignored": "已忽略",
+      "failed": "失败"
+    },
+    "signature": {
+      "not_required": "无需签名",
+      "valid": "签名有效",
+      "invalid": "签名无效",
+      "missing": "缺少签名"
+    },
+    "detail": {
+      "title": "投递",
+      "received_at": "收到时间",
+      "last_attempt_at": "最近尝试",
+      "attempt_count": "尝试次数",
+      "response_status": "响应",
+      "dedupe_key": "去重键",
+      "dedupe_source": "去重来源",
+      "content_type": "Content-Type",
+      "replayed_from": "重放来源",
+      "error_label": "错误",
+      "raw_body": "原始内容",
+      "selected_headers": "Headers",
+      "response_body": "响应内容"
+    },
+    "replay": {
+      "action": "重放",
+      "in_progress": "重放中...",
+      "toast_success": "投递已重放",
+      "toast_failed": "重放失败",
+      "disabled_invalid_signature": "签名无效，无法重放",
+      "disabled_rejected": "被拒绝的投递无法重放",
+      "disabled_queued": "仍在排队，完成后可重放"
     }
   },
   "agent_picker": {
