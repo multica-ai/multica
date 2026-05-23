@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Columns3, Search, X } from "lucide-react";
+import { Columns3, Search, SlidersHorizontal, X } from "lucide-react";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects";
 import { issueListOptions } from "@multica/core/issues/queries";
@@ -95,9 +95,9 @@ export function TasksFilters({ wsId }: TasksFiltersProps) {
     groupBy !== "none";
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1 max-w-xs">
+    <div className="flex flex-col gap-3 rounded-md border bg-background p-2 sm:border-0 sm:p-0">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[180px] flex-1 sm:max-w-xs">
           <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
           <input
             type="search"
@@ -112,20 +112,145 @@ export function TasksFilters({ wsId }: TasksFiltersProps) {
           <button
             type="button"
             onClick={reset}
-            className="ml-auto rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+            className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground sm:ml-auto"
           >
             Nulstil
           </button>
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:overflow-visible sm:pb-0">
+        <FilterGroup label="Status" compact>
+          <PillRow
+            ariaLabel="Filter on status"
+            options={STATUSES}
+            value={status ?? "all"}
+            onChange={(v) => setStatus(v === "all" ? null : (v as TaskStatus))}
+          />
+        </FilterGroup>
+
+        <FilterGroup label="Range" compact>
+          <PillRow
+            ariaLabel="Filter on time range"
+            options={RANGES}
+            value={range}
+            onChange={(v) => setRange(v as TaskTimeRange)}
+          />
+        </FilterGroup>
+      </div>
+
+      <details className="group sm:hidden">
+        <summary className="flex h-8 cursor-pointer list-none items-center justify-between rounded-md border px-2 text-xs font-medium">
+          <span className="inline-flex items-center gap-1.5">
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            Flere filtre
+          </span>
+          <span className="text-muted-foreground group-open:hidden">Vis</span>
+          <span className="hidden text-muted-foreground group-open:inline">Skjul</span>
+        </summary>
+        <div className="mt-2 flex flex-col gap-2">
+          <AdvancedFilters
+            agentOptions={agentOptions}
+            projectOptions={projectOptions}
+            issueOptions={issueOptions}
+            agentId={agentId}
+            issueId={issueId}
+            projectId={projectId}
+            type={type}
+            range={range}
+            customFrom={customFrom}
+            customTo={customTo}
+            groupBy={groupBy}
+            setAgentId={setAgentId}
+            setIssueId={setIssueId}
+            setProjectId={setProjectId}
+            setType={setType}
+            setCustomFrom={setCustomFrom}
+            setCustomTo={setCustomTo}
+            setGroupBy={setGroupBy}
+          />
+        </div>
+      </details>
+
+      <div className="hidden flex-wrap items-center gap-2 sm:flex">
+        <AdvancedFilters
+          agentOptions={agentOptions}
+          projectOptions={projectOptions}
+          issueOptions={issueOptions}
+          agentId={agentId}
+          issueId={issueId}
+          projectId={projectId}
+          type={type}
+          range={range}
+          customFrom={customFrom}
+          customTo={customTo}
+          groupBy={groupBy}
+          setAgentId={setAgentId}
+          setIssueId={setIssueId}
+          setProjectId={setProjectId}
+          setType={setType}
+          setCustomFrom={setCustomFrom}
+          setCustomTo={setCustomTo}
+          setGroupBy={setGroupBy}
+        />
+      </div>
+    </div>
+  );
+}
+
+interface Issue {
+  id: string;
+  title?: string;
+  number?: number;
+}
+
+function AdvancedFilters({
+  agentOptions,
+  projectOptions,
+  issueOptions,
+  agentId,
+  issueId,
+  projectId,
+  type,
+  range,
+  customFrom,
+  customTo,
+  groupBy,
+  setAgentId,
+  setIssueId,
+  setProjectId,
+  setType,
+  setCustomFrom,
+  setCustomTo,
+  setGroupBy,
+}: {
+  agentOptions: Array<{ id: string; name: string; archived_at?: string | null }>;
+  projectOptions: Array<{ id: string; title: string }>;
+  issueOptions: Issue[];
+  agentId: string | null;
+  issueId: string | null;
+  projectId: string | null;
+  type: TaskType | null;
+  range: TaskTimeRange;
+  customFrom: string | null;
+  customTo: string | null;
+  groupBy: GroupBy;
+  setAgentId: (id: string | null) => void;
+  setIssueId: (id: string | null) => void;
+  setProjectId: (id: string | null) => void;
+  setType: (type: TaskType | null) => void;
+  setCustomFrom: (date: string | null) => void;
+  setCustomTo: (date: string | null) => void;
+  setGroupBy: (groupBy: GroupBy) => void;
+}) {
+  return (
+    <>
         <FilterGroup label="Agent">
           <select
             aria-label="Filter on agent"
             value={agentId ?? ""}
             onChange={(e) => setAgentId(e.target.value === "" ? null : e.target.value)}
-            className="h-7 rounded-md border bg-background px-2 text-xs"
+            className="h-7 min-w-0 rounded-md border bg-background px-2 text-xs"
           >
             <option value="">Alle agenter</option>
             {agentOptions
@@ -151,7 +276,7 @@ export function TasksFilters({ wsId }: TasksFiltersProps) {
             aria-label="Filter on project"
             value={projectId ?? ""}
             onChange={(e) => setProjectId(e.target.value === "" ? null : e.target.value)}
-            className="h-7 rounded-md border bg-background px-2 text-xs"
+            className="h-7 min-w-0 rounded-md border bg-background px-2 text-xs"
           >
             <option value="">Alle projekter</option>
             {projectOptions.map((p) => (
@@ -160,15 +285,6 @@ export function TasksFilters({ wsId }: TasksFiltersProps) {
               </option>
             ))}
           </select>
-        </FilterGroup>
-
-        <FilterGroup label="Status">
-          <PillRow
-            ariaLabel="Filter on status"
-            options={STATUSES}
-            value={status ?? "all"}
-            onChange={(v) => setStatus(v === "all" ? null : (v as TaskStatus))}
-          />
         </FilterGroup>
 
         <FilterGroup label="Type">
@@ -180,14 +296,8 @@ export function TasksFilters({ wsId }: TasksFiltersProps) {
           />
         </FilterGroup>
 
-        <FilterGroup label="Range">
-          <PillRow
-            ariaLabel="Filter on time range"
-            options={RANGES}
-            value={range}
-            onChange={(v) => setRange(v as TaskTimeRange)}
-          />
-          {range === "custom" && (
+        {range === "custom" && (
+          <FilterGroup label="Dato">
             <div className="flex items-center gap-1">
               <input
                 type="date"
@@ -215,8 +325,8 @@ export function TasksFilters({ wsId }: TasksFiltersProps) {
                 className="h-7 rounded-md border bg-background px-2 text-xs"
               />
             </div>
-          )}
-        </FilterGroup>
+          </FilterGroup>
+        )}
 
         <FilterGroup label="Gruppér på">
           <PillRow
@@ -226,15 +336,8 @@ export function TasksFilters({ wsId }: TasksFiltersProps) {
             onChange={(v) => setGroupBy(v as GroupBy)}
           />
         </FilterGroup>
-      </div>
-    </div>
+    </>
   );
-}
-
-interface Issue {
-  id: string;
-  title?: string;
-  number?: number;
 }
 
 function IssueCombobox({
@@ -288,7 +391,7 @@ function IssueCombobox({
           onBlur={() => {
             setTimeout(() => setOpen(false), 150);
           }}
-          className="h-7 w-44 rounded-md border bg-background pl-2 pr-6 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          className="h-7 w-full min-w-[160px] rounded-md border bg-background pl-2 pr-6 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring sm:w-44"
         />
         {value && (
           <button
@@ -305,7 +408,7 @@ function IssueCombobox({
       </div>
 
       {open && (
-        <div className="absolute left-0 top-full z-20 mt-1 max-h-48 w-64 overflow-y-auto rounded-md border bg-popover shadow-md">
+        <div className="absolute left-0 top-full z-20 mt-1 max-h-48 w-[min(20rem,calc(100vw-2rem))] overflow-y-auto rounded-md border bg-popover shadow-md sm:w-64">
           <div
             className="px-2 py-1 text-xs text-muted-foreground hover:bg-accent cursor-pointer"
             onMouseDown={(e) => {
@@ -393,10 +496,18 @@ function ColumnToggle({
   );
 }
 
-function FilterGroup({ label, children }: { label: string; children: React.ReactNode }) {
+function FilterGroup({
+  label,
+  children,
+  compact = false,
+}: {
+  label: string;
+  children: React.ReactNode;
+  compact?: boolean;
+}) {
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+    <div className={cn("flex min-w-0 items-center gap-1.5", !compact && "max-sm:justify-between")}>
+      <span className="shrink-0 text-[11px] uppercase tracking-wide text-muted-foreground">
         {label}
       </span>
       {children}
@@ -416,7 +527,7 @@ function PillRow<T extends string>({ ariaLabel, options, value, onChange }: Pill
     <div
       role="radiogroup"
       aria-label={ariaLabel}
-      className="inline-flex items-center rounded-md border bg-background p-0.5"
+      className="inline-flex min-w-max items-center rounded-md border bg-background p-0.5"
     >
       {options.map((opt) => {
         const active = value === opt.value;

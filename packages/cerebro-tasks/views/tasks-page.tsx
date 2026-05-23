@@ -78,7 +78,7 @@ export function TasksPage() {
       </PageHeader>
 
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <div className="flex flex-col gap-4 p-6">
+        <div className="flex flex-col gap-3 p-3 sm:gap-4 sm:p-6">
           <TasksFilters wsId={wsId} />
 
           <TasksTable

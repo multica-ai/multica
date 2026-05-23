@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useNavigation } from "@multica/views/navigation";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -72,58 +72,88 @@ export function TasksTable({
   }
 
   return (
-    <div className="overflow-x-auto rounded-md border">
-      <table className="w-full text-xs">
-        <thead className="bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground">
-          <tr>
-            {visibleColumns.agent && <th className="px-3 py-2 text-left font-medium">Agent</th>}
-            {visibleColumns.task && <th className="px-3 py-2 text-left font-medium">Task</th>}
-            {visibleColumns.issue_name && <th className="px-3 py-2 text-left font-medium">Issue navn</th>}
-            {visibleColumns.issue_id && <th className="px-3 py-2 text-left font-medium">Issue ID</th>}
-            {visibleColumns.parent_issue && <th className="px-3 py-2 text-left font-medium">Parent issue</th>}
-            {visibleColumns.project && <th className="px-3 py-2 text-left font-medium">Projekt</th>}
-            {visibleColumns.status && <th className="px-3 py-2 text-left font-medium">Status</th>}
-            {visibleColumns.started && <th className="px-3 py-2 text-left font-medium">Started</th>}
-            {visibleColumns.created_at && <th className="px-3 py-2 text-left font-medium">Oprettet</th>}
-            {visibleColumns.duration && <th className="px-3 py-2 text-left font-medium">Varighed</th>}
-            {visibleColumns.cost && <th className="px-3 py-2 text-right font-medium">Kost</th>}
-            {visibleColumns.triggered_by && <th className="px-3 py-2 text-left font-medium">Startet af</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {groups.map((group) => {
-            const isCollapsed = collapsedGroups.has(group.key);
-            return (
-              <>
-                {groupBy !== "none" && (
-                  <tr key={`group-${group.key}`} className="bg-muted/20">
-                    <td
-                      colSpan={countVisibleColumns(visibleColumns)}
-                      className="px-3 py-1.5"
-                    >
-                      <GroupHeader
-                        group={group}
-                        groupBy={groupBy}
-                        isCollapsed={isCollapsed}
-                        onToggle={() => toggleGroup(group.key)}
+    <div className="space-y-2">
+      <div className="space-y-2 md:hidden">
+        {groups.map((group) => {
+          const isCollapsed = collapsedGroups.has(group.key);
+          return (
+            <Fragment key={`mobile-${group.key}`}>
+              {groupBy !== "none" && (
+                <div className="rounded-md border bg-muted/20 px-3 py-2">
+                  <GroupHeader
+                    group={group}
+                    groupBy={groupBy}
+                    isCollapsed={isCollapsed}
+                    onToggle={() => toggleGroup(group.key)}
+                  />
+                </div>
+              )}
+              {!isCollapsed &&
+                group.tasks.map((t) => (
+                  <MobileTaskCard
+                    key={t.task_id}
+                    task={t}
+                    workspaceSlug={workspaceSlug}
+                  />
+                ))}
+            </Fragment>
+          );
+        })}
+      </div>
+
+      <div className="hidden overflow-x-auto rounded-md border md:block">
+        <table className="w-full text-xs">
+          <thead className="bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground">
+            <tr>
+              {visibleColumns.agent && <th className="px-3 py-2 text-left font-medium">Agent</th>}
+              {visibleColumns.task && <th className="px-3 py-2 text-left font-medium">Task</th>}
+              {visibleColumns.issue_name && <th className="px-3 py-2 text-left font-medium">Issue navn</th>}
+              {visibleColumns.issue_id && <th className="px-3 py-2 text-left font-medium">Issue ID</th>}
+              {visibleColumns.parent_issue && <th className="px-3 py-2 text-left font-medium">Parent issue</th>}
+              {visibleColumns.project && <th className="px-3 py-2 text-left font-medium">Projekt</th>}
+              {visibleColumns.status && <th className="px-3 py-2 text-left font-medium">Status</th>}
+              {visibleColumns.started && <th className="px-3 py-2 text-left font-medium">Started</th>}
+              {visibleColumns.created_at && <th className="px-3 py-2 text-left font-medium">Oprettet</th>}
+              {visibleColumns.duration && <th className="px-3 py-2 text-left font-medium">Varighed</th>}
+              {visibleColumns.cost && <th className="px-3 py-2 text-right font-medium">Kost</th>}
+              {visibleColumns.triggered_by && <th className="px-3 py-2 text-left font-medium">Startet af</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {groups.map((group) => {
+              const isCollapsed = collapsedGroups.has(group.key);
+              return (
+                <Fragment key={group.key}>
+                  {groupBy !== "none" && (
+                    <tr key={`group-${group.key}`} className="bg-muted/20">
+                      <td
+                        colSpan={countVisibleColumns(visibleColumns)}
+                        className="px-3 py-1.5"
+                      >
+                        <GroupHeader
+                          group={group}
+                          groupBy={groupBy}
+                          isCollapsed={isCollapsed}
+                          onToggle={() => toggleGroup(group.key)}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                  {!isCollapsed &&
+                    group.tasks.map((t) => (
+                      <Row
+                        key={t.task_id}
+                        task={t}
+                        workspaceSlug={workspaceSlug}
+                        visibleColumns={visibleColumns}
                       />
-                    </td>
-                  </tr>
-                )}
-                {!isCollapsed &&
-                  group.tasks.map((t) => (
-                    <Row
-                      key={t.task_id}
-                      task={t}
-                      workspaceSlug={workspaceSlug}
-                      visibleColumns={visibleColumns}
-                    />
-                  ))}
-              </>
-            );
-          })}
-        </tbody>
-      </table>
+                    ))}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -357,6 +387,74 @@ function Row({
   );
 }
 
+function MobileTaskCard({
+  task,
+  workspaceSlug,
+}: {
+  task: CerebroTask;
+  workspaceSlug: string;
+}) {
+  const { push } = useNavigation();
+  const target = rowTarget(task, workspaceSlug);
+  const startedISO = task.started_at ?? task.dispatched_at ?? task.created_at;
+  const endedISO = task.completed_at;
+  const taskTitle =
+    task.task_title ||
+    task.issue_title ||
+    (task.chat_session_id ? "Chat task" : "Uden titel");
+  const issueLabel = task.issue_number ? `#${task.issue_number}` : null;
+  const context = [
+    task.issue_title ? [issueLabel, task.issue_title].filter(Boolean).join(" ") : null,
+    task.project_title,
+  ].filter(Boolean);
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (target) push(target);
+      }}
+      disabled={!target}
+      className={cn(
+        "w-full rounded-md border bg-background p-3 text-left transition-colors",
+        target ? "hover:bg-accent/40" : "opacity-70",
+      )}
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <ActorAvatar
+          name={task.agent_name}
+          initials={task.agent_name.charAt(0).toUpperCase()}
+          avatarUrl={task.agent_avatar_url}
+          size={22}
+        />
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{task.agent_name}</span>
+        <StatusBadge status={task.status} />
+        <span className="shrink-0 text-[11px] text-muted-foreground">
+          {formatDuration(startedISO, endedISO)}
+        </span>
+      </div>
+
+      <div className="mt-2 flex min-w-0 items-center gap-2">
+        <TaskKindBadge isChat={!!task.chat_session_id} />
+        <span className="truncate text-sm">{taskTitle}</span>
+      </div>
+
+      <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+        {context.length > 0 ? (
+          context.map((item) => (
+            <span key={item} className="max-w-full truncate">
+              {item}
+            </span>
+          ))
+        ) : (
+          <span>{formatAbsolute(startedISO)}</span>
+        )}
+        {task.triggered_by_name && <span>Startet af {task.triggered_by_name}</span>}
+      </div>
+    </button>
+  );
+}
+
 function rowTarget(task: CerebroTask, workspaceSlug: string): string | null {
   if (task.chat_session_id) return `/${workspaceSlug}/chats/${task.chat_session_id}`;
   if (task.issue_id) return `/${workspaceSlug}/issues/${task.issue_id}`;
@@ -364,8 +462,9 @@ function rowTarget(task: CerebroTask, workspaceSlug: string): string | null {
 }
 
 function StatusBadge({ status }: { status: string }) {
+  const isLive = status === "running" || status === "dispatched";
   const tone =
-    status === "running" || status === "dispatched"
+    isLive
       ? "bg-blue-500/10 text-blue-600 dark:text-blue-400"
       : status === "completed"
         ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
@@ -381,6 +480,7 @@ function StatusBadge({ status }: { status: string }) {
         tone,
       )}
     >
+      {isLive && <span className="h-1.5 w-1.5 rounded-full bg-current" />}
       {status}
     </span>
   );
