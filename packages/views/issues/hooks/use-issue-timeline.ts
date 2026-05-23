@@ -100,7 +100,12 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           const entry = commentToTimelineEntry(comment);
           if (!old) return [entry];
           if (old.some((e) => e.id === comment.id)) return old;
-          return [...old, entry];
+          const next = [...old, entry];
+          next.sort((a, b) => {
+            if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
+            return a.id < b.id ? -1 : 1;
+          });
+          return next;
         });
       },
       [qc, issueId],
@@ -204,7 +209,12 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) => {
           if (!old) return [entry];
           if (old.some((e) => e.id === entry.id)) return old;
-          return [...old, entry];
+          const next = [...old, entry];
+          next.sort((a, b) => {
+            if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
+            return a.id < b.id ? -1 : 1;
+          });
+          return next;
         });
       },
       [qc, issueId],
