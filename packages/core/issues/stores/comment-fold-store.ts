@@ -37,8 +37,8 @@ export function normalizeCommentFoldSettings(
   const base = { ...COMMENT_FOLD_DEFAULTS, ...(input ?? {}) };
 
   const enabled = base.enabled !== false;
-  let headCount = clampInt(base.headCount, MIN_WINDOW, MAX_WINDOW);
-  let tailCount = clampInt(base.tailCount, MIN_WINDOW, MAX_WINDOW);
+  const headCount = clampInt(base.headCount, MIN_WINDOW, MAX_WINDOW);
+  const tailCount = clampInt(base.tailCount, MIN_WINDOW, MAX_WINDOW);
   let threshold = clampInt(base.threshold, MIN_THRESHOLD, MAX_THRESHOLD);
 
   if (headCount + tailCount >= threshold) {
