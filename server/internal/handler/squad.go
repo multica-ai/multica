@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -806,6 +807,190 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 	})
 }
 
+// ── Squad Await Barrier ──────────────────────────────────────────────────────
+
+const squadAwaitBarrierKey = "_system.squad_barrier"
+
+type squadAwaitBarrier struct {
+	ExpectedMembers []string `json:"expected_members"`
+	ReportedMembers []string `json:"reported_members"`
+}
+
+// readSquadAwaitBarrier reads the barrier from issue metadata. Returns nil if
+// no barrier is present or parsing fails.
+func readSquadAwaitBarrier(issue db.Issue) *squadAwaitBarrier {
+	raw := parseIssueMetadata(issue.Metadata)
+	val, ok := raw[squadAwaitBarrierKey]
+	if !ok {
+		return nil
+	}
+	encoded, err := json.Marshal(val)
+	if err != nil {
+		return nil
+	}
+	var barrier squadAwaitBarrier
+	if err := json.Unmarshal(encoded, &barrier); err != nil {
+		return nil
+	}
+	return &barrier
+}
+
+// writeSquadAwaitBarrier marshals a barrier for storage in issue metadata.
+func writeSquadAwaitBarrier(barrier *squadAwaitBarrier) (json.RawMessage, error) {
+	encoded, err := json.Marshal(barrier)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(encoded), nil
+}
+
+// SetSquadAwaitBarrier creates an await barrier on a squad-assigned issue.
+// POST /api/issues/{id}/squad/await
+func (h *Handler) SetSquadAwaitBarrier(w http.ResponseWriter, r *http.Request) {
+	issueID := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, issueID)
+	if !ok {
+		return
+	}
+
+	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
+		writeError(w, http.StatusBadRequest, "issue is not assigned to a squad")
+		return
+	}
+
+	squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+		ID:          issue.AssigneeID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "squad not found")
+		return
+	}
+
+	workspaceID := uuidToString(issue.WorkspaceID)
+	userID := requestUserID(r)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if actorType != "agent" || actorID != uuidToString(squad.LeaderID) {
+		writeError(w, http.StatusForbidden, "only the squad leader agent can set barriers")
+		return
+	}
+
+	// Build a name→UUID map from squad members so the CLI --members
+	// flag can accept display names (what the roster shows).
+	members, err := h.Queries.ListSquadMembers(r.Context(), squad.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list squad members")
+		return
+	}
+	nameToID := make(map[string]string, len(members)+1) // case-insensitive name → UUID
+	// Include the leader.
+	if leader, err := h.Queries.GetAgent(r.Context(), squad.LeaderID); err == nil {
+		nameToID[strings.ToLower(leader.Name)] = uuidToString(squad.LeaderID)
+	}
+	for _, m := range members {
+		if m.MemberType != "agent" {
+			continue
+		}
+		ag, err := h.Queries.GetAgent(r.Context(), m.MemberID)
+		if err != nil {
+			continue
+		}
+		nameToID[strings.ToLower(ag.Name)] = uuidToString(m.MemberID)
+	}
+
+	var req struct {
+		Members string `json:"members"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Members == "" {
+		writeError(w, http.StatusBadRequest, "members field is required (comma-separated list)")
+		return
+	}
+
+	expected := make([]string, 0)
+	for _, m := range strings.Split(req.Members, ",") {
+		trimmed := strings.TrimSpace(m)
+		if trimmed == "" {
+			continue
+		}
+		// Accept either a display name or a raw UUID.
+		if id, ok := nameToID[strings.ToLower(trimmed)]; ok {
+			expected = append(expected, id)
+		} else if _, err := util.ParseUUID(trimmed); err == nil {
+			expected = append(expected, trimmed)
+		} else {
+			writeError(w, http.StatusBadRequest, "member not found in squad: "+trimmed)
+			return
+		}
+	}
+	if len(expected) == 0 {
+		writeError(w, http.StatusBadRequest, "at least one member is required")
+		return
+	}
+
+	barrier := squadAwaitBarrier{
+		ExpectedMembers: expected,
+		ReportedMembers: make([]string, 0),
+	}
+	value, err := writeSquadAwaitBarrier(&barrier)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode barrier")
+		return
+	}
+
+	updated, err := h.Queries.SetIssueMetadataKey(r.Context(), db.SetIssueMetadataKeyParams{
+		ID:          issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		Key:         squadAwaitBarrierKey,
+		Value:       []byte(value),
+	})
+	if err != nil {
+		slog.Warn("SetSquadAwaitBarrier failed", "error", err, "issue_id", issueID)
+		writeError(w, http.StatusInternalServerError, "failed to set barrier")
+		return
+	}
+
+	metadata := parseIssueMetadata(updated.Metadata)
+	h.publish(protocol.EventIssueMetadataChanged, workspaceID, actorType, actorID, map[string]any{
+		"issue_id": uuidToString(updated.ID),
+		"metadata": metadata,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"metadata": metadata,
+		"barrier":  barrier,
+	})
+}
+
+// ClearSquadAwaitBarrier removes the await barrier from an issue.
+// DELETE /api/issues/{id}/squad/await
+func (h *Handler) ClearSquadAwaitBarrier(w http.ResponseWriter, r *http.Request) {
+	issueID := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, issueID)
+	if !ok {
+		return
+	}
+
+	workspaceID := uuidToString(issue.WorkspaceID)
+	userID := requestUserID(r)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+
+	updated, err := h.Queries.DeleteIssueMetadataKey(r.Context(), db.DeleteIssueMetadataKeyParams{
+		ID:          issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		Key:         squadAwaitBarrierKey,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clear barrier")
+		return
+	}
+
+	metadata := parseIssueMetadata(updated.Metadata)
+	h.publish(protocol.EventIssueMetadataChanged, workspaceID, actorType, actorID, map[string]any{
+		"issue_id": uuidToString(updated.ID),
+		"metadata": metadata,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"metadata": metadata})
+}
+
 // ── Squad Trigger Logic ─────────────────────────────────────────────────────
 
 // shouldEnqueueSquadLeaderOnComment returns true if the issue is assigned to a
@@ -829,6 +1014,66 @@ func (h *Handler) shouldEnqueueSquadLeaderOnComment(ctx context.Context, issue d
 	})
 	if err != nil {
 		return false
+	}
+
+	// Barrier check: if the leader has set an await barrier, only allow
+	// wakeup once all expected members have reported. Comment authors
+	// matching an expected member are tracked; all others pass through.
+	if barrier := readSquadAwaitBarrier(issue); barrier != nil {
+		if authorType == "agent" {
+			authorIDStr := authorID
+			matched := false
+			for _, e := range barrier.ExpectedMembers {
+				if strings.EqualFold(e, authorIDStr) {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				alreadyReported := false
+				for _, r := range barrier.ReportedMembers {
+					if strings.EqualFold(r, authorIDStr) {
+						alreadyReported = true
+						break
+					}
+				}
+				if !alreadyReported {
+					barrier.ReportedMembers = append(barrier.ReportedMembers, authorIDStr)
+					value, err := writeSquadAwaitBarrier(barrier)
+					if err == nil {
+						h.Queries.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{
+							ID:          issue.ID,
+							WorkspaceID: issue.WorkspaceID,
+							Key:         squadAwaitBarrierKey,
+							Value:       []byte(value),
+						})
+					}
+				}
+
+				reportedSet := make(map[string]bool, len(barrier.ReportedMembers))
+				for _, r := range barrier.ReportedMembers {
+					reportedSet[strings.ToLower(r)] = true
+				}
+				allReported := true
+				for _, e := range barrier.ExpectedMembers {
+					if !reportedSet[strings.ToLower(e)] {
+						allReported = false
+						break
+					}
+				}
+
+				if allReported {
+					h.Queries.DeleteIssueMetadataKey(ctx, db.DeleteIssueMetadataKeyParams{
+						ID:          issue.ID,
+						WorkspaceID: issue.WorkspaceID,
+						Key:         squadAwaitBarrierKey,
+					})
+					// Fall through to normal enqueue below.
+				} else {
+					return false
+				}
+			}
+		}
 	}
 
 	// Skip if the comment author is the squad leader itself AND the agent's

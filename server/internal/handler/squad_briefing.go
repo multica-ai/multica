@@ -80,6 +80,15 @@ Hard rules:
   rather than silently doing the work.
 - ALWAYS call ` + "`" + `multica squad activity` + "`" + ` before ending your turn —
   even when the outcome is no_action.
+- When you delegate to MULTIPLE members and need ALL of their results
+  before you can decide the next step, call ` + "`" + `multica squad await <issue-id> --members <name-a>,<name-b>,<name-c>` + "`" + `
+  BEFORE ending your turn. This sets a barrier — you will only be
+  re-triggered after every listed member has posted a comment.
+  Then record ` + "`" + `no_action` + "`" + ` and exit. Without await, each member's
+  comment independently re-triggers you, which wastes turns and can
+  cause you to act on incomplete information.
+- Use ` + "`" + `multica squad unawait <issue-id>` + "`" + ` to cancel an active barrier
+  if the delegation plan changes or a member is stuck.
 - A child issue you create with ` + "`" + `--status todo` + "`" + ` and an agent assignee
   already fires that agent automatically — the assignment IS the trigger.
   If you also @mention the same agent on this parent issue for the same

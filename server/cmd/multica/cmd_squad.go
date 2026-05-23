@@ -433,6 +433,98 @@ func runSquadActivity(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// ── Await ────────────────────────────────────────────────────────────────────
+
+var squadAwaitCmd = &cobra.Command{
+	Use:   "await <issue-id>",
+	Short: "Pause leader wakeup until listed members report",
+	Long: `Set a barrier on the issue. The squad leader will not be re-triggered
+by member comments until every member listed in --members has posted at
+least one comment on this issue.
+
+Use this after delegating to multiple members when you need all results
+before making a decision. The barrier is stored in issue metadata and
+cleared automatically when the last expected member reports.
+
+Example:
+  multica squad await MUL-123 --members writer-01,reader-01,reviewer-01`,
+	Args: exactArgs(1),
+	RunE: runSquadAwait,
+}
+
+var squadUnawaitCmd = &cobra.Command{
+	Use:   "unawait <issue-id>",
+	Short: "Clear an active squad await barrier",
+	Long: `Remove the await barrier from the issue, allowing the leader to
+be re-triggered normally by subsequent member comments.
+
+Use this to cancel a wait that is no longer needed, e.g. when the
+delegation plan changed or a member is stuck.`,
+	Args: exactArgs(1),
+	RunE: runSquadUnawait,
+}
+
+func runSquadAwait(cmd *cobra.Command, args []string) error {
+	issueID := args[0]
+	members, _ := cmd.Flags().GetString("members")
+	if members == "" {
+		return fmt.Errorf("--members is required (comma-separated agent names)")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, issueID)
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	body := map[string]any{
+		"members": members,
+	}
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+issueRef.ID+"/squad/await", body, &result); err != nil {
+		return fmt.Errorf("set await barrier: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Await barrier set on %s for members: %s\n", issueRef.Display, members)
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	return nil
+}
+
+func runSquadUnawait(cmd *cobra.Command, args []string) error {
+	issueID := args[0]
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, issueID)
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	if err := client.DeleteJSON(ctx, "/api/issues/"+issueRef.ID+"/squad/await"); err != nil {
+		return fmt.Errorf("clear await barrier: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Await barrier cleared on %s\n", issueRef.Display)
+	return nil
+}
+
 // ── Init ────────────────────────────────────────────────────────────────────
 
 func init() {
@@ -477,6 +569,13 @@ func init() {
 	squadActivityCmd.Flags().String("reason", "", "Short explanation of the decision")
 	squadActivityCmd.Flags().String("output", "table", "Output format: table or json")
 
+	// await
+	squadAwaitCmd.Flags().String("members", "", "Comma-separated member names to wait for (required)")
+	squadAwaitCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// unawait
+	squadUnawaitCmd.Flags().String("output", "table", "Output format: table or json")
+
 	squadMemberCmd.AddCommand(squadMemberListCmd)
 	squadMemberCmd.AddCommand(squadMemberAddCmd)
 	squadMemberCmd.AddCommand(squadMemberRemoveCmd)
@@ -488,4 +587,6 @@ func init() {
 	squadCmd.AddCommand(squadDeleteCmd)
 	squadCmd.AddCommand(squadMemberCmd)
 	squadCmd.AddCommand(squadActivityCmd)
+	squadCmd.AddCommand(squadAwaitCmd)
+	squadCmd.AddCommand(squadUnawaitCmd)
 }

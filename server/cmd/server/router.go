@@ -472,6 +472,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Squad leader evaluation (writes to activity_log)
 			r.Post("/api/issues/{id}/squad-evaluated", h.RecordSquadLeaderEvaluation)
 
+			// Squad await barrier (writes to issue_metadata)
+			r.Post("/api/issues/{id}/squad/await", h.SetSquadAwaitBarrier)
+			r.Delete("/api/issues/{id}/squad/await", h.ClearSquadAwaitBarrier)
 			// Autopilots
 			r.Route("/api/autopilots", func(r chi.Router) {
 				r.Get("/", h.ListAutopilots)

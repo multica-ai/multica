@@ -105,3 +105,8 @@ export interface SquadMemberStatus {
 export interface SquadMemberStatusListResponse {
   members: SquadMemberStatus[];
 }
+
+export interface SquadAwaitBarrier {
+  expected_members: string[];
+  reported_members: string[];
+}
