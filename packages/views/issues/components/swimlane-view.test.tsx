@@ -286,6 +286,47 @@ describe("SwimLaneView", () => {
     expect(mockOpenModal).toHaveBeenCalledWith("create-issue", expect.any(Object));
   });
 
+  it("renders an open-parent link for lanes with a real parent", () => {
+    renderWithI18n(
+      <SwimLaneView
+        issues={mockIssues}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    // The pencil link uses aria-label "Open parent issue" and href to /issues/<id>.
+    // Only the "Parent Issue 1" lane (parent-1) has a parent issue id; the
+    // orphan lane ("No parent") must not render this link.
+    const links = screen.getAllByRole("link", { name: "Open parent issue" });
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute("href", expect.stringContaining("parent-1"));
+  });
+
+  it("renders HiddenColumnsPanel only when hiddenStatuses is non-empty", () => {
+    // Case 1: no hidden statuses → panel is absent.
+    const { unmount } = renderWithI18n(
+      <SwimLaneView
+        issues={mockIssues}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("Hidden columns")).not.toBeInTheDocument();
+    unmount();
+
+    // Case 2: hide a status → panel shows the localized status name + count.
+    // "cancelled" is excluded from BOARD_STATUSES, so we pass "blocked" as hidden.
+    renderWithI18n(
+      <SwimLaneView
+        issues={mockIssues}
+        visibleStatuses={["backlog", "todo", "in_progress", "in_review", "done"]}
+        hiddenStatuses={["blocked"]}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Hidden columns")).toBeInTheDocument();
+    expect(screen.getByText("Blocked")).toBeInTheDocument();
+  });
+
   it("calls onMoveIssue on drag-and-drop end", () => {
     const mockOnMoveIssue = vi.fn();
     renderWithI18n(
