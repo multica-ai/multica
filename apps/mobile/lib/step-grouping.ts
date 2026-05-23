@@ -36,7 +36,9 @@ export function getGroupLabel(type: TaskMessagePayload["type"], count: number): 
   return (LABELS[type] ?? LABELS.error)(count);
 }
 
-export function getGroupIcon(type: TaskMessagePayload["type"]): string {
+export function getGroupIcon(
+  type: TaskMessagePayload["type"],
+): "bulb-outline" | "alert-circle" | "chevron-forward" {
   switch (type) {
     case "thinking":
       return "bulb-outline";
