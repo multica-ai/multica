@@ -220,12 +220,26 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		cancel()
 		return nil, fmt.Errorf("pi stdout pipe: %w", err)
 	}
+	// Attach an explicit stdin pipe so we can close it ourselves. Pi reads
+	// its prompt from argv (positional, see buildPiArgs) and never expects
+	// interactive input, but when the parent leaves cmd.Stdin nil and the
+	// daemon is run under systemd, Pi has been observed to block in its
+	// event loop awaiting stdin events instead of progressing to "done"
+	// (#2188). Closing the pipe immediately after Start delivers an
+	// explicit EOF on a FIFO, which unblocks Pi's readable side.
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("pi stdin pipe: %w", err)
+	}
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "[pi:stderr] ")
 
 	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
 		cancel()
 		return nil, fmt.Errorf("start pi: %w", err)
 	}
+	_ = stdin.Close()
 
 	b.cfg.Logger.Info("pi started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
