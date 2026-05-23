@@ -19,6 +19,17 @@
       "browser_suffix": "（浏览器）",
       "hint": "用于仪表盘、图表和「今天」标签。这是个人偏好，在你的所有工作区中通用。",
       "sync_failed": "保存时区偏好失败。"
+    },
+    "comment_fold": {
+      "title": "评论讨论串",
+      "description": "讨论串过长时，像 GitHub 一样把中间回复折叠，点击后再展开。适用于 Web 和 Desktop。",
+      "enabled_label": "折叠长讨论串",
+      "enabled_hint": "保留最早和最新的若干条回复，中间部分折叠隐藏。",
+      "threshold_label": "超过此回复数后折叠",
+      "threshold_suffix": "条回复",
+      "head_label": "顶部保留",
+      "tail_label": "底部保留",
+      "reset_action": "恢复默认"
     }
   },
   "page": {

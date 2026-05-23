@@ -66,6 +66,7 @@ vi.mock("@multica/core/auth", async () => {
 });
 
 import { PreferencesTab } from "./preferences-tab";
+import { useCommentFoldStore } from "@multica/core/issues/stores";
 
 const TEST_RESOURCES = {
   en: { common: enCommon, auth: enAuth, settings: enSettings },
@@ -249,4 +250,45 @@ describe("PreferencesTab — Timezone section", () => {
       expect(mockSetUser).toHaveBeenCalledWith(clearedUser);
     });
   }, 20000);
+});
+
+describe("PreferencesTab — Comment thread folding", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useCommentFoldStore.setState({
+      settings: {
+        enabled: true,
+        threshold: 7,
+        headCount: 2,
+        tailCount: 2,
+      },
+    });
+  });
+
+  it("toggles folding off via the preferences switch", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    await user.click(
+      screen.getByRole("switch", { name: /collapse long threads/i }),
+    );
+
+    expect(useCommentFoldStore.getState().settings.enabled).toBe(false);
+  });
+
+  it("hides numeric fields when folding is disabled", async () => {
+    useCommentFoldStore.setState({
+      settings: {
+        enabled: false,
+        threshold: 7,
+        headCount: 2,
+        tailCount: 2,
+      },
+    });
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    expect(
+      screen.queryByLabelText(/start folding after/i),
+    ).not.toBeInTheDocument();
+  });
 });
