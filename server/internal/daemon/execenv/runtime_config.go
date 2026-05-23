@@ -63,12 +63,16 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 			DefaultBranchHint string `json:"default_branch_hint,omitempty"`
 		}
 		_ = json.Unmarshal(r.ResourceRef, &payload)
+		if label != "" {
+			out := fmt.Sprintf("**%s** (github_repo): %s", label, payload.URL)
+			if payload.DefaultBranchHint != "" {
+				out += fmt.Sprintf(" (default branch: `%s`)", payload.DefaultBranchHint)
+			}
+			return out
+		}
 		out := fmt.Sprintf("**GitHub repo**: %s", payload.URL)
 		if payload.DefaultBranchHint != "" {
 			out += fmt.Sprintf(" (default branch: `%s`)", payload.DefaultBranchHint)
-		}
-		if label != "" {
-			out += " — " + label
 		}
 		return out
 	case "local_path":
@@ -77,11 +81,10 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 			DaemonID string `json:"daemon_id"`
 		}
 		_ = json.Unmarshal(r.ResourceRef, &payload)
-		out := fmt.Sprintf("**Local path**: `%s`", payload.Path)
 		if label != "" {
-			out += " — " + label
+			return fmt.Sprintf("**%s** (local_path): `%s`", label, payload.Path)
 		}
-		return out
+		return fmt.Sprintf("**Local path**: `%s`", payload.Path)
 	default:
 		ref := string(r.ResourceRef)
 		if ref == "" {

@@ -224,6 +224,67 @@ func TestPrepareWithProjectResources(t *testing.T) {
 	}
 }
 
+func TestFormatProjectResource(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		res  ProjectResourceForEnv
+		want string
+	}{
+		{
+			name: "local_path without label",
+			res: ProjectResourceForEnv{
+				ResourceType: "local_path",
+				ResourceRef:  json.RawMessage(`{"path":"/home/user/project","daemon_id":"abc-123"}`),
+			},
+			want: "**Local path**: `/home/user/project`",
+		},
+		{
+			name: "local_path with label shows alias as primary",
+			res: ProjectResourceForEnv{
+				ResourceType: "local_path",
+				ResourceRef:  json.RawMessage(`{"path":"/home/user/project","daemon_id":"abc-123"}`),
+				Label:        "My Project",
+			},
+			want: "**My Project** (local_path): `/home/user/project`",
+		},
+		{
+			name: "github_repo without label",
+			res: ProjectResourceForEnv{
+				ResourceType: "github_repo",
+				ResourceRef:  json.RawMessage(`{"url":"https://github.com/org/repo","default_branch_hint":"main"}`),
+			},
+			want: "**GitHub repo**: https://github.com/org/repo (default branch: `main`)",
+		},
+		{
+			name: "github_repo with label shows alias as primary",
+			res: ProjectResourceForEnv{
+				ResourceType: "github_repo",
+				ResourceRef:  json.RawMessage(`{"url":"https://github.com/org/repo","default_branch_hint":"main"}`),
+				Label:        "Core Repo",
+			},
+			want: "**Core Repo** (github_repo): https://github.com/org/repo (default branch: `main`)",
+		},
+		{
+			name: "unknown type with label appends label",
+			res: ProjectResourceForEnv{
+				ResourceType: "custom_type",
+				ResourceRef:  json.RawMessage(`{"key":"value"}`),
+				Label:        "Custom",
+			},
+			want: "**custom_type**: `{\"key\":\"value\"}` — Custom",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatProjectResource(tt.res)
+			if got != tt.want {
+				t.Errorf("formatProjectResource() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // When the issue's project has its own github_repo resources, those should be
 // the only repos rendered in the meta-skill — workspace-level repos must not
 // leak into the agent prompt to avoid confusing it about which repo to use.

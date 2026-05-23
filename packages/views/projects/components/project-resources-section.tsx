@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, FolderGit, FolderOpen, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -18,6 +18,11 @@ import type {
   ProjectResource,
 } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@multica/ui/components/ui/native-select";
 import {
   Popover,
   PopoverContent,
@@ -76,11 +81,12 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
     }
   };
 
-  const handleAddLocalPath = async (path: string, daemonId: string) => {
+  const handleAddLocalPath = async (path: string, daemonId: string, label?: string) => {
     try {
       await createResource.mutateAsync({
         resource_type: "local_path",
         resource_ref: { path, daemon_id: daemonId },
+        ...(label?.trim() ? { label: label.trim() } : {}),
       });
       toast.success(t(($) => $.resources.toast_attached));
     } catch (err) {
@@ -187,17 +193,15 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                   setAddOpen(false);
                 }}
               />
-              {onlineRuntimes.length > 0 && (
-                <LocalPathForm
-                  attachedPaths={attachedPaths}
-                  runtimes={onlineRuntimes}
-                  onSubmit={async (path, daemonId) => {
-                    await handleAddLocalPath(path, daemonId);
-                    setAddOpen(false);
-                  }}
-                  disabled={createResource.isPending}
-                />
-              )}
+              <LocalPathForm
+                attachedPaths={attachedPaths}
+                runtimes={onlineRuntimes}
+                onSubmit={async (path, daemonId, label) => {
+                  await handleAddLocalPath(path, daemonId, label);
+                  setAddOpen(false);
+                }}
+                disabled={createResource.isPending}
+              />
             </PopoverContent>
           </Popover>
         </div>
@@ -316,23 +320,25 @@ function CustomRepoForm({
     }
   };
   return (
-    <form onSubmit={handle} className="flex items-center gap-1.5 pt-1 border-t">
+    <form onSubmit={handle} className="space-y-1.5 pt-1 border-t">
       <input
         type="text"
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         placeholder={t(($) => $.resources.url_placeholder)}
-        className="flex-1 bg-transparent text-xs px-2 py-1 outline-none placeholder:text-muted-foreground"
+        className="w-full bg-transparent text-xs px-2 py-1 outline-none placeholder:text-muted-foreground"
       />
-      <Button
-        type="submit"
-        size="sm"
-        variant="ghost"
-        className="h-6 px-2 text-xs"
-        disabled={!url.trim() || submitting}
-      >
-        {t(($) => $.resources.url_submit)}
-      </Button>
+      <div className="flex justify-end">
+        <Button
+          type="submit"
+          size="sm"
+          variant="ghost"
+          className="h-6 px-2 text-xs"
+          disabled={!url.trim() || submitting}
+        >
+          {t(($) => $.resources.url_submit)}
+        </Button>
+      </div>
     </form>
   );
 }
@@ -373,17 +379,32 @@ function LocalPathForm({
 }: {
   attachedPaths: Set<string>;
   runtimes: Array<{ id: string; daemon_id: string | null; name: string; device_info: string }>;
-  onSubmit: (path: string, daemonId: string) => Promise<void> | void;
+  onSubmit: (path: string, daemonId: string, label?: string) => Promise<void> | void;
   disabled: boolean;
 }) {
   const { t } = useT("projects");
   const [path, setPath] = useState("");
+  const [label, setLabel] = useState("");
   const machines = buildRuntimeMachines(runtimes);
   const [daemonId, setDaemonId] = useState(() => machines[0]?.daemonId ?? "");
   const [submitting, setSubmitting] = useState(false);
 
+  useEffect(() => {
+    if (machines.length === 0) {
+      setDaemonId("");
+      return;
+    }
+    setDaemonId((current) =>
+      machines.some((machine) => machine.daemonId === current)
+        ? current
+        : machines[0]!.daemonId,
+    );
+  }, [machines]);
+
   const isAttached = path.trim() && attachedPaths.has(path.trim());
-  const canSubmit = path.trim() && daemonId && !isAttached && !disabled && !submitting;
+  const canSubmit =
+    path.trim() && daemonId && !isAttached && !disabled && !submitting;
+  const hasMachines = machines.length > 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -391,17 +412,27 @@ function LocalPathForm({
     if (!trimmed || !daemonId || !canSubmit) return;
     setSubmitting(true);
     try {
-      await onSubmit(trimmed, daemonId);
+      await onSubmit(trimmed, daemonId, label.trim() || undefined);
       setPath("");
+      setLabel("");
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-1.5 pt-1 border-t">
-      <div className="text-[10px] font-medium text-muted-foreground">
-        Local path
+    <form onSubmit={handleSubmit} className="space-y-2 pt-1 border-t">
+      <div className="space-y-1">
+        <div className="text-[10px] font-medium text-muted-foreground">
+          {t(($) => $.resources.alias_label)}
+        </div>
+        <Input
+          type="text"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder={t(($) => $.resources.alias_placeholder)}
+          className="h-7 text-xs"
+        />
       </div>
       <input
         type="text"
@@ -411,22 +442,28 @@ function LocalPathForm({
         className="w-full bg-transparent text-xs px-2 py-1 outline-none placeholder:text-muted-foreground"
       />
       <div className="flex items-center gap-1.5">
-        <select
+        <NativeSelect
           value={daemonId}
           onChange={(e) => setDaemonId(e.target.value)}
-          className="flex-1 bg-transparent text-xs px-2 py-1 outline-none border border-border rounded-md"
+          className="w-full min-w-0"
+          disabled={!hasMachines || disabled || submitting}
         >
+          <NativeSelectOption value="" disabled>
+            {hasMachines
+              ? t(($) => $.resources.machine_placeholder)
+              : t(($) => $.resources.no_online_machines)}
+          </NativeSelectOption>
           {machines.map((m) => (
-            <option key={m.daemonId} value={m.daemonId}>
+            <NativeSelectOption key={m.daemonId} value={m.daemonId}>
               {m.label}
-            </option>
+            </NativeSelectOption>
           ))}
-        </select>
+        </NativeSelect>
         <Button
           type="submit"
           size="sm"
           variant="ghost"
-          className="h-6 px-2 text-xs shrink-0"
+          className="h-7 px-2 text-xs shrink-0"
           disabled={!canSubmit}
         >
           {t(($) => $.resources.url_submit)}
@@ -435,6 +472,11 @@ function LocalPathForm({
       {isAttached && (
         <p className="text-[10px] text-muted-foreground">
           {t(($) => $.resources.attached_badge)}
+        </p>
+      )}
+      {!hasMachines && (
+        <p className="text-[10px] text-muted-foreground">
+          {t(($) => $.resources.no_online_machines_hint)}
         </p>
       )}
     </form>
