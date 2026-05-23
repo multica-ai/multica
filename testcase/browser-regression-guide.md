@@ -86,13 +86,23 @@ For cloud/shared workspaces:
 - Do not mutate agents/runtimes owned by unclear or unrelated users.
 - If ownership is unclear and no safe test agent exists, report the blocker.
 
-## 6. Fixture recipe: creating agent task runs
+## 6. Fixture recipe: workspace independence for UI regression
+
+UI regression tests the Multica **product code**, not a specific Multica workspace or issue. Features like execution logs, retry, board cards, permission controls, and notification delivery are product-level features that behave the same way regardless of which workspace they are tested in.
+
+When a browser test case requires a specific UI feature:
+
+- **Do not tie the test to the same workspace as the regression Issue.**  The tracking Issue (e.g. OPE-1327 in openharness) tells you *what* to test, but the browser test workspace can be any workspace your auth can access.
+- If your auth (e.g. `tester@multica.com`) only has access to workspace "123" but the tracking Issue is in openharness, **run the browser regression in workspace "123"**. The product build under test is the same. The feature behavior is the same. The evidence is equally valid.
+- Only declare BLOCKED due to workspace access when **no accessible workspace** can provide the required fixture data.
+
+## 7. Fixture recipe: creating agent task runs
 
 Cases such as TC-018, TC-019, TC-028, TC-031, TC-036, notification delivery cases, and runtime-dependent cases need real task runs.
 
-If no suitable issue with task runs exists, create data before declaring BLOCKED:
+If no suitable issue with task runs exists in any accessible workspace, create data before declaring BLOCKED:
 
-1. Create or select a disposable test issue in the test workspace.
+1. Create or select a disposable test issue in any workspace your auth can access.
 2. Ensure at least one suitable test agent exists and has an online runtime.
 3. Trigger the agent with a markdown mention comment, not plain text:
 
@@ -109,9 +119,9 @@ If no suitable issue with task runs exists, create data before declaring BLOCKED
 
 6. Reopen the issue detail page and verify the timeline / execution log / retry UI.
 
-Do not mark Agent-run-dependent cases as BLOCKED until these setup steps were attempted and the exact failure is reported.
+Do not mark Agent-run-dependent cases as BLOCKED until these setup steps were attempted in every accessible workspace and the exact failure is reported.
 
-## 7. PASS / BLOCKED / FAIL discipline
+## 8. PASS / BLOCKED / FAIL discipline
 
 PASS is allowed only when all applicable checks passed and required browser evidence exists.
 
@@ -121,7 +131,7 @@ FAIL means the product behavior does not satisfy the testcase or PR requirement.
 
 Do not report `PASS` by excluding BLOCKED cases unless the user explicitly accepts the risk. Use `PARTIAL PASS` or `PASS with accepted blockers` and list every blocked case.
 
-## 8. Required report format
+## 9. Required report format
 
 Multica Issue completion comments must be human-readable and include:
 

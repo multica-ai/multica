@@ -1,6 +1,8 @@
 Purpose: Verify that the Retry button appears on agent comments and system task-run comments, and that clicking Retry re-triggers the agent task correctly.
 
-Preconditions: The Multica web app is reachable. The user is signed in. An issue exists with at least one agent comment from a completed or failed task run. The comment can be either a regular agent comment or a system-type task-run comment.
+Preconditions: The Multica web app is reachable. The user is signed in to any workspace. An issue exists in that workspace with at least one agent comment from a completed or failed task run. The comment can be either a regular agent comment or a system-type task-run comment.
+
+Workspace note: Retry is a product-level feature, not tied to a specific workspace. You can run this test in any workspace your auth can access.
 
 Fixture setup if no suitable issue/comment exists:
 1. Follow `testcase/fixtures/README.md` → "Agent task run fixture".

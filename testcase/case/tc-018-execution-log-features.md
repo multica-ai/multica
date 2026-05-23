@@ -1,6 +1,8 @@
 Purpose: Verify that the execution log section on the issue detail page shows run index, filter/search, trigger info, agent coloring, comment jump links, and run statistics.
 
-Preconditions: The Multica web app is reachable. The user is signed in. An issue exists with multiple completed task runs from different agents (ideally at least 3 runs, some successful, some failed).
+Preconditions: The Multica web app is reachable. The user is signed in to any workspace. An issue exists in that workspace with multiple completed task runs from different agents (ideally at least 3 runs, some successful, some failed).
+
+Workspace note: Execution log is a product-level feature, not tied to a specific workspace. You can run this test in any workspace your auth can access — it does not need to be the same workspace as the tracking Issue.
 
 Fixture setup if no suitable issue exists:
 1. Follow `testcase/fixtures/README.md` → "Agent task run fixture".
