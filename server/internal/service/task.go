@@ -1540,23 +1540,26 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason)
 	s.captureTaskFailed(ctx, task)
 
+	// CEREBRO-PATCH(auto-pause-on-failure): check rate-limit / monthly-cap /
+	// expired auth BEFORE auto-retry. When paused, skip retry creation so the
+	// fail-safe 5-min loop does not re-queue the same task indefinitely. See
+	// cerebro/runtime/auto_pause.go for the full trade-off explanation.
+	autoPaused := s.AutoPause != nil && s.AutoPause.MaybeAutoPauseOnFailure(ctx, task)
+
 	// Auto-retry eligible failures (orphan, timeout, runtime_offline,
 	// runtime_recovery). The helper itself enforces attempt < max_attempts
 	// and only triggers for issue/chat tasks.
-	retried, _ := s.MaybeRetryFailedTask(ctx, task)
-
-	// CEREBRO-PATCH(auto-pause-on-failure): pause runtime when error
-	// signals rate-limit / monthly-cap / expired auth — see
-	// cerebro/runtime/auto_pause.go for the full trade-off explanation.
-	if s.AutoPause != nil {
-		s.AutoPause.MaybeAutoPauseOnFailure(ctx, task)
+	var retried *db.AgentTaskQueue
+	if !autoPaused { // CEREBRO-PATCH(auto-pause-on-failure): no retry when rate-limited
+		retried, _ = s.MaybeRetryFailedTask(ctx, task)
 	}
 
 	// Skip the per-failure system comment when we'll immediately retry —
 	// the new task will surface its own status to the user, and we don't
 	// want to spam the issue with "task timed out" messages on every
-	// daemon hiccup.
-	if errMsg != "" && task.IssueID.Valid && retried == nil {
+	// daemon hiccup. Also skip when auto-paused so rate-limit failures do
+	// not post on every 5-min fail-safe loop tick.
+	if errMsg != "" && task.IssueID.Valid && retried == nil && !autoPaused { // CEREBRO-PATCH(auto-pause-on-failure)
 		if failureReason == "timeout" {
 			s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(s.timeoutFailureCommentBody(ctx, task, errMsg)), "comment", task.TriggerCommentID)
 		} else {
@@ -1569,7 +1572,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// conversation history shows what happened. Skip when auto-retry is
 	// pending (the new attempt will write its own outcome) — same guard as
 	// the issue path above.
-	if task.ChatSessionID.Valid && retried == nil {
+	if task.ChatSessionID.Valid && retried == nil && !autoPaused { // CEREBRO-PATCH(auto-pause-on-failure)
 		// CEREBRO-PATCH(chat-message-id-claim): JEH-1083 — upsert the pre-created assistant row from the claim path instead of inserting a duplicate.
 		if err := upsertAssistantChatMessage(ctx, s.Queries, db.CreateChatMessageParams{
 			ChatSessionID: task.ChatSessionID,
@@ -1594,7 +1597,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// requester so they can either retry or fall back to the advanced form
 	// without losing their original prompt. Skipped when an auto-retry is
 	// pending — the new attempt will write its own outcome.
-	if retried == nil {
+	if retried == nil && !autoPaused { // CEREBRO-PATCH(auto-pause-on-failure)
 		if qc, ok := s.parseQuickCreateContext(task); ok {
 			s.notifyQuickCreateFailed(ctx, task, qc, errMsg)
 		}
