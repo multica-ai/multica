@@ -85,12 +85,25 @@ type GitHubPullRequestResponse struct {
 	Additions    int32 `json:"additions"`
 	Deletions    int32 `json:"deletions"`
 	ChangedFiles int32 `json:"changed_files"`
+	// SyncSource tells the sidebar whether this row came from the full
+	// GitHub App webhook path or a user-linked public PR snapshot.
+	SyncSource string `json:"sync_source"`
 }
 
 type GitHubConnectResponse struct {
 	URL        string `json:"url"`
 	Configured bool   `json:"configured"`
 }
+
+const (
+	githubPullRequestSourceApp    = "github_app"
+	githubPullRequestSourcePublic = "public"
+)
+
+var (
+	githubAPIBaseURL = "https://api.github.com"
+	githubHTTPClient = http.DefaultClient
+)
 
 func githubInstallationToResponse(i db.GithubInstallation) GitHubInstallationResponse {
 	instID := i.InstallationID
@@ -143,6 +156,7 @@ func githubPullRequestToResponse(p db.GithubPullRequest) GitHubPullRequestRespon
 		Additions:        p.Additions,
 		Deletions:        p.Deletions,
 		ChangedFiles:     p.ChangedFiles,
+		SyncSource:       githubPullRequestSyncSource(p.InstallationID),
 	}
 }
 
@@ -171,7 +185,15 @@ func issuePullRequestRowToResponse(p db.ListPullRequestsByIssueRow) GitHubPullRe
 		Additions:        p.Additions,
 		Deletions:        p.Deletions,
 		ChangedFiles:     p.ChangedFiles,
+		SyncSource:       githubPullRequestSyncSource(p.InstallationID),
 	}
+}
+
+func githubPullRequestSyncSource(installationID int64) string {
+	if installationID == 0 {
+		return githubPullRequestSourcePublic
+	}
+	return githubPullRequestSourceApp
 }
 
 // aggregateChecksConclusion collapses the per-PR check_suite counts into a
@@ -369,7 +391,7 @@ func fetchInstallationAccount(ctx context.Context, installationID int64) (login,
 		return
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := githubHTTPClient.Do(req)
 	if err != nil {
 		return
 	}
@@ -478,6 +500,265 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 		out = append(out, issuePullRequestRowToResponse(row))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"pull_requests": out})
+}
+
+type LinkPullRequestRequest struct {
+	URL string `json:"url"`
+}
+
+func (h *Handler) LinkPullRequestForIssue(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	var req LinkPullRequestRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	owner, repo, number, err := parseGitHubPullRequestURL(req.URL)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	publicPR, err := fetchPublicGitHubPullRequest(r.Context(), owner, repo, number)
+	if err != nil {
+		var fetchErr *githubPublicPullRequestError
+		if errors.As(err, &fetchErr) && fetchErr.Status == http.StatusForbidden {
+			writeError(w, http.StatusTooManyRequests, fetchErr.Error())
+			return
+		}
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	pr, err := h.Queries.UpsertGitHubPullRequest(r.Context(), publicPR.upsertParams(issue.WorkspaceID))
+	if err != nil {
+		slog.Warn("github: upsert public pr failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "failed to link pull request")
+		return
+	}
+
+	linkedByID := pgtype.UUID{}
+	if userID := requestUserID(r); userID != "" {
+		if parsed, err := parseStrictUUID(userID); err == nil {
+			linkedByID = parsed
+		}
+	}
+	if err := h.Queries.LinkIssueToPullRequest(r.Context(), db.LinkIssueToPullRequestParams{
+		IssueID:       issue.ID,
+		PullRequestID: pr.ID,
+		LinkedByType:  strToText("member"),
+		LinkedByID:    linkedByID,
+	}); err != nil {
+		slog.Warn("github: link public pr failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "failed to link pull request")
+		return
+	}
+
+	issueID := uuidToString(issue.ID)
+	h.publish(protocol.EventPullRequestUpdated, uuidToString(issue.WorkspaceID), "system", "", map[string]any{
+		"pull_request":     githubPullRequestToResponse(pr),
+		"linked_issue_ids": []string{issueID},
+	})
+	writeJSON(w, http.StatusCreated, map[string]any{"pull_request": githubPullRequestToResponse(pr)})
+}
+
+type publicGitHubPullRequest struct {
+	RepoOwner       string
+	RepoName        string
+	Number          int32
+	Title           string
+	State           string
+	HTMLURL         string
+	Branch          string
+	HeadSHA         string
+	AuthorLogin     string
+	AuthorAvatarURL string
+	MergedAt        string
+	ClosedAt        string
+	CreatedAt       string
+	UpdatedAt       string
+	MergeableState  string
+	Additions       int32
+	Deletions       int32
+	ChangedFiles    int32
+	Draft           bool
+	Merged          bool
+}
+
+func (p publicGitHubPullRequest) upsertParams(workspaceID pgtype.UUID) db.UpsertGitHubPullRequestParams {
+	state := derivePRState(p.State, p.Draft, p.Merged || p.MergedAt != "")
+	mergeable := pgtype.Text{}
+	if p.MergeableState != "" {
+		mergeable = pgtype.Text{String: p.MergeableState, Valid: true}
+	}
+	return db.UpsertGitHubPullRequestParams{
+		WorkspaceID:         workspaceID,
+		InstallationID:      0,
+		RepoOwner:           p.RepoOwner,
+		RepoName:            p.RepoName,
+		PrNumber:            p.Number,
+		Title:               p.Title,
+		State:               state,
+		HtmlUrl:             p.HTMLURL,
+		Branch:              ptrToText(strPtrOrNil(p.Branch)),
+		AuthorLogin:         ptrToText(strPtrOrNil(p.AuthorLogin)),
+		AuthorAvatarUrl:     ptrToText(strPtrOrNil(p.AuthorAvatarURL)),
+		MergedAt:            parseGHTime(p.MergedAt),
+		ClosedAt:            parseGHTime(p.ClosedAt),
+		PrCreatedAt:         parseGHTimeRequired(p.CreatedAt),
+		PrUpdatedAt:         parseGHTimeRequired(p.UpdatedAt),
+		HeadSha:             p.HeadSHA,
+		MergeableState:      mergeable,
+		ClearMergeableState: pgtype.Bool{Bool: false, Valid: true},
+		Additions:           p.Additions,
+		Deletions:           p.Deletions,
+		ChangedFiles:        p.ChangedFiles,
+	}
+}
+
+type githubPublicPullRequestError struct {
+	Status  int
+	Message string
+}
+
+func (e *githubPublicPullRequestError) Error() string {
+	return e.Message
+}
+
+func parseGitHubPullRequestURL(raw string) (owner, repo string, number int32, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", 0, errors.New("pull request URL is required")
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", "", 0, errors.New("enter a full GitHub pull request URL")
+	}
+	host := strings.ToLower(strings.TrimPrefix(u.Host, "www."))
+	if host != "github.com" {
+		return "", "", 0, errors.New("only github.com pull request URLs are supported")
+	}
+	parts := strings.Split(strings.Trim(u.EscapedPath(), "/"), "/")
+	if len(parts) < 4 || parts[2] != "pull" {
+		return "", "", 0, errors.New("enter a GitHub pull request URL like https://github.com/owner/repo/pull/123")
+	}
+	n, err := strconv.ParseInt(parts[3], 10, 32)
+	if err != nil || n <= 0 {
+		return "", "", 0, errors.New("pull request number must be a positive integer")
+	}
+	owner, err = url.PathUnescape(parts[0])
+	if err != nil || owner == "" {
+		return "", "", 0, errors.New("invalid GitHub owner in pull request URL")
+	}
+	repo, err = url.PathUnescape(parts[1])
+	if err != nil || repo == "" {
+		return "", "", 0, errors.New("invalid GitHub repository in pull request URL")
+	}
+	return owner, repo, int32(n), nil
+}
+
+func fetchPublicGitHubPullRequest(ctx context.Context, owner, repo string, number int32) (publicGitHubPullRequest, error) {
+	apiURL := strings.TrimRight(githubAPIBaseURL, "/") + "/repos/" +
+		url.PathEscape(owner) + "/" + url.PathEscape(repo) +
+		"/pulls/" + strconv.FormatInt(int64(number), 10)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return publicGitHubPullRequest{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("User-Agent", "multica")
+	resp, err := githubHTTPClient.Do(req)
+	if err != nil {
+		return publicGitHubPullRequest{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return publicGitHubPullRequest{}, &githubPublicPullRequestError{
+			Status:  resp.StatusCode,
+			Message: "could not read that PR publicly. Connect the repo with the GitHub App, or check that the URL points to a public GitHub pull request.",
+		}
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		return publicGitHubPullRequest{}, &githubPublicPullRequestError{
+			Status:  resp.StatusCode,
+			Message: "GitHub public API access is temporarily unavailable. Try again later, or connect the repo with the GitHub App for authenticated syncing.",
+		}
+	}
+	if resp.StatusCode != http.StatusOK {
+		return publicGitHubPullRequest{}, &githubPublicPullRequestError{
+			Status:  resp.StatusCode,
+			Message: "failed to read GitHub pull request metadata",
+		}
+	}
+
+	var body struct {
+		Number         int32  `json:"number"`
+		HTMLURL        string `json:"html_url"`
+		Title          string `json:"title"`
+		State          string `json:"state"`
+		Draft          bool   `json:"draft"`
+		Merged         bool   `json:"merged"`
+		MergedAt       string `json:"merged_at"`
+		ClosedAt       string `json:"closed_at"`
+		CreatedAt      string `json:"created_at"`
+		UpdatedAt      string `json:"updated_at"`
+		MergeableState string `json:"mergeable_state"`
+		Additions      int32  `json:"additions"`
+		Deletions      int32  `json:"deletions"`
+		ChangedFiles   int32  `json:"changed_files"`
+		Head           struct {
+			Ref string `json:"ref"`
+			SHA string `json:"sha"`
+		} `json:"head"`
+		User struct {
+			Login     string `json:"login"`
+			AvatarURL string `json:"avatar_url"`
+		} `json:"user"`
+		Base struct {
+			Repo struct {
+				Name  string `json:"name"`
+				Owner struct {
+					Login string `json:"login"`
+				} `json:"owner"`
+			} `json:"repo"`
+		} `json:"base"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return publicGitHubPullRequest{}, err
+	}
+	if body.Number == 0 {
+		body.Number = number
+	}
+	repoOwner := coalesce(body.Base.Repo.Owner.Login, owner)
+	repoName := coalesce(body.Base.Repo.Name, repo)
+	htmlURL := coalesce(body.HTMLURL, fmt.Sprintf("https://github.com/%s/%s/pull/%d", repoOwner, repoName, body.Number))
+	title := coalesce(body.Title, fmt.Sprintf("%s/%s#%d", repoOwner, repoName, body.Number))
+	return publicGitHubPullRequest{
+		RepoOwner:       repoOwner,
+		RepoName:        repoName,
+		Number:          body.Number,
+		Title:           title,
+		State:           coalesce(body.State, "open"),
+		HTMLURL:         htmlURL,
+		Branch:          body.Head.Ref,
+		HeadSHA:         body.Head.SHA,
+		AuthorLogin:     body.User.Login,
+		AuthorAvatarURL: body.User.AvatarURL,
+		MergedAt:        body.MergedAt,
+		ClosedAt:        body.ClosedAt,
+		CreatedAt:       body.CreatedAt,
+		UpdatedAt:       body.UpdatedAt,
+		MergeableState:  body.MergeableState,
+		Additions:       body.Additions,
+		Deletions:       body.Deletions,
+		ChangedFiles:    body.ChangedFiles,
+		Draft:           body.Draft,
+		Merged:          body.Merged,
+	}, nil
 }
 
 // ── Webhook ─────────────────────────────────────────────────────────────────

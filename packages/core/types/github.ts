@@ -1,4 +1,5 @@
 export type GitHubPullRequestState = "open" | "closed" | "merged" | "draft";
+export type GitHubPullRequestSyncSource = "github_app" | "public";
 
 /** Aggregated CI status for a PR's current head SHA, computed server-side from
  * the latest check_suite per app. `null` when no completed suite has been seen
@@ -58,6 +59,9 @@ export interface GitHubPullRequest {
   additions?: number;
   deletions?: number;
   changed_files?: number;
+  /** Source of this PR row. `public` means the row was linked from a public
+   * GitHub PR URL without the repo's GitHub App installation. */
+  sync_source?: GitHubPullRequestSyncSource;
 }
 
 export interface ListGitHubInstallationsResponse {

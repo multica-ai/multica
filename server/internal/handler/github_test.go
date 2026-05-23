@@ -89,6 +89,27 @@ func TestDerivePRState(t *testing.T) {
 	}
 }
 
+func TestParseGitHubPullRequestURL(t *testing.T) {
+	owner, repo, number, err := parseGitHubPullRequestURL("https://github.com/multica-ai/multica/pull/3019")
+	if err != nil {
+		t.Fatalf("parseGitHubPullRequestURL: %v", err)
+	}
+	if owner != "multica-ai" || repo != "multica" || number != 3019 {
+		t.Fatalf("got %s/%s#%d, want multica-ai/multica#3019", owner, repo, number)
+	}
+
+	for _, raw := range []string{
+		"",
+		"https://gitlab.com/acme/widget/-/merge_requests/1",
+		"https://github.com/acme/widget/issues/1",
+		"https://github.com/acme/widget/pull/nope",
+	} {
+		if _, _, _, err := parseGitHubPullRequestURL(raw); err == nil {
+			t.Fatalf("parseGitHubPullRequestURL(%q) expected error", raw)
+		}
+	}
+}
+
 func TestVerifyWebhookSignature(t *testing.T) {
 	secret := "shared-secret"
 	body := []byte(`{"action":"opened"}`)
@@ -263,6 +284,110 @@ func TestWebhook_MergedPR_AdvancesLinkedIssueToDone(t *testing.T) {
 	}
 	if updated.Status != "done" {
 		t.Errorf("expected issue status 'done', got %q", updated.Status)
+	}
+}
+
+func TestLinkPullRequestForIssue_PublicGitHubPR(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/acme/widget/pulls/77" {
+			t.Fatalf("unexpected GitHub API path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"number":          77,
+			"html_url":        "https://github.com/acme/widget/pull/77",
+			"title":           "Public contribution",
+			"state":           "open",
+			"draft":           false,
+			"merged":          false,
+			"created_at":      "2026-05-01T00:00:00Z",
+			"updated_at":      "2026-05-02T00:00:00Z",
+			"mergeable_state": "clean",
+			"additions":       12,
+			"deletions":       3,
+			"changed_files":   2,
+			"head":            map[string]any{"ref": "contrib/pr", "sha": "abc123"},
+			"user":            map[string]any{"login": "octocat", "avatar_url": "https://example.test/avatar.png"},
+			"base": map[string]any{
+				"repo": map[string]any{
+					"name":  "widget",
+					"owner": map[string]any{"login": "acme"},
+				},
+			},
+		})
+	}))
+	oldAPIBaseURL, oldHTTPClient := githubAPIBaseURL, githubHTTPClient
+	githubAPIBaseURL, githubHTTPClient = api.URL, api.Client()
+	t.Cleanup(func() {
+		githubAPIBaseURL, githubHTTPClient = oldAPIBaseURL, oldHTTPClient
+		api.Close()
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "Manual public PR link",
+		"status": "in_progress",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM github_pull_request_check_suite WHERE pr_id IN (SELECT id FROM github_pull_request WHERE workspace_id = $1)`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	w = httptest.NewRecorder()
+	req = newRequest(http.MethodPost, "/api/issues/"+created.ID+"/pull-requests", map[string]any{
+		"url": "https://github.com/acme/widget/pull/77",
+	})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.LinkPullRequestForIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("LinkPullRequestForIssue: expected 201, got %d (%s)", w.Code, w.Body.String())
+	}
+	var resp struct {
+		PullRequest GitHubPullRequestResponse `json:"pull_request"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode link response: %v", err)
+	}
+	if resp.PullRequest.SyncSource != githubPullRequestSourcePublic {
+		t.Fatalf("sync_source = %q, want public", resp.PullRequest.SyncSource)
+	}
+	if resp.PullRequest.Title != "Public contribution" || resp.PullRequest.Additions != 12 || resp.PullRequest.ChangedFiles != 2 {
+		t.Fatalf("unexpected linked PR response: %+v", resp.PullRequest)
+	}
+
+	pr, err := testHandler.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
+		WorkspaceID: parseUUID(testWorkspaceID),
+		RepoOwner:   "acme",
+		RepoName:    "widget",
+		PrNumber:    77,
+	})
+	if err != nil {
+		t.Fatalf("GetGitHubPullRequest: %v", err)
+	}
+	if pr.InstallationID != 0 {
+		t.Fatalf("installation_id = %d, want 0 for public PR snapshot", pr.InstallationID)
+	}
+	linked, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(linked) != 1 {
+		t.Fatalf("expected one linked PR, got %d", len(linked))
 	}
 }
 
