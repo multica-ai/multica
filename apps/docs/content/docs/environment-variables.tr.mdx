@@ -1,0 +1,208 @@
+---
+title: Ortam değişkenleri
+description: Self-hosted Multica sunucusu çalıştırmak için kullanılan tüm ortam değişkenlerinin tam listesi.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Self-hosted Multica [server](/self-host-quickstart), yapılandırmasını başlangıçta ortam değişkenlerinden okur: veritabanı, oturum açma, e-posta, depolama ve kayıt izin listeleri burada tanımlanır. Bu sayfa tüm değişkenleri amaçlarına göre gruplar: her bölümde **boş bırakırsanız ne olacağı** ve **production ortamında hangilerini ayarlamanız gerektiği** açıklanır. Kimlik doğrulamayla ilgili değişkenleri nasıl yapılandıracağınız için [Oturum açma ve kayıt yapılandırması](/auth-setup) sayfasına bakın.
+
+## Çekirdek sunucu değişkenleri
+
+Dağıtımdan önce düşünmeniz gereken temel değişkenler bunlardır. Bazılarının sunucuyu başlatmaya yetecek varsayılanları vardır, ancak production ortamında zorunlu olanları açıkça ayarlamalısınız.
+
+| Variable | Default | Required in production? |
+|---|---|---|
+| `DATABASE_URL` | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` | **Evet** |
+| `PORT` | `8080` | Hayır (portu değiştirmiyorsanız) |
+| `JWT_SECRET` | `multica-dev-secret-change-in-production` | **Evet** (varsayılan güvenli değildir) |
+| `APP_ENV` | empty | **Evet** (`production` olmalı) |
+| `FRONTEND_ORIGIN` | empty | **Evet** (self-host kendi alan adını ayarlamalıdır) |
+| `MULTICA_DEV_VERIFICATION_CODE` | empty | Hayır (production ortamında boş kalmalıdır) |
+
+<Callout type="warning">
+**Production ortamında `MULTICA_DEV_VERIFICATION_CODE` değerini boş bırakın.** Sabit yerel test kodu varsayılan olarak devre dışıdır, ancak `MULTICA_DEV_VERIFICATION_CODE=888888` ile etkinleştirirseniz `APP_ENV` production değilken kod isteyebilen herkes bu sabit değerle oturum açabilir. `APP_ENV=production` olduğunda bu kısa yol yok sayılır.
+</Callout>
+
+### Veritabanı bağlantı havuzu
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_MAX_CONNS` | `25` | pgxpool maksimum bağlantı sayısı. Daemon sık yoklama yapar (her 3s) ve bağlantı kullanır; daha büyük dağıtımlar daha yüksek değer gerektirebilir |
+| `DATABASE_MIN_CONNS` | `5` | Minimum boş bağlantı sayısı |
+
+**Boş bırakıldığında** yukarıdaki değerler kullanılır; daha önce production ortamında havuz tükenmesine neden olan pgx'in yerleşik 4/NumCPU varsayılanları **kullanılmaz**.
+
+## E-posta yapılandırması
+
+Multica iki gönderim arka ucu destekler: bulut dağıtımları için [Resend](https://resend.com/) veya dahili / on-premise ağlar için SMTP relay. İkisi de ayarlıysa `SMTP_HOST`, `RESEND_API_KEY` değerine göre önceliklidir.
+
+### Resend
+
+| Variable | Default | Description |
+|---|---|---|
+| `RESEND_API_KEY` | empty | Resend API anahtarı |
+| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | Gönderen adresi (Resend hesabınızda doğrulanmış bir alan adı olmalıdır; SMTP kullanıldığında `From:` başlığı olarak da yeniden kullanılır) |
+
+### SMTP relay
+
+| Variable | Default | Description |
+|---|---|---|
+| `SMTP_HOST` | empty | SMTP relay host adı. Bunu ayarlamak SMTP modunu etkinleştirir ve Resend'i geçersiz kılar |
+| `SMTP_PORT` | `25` | SMTP portu. STARTTLS submission için `587` kullanın; **port 465 (SMTPS / implicit TLS) desteklenmez** |
+| `SMTP_USERNAME` | empty | SMTP kullanıcı adı. Kimlik doğrulamasız relay için boş bırakın |
+| `SMTP_PASSWORD` | empty | SMTP parolası |
+| `SMTP_TLS_INSECURE` | `false` | TLS sertifika doğrulamasını atlamak için `true` yapın (yalnızca private CA / self-signed) |
+
+Sunucu desteklediğini ilan ettiğinde STARTTLS otomatik olarak yükseltilir. Dial timeout 10s, tüm SMTP oturumunun son tarihi 30s değerindedir; bu yüzden kara deliğe düşen bir relay auth handler'ı askıda bırakamaz.
+
+**Hiçbiri ayarlı değilse davranış**: sunucu hata vermez, ancak gönderilmesi gereken her e-posta (doğrulama kodları, davet bağlantıları) **yalnızca sunucunun stdout çıktısına yazılır**. Yerel geliştirme için kullanışlıdır; kodu sunucu loglarından kopyalayın. **Production ortamında bunu ayarlamayı unutmak sessiz bir kara delik oluşturur**: kullanıcılar e-posta almaz ve hata görünmez.
+
+## Google OAuth yapılandırması
+
+İsteğe bağlıdır. Yalnızca e-posta + doğrulama kodu için boş bırakın; oturum açma sayfasına "Sign in with Google" eklemek için yapılandırın.
+
+| Variable | Default | Description |
+|---|---|---|
+| `GOOGLE_CLIENT_ID` | empty | Google Cloud OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | empty | Google Cloud OAuth secret |
+| `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` | OAuth callback URL (self-host: frontend alan adınızla değiştirin) |
+
+**Çalışma zamanında etkili olur**: frontend bu ayarları çalışma zamanında `/api/config` üzerinden okur; bu yüzden **değiştirmek için frontend'i yeniden build etmeniz veya yeniden dağıtmanız gerekmez**. Sunucuyu yeniden başlatın, ayarlar uygulanır.
+
+Google Cloud Console adımları dahil tam kurulum [Oturum açma ve kayıt yapılandırması](/auth-setup#google-oauth-configuration) sayfasındadır.
+
+## Dosya depolama yapılandırması
+
+Multica kullanıcıların yüklediği ekleri (yorumlarda görseller ve dosyalar) saklar. **S3 tercih edilir**; S3 yapılandırılmamışsa yerel diske düşer.
+
+### S3 / S3 uyumlu depolama
+
+| Variable | Default | Description |
+|---|---|---|
+| `S3_BUCKET` | empty | **Yalnızca bucket adı** (örneğin `my-bucket`). `.s3.<region>.amazonaws.com` son ekini eklemeyin; sunucu public host'u `S3_BUCKET` + `S3_REGION` üzerinden oluşturur. Bunu ayarlamak S3 depolamayı etkinleştirir |
+| `S3_REGION` | `us-west-2` | AWS region. Bucket'ın gerçek region değeriyle eşleşmelidir; hem SDK imzalama hem de public URL oluşturma için kullanılır |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | empty | Statik kimlik bilgileri. İkisi de boşsa AWS SDK varsayılan kimlik bilgisi zinciri kullanılır (IAM role / ortam kimlik bilgileri) |
+| `AWS_ENDPOINT_URL` | empty | Özel S3 uyumlu endpoint (örneğin [MinIO](https://min.io/)). Bunu ayarlamak path-style URL'lere geçer |
+
+**`S3_BUCKET` boşsa**: sunucu başlangıçta `"S3_BUCKET not set, cloud upload disabled"` loglar ve tüm yüklemeler yerel diske düşer.
+
+**Public URL'ler** şu öncelik sırasıyla oluşturulur:
+
+1. `CLOUDFRONT_DOMAIN` ayarlıysa `https://<CLOUDFRONT_DOMAIN>/<key>`.
+2. `AWS_ENDPOINT_URL` ayarlıysa `<AWS_ENDPOINT_URL>/<S3_BUCKET>/<key>` (path-style).
+3. `https://<S3_BUCKET>.s3.<S3_REGION>.amazonaws.com/<key>` (virtual-hosted-style). `S3_BUCKET` nokta içeriyorsa AWS tarafından verilen wildcard TLS sertifikası noktalı bucket host'larını doğrulamadığı için sunucu `https://s3.<S3_REGION>.amazonaws.com/<S3_BUCKET>/<key>` (path-style) adresine düşer.
+
+### Yerel disk (S3 yapılandırılmadığında)
+
+| Variable | Default | Description |
+|---|---|---|
+| `LOCAL_UPLOAD_DIR` | `./data/uploads` | Yerel depolama dizini |
+| `LOCAL_UPLOAD_BASE_URL` | empty (returns relative paths) | Public base URL; boş bırakırsanız frontend ekler için tam URL çözemeyebilir |
+
+### CloudFront (isteğe bağlı)
+
+S3'ün önüne CloudFront koyarsanız üç değişken geçerlidir: `CLOUDFRONT_DOMAIN`, `CLOUDFRONT_KEY_PAIR_ID`, `CLOUDFRONT_PRIVATE_KEY` (veya Secrets Manager'dan okumak için `CLOUDFRONT_PRIVATE_KEY_SECRET`). CloudFront kullanmıyorsanız bunları atlayın; S3 yapılandırmasıyla çakışmazlar.
+
+### Cookie domain
+
+| Variable | Default | Description |
+|---|---|---|
+| `COOKIE_DOMAIN` | empty | Oturum cookie'sinin kapsamı |
+
+- **Boş**: cookie yalnızca ziyaret edilen tam host üzerinde geçerlidir (tek host dağıtımları için doğru)
+- **`.example.com` olarak ayarlı**: cookie alt alan adları arasında paylaşılır (böylece `app.example.com` ve `api.example.com` aynı oturum açma oturumunu paylaşır)
+- Uyarı: IP adresi olamaz (tarayıcılar yok sayar)
+
+## Kimlerin kayıt olabileceğini kısıtlama
+
+Üç izin listesi katmanı önceliğe göre birleşir. **Herhangi bir katman boş olmayan bir değere ayarlıysa eşleşmeyen e-postalar reddedilir**; `ALLOW_SIGNUP=true` bile bunu geçersiz kılmaz.
+
+| Variable | Default | Description |
+|---|---|---|
+| `ALLOWED_EMAILS` | empty | Açık e-posta izin listesi (virgülle ayrılmış). Boş değilse yalnızca listelenen e-postalar kayıt olabilir |
+| `ALLOWED_EMAIL_DOMAINS` | empty | Alan adı izin listesi (virgülle ayrılmış). Boş değilse yalnızca listelenen alan adları kayıt olabilir |
+| `ALLOW_SIGNUP` | `true` | Kayıt ana anahtarı. Kaydı tamamen kapatmak için `false` yapın |
+
+**Sezgisel olmayan kısım**: `ALLOWED_EMAIL_DOMAINS=company.io` + `ALLOW_SIGNUP=true`, "company.io veya herkese izin ver" anlamına gelmez; **yalnızca company.io'ya izin ver** anlamına gelir. İzin listesi katmanları AND semantiğindedir; tam karar ağacı [Oturum açma ve kayıt yapılandırması → Kayıt izin listeleri](/auth-setup#restricting-who-can-sign-up) bölümündedir.
+
+**Davet akışları kayıt izin listesini kendileri kontrol etmez**, ancak davetlinin daveti kabul etmeden önce yine de **oturum açabilmesi** gerekir. Zaten bir Multica hesabı varsa (örneğin başka bir çalışma alanından), izin listesinden etkilenmeden doğrudan kabul edebilir. **Hiç kayıt olmadıysa**, oturum açmanın ilk adımı (doğrulama kodu istemek) yine izin listesi kontrolünden geçer; `ALLOW_SIGNUP=false` ya da `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS` tarafından reddedilen bir e-posta **kaydı tamamlayamaz ve bu yüzden daveti kabul edemez**.
+
+## Rate limiting (isteğe bağlı Redis)
+
+Public auth endpoint'leri `/auth/send-code`, `/auth/verify-code`, `/auth/google` önlerinde IP başına fixed-window rate limiting ile korunur. Limiter Redis tarafından desteklenir. `REDIS_URL` boşsa middleware **no-op** olur (fail-open) ve backend başlangıçta `rate limiting disabled: REDIS_URL not configured` loglar.
+
+| Variable | Default | Description |
+|---|---|---|
+| `REDIS_URL` | empty | Redis bağlantı URL'si (örneğin `redis://localhost:6379/0`). Boşsa auth endpoint'lerinde rate limiting devre dışı kalır. Aynı Redis realtime hub fan-out, PAT cache ve daemon-token cache için de kullanılır; boşsa hepsi in-memory / direct-DB moduna düşer |
+| `RATE_LIMIT_AUTH` | `5` | `/auth/send-code` ve `/auth/google` için IP başına dakikada maksimum istek |
+| `RATE_LIMIT_AUTH_VERIFY` | `20` | `/auth/verify-code` için IP başına dakikada maksimum istek |
+| `RATE_LIMIT_TRUSTED_PROXIES` | empty | Limiter'ın `X-Forwarded-For` header'ına güvenmesine izin verilen CIDR'ler (virgülle ayrılmış). Boş (varsayılan) **XFF'e asla güvenme** anlamına gelir; limiter yalnızca doğrudan bağlantının `RemoteAddr` değerini kullanır |
+
+İstek limitin üzerindeyse sunucu `429 Too Many Requests`, `Retry-After: 60` ve `{"error":"too many requests"}` gövdesiyle yanıt verir.
+
+<Callout type="warning">
+**Reverse proxy arkasında `RATE_LIMIT_TRUSTED_PROXIES` ayarlamalısınız.** Aksi halde backend açısından tüm gerçek kullanıcılar proxy IP'sini paylaşır, tüm dağıtım tek bucket'a düşer ve `/auth/send-code` tüm site için 5 req/min olur. Tipik değerler: aynı host Caddy / Nginx için `127.0.0.1/32,::1/128`; Cloudflare / ALB / CloudFront için CDN'in yayımladığı aralıklar. Yalnızca `RemoteAddr` değeri bu CIDR'lerden birinin içine düşen IP'ler istemciyi tanımlamak için `X-Forwarded-For` kullanabilir.
+</Callout>
+
+Bu ayrı `RATE_LIMIT_TRUSTED_PROXIES`, autopilot-webhook limiter'ı (`/api/webhooks/autopilots/{token}`) kontrol eden `MULTICA_TRUSTED_PROXIES` ile **aynı değildir**. Her limiter kendi listesini parse eder; bu yüzden proxy arkasındaki bir dağıtım ikisini de ayarlamalıdır.
+
+## Daemon ayar parametreleri
+
+Daemon kullanıcının yerel makinesinde çalışır ve yapılandırmasını yerel ortam değişkenlerinden okur. Yaygın olanlar:
+
+| Variable | Default | Description |
+|---|---|---|
+| `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | Sunucu adresi (self-host: alan adınızla değiştirin) |
+| `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat aralığı |
+| `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | Görev yoklama aralığı |
+| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Maksimum eşzamanlı görev sayısı |
+| `MULTICA_<PROVIDER>_PATH` | matches the CLI name | Her AI coding tool'un executable yolu (örneğin `MULTICA_CLAUDE_PATH`) |
+| `MULTICA_<PROVIDER>_MODEL` | empty | Her AI coding tool için varsayılan model |
+
+Her parametrenin daemon davranışını nasıl etkilediğinin tam açıklaması için [Daemon ve çalışma ortamları](/daemon-runtimes) sayfasına bakın.
+
+## Frontend erişim kontrolü
+
+| Variable | Default | Description |
+|---|---|---|
+| `FRONTEND_ORIGIN` | empty | Frontend adresi. Davet e-posta bağlantıları, CORS izin listesi ve cookie domain bunun üzerinden türetilir. Boşsa davet e-posta bağlantıları hosted domain `https://app.multica.ai` değerine düşer; self-host bunu açıkça ayarlamalıdır |
+| `CORS_ALLOWED_ORIGINS` | empty | Ek izin verilen CORS origin'leri (virgülle ayrılmış) |
+| `ALLOWED_ORIGINS` | empty | WebSocket'e özel origin izin listesi (virgülle ayrılmış); boşsa fallback sırası `CORS_ALLOWED_ORIGINS` → `FRONTEND_ORIGIN` → `localhost:3000/5173/5174` |
+
+<Callout type="warning">
+**`FRONTEND_ORIGIN` değerini boş bırakmak iki sessiz arıza oluşturur**: (1) davet e-posta bağlantıları `https://app.multica.ai` adresini (hosted domain) gösterir ve tıklanınca kullanıcıları self-hosted instance'ınıza geri getirmez; (2) WebSocket Origin kontrolleri `localhost:3000 / 5173 / 5174` değerlerine düşer, bu yüzden production dağıtımındaki her WebSocket bağlantısı reddedilir ve frontend "real-time güncellemeleri kaybediyor" gibi görünür.
+</Callout>
+
+## GitHub entegrasyonu
+
+[GitHub PR ↔ issue entegrasyonu](/github-integration) iki değişkene ihtiyaç duyar. Settings içinde Connect GitHub'ı etkinleştirmek ve gelen webhook'ları kabul etmek için ikisini de ayarlayın.
+
+| Variable | Default | Description |
+|---|---|---|
+| `GITHUB_APP_SLUG` | empty | GitHub App'inizin slug değeri (`https://github.com/apps/<slug>` adresinin son kısmı). Settings → GitHub kurulum butonu URL'sini belirler |
+| `GITHUB_WEBHOOK_SECRET` | empty | GitHub App üzerinde ayarladığınız Webhook secret. Her `pull_request` / `installation` delivery için HMAC-SHA256 doğrulamasında ve setup-callback state token için HMAC anahtarı olarak kullanılır |
+
+**Biri boşsa davranış:**
+
+- Settings → GitHub içindeki `Connect GitHub` **devre dışı** olur ve admin'lere "not configured" ipucu gösterir.
+- `/api/webhooks/github` endpoint'i **`503 github webhooks not configured`** döner; Multica secret yokken her imzayı geçerli saymak yerine event'leri işlemeyi reddeder.
+
+**Not:** `GITHUB_WEBHOOK_SECRET`, install-flow state token için imzalama anahtarı olarak yeniden kullanılır; böylece operatörlerin yalnızca bir secret yönetmesi gerekir. GitHub App'in *Client* secret'ı **değildir**; Client secret'lar OAuth ile ilgilidir ve bu entegrasyonda kullanılmaz. Tam akış için [GitHub entegrasyonu → Self-host kurulumu](/github-integration#self-host-setup) sayfasına bakın.
+
+## Kullanım analitiği
+
+Varsayılan olarak sunucu Multica'nın resmi PostHog instance'ına raporlar. Çıkmak için `ANALYTICS_DISABLED=true` ayarlayın.
+
+| Variable | Default | Description |
+|---|---|---|
+| `ANALYTICS_DISABLED` | `false` | Backend analitiğini tamamen devre dışı bırakmak için `true` yapın |
+| `POSTHOG_API_KEY` | built-in default key | Kendi PostHog instance'ınızı hedeflerken ayarlayın |
+| `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog'u self-host ediyorsanız kendi host'unuzla değiştirin |
+
+## Sonraki
+
+- [Oturum açma ve kayıt yapılandırması](/auth-setup) — yukarıdaki auth değişkenlerini gerçekten nasıl yapılandıracağınız ve tuzakların nerede olduğu
+- [GitHub entegrasyonu](/github-integration) — `GITHUB_APP_SLUG` / `GITHUB_WEBHOOK_SECRET` arkasındaki GitHub App'i nasıl kuracağınız
+- [Sorun giderme](/troubleshooting) — yaygın hatalı yapılandırmaların belirtileri ve çözümleri
+- [Daemon ve çalışma ortamları](/daemon-runtimes) — `MULTICA_DAEMON_*` parametrelerinin gerçekte ne yaptığı

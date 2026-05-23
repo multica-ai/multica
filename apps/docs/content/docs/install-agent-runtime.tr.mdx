@@ -1,0 +1,169 @@
+---
+title: Ajan çalışma ortamı kurma
+description: Multica, makinenizde hangi AI coding tools varsa onları çalıştırır. Bu sayfa, daemon'ın algılayabilmesi için desteklenen 11 aracın her birini nasıl kuracağınızı gösterir.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica'da bir **çalışma ortamı**, makinenizdeki daemon ile daemon'ın `PATH` üzerinde bulduğu bir AI coding tool'un eşleşmesidir. Onboarding'deki "Connect a runtime" adımı **No supported tools detected** gösteriyorsa, daemon `PATH` taraması yapmış ve çalıştırmayı bildiği 11 araçtan hiçbirini bulamamış demektir. Aşağıdaki araçlardan birini (veya birkaçını) kurun, sonra adıma dönüp yeniden tarayın — çalışma ortamı birkaç saniye içinde görünür.
+
+Bu sayfa şunların kurulum tarafındaki tamamlayıcısıdır:
+
+- [Daemon ve çalışma ortamları](/daemon-runtimes) — algılamanın nasıl çalıştığı
+- [AI coding tools matrix](/providers) — her aracın ne yapıp yapamadığı (session resumption, MCP, model selection)
+
+<Callout type="info">
+Multica server API key'lerinizi veya araçların kendisini asla görmez. Aşağıdaki her şey — kurulum, authentication, model erişimi — yerel makinenizde yaşar. Bir şey başarısız olursa neredeyse her zaman yerel bir problemdir.
+</Callout>
+
+## Başlamadan önce
+
+Aşağıdaki **her** araç için iki ön koşul geçerlidir:
+
+1. **Multica daemon çalışıyor olmalıdır.** [Multica CLI](/cli) kurduktan sonra `multica daemon start` çalıştırın veya daemon'ı otomatik başlatan [Multica desktop app](/desktop-app) kullanın. Çalışan bir daemon olmadan araçları algılayacak hiçbir şey yoktur.
+2. **Aracın binary'si `PATH` üzerinden erişilebilir olmalıdır.** Daemon her aracı adıyla shell out eder (her bölümdeki **Daemon looks for** sütununa bakın). Terminalinizde `which <name>` bulamıyorsa daemon da bulamaz. Kurulumdan sonra yeni `PATH` girdisinin alınması için yeni bir terminal açın (veya daemon'ı yeniden başlatın).
+
+Bir araç kurduktan sonra daemon'ı yeniden başlatın:
+
+```bash
+multica daemon restart
+```
+
+Veya desktop app içinde uygulamayı yeniden açın. Daemon her başlangıçta `PATH` değerini yeniden tarar.
+
+## Desteklenen 11 araç
+
+Kabaca en yaygından en aza doğru listelenmiştir. Zaten kimlik bilgileriniz olanları seçin — 11'inin hepsine ihtiyacınız yok.
+
+### Claude Code (Anthropic)
+
+En eksiksiz entegrasyon. Session resumption çalışır, MCP çalışır ve ajanlardaki `mcp_config` alanını **gerçekten kullanan 11 araçtan tekidir** (bkz. [matrix](/providers#mcp-configuration-only-claude-code-actually-reads-it)).
+
+| | |
+|---|---|
+| Daemon looks for | `claude` |
+| Install | Resmi rehberi [claude.com/claude-code](https://www.claude.com/claude-code) adresinden izleyin. Standart yol npm paketi `@anthropic-ai/claude-code` kullanmaktır (Node.js 18+ gerekir). |
+| Authentication | `claude` komutunu bir kez çalıştırıp CLI içi login akışını izleyin veya `ANTHROPIC_API_KEY` ayarlayın. |
+| Notes | Yeni kullanıcılar için ilk tercih önerisi. |
+
+### Codex (OpenAI)
+
+Daha ince taneli approval gates ile JSON-RPC 2.0 transport. **Session resumption kodu var ama şu anda erişilemez** — resume gerekiyorsa Claude Code veya ACP ailesinden birini seçin.
+
+| | |
+|---|---|
+| Daemon looks for | `codex` |
+| Install | Resmi rehberi [github.com/openai/codex](https://github.com/openai/codex) adresinden izleyin. Standart yol npm paketi `@openai/codex` kullanmaktır. |
+| Authentication | `codex login` (browser-based) veya `OPENAI_API_KEY`. |
+
+### Cursor (Anysphere)
+
+Cursor editörünün CLI karşılığı. **Session resumption bozuk** — Cursor'ın CLI'ı session id döndürmez, bu yüzden resume sırasında verdiğiniz değer her zaman geçersizdir.
+
+| | |
+|---|---|
+| Daemon looks for | `cursor-agent` |
+| Install | [Cursor editor](https://cursor.com/) kurun ve ardından [docs.cursor.com](https://docs.cursor.com/) üzerindeki dokümanlarına göre CLI'ı kurun. Binary adı `cursor` değil, `cursor-agent` değeridir. |
+| Authentication | Cursor editörü üzerinden giriş yapın; CLI aynı session'ı yeniden kullanır. |
+
+### GitHub Copilot
+
+Model routing, GitHub hesap hakkınız üzerinden geçer — araç modeli kendisi seçmez; hangi modeli alacağınıza GitHub karar verir.
+
+| | |
+|---|---|
+| Daemon looks for | `copilot` |
+| Install | GitHub'ın CLI dokümanlarına [github.com/github/copilot-cli](https://github.com/github/copilot-cli) adresinden bakın. |
+| Authentication | CLI üzerinden browser-based GitHub login. |
+| Notes | Giriş yapılan hesapta aktif GitHub Copilot aboneliği gerektirir. |
+
+### Gemini (Google)
+
+Gemini 2.5 ve 3 serisini destekler. Session resumption yok, MCP yok — tek seferlik görevler için uygundur.
+
+| | |
+|---|---|
+| Daemon looks for | `gemini` |
+| Install | Resmi rehberi [github.com/google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli) adresinden izleyin. Standart yol npm paketi `@google/gemini-cli` kullanmaktır. |
+| Authentication | `gemini` Google hesabıyla login isteyecektir veya `GEMINI_API_KEY` ayarlayın. |
+
+### OpenCode (SST)
+
+Open-source CLI agent. Kullanılabilir modelleri kendi config dosyasından dinamik olarak keşfeder — kendi model kataloglarını getirmek isteyen kullanıcılar için uygundur.
+
+| | |
+|---|---|
+| Daemon looks for | `opencode` |
+| Install | Resmi rehberi [opencode.ai](https://opencode.ai/) adresinden veya GitHub repo'sunu [github.com/sst/opencode](https://github.com/sst/opencode) adresinden izleyin. Tipik yol install script veya npm paketidir. |
+| Authentication | Model provider'larınızı OpenCode dokümanlarına göre yapılandırın (Anthropic, OpenAI vb.). |
+
+### Kiro CLI (Amazon)
+
+ACP-over-stdio transport. Session resumption ACP `session/load` üzerinden çalışır; skills `.kiro/skills/` içine kopyalanır.
+
+| | |
+|---|---|
+| Daemon looks for | `kiro-cli` |
+| Install | [kiro.dev](https://kiro.dev/) adresindeki Kiro dokümanlarına bakın. Binary adı `kiro` değil, `kiro-cli` değeridir. |
+| Authentication | AWS-account-based; Kiro'nun kendi onboarding akışını izleyin. |
+
+### Kimi (Moonshot)
+
+ACP-protocol agent, ağırlıklı olarak Çin pazarı hedeflidir. Skills `.kimi/skills/` altında yaşar (native discovery).
+
+| | |
+|---|---|
+| Daemon looks for | `kimi` |
+| Install | Resmi rehberi [github.com/MoonshotAI/kimi-cli](https://github.com/MoonshotAI/kimi-cli) adresinden izleyin. |
+| Authentication | Moonshot API key, vendor dokümanlarına göre yapılandırılır. |
+
+### Hermes (Nous Research)
+
+ACP-protocol agent (transport'u Kimi ile paylaşır). Session resumption çalışır. Skill injection path generic `.agent_context/skills/` yoluna fallback yapar — güvenmeden önce skill'lerinizin yüklendiğini doğrulayın.
+
+| | |
+|---|---|
+| Daemon looks for | `hermes` |
+| Install | En güncel CLI dağıtımı için Nous Research repository'sine [github.com/NousResearch](https://github.com/NousResearch) adresinden bakın. |
+| Authentication | Vendor dokümanlarına göre. |
+
+### OpenClaw
+
+Open-source CLI agent orchestrator. **Model ajan katmanında bağlıdır** (`openclaw agents add --model`) — görev başına override edilemez ve Multica'dan `--model` veya `--system-prompt` geçiremezsiniz.
+
+| | |
+|---|---|
+| Daemon looks for | `openclaw` |
+| Install | Projeye [github.com/openclaw-org/openclaw](https://github.com/openclaw-org/openclaw) adresinden bakın (community-maintained). |
+| Authentication | Alttaki model provider'ı OpenClaw dokümanlarına göre yapılandırın. |
+
+### Pi (Inflection AI)
+
+Minimalist. **Session resumption alışılmadık** — resume id string id değil, diskteki bir session dosyasının yoludur.
+
+| | |
+|---|---|
+| Daemon looks for | `pi` |
+| Install | Inflection'ın CLI dokümanlarına [pi.ai](https://pi.ai/) adresinden bakın. |
+| Authentication | Vendor dokümanlarına göre. |
+
+## Kurulumdan sonra
+
+1. **Binary'nin `PATH` üzerinde olduğunu doğrulayın.** Yeni bir terminal açıp `which <name>` çalıştırın (örneğin `which claude`, `which cursor-agent`, `which kiro-cli`). Bir path yazdırırsa daemon bulur. Hiçbir şey yazdırmazsa önce shell `PATH` değerini düzeltin (tipik sebep yeniden yüklenmemiş per-shell rc dosyasıdır).
+2. **Daemon'ı yeniden başlatın.** `multica daemon restart` veya desktop app'i yeniden açın. Daemon `PATH` değerini yalnızca başlangıçta tarar.
+3. **Runtimes sayfasını kontrol edin.** Multica UI'da **Runtimes** sayfası artık `(workspace × tool)` kombinasyonu başına bir satır listelemelidir. Satır "offline" diyorsa bkz. [Daemon ve çalışma ortamları → Bir runtime ne zaman offline işaretlenir](/daemon-runtimes#when-a-runtime-is-marked-offline).
+4. **Onboarding'e geri dönün.** "Connect a runtime" adımı poll eder ve yeni çalışma ortamını birkaç saniye içinde alır — refresh gerekmez.
+
+## Troubleshooting
+
+- **`which` binary'yi buluyor ama daemon bulmuyor.** Daemon daha eski bir `PATH` ile başlatılmıştır. Yeniden başlatın.
+- **Binary var ama launch başarısız.** Terminalden aracın kendi `--version` veya `--help` komutunu bir kez çalıştırın — buradaki çoğu hata eksik auth, süresi dolmuş token veya Node.js / runtime uyumsuzluğudur.
+- **Runtimes sayfası satırı gösteriyor ama görevler hemen fail ediyor.** Bir görevi tetiklerken `multica daemon logs -f` kontrol edin. Daemon aracın kendi error output'unu gösterir.
+
+Daha geniş semptomlar için [Troubleshooting guide](/troubleshooting) sayfasına bakın.
+
+## Sırada
+
+- [Daemon ve çalışma ortamları](/daemon-runtimes) — algılama, heartbeat'ler ve offline handling nasıl çalışır
+- [AI coding tools matrix](/providers) — bir araç bağlandıktan sonraki yetenek farkları
+- [Ajan oluşturma ve yapılandırma](/agents-create) — ajanınız için bir araç seçin ve görev çalıştırmaya başlayın

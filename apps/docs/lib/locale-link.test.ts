@@ -4,6 +4,7 @@ import { prefixLocale } from "./locale-link";
 describe("prefixLocale", () => {
   it("prefixes root-relative paths with the active non-default locale", () => {
     expect(prefixLocale("/workspaces", "zh")).toBe("/zh/workspaces");
+    expect(prefixLocale("/workspaces", "tr")).toBe("/tr/workspaces");
     expect(prefixLocale("/agents-create", "zh")).toBe("/zh/agents-create");
   });
 
@@ -18,6 +19,7 @@ describe("prefixLocale", () => {
 
   it("rewrites the bare root path to the locale root", () => {
     expect(prefixLocale("/", "zh")).toBe("/zh");
+    expect(prefixLocale("/", "tr")).toBe("/tr");
   });
 
   it("leaves the default language untouched (URLs are prefix-less)", () => {
@@ -27,6 +29,7 @@ describe("prefixLocale", () => {
 
   it("does not double-prefix paths that already carry a known locale", () => {
     expect(prefixLocale("/zh/workspaces", "zh")).toBe("/zh/workspaces");
+    expect(prefixLocale("/tr/workspaces", "zh")).toBe("/tr/workspaces");
     expect(prefixLocale("/en/workspaces", "zh")).toBe("/en/workspaces");
   });
 

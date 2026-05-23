@@ -1,0 +1,56 @@
+---
+title: Çalışma alanları
+description: Çalışma alanı, bir grubun birlikte çalıştığı bağımsız alandır — her issue, üye, yorum ve ajan bir çalışma alanına aittir.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Çalışma alanı, **bir grubun Multica'da birlikte çalıştığı bağımsız alandır** — her [issue](/issues), [üye](/members-roles), [yorum](/comments) ve [ajan](/agents) bir çalışma alanına aittir. Giriş yaptıktan sonra gördüğünüz issue listesi, üye listesi ve ajan yapılandırması mevcut çalışma alanıyla sınırlıdır; **çalışma alanı değiştirmek tüm görünümü değiştirir**.
+
+## Çalışma alanı oluşturma
+
+Bir çalışma alanı oluşturduğunuzda üç şey belirlenir:
+
+- **Workspace name** — üyelerin gördüğü görüntü adı. Boşluklara ve ASCII dışı karakterlere izin verilir. Daha sonra değiştirebilirsiniz.
+- **Slug** — çalışma alanı URL'sinde kullanılan string. Yalnızca küçük harf ve rakam (aralarına `-` konularak). **Oluşturulduktan sonra değiştirilemez**, bu yüzden dikkatli seçin. Slug alınmışsa veya sistem tarafından ayrılmış bir kelimeyle çakışıyorsa oluşturma ekranı başka bir tane seçmenizi ister.
+- **Issue prefix** — çalışma alanındaki her issue numarasının prefix'i (`MUL-123` içindeki `MUL`). Büyük harfler ve rakamlar, en fazla 10 karakter.
+
+<Callout type="warning">
+**Issue prefix'ini değiştirmekten kaçının.** Issue numaraları mevcut prefix ile gösterilir — değiştirirseniz `MUL-5` anında `NEW-5` olur. Eski numaraya bakan her dış bağlantı, Slack mention'ı ve yorumlardaki geçmiş referans kırılır. Issue prefix'ini "oluştururken ayarla, sonra dokunma" olarak kabul edin.
+</Callout>
+
+Web UI'dan veya komut satırından çalışma alanı oluşturabilirsiniz:
+
+```bash
+multica workspace create
+```
+
+## Issue numaraları
+
+Bir çalışma alanında oluşturulan her issue'ya otomatik olarak `<prefix>-<digits>` formatında bir numara atanır — `MUL-1`, `MUL-2`, `MUL-3`. Birkaç özellik:
+
+- **Çalışma alanı içinde sıralı ve benzersiz** — her çalışma alanı kendi sayacını tutar; çalışma alanları birbirini etkilemez.
+- **Elle atanamaz** — issue oluştururken yalnızca başlık girersiniz; numara sistem tarafından atanır.
+- **Silinince geri alınmaz** — `MUL-5` silinirse sonraki yeni issue `MUL-5` değil `MUL-6` olur.
+
+## Çalışma alanı silme
+
+Tüm çalışma alanını yalnızca çalışma alanı sahibi silebilir. Silme işlemi **geri alınamaz**.
+
+<Callout type="warning">
+Bir çalışma alanını silmek aşağıdakilerin tamamını tek seferde siler:
+
+- Her issue, proje, yorum ve tepki
+- Her ek
+- Her üyelik ve bekleyen davet
+- Görev geçmişiyle birlikte her ajan yapılandırması
+
+**Veriler kurtarılamaz.** Silmeden önce saklamanız gereken her şeyi dışa aktarın.
+</Callout>
+
+Bir çalışma alanının son sahibiyseniz ve ayrılmak istiyorsanız önce owner rolünü başka bir üyeye devredin, sonra yeni sahibin (veya sizin) silip silmemeye karar vermesini sağlayın. Bkz. [Members and roles](/members-roles).
+
+## Sonraki
+
+- [Members and roles](/members-roles) — çalışma alanına insan ekleme ve üç rolün neler yapabildiği
+- [Issues and projects](/issues) — çalışma alanı içindeki temel iş nesneleri

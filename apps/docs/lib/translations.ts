@@ -2,7 +2,7 @@ import type { Translations } from "fumadocs-ui/i18n";
 import type { Lang } from "./i18n";
 
 // Fumadocs built-in UI strings (search, TOC, last-updated, etc.) per locale.
-// English uses Fumadocs defaults so we only override Chinese.
+// English uses Fumadocs defaults so we only override translated locales.
 export const uiTranslations: Partial<Record<Lang, Partial<Translations>>> = {
   zh: {
     search: "搜索",
@@ -16,12 +16,25 @@ export const uiTranslations: Partial<Record<Lang, Partial<Translations>>> = {
     chooseTheme: "切换主题",
     editOnGithub: "在 GitHub 上编辑",
   },
+  tr: {
+    search: "Ara",
+    searchNoResult: "Sonuç bulunamadı",
+    toc: "Bu sayfada",
+    tocNoHeadings: "Başlık yok",
+    lastUpdate: "Son güncelleme",
+    chooseLanguage: "Dil seç",
+    nextPage: "Sonraki sayfa",
+    previousPage: "Önceki sayfa",
+    chooseTheme: "Tema seç",
+    editOnGithub: "GitHub'da düzenle",
+  },
 };
 
 // Display name shown in the LanguageToggle dropdown.
 export const localeLabels: Record<Lang, string> = {
   en: "English",
   zh: "简体中文",
+  tr: "Türkçe",
 };
 
 // Copy for the welcome page (Hero + Byline). Pages are translated as MDX;
@@ -38,5 +51,11 @@ export const homeCopy = {
     titleLead: "人与智能体，",
     titleAccent: "共处一方。",
     byline: ["开始使用", "2026 年 4 月更新", "阅读约 6 分钟"],
+  },
+  tr: {
+    eyebrow: "Multica Dokümanları",
+    titleLead: "İnsanlar ve ajanlar,",
+    titleAccent: "tek yerde.",
+    byline: ["Başlangıç", "Mayıs 2026'da güncellendi", "6 dk okuma"],
   },
 } as const satisfies Record<Lang, unknown>;

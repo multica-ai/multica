@@ -1,0 +1,65 @@
+---
+title: Gelen kutusu ve abonelikler
+description: Multica'nın sizi ne zaman bilgilendirdiği ve ilgilenmediğiniz issue'ları nasıl sessize alacağınız.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Gelen kutusu, Multica'nın sizi **böldüğü** yerdir: size atanmış [issue'lar](/issues), [`@` mention'lar](/comments) ve abone olduğunuz issue'lardaki etkinlikler buraya düşer.
+
+Hangi issue etkinliğinin size ulaşacağını **abone olarak** ve **abonelikten çıkarak** kontrol edersiniz.
+
+## Gelen kutunuzda ne görünür
+
+Aşağıdaki olaylar gelen kutunuza bildirim gönderir:
+
+- **Issue assigned / unassigned / reassigned** — yeni (veya eski) atanan siz olduğunuzda bildirim alırsınız
+- **Abone olduğunuz bir issue'da durum, öncelik veya due date değişikliği**
+- **Abone olduğunuz bir issue'da yeni yorum**
+- **Bir yorumda size `@`-mention yapılması** — abone olup olmadığınızdan bağımsız olarak iletilir
+- **Birinin issue'nuza veya yorumunuza reaction vermesi**
+- **Atadığınız bir ajan [task](/tasks)'ının başarısız olması**
+
+## `@all` tüm çalışma alanını bilgilendirir
+
+`@all` özel bir hedeftir; çalışma alanının **her üyesine** bildirim gönderir.
+
+<Callout type="warning">
+**`@all`'ı ölçülü kullanın.** 50 kişilik bir çalışma alanında tek bir `@all` yorumu anında 50 gelen kutusu bildirimi üretir. Bunu yüksek öncelikli olaylara ayırın (production incident'ları, milestone duyuruları); günlük tartışmalar için değil.
+</Callout>
+
+## Ajanlar asla bildirim almaz
+
+Ajanlar **asla** gelen kutusu bildirimi almaz; atanan, oluşturan veya bir yorumda `@`-mention edilen taraf olsalar bile.
+
+Bu bir bug değildir: ajanlar gelen kutusu okumaz. [**Anında tetikleme**](/assigning-issues) ile çalışırlar; bir issue atamak veya yorumda ajana `@`-mention yapmak onun için hemen bir görev başlatır. Gelen kutusu insanlar için hatırlatma mekanizmasıdır; ajanlar için anlamı yoktur.
+
+## Abonelik kuralları
+
+Dört durumda bir issue'ya **otomatik abone** olursunuz:
+
+- Onu **siz oluşturdunuz**
+- Size **atandı**
+- Ona **yorum yaptınız**
+- O issue'da veya yorumlarından birinde size **`@`-mention** yapıldı
+
+Otomatik abonelik bir kez olur; hem oluşturan hem mention edilen olmak sizi iki kez abone etmez.
+
+<Callout type="warning">
+**Yeniden atama sizi otomatik abonelikten çıkarmaz.** Eskiden atanan sizdiniz ve yerinize başkası geldiyse, o issue'da **hâlâ güncelleme alırsınız**; otomatik abonelik veritabanında kalır.
+
+Bildirim almayı durdurmak için issue'yu açıp abonelikten elle çıkın.
+</Callout>
+
+Herhangi bir issue'ya (ilişkisiz olanlara bile) **elle abone** olabilir veya herhangi bir otomatik abonelikten **elle çıkabilirsiniz**. UI'da issue sayfasındaki sağ paneli kullanın; CLI'da `multica issue subscriber add/remove` kullanın.
+
+## Alt issue durum değişiklikleri üst issue'ya yayılır
+
+Bir alt issue'nun **durumu** değiştiğinde üst issue'nun aboneleri de bilgilendirilir; alt issue'ya abone olmasalar bile.
+
+Bu yalnızca **durum** için geçerlidir: alt issue'lardaki yorum, öncelik ve due date değişiklikleri **yayılmaz**.
+
+## Sonraki
+
+- [Yorumlar ve mention'lar](/comments) — `@` mention'ların nasıl çalıştığı ve dikkat edilmesi gerekenler
+- [Issue'ları ajanlara atama](/assigning-issues) — ajanların nasıl tetiklendiği (ve neden gelen kutusu okumadıkları)

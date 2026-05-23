@@ -1,0 +1,136 @@
+---
+title: Ekipler
+description: "Bir ekip, belirlenmiş bir lider ajan tarafından yönetilen ajanlar (ve isteğe bağlı insan üyeler) grubudur. Bir issue'yu ekibe atayın; lider kimin alacağına karar verir."
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Bir ekip, belirlenmiş bir **lider ajanı** olan **adlandırılmış bir [ajan](/agents) ve insan [üye](/members-roles) grubudur**. Ekibin kendisi birinci sınıf assignee'dir: herhangi bir **Assignee** seçicisinden seçin; lider tetikleyiciyi alır, issue'yu okur ve işi yapmaya en uygun ekip üyesinden `@` ile bahseder. Ekipler uzmanları bir kez bir araya getirmenizi ve onları **ada göre değil konuya göre** dispatch etmenizi sağlar — takım büyür, routing aynı kalır.
+
+## Mekanik olarak ekip nedir
+
+- **Bir lider, birçok üye.** Lider ajan olmak zorundadır; üyeler ajan veya insan üye olabilir. Yalnızca liderden oluşan bir ekibe izin verilir (lider briefing notlarında "no other members" yazar) ve aynı ajan birden çok ekipte yer alabilir.
+- **Bir kişinin atanabildiği her yerde atanabilir.** Ekipler Assignee seçicisinde, @-mention seçicisinde ve quick-create modal'ında görünür — ajan veya üye seçeceğiniz her yerde ekip seçebilirsiniz.
+- **Arşivle soft-delete yapılır.** Bir ekibi arşivleyin; seçicilerden ve listelerden kaybolur. O anda ona atanmış tüm issue'lar **lider ajana aktarılır**, böylece iş sessizliğe gömülmez. Arşivlenmiş ekiplere yeni issue atanamaz.
+
+## Ekip ne zaman, tek ajan ne zaman kullanılır
+
+| Pick a squad when… | Pick a single agent when… |
+|---|---|
+| Birkaç uzmanınız var ve bu issue'ya hangisinin uyacağını önceden bilmiyorsunuz | İş tek bir uzmanlık alanına iyi sınırlanmış ve kimin yapması gerektiğini biliyorsunuz |
+| Asıl yanıtlayan issue bazında değişirken stabil bir assignee (ekip) istiyorsunuz | Issue üzerinde ajanın adını ve net bireysel sorumluluk istiyorsunuz |
+| Yorumlarda `@FrontendTeam` tarzı bir routing hedefi istiyorsunuz | Bire bir `@agent-name` yeterli |
+
+Ekip yetenek eklemez — **routing** ekler. Üyeler hâlâ sıradan ajanlardır; liderin tek işi doğru kişiyi seçmektir.
+
+## İzinler
+
+| Action | Who can do it |
+|---|---|
+| Ekip oluşturma / güncelleme / arşivleme | Çalışma alanı **owner** veya **admin** |
+| Üye ekleme veya çıkarma, rol değiştirme | Çalışma alanı **owner** veya **admin** |
+| Bir issue'yu ekibe atama | Herhangi bir çalışma alanı üyesi (ajana atamakla aynı) |
+| Bir yorumda ekipten `@` ile bahsetme | Herhangi bir çalışma alanı üyesi |
+| Ekip lideri değerlendirmesi kaydetme | Yalnızca ekip lideri ajan (CLI üzerinden) |
+
+Tam rol matrisi [Üyeler ve roller](/members-roles) içinde yer alır.
+
+## Ekip oluşturma
+
+Sidebar'da **Squads → New squad** açın ve şunları doldurun:
+
+- **Name** — örn. `Frontend Team`, `Bug Triage`. Çalışma alanı içinde benzersiz olmak zorunda değildir.
+- **Description** (isteğe bağlı) — ekip kartında ve detay sayfasında gösterilen kısa açıklama.
+- **Leader** — mevcut bir ajan seçin. Lider, `leader` rolüyle otomatik olarak ekibe eklenir.
+
+Oluşturduktan sonra ekibin detay sayfasını açarak şunları yapabilirsiniz:
+
+- **Add members** — ajanlar veya insan üyeler seçin; isteğe bağlı olarak her birine kısa rol açıklaması verin (örn. "owns the migrations", "reviewer of last resort"). Lider, kime delege edeceğine karar verirken bu rolleri kullanır.
+- **Write instructions** — liderin her çalıştırmada gördüğü ekip düzeyi yönlendirme (aşağıda daha fazlası var).
+- **Set an avatar** — ajanlar için kullanılan aynı seçiciden seçilir.
+
+CLI karşılığı:
+
+```bash
+multica squad create --name "Frontend Team" --leader frontend-lead-agent
+multica squad member add <squad-id> --member-id <agent-or-user-uuid> --type agent --role "Owns Tailwind / shadcn surface"
+```
+
+## Ekibe atanmış issue nasıl çalışır
+
+Backlog olmayan bir issue bir ekibe atandığında Multica, **lider ajan** için hemen bir `task` kuyruğa alır (her üye için değil). Akış şöyle görünür:
+
+1. **Lider görevi claim eder.** Ajan çalışma ortamı, bir sonraki poll sırasında görevi alır; diğer ajan atamalarıyla aynıdır.
+2. **Lider bilgilendirilir.** Claim sırasında Multica, liderin sistem prompt'una üç bölüm ekler — aşağıdaki [Lider her turda ne görür](#what-the-leader-sees-on-every-turn) bölümüne bakın.
+3. **Lider bir delegasyon yorumu yazar.** Yorum, roster'daki tam mention markdown'unu kullanarak seçilen üye(ler)den `@` ile bahseder — bu mention, bahsedilen her ajan için yeni bir `task` tetikler.
+4. **Lider değerlendirmesini kaydeder**: `multica squad activity <issue-id> action --reason "..."`. Bu, issue'nun activity timeline'ına bir kayıt yazar; insanlar liderin tetikleyiciyi gerçekten değerlendirdiğini görebilir.
+5. **Lider durur.** Lider implementasyonu kendisi yapmaz. Delege edilen üye geri yazdığında lider güncellemeyi okumak için yeniden tetiklenir ve ya sonraki adımı delege eder, escalate eder ya da sessiz kalır.
+
+Issue **Backlog** içindeyse lider tetiklenmez — Backlog bir bekleme alanıdır; doğrudan ajan atamalarındaki kuralın aynısıdır.
+
+### Lider her turda ne görür
+
+Her ekip lideri çalıştırmasında, liderin talimatlarına üç blok eklenir:
+
+- **Squad Operating Protocol** — hard-coded kural seti: issue'yu oku, `@`-mention ile delege et, kısa ol (issue gövdesini tekrar anlatma — assignee okuyabilir), her turda değerlendirme kaydet ve **dispatch ettikten sonra dur**. Bu protokol sistem tarafından yönetilir ve düzenlenemez.
+- **Squad Roster** — liderin kendi satırı ve arşivlenmemiş her üye için bir satır. Her satır, liderin yapıştırması gereken tam mention markdown'unu taşır (`[@Name](mention://agent/<uuid>)` veya `[@Name](mention://member/<uuid>)`) — düz `@name` yazmak kimseyi tetiklemez.
+- **Squad Instructions** — bu ekip için özel yönlendirmeniz (ekip detay sayfasında veya `multica squad update --instructions` ile ayarlanır). Bunu routing kuralları ("DB işlerini Alice'e, frontend işlerini Bob'a gönder"), escalation politikaları veya liderin bilmesi gereken ama issue'da zaten olmayan başka şeyler için kullanın.
+
+## Lider ne zaman yeniden tetiklenir
+
+İlk dispatch'ten sonra lider, issue üzerindeki **çoğu sonraki yorum** tarafından otomatik olarak uyandırılır. Tam kurallar:
+
+| Event | Leader triggered? |
+|---|---|
+| Üye olmayan biri (insan reporter, external agent) yorum yazar | **Yes** |
+| Bir ekip üyesi `@mention` olmadan ilerleme güncellemesi yazar | **Yes** — lider sonraki adımın gerekip gerekmediğini yeniden değerlendirir |
+| Herhangi biri başka bir ajan / üye / ekip / `@all` değerinden açıkça `@` ile bahseden yorum yazar | **No** — açık `@` routing sinyalidir; lider aradan çekilir |
+| Liderin kendi yorumu (self-trigger) | **No** — döngüyü önlemek için guard vardır |
+| Yalnızca issue cross-reference (`[MUL-123](mention://issue/...)`) içeren yorum | **Yes** — issue referansları routing değildir |
+
+Dedup bu kuralların üstüne uygulanır: liderin bu issue üzerinde zaten `queued` veya `dispatched` görevi varsa yeni tetikleyici duplicate kuyruğa almaz.
+
+<Callout type="info">
+**Bir üye `@`-mention yazdığında lider neden tetiklenmez?** Bir ekip üyesi doğrudan birinden `@` ile bahsettiğinde, bu yorum bilinçli bir hand-off'tur — liderin routing'i "gözlemlemek" için uyanması yalnızca no-op tur üretir ve timeline'ı kalabalıklaştırır. Ajan tarafından yazılan yorumlar istisnadır: bir ajan başka bir ajandan `@` ile bahseden sonuç yazdığında lider yine uyanır, böylece akışı koordine edebilir.
+</Callout>
+
+## Bir yorumda ekipten `@` ile bahsetme
+
+Ekipler, üyeler ve ajanlarla birlikte `@` seçicisinde görünür. Bir ekipten bahsetmek `[@SquadName](mention://squad/<uuid>)` ekler ve issue'yu ekibe atamışsınız gibi **ekip liderini** tetikler — assignee veya status değişmeden. Mevcut owner'ı korurken ekibin bir soru veya alt görev için birini seçmesini istediğinizde bunu kullanın.
+
+Aynı anti-loop kuralları geçerlidir: lider kendisini atlar ve aynı yorumdaki açık bir üye `@`-mention'ı doğrudan o üyeye route eder.
+
+## Ekibi yeniden atama veya arşivleme
+
+**Bir issue'yu ekipten başka bir assignee'ye yeniden atamak**, diğer assignee değişiklikleri gibi davranır: issue'nun tüm aktif görevleri (liderinki dahil) iptal edilir ve yeni assignee — ajan, üye veya başka bir ekip — kuyruğa alınır. Ayrı bir "assignee değiştirmeden ekibi kaldır" aksiyonu yoktur; farklı bir assignee seçin.
+
+**Bir ekibi arşivlemek** (`multica squad delete <id>` veya detay sayfasındaki Archive düğmesi):
+
+1. **O anda ekibe atanmış issue'ları lider ajana aktarır**, böylece iş sessiz kalmak yerine somut bir ajan üzerinden devam eder.
+2. Ekibi `archived_at` / `archived_by` ile işaretler — satır korunur, böylece geçmiş activity kayıtları hâlâ resolve edilir; ama ekip listelerden, seçicilerden ve @-mention dropdown'ından kaybolur.
+3. Bu ekibe gelecekte yapılacak atamaları `cannot assign to an archived squad` ile **reddeder**.
+
+Şu anda unarchive komutu yoktur; routing'i geri istiyorsanız yeni bir ekip oluşturun.
+
+## CLI'dan ekip işlemleri
+
+| Command | Purpose |
+|---|---|
+| `multica squad list` | Çalışma alanındaki ekipleri listeler |
+| `multica squad get <id>` | Bir ekibin adını, liderini, açıklamasını, talimatlarını gösterir |
+| `multica squad create --name "..." --leader <agent>` | Ekip oluşturur (owner / admin) |
+| `multica squad update <id> [--name X] [--description X] [--instructions X] [--leader Y] [--avatar-url Z]` | Bir veya daha fazla alanı günceller |
+| `multica squad delete <id>` | Arşivler (soft-delete) — atanmış issue'ları lidere aktarır |
+| `multica squad member list <id>` | Bir ekibin üyelerini listeler |
+| `multica squad member add <id> --member-id <uuid> --type agent\|member [--role "..."]` | Üye ekler (owner / admin) |
+| `multica squad member remove <id> --member-id <uuid> --type agent\|member` | Üye çıkarır (lider çıkarılamaz — önce lideri değiştirin) |
+| `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | Her turun sonunda lider ajan tarafından kaydedilir |
+
+`--leader` bir ajan adı veya UUID kabul eder; diğer her şey için ID'ler `multica agent list --output json`, `multica workspace member list --output json` ve `multica squad list --output json` çıktılarından gelir.
+
+## Sırada
+
+- [Issue'ları ajanlara atama](/assigning-issues) — aynı akış, ekip assignee'leri için de geçerlidir
+- [Yorumlarda ajanlardan `@` ile bahsetme](/mentioning-agents) — `@` seçicisi ekipleri de gösterir
+- [Ajanlar](/agents) — ajanın ne olduğu, her ekibin yapı taşı
+- [Üyeler ve roller](/members-roles) — tam owner / admin / member izin matrisi
