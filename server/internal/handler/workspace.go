@@ -201,26 +201,28 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Becoming a workspace member is the physical event that "completes" onboarding —
-	// keep this atomic with CreateMember so `member` and `onboarded_at`
-	// can never disagree. COALESCE in MarkUserOnboarded keeps it idempotent.
-	if _, err := qtx.MarkUserOnboarded(r.Context(), parseUUID(userID)); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to mark user onboarded")
-		return
-	}
+	// NOTE: CreateWorkspace deliberately does NOT mark the user as
+	// onboarded. The `onboarded_at` flag is owned by CompleteOnboarding
+	// (Step 3 of the flow) and by AcceptInvitation (invitee joining an
+	// existing workspace). This decouples "the user has a workspace"
+	// from "the user has finished setup"; the workspace-layer route
+	// gate (web layout / desktop App.tsx overlay) redirects un-onboarded
+	// users back to /onboarding instead.
 
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create workspace")
 		return
 	}
 
+	wsID := uuidToString(ws.ID)
+
 	// "Is this the user's first workspace?" is derived in PostHog by looking
 	// at whether they have a prior workspace_created event, not stamped at
 	// emit time. Stamping here would race under concurrent creates without
 	// a schema change, and the event stream answers the question exactly.
-	h.Analytics.Capture(analytics.WorkspaceCreated(userID, uuidToString(ws.ID)))
+	h.Analytics.Capture(analytics.WorkspaceCreated(userID, wsID))
 
-	slog.Info("workspace created", append(logger.RequestAttrs(r), "workspace_id", uuidToString(ws.ID), "name", ws.Name, "slug", ws.Slug)...)
+	slog.Info("workspace created", append(logger.RequestAttrs(r), "workspace_id", wsID, "name", ws.Name, "slug", ws.Slug)...)
 	writeJSON(w, http.StatusCreated, workspaceToResponse(ws))
 }
 

@@ -2,6 +2,7 @@ import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 import type {
   GroupedIssuesResponse,
+  Issue,
   IssueStatus,
   ListGroupedIssuesParams,
   ListIssuesParams,
@@ -105,6 +106,102 @@ async function fetchFirstPages(filter: MyIssuesFilter = {}): Promise<ListIssuesC
 }
 
 /**
+ * "All my issues" — union of three server filters:
+ *   assignee_id=me OR creator_id=me OR involves_user_id=me
+ *
+ * The backend has no OR-across-user-filters today, so we run the three
+ * existing single-filter fetches in parallel and dedupe on the client by
+ * issue id within each status bucket. Order within each bucket preserves
+ * the first-seen position (each sub-fetch is already server-sorted).
+ *
+ * Personal lists are bounded (tens to a few hundred issues across all
+ * three relations), so 3× the request count is acceptable — a single
+ * fetchFirstPages already runs 7 status fetches in parallel, so the total
+ * here is 21 small parallel requests. Easy enough; no need to add a new
+ * backend query just for this scope.
+ *
+ * `total` per bucket is set to the merged length, not the true server
+ * total — pagination on the "All" scope is out of scope; the first
+ * 50-per-status × 3 widening (deduped) is what the page renders.
+ */
+async function fetchAllMyFirstPages(userId: string): Promise<ListIssuesCache> {
+  const [byAssignee, byCreator, byInvolves] = await Promise.all([
+    fetchFirstPages({ assignee_id: userId }),
+    fetchFirstPages({ creator_id: userId }),
+    fetchFirstPages({ involves_user_id: userId }),
+  ]);
+  const byStatus: ListIssuesCache["byStatus"] = {};
+  for (const status of PAGINATED_STATUSES) {
+    const seen = new Set<string>();
+    const merged: Issue[] = [];
+    for (const cache of [byAssignee, byCreator, byInvolves]) {
+      const bucket = cache.byStatus[status];
+      if (!bucket) continue;
+      for (const issue of bucket.issues) {
+        if (seen.has(issue.id)) continue;
+        seen.add(issue.id);
+        merged.push(issue);
+      }
+    }
+    byStatus[status] = { issues: merged, total: merged.length };
+  }
+  return { byStatus };
+}
+
+/**
+ * Sibling of {@link fetchAllMyFirstPages} for the assignee-grouped board
+ * view. Runs the three single-filter grouped queries in parallel and
+ * merges groups by (assignee_type, assignee_id), deduping issues within
+ * each group. Extra filters from the page (statuses, priorities, etc.)
+ * pass through unchanged.
+ */
+async function fetchAllMyAssigneeGroups(
+  userId: string,
+  filter: AssigneeGroupedIssuesFilter,
+): Promise<GroupedIssuesResponse> {
+  const variants: AssigneeGroupedIssuesFilter[] = [
+    { ...filter, assignee_id: userId },
+    { ...filter, creator_id: userId },
+    { ...filter, involves_user_id: userId },
+  ];
+  const responses = await Promise.all(
+    variants.map((f) =>
+      api.listGroupedIssues({
+        group_by: "assignee",
+        limit: ISSUE_PAGE_SIZE,
+        offset: 0,
+        ...f,
+      }),
+    ),
+  );
+  const groupKey = (g: GroupedIssuesResponse["groups"][number]) =>
+    `${g.assignee_type ?? "_"}::${g.assignee_id ?? "_"}`;
+  const merged = new Map<string, GroupedIssuesResponse["groups"][number]>();
+  for (const res of responses) {
+    for (const group of res.groups) {
+      const key = groupKey(group);
+      const existing = merged.get(key);
+      if (!existing) {
+        merged.set(key, {
+          ...group,
+          issues: [...group.issues],
+          total: group.issues.length,
+        });
+        continue;
+      }
+      const seen = new Set(existing.issues.map((i) => i.id));
+      for (const issue of group.issues) {
+        if (seen.has(issue.id)) continue;
+        seen.add(issue.id);
+        existing.issues.push(issue);
+      }
+      existing.total = existing.issues.length;
+    }
+  }
+  return { groups: [...merged.values()] };
+}
+
+/**
  * CACHE SHAPE NOTE: The raw cache stores {@link ListIssuesCache} (buckets keyed
  * by status, each with `{ issues, total }`), and `select` flattens it to
  * `Issue[]` for consumers. Mutations and ws-updaters must use
@@ -145,10 +242,18 @@ export function myIssueListOptions(
   wsId: string,
   scope: string,
   filter: MyIssuesFilter,
+  // Required when scope === "all" — the user id whose three relations
+  // (assignee, creator, agents+squads) we union over. For every other
+  // scope the filter object already carries the relevant id and userId
+  // is ignored.
+  userId?: string,
 ) {
   return queryOptions({
     queryKey: issueKeys.myList(wsId, scope, filter),
-    queryFn: () => fetchFirstPages(filter),
+    queryFn: () =>
+      scope === "all" && userId
+        ? fetchAllMyFirstPages(userId)
+        : fetchFirstPages(filter),
     select: flattenIssueBuckets,
   });
 }
@@ -210,16 +315,21 @@ export function myIssueAssigneeGroupsOptions(
   wsId: string,
   scope: string,
   filter: AssigneeGroupedIssuesFilter,
+  // See myIssueListOptions for the userId contract — only consulted when
+  // scope === "all", and powers the 3-fetch grouped union.
+  userId?: string,
 ) {
   return queryOptions<GroupedIssuesResponse>({
     queryKey: issueKeys.myAssigneeGroups(wsId, scope, filter),
     queryFn: () =>
-      api.listGroupedIssues({
-        group_by: "assignee",
-        limit: ISSUE_PAGE_SIZE,
-        offset: 0,
-        ...filter,
-      }),
+      scope === "all" && userId
+        ? fetchAllMyAssigneeGroups(userId, filter)
+        : api.listGroupedIssues({
+            group_by: "assignee",
+            limit: ISSUE_PAGE_SIZE,
+            offset: 0,
+            ...filter,
+          }),
   });
 }
 

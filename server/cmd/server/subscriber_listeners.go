@@ -105,6 +105,16 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 			return
 		}
 
+		// Platform-authored system comments (MUL-2538 child-done parent notify)
+		// have author_type='system' and a zero UUID author. They must NOT
+		// add a subscriber row: issue_subscriber.user_type is constrained to
+		// ('member','agent'), and a "system" subscriber has no inbox to read
+		// anyway. Skip them at the side-effect boundary so the system event
+		// stays a pure WS broadcast for the timeline.
+		if authorType == "system" {
+			return
+		}
+
 		addSubscriber(bus, queries, e.WorkspaceID, issueID, authorType, authorID, "commenter")
 	})
 }

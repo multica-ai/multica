@@ -126,6 +126,7 @@
     "section_skills": "skill",
     "prop_runtime": "运行时",
     "prop_model": "模型",
+    "prop_thinking": "思考",
     "prop_visibility": "可见性",
     "prop_concurrency": "并发",
     "prop_owner": "所有者",
@@ -162,13 +163,16 @@
     "model_managed_by_runtime": "由运行时管理",
     "model_search_placeholder": "搜索或输入模型 ID",
     "model_discovering": "正在发现模型...",
-    "model_default_badge": "默认",
     "model_empty": "暂无可用模型",
     "model_empty_with_dot": "暂无可用模型。",
     "model_custom_tooltip": "使用\"{{value}}\"作为自定义模型 ID",
     "model_custom_use": "使用\"{{value}}\"",
     "model_clear": "清除（使用提供方默认）",
-    "model_clear_title": "清除并回退到运行时的提供方默认"
+    "model_clear_title": "清除并回退到运行时的提供方默认",
+    "thinking_default": "跟随 CLI 配置",
+    "thinking_tooltip": "思考 · {{value}}",
+    "thinking_clear": "跟随 CLI 配置",
+    "thinking_clear_title": "清除覆盖，让本地 CLI（claude/codex）的配置决定推理级别"
   },
   "model_dropdown": {
     "label": "模型",

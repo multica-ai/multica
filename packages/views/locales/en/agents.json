@@ -130,6 +130,7 @@
     "section_skills": "Skills",
     "prop_runtime": "Runtime",
     "prop_model": "Model",
+    "prop_thinking": "Thinking",
     "prop_visibility": "Visibility",
     "prop_concurrency": "Concurrency",
     "prop_owner": "Owner",
@@ -166,13 +167,16 @@
     "model_managed_by_runtime": "Managed by runtime",
     "model_search_placeholder": "Search or type a model ID",
     "model_discovering": "Discovering models…",
-    "model_default_badge": "default",
     "model_empty": "No models available",
     "model_empty_with_dot": "No models available.",
     "model_custom_tooltip": "Use \"{{value}}\" as a custom model id",
     "model_custom_use": "Use \"{{value}}\"",
     "model_clear": "Clear (use provider default)",
-    "model_clear_title": "Clear and fall back to the runtime's provider default"
+    "model_clear_title": "Clear and fall back to the runtime's provider default",
+    "thinking_default": "Follow CLI config",
+    "thinking_tooltip": "Thinking · {{value}}",
+    "thinking_clear": "Follow CLI config",
+    "thinking_clear_title": "Clear the override and let the local CLI config (claude/codex) decide the reasoning level"
   },
   "model_dropdown": {
     "label": "Model",

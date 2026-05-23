@@ -19,7 +19,8 @@ import {
 } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { isImeComposing, timeAgo } from "@multica/core/utils";
+import { isImeComposing } from "@multica/core/utils";
+import { useTimeAgo } from "../../i18n";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Input } from "@multica/ui/components/ui/input";
@@ -43,6 +44,7 @@ import { ConcurrencyPicker } from "./inspector/concurrency-picker";
 import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { SkillAttach } from "./inspector/skill-attach";
+import { ThinkingPropRow } from "./inspector/thinking-prop-row";
 import { VisibilityPicker } from "./inspector/visibility-picker";
 
 interface InspectorProps {
@@ -91,6 +93,7 @@ export function AgentDetailInspector({
   onUpdate,
 }: InspectorProps) {
   const { t } = useT("agents");
+  const timeAgo = useTimeAgo();
   const update = (data: Record<string, unknown>) => onUpdate(agent.id, data);
   const isOnline = runtime?.status === "online";
 
@@ -130,6 +133,14 @@ export function AgentDetailInspector({
             onChange={(m) => update({ model: m })}
           />
         </PropRow>
+        <ThinkingPropRow
+          runtimeId={agent.runtime_id}
+          runtimeOnline={!!isOnline}
+          model={agent.model ?? ""}
+          value={agent.thinking_level ?? ""}
+          canEdit={canEdit}
+          onChange={(v) => update({ thinking_level: v })}
+        />
         <PropRow label={t(($) => $.inspector.prop_visibility)} interactive={false}>
           <VisibilityPicker
             value={agent.visibility}

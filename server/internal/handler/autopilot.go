@@ -24,10 +24,15 @@ func computeNextRun(cronExpr, timezone string) (time.Time, error) {
 // ── Response types ──────────────────────────────────────────────────────────
 
 type AutopilotResponse struct {
-	ID                 string  `json:"id"`
-	WorkspaceID        string  `json:"workspace_id"`
-	Title              string  `json:"title"`
-	Description        *string `json:"description"`
+	ID          string  `json:"id"`
+	WorkspaceID string  `json:"workspace_id"`
+	Title       string  `json:"title"`
+	Description *string `json:"description"`
+	ProjectID   *string `json:"project_id"`
+	// AssigneeType is "agent" or "squad". Path A from MUL-2429: when set
+	// to "squad", AssigneeID points at squad(id) rather than agent(id) and
+	// dispatch resolves to squad.leader_id at run time.
+	AssigneeType       string  `json:"assignee_type"`
 	AssigneeID         string  `json:"assignee_id"`
 	Status             string  `json:"status"`
 	ExecutionMode      string  `json:"execution_mode"`
@@ -94,11 +99,20 @@ type AutopilotRunResponse struct {
 // ── Converters ──────────────────────────────────────────────────────────────
 
 func autopilotToResponse(a db.Autopilot) AutopilotResponse {
+	assigneeType := a.AssigneeType
+	if assigneeType == "" {
+		// Older rows pre-MUL-2429 may surface as "" against an out-of-date
+		// schema view; default to "agent" so the API contract stays
+		// non-null.
+		assigneeType = "agent"
+	}
 	return AutopilotResponse{
 		ID:                 uuidToString(a.ID),
 		WorkspaceID:        uuidToString(a.WorkspaceID),
 		Title:              a.Title,
 		Description:        textToPtr(a.Description),
+		ProjectID:          uuidToPtr(a.ProjectID),
+		AssigneeType:       assigneeType,
 		AssigneeID:         uuidToString(a.AssigneeID),
 		Status:             a.Status,
 		ExecutionMode:      a.ExecutionMode,
@@ -205,8 +219,12 @@ func runToResponseSlim(r db.AutopilotRun) AutopilotRunResponse {
 // ── Request types ───────────────────────────────────────────────────────────
 
 type CreateAutopilotRequest struct {
-	Title              string  `json:"title"`
-	Description        *string `json:"description"`
+	Title       string  `json:"title"`
+	Description *string `json:"description"`
+	ProjectID   *string `json:"project_id"`
+	// AssigneeType is optional and defaults to "agent" — preserves backward
+	// compatibility with desktop clients shipped before MUL-2429.
+	AssigneeType       *string `json:"assignee_type"`
 	AssigneeID         string  `json:"assignee_id"`
 	ExecutionMode      string  `json:"execution_mode"`
 	IssueTitleTemplate *string `json:"issue_title_template"`
@@ -215,6 +233,8 @@ type CreateAutopilotRequest struct {
 type UpdateAutopilotRequest struct {
 	Title              *string `json:"title"`
 	Description        *string `json:"description"`
+	ProjectID          *string `json:"project_id"`
+	AssigneeType       *string `json:"assignee_type"`
 	AssigneeID         *string `json:"assignee_id"`
 	Status             *string `json:"status"`
 	ExecutionMode      *string `json:"execution_mode"`
@@ -369,19 +389,26 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate assignee is an agent in the workspace.
-	_, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-		ID:          assigneeUUID,
-		WorkspaceID: wsUUID,
-	})
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "assignee must be a valid agent in this workspace")
+	assigneeType := "agent"
+	if req.AssigneeType != nil && *req.AssigneeType != "" {
+		assigneeType = *req.AssigneeType
+	}
+	if !isValidAutopilotAssigneeType(assigneeType) {
+		writeError(w, http.StatusBadRequest, "assignee_type must be agent or squad")
+		return
+	}
+	if !h.validateAutopilotAssignee(w, r, assigneeType, assigneeUUID, wsUUID) {
+		return
+	}
+	projectID, ok := h.parseAutopilotProjectID(w, r, req.ProjectID, wsUUID)
+	if !ok {
 		return
 	}
 
 	autopilot, err := h.Queries.CreateAutopilot(r.Context(), db.CreateAutopilotParams{
 		WorkspaceID:        wsUUID,
 		Title:              req.Title,
+		AssigneeType:       assigneeType,
 		AssigneeID:         assigneeUUID,
 		Status:             "active",
 		ExecutionMode:      req.ExecutionMode,
@@ -389,6 +416,7 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		CreatedByID:        parseUUID(userID),
 		Description:        ptrToText(req.Description),
 		IssueTitleTemplate: ptrToText(req.IssueTitleTemplate),
+		ProjectID:          projectID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create autopilot")
@@ -432,6 +460,7 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		Description:        prev.Description,
 		AssigneeID:         prev.AssigneeID,
 		IssueTitleTemplate: prev.IssueTitleTemplate,
+		ProjectID:          prev.ProjectID,
 	}
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
@@ -454,20 +483,56 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		}
 		params.IssueTitleTemplate = ptrToText(req.IssueTitleTemplate)
 	}
-	if _, ok := rawFields["assignee_id"]; ok {
-		if req.AssigneeID != nil {
-			assigneeUUID, ok := parseUUIDOrBadRequest(w, *req.AssigneeID, "assignee_id")
+	if _, ok := rawFields["project_id"]; ok {
+		projectID, ok := h.parseAutopilotProjectID(w, r, req.ProjectID, prev.WorkspaceID)
+		if !ok {
+			return
+		}
+		params.ProjectID = projectID
+	}
+	// assignee_type and assignee_id are validated as a pair: switching
+	// between agent and squad without supplying a new id would leave the
+	// row pointing at the wrong table. The client is expected to send both
+	// fields on any change; partial updates that change only one are
+	// rejected.
+	_, typeSent := rawFields["assignee_type"]
+	_, idSent := rawFields["assignee_id"]
+	if typeSent || idSent {
+		nextType := prev.AssigneeType
+		if typeSent && req.AssigneeType != nil && *req.AssigneeType != "" {
+			nextType = *req.AssigneeType
+		}
+		if !isValidAutopilotAssigneeType(nextType) {
+			writeError(w, http.StatusBadRequest, "assignee_type must be agent or squad")
+			return
+		}
+		nextID := prev.AssigneeID
+		if idSent {
+			if req.AssigneeID == nil {
+				writeError(w, http.StatusBadRequest, "assignee_id cannot be null")
+				return
+			}
+			parsed, ok := parseUUIDOrBadRequest(w, *req.AssigneeID, "assignee_id")
 			if !ok {
 				return
 			}
-			if _, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-				ID:          assigneeUUID,
-				WorkspaceID: prev.WorkspaceID,
-			}); err != nil {
-				writeError(w, http.StatusBadRequest, "assignee must be a valid agent in this workspace")
-				return
-			}
-			params.AssigneeID = assigneeUUID
+			nextID = parsed
+		}
+		// Reject the agent↔squad switch without a paired id, otherwise the
+		// row would address agent(id) under assignee_type='squad' or vice
+		// versa.
+		if typeSent && !idSent && nextType != prev.AssigneeType {
+			writeError(w, http.StatusBadRequest, "assignee_id is required when changing assignee_type")
+			return
+		}
+		if !h.validateAutopilotAssignee(w, r, nextType, nextID, prev.WorkspaceID) {
+			return
+		}
+		if typeSent {
+			params.AssigneeType = pgtype.Text{String: nextType, Valid: true}
+		}
+		if idSent {
+			params.AssigneeID = nextID
 		}
 	}
 
@@ -480,6 +545,29 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 	resp := autopilotToResponse(autopilot)
 	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{"autopilot": resp})
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) parseAutopilotProjectID(
+	w http.ResponseWriter,
+	r *http.Request,
+	raw *string,
+	workspaceID pgtype.UUID,
+) (pgtype.UUID, bool) {
+	if raw == nil || *raw == "" {
+		return pgtype.UUID{}, true
+	}
+	projectID, ok := parseUUIDOrBadRequest(w, *raw, "project_id")
+	if !ok {
+		return pgtype.UUID{}, false
+	}
+	if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+		ID:          projectID,
+		WorkspaceID: workspaceID,
+	}); err != nil {
+		writeError(w, http.StatusBadRequest, "project_id must reference a project in this workspace")
+		return pgtype.UUID{}, false
+	}
+	return projectID, true
 }
 
 func (h *Handler) DeleteAutopilot(w http.ResponseWriter, r *http.Request) {
@@ -691,6 +779,71 @@ func isAllowedWebhookProvider(p string) bool {
 	case "generic", "github":
 		return true
 	default:
+		return false
+	}
+}
+
+func isValidAutopilotAssigneeType(t string) bool {
+	switch t {
+	case "agent", "squad":
+		return true
+	default:
+		return false
+	}
+}
+
+// validateAutopilotAssignee checks that the assignee (agent or squad) exists
+// in the given workspace, and for squad assignees that the squad's leader
+// agent is in a workable state at create / update time. Writes an HTTP error
+// and returns false on any failure.
+//
+// At dispatch time the same checks (resolveAutopilotLeader + AgentReadiness)
+// run again — they live there to handle "leader was online at save time but
+// went offline by trigger time". Save-time validation exists so the user gets
+// immediate feedback ("can't pick this squad because its leader is archived")
+// instead of discovering the autopilot is dead at the next schedule tick.
+func (h *Handler) validateAutopilotAssignee(w http.ResponseWriter, r *http.Request, assigneeType string, assigneeID, workspaceID pgtype.UUID) bool {
+	switch assigneeType {
+	case "agent":
+		if _, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+			ID:          assigneeID,
+			WorkspaceID: workspaceID,
+		}); err != nil {
+			writeError(w, http.StatusBadRequest, "assignee must be a valid agent in this workspace")
+			return false
+		}
+		return true
+	case "squad":
+		squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+			ID:          assigneeID,
+			WorkspaceID: workspaceID,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "assignee must be a valid squad in this workspace")
+			return false
+		}
+		// Archived squads must be rejected at save time: the dispatcher will
+		// otherwise produce an unbroken stream of skipped runs against a
+		// squad that can never be revived without an explicit un-archive.
+		// Pair with TransferSquadAutopilotsToLeader on DeleteSquad so any
+		// autopilot that survives the archive flips to assignee_type='agent'
+		// (the leader) and stops referencing the dead squad row.
+		if squad.ArchivedAt.Valid {
+			writeError(w, http.StatusUnprocessableEntity, "squad is archived; pick a different squad")
+			return false
+		}
+		leader, err := h.Queries.GetAgent(r.Context(), squad.LeaderID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "squad leader agent not found")
+			return false
+		}
+		if leader.ArchivedAt.Valid {
+			writeError(w, http.StatusUnprocessableEntity, "squad leader is archived; pick a different squad or rotate the leader before assigning autopilot")
+			return false
+		}
+		return true
+	default:
+		writeError(w, http.StatusBadRequest, "assignee_type must be agent or squad")
 		return false
 	}
 }

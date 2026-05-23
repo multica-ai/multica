@@ -56,7 +56,7 @@ import {
 } from "./utils/preview";
 import { useDownloadAttachment } from "./use-download-attachment";
 import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
-import { withFragmentNavShim } from "./utils/iframe-fragment-nav";
+import { HtmlPreviewBody } from "./html-preview-body";
 import { CodeBlockStatic } from "./code-block-static";
 
 // ---------------------------------------------------------------------------
@@ -352,7 +352,7 @@ function PreviewContent({
           <img
             src={state.mediaUrl}
             alt={state.filename}
-            className="max-h-full max-w-full rounded-lg object-contain"
+            className="h-full w-full rounded-lg object-contain"
           />
         </div>
       );
@@ -370,7 +370,7 @@ function PreviewContent({
           <video
             src={state.mediaUrl}
             controls
-            className="max-h-full max-w-full"
+            className="h-full w-full object-contain"
           />
         </div>
       );
@@ -400,16 +400,11 @@ function PreviewContent({
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
           render={(text) => (
-            <iframe
-              srcDoc={withFragmentNavShim(text)}
-              // `allow-scripts` without `allow-same-origin` — scripts run
-              // in an opaque origin and cannot read cookies / localStorage
-              // / parent state, nor escape via top-nav / popups / forms.
-              // Required so JS-driven charts (echarts / Plotly / vanilla
-              // SVG injection) render instead of showing a blank `<svg>`.
-              sandbox="allow-scripts"
-              className="h-full w-full bg-background"
+            <HtmlPreviewBody
+              source={{ kind: "inline", html: text }}
               title={state.filename}
+              className="h-full w-full"
+              iframeClassName="rounded-none border-0"
             />
           )}
         />

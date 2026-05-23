@@ -13,6 +13,7 @@ import {
   runtimeUsageByAgentOptions,
 } from "@multica/core/runtimes/queries";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
+import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import {
   formatTokens,
   estimateCost,
@@ -129,12 +130,12 @@ function fmtMoney(n: number): string {
 export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");
   const runtimeId = runtime.id;
-  // Tz comes from the runtime itself — the backend already buckets daily
-  // rows on `start-of-day in runtime tz`, so we use the same axis for every
-  // frontend window calculation. No "user timezone" option here on purpose.
-  const tz = runtime.timezone;
+  // Reports render in the viewer's timezone — the backend slices the UTC
+  // hourly rollup on the same `tz` we pass here, so every frontend window
+  // calculation shares one axis with the server.
+  const tz = useViewingTimezone();
   const { data: usage = [], isLoading: loading } = useQuery(
-    runtimeUsageOptions(runtimeId, 180),
+    runtimeUsageOptions(runtimeId, 180, tz),
   );
   const [dim, setDim] = useState<Exclude<WhenTab, "heatmap">>("daily");
   const [days, setDays] = useState<TimeRange>(30);
@@ -283,7 +284,7 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
       />
 
       {/* Layer 3 — WHO/WHAT burned the spend. */}
-      <CostByBlock runtimeId={runtimeId} days={days} usage={filtered} />
+      <CostByBlock runtimeId={runtimeId} days={days} usage={filtered} tz={tz} />
 
       {/* Layer 4 — Folded raw view. The Heatmap used to live here too; it
           was promoted into the WHEN chart's toggle, leaving only the
@@ -599,10 +600,12 @@ function CostByBlock({
   runtimeId,
   days,
   usage,
+  tz,
 }: {
   runtimeId: string;
   days: number;
   usage: RuntimeUsage[];
+  tz: string;
 }) {
   const { t } = useT("runtimes");
   const [tab, setTab] = useState<"agent" | "model">("agent");
@@ -613,7 +616,7 @@ function CostByBlock({
   // by-agent is server-side aggregation (fetched lazily on tab activation).
   // by-model derives from the daily cache the parent already has — free.
   const { data: byAgentRows = [] } = useQuery({
-    ...runtimeUsageByAgentOptions(runtimeId, days),
+    ...runtimeUsageByAgentOptions(runtimeId, days, tz),
     enabled: tab === "agent",
   });
 

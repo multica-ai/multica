@@ -29,8 +29,8 @@ const (
 	EventAgentCreated                  = "agent_created"
 	EventOnboardingCompleted           = "onboarding_completed"
 	EventCloudWaitlistJoined           = "cloud_waitlist_joined"
-	EventStarterContentDecided         = "starter_content_decided"
 	EventFeedbackSubmitted             = "feedback_submitted"
+	EventContactSalesSubmitted         = "contact_sales_submitted"
 )
 
 const EventSchemaVersion = 2
@@ -71,14 +71,6 @@ const (
 	OnboardingPathSkipExisting   = "skip_existing"   // "I've done this before" from welcome
 	OnboardingPathInviteAccept   = "invite_accept"   // accepted at least one invitation from /invitations
 	OnboardingPathUnknown        = "unknown"         // fallback when the server can't derive the path
-)
-
-// Starter content branches. Matches the server-authoritative decision in
-// ImportStarterContent (hasAgent ? agent_guided : self_serve). DismissStarter
-// carries the same branch so acceptance rates split cleanly.
-const (
-	StarterContentBranchAgentGuided = "agent_guided"
-	StarterContentBranchSelfServe   = "self_serve"
 )
 
 // Platform is used as the "platform" event property so funnels can split by
@@ -337,18 +329,29 @@ func AgentTaskCancelled(ctx TaskContext, durationMS int64) Event {
 	})
 }
 
-func AutopilotRunStarted(actorID, workspaceID, autopilotID, runID, agentID, triggerSource string) Event {
-	return autopilotRunEvent(EventAutopilotRunStarted, actorID, workspaceID, autopilotID, runID, agentID, triggerSource, nil)
+// AutopilotAssignee describes the autopilot's configured target. agent_id is
+// always the agent that will actually execute the work (the squad leader for
+// squad autopilots) so funnels grouping by agent stay consistent. assignee_*
+// fields record the original configuration so reports can tell a solo-agent
+// autopilot apart from a squad one without joining back to the autopilot row.
+type AutopilotAssignee struct {
+	AgentID      string // executing agent — leader for squad autopilots
+	AssigneeType string // "agent" or "squad"
+	SquadID      string // empty when AssigneeType != "squad"
 }
 
-func AutopilotRunCompleted(actorID, workspaceID, autopilotID, runID, agentID, triggerSource string, durationMS int64) Event {
-	return autopilotRunEvent(EventAutopilotRunCompleted, actorID, workspaceID, autopilotID, runID, agentID, triggerSource, map[string]any{
+func AutopilotRunStarted(actorID, workspaceID, autopilotID, runID string, assignee AutopilotAssignee, triggerSource string) Event {
+	return autopilotRunEvent(EventAutopilotRunStarted, actorID, workspaceID, autopilotID, runID, assignee, triggerSource, nil)
+}
+
+func AutopilotRunCompleted(actorID, workspaceID, autopilotID, runID string, assignee AutopilotAssignee, triggerSource string, durationMS int64) Event {
+	return autopilotRunEvent(EventAutopilotRunCompleted, actorID, workspaceID, autopilotID, runID, assignee, triggerSource, map[string]any{
 		"duration_ms": durationMS,
 	})
 }
 
-func AutopilotRunFailed(actorID, workspaceID, autopilotID, runID, agentID, triggerSource, failureReason, errorType string, willRetry bool, durationMS int64) Event {
-	return autopilotRunEvent(EventAutopilotRunFailed, actorID, workspaceID, autopilotID, runID, agentID, triggerSource, map[string]any{
+func AutopilotRunFailed(actorID, workspaceID, autopilotID, runID string, assignee AutopilotAssignee, triggerSource, failureReason, errorType string, willRetry bool, durationMS int64) Event {
+	return autopilotRunEvent(EventAutopilotRunFailed, actorID, workspaceID, autopilotID, runID, assignee, triggerSource, map[string]any{
 		"duration_ms":    durationMS,
 		"failure_reason": failureReason,
 		"error_type":     errorType,
@@ -391,16 +394,29 @@ func TeamInviteAccepted(inviteeID, workspaceID string, daysSinceInvite int64) Ev
 // The handler drives this transition — we emit from PatchOnboarding so
 // the single emission site stays honest even if the frontend retries.
 //
+// `source` and `useCase` are multi-select (users can pick several);
+// `role` stays single-select. Empty slice = no answer (skip is
+// captured separately via the *Skipped booleans).
+//
 // The three answers are also mirrored into person properties via $set
 // so cohorting by source / role / use_case works across every event
-// on the same user without re-joining back to the DB.
+// on the same user without re-joining back to the DB. PostHog accepts
+// array property values; breakdowns on a multi-value property treat
+// each element as a separate group.
 //
-// `*Skipped` booleans capture per-question skip intent (the new v2
-// signal). `*HasOther` are presence booleans for the free-text "other"
-// override; the free-text content is kept in the DB for product
-// research but not broadcast via analytics (PII risk + low cardinality
-// ask).
-func OnboardingQuestionnaireSubmitted(userID, source, role, useCase string, sourceSkipped, roleSkipped, useCaseSkipped, sourceHasOther, roleHasOther, useCaseHasOther bool) Event {
+// `*Skipped` booleans capture per-question skip intent. `*HasOther`
+// are presence booleans for the free-text "other" override; the
+// free-text content is kept in the DB for product research but not
+// broadcast via analytics (PII risk + low cardinality ask).
+func OnboardingQuestionnaireSubmitted(userID string, source []string, role string, useCase []string, sourceSkipped, roleSkipped, useCaseSkipped, sourceHasOther, roleHasOther, useCaseHasOther bool) Event {
+	// Normalize nil slices to [] so PostHog property values are stable
+	// (avoids null vs [] mixing in property type inference).
+	if source == nil {
+		source = []string{}
+	}
+	if useCase == nil {
+		useCase = []string{}
+	}
 	return Event{
 		Name:       EventOnboardingQuestionnaireSubmit,
 		DistinctID: userID,
@@ -500,27 +516,6 @@ func CloudWaitlistJoined(userID string, hasReason bool) Event {
 	}
 }
 
-// StarterContentDecided fires on the atomic NULL -> terminal state
-// transition in both ImportStarterContent and DismissStarterContent.
-// branch carries agent_guided / self_serve for BOTH decisions — the
-// dismiss handler resolves it from the current ListAgents state so
-// acceptance rates split cleanly by branch.
-func StarterContentDecided(userID, workspaceID, decision, branch string) Event {
-	return Event{
-		Name:        EventStarterContentDecided,
-		DistinctID:  userID,
-		WorkspaceID: workspaceID,
-		Properties: withCoreProperties(map[string]any{
-			"decision": decision,
-			"branch":   branch,
-		}, CoreProperties{
-			UserID:      userID,
-			WorkspaceID: workspaceID,
-			Source:      SourceOnboarding,
-		}),
-	}
-}
-
 // FeedbackSubmitted fires after a feedback row is successfully inserted.
 // The raw message is stored in the DB and never broadcast — we only emit a
 // coarse length bucket, an image-presence flag, and the client platform /
@@ -548,6 +543,28 @@ func FeedbackSubmitted(userID, workspaceID string, messageLen int, hasImages boo
 	}
 }
 
+// ContactSalesSubmitted fires after a contact-sales inquiry is recorded.
+// The form is public and unauthenticated, so DistinctID is empty (PostHog
+// will treat it as an anonymous event). We carry the coarse company size,
+// country, and intended use case so sales / marketing can split inbound
+// volume without having to query the operational DB.
+func ContactSalesSubmitted(inquiryID, companySize, countryRegion, useCase string, hasGoals bool) Event {
+	props := map[string]any{
+		"inquiry_id":     inquiryID,
+		"company_size":   companySize,
+		"country_region": countryRegion,
+		"use_case":       useCase,
+		"has_goals":      hasGoals,
+	}
+	return Event{
+		Name:       EventContactSalesSubmitted,
+		DistinctID: inquiryID,
+		Properties: withCoreProperties(props, CoreProperties{
+			Source: "marketing_contact_sales",
+		}),
+	}
+}
+
 func agentTaskEvent(name string, ctx TaskContext, extra map[string]any) Event {
 	props := withCoreProperties(extra, CoreProperties(ctx))
 	return Event{
@@ -558,7 +575,7 @@ func agentTaskEvent(name string, ctx TaskContext, extra map[string]any) Event {
 	}
 }
 
-func autopilotRunEvent(name, actorID, workspaceID, autopilotID, runID, agentID, triggerSource string, extra map[string]any) Event {
+func autopilotRunEvent(name, actorID, workspaceID, autopilotID, runID string, assignee AutopilotAssignee, triggerSource string, extra map[string]any) Event {
 	if extra == nil {
 		extra = map[string]any{}
 	}
@@ -566,11 +583,17 @@ func autopilotRunEvent(name, actorID, workspaceID, autopilotID, runID, agentID, 
 	props := withCoreProperties(extra, CoreProperties{
 		UserID:         nonAgentUserID(actorID),
 		WorkspaceID:    workspaceID,
-		AgentID:        agentID,
+		AgentID:        assignee.AgentID,
 		AutopilotRunID: runID,
 		Source:         SourceAutopilot,
 	})
 	props["autopilot_id"] = autopilotID
+	if assignee.AssigneeType != "" {
+		props["assignee_type"] = assignee.AssigneeType
+	}
+	if assignee.SquadID != "" {
+		props["squad_id"] = assignee.SquadID
+	}
 	return Event{
 		Name:        name,
 		DistinctID:  actorID,

@@ -73,6 +73,19 @@ ORDER BY s.created_at ASC;
 UPDATE issue SET assignee_type = 'agent', assignee_id = $2, updated_at = now()
 WHERE assignee_type = 'squad' AND assignee_id = $1;
 
+-- name: TransferSquadAutopilotsToLeader :exec
+-- Mirrors TransferSquadAssignees for autopilot rows: when a squad is archived,
+-- any autopilot still pointing at the squad would otherwise dangle and the
+-- admission gate would skip every subsequent dispatch with "assignee squad
+-- cannot be resolved". Rewrite the assignee in place to the leader agent so
+-- the autopilot keeps firing under the same leader-only execution semantics
+-- it had a moment before the archive (Path A from MUL-2429).
+UPDATE autopilot
+SET assignee_type = 'agent',
+    assignee_id = $2,
+    updated_at = now()
+WHERE assignee_type = 'squad' AND assignee_id = $1;
+
 -- name: ListSquadMemberStatusRows :many
 -- Per-row join used to build the squad-members status view. One row per
 -- (squad_member × active_task); members with no active task return a

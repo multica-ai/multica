@@ -171,6 +171,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					output.Reset()
 					output.WriteString(msg.ResultText)
 				}
+				if resultUsage := claudeResultUsage(msg, opts.Model); len(resultUsage) > 0 {
+					usage = resultUsage
+				}
 				if msg.IsError {
 					finalStatus = "failed"
 					finalError = msg.ResultText
@@ -341,12 +344,15 @@ type claudeSDKMessage struct {
 	Message   json.RawMessage `json:"message,omitempty"`
 	Subtype   string          `json:"subtype,omitempty"`
 	SessionID string          `json:"session_id,omitempty"`
+	Model     string          `json:"model,omitempty"`
 
 	// result fields
-	ResultText string  `json:"result,omitempty"`
-	IsError    bool    `json:"is_error,omitempty"`
-	DurationMs float64 `json:"duration_ms,omitempty"`
-	NumTurns   int     `json:"num_turns,omitempty"`
+	ResultText string                            `json:"result,omitempty"`
+	IsError    bool                              `json:"is_error,omitempty"`
+	DurationMs float64                           `json:"duration_ms,omitempty"`
+	NumTurns   int                               `json:"num_turns,omitempty"`
+	Usage      *claudeUsage                      `json:"usage,omitempty"`
+	ModelUsage map[string]claudeResultModelUsage `json:"modelUsage,omitempty"`
 
 	// log fields
 	Log *claudeLogEntry `json:"log,omitempty"`
@@ -373,6 +379,58 @@ type claudeUsage struct {
 	OutputTokens             int64 `json:"output_tokens"`
 	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
 	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+}
+
+type claudeResultModelUsage struct {
+	InputTokens              int64 `json:"inputTokens"`
+	OutputTokens             int64 `json:"outputTokens"`
+	CacheReadInputTokens     int64 `json:"cacheReadInputTokens"`
+	CacheCreationInputTokens int64 `json:"cacheCreationInputTokens"`
+}
+
+func claudeResultUsage(msg claudeSDKMessage, fallbackModel string) map[string]TokenUsage {
+	if len(msg.ModelUsage) > 0 {
+		usage := make(map[string]TokenUsage, len(msg.ModelUsage))
+		for model, u := range msg.ModelUsage {
+			if model == "" || !claudeUsageHasTokens(u.InputTokens, u.OutputTokens, u.CacheReadInputTokens, u.CacheCreationInputTokens) {
+				continue
+			}
+			usage[model] = TokenUsage{
+				InputTokens:      u.InputTokens,
+				OutputTokens:     u.OutputTokens,
+				CacheReadTokens:  u.CacheReadInputTokens,
+				CacheWriteTokens: u.CacheCreationInputTokens,
+			}
+		}
+		if len(usage) > 0 {
+			return usage
+		}
+	}
+
+	model := msg.Model
+	if model == "" {
+		model = fallbackModel
+	}
+	if msg.Usage == nil || model == "" || !claudeUsageHasTokens(
+		msg.Usage.InputTokens,
+		msg.Usage.OutputTokens,
+		msg.Usage.CacheReadInputTokens,
+		msg.Usage.CacheCreationInputTokens,
+	) {
+		return nil
+	}
+	return map[string]TokenUsage{
+		model: {
+			InputTokens:      msg.Usage.InputTokens,
+			OutputTokens:     msg.Usage.OutputTokens,
+			CacheReadTokens:  msg.Usage.CacheReadInputTokens,
+			CacheWriteTokens: msg.Usage.CacheCreationInputTokens,
+		},
+	}
+}
+
+func claudeUsageHasTokens(input, output, cacheRead, cacheWrite int64) bool {
+	return input > 0 || output > 0 || cacheRead > 0 || cacheWrite > 0
 }
 
 type claudeContentBlock struct {
@@ -411,6 +469,13 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 	"--input-format":    blockedWithValue,  // stream-json protocol
 	"--permission-mode": blockedWithValue,  // bypassPermissions for autonomous operation
 	"--mcp-config":      blockedWithValue,  // set by daemon from agent.mcp_config
+	// `--effort` is owned by the per-agent thinking_level picker so a
+	// user-supplied custom_arg cannot silently outvote it. The daemon
+	// injects --effort only when opts.ThinkingLevel is set; if a user
+	// nevertheless writes it in custom_args we drop the duplicate and
+	// log a warning rather than letting the CLI receive two conflicting
+	// --effort values.
+	"--effort": blockedWithValue,
 }
 
 func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
@@ -431,6 +496,13 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
+	}
+	if opts.ThinkingLevel != "" {
+		// Slotted right after --model so the per-session effort runs
+		// against the same model selection the args advertise; the CLI
+		// itself accepts the flag in any order but this ordering makes
+		// the launch line readable in `agent command` logs.
+		args = append(args, "--effort", opts.ThinkingLevel)
 	}
 	if opts.MaxTurns > 0 {
 		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))

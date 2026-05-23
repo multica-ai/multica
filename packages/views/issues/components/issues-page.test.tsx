@@ -337,6 +337,7 @@ const issueDefaults = {
   parent_issue_id: null,
   project_id: null,
   position: 0,
+  metadata: {},
 };
 
 const mockIssues: Issue[] = [
@@ -531,8 +532,8 @@ describe("IssuesPage (shared)", () => {
     renderWithQuery(<IssuesPage />);
 
     await screen.findByText("Test User");
-    expect(screen.getByText("Agent One")).toBeInTheDocument();
-    expect(screen.getByText("Squad One")).toBeInTheDocument();
+    expect(screen.getAllByText("Agent One").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Squad One").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("No assignee")).toBeInTheDocument();
   });
 

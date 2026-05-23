@@ -161,16 +161,7 @@ type DaemonRegisterRequest struct {
 	DeviceName      string   `json:"device_name"`
 	CLIVersion      string   `json:"cli_version"` // multica CLI version
 	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
-	// Timezone is the daemon host's IANA timezone (e.g. "Asia/Shanghai"),
-	// detected client-side from time.Local. The server stores it on each
-	// agent_runtime row created for this daemon so token-usage rollups
-	// bucket by the operator's local calendar day instead of UTC. Empty
-	// or invalid values fall back to "UTC". The value is set ONLY on
-	// first-time registration; once a user overrides the tz via the web
-	// UI, the upsert query preserves that override on subsequent
-	// daemon reconnects (see UpsertAgentRuntime in runtime.sql).
-	Timezone string `json:"timezone"`
-	Runtimes []struct {
+	Runtimes        []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
@@ -179,27 +170,10 @@ type DaemonRegisterRequest struct {
 }
 
 type daemonWorkspaceReposResponse struct {
-	WorkspaceID  string     `json:"workspace_id"`
-	Repos        []RepoData `json:"repos"`
-	ReposVersion string     `json:"repos_version"`
-}
-
-// normalizeRuntimeTimezone validates and normalizes the IANA timezone string
-// reported by a daemon during registration. The stored column is NOT NULL with
-// a 'UTC' default so any unparseable, blank, or trivially-invalid value is
-// quietly downgraded to "UTC" rather than rejected: a misconfigured daemon
-// host shouldn't take down registration just because its tz string is junk.
-// Real validation happens on the user-driven PATCH path where we surface the
-// error.
-func normalizeRuntimeTimezone(tz string) string {
-	tz = strings.TrimSpace(tz)
-	if tz == "" {
-		return "UTC"
-	}
-	if _, err := time.LoadLocation(tz); err != nil {
-		return "UTC"
-	}
-	return tz
+	WorkspaceID  string          `json:"workspace_id"`
+	Repos        []RepoData      `json:"repos"`
+	ReposVersion string          `json:"repos_version"`
+	Settings     json.RawMessage `json:"settings,omitempty"`
 }
 
 func normalizeWorkspaceRepos(repos []RepoData) []RepoData {
@@ -248,13 +222,17 @@ func parseWorkspaceRepos(raw []byte) []RepoData {
 	return normalizeWorkspaceRepos(repos)
 }
 
-func workspaceReposResponse(workspaceID string, raw []byte) daemonWorkspaceReposResponse {
+func workspaceReposResponse(workspaceID string, raw []byte, settingsRaw []byte) daemonWorkspaceReposResponse {
 	repos := parseWorkspaceRepos(raw)
-	return daemonWorkspaceReposResponse{
+	resp := daemonWorkspaceReposResponse{
 		WorkspaceID:  workspaceID,
 		Repos:        repos,
 		ReposVersion: workspaceReposVersion(repos),
 	}
+	if len(settingsRaw) > 0 {
+		resp.Settings = json.RawMessage(settingsRaw)
+	}
+	return resp
 }
 
 func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
@@ -350,7 +328,6 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			DeviceInfo:  deviceInfo,
 			Metadata:    metadata,
 			OwnerID:     ownerID,
-			Timezone:    normalizeRuntimeTimezone(req.Timezone),
 		})
 		if err != nil {
 			h.Analytics.Capture(analytics.RuntimeFailed(
@@ -381,7 +358,6 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt:      row.UpdatedAt,
 			OwnerID:        row.OwnerID,
 			LegacyDaemonID: row.LegacyDaemonID,
-			Timezone:       row.Timezone,
 		}
 
 		// Inserted is false for normal daemon reconnects/upserts, so
@@ -424,20 +400,13 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		"runtimes": resp,
 	})
 
-	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos)
-
-	// Include workspace settings so the daemon can honour feature toggles
-	// (e.g. co_authored_by_enabled for the prepare-commit-msg hook).
-	var settings json.RawMessage
-	if len(ws.Settings) > 0 {
-		settings = json.RawMessage(ws.Settings)
-	}
+	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos, ws.Settings)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"runtimes":      resp,
 		"repos":         repoResp.Repos,
 		"repos_version": repoResp.ReposVersion,
-		"settings":      settings,
+		"settings":      repoResp.Settings,
 	})
 }
 
@@ -535,7 +504,7 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos))
+	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos, ws.Settings))
 }
 
 // DaemonDeregister marks runtimes as offline when the daemon shuts down.
@@ -1145,14 +1114,33 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
 		resp.Agent = &TaskAgentData{
-			ID:           uuidToString(agent.ID),
-			Name:         agent.Name,
-			Instructions: agent.Instructions,
-			Skills:       skills,
-			CustomEnv:    customEnv,
-			CustomArgs:   customArgs,
-			McpConfig:    mcpConfig,
-			Model:        agent.Model.String,
+			ID:            uuidToString(agent.ID),
+			Name:          agent.Name,
+			Instructions:  agent.Instructions,
+			Skills:        skills,
+			CustomEnv:     customEnv,
+			CustomArgs:    customArgs,
+			McpConfig:     mcpConfig,
+			Model:         agent.Model.String,
+			ThinkingLevel: agent.ThinkingLevel.String,
+		}
+	}
+
+	// Resolve the runtime owner's profile description so the daemon can
+	// inject "## Requesting User" into the brief. Empty fields short-circuit
+	// the heading entirely on the daemon side; cloud / system runtimes with
+	// no owner stay anonymous. Failure here must not block claim — the agent
+	// can still run without the user-context section.
+	if runtime.OwnerID.Valid {
+		if owner, err := h.Queries.GetUser(r.Context(), runtime.OwnerID); err == nil {
+			resp.RequestingUserName = owner.Name
+			resp.RequestingUserProfileDescription = owner.ProfileDescription
+		} else {
+			slog.Debug("failed to load runtime owner for brief injection",
+				"runtime_id", runtimeID,
+				"owner_id", uuidToString(runtime.OwnerID),
+				"error", err,
+			)
 		}
 	}
 
@@ -1309,26 +1297,28 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
-			// Resume chat sessions only when the stored pointer was produced
-			// by the same runtime as the claiming task. When the chat_session
-			// pointer is missing (legacy NULL runtime_id), stale (last task
-			// failed before reporting completion), or runtime-mismatched, fall
-			// back to the most recent task row that recorded a session_id —
-			// otherwise a single failed turn would silently drop the entire
-			// conversation memory on the next message. The fallback also
-			// requires runtime to match.
-			if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
-				resp.PriorSessionID = cs.SessionID.String
-			}
-			if cs.WorkDir.Valid {
-				resp.PriorWorkDir = cs.WorkDir.String
-			}
-			if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil && prior.SessionID.Valid {
-				if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
-					resp.PriorSessionID = prior.SessionID.String
+			if !task.ForceFreshSession {
+				// Resume chat sessions only when the stored pointer was produced
+				// by the same runtime as the claiming task. When the chat_session
+				// pointer is missing (legacy NULL runtime_id), stale (last task
+				// failed before reporting completion), or runtime-mismatched, fall
+				// back to the most recent task row that recorded a session_id —
+				// otherwise a single failed turn would silently drop the entire
+				// conversation memory on the next message. The fallback also
+				// requires runtime to match.
+				if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
+					resp.PriorSessionID = cs.SessionID.String
 				}
-				if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
-					resp.PriorWorkDir = prior.WorkDir.String
+				if cs.WorkDir.Valid {
+					resp.PriorWorkDir = cs.WorkDir.String
+				}
+				if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil && prior.SessionID.Valid {
+					if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
+						resp.PriorSessionID = prior.SessionID.String
+					}
+					if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
+						resp.PriorWorkDir = prior.WorkDir.String
+					}
 				}
 			}
 			// Load the latest user message for the chat prompt, plus any
@@ -1517,6 +1507,24 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "task workspace isolation check failed")
 		return
+	}
+
+	// Workspace-level Context (workspace.context DB column) — the per-workspace
+	// system prompt that workspace owners set in Settings → General. Inject it
+	// into the brief regardless of task kind (issue / chat / autopilot /
+	// quick-create) so every agent running in the workspace sees the same
+	// shared context. Empty string when the owner hasn't set one; the daemon
+	// skips rendering the heading in that case.
+	if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(resp.WorkspaceID)); err == nil {
+		if ws.Context.Valid {
+			resp.WorkspaceContext = ws.Context.String
+		}
+	} else {
+		slog.Warn("task claim: failed to load workspace for context injection",
+			"task_id", uuidToString(task.ID),
+			"workspace_id", resp.WorkspaceID,
+			"error", err,
+		)
 	}
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
@@ -1991,8 +1999,12 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 // Verifies the task belongs to the caller's workspace.
 func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
+	taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task_id")
+	if !ok {
+		return
+	}
 
-	task, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskID))
+	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "task not found")
 		return
@@ -2016,11 +2028,11 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		messages, queryErr = h.Queries.ListTaskMessagesSince(r.Context(), db.ListTaskMessagesSinceParams{
-			TaskID: parseUUID(taskID),
+			TaskID: taskUUID,
 			Seq:    int32(sinceSeq),
 		})
 	} else {
-		messages, queryErr = h.Queries.ListTaskMessages(r.Context(), parseUUID(taskID))
+		messages, queryErr = h.Queries.ListTaskMessages(r.Context(), taskUUID)
 	}
 	if queryErr != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list task messages")

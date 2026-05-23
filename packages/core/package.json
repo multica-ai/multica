@@ -10,6 +10,7 @@
   },
   "exports": {
     ".": "./index.ts",
+    "./markdown": "./markdown/index.ts",
     "./types": "./types/index.ts",
     "./types/*": "./types/*.ts",
     "./api": "./api/index.ts",

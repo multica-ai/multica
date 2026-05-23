@@ -8,6 +8,7 @@ import {
   ArrowDown,
   ArrowLeftRight,
   ArrowUp,
+  CalendarClock,
   Check,
   ChevronRight,
   Maximize2,
@@ -29,7 +30,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
@@ -128,6 +129,11 @@ export function ManualCreatePanel({
     (data?.parent_issue_id as string) || undefined,
   );
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
+  // Start date is a low-frequency field — by default it lives in the
+  // overflow ⋯ menu. Clicking the menu item flips this open, which both
+  // mounts the inline pill (the popover's anchor) AND opens the calendar.
+  // When the popover closes without a value set, the pill unmounts again.
+  const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
   // Children live as full Issue objects — the picker always returns the whole
   // object, and we never need to hydrate from an ID the way we do for parent.
   const [childIssues, setChildIssues] = useState<Issue[]>([]);
@@ -494,14 +500,6 @@ export function ManualCreatePanel({
                 align="start"
               />
 
-              {/* Start date */}
-              <StartDatePicker
-                startDate={startDate}
-                onUpdate={(u) => updateStartDate(u.start_date ?? null)}
-                triggerRender={<PillButton />}
-                align="start"
-              />
-
               {/* Due date */}
               <DueDatePicker
                 dueDate={dueDate}
@@ -517,6 +515,22 @@ export function ManualCreatePanel({
                 triggerRender={<PillButton />}
                 align="start"
               />
+
+              {/* Start date — collapsed into the ⋯ menu by default since it's
+                  a low-frequency field. Renders inline only when the field
+                  has a value OR the user just opened it from the overflow
+                  menu (the picker's calendar popover needs the inline pill
+                  as its anchor). */}
+              {(startDate || startDatePickerOpen) && (
+                <StartDatePicker
+                  startDate={startDate}
+                  onUpdate={(u) => updateStartDate(u.start_date ?? null)}
+                  triggerRender={<PillButton />}
+                  align="start"
+                  open={startDatePickerOpen}
+                  onOpenChange={setStartDatePickerOpen}
+                />
+              )}
 
               {/* Parent chip — appears when parent is set.
                   Placed before the ⋯ so it wraps to a new line with ⋯ if
@@ -579,6 +593,12 @@ export function ManualCreatePanel({
                   }
                 />
                 <DropdownMenuContent align="start" className="w-auto">
+                  {!startDate && (
+                    <DropdownMenuItem onClick={() => setStartDatePickerOpen(true)}>
+                      <CalendarClock className="h-3.5 w-3.5" />
+                      {t(($) => $.create_issue.set_start_date)}
+                    </DropdownMenuItem>
+                  )}
                   {parentIssueId && parentIssue ? (
                     <DropdownMenuItem onClick={() => setParentPickerOpen(true)}>
                       <ArrowUp className="h-3.5 w-3.5" />
@@ -666,9 +686,18 @@ export function ManualCreatePanel({
                   />
                   {t(($) => $.create_issue.create_another)}
                 </label>
-                <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
-                  {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
-                </Button>
+                {!title.trim() ? (
+                  <TooltipProvider delay={200}>
+                    <Tooltip>
+                      <TooltipTrigger render={<span><Button size="sm" onClick={handleSubmit} disabled>{t(($) => $.create_issue.submit)}</Button></span>} />
+                      <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                ) : (
+                  <Button size="sm" onClick={handleSubmit} disabled={submitting}>
+                    {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
+                  </Button>
+                )}
               </div>
             </div>
           </>
