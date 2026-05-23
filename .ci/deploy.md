@@ -174,12 +174,15 @@ Release 内容必须至少包含：
 
 - `PROJECT_VERSION`
 - `FULL_SHA`
-- backend Jenkins build URL / build number / result
-- frontend Jenkins build URL / build number / result
-- CLI Jenkins build URL / build number / result
+- backend Jenkins build URL / build number / result / image tag / code revision
+- frontend Jenkins build URL / build number / result / image tag / code revision
+- CLI Jenkins build URL / build number / result / CLI version / code revision
 - CLI manifest URL 和实际 version
 - previous release tag
-- 主要变更摘要
+- 官方上游变更摘要（如果本次发布包含官方版本合入）
+- Fork 独有变更摘要（每条尽量包含 Gitee PR 和 Multica Issue）
+- 基础设施 / 发布流程变更（如果本次发布包含 ENV、K8S、Jenkins、OBS、backfill 等变化）
+- 下载与安装信息（CLI / desktop / mobile 等客户端产物；没有客户端产物时明确写暂无）
 
 测试环境发布不创建 Gitee Release。
 
@@ -191,3 +194,114 @@ Release 内容必须至少包含：
 - Release 版本号必须等于发布流程 pre 阶段确定的 `PROJECT_VERSION`。
 - Release 在 backend、frontend、cli 三个组件都发布成功后再创建或更新。
 - Release 不是用来修正发布事实的地方；如果 Jenkins/OBS 实际版本和 `PROJECT_VERSION` 不一致，先修发布产物，再写 Release。
+- Release 只能记录当前 release tag 覆盖范围内的 PR / commit；不要把 tag 之后合入的 PR 写进去。
+- Release 是人类 changelog + 发布事实记录，不是原始流水日志；保留可追溯链接和关键校验结果，避免粘贴大段 console log。
+
+### Release 标准结构
+
+生产 Release 默认使用以下结构；除非某节确实不适用，否则不要删节。
+
+```markdown
+# Multica Release <PROJECT_VERSION>
+
+- **PROJECT_VERSION**: `<PROJECT_VERSION>`
+- **FULL_SHA**: `<FULL_SHA>`
+- **source branch**: `main`
+- **previous release**: [`<PREVIOUS_RELEASE>`](https://gitee.com/wujie-agent/multica/releases/tag/<PREVIOUS_RELEASE>)
+
+## 组件交付
+
+| 组件 | Jenkins Build | 结果 | 产物版本 | 代码 Revision |
+|------|---------------|------|----------|---------------|
+| backend | [#<N>](<backend-build-url>) | ✅ SUCCESS | `<backend-image>:<tag>` | `<FULL_SHA>` |
+| frontend | [#<N>](<frontend-build-url>) | ✅ SUCCESS | `<frontend-image>:<tag>` | `<FULL_SHA>` |
+| CLI | [#<N>](<cli-build-url>) | ✅ SUCCESS | `<PROJECT_VERSION>` | `<short-sha>` |
+
+## 发布验证
+
+- backend/frontend checkout: `<FULL_SHA>` (`main`)
+- backend rollout: ✅ `<rollout-result>` in namespace `<namespace>`
+- frontend rollout: ✅ `<rollout-result>` in namespace `<namespace>`
+- backend/frontend image tag: `<image-tag>`
+- CLI manifest: [`<manifest-url>`](<manifest-url>)
+- CLI manifest version: `<actual-version>` ✅ 与 `PROJECT_VERSION` 一致
+- CLI OBS artifacts: ✅ `<platform-count>` platform packages published, checksums included in manifest, asset HEAD checks passed
+- 生产入口: [`https://multica.wujieai.com`](https://multica.wujieai.com) ✅
+
+## 官方上游变更
+
+仅当本次发布包含官方上游合入时填写。按领域分组列 GitHub PR 链接和一句话摘要，来源优先级：
+1. `git log <previous-release-tag>..<PROJECT_VERSION>` 中的 GitHub PR merge commits
+2. 官方 release/changelog
+3. GitHub PR title/body
+
+## Fork 独有变更
+
+- **<变更标题>**
+  - Issue: [OPE-XXX](https://multica.wujieai.com/openharness/issues/OPE-XXX)
+  - PR: [!N](https://gitee.com/wujie-agent/multica/pulls/N)
+  - 摘要: <一句话说明用户可感知变化或技术影响>
+
+没有 Issue 的 PR 可以省略 Issue，但不能省略 PR。多个 PR / Issue 用逗号分隔。
+
+## 基础设施 / 发布流程变更
+
+仅当本次发布包含 ENV、K8S、Jenkins、OBS、backfill、release pipeline 等变化时填写。至少记录：
+
+- ENV refreshed: `<yes/no>`
+- source: `<Jenkins credentials ID / controlled env source>`
+- namespace: `<namespace>`
+- secret: `<secret-name> <configured/skipped>`
+- deployment spec: `<applied/skipped>`
+- rollout: `<result>`
+
+## 下载与安装
+
+- CLI manifest: [`<manifest-url>`](<manifest-url>)
+- CLI version: `<PROJECT_VERSION>`
+- Install:
+
+```bash
+curl -fsSL https://multica.wujieai.com/install.sh | sh
+```
+
+- Published CLI artifacts:
+  - `darwin/amd64`
+  - `darwin/arm64`
+  - `linux/amd64`
+  - `linux/arm64`
+  - `windows/amd64`
+  - `windows/arm64`
+- Checksums: included in `manifest.json`
+```
+
+### Release 撰写前校验
+
+写 Release 前必须做这几步，避免把错误事实固化到发布记录里：
+
+```bash
+# 1. 确认 tag 与 FULL_SHA 一致
+git rev-parse <PROJECT_VERSION>
+git rev-parse <FULL_SHA>
+
+# 2. 列出当前 release 覆盖范围内的 commits / PR，严禁写入 tag 之后的 PR
+git log --oneline <PREVIOUS_RELEASE>..<PROJECT_VERSION> --reverse
+
+# 3. Fork PR 清单以 Gitee PR API / merge commit 为准
+# 每个 Fork 变更都尽量补 PR + OPE issue；不能只凭记忆写。
+
+# 4. 官方上游变更以 GitHub PR merge commits / 官方 changelog 为准
+# 如果本次没有官方合入，明确跳过「官方上游变更」。
+
+# 5. CLI manifest 必须 live 校验
+curl -fsSL https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json | jq -r .version
+```
+
+最低验收：
+
+- `PROJECT_VERSION`、Gitee release tag、CLI manifest version 三者一致。
+- 组件交付表包含 backend / frontend / CLI 的 build URL、build number、result、产物版本、code revision。
+- 「官方上游变更」和「Fork 独有变更」已分开；无官方合入时说明跳过。
+- Fork 变更不漏当前 tag 内的重要 PR，不混入 tag 之后的 PR。
+- ENV / K8S / Jenkins / OBS / backfill 等基础设施变化有独立 section。
+- 下载 section 只写真实已发布客户端产物；checksum 信息来自 manifest。
