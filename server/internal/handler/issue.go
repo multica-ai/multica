@@ -1125,6 +1125,28 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	} else if filter != nil {
 		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(filter))))
 	}
+	// CEREBRO-PATCH(issue-reference-filter-grouped): keep grouped/assignee
+	// boards in lock-step with ListIssues' ?reference=<object>:<ref_id> filter.
+	if raw := strings.TrimSpace(r.URL.Query().Get("reference")); raw != "" {
+		object, refID, found := strings.Cut(raw, ":")
+		object = strings.TrimSpace(object)
+		refID = strings.TrimSpace(refID)
+		if !found || object == "" || refID == "" {
+			writeError(w, http.StatusBadRequest, "reference must be <object>:<ref_id>")
+			return
+		}
+		where = append(where, fmt.Sprintf(
+			`EXISTS (
+				SELECT 1
+				  FROM cerebro_issue_reference cir
+				 WHERE cir.issue_id = i.id
+				   AND cir.object = %s::text
+				   AND cir.ref_id = %s::text
+			)`,
+			addArg(object),
+			addArg(refID),
+		))
+	}
 	// Mirror the involves_user_id 4-branch UNION from sqlc's ListIssues /
 	// ListOpenIssues / CountIssues. ListGroupedIssues is a hand-written dynamic
 	// SQL builder that does not share parameters with sqlc, so the fragment is

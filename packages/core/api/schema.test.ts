@@ -131,6 +131,20 @@ describe("ApiClient schema fallback", () => {
       const res = await client.listGroupedIssues({ group_by: "assignee" });
       expect(res).toEqual({ groups: [] });
     });
+
+    it("serializes reference filters", async () => {
+      stubFetchJson({ groups: [] });
+      const client = new ApiClient("https://api.example.test");
+      await client.listGroupedIssues({
+        group_by: "assignee",
+        reference: "github_pr:firtal-group/firtal-cerebro#525",
+      });
+      const fetchMock = vi.mocked(fetch);
+      const url = String(fetchMock.mock.calls[0]?.[0]);
+      expect(url).toBe(
+        "https://api.example.test/api/issues/grouped?group_by=assignee&reference=github_pr%3Afirtal-group%2Ffirtal-cerebro%23525",
+      );
+    });
   });
 
   describe("listComments", () => {

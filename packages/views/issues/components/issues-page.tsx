@@ -73,11 +73,12 @@ export function IssuesPage({
       project_ids: projectFilters,
       include_no_project: includeNoProject,
       label_ids: labelFilters,
+      reference: referenceFilter,
     };
     if (scope === "members") filter.assignee_types = ["member"];
     if (scope === "agents") filter.assignee_types = ["agent", "squad"];
     return filter;
-  }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, priorityFilters, projectFilters, scope, statusFilters]);
+  }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, priorityFilters, projectFilters, referenceFilter, scope, statusFilters]);
 
   const assigneeGroupsOptions = issueAssigneeGroupsOptions(wsId, assigneeGroupFilter);
   const statusIssuesQuery = useQuery({
