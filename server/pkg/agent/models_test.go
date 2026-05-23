@@ -144,9 +144,9 @@ func TestInferCopilotProvider(t *testing.T) {
 		"raptor-mini":       "",
 		// negative cases: must not be misidentified as OpenAI
 		// reasoning series even though they start with `o`.
-		"opus-fake":         "",
-		"omni":              "",
-		"o":                 "",
+		"opus-fake": "",
+		"omni":      "",
+		"o":         "",
 	}
 	for id, want := range cases {
 		if got := inferCopilotProvider(id); got != want {
@@ -238,6 +238,24 @@ func TestListModelsUnknownProvider(t *testing.T) {
 	_, err := ListModels(ctx, "nonexistent", "")
 	if err == nil {
 		t.Fatal("ListModels(unknown) expected error")
+	}
+}
+
+func TestListModelsQwenpawReturnsACPModelCatalog(t *testing.T) {
+	ctx := context.Background()
+	got, err := ListModels(ctx, "qwenpaw", "")
+	if err != nil {
+		t.Fatalf("ListModels(qwenpaw) error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil slice")
+	}
+	// QwenPaw ACP mode discovers models via discoverACPModels
+	if len(got) == 0 {
+		t.Log("qwenpaw returned empty catalog — QwenPaw binary may not be installed")
+	}
+	if !ModelSelectionSupported("qwenpaw") {
+		t.Fatal("expected qwenpaw model selection to be reported supported")
 	}
 }
 

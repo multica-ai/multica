@@ -81,6 +81,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverKiroModels(ctx, executablePath)
 		})
+	case "qwenpaw":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverQwenpawModels(ctx, executablePath)
+		})
 	case "opencode":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
@@ -452,6 +456,16 @@ func discoverKiroModels(ctx context.Context, executablePath string) ([]Model, er
 		defaultBin:   "kiro-cli",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-kiro-discovery-",
+	})
+}
+
+// discoverQwenpawModels spins up a throwaway `qwenpaw acp` process and parses
+// the models block from session/new, same pattern as hermes/kimi/kiro.
+func discoverQwenpawModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "qwenpaw",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-qwenpaw-discovery-",
 	})
 }
 
