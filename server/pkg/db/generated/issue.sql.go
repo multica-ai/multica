@@ -125,16 +125,27 @@ WHERE i.workspace_id = $1
   AND ($9::uuid IS NULL OR i.project_id = $9)
   AND ($10::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND ($11::jsonb IS NULL OR i.metadata @> $11::jsonb)
+  -- CEREBRO-PATCH(issue-reference-filter-count): keep totals aligned with ListIssues.
   AND (
-    $12::uuid[] IS NULL
-    OR i.project_id = ANY($12::uuid[])
+    $12::text IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM cerebro_issue_reference cir
+      WHERE cir.issue_id = i.id
+        AND cir.object = $12::text
+        AND cir.ref_id = $13::text
+    )
   )
   AND (
-    $13::uuid IS NULL
+    $14::uuid[] IS NULL
+    OR i.project_id = ANY($14::uuid[])
+  )
+  AND (
+    $15::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
            WHERE a.workspace_id = $1
-             AND a.owner_id     = $13::uuid
+             AND a.owner_id     = $15::uuid
     ))
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
           SELECT sm.squad_id
@@ -142,14 +153,14 @@ WHERE i.workspace_id = $1
             JOIN squad s ON s.id = sm.squad_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'member'
-             AND sm.member_id   = $13::uuid
+             AND sm.member_id   = $15::uuid
           UNION
           SELECT s.id
             FROM squad s
             JOIN agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
              AND a.workspace_id = $1
-             AND a.owner_id     = $13::uuid
+             AND a.owner_id     = $15::uuid
           UNION
           SELECT sm.squad_id
             FROM squad_member sm
@@ -158,25 +169,27 @@ WHERE i.workspace_id = $1
            WHERE s.workspace_id = $1
              AND sm.member_type = 'agent'
              AND a.workspace_id = $1
-             AND a.owner_id     = $13::uuid
+             AND a.owner_id     = $15::uuid
     ))
   )
 `
 
 type CountIssuesParams struct {
-	WorkspaceID    pgtype.UUID   `json:"workspace_id"`
-	IsAdmin        bool          `json:"is_admin"`
-	UserID         pgtype.UUID   `json:"user_id"`
-	Status         pgtype.Text   `json:"status"`
-	Priority       pgtype.Text   `json:"priority"`
-	AssigneeID     pgtype.UUID   `json:"assignee_id"`
-	AssigneeIds    []pgtype.UUID `json:"assignee_ids"`
-	CreatorID      pgtype.UUID   `json:"creator_id"`
-	ProjectID      pgtype.UUID   `json:"project_id"`
-	Scheduled      pgtype.Bool   `json:"scheduled"`
-	MetadataFilter []byte        `json:"metadata_filter"`
-	ProjectIds     []pgtype.UUID `json:"project_ids"`
-	InvolvesUserID pgtype.UUID   `json:"involves_user_id"`
+	WorkspaceID     pgtype.UUID   `json:"workspace_id"`
+	IsAdmin         bool          `json:"is_admin"`
+	UserID          pgtype.UUID   `json:"user_id"`
+	Status          pgtype.Text   `json:"status"`
+	Priority        pgtype.Text   `json:"priority"`
+	AssigneeID      pgtype.UUID   `json:"assignee_id"`
+	AssigneeIds     []pgtype.UUID `json:"assignee_ids"`
+	CreatorID       pgtype.UUID   `json:"creator_id"`
+	ProjectID       pgtype.UUID   `json:"project_id"`
+	Scheduled       pgtype.Bool   `json:"scheduled"`
+	MetadataFilter  []byte        `json:"metadata_filter"`
+	ReferenceObject pgtype.Text   `json:"reference_object"`
+	ReferenceRefID  pgtype.Text   `json:"reference_ref_id"`
+	ProjectIds      []pgtype.UUID `json:"project_ids"`
+	InvolvesUserID  pgtype.UUID   `json:"involves_user_id"`
 }
 
 // CEREBRO-PATCH(count-issues-access-filter): keep list totals aligned with private/project visibility (JEH-1749).
@@ -194,6 +207,8 @@ func (q *Queries) CountIssues(ctx context.Context, arg CountIssuesParams) (int64
 		arg.ProjectID,
 		arg.Scheduled,
 		arg.MetadataFilter,
+		arg.ReferenceObject,
+		arg.ReferenceRefID,
 		arg.ProjectIds,
 		arg.InvolvesUserID,
 	)
@@ -769,17 +784,28 @@ WHERE i.workspace_id = $1
   AND ($11::uuid IS NULL OR i.project_id = $11)
   AND ($12::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND ($13::jsonb IS NULL OR i.metadata @> $13::jsonb)
+  -- CEREBRO-PATCH(issue-reference-filter): reference edge filter for cerebro_issue_reference.
   AND (
-    $14::uuid[] IS NULL
-    OR i.project_id = ANY($14::uuid[])
+    $14::text IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM cerebro_issue_reference cir
+      WHERE cir.issue_id = i.id
+        AND cir.object = $14::text
+        AND cir.ref_id = $15::text
+    )
   )
   AND (
-    $15::uuid IS NULL
+    $16::uuid[] IS NULL
+    OR i.project_id = ANY($16::uuid[])
+  )
+  AND (
+    $17::uuid IS NULL
     -- (1) assignee is an agent owned by the user
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
            WHERE a.workspace_id = $1
-             AND a.owner_id     = $15::uuid
+             AND a.owner_id     = $17::uuid
     ))
     -- (2)(3)(4) assignee is a squad related to the user — three relations
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
@@ -789,7 +815,7 @@ WHERE i.workspace_id = $1
             JOIN squad s ON s.id = sm.squad_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'member'
-             AND sm.member_id   = $15::uuid
+             AND sm.member_id   = $17::uuid
           UNION
           -- (3) the squad's canonical leader is an agent owned by the user.
           -- We read squad.leader_id directly rather than relying on a
@@ -800,7 +826,7 @@ WHERE i.workspace_id = $1
             JOIN agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
              AND a.workspace_id = $1
-             AND a.owner_id     = $15::uuid
+             AND a.owner_id     = $17::uuid
           UNION
           -- (4) the squad has an agent member owned by the user
           SELECT sm.squad_id
@@ -810,7 +836,7 @@ WHERE i.workspace_id = $1
            WHERE s.workspace_id = $1
              AND sm.member_type = 'agent'
              AND a.workspace_id = $1
-             AND a.owner_id     = $15::uuid
+             AND a.owner_id     = $17::uuid
     ))
   )
 ORDER BY i.position ASC, i.created_at DESC
@@ -818,21 +844,23 @@ LIMIT $2 OFFSET $3
 `
 
 type ListIssuesParams struct {
-	WorkspaceID    pgtype.UUID   `json:"workspace_id"`
-	Limit          int32         `json:"limit"`
-	Offset         int32         `json:"offset"`
-	IsAdmin        bool          `json:"is_admin"`
-	UserID         pgtype.UUID   `json:"user_id"`
-	Status         pgtype.Text   `json:"status"`
-	Priority       pgtype.Text   `json:"priority"`
-	AssigneeID     pgtype.UUID   `json:"assignee_id"`
-	AssigneeIds    []pgtype.UUID `json:"assignee_ids"`
-	CreatorID      pgtype.UUID   `json:"creator_id"`
-	ProjectID      pgtype.UUID   `json:"project_id"`
-	Scheduled      pgtype.Bool   `json:"scheduled"`
-	MetadataFilter []byte        `json:"metadata_filter"`
-	ProjectIds     []pgtype.UUID `json:"project_ids"`
-	InvolvesUserID pgtype.UUID   `json:"involves_user_id"`
+	WorkspaceID     pgtype.UUID   `json:"workspace_id"`
+	Limit           int32         `json:"limit"`
+	Offset          int32         `json:"offset"`
+	IsAdmin         bool          `json:"is_admin"`
+	UserID          pgtype.UUID   `json:"user_id"`
+	Status          pgtype.Text   `json:"status"`
+	Priority        pgtype.Text   `json:"priority"`
+	AssigneeID      pgtype.UUID   `json:"assignee_id"`
+	AssigneeIds     []pgtype.UUID `json:"assignee_ids"`
+	CreatorID       pgtype.UUID   `json:"creator_id"`
+	ProjectID       pgtype.UUID   `json:"project_id"`
+	Scheduled       pgtype.Bool   `json:"scheduled"`
+	MetadataFilter  []byte        `json:"metadata_filter"`
+	ReferenceObject pgtype.Text   `json:"reference_object"`
+	ReferenceRefID  pgtype.Text   `json:"reference_ref_id"`
+	ProjectIds      []pgtype.UUID `json:"project_ids"`
+	InvolvesUserID  pgtype.UUID   `json:"involves_user_id"`
 }
 
 type ListIssuesRow struct {
@@ -890,6 +918,8 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 		arg.ProjectID,
 		arg.Scheduled,
 		arg.MetadataFilter,
+		arg.ReferenceObject,
+		arg.ReferenceRefID,
 		arg.ProjectIds,
 		arg.InvolvesUserID,
 	)

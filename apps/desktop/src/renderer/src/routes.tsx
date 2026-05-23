@@ -48,6 +48,9 @@ import { DaemonSettingsTab } from "./components/daemon-settings-tab";
 import { UpdatesSettingsTab } from "./components/updates-settings-tab";
 import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
 import { cerebroFeatureFlagTabs } from "@multica/cerebro-feature-flags";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { IssueListReferenceFilter } from "@multica/cerebro-references/views";
+import { ReferencesByObjectPage } from "@multica/cerebro-references/views/pages";
 
 /**
  * Sets document.title from the deepest matched route's handle.title.
@@ -104,6 +107,27 @@ function SettingsRoute() {
   );
 }
 
+function IssuesRoute() {
+  const referencesEnabled = useFeatureFlag("cerebro_references");
+  return (
+    <IssuesPage
+      referenceFilterControl={
+        referencesEnabled ? <IssueListReferenceFilter /> : null
+      }
+    />
+  );
+}
+
+function ReferenceReverseLookupRoute() {
+  const { object = "", refId = "" } = useParams();
+  return (
+    <ReferencesByObjectPage
+      object={decodeURIComponent(object)}
+      refId={decodeURIComponent(refId)}
+    />
+  );
+}
+
 /**
  * Route definitions shared by all tabs.
  *
@@ -135,7 +159,7 @@ export const appRoutes: RouteObject[] = [
             path: "issues",
             element: (
               <ErrorBoundary>
-                <IssuesPage />
+                <IssuesRoute />
               </ErrorBoundary>
             ),
             handle: { title: "Issues" },
@@ -144,6 +168,11 @@ export const appRoutes: RouteObject[] = [
             path: "issues/:id",
             element: <IssueDetailPage />,
             handle: { title: "Issue" },
+          },
+          {
+            path: "cerebro/references/:object/:refId",
+            element: <ReferenceReverseLookupRoute />,
+            handle: { title: "Reference" },
           },
           {
             path: "channels/:id",

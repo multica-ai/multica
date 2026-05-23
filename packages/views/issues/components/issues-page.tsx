@@ -2,7 +2,7 @@
 
 // CEREBRO-PATCH(issues-page-cerebro): cerebro modification of upstream file
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { toast } from "sonner";
 import { ChevronRight, ListTodo } from "lucide-react";
 import type { UpdateIssueRequest } from "@multica/core/types";
@@ -25,10 +25,24 @@ import { BoardView } from "./board-view";
 import { ListView } from "./list-view";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import { useT } from "../../i18n";
+import { useNavigation } from "../../navigation";
 
-export function IssuesPage() {
+function parseReferenceFilter(searchValue: string | null): string | undefined {
+  if (!searchValue) return undefined;
+  const [object, ...rest] = searchValue.split(":");
+  const refId = rest.join(":");
+  if (!object || !refId) return undefined;
+  return `${object}:${refId}`;
+}
+
+export function IssuesPage({
+  referenceFilterControl,
+}: {
+  referenceFilterControl?: ReactNode;
+} = {}) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
+  const navigation = useNavigation();
 
   const workspace = useCurrentWorkspace();
   const scope = useIssuesScopeStore((s) => s.scope);
@@ -43,6 +57,10 @@ export function IssuesPage() {
   const includeNoProject = useIssueViewStore((s) => s.includeNoProject);
   const subIssueDisplay = useIssueViewStore((s) => s.subIssueDisplay);
   const labelFilters = useIssueViewStore((s) => s.labelFilters);
+  const referenceFilter = useMemo(
+    () => parseReferenceFilter(navigation.searchParams.get("reference")),
+    [navigation.searchParams],
+  );
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
 
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(() => {
@@ -55,15 +73,16 @@ export function IssuesPage() {
       project_ids: projectFilters,
       include_no_project: includeNoProject,
       label_ids: labelFilters,
+      reference: referenceFilter,
     };
     if (scope === "members") filter.assignee_types = ["member"];
     if (scope === "agents") filter.assignee_types = ["agent", "squad"];
     return filter;
-  }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, priorityFilters, projectFilters, scope, statusFilters]);
+  }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, priorityFilters, projectFilters, referenceFilter, scope, statusFilters]);
 
   const assigneeGroupsOptions = issueAssigneeGroupsOptions(wsId, assigneeGroupFilter);
   const statusIssuesQuery = useQuery({
-    ...issueListOptions(wsId),
+    ...issueListOptions(wsId, { reference: referenceFilter }),
     enabled: !usesAssigneeBoard,
   });
   const assigneeGroupsQuery = useQuery({
@@ -206,7 +225,10 @@ export function IssuesPage() {
 
       <ViewStoreProvider store={useIssueViewStore}>
         {/* Header 2: Scope tabs + filters */}
-        <IssuesHeader scopedIssues={headerIssues} />
+        <IssuesHeader
+          scopedIssues={headerIssues}
+          referenceFilterControl={referenceFilterControl}
+        />
 
         {/* Content: scrollable */}
         {headerIssues.length === 0 ? (

@@ -2,7 +2,7 @@
 
 // CEREBRO-PATCH(issues-header-cerebro): cerebro modification of upstream file
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -493,7 +493,13 @@ function LabelSubContent({
 // IssuesHeader
 // ---------------------------------------------------------------------------
 
-export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
+export function IssuesHeader({
+  scopedIssues,
+  referenceFilterControl,
+}: {
+  scopedIssues: Issue[];
+  referenceFilterControl?: ReactNode;
+}) {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
   const setScope = useIssuesScopeStore((s) => s.setScope);
@@ -536,7 +542,10 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
         ))}
       </div>
 
-      <IssueDisplayControls scopedIssues={scopedIssues} />
+      <div className="flex min-w-0 items-center gap-1">
+        {referenceFilterControl}
+        <IssueDisplayControls scopedIssues={scopedIssues} />
+      </div>
     </div>
   );
 }

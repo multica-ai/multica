@@ -10,6 +10,7 @@ const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
+const mockNavigationSearchParams = vi.hoisted(() => new URLSearchParams());
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -50,7 +51,11 @@ vi.mock("../../navigation", () => ({
       {children}
     </a>
   ),
-  useNavigation: () => ({ push: vi.fn(), pathname: "/issues" }),
+  useNavigation: () => ({
+    push: vi.fn(),
+    pathname: "/issues",
+    searchParams: mockNavigationSearchParams,
+  }),
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
@@ -479,6 +484,7 @@ function renderWithQuery(ui: React.ReactElement) {
 describe("IssuesPage (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockNavigationSearchParams.delete("reference");
     mockListIssues.mockResolvedValue({ issues: [], total: 0 });
     mockListGroupedIssues.mockResolvedValue({ groups: [] });
     mockViewState.viewMode = "board";
@@ -550,6 +556,23 @@ describe("IssuesPage (shared)", () => {
         limit: 50,
         offset: 0,
         statuses: ["backlog", "todo", "in_progress", "in_review", "done", "blocked"],
+      }),
+    );
+    expect(mockListIssues).not.toHaveBeenCalled();
+  });
+
+  it("passes reference filter to grouped assignee endpoint", async () => {
+    mockNavigationSearchParams.set("reference", "github_pr:firtal-group/firtal-cerebro#525");
+    mockViewState.grouping = "assignee";
+    mockListGroupedIssues.mockResolvedValue(mockAssigneeGroups(mockIssues));
+
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findByText("Implement auth");
+    expect(mockListGroupedIssues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        group_by: "assignee",
+        reference: "github_pr:firtal-group/firtal-cerebro#525",
       }),
     );
     expect(mockListIssues).not.toHaveBeenCalled();

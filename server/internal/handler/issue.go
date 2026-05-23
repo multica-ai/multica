@@ -796,6 +796,22 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// CEREBRO-PATCH(issue-reference-filter): ?reference=<object>:<ref_id>
+	// narrows the issue list to rows that carry a matching cerebro edge.
+	var referenceObjectFilter pgtype.Text
+	var referenceRefIDFilter pgtype.Text
+	if raw := strings.TrimSpace(r.URL.Query().Get("reference")); raw != "" {
+		object, refID, found := strings.Cut(raw, ":")
+		object = strings.TrimSpace(object)
+		refID = strings.TrimSpace(refID)
+		if !found || object == "" || refID == "" {
+			writeError(w, http.StatusBadRequest, "reference must be <object>:<ref_id>")
+			return
+		}
+		referenceObjectFilter = pgtype.Text{String: object, Valid: true}
+		referenceRefIDFilter = pgtype.Text{String: refID, Valid: true}
+	}
+
 	// open_only=true returns all non-done/cancelled issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
@@ -871,21 +887,23 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	issues, err := h.Queries.ListIssues(ctx, db.ListIssuesParams{
-		WorkspaceID:    wsUUID,
-		Limit:          int32(limit),
-		Offset:         int32(offset),
-		IsAdmin:        isWorkspaceAdmin(member),
-		UserID:         member.UserID,
-		Status:         statusFilter,
-		Priority:       priorityFilter,
-		AssigneeID:     assigneeFilter,
-		AssigneeIds:    assigneeIdsFilter,
-		CreatorID:      creatorFilter,
-		ProjectID:      projectFilter,
-		ProjectIds:     projectIDsFilter,
-		InvolvesUserID: involvesUserFilter,
-		Scheduled:      scheduledFilter,
-		MetadataFilter: metadataFilter,
+		WorkspaceID:     wsUUID,
+		Limit:           int32(limit),
+		Offset:          int32(offset),
+		IsAdmin:         isWorkspaceAdmin(member),
+		UserID:          member.UserID,
+		Status:          statusFilter,
+		Priority:        priorityFilter,
+		AssigneeID:      assigneeFilter,
+		AssigneeIds:     assigneeIdsFilter,
+		CreatorID:       creatorFilter,
+		ProjectID:       projectFilter,
+		ProjectIds:      projectIDsFilter,
+		InvolvesUserID:  involvesUserFilter,
+		Scheduled:       scheduledFilter,
+		MetadataFilter:  metadataFilter,
+		ReferenceObject: referenceObjectFilter,
+		ReferenceRefID:  referenceRefIDFilter,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -894,19 +912,21 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	// Get the true total count for pagination awareness.
 	total, err := h.Queries.CountIssues(ctx, db.CountIssuesParams{
-		WorkspaceID:    wsUUID,
-		IsAdmin:        isWorkspaceAdmin(member),
-		UserID:         member.UserID,
-		Status:         statusFilter,
-		Priority:       priorityFilter,
-		AssigneeID:     assigneeFilter,
-		AssigneeIds:    assigneeIdsFilter,
-		CreatorID:      creatorFilter,
-		ProjectID:      projectFilter,
-		ProjectIds:     projectIDsFilter,
-		InvolvesUserID: involvesUserFilter,
-		Scheduled:      scheduledFilter,
-		MetadataFilter: metadataFilter,
+		WorkspaceID:     wsUUID,
+		IsAdmin:         isWorkspaceAdmin(member),
+		UserID:          member.UserID,
+		Status:          statusFilter,
+		Priority:        priorityFilter,
+		AssigneeID:      assigneeFilter,
+		AssigneeIds:     assigneeIdsFilter,
+		CreatorID:       creatorFilter,
+		ProjectID:       projectFilter,
+		ProjectIds:      projectIDsFilter,
+		InvolvesUserID:  involvesUserFilter,
+		Scheduled:       scheduledFilter,
+		MetadataFilter:  metadataFilter,
+		ReferenceObject: referenceObjectFilter,
+		ReferenceRefID:  referenceRefIDFilter,
 		// CEREBRO-PATCH(count-issues-access-filter): count uses the same privacy/project visibility as ListIssues (JEH-1749).
 	})
 	if err != nil {
@@ -1104,6 +1124,28 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if filter != nil {
 		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(filter))))
+	}
+	// CEREBRO-PATCH(issue-reference-filter-grouped): keep grouped/assignee
+	// boards in lock-step with ListIssues' ?reference=<object>:<ref_id> filter.
+	if raw := strings.TrimSpace(r.URL.Query().Get("reference")); raw != "" {
+		object, refID, found := strings.Cut(raw, ":")
+		object = strings.TrimSpace(object)
+		refID = strings.TrimSpace(refID)
+		if !found || object == "" || refID == "" {
+			writeError(w, http.StatusBadRequest, "reference must be <object>:<ref_id>")
+			return
+		}
+		where = append(where, fmt.Sprintf(
+			`EXISTS (
+				SELECT 1
+				  FROM cerebro_issue_reference cir
+				 WHERE cir.issue_id = i.id
+				   AND cir.object = %s::text
+				   AND cir.ref_id = %s::text
+			)`,
+			addArg(object),
+			addArg(refID),
+		))
 	}
 	// Mirror the involves_user_id 4-branch UNION from sqlc's ListIssues /
 	// ListOpenIssues / CountIssues. ListGroupedIssues is a hand-written dynamic

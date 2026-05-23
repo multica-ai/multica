@@ -22,6 +22,9 @@ function workspaceScoped(slug: string) {
     usage: () => `${ws}/usage`,
     issues: () => `${ws}/issues`,
     issueDetail: (id: string) => `${ws}/issues/${encode(id)}`,
+    // CEREBRO-PATCH(cerebro-reference-path): reverse lookup for issue edge references.
+    referenceObject: (object: string, refId: string) =>
+      `${ws}/cerebro/references/${encode(object)}/${encode(refId)}`,
     channels: () => `${ws}/channels`,
     channelDetail: (id: string) => `${ws}/channels/${encode(id)}`,
     projects: () => `${ws}/projects`,

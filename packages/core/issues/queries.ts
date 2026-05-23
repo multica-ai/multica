@@ -12,6 +12,8 @@ import { BOARD_STATUSES } from "./config";
 export const issueKeys = {
   all: (wsId: string) => ["issues", wsId] as const,
   list: (wsId: string) => [...issueKeys.all(wsId), "list"] as const,
+  listFiltered: (wsId: string, filter: IssueListFilter) =>
+    [...issueKeys.list(wsId), filter] as const,
   assigneeGroupsAll: (wsId: string) =>
     [...issueKeys.all(wsId), "assignee-groups"] as const,
   assigneeGroups: (wsId: string, filter: AssigneeGroupedIssuesFilter) =>
@@ -69,6 +71,8 @@ export type MyIssuesFilter = Pick<
   "assignee_id" | "assignee_ids" | "creator_id" | "project_id"
 >;
 
+export type IssueListFilter = Pick<ListIssuesParams, "reference">;
+
 export type AssigneeGroupedIssuesFilter = Omit<
   ListGroupedIssuesParams,
   "group_by" | "limit" | "offset" | "group_assignee_type" | "group_assignee_id"
@@ -90,7 +94,9 @@ export function flattenIssueBuckets(data: ListIssuesCache) {
   return out;
 }
 
-async function fetchFirstPages(filter: MyIssuesFilter = {}): Promise<ListIssuesCache> {
+async function fetchFirstPages(
+  filter: MyIssuesFilter & IssueListFilter = {},
+): Promise<ListIssuesCache> {
   const responses = await Promise.all(
     PAGINATED_STATUSES.map((status) =>
       api.listIssues({ status, limit: ISSUE_PAGE_SIZE, offset: 0, ...filter }),
@@ -113,10 +119,11 @@ async function fetchFirstPages(filter: MyIssuesFilter = {}): Promise<ListIssuesC
  * Fetches the first page of each paginated status in parallel. Use
  * {@link useLoadMoreByStatus} to paginate a specific status into the cache.
  */
-export function issueListOptions(wsId: string) {
+export function issueListOptions(wsId: string, filter: IssueListFilter = {}) {
+  const hasFilter = Boolean(filter.reference);
   return queryOptions({
-    queryKey: issueKeys.list(wsId),
-    queryFn: () => fetchFirstPages(),
+    queryKey: hasFilter ? issueKeys.listFiltered(wsId, filter) : issueKeys.list(wsId),
+    queryFn: () => fetchFirstPages(filter),
     select: flattenIssueBuckets,
   });
 }
