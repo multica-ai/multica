@@ -41,9 +41,11 @@ import {
   LEFT_PANEL_REVEAL_PX,
   LONG_PRESS_MS,
   POST_SWIPE_CLICK_SUPPRESS_MS,
+  SWIPE_ARCHIVE_EXIT_MS,
   SWIPE_INTENT_PX,
   SWIPE_ROW_TRANSITION_MS,
   commitThresholdPx,
+  shouldArchiveOnRelease,
   shouldCommitHeldSwipe,
   shouldInstantArchive,
 } from "../swipe-thresholds";
@@ -56,6 +58,21 @@ interface Props {
    * our own archive mutation, so batch-archive paths stay consistent.
    */
   onArchive: () => void;
+}
+
+function animateRowArchiveExit(
+  row: HTMLElement | null,
+  rowWidth: number,
+  onArchive: () => void,
+) {
+  if (!row) {
+    onArchive();
+    return;
+  }
+  row.style.transition = `transform ${SWIPE_ARCHIVE_EXIT_MS}ms ease-out, opacity ${SWIPE_ARCHIVE_EXIT_MS}ms ease-out`;
+  row.style.transform = `translateX(${rowWidth + 48}px)`;
+  row.style.opacity = "0";
+  window.setTimeout(onArchive, SWIPE_ARCHIVE_EXIT_MS);
 }
 
 /**
@@ -453,7 +470,8 @@ function MobileRowActions({
       if (!wasHorizontal) return;
 
       const live = offsetXRef.current;
-      const rowWidth = overlay.parentElement?.clientWidth ?? 360;
+      const row = overlay.parentElement;
+      const rowWidth = row?.clientWidth ?? 360;
       const commitPx = commitThresholdPx(rowWidth);
 
       // Suppress the synthetic click after any meaningful horizontal
@@ -465,12 +483,13 @@ function MobileRowActions({
       }
 
       if (
+        shouldArchiveOnRelease(live) ||
         shouldInstantArchive(live, rowWidth) ||
         shouldCommitHeldSwipe(live, rowWidth, archiveHoldReadyRef.current)
       ) {
         setRevealed(false);
-        setOffsetX(0);
-        onArchiveRef.current();
+        resetArchiveHold();
+        animateRowArchiveExit(row, rowWidth, onArchiveRef.current);
       } else if (live <= -commitPx) {
         setOffsetX(0);
         setRevealed(true);
@@ -941,16 +960,18 @@ function SwipeArchiveOnly({
       if (!wasHorizontal) return;
 
       const live = offsetXRef.current;
-      const rowWidth = overlay.parentElement?.clientWidth ?? 360;
+      const row = overlay.parentElement;
+      const rowWidth = row?.clientWidth ?? 360;
       if (live > SWIPE_INTENT_PX) {
         swipeEndedAtRef.current = Date.now();
       }
       if (
+        shouldArchiveOnRelease(live) ||
         shouldInstantArchive(live, rowWidth) ||
         shouldCommitHeldSwipe(live, rowWidth, archiveHoldReadyRef.current)
       ) {
-        setOffsetX(0);
-        onArchiveRef.current();
+        resetArchiveHold();
+        animateRowArchiveExit(row, rowWidth, onArchiveRef.current);
       } else {
         setOffsetX(0);
       }

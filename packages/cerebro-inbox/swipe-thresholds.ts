@@ -38,10 +38,13 @@
  *        archives. Users must swipe nearly the full row width to trigger the
  *        hold-to-commit path. Max clamp raised from 200 → 400 px so 80% of
  *        standard phone widths (320–430 px) is never clipped.
- *  - v9 (current): instant-archive threshold lowered from 95% → 80% to match
+ *  - v9: instant-archive threshold lowered from 95% → 80% to match
  *        the commit threshold. Any swipe reaching 80% now archives immediately
  *        on release; the hold-to-commit path is only reached at exactly the
  *        commit boundary, making the two thresholds consistent.
+ *  - v10 (current): release-to-archive threshold changed to >50 px. This
+ *        matches the mobile inbox requirement and makes the gesture feel like
+ *        a quick dismiss instead of a near-full-row drag.
  *
  * Sources:
  *  - "Pointer events vs touch events for swipe" — react-swipeable's README
@@ -53,6 +56,7 @@
 export const SWIPE_COMMIT_FRACTION = 0.80;
 export const SWIPE_COMMIT_MIN_PX = 80;
 export const SWIPE_COMMIT_MAX_PX = 400;
+export const SWIPE_RELEASE_ARCHIVE_PX = 50;
 
 /** Pixels of finger travel that count as "the user tried to swipe" — used
  * to suppress the synthetic click after touchend even when the swipe didn't
@@ -78,6 +82,7 @@ export const ARCHIVE_HOLD_COMMIT_MS = 450;
 /** Snap-back / reveal transition duration. Slightly slower than the previous
  * 200ms so swipe-to-archive feels less abrupt. */
 export const SWIPE_ROW_TRANSITION_MS = 320;
+export const SWIPE_ARCHIVE_EXIT_MS = 180;
 
 /** Total movement before we decide which axis dominates. Below this, we
  * wait — the very first sample of a touch is noisy. */
@@ -120,4 +125,8 @@ export const SWIPE_INSTANT_ARCHIVE_FRACTION = 0.80;
  * commit immediately on release, bypassing the hold-to-commit timer. */
 export function shouldInstantArchive(offsetX: number, rowWidth: number): boolean {
   return offsetX >= rowWidth * SWIPE_INSTANT_ARCHIVE_FRACTION;
+}
+
+export function shouldArchiveOnRelease(offsetX: number): boolean {
+  return offsetX > SWIPE_RELEASE_ARCHIVE_PX;
 }
