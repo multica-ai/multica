@@ -1,0 +1,296 @@
+{
+  "page": {
+    "title": "Runtimes",
+    "tagline": "Máquinas y workers en la nube que ejecutan sesiones de CLI para tus agentes.",
+    "learn_more": "Más información →",
+    "connect_remote": "Agregar una computadora",
+    "search_placeholder": "Buscar runtimes…",
+    "scope_mine": "Míos",
+    "scope_all": "Todos",
+    "live": "En vivo",
+    "live_tooltip": "Actualizaciones en tiempo real · detección de desconexión hasta 75s",
+    "filter_all": "Todos",
+    "filter_all_description": "Todos los runtimes en esta vista",
+    "empty": {
+      "title": "No hay runtimes todavía",
+      "hint": "Desktop escanea automáticamente esta computadora. Para usar otra máquina — un servidor, dev box, o cualquier computadora con terminal — agregala acá."
+    },
+    "no_matches": {
+      "title": "Sin resultados",
+      "with_query": "Ningún runtime coincide con \"{{query}}\"{{filterSuffix}}.",
+      "with_query_filter_suffix": " en este filtro",
+      "no_query": "Ningún runtime coincide con este filtro.",
+      "try_widening": " Probá ampliando el alcance o limpiando los filtros."
+    },
+    "bootstrapping": {
+      "title": "Iniciando runtime local…",
+      "hint": "Esto suele tardar unos segundos. Tu daemon se está registrando con el workspace."
+    }
+  },
+  "machine": {
+    "search_placeholder": "Buscar máquinas…",
+    "filters": {
+      "all": "Todas",
+      "online": "Online",
+      "issues": "Issues"
+    },
+    "section_local": "Local",
+    "section_remote": "Remota",
+    "section_cloud": "Nube",
+    "this_machine": "Esta Mac",
+    "local_badge": "Local · esta máquina",
+    "runtime_count_one": "{{count}} runtime",
+    "runtime_count_other": "{{count}} runtimes",
+    "busy_count_one": "{{count}} ocupado",
+    "busy_count_other": "{{count}} ocupados",
+    "no_matches_title": "Sin máquinas",
+    "no_matches_hint": "Ninguna máquina coincide con la búsqueda o filtro actual.",
+    "select_machine": "Seleccioná una máquina para inspeccionar sus runtimes.",
+    "metrics": {
+      "runtimes": "Runtimes",
+      "runtimes_hint_one": "{{count}} online",
+      "runtimes_hint_other": "{{count}} online",
+      "health": "Estado",
+      "health_clear": "Sin issues",
+      "health_issues_one": "{{count}} issue",
+      "health_issues_other": "{{count}} issues",
+      "workload": "Carga de trabajo",
+      "workload_value_idle": "Inactivo",
+      "workload_idle": "Todos inactivos",
+      "workload_hint": "{{running}} ejecutándose · {{queued}} encolados",
+      "cli": "CLI",
+      "cloud_worker": "Cloud worker",
+      "local_daemon": "Daemon local"
+    }
+  },
+  "health": {
+    "online": {
+      "label": "Online",
+      "description": "Heartbeat recibido en los últimos 45s. Listo para despachar tareas."
+    },
+    "recently_lost": {
+      "label": "Conexión perdida recientemente",
+      "description": "Se perdió contacto hace menos de 5 minutos — suele ser un cortocircuito de red temporal."
+    },
+    "offline": {
+      "label": "Offline",
+      "description": "Sin heartbeat por más de 5 minutos. Reiniciá el daemon o investigá el host."
+    },
+    "about_to_gc": {
+      "label": "Por ser eliminado",
+      "description": "Offline por más de 6 días. Se elimina automáticamente a los 7 días si no se reconecta."
+    }
+  },
+  "detail": {
+    "all_runtimes": "Todos los runtimes",
+    "read_only": "Solo lectura",
+    "delete_button": "Eliminar runtime",
+    "delete_disabled_tooltip": "Este runtime está gestionado por un daemon local en ejecución y se va a volver a registrar en segundos. Detené el proceso del daemon para eliminarlo permanentemente.",
+    "last_seen": "última vez visto {{when}}",
+    "fact_owner": "Propietario",
+    "fact_device": "Dispositivo",
+    "fact_runtime": "Runtime",
+    "technical_details": "Detalles técnicos",
+    "fact_daemon_cli": "Daemon CLI",
+    "fact_daemon_id": "Daemon ID",
+    "serving_title": "Sirviendo a",
+    "serving_count_one": "{{count}} agente",
+    "serving_count_other": "{{count}} agentes",
+    "no_agents": "No hay agentes vinculados a este runtime todavía.",
+    "diagnostics_title": "Diagnósticos",
+    "diagnostics_cli": "CLI",
+    "diagnostics_visibility": "Visibilidad",
+    "visibility_label": {
+      "private": "Privado",
+      "public": "Público"
+    },
+    "visibility_hint": {
+      "private": "Solo vos y los admins del workspace pueden crear agentes en este runtime.",
+      "public": "Cualquier miembro del workspace puede crear agentes en este runtime."
+    },
+    "visibility_toast_updated": "Visibilidad establecida en {{visibility}}",
+    "visibility_toast_failed": "Error al actualizar la visibilidad",
+    "delete_dialog": {
+      "title": "Eliminar Runtime",
+      "description": "¿Estás seguro de que querés eliminar \"{{name}}\"? Esta acción no se puede deshacer.",
+      "cancel": "Cancelar",
+      "confirm": "Eliminar",
+      "deleting": "Eliminando..."
+    },
+    "toast_deleted": "Runtime eliminado",
+    "toast_delete_failed": "Error al eliminar el runtime",
+    "running_chip_one": "· {{count}} ejecutándose",
+    "running_chip_other": "· {{count}} ejecutándose",
+    "queued_chip_one": "· {{count}} encolado",
+    "queued_chip_other": "· {{count}} encolados"
+  },
+  "detail_page": {
+    "not_found_title": "Runtime no encontrado",
+    "not_found_hint": "Puede haber sido eliminado o no tenés acceso."
+  },
+  "running_one": "{{count}} ejecutándose",
+  "running_other": "{{count}} ejecutándose",
+  "queued_one": "{{count}} encolado",
+  "queued_other": "{{count}} encolados",
+  "connect": {
+    "title": "Agregar una computadora",
+    "description": "Ejecutá estos dos comandos en la computadora que querés agregar. Vamos a detectarla en cuanto el daemon se conecte.",
+    "step1_label": "Instalá la CLI de Multica",
+    "step2_label": "Iniciá el daemon",
+    "step2_hint": "Abre un navegador para iniciar sesión, y después mantiene el daemon corriendo en segundo plano.",
+    "live_listening": "Esperando tu computadora",
+    "live_listening_hint": "La vamos a detectar en cuanto el daemon arranque — generalmente en menos de un minuto.",
+    "troubleshooting": "¿No podés abrir un navegador en esa computadora?",
+    "trouble_intro": "Usá un token en vez del inicio de sesión en el navegador. Esto reemplaza el paso 2 y funciona en cualquier lugar donde tengás una terminal.",
+    "trouble_token_hint_prefix": "Creá un token en ",
+    "trouble_token_hint_destination": "Configuración → Tokens",
+    "trouble_token_hint_suffix": ". El daemon solo hace conexiones salientes — no necesita puertos entrantes.",
+    "trouble_check_status": "Verificar estado",
+    "trouble_view_logs": "Ver logs",
+    "copy_aria": "Copiar",
+    "cancel": "Cancelar",
+    "success_title": "Computadora conectada",
+    "success_description": "Tu computadora está online y lista. Creá un agente y va a poder empezar a tomar tareas acá.",
+    "view_runtime": "Ver runtime",
+    "create_agent": "Crear un agente"
+  },
+  "cloud_runtime": {
+    "action": "Cloud Runtime",
+    "title": "Cloud Runtime",
+    "description": "Lanzá un nodo en la nube gestionado y mirá su estado en Fleet.",
+    "create_title": "Nuevo nodo",
+    "create_hint": "Elegí un nombre, tipo de instancia y tamaño de disco. Fleet se encarga del resto.",
+    "nodes_title": "Nodos de Fleet",
+    "refresh": "Actualizar",
+    "nodes_empty": "Sin nodos en la nube",
+    "nodes_failed": "Cloud Runtime no disponible",
+    "nodes_failed_hint": "Fleet no devolvió una lista de nodos.",
+    "node_fallback_name": "Nodo en la nube",
+    "create": "Crear nodo",
+    "creating": "Creando...",
+    "cancel": "Cancelar",
+    "toast_created": "Nodo de Cloud Runtime creado",
+    "toast_create_failed": "Error al crear el nodo de Cloud Runtime",
+    "delete": "Eliminar nodo",
+    "delete_confirm": "¿Estás seguro de que querés eliminar este nodo en la nube? Esta acción no se puede deshacer.",
+    "toast_deleted": "Nodo en la nube eliminado",
+    "toast_delete_failed": "Error al eliminar el nodo en la nube",
+    "fields": {
+      "name": "Nombre",
+      "instance_type": "Tipo de instancia",
+      "region": "Región",
+      "disk_size": "Tamaño de disco GiB",
+      "image_id": "AMI ID",
+      "subnet_id": "Subnet ID",
+      "key_name": "Par de claves",
+      "bootstrap_pat": "PAT de Bootstrap"
+    },
+    "placeholders": {
+      "name": "cloud-dev-01",
+      "key_name": "dev-key"
+    },
+    "validation": {
+      "instance_type_required": "El tipo de instancia es obligatorio",
+      "disk_size_invalid": "El tamaño de disco tiene que ser un número entero positivo"
+    }
+  },
+  "update": {
+    "cli_version_label": "Versión de CLI:",
+    "version_unknown": "desconocida",
+    "managed_by_desktop": "Gestionado por Desktop",
+    "managed_by_desktop_title": "El binario de CLI lo gestiona Multica Desktop — actualizá Desktop para actualizar la CLI.",
+    "latest": "Última",
+    "available": "disponible",
+    "action": "Actualizar",
+    "retry": "Reintentar",
+    "unknown_error": "Error desconocido",
+    "initiate_failed": "Error al iniciar la actualización",
+    "status": {
+      "pending": "Esperando al daemon...",
+      "running": "Actualizando...",
+      "completed": "Actualización completa. El daemon se está reiniciando...",
+      "failed": "La actualización falló",
+      "timeout": "Tiempo de espera agotado"
+    }
+  },
+  "charts": {
+    "heatmap_less": "Menos",
+    "heatmap_more": "Más",
+    "tooltip_total": "Total"
+  },
+  "list": {
+    "col_runtime": "Runtime",
+    "col_health": "Estado",
+    "col_owner": "Propietario",
+    "col_agents": "Agentes",
+    "col_workload": "Carga",
+    "col_cost": "Costo · 7d",
+    "col_cli": "CLI",
+    "cost_delta_flat": "estable",
+    "cli_managed_badge": "Desktop",
+    "cli_update_available_aria": "Actualización disponible",
+    "cli_update_available_tooltip": "Actualización disponible: {{version}}",
+    "row_actions_aria": "Acciones de fila",
+    "delete_action": "Eliminar",
+    "delete_permission_hint": "Solo el propietario del runtime y los admins del workspace pueden eliminar este runtime",
+    "delete_admin_hint": "Solo el propietario del runtime y los admins del workspace pueden eliminar un runtime."
+  },
+  "usage": {
+    "period_label": "Período",
+    "dimension_label": "Dimensión",
+    "kpi_cost_label": "Costo · {{days}}D",
+    "kpi_cost_delta": "{{sign}}{{pct}}% vs período anterior",
+    "kpi_cache_label": "Ahorro de cache · {{days}}D",
+    "kpi_cache_hint": "{{pct}}% hit · {{reads}} lecturas",
+    "kpi_tokens_label": "Tokens · {{days}}D",
+    "kpi_tokens_hint": "entrada {{input}} · salida {{output}}",
+    "when_title": "Cuándo gastó este runtime",
+    "when_tab_daily": "Diario",
+    "when_tab_weekly": "Semanal",
+    "when_tab_heatmap": "Mapa de calor",
+    "daily_metric_cost": "Costo",
+    "daily_metric_tokens": "Tokens",
+    "weekly_partial_label": "{{range}} (parcial · {{covered}} / 7 días)",
+    "heatmap_caption": "Últimas 26 semanas · intensidad de $ diaria (selector de período ignorado acá)",
+    "legend_input": "Entrada",
+    "legend_output": "Salida",
+    "legend_cache_read": "Lectura de cache",
+    "legend_cache_write": "Escritura de cache",
+    "empty_no_usage": "Sin uso en este período.",
+    "empty_pricing_missing": "Tokens registrados pero sin precios para:",
+    "empty_pricing_hint": "Configurá una tarifa personalizada para incluirlos en los totales de costo.",
+    "empty_zero_cost": "Tokens registrados pero el cálculo de costo devolvió $0.",
+    "unmapped_notice_one": "{{count}} model no tiene precio mantenido — sus tokens están excluidos de los totales de costo.",
+    "unmapped_notice_other": "{{count}} models no tienen precio mantenido — sus tokens están excluidos de los totales de costo.",
+    "custom_pricing": {
+      "open_button": "Configurar precios personalizados",
+      "title": "Precios personalizados de modelos",
+      "description": "Ingresá las tarifas por millón de tokens para poder cotizar modelos que no tienen tarifa mantenida. Se guardan localmente en esta máquina.",
+      "empty": "Ningún model necesita un precio personalizado ahora.",
+      "field_input": "Entrada",
+      "field_output": "Salida",
+      "field_cache_read": "Lectura de cache",
+      "field_cache_write": "Escritura de cache",
+      "unit_hint": "Todas las tarifas son en USD por 1M de tokens. Dejá todos los campos vacíos para eliminar una configuración.",
+      "remove_aria": "Eliminar precio personalizado",
+      "cancel": "Cancelar",
+      "save": "Guardar"
+    },
+    "cost_by_title_agent": "Costo por agente",
+    "cost_by_title_model": "Costo por modelo",
+    "cost_by_tab_agent": "Por agente",
+    "cost_by_tab_model": "Por modelo",
+    "cost_by_caption_agent_one": "{{count}} agente en este runtime",
+    "cost_by_caption_agent_other": "{{count}} agentes en este runtime",
+    "cost_by_caption_model_one": "{{count}} model usado",
+    "cost_by_caption_model_other": "{{count}} models usados",
+    "daily_breakdown_toggle": "Tabla de desglose diario",
+    "table_date": "Fecha",
+    "table_model": "Model",
+    "table_input": "Entrada",
+    "table_output": "Salida",
+    "table_cache_r": "Cache R",
+    "table_cache_w": "Cache W",
+    "no_data": "Sin datos de uso todavía"
+  }
+}
