@@ -1,21 +1,3 @@
-# Self-hosting Docker Compose — starts PostgreSQL, backend, and frontend.
-#
-# Services bind to 127.0.0.1 only. For cross-machine or public access, front
-# them with a reverse proxy (Caddy / nginx / Cloudflare Tunnel) that terminates
-# TLS and forwards to 127.0.0.1:8080 (backend) and 127.0.0.1:3000 (frontend).
-# Do NOT change these bindings to 0.0.0.0 — Docker bypasses host firewalls
-# (UFW/iptables) by default, so the raw ports would be exposed to the internet
-# with the default JWT_SECRET and Postgres credentials. See:
-#   apps/docs/content/docs/self-host-quickstart.mdx
-#
-# Usage:
-#   cp .env.example .env
-#   # Edit .env — change JWT_SECRET at minimum
-#   docker compose -f docker-compose.selfhost.yml up -d
-#
-# Frontend: http://localhost:3000
-# Backend:  http://localhost:8080 (also used by CLI/daemon)
-
 name: multica
 
 services:
@@ -25,11 +7,17 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-multica}
       POSTGRES_USER: ${POSTGRES_USER:-multica}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-multica}
+    ports:
+      - "${POSTGRES_PORT:-15433}:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata_v2:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-multica} -d ${POSTGRES_DB:-multica}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-multica} -d ${POSTGRES_DB:-multica}",
+        ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -40,7 +28,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "127.0.0.1:${PORT:-8080}:8080"
+      - "${PORT:-18080}:8080"
     volumes:
       - backend_uploads:/app/data/uploads
     environment:
@@ -52,11 +40,6 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-noreply@multica.ai}
-      SMTP_HOST: ${SMTP_HOST:-}
-      SMTP_PORT: ${SMTP_PORT:-25}
-      SMTP_USERNAME: ${SMTP_USERNAME:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SMTP_TLS_INSECURE: ${SMTP_TLS_INSECURE:-false}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3000/auth/callback}
@@ -74,19 +57,6 @@ services:
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
-      # Public URL the API is reachable at from the open internet, no
-      # trailing slash. Used to mint absolute webhook URLs for autopilot
-      # webhook triggers. Leave unset behind a same-origin reverse proxy
-      # (e.g. plain localhost dev); the frontend will compose the URL
-      # from window.origin + webhook_path in that case. Headers are
-      # intentionally NOT used to derive this value, to avoid Host /
-      # X-Forwarded-Host spoofing on misconfigured proxies.
-      MULTICA_PUBLIC_URL: ${MULTICA_PUBLIC_URL:-}
-      # Comma-separated CIDRs whose source IP is allowed to set
-      # X-Forwarded-For / X-Real-IP for the webhook per-IP rate limiter.
-      # Empty default = headers ignored, RemoteAddr used. Set e.g.
-      # "127.0.0.1/32" when running behind a same-host reverse proxy.
-      MULTICA_TRUSTED_PROXIES: ${MULTICA_TRUSTED_PROXIES:-}
     restart: unless-stopped
 
   frontend:
@@ -94,11 +64,11 @@ services:
     depends_on:
       - backend
     ports:
-      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+      - "${FRONTEND_PORT:-13000}:3000"
     environment:
       HOSTNAME: "0.0.0.0"
     restart: unless-stopped
 
 volumes:
-  pgdata:
+  pgdata_v2:
   backend_uploads:
