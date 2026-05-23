@@ -1,5 +1,5 @@
 {
-  "name": "@multica/cerebro-runtime",
+  "name": "@multica/cerebro-runtime-tools",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -9,16 +9,12 @@
   },
   "exports": {
     ".": "./index.ts",
-    "./views": "./views/index.ts",
-    "./views/docs": "./views/docs/index.ts"
+    "./views": "./views/index.ts"
   },
   "dependencies": {
-    "@multica/cerebro-groups": "workspace:*",
-    "@multica/cerebro-runtime-tools": "workspace:*",
     "@multica/cerebro-types": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
-    "@multica/views": "workspace:*",
     "@tanstack/react-query": "catalog:",
     "lucide-react": "catalog:",
     "sonner": "^2.0.7"
