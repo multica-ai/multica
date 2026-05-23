@@ -135,6 +135,8 @@ type Handler struct {
 	// CEREBRO-PATCH(handler-persona-mask-audit): JEH-1173 redaction ledger.
 	// Wired by the router after construction; nil = no audit row written.
 	PersonaMaskAudit PersonaMaskAuditWriter
+	// CEREBRO-PATCH(handler-github-pr-heal): JEH-1919 PR-card self-heal hook.
+	PullRequestLinkHealer PullRequestLinkHealer
 	// CEREBRO-PATCH(handler-tool-meta): JEH-1353 — ordered list of registered
 	// tools and name→description lookup for the tool grant admin API.
 	cerebroToolItems  []CerebroToolItem

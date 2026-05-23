@@ -468,7 +468,10 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	h.ensurePullRequestLinksForIssue(r.Context(), issue)
+	if h.PullRequestLinkHealer != nil { // CEREBRO-PATCH(github-pr-card-self-heal-hook): JEH-1919
+		identifier := h.getIssuePrefix(r.Context(), issue.WorkspaceID) + "-" + strconv.Itoa(int(issue.Number))
+		h.PullRequestLinkHealer.EnsurePullRequestLinksForIssue(r.Context(), issue.ID, issue.WorkspaceID, identifier)
+	}
 	rows, err := h.Queries.ListPullRequestsByIssue(r.Context(), issue.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list pull requests")
@@ -479,32 +482,6 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 		out = append(out, issuePullRequestRowToResponse(row))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"pull_requests": out})
-}
-
-// CEREBRO-PATCH(github-pr-card-self-heal): JEH-1590 recovers issue↔PR links
-// when a mirrored PR row already mentions the issue identifier but the link
-// row was missed by webhook processing.
-func (h *Handler) ensurePullRequestLinksForIssue(ctx context.Context, issue db.Issue) {
-	identifier := h.getIssuePrefix(ctx, issue.WorkspaceID) + "-" + strconv.Itoa(int(issue.Number))
-	matching, err := h.Queries.ListUnlinkedPullRequestsMatchingIssueIdentifier(ctx, db.ListUnlinkedPullRequestsMatchingIssueIdentifierParams{
-		IssueID:         issue.ID,
-		WorkspaceID:     issue.WorkspaceID,
-		IdentifierRegex: identifierBoundaryRegex(identifier),
-	})
-	if err != nil {
-		slog.Warn("github: self-heal pr links failed", "err", err, "issue_id", uuidToString(issue.ID))
-		return
-	}
-	for _, pr := range matching {
-		if err := h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
-			IssueID:       issue.ID,
-			PullRequestID: pr.ID,
-			LinkedByType:  strToText("system"),
-			LinkedByID:    pgtype.UUID{},
-		}); err != nil {
-			slog.Warn("github: self-heal pr link failed", "err", err, "issue_id", uuidToString(issue.ID), "pr_id", uuidToString(pr.ID))
-		}
-	}
 }
 
 // ── Webhook ─────────────────────────────────────────────────────────────────
@@ -1015,12 +992,6 @@ func extractIdentifiers(parts ...string) []string {
 		}
 	}
 	return out
-}
-
-// CEREBRO-PATCH(github-pr-card-self-heal): JEH-1590 boundary matcher used by
-// the PR-card self-heal query.
-func identifierBoundaryRegex(identifier string) string {
-	return `(^|[^[:alnum:]])` + regexp.QuoteMeta(identifier) + `([^[:alnum:]]|$)`
 }
 
 // lookupIssueByIdentifier looks up an issue in the given workspace by its

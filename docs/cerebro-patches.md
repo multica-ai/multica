@@ -342,6 +342,9 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `feature-flags-client` | packages/core/api/client.ts | 0 | Adds listFeatureFlags + setFeatureFlag to API client |
 | `feature-flags-routes` | server/cmd/server/router.go | 0 | Mounts feature-flags routes |
 | `feature-flags-storage` | packages/core/platform/storage-cleanup.ts | 0 | Cleans cerebro feature-flag storage on logout |
+| `github-pr-card-self-heal-hook` | server/internal/handler/github.go<br>server/internal/handler/github_pr_heal_cerebro.go<br>server/internal/handler/handler.go<br>server/cmd/server/router.go<br>server/internal/cerebro/githubprheal/*<br>server/internal/cerebro/queries/github_pr_heal.sql | 4 upstream hook lines + cerebro service | JEH-1919 — PR-card self-heal now lives in the cerebro zone. The upstream issue PR list endpoint only builds the issue identifier and calls a nullable hook; the query, boundary matcher, and link creation are owned by `server/internal/cerebro/githubprheal`. |
+| `github-pr-card-self-heal-relocated` | server/pkg/db/queries/github.sql | 1 | JEH-1919 — marker for the removed upstream sqlc self-heal query; the query now lives in `server/internal/cerebro/queries/github_pr_heal.sql`. |
+| `github-pr-card-self-heal-test-relocated` | server/internal/handler/github_test.go | 1 | JEH-1919 — marker for moving the boundary matcher coverage from upstream handler tests into `server/internal/cerebro/githubprheal`. |
 | `file-handler-file` | server/internal/handler/file.go | 117 | File handler additions |
 | `handler-cerebro-routes` | server/internal/handler/handler.go | 37 | Server handler additions |
 | `inbox-chat-panel` | packages/views/inbox/components/inbox-chat-panel.tsx | 298 | Inbox view additions |

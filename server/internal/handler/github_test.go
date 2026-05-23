@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
-	"regexp"
 	"testing"
 	"time"
 
@@ -68,33 +67,7 @@ func TestExtractIdentifiers(t *testing.T) {
 	}
 }
 
-// CEREBRO-PATCH(github-pr-card-self-heal): JEH-1590 pins exact issue
-// identifier matching for PR-card self-heal.
-func TestIdentifierBoundaryRegex(t *testing.T) {
-	re := regexp.MustCompile(`(?i)` + identifierBoundaryRegex("JEH-1590"))
-	matches := []string{
-		"JEH-1590: Merge upstream/main",
-		"fix/jeh-1590-upstream",
-		"See (JEH-1590)",
-	}
-	for _, input := range matches {
-		if !re.MatchString(input) {
-			t.Errorf("expected %q to match", input)
-		}
-	}
-
-	nonMatches := []string{
-		"JEH-15900",
-		"XJEH-1590",
-		"JEH-1590A",
-	}
-	for _, input := range nonMatches {
-		if re.MatchString(input) {
-			t.Errorf("expected %q not to match", input)
-		}
-	}
-}
-
+// CEREBRO-PATCH(github-pr-card-self-heal-test-relocated): JEH-1919 boundary matcher test moved to internal/cerebro/githubprheal.
 func TestDerivePRState(t *testing.T) {
 	cases := []struct {
 		state  string
