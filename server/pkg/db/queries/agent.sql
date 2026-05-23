@@ -1,12 +1,12 @@
 -- name: ListAgents :many
 SELECT * FROM agent
 WHERE workspace_id = $1 AND archived_at IS NULL
-ORDER BY created_at ASC;
+ORDER BY name ASC;
 
 -- name: ListAllAgents :many
 SELECT * FROM agent
 WHERE workspace_id = $1
-ORDER BY created_at ASC;
+ORDER BY name ASC;
 
 -- name: GetAgent :one
 SELECT * FROM agent

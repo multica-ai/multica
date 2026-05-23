@@ -107,7 +107,7 @@ export function AgentsPage() {
   const setScope = useAgentsViewStore((s) => s.setScope);
   const [availabilityFilter, setAvailabilityFilter] =
     useState<AvailabilityFilter>("all");
-  const [sort, setSort] = useState<SortKey>("recent");
+  const [sort, setSort] = useState<SortKey>("name");
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   // When set, the Create dialog opens pre-populated with this agent's
