@@ -191,6 +191,41 @@ export interface CreatePersonalAccessTokenResponse extends PersonalAccessToken {
   token: string;
 }
 
+// DAG Core
+export interface DAGDVTDot {
+  agent_id: string;
+  counter: number;
+}
+
+export interface DAGDVT {
+  dot: DAGDVTDot;
+  context: Record<string, number>;
+}
+
+export interface DAGEvent {
+  id: string;
+  record_ids: string[];
+  agent_id: string;
+  dvt: DAGDVT;
+  operation: "create" | "update" | "delete" | "link" | "unlink" | "assert" | "retract" | "schema_assert";
+  payload?: Record<string, unknown>;
+  reason?: string;
+}
+
+export interface DAGAnalysisResponse {
+  cycles: string[][];
+  topological_order?: string[];
+  critical_path?: Record<string, number>;
+  missing_inverse_links?: Array<{
+    from_id: string;
+    to_id: string;
+    type: string;
+  }>;
+  node_count: number;
+  edge_count: number;
+  status: string;
+}
+
 // Pagination
 export interface PaginationParams {
   limit?: number;
