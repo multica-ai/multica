@@ -4,6 +4,8 @@ import {
   POST_SWIPE_CLICK_SUPPRESS_MS,
   SWIPE_COMMIT_MAX_PX,
   SWIPE_COMMIT_MIN_PX,
+  SWIPE_RELEASE_ARCHIVE_PX,
+  shouldArchiveOnRelease,
   commitThresholdPx,
   shouldCommitHeldSwipe,
   shouldInstantArchive,
@@ -85,5 +87,17 @@ describe("shouldInstantArchive", () => {
   it("does not commit below the 80% threshold", () => {
     // 70% of 414 = 289.8 px — clearly below threshold
     expect(shouldInstantArchive(290, 414)).toBe(false);
+  });
+});
+
+describe("shouldArchiveOnRelease", () => {
+  it("archives once the released swipe is more than 50 px", () => {
+    expect(SWIPE_RELEASE_ARCHIVE_PX).toBe(50);
+    expect(shouldArchiveOnRelease(51)).toBe(true);
+  });
+
+  it("does not archive at exactly 50 px or below", () => {
+    expect(shouldArchiveOnRelease(50)).toBe(false);
+    expect(shouldArchiveOnRelease(49)).toBe(false);
   });
 });
