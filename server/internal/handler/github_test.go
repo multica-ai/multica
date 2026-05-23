@@ -4,20 +4,33 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 func TestExtractIdentifiers(t *testing.T) {
 	cases := []struct {
@@ -168,6 +181,78 @@ func TestSignStateRequiresSecret(t *testing.T) {
 	t.Setenv("GITHUB_WEBHOOK_SECRET", "")
 	if _, err := signState("ws"); err == nil {
 		t.Error("signState should error when secret is unset")
+	}
+}
+
+func TestFetchInstallationAccountUsesGitHubAppJWT(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	privatePEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	})
+	t.Setenv("GITHUB_APP_ID", "12345")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", strings.ReplaceAll(string(privatePEM), "\n", `\n`))
+
+	oldClient := githubHTTPClient
+	t.Cleanup(func() { githubHTTPClient = oldClient })
+	authorized := false
+	githubHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/app/installations/987654" {
+			t.Fatalf("path = %q, want /app/installations/987654", req.URL.Path)
+		}
+		auth := req.Header.Get("Authorization")
+		if auth == "" {
+			return &http.Response{
+				StatusCode: http.StatusUnauthorized,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"message":"A JSON web token could not be decoded"}`)),
+			}, nil
+		}
+		if !strings.HasPrefix(auth, "Bearer ") {
+			t.Fatalf("authorization header = %q, want Bearer token", auth)
+		}
+		token, err := jwt.Parse(strings.TrimPrefix(auth, "Bearer "), func(token *jwt.Token) (any, error) {
+			if token.Method != jwt.SigningMethodRS256 {
+				return nil, fmt.Errorf("signing method = %v, want RS256", token.Method)
+			}
+			return &key.PublicKey, nil
+		})
+		if err != nil || !token.Valid {
+			t.Fatalf("invalid app jwt: valid=%v err=%v", token != nil && token.Valid, err)
+		}
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok || claims["iss"] != "12345" {
+			t.Fatalf("jwt issuer = %v, want 12345", claims["iss"])
+		}
+		authorized = true
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body: io.NopCloser(strings.NewReader(`{
+				"account": {
+					"login": "octo-org",
+					"type": "Organization",
+					"avatar_url": "https://avatars.githubusercontent.com/u/1"
+				}
+			}`)),
+		}, nil
+	})}
+
+	login, accountType, avatar := fetchInstallationAccount(context.Background(), 987654)
+	if !authorized {
+		t.Fatal("expected fetchInstallationAccount to authenticate with a GitHub App JWT")
+	}
+	if login != "octo-org" {
+		t.Fatalf("login = %q, want octo-org", login)
+	}
+	if accountType != "Organization" {
+		t.Fatalf("accountType = %q, want Organization", accountType)
+	}
+	if avatar == nil || *avatar != "https://avatars.githubusercontent.com/u/1" {
+		t.Fatalf("avatar = %v, want GitHub avatar URL", avatar)
 	}
 }
 

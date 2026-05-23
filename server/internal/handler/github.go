@@ -22,6 +22,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/githubapp"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -226,15 +227,27 @@ func aggregateChecksConclusion(failed, passed, pending, total int64) *string {
 // Empty when the integration is not configured for this deployment.
 func githubAppSlug() string { return strings.TrimSpace(os.Getenv("GITHUB_APP_SLUG")) }
 
+func githubAppID() string { return strings.TrimSpace(os.Getenv("GITHUB_APP_ID")) }
+
+func githubAppPrivateKeyConfigured() bool {
+	return strings.TrimSpace(os.Getenv("GITHUB_APP_PRIVATE_KEY")) != ""
+}
+
 // githubWebhookSecret is shared by webhook verification and state-token signing.
 // We reuse the webhook secret as the state HMAC key so operators only need to
 // configure one value.
 func githubWebhookSecret() string { return strings.TrimSpace(os.Getenv("GITHUB_WEBHOOK_SECRET")) }
 
-// isGitHubConfigured returns true only when BOTH the install slug and the
-// webhook secret are set. The Connect button uses this single flag, so the
-// frontend never offers a flow that the backend would reject.
-func isGitHubConfigured() bool { return githubAppSlug() != "" && githubWebhookSecret() != "" }
+// isGitHubConfigured returns true only when the install URL, webhook
+// verification, and GitHub App auth credentials are all set. The Connect
+// button uses this single flag, so the frontend never offers a flow that
+// would save an installation row without being able to resolve its account.
+func isGitHubConfigured() bool {
+	return githubAppSlug() != "" &&
+		githubAppID() != "" &&
+		githubAppPrivateKeyConfigured() &&
+		githubWebhookSecret() != ""
+}
 
 // signState produces an opaque token that binds a workspace ID to the
 // install flow so the setup callback can recover the workspace without
@@ -377,20 +390,25 @@ func (h *Handler) GitHubSetupCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 // fetchInstallationAccount tries to enrich the installation row with the
-// account name + avatar via GitHub's public API. We deliberately do NOT
-// require GitHub App JWT auth here — the install endpoint is publicly
-// readable for installations on public accounts, and on failure we fall
-// back to placeholders that the next webhook will overwrite.
+// account name + avatar via GitHub's App API. That endpoint requires a
+// GitHub App JWT; if credentials are missing or signing fails, we still save
+// the installation with placeholders and let a later installation webhook
+// refresh the display fields.
 func fetchInstallationAccount(ctx context.Context, installationID int64) (login, accountType string, avatar *string) {
 	login = "unknown"
 	accountType = "User"
 	avatar = nil
-	url := fmt.Sprintf("https://api.github.com/app/installations/%d", installationID)
+	url := fmt.Sprintf("%s/app/installations/%d", strings.TrimRight(githubAPIBaseURL, "/"), installationID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
+	if token, configured, err := githubapp.TokenFromEnv(time.Now()); err != nil {
+		slog.Warn("github: failed to sign app jwt for installation lookup", "err", err)
+	} else if configured {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	resp, err := githubHTTPClient.Do(req)
 	if err != nil {
 		return

@@ -186,6 +186,7 @@
     "connection_description_done": "Done",
     "connection_identifier_example": "MUL-123",
     "connected_to": "已连接到 {{login}}",
+    "connected_account_pending": "已连接，账号名仍在同步中。",
     "connect_github": "连接 GitHub",
     "connect_opening": "正在打开…",
     "connect_disabled_tooltip": "服务端未配置 GitHub App",
