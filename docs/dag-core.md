@@ -17,7 +17,7 @@ opensrc path Dicklesworthstone/beads_viewer
 opensrc path Dicklesworthstone/beads_rust
 ```
 
-Current fork description from GitHub: “A fork of multica that provides an unbounded dag schema, building on the architecture of beads and beads_viewer, as well as mdbase and other infrastructures.”
+Current fork description from GitHub: "A fork of multica that provides an unbounded dag schema, building on the architecture of beads and beads_viewer, as well as mdbase and other infrastructures."
 
 Direct source paths referenced for this slice:
 
@@ -26,20 +26,57 @@ Direct source paths referenced for this slice:
 - `beads_viewer` graph/robot architecture: `pkg/analysis/`, `cmd/bv/robot_registry.go`, `tests/e2e/robot_*`
 - `br` local-first JSONL/SQLite architecture: `src/storage/schema.rs`, `src/sync/`, `tests/*jsonl*`, `tests/e2e_sync_*`
 
-## Initial implementation slice
+## Completed implementation
 
-The first slice is deliberately small and non-invasive:
+### 1. Schema migration (`server/migrations/108_dag_core.*.sql`)
+- `dag_event` — append-only event log with DVT clock
+- `dag_record_projection` — materialized record view
+- `dag_link_projection` — materialized directed link view
+- `dag_fact_projection` — typed facts with deterministic ordering
+- `dag_citation_chain_projection` — citation provenance
+- `dag_conflict_state` — contradiction tracking
+- `dag_schema_dependency` — schema DAG constraints
 
-1. `server/migrations/108_dag_core.*.sql` adds an append-only DAG event substrate and projection tables.
-2. `server/internal/dagcore` adds pure Go contract logic for:
-   - DVT increment/merge/compare,
-   - event validation,
-   - inverse-link detection,
-   - acyclic schema validation,
-   - deterministic fact ordering,
-   - grounded contradiction detection.
+### 2. Pure Go contract (`server/internal/dagcore`)
+- DVT increment/merge/compare
+- Event validation (8 operation types)
+- Inverse-link detection
+- Acyclic schema validation
+- Deterministic fact ordering
+- Citation-chain validation
+- Contradiction detection
+- Concurrent single-field write conflict detection
 
-This does **not** replace Multica issues or task queues yet. Product tables can project into `dag_event` later once conformance tests prove the semantics.
+### 3. Graph analysis (`server/internal/daggraph`)
+- Cycle detection (DFS-based, deduplicated)
+- Topological sort (Kahn's algorithm)
+- Critical path computation (longest path to leaf)
+
+### 4. Service layer (`server/internal/service/dag`)
+- `AppendEvent()` — validate + persist + project in one transaction
+- `DetectConflicts()` — delegate to dagcore
+- `ProjectRecord()`, `ProjectLink()`, `ProjectFact()` — upsert projections
+
+### 5. Backfill command (`server/cmd/backfill_dag`)
+- One-shot migration from `issue` + `issue_dependency` into DAG event log
+- Idempotent via deterministic event IDs
+- Fixed: joins `issue` to resolve `workspace_id` for dependencies
+
+### 6. HTTP API (`server/internal/handler/dag`)
+- `POST /api/dag/events` — append event
+- `GET /api/dag/analysis` — robot-mode deterministic output
+  - `cycles`, `topological_order`, `critical_path`
+  - `missing_inverse_links`, `node_count`, `edge_count`
+
+### 7. Issue CRUD auto-wiring (`server/internal/handler/issue`)
+- `CreateIssue`: emits `OperationCreate` after tx commit
+- `UpdateIssue`: emits `OperationUpdate` with changed fields
+- `DeleteIssue`: emits `OperationDelete` (tombstone)
+- Fire-and-forget goroutine — never blocks HTTP response
+
+### 8. E2E tests (`e2e/dag-api.spec.ts`)
+- 4 Playwright tests pass against live backend
+- DAG analysis, event append valid/invalid, analysis reflects records
 
 ## Contract mapping
 
@@ -56,17 +93,16 @@ This does **not** replace Multica issues or task queues yet. Product tables can 
 
 ## Beads / bv influence
 
-The dependency graph must remain agent-legible and deterministic:
+The dependency graph remains agent-legible and deterministic:
 
-- use graph projections rather than asking agents to infer dependencies from raw rows;
-- expose cycle/critical-path/PageRank style analysis in a later robot API instead of relying on LLM graph traversal;
-- keep VCS/local-first exports explicit if JSONL export is added; do not auto-run git;
-- preserve `.beads` lessons: SQLite/Postgres for query speed, JSONL-like append logs for collaboration/auditability, robot-mode outputs for agents.
+- graph projections exposed via `GET /api/dag/analysis` rather than requiring LLM graph traversal;
+- cycle/critical-path analysis is deterministic and robot-mode ready;
+- append-only event log preserves auditability;
+- VCS/local-first exports remain explicit if JSONL export is added later.
 
-## Next implementation steps
+## Future work (next PR)
 
-1. Add repository/service methods to append DAG events transactionally.
-2. Backfill/project existing `issue` + `issue_dependency` rows into DAG records/links.
-3. Add graph analysis APIs for cycle detection and dependency-aware planning.
-4. Add agent-facing CLI/API output shaped like `bv --robot-triage`: concise, deterministic, status-tagged graph insights.
-5. Only then connect DAG state to UI flows.
+1. **Frontend integration**: surface DAG analysis in UI (cycle warnings, dependency graph visualization)
+2. **Dependency link/unlink API**: when explicit dependency management endpoints are added, wire them to `OperationLink` / `OperationUnlink`
+3. **Robot-triage CLI**: if a dedicated CLI is needed, wrap `GET /api/dag/analysis` into a terminal command
+4. **Conformance gate**: cross-writer conflict matrix for Obsidian plugin, CLI, TUI, Android, browser extension
