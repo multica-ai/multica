@@ -21,6 +21,10 @@
     "tool_result_named": "{{tool}} 结果：",
     "tool_result_unnamed": "结果：",
     "process_steps_other": "{{count}} 步",
+    "group_thinking_other": "{{count}} 步思考",
+    "group_tool_calls_other": "{{count}} 次工具调用",
+    "group_results_other": "{{count}} 条结果",
+    "group_errors_other": "{{count}} 个错误",
     "copy_action": "复制",
     "copied_toast": "已复制",
     "copy_failed_toast": "复制失败"

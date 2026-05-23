@@ -30,6 +30,7 @@ import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { TaskStatusPill } from "./task-status-pill";
 import { formatElapsedMs } from "../lib/format";
 import { splitTimeline, extractCopyText } from "../lib/copy-text";
+import { groupConsecutiveSteps } from "../lib/step-grouping";
 import { useT } from "../../i18n";
 
 // ─── Public component ────────────────────────────────────────────────────
@@ -455,11 +456,15 @@ function OuterProcessFold({
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-1 rounded-lg border bg-muted/20 p-2 space-y-0.5">
-          {items.map((item) =>
-            item.type === "text" ? (
-              <MiddleTextRow key={item.seq} item={item} attachments={attachments} />
+          {groupConsecutiveSteps(items).map((group, idx) =>
+            group.kind === "single" ? (
+              group.item.type === "text" ? (
+                <MiddleTextRow key={group.item.seq} item={group.item} attachments={attachments} />
+              ) : (
+                <ItemRow key={group.item.seq} item={group.item} />
+              )
             ) : (
-              <ItemRow key={item.seq} item={item} />
+              <StepGroupRow key={`group-${group.type}-${idx}`} group={group} attachments={attachments} />
             ),
           )}
         </div>
@@ -483,6 +488,56 @@ function MiddleTextRow({
     <div className="py-0.5 text-xs text-muted-foreground prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
       <Markdown attachments={attachments}>{item.content ?? ""}</Markdown>
     </div>
+  );
+}
+
+// ─── Grouped step row ──────────────────────────────────────────────────────
+
+const GROUP_LABEL_KEYS: Record<string, string> = {
+  thinking: "group_thinking",
+  tool_use: "group_tool_calls",
+  tool_result: "group_results",
+  error: "group_errors",
+};
+
+function StepGroupRow({
+  group,
+  attachments,
+}: {
+  group: Extract<import("../lib/step-grouping").StepGroup, { kind: "group" }>;
+  attachments?: import("@multica/core/types").Attachment[];
+}) {
+  const { t } = useT("chat");
+  const [open, setOpen] = useState(false);
+  const labelKey = GROUP_LABEL_KEYS[group.type] ?? GROUP_LABEL_KEYS.error!;
+
+  const Icon =
+    group.type === "thinking"
+      ? Brain
+      : group.type === "error"
+        ? AlertCircle
+        : ChevronRight;
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="flex items-start gap-1.5 rounded px-1 -mx-1 py-0.5 text-xs hover:bg-accent/30 transition-colors">
+        <Icon className="h-3 w-3 shrink-0 text-muted-foreground/60 mt-0.5" />
+        <span className="text-muted-foreground">
+          {t(($) => $.message_list[labelKey as keyof typeof $.message_list], {
+            count: group.items.length,
+          })}
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        {group.items.map((item) =>
+          item.type === "text" ? (
+            <MiddleTextRow key={item.seq} item={item} attachments={attachments} />
+          ) : (
+            <ItemRow key={item.seq} item={item} />
+          ),
+        )}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
