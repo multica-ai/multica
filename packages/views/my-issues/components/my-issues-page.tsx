@@ -260,6 +260,7 @@ export function MyIssuesPage() {
               <SwimLaneView
                 issues={issues}
                 visibleStatuses={visibleStatuses}
+                hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
               />

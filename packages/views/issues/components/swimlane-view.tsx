@@ -16,18 +16,31 @@ import {
   type DragOverEvent,
 } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
-import { Plus } from "lucide-react";
+import { Eye, EyeOff, MoreHorizontal, Pencil, Plus } from "lucide-react";
 import type { Issue, IssueStatus } from "@multica/core/types";
 import type { UpdateIssueRequest } from "@multica/core/types";
-import { useViewStore } from "@multica/core/issues/stores/view-store-context";
+import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
+import { useWorkspacePaths } from "@multica/core/paths";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { sortIssues } from "../utils/sort";
 import { BOARD_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config";
 import { useModalStore } from "@multica/core/modals";
 import { DraggableBoardCard, BoardCardContent } from "./board-card";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
+import { StatusHeading } from "./status-heading";
+import { StatusIcon } from "./status-icon";
+import { AppLink } from "../../navigation";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
+
+const COLUMN_WIDTH = 280;
+const COLUMN_GAP = 16;
 
 type SwimLaneMoveUpdates = Pick<
   UpdateIssueRequest,
@@ -96,15 +109,19 @@ const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 export function SwimLaneView({
   issues,
   visibleStatuses = BOARD_STATUSES,
+  hiddenStatuses = [],
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
 }: {
   issues: Issue[];
   visibleStatuses?: IssueStatus[];
+  hiddenStatuses?: IssueStatus[];
   onMoveIssue: (issueId: string, updates: SwimLaneMoveUpdates) => void;
   childProgressMap?: Map<string, ChildProgress>;
 }) {
   const { t } = useT("issues");
+  const paths = useWorkspacePaths();
+  const viewStoreApi = useViewStoreApi();
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
 
@@ -181,6 +198,14 @@ export function SwimLaneView({
     }
     return ids;
   }, [parentGroups, sortedStatuses]);
+
+  const statusTotals = useMemo(() => {
+    const totals = new Map<IssueStatus, number>();
+    for (const issue of issues) {
+      totals.set(issue.status, (totals.get(issue.status) ?? 0) + 1);
+    }
+    return totals;
+  }, [issues]);
 
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   const isDraggingRef = useRef(false);
@@ -380,6 +405,15 @@ export function SwimLaneView({
     [cells, cellSet, onMoveIssue],
   );
 
+  // Grid template: one column per status, fixed width COLUMN_WIDTH, gap COLUMN_GAP.
+  const trackWidth = sortedStatuses.length * COLUMN_WIDTH + Math.max(0, sortedStatuses.length - 1) * COLUMN_GAP;
+  const gridStyle = {
+    display: "grid",
+    gridTemplateColumns: `repeat(${sortedStatuses.length}, ${COLUMN_WIDTH}px)`,
+    columnGap: `${COLUMN_GAP}px`,
+    width: `${trackWidth}px`,
+  } as const;
+
   return (
     <DndContext
       sensors={sensors}
@@ -388,59 +422,107 @@ export function SwimLaneView({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div className="flex flex-1 min-h-0 overflow-x-auto">
-        <div className="flex flex-col min-w-0" style={{ width: sortedStatuses.length * 280 }}>
-          <div className="flex h-10 border-b border-border bg-background sticky top-0 z-10">
+      <div className="flex flex-1 min-h-0 gap-4 overflow-auto p-4">
+        <div className="flex shrink-0 flex-col" style={{ width: `${trackWidth}px` }}>
+        {/* Sticky status header row — visually matches the top of a BoardColumn */}
+        <div className="sticky top-0 z-10 mb-2 bg-background/95 pb-2 backdrop-blur supports-[backdrop-filter]:bg-background/75">
+          <div style={gridStyle}>
             {sortedStatuses.map((status) => {
               const cfg = STATUS_CONFIG[status];
+              const total = statusTotals.get(status) ?? 0;
               return (
                 <div
                   key={status}
-                  className="flex w-[280px] shrink-0 items-center gap-2 px-3"
+                  className={`flex items-center justify-between rounded-xl ${cfg?.columnBg ?? "bg-muted/40"} px-3 py-2`}
                 >
-                  <span className={`h-2 w-2 rounded-full ${cfg?.iconColor ? cfg.iconColor.replace("text-", "bg-") : "bg-muted"}`} />
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {t(($) => $.status[status])}
-                  </span>
+                  <StatusHeading status={status} count={total} />
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="rounded-full text-muted-foreground"
+                        >
+                          <MoreHorizontal className="size-3.5" />
+                        </Button>
+                      }
+                    />
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        onClick={() => viewStoreApi.getState().hideStatus(status)}
+                      >
+                        <EyeOff className="size-3.5" />
+                        {t(($) => $.board.hide_column)}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               );
             })}
           </div>
-
-          <div className="flex-1">
-            {parentGroups.map((parent) => (
-              <div key={parent.key}>
-                <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border/30 bg-muted/20">
-                  <span className="text-sm font-semibold text-accent truncate">
-                    {parent.title}
-                  </span>
-                  {parent.identifier && (
-                    <span className="text-xs text-muted-foreground tabular-nums truncate">
-                      {parent.identifier}
-                    </span>
-                  )}
-                </div>
-                <div className="flex border-b border-border/50">
-                  {sortedStatuses.map((status) => {
-                    const cId = cellId(parent.key, status);
-                    const issueIds = localCells[parent.key]?.[status] ?? [];
-                    return (
-                      <SwimLaneCell
-                        key={cId}
-                        cellId={cId}
-                        issueIds={issueIds}
-                        issueMap={issueMapRef.current}
-                        childProgressMap={childProgressMap}
-                        status={status}
-                        parentGroup={parent}
-                      />
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
         </div>
+
+        {/* Parent rows */}
+        <div className="flex flex-col gap-4">
+          {parentGroups.map((parent) => (
+            <div key={parent.key} className="flex flex-col">
+              {/* Lane header — spans full width above the row */}
+              <div className="mb-2 flex items-center gap-2 px-1">
+                <span className="truncate text-sm font-semibold">
+                  {parent.title}
+                </span>
+                {parent.identifier && (
+                  <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">
+                    {parent.identifier}
+                  </span>
+                )}
+                {parent.parentIssueId && (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <AppLink
+                          href={paths.issueDetail(parent.parentIssueId)}
+                          aria-label={t(($) => $.swimlane.open_parent)}
+                          className="inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                        >
+                          <Pencil className="size-3" />
+                        </AppLink>
+                      }
+                    />
+                    <TooltipContent>{t(($) => $.swimlane.open_parent)}</TooltipContent>
+                  </Tooltip>
+                )}
+              </div>
+              {/* Cells row — each cell mirrors a BoardColumn body */}
+              <div style={gridStyle}>
+                {sortedStatuses.map((status) => {
+                  const cId = cellId(parent.key, status);
+                  const issueIds = localCells[parent.key]?.[status] ?? [];
+                  return (
+                    <SwimLaneCell
+                      key={cId}
+                      cellId={cId}
+                      issueIds={issueIds}
+                      issueMap={issueMapRef.current}
+                      childProgressMap={childProgressMap}
+                      status={status}
+                      parentGroup={parent}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+        </div>
+
+        {hiddenStatuses.length > 0 && (
+          <SwimLaneHiddenColumnsPanel
+            hiddenStatuses={hiddenStatuses}
+            statusTotals={statusTotals}
+          />
+        )}
       </div>
 
       <DragOverlay dropAnimation={null}>
@@ -471,6 +553,7 @@ function SwimLaneCell({
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: cId });
   const { t } = useT("issues");
+  const cfg = STATUS_CONFIG[status];
 
   const resolvedIssues = useMemo(
     () =>
@@ -490,42 +573,101 @@ function SwimLaneCell({
   }, [status, parentGroup]);
 
   return (
-    <div
-      ref={setNodeRef}
-      className={`flex w-[280px] shrink-0 flex-col rounded-lg p-1 transition-colors ${
-        isOver ? "bg-accent/60" : ""
-      }`}
-    >
-      <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
-        {resolvedIssues.map((issue) => (
-          <DraggableBoardCard
-            key={issue.id}
-            issue={issue}
-            childProgress={childProgressMap.get(issue.id)}
-          />
+    <div className={`flex min-h-[120px] flex-col rounded-xl ${cfg?.columnBg ?? "bg-muted/40"} p-2`}>
+      <div
+        ref={setNodeRef}
+        className={`flex-1 space-y-2 rounded-lg p-1 transition-colors ${
+          isOver ? "bg-accent/60" : ""
+        }`}
+      >
+        <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
+          {resolvedIssues.map((issue) => (
+            <DraggableBoardCard
+              key={issue.id}
+              issue={issue}
+              childProgress={childProgressMap.get(issue.id)}
+            />
+          ))}
+        </SortableContext>
+        {issueIds.length === 0 && (
+          <p className="py-6 text-center text-xs text-muted-foreground">
+            &mdash;
+          </p>
+        )}
+      </div>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="mt-1 w-full rounded-md text-muted-foreground hover:text-foreground"
+              onClick={handleAdd}
+            >
+              <Plus className="size-3.5" />
+            </Button>
+          }
+        />
+        <TooltipContent>{t(($) => $.board.add_issue_tooltip)}</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
+function SwimLaneHiddenColumnsPanel({
+  hiddenStatuses,
+  statusTotals,
+}: {
+  hiddenStatuses: IssueStatus[];
+  statusTotals: Map<IssueStatus, number>;
+}) {
+  const { t } = useT("issues");
+  const viewStoreApi = useViewStoreApi();
+  return (
+    <div className="flex w-[240px] shrink-0 flex-col">
+      <div className="mb-2 flex items-center gap-2 px-1">
+        <span className="text-sm font-medium text-muted-foreground">
+          {t(($) => $.board.hidden_columns_label)}
+        </span>
+      </div>
+      <div className="flex-1 space-y-0.5">
+        {hiddenStatuses.map((status) => (
+          <div
+            key={status}
+            className="flex items-center justify-between rounded-lg px-2.5 py-2 hover:bg-muted/50"
+          >
+            <div className="flex items-center gap-2">
+              <StatusIcon status={status} className="h-3.5 w-3.5" />
+              <span className="text-sm">{t(($) => $.status[status])}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">
+                {statusTotals.get(status) ?? 0}
+              </span>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="rounded-full text-muted-foreground"
+                    >
+                      <MoreHorizontal className="size-3.5" />
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onClick={() => viewStoreApi.getState().showStatus(status)}
+                  >
+                    <Eye className="size-3.5" />
+                    {t(($) => $.board.show_column)}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
         ))}
-      </SortableContext>
-      {issueIds.length === 0 && (
-        <p className="py-8 text-center text-xs text-muted-foreground">
-          &mdash;
-        </p>
-      )}
-      <div className="mt-auto pt-1">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="w-full rounded-md text-muted-foreground hover:text-foreground"
-                onClick={handleAdd}
-              >
-                <Plus className="size-3.5" />
-              </Button>
-            }
-          />
-          <TooltipContent>{t(($) => $.board.add_issue_tooltip)}</TooltipContent>
-        </Tooltip>
       </div>
     </div>
   );

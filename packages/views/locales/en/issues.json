@@ -126,7 +126,8 @@
   },
   "swimlane": {
     "parent_column": "Parent",
-    "no_parent": "No parent"
+    "no_parent": "No parent",
+    "open_parent": "Open parent issue"
   },
   "board": {
     "hidden_columns_label": "Hidden columns",
