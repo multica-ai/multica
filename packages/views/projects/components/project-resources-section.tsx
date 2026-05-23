@@ -96,13 +96,17 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
               {t(($) => $.resources.empty)}
             </p>
           )}
-          {resources.map((resource) => (
-            <ResourceRow
-              key={resource.id}
-              resource={resource}
-              onRemove={() => handleRemove(resource)}
-            />
-          ))}
+          {resources.length > 0 && (
+            <div className="max-h-64 space-y-1.5 overflow-y-auto pr-1">
+              {resources.map((resource) => (
+                <ResourceRow
+                  key={resource.id}
+                  resource={resource}
+                  onRemove={() => handleRemove(resource)}
+                />
+              ))}
+            </div>
+          )}
           <Popover open={addOpen} onOpenChange={setAddOpen}>
             <PopoverTrigger
               render={
