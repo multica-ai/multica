@@ -172,6 +172,7 @@ Expected output should show `running` status with detected agents (e.g. `claude`
 - Check logs: `multica daemon logs`
 - If a port conflict occurs, the daemon may already be running under a different profile.
 - If no agents are detected, ensure at least one AI CLI (`claude`, `codex`, `copilot`, `opencode`, `openclaw`, `hermes`, `gemini`, `pi`, `cursor-agent`, or `oz`) is installed and on the `$PATH`.
+- For Warp on macOS, prefer the standalone Oz CLI package over the `oz` shim bundled inside `Warp.app`, so daemon tasks run headlessly without activating the desktop app.
 
 ---
 

@@ -512,27 +512,6 @@ func TestParseWarpModelsJSON(t *testing.T) {
 	}
 }
 
-func TestParseWarpModelsNDJSON(t *testing.T) {
-	input := `{"id":"gpt-5.5-high"}
-{"id":"auto"}
-{"id":"gpt-5.5-high"}
-`
-	models := parseWarpModelsNDJSON(input)
-	if len(models) != 2 {
-		t.Fatalf("expected 2 models, got %d: %+v", len(models), models)
-	}
-	ids := map[string]Model{}
-	for _, m := range models {
-		ids[m.ID] = m
-	}
-	if !ids["auto"].Default {
-		t.Fatalf("expected auto to be marked default: %+v", ids["auto"])
-	}
-	if ids["gpt-5.5-high"].Provider != "warp" {
-		t.Fatalf("expected provider=warp, got %+v", ids["gpt-5.5-high"])
-	}
-}
-
 func TestParseHermesSessionNewModels(t *testing.T) {
 	// Mirrors the real shape emitted by hermes'
 	// acp_adapter/server.py _build_model_state -> SessionModelState.

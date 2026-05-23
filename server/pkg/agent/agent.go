@@ -169,7 +169,7 @@ var launchHeaders = map[string]string{
 	"openclaw":    "openclaw agent (json)",
 	"opencode":    "opencode run (json)",
 	"pi":          "pi (json mode)",
-	"warp":        "oz agent run (ndjson)",
+	"warp":        "oz agent run (json)",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

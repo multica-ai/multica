@@ -873,25 +873,13 @@ func discoverWarpModels(ctx context.Context, executablePath string) ([]Model, er
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	// Preferred shape: one JSON array.
 	cmd := exec.CommandContext(runCtx, executablePath, "model", "list", "--output-format", "json")
 	hideAgentWindow(cmd)
 	out, err := cmd.Output()
-	if err == nil {
-		models := parseWarpModelsJSON(out)
-		if len(models) > 0 {
-			return models, nil
-		}
-	}
-
-	// Compatibility shape: one JSON object per line.
-	cmd = exec.CommandContext(runCtx, executablePath, "model", "list", "--output-format", "ndjson")
-	hideAgentWindow(cmd)
-	out, err = cmd.Output()
 	if err != nil {
 		return warpStaticModels(), nil
 	}
-	models := parseWarpModelsNDJSON(string(out))
+	models := parseWarpModelsJSON(out)
 	if len(models) == 0 {
 		return warpStaticModels(), nil
 	}
@@ -915,41 +903,6 @@ func parseWarpModelsJSON(raw []byte) []Model {
 	seen := map[string]bool{}
 	defaultSet := false
 	for _, row := range rows {
-		id := strings.TrimSpace(row.ID)
-		if id == "" || seen[id] {
-			continue
-		}
-		seen[id] = true
-		m := Model{ID: id, Label: id, Provider: "warp"}
-		if !defaultSet && id == "auto" {
-			m.Default = true
-			defaultSet = true
-		}
-		models = append(models, m)
-	}
-	if !defaultSet && len(models) > 0 {
-		models[0].Default = true
-	}
-	return models
-}
-
-func parseWarpModelsNDJSON(output string) []Model {
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	models := make([]Model, 0, 16)
-	seen := map[string]bool{}
-	defaultSet := false
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var row struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			continue
-		}
 		id := strings.TrimSpace(row.ID)
 		if id == "" || seen[id] {
 			continue

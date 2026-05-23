@@ -16,7 +16,7 @@ import (
 var warpBlockedArgs = map[string]blockedArgMode{
 	"-p":              blockedWithValue, // prompt
 	"--prompt":        blockedWithValue, // prompt
-	"--output-format": blockedWithValue, // ndjson stream consumed by daemon
+	"--output-format": blockedWithValue, // JSON event stream consumed by daemon
 	"-C":              blockedWithValue, // task workdir
 	"--cwd":           blockedWithValue, // task workdir
 	"--model":         blockedWithValue, // model comes from agent settings
@@ -24,8 +24,8 @@ var warpBlockedArgs = map[string]blockedArgMode{
 	"--mcp":           blockedWithValue, // daemon-managed MCP payload
 }
 
-// warpBackend implements Backend by spawning `oz agent run --output-format ndjson`
-// and reading newline-delimited JSON events from stdout.
+// warpBackend implements Backend by spawning `oz agent run --output-format json`
+// and reading JSON event lines from stdout.
 type warpBackend struct {
 	cfg Config
 }
@@ -220,7 +220,7 @@ func buildWarpArgs(prompt string, opts ExecOptions, logger *slog.Logger) []strin
 		agentPrompt = opts.SystemPrompt + "\n\n---\n\n" + prompt
 	}
 
-	args := []string{"agent", "run", "--prompt", agentPrompt, "--output-format", "ndjson"}
+	args := []string{"agent", "run", "--prompt", agentPrompt, "--output-format", "json"}
 	if opts.Cwd != "" {
 		args = append(args, "--cwd", opts.Cwd)
 	}

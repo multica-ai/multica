@@ -1,11 +1,11 @@
 ---
 title: Install an agent runtime
-description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 12 supported tools so the daemon can detect them.
+description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 13 supported tools so the daemon can detect them.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 12 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
+A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 13 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
 
 This page is the install-side companion to:
 
@@ -31,13 +31,13 @@ multica daemon restart
 
 Or, in the desktop app, just relaunch the app. The daemon re-scans `PATH` on every start.
 
-## The 12 supported tools
+## The 13 supported tools
 
-Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 12.
+Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 13.
 
 ### Claude Code (Anthropic)
 
-The most complete integration. Session resumption works, MCP works, and it's the **only one of the 11 that actually consumes the `mcp_config` field** on agents (see the [matrix](/providers#mcp-configuration-only-claude-code-actually-reads-it)).
+The most complete integration. Session resumption works, MCP works, and it supports the richest daemon-controlled options (see the [matrix](/providers#mcp-configuration-support)).
 
 | | |
 |---|---|
@@ -65,6 +65,17 @@ The CLI counterpart to the Cursor editor. **Session resumption is broken** — C
 | Daemon looks for | `cursor-agent` |
 | Install | Install the [Cursor editor](https://cursor.com/) and then the CLI per their docs at [docs.cursor.com](https://docs.cursor.com/). The binary name is `cursor-agent`, not `cursor`. |
 | Authentication | Sign in through the Cursor editor; the CLI reuses that session. |
+
+### Warp Oz CLI
+
+Warp's headless CLI for running cloud-connected agents.
+
+| | |
+|---|---|
+| Daemon looks for | `oz` |
+| Install | Follow Warp's Oz CLI docs at [docs.warp.dev/reference/cli](https://docs.warp.dev/reference/cli/). On macOS, prefer the standalone Homebrew cask (`brew tap warpdotdev/warp && brew install --cask oz`) for daemon use. |
+| Authentication | Run `oz login`, or configure `WARP_API_KEY` for automation. |
+| Notes | The standalone package avoids launching the Warp desktop app during background daemon runs. |
 
 ### GitHub Copilot
 

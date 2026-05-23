@@ -20,7 +20,7 @@ func TestBuildWarpArgsIncludesCoreOptions(t *testing.T) {
 	assertHasArg(t, args, "agent")
 	assertHasArg(t, args, "run")
 	assertHasArg(t, args, "--output-format")
-	assertHasArg(t, args, "ndjson")
+	assertHasArg(t, args, "json")
 	assertHasArg(t, args, "--cwd")
 	assertHasArg(t, args, "/tmp/repo")
 	assertHasArg(t, args, "--model")

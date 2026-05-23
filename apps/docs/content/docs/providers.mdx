@@ -1,11 +1,11 @@
 ---
 title: AI coding tools matrix
-description: Multica supports 12 AI coding tools; they implement the same interface, but the capability details diverge significantly.
+description: Multica supports 13 AI coding tools; they implement the same interface, but the capability details diverge significantly.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica ships with built-in support for **12 AI coding tools**. They all implement the same interface — queue, dispatch, execute, return results — so you can drive any of them from the same Multica board. **But the capability details diverge significantly**: whether session resumption actually works, whether MCP is supported, where skill files live, how models are selected. This page is the full matrix.
+Multica ships with built-in support for **13 AI coding tools**. They all implement the same interface — queue, dispatch, execute, return results — so you can drive any of them from the same Multica board. **But the capability details diverge significantly**: whether session resumption actually works, whether MCP is supported, where skill files live, how models are selected. This page is the full matrix.
 
 For guidance on picking a tool when creating an agent, see [Creating and configuring agents](/agents-create).
 
@@ -14,7 +14,7 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 | Tool | Vendor | Session resumption | MCP | Skill injection path | Model selection |
 |---|---|---|---|---|---|
 | **Antigravity** | Google | ✅ (`--conversation <id>`) | ❌ | `.agents/skills/` | Managed inside the Antigravity CLI itself |
-| **Claude Code** | Anthropic | ✅ | **✅ (the only one that actually uses it)** | `.claude/skills/` | Static + flag |
+| **Claude Code** | Anthropic | ✅ | ✅ | `.claude/skills/` | Static + flag |
 | **Codex** | OpenAI | ⚠️ Code exists but unreachable | ❌ | `$CODEX_HOME/skills/` | Static |
 | **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | Static (determined by account entitlement) |
 | **Cursor** | Anysphere | ⚠️ Code exists but unusable | ❌ | `.cursor/skills/` | Dynamic discovery |
@@ -25,6 +25,7 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 | **OpenCode** | SST | ✅ | ❌ | `.opencode/skills/` | Dynamic discovery |
 | **OpenClaw** | Open source | ✅ | ❌ | `.agent_context/skills/` (fallback) | Bound to the agent, can't be switched per task |
 | **Pi** | Inflection AI | ✅ (session is a file path) | ❌ | `.pi/skills/` | Dynamic discovery |
+| **Warp Oz CLI** | Warp | ✅ | ✅ | `.agents/skills/` | Dynamic discovery |
 
 ## What each tool is for
 
@@ -34,7 +35,7 @@ From Google. CLI binary name is `agy`. Pairs with Google's Antigravity service a
 
 ### Claude Code
 
-From Anthropic. **First choice for new users** — the most complete feature set: session resumption actually works, it's the **only one of the 11 that truly reads MCP configuration**, and it supports fine-tuning flags like `--max-turns` and `--append-system-prompt`. Requires an Anthropic API key.
+From Anthropic. **First choice for new users** — the most complete feature set: session resumption actually works, it reads MCP configuration, and it supports fine-tuning flags like `--max-turns` and `--append-system-prompt`. Requires an Anthropic API key.
 
 ### Codex
 
@@ -76,24 +77,28 @@ Open-source project, a CLI agent orchestrator. **Model is bound at the agent lay
 
 From Inflection AI, minimalist. **Session resumption is unusual** — the session ID is a file path on disk (`~/.pi/...`) rather than a string ID. In other tools, the resume id is a string returned by the CLI; in Pi, the resume id is the session file itself.
 
+### Warp Oz CLI
+
+From Warp. Uses `oz agent run` for headless agent execution. Session resumption works through Oz conversation IDs, MCP is passed through to Oz, and skills are discovered from `.agents/skills/`. For macOS daemon use, prefer Warp's standalone Oz CLI package over the CLI bundled inside `Warp.app` so background runs do not activate the desktop app.
+
 ## Session resumption: who really supports it
 
 The session resumption mechanism is covered in [Tasks](/tasks#can-a-task-continue-from-the-previous-context). Here's the **exact current state** per tool:
 
 | Status | Tools | Meaning |
 |---|---|---|
-| ✅ Really works | Antigravity, Claude Code, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi | Pass the resume id and it continues from the previous context |
+| ✅ Really works | Antigravity, Claude Code, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi, Warp Oz CLI | Pass the resume id and it continues from the previous context |
 | ⚠️ Code exists but unreachable | Codex, Cursor | Resume paths exist in the code but aren't actually reached (Codex silently falls back; Cursor doesn't return session id) — **treat as unsupported** |
 | ❌ None | Gemini | The CLI has no resume mechanism |
 
 **For your decision**: if your workflow needs agents to preserve context across tasks (failure retries, manual reruns, conversational iteration), pick only from the ✅ row.
 
-## MCP configuration: only Claude Code actually reads it
+## MCP configuration support
 
-**Of the 12 tools, only Claude Code actually consumes `mcp_config`**. The other 11 accept the field but **completely ignore it** — no error, no warning, the config just has no effect.
+Claude Code and Warp Oz CLI consume `mcp_config`. The other tools accept the field but ignore it — no error, no warning, the config just has no effect.
 
 <Callout type="warning">
-If you set `mcp_config` in an agent configuration but pick a tool other than Claude Code, your MCP servers have **no effect** on that agent. MCP integration currently covers Claude Code only.
+If you set `mcp_config` in an agent configuration but pick a tool other than Claude Code or Warp Oz CLI, your MCP servers have **no effect** on that agent.
 </Callout>
 
 ## Where skill files go
@@ -111,6 +116,7 @@ Each tool uses **its own** skill discovery path. Before a task runs, the Multica
 | OpenCode | `.opencode/skills/` | ✅ Native |
 | Pi | `.pi/skills/` | ✅ Native |
 | Antigravity | `.agents/skills/` | ✅ Native (inherits Gemini CLI's workspace layout — see [Antigravity docs](https://antigravity.google/docs/gcli-migration)) |
+| Warp Oz CLI | `.agents/skills/` | ✅ Native |
 | Gemini | `.agent_context/skills/` | ⚠️ Generic fallback |
 | Hermes | `.agent_context/skills/` | ⚠️ Generic fallback |
 | OpenClaw | `.agent_context/skills/` | ⚠️ Generic fallback |
@@ -124,4 +130,4 @@ For creating and using skills, see [Skills](/skills).
 - [Creating and configuring agents](/agents-create) — pick a tool for your agent
 - [Tasks](/tasks) — task lifecycle and session-resumption mechanics
 - [Daemon and runtimes](/daemon-runtimes) — where the tools run and how they connect to Multica
-- [Install an agent runtime](/install-agent-runtime) — installation and authentication for each of the 12 supported tools
+- [Install an agent runtime](/install-agent-runtime) — installation and authentication for each of the 13 supported tools

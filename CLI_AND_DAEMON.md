@@ -153,6 +153,8 @@ The daemon auto-detects these AI CLIs on your PATH:
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
+For macOS daemon use, prefer Warp's standalone Oz CLI package over the `oz` shim bundled inside `Warp.app`; the standalone binary runs headlessly and avoids activating the Warp desktop app during background tasks.
+
 ### How It Works
 
 1. On start, the daemon detects installed agent CLIs and registers a runtime for each agent in each watched workspace
