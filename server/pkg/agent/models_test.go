@@ -233,6 +233,24 @@ func TestListModelsKiroWithoutBinary(t *testing.T) {
 	}
 }
 
+func TestListModelsWarpWithoutBinary(t *testing.T) {
+	ctx := context.Background()
+	modelCacheMu.Lock()
+	delete(modelCache, "warp")
+	modelCacheMu.Unlock()
+
+	got, err := ListModels(ctx, "warp", "/nonexistent/oz")
+	if err != nil {
+		t.Fatalf("ListModels(warp) error: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("expected static fallback models, got empty list")
+	}
+	if got[0].ID == "" || got[0].Label == "" {
+		t.Fatalf("unexpected empty fallback model: %+v", got[0])
+	}
+}
+
 func TestListModelsUnknownProvider(t *testing.T) {
 	ctx := context.Background()
 	_, err := ListModels(ctx, "nonexistent", "")
@@ -251,6 +269,7 @@ func TestStaticCatalogsHaveAtMostOneDefault(t *testing.T) {
 		"gemini":  geminiStaticModels(),
 		"cursor":  cursorStaticModels(),
 		"copilot": copilotStaticModels(),
+		"warp":    warpStaticModels(),
 	}
 	for provider, models := range catalogs {
 		count := 0
@@ -476,6 +495,41 @@ composer-2 - Composer 2
 	models := parseCursorModels(input)
 	if len(models) != 1 || models[0].ID != "composer-2" {
 		t.Fatalf("unexpected: %+v", models)
+	}
+}
+
+func TestParseWarpModelsJSON(t *testing.T) {
+	input := []byte(`[{"id":"auto"},{"id":"gpt-5.5-high"},{"id":"auto"}]`)
+	models := parseWarpModelsJSON(input)
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d: %+v", len(models), models)
+	}
+	if models[0].ID != "auto" || !models[0].Default {
+		t.Fatalf("expected first model auto/default, got %+v", models[0])
+	}
+	if models[1].ID != "gpt-5.5-high" || models[1].Provider != "warp" {
+		t.Fatalf("unexpected second model %+v", models[1])
+	}
+}
+
+func TestParseWarpModelsNDJSON(t *testing.T) {
+	input := `{"id":"gpt-5.5-high"}
+{"id":"auto"}
+{"id":"gpt-5.5-high"}
+`
+	models := parseWarpModelsNDJSON(input)
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d: %+v", len(models), models)
+	}
+	ids := map[string]Model{}
+	for _, m := range models {
+		ids[m.ID] = m
+	}
+	if !ids["auto"].Default {
+		t.Fatalf("expected auto to be marked default: %+v", ids["auto"])
+	}
+	if ids["gpt-5.5-high"].Provider != "warp" {
+		t.Fatalf("expected provider=warp, got %+v", ids["gpt-5.5-high"])
 	}
 }
 

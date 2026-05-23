@@ -22,6 +22,7 @@ import (
 // Kimi:        skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
 // Kiro:        skills → {workDir}/.kiro/skills/{name}/SKILL.md  (native discovery)
 // Antigravity: skills → {workDir}/.agents/skills/{name}/SKILL.md  (native discovery — see https://antigravity.google/docs/gcli-migration "Workspace skills")
+// Warp/Oz:     skills → {workDir}/.agents/skills/{name}/SKILL.md  (native discovery)
 // Default:     skills → {workDir}/.agent_context/skills/{name}/SKILL.md
 //
 // manifest, when non-nil, is populated with every file we created and every
@@ -202,6 +203,9 @@ func resolveSkillsDir(workDir, provider string, manifest *sidecarManifest) (stri
 		// .agents/skills/ in the workdir. The CLI inherits Gemini CLI's
 		// workspace skill layout; see https://antigravity.google/docs/gcli-migration
 		// under "Workspace skills".
+	case "warp":
+		// Warp Oz CLI auto-discovers project-level skills from .agents/skills/
+		// in the workdir.
 		skillsDir = filepath.Join(workDir, ".agents", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).

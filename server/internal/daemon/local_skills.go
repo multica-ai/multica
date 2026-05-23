@@ -49,6 +49,7 @@ type runtimeLocalSkillBundle struct {
 //   - Kiro: project and user-level .kiro/skills directories discovered by Kiro CLI
 //   - Antigravity: ~/.gemini/antigravity-cli/skills user-level skill root
 //     (https://antigravity.google/docs/gcli-migration "Global skills")
+//   - Warp Oz CLI: discovers skills from .agents/skills
 //
 // Longer-term this mapping would be better colocated with the provider
 // definitions under server/pkg/agent so adding a new runtime can't silently
@@ -84,6 +85,8 @@ func localSkillRootForProvider(provider string) (string, bool, error) {
 		// agy inherits Gemini CLI's global skill root; see
 		// https://antigravity.google/docs/gcli-migration ("Global skills").
 		return filepath.Join(home, ".gemini", "antigravity-cli", "skills"), true, nil
+	case "warp":
+		return filepath.Join(home, ".agents", "skills"), true, nil
 	default:
 		return "", false, nil
 	}

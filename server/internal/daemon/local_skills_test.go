@@ -327,3 +327,29 @@ func TestLoadRuntimeLocalSkillBundle_Cursor(t *testing.T) {
 		t.Fatalf("source_path = %q", bundle.SourcePath)
 	}
 }
+
+func TestListRuntimeLocalSkills_Warp(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "ship-helper", map[string]string{
+		"SKILL.md": "---\nname: Ship Helper\ndescription: Warp/Oz helper skill\n---\n# Ship Helper\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("warp")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("warp should be supported")
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	if skills[0].Name != "Ship Helper" {
+		t.Fatalf("name = %q, want Ship Helper", skills[0].Name)
+	}
+	if skills[0].SourcePath != "~/.agents/skills/ship-helper" {
+		t.Fatalf("source_path = %q", skills[0].SourcePath)
+	}
+}

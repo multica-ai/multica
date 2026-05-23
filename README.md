@@ -114,7 +114,7 @@ multica setup          # Connect to Multica Cloud, log in, start daemon
 multica setup           # Configure, authenticate, and start the daemon
 ```
 
-The daemon runs in the background and auto-detects agent CLIs (`claude`, `codex`, `copilot`, `openclaw`, `opencode`, `hermes`, `gemini`, `pi`, `cursor-agent`, `kimi`, `kiro-cli`, `agy`) on your PATH.
+The daemon runs in the background and auto-detects agent CLIs (`claude`, `codex`, `copilot`, `openclaw`, `opencode`, `hermes`, `gemini`, `pi`, `cursor-agent`, `kimi`, `kiro-cli`, `agy`, `oz`) on your PATH.
 
 ### 2. Verify your runtime
 

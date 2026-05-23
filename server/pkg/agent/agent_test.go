@@ -49,6 +49,17 @@ func TestNewReturnsAntigravityBackend(t *testing.T) {
 	}
 }
 
+func TestNewReturnsWarpBackend(t *testing.T) {
+	t.Parallel()
+	b, err := New("warp", Config{ExecutablePath: "/nonexistent/oz"})
+	if err != nil {
+		t.Fatalf("New(warp) error: %v", err)
+	}
+	if _, ok := b.(*warpBackend); !ok {
+		t.Fatalf("expected *warpBackend, got %T", b)
+	}
+}
+
 func TestNewRejectsUnknownType(t *testing.T) {
 	t.Parallel()
 	_, err := New("gpt", Config{})
@@ -83,7 +94,7 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	// entry to launchHeaders in agent.go and extend this list.
 	supported := []string{
 		"antigravity", "claude", "codex", "copilot", "cursor", "gemini",
-		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi",
+		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi", "warp",
 	}
 	for _, t_ := range supported {
 		if header := LaunchHeader(t_); header == "" {
