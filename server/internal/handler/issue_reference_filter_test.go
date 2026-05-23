@@ -148,11 +148,9 @@ func TestListGroupedIssues_ReferenceFilter(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode grouped response: %v", err)
 	}
-	ids := []string{}
+	var ids []string
 	for _, group := range resp.Groups {
-		for _, issue := range group.Issues {
-			ids = append(ids, issue.ID)
-		}
+		ids = append(ids, issueResponseIDs(group.Issues)...)
 	}
 	if !containsIssueID(ids, matching) {
 		t.Fatalf("filtered grouped list missing matching issue %s", matching)
