@@ -105,6 +105,8 @@
     "repos_pill_count_other": "{{count}} 个仓库",
     "repos_heading": "为此项目关联 GitHub 仓库",
     "repos_empty": "还没有工作区级别的仓库。可以在下方粘贴 URL 临时关联一个。",
+    "repos_search_placeholder": "搜索仓库...",
+    "repos_search_empty": "没有匹配的仓库。",
     "repos_url_placeholder": "https://github.com/owner/repo 或 git@github.com:owner/repo.git",
     "repos_add": "添加",
     "repos_selected": "已选"

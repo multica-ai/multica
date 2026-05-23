@@ -71,6 +71,8 @@
     "empty": "No resources attached.",
     "add_button": "Add resource",
     "popover_title": "Attach a GitHub repo",
+    "repos_search_placeholder": "Search repositories...",
+    "repos_search_empty": "No repositories match your search.",
     "attached_badge": "attached",
     "remove_tooltip": "Remove",
     "url_placeholder": "https://github.com/owner/repo or git@github.com:owner/repo.git",
