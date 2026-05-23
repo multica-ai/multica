@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
+  ChartGantt,
   Check,
   ChevronDown,
   CircleDot,
@@ -54,6 +55,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { LabelChip } from "../../labels/label-chip";
 import {
   SORT_OPTIONS,
+  GROUPING_OPTIONS,
   CARD_PROPERTY_OPTIONS,
   type ActorFilterValue,
 } from "@multica/core/issues/stores/view-store";
@@ -66,6 +68,8 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import type { Issue } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
+import { useIssueViewStore } from "@multica/core/issues/stores/view-store";
+import { WorkspaceAgentWorkingChip } from "./workspace-agent-working-chip";
 
 // ---------------------------------------------------------------------------
 // HoverCheck — shadcn official pattern (PR #6862)
@@ -489,10 +493,31 @@ function LabelSubContent({
 // IssuesHeader
 // ---------------------------------------------------------------------------
 
-export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
+export function IssuesHeader({
+  scopedIssues,
+  allowGantt = false,
+}: {
+  scopedIssues: Issue[];
+  allowGantt?: boolean;
+}) {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
   const setScope = useIssuesScopeStore((s) => s.setScope);
+  // Bind the workspace agents-working chip to the global /issues view
+  // store. Subscribing here keeps the chip presentational and lets
+  // /my-issues bind its own store via a sibling header.
+  const agentRunningFilter = useIssueViewStore((s) => s.agentRunningFilter);
+  const toggleAgentRunningFilter = useIssueViewStore(
+    (s) => s.toggleAgentRunningFilter,
+  );
+  // Scope the chip to whatever issues this page is currently showing.
+  // /issues uses the full workspace minus Members/Agents pill filtering;
+  // passing the visible-issue id set lets the chip count match the list
+  // length when the filter is on.
+  const scopedIssueIds = useMemo(
+    () => new Set(scopedIssues.map((i) => i.id)),
+    [scopedIssues],
+  );
   const SCOPE_LABEL_KEY: Record<IssuesScope, "all_label" | "members_label" | "agents_label"> = {
     all: "all_label",
     members: "members_label",
@@ -531,12 +556,35 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
         ))}
       </div>
 
-      <IssueDisplayControls scopedIssues={scopedIssues} />
+      <div className="flex items-center gap-1">
+        {agentRunningFilter && (
+          <span className="mr-1 text-xs text-muted-foreground">
+            {t(($) => $.agent_activity.filter_active_label)}
+          </span>
+        )}
+        <WorkspaceAgentWorkingChip
+          value={agentRunningFilter}
+          onToggle={toggleAgentRunningFilter}
+          scopedIssueIds={scopedIssueIds}
+        />
+        <IssueDisplayControls scopedIssues={scopedIssues} allowGantt={allowGantt} />
+      </div>
     </div>
   );
 }
 
-export function IssueDisplayControls({ scopedIssues }: { scopedIssues: Issue[] }) {
+export function IssueDisplayControls({
+  scopedIssues,
+  hideViewToggle = false,
+  allowGantt = false,
+}: {
+  scopedIssues: Issue[];
+  hideViewToggle?: boolean;
+  // Only Project Detail renders <GanttView>; other surfaces (global /issues,
+  // /my-issues, actor panel) ignore viewMode === "gantt" and would silently
+  // fall back to List if the option were exposed there. Keep Gantt opt-in.
+  allowGantt?: boolean;
+}) {
   const { t } = useT("issues");
   const viewMode = useViewStore((s) => s.viewMode);
   const statusFilters = useViewStore((s) => s.statusFilters);
@@ -549,6 +597,7 @@ export function IssueDisplayControls({ scopedIssues }: { scopedIssues: Issue[] }
   const labelFilters = useViewStore((s) => s.labelFilters);
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
+  const grouping = useViewStore((s) => s.grouping);
   const cardProperties = useViewStore((s) => s.cardProperties);
   const act = useViewStoreApi().getState();
 
@@ -566,23 +615,30 @@ export function IssueDisplayControls({ scopedIssues }: { scopedIssues: Issue[] }
       labelFilters,
     }) > 0;
 
-  const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_priority" | "sort_due_date" | "sort_created" | "sort_title"> = {
+  const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_priority" | "sort_start_date" | "sort_due_date" | "sort_created" | "sort_title"> = {
     position: "sort_manual",
     priority: "sort_priority",
+    start_date: "sort_start_date",
     due_date: "sort_due_date",
     created_at: "sort_created",
     title: "sort_title",
   };
-  const CARD_PROPERTY_LABEL_KEY: Record<typeof CARD_PROPERTY_OPTIONS[number]["key"], "card_priority" | "card_description" | "card_assignee" | "card_due_date" | "card_project" | "card_labels" | "card_child_progress"> = {
+  const GROUPING_LABEL_KEY: Record<typeof GROUPING_OPTIONS[number]["value"], "group_status" | "group_assignee"> = {
+    status: "group_status",
+    assignee: "group_assignee",
+  };
+  const CARD_PROPERTY_LABEL_KEY: Record<typeof CARD_PROPERTY_OPTIONS[number]["key"], "card_priority" | "card_description" | "card_assignee" | "card_start_date" | "card_due_date" | "card_project" | "card_labels" | "card_child_progress"> = {
     priority: "card_priority",
     description: "card_description",
     assignee: "card_assignee",
+    startDate: "card_start_date",
     dueDate: "card_due_date",
     project: "card_project",
     labels: "card_labels",
     childProgress: "card_child_progress",
   };
   const sortLabel = t(($) => $.display[SORT_LABEL_KEY[sortBy]]);
+  const groupingLabel = t(($) => $.display[GROUPING_LABEL_KEY[grouping]]);
 
   return (
     <div className="flex items-center gap-1">
@@ -795,6 +851,40 @@ export function IssueDisplayControls({ scopedIssues }: { scopedIssues: Issue[] }
             <TooltipContent side="bottom">{t(($) => $.display.tooltip)}</TooltipContent>
           </Tooltip>
           <PopoverContent align="end" className="w-64 p-0">
+            {viewMode === "board" && (
+              <div className="border-b px-3 py-2.5">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {t(($) => $.display.grouping_section)}
+                </span>
+                <div className="mt-2">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full justify-between text-xs"
+                        >
+                          {groupingLabel}
+                          <ChevronDown className="size-3 text-muted-foreground" />
+                        </Button>
+                      }
+                    />
+                    <DropdownMenuContent align="start" className="w-auto">
+                      {GROUPING_OPTIONS.map((opt) => (
+                        <DropdownMenuItem
+                          key={opt.value}
+                          onClick={() => act.setGrouping(opt.value)}
+                        >
+                          {t(($) => $.display[GROUPING_LABEL_KEY[opt.value]])}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
+            )}
+
             <div className="border-b px-3 py-2.5">
               <span className="text-xs font-medium text-muted-foreground">
                 {t(($) => $.display.ordering_section)}
@@ -864,42 +954,58 @@ export function IssueDisplayControls({ scopedIssues }: { scopedIssues: Issue[] }
           </PopoverContent>
         </Popover>
 
-        {/* View toggle */}
-        <DropdownMenu>
-          <Tooltip>
-            <DropdownMenuTrigger
-              render={
-                <TooltipTrigger
-                  render={
-                    <Button variant="outline" size="icon-sm" className="text-muted-foreground">
-                      {viewMode === "board" ? (
-                        <Columns3 className="size-4" />
-                      ) : (
-                        <List className="size-4" />
-                      )}
-                    </Button>
-                  }
-                />
-              }
-            />
-            <TooltipContent side="bottom">
-              {viewMode === "board" ? t(($) => $.view.tooltip_board) : t(($) => $.view.tooltip_list)}
-            </TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="end" className="w-auto">
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>{t(($) => $.view.section)}</DropdownMenuLabel>
-              <DropdownMenuItem onClick={() => act.setViewMode("board")}>
-                <Columns3 />
-                {t(($) => $.view.board)}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => act.setViewMode("list")}>
-                <List />
-                {t(($) => $.view.list)}
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {/* View toggle. If a store has `viewMode === "gantt"` persisted but
+            this surface doesn't render Gantt, fall back to "list" so the
+            trigger icon matches what's actually on screen. */}
+        {!hideViewToggle && (
+          <DropdownMenu>
+            <Tooltip>
+              <DropdownMenuTrigger
+                render={
+                  <TooltipTrigger
+                    render={
+                      <Button variant="outline" size="icon-sm" className="text-muted-foreground">
+                        {viewMode === "board" ? (
+                          <Columns3 className="size-4" />
+                        ) : viewMode === "gantt" && allowGantt ? (
+                          <ChartGantt className="size-4" />
+                        ) : (
+                          <List className="size-4" />
+                        )}
+                      </Button>
+                    }
+                  />
+                }
+              />
+              <TooltipContent side="bottom">
+                {viewMode === "board"
+                  ? t(($) => $.view.tooltip_board)
+                  : viewMode === "gantt" && allowGantt
+                  ? t(($) => $.view.tooltip_gantt)
+                  : t(($) => $.view.tooltip_list)}
+              </TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end" className="w-auto">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>{t(($) => $.view.section)}</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => act.setViewMode("board")}>
+                  <Columns3 />
+                  {t(($) => $.view.board)}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => act.setViewMode("list")}>
+                  <List />
+                  {t(($) => $.view.list)}
+                </DropdownMenuItem>
+                {allowGantt && (
+                  <DropdownMenuItem onClick={() => act.setViewMode("gantt")}>
+                    <ChartGantt />
+                    {t(($) => $.view.gantt)}
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
     </div>
   );
 }

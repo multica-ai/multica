@@ -63,19 +63,37 @@ detect_os() {
 # ---------------------------------------------------------------------------
 # CLI Installation
 # ---------------------------------------------------------------------------
+_dump_brew_log() {
+  local log="$1"
+  if [ -s "$log" ]; then
+    warn "Homebrew output (last 80 lines):"
+    tail -n 80 "$log" | sed 's/^/  /' >&2
+  fi
+}
+
 install_cli_brew() {
   info "Installing Multica CLI via Homebrew..."
-  if ! brew tap multica-ai/tap 2>/dev/null; then
-    fail "Failed to add Homebrew tap. Check your network connection."
+  local brew_log
+  brew_log=$(mktemp)
+  if ! brew tap multica-ai/tap >"$brew_log" 2>&1; then
+    warn "Failed to add Homebrew tap. Falling back to GitHub Releases binary install."
+    _dump_brew_log "$brew_log"
+    rm -f "$brew_log"
+    return 1
   fi
   # brew install exits non-zero if already installed on older Homebrew versions
-  if ! brew install "$BREW_PACKAGE" 2>/dev/null; then
+  if ! brew install "$BREW_PACKAGE" >"$brew_log" 2>&1; then
     if brew list "$BREW_PACKAGE" >/dev/null 2>&1; then
+      rm -f "$brew_log"
       ok "Multica CLI already installed via Homebrew"
     else
-      fail "Failed to install multica via Homebrew."
+      warn "Failed to install multica via Homebrew. Falling back to GitHub Releases binary install."
+      _dump_brew_log "$brew_log"
+      rm -f "$brew_log"
+      return 1
     fi
   else
+    rm -f "$brew_log"
     ok "Multica CLI installed via Homebrew"
   fi
 }
@@ -103,8 +121,9 @@ install_cli_binary() {
 
   tar -xzf "$tmp_dir/multica.tar.gz" -C "$tmp_dir" multica
 
-  # Try /usr/local/bin first, fall back to ~/.local/bin
-  local bin_dir="/usr/local/bin"
+  # Try /usr/local/bin first, fall back to ~/.local/bin. Tests and scripted
+  # installs can override the first choice with MULTICA_BIN_DIR.
+  local bin_dir="${MULTICA_BIN_DIR:-/usr/local/bin}"
   if [ -w "$bin_dir" ]; then
     mv "$tmp_dir/multica" "$bin_dir/multica"
   elif command_exists sudo; then
@@ -232,7 +251,7 @@ install_cli() {
   fi
 
   if command_exists brew; then
-    install_cli_brew
+    install_cli_brew || install_cli_binary
   else
     install_cli_binary
   fi
@@ -443,6 +462,15 @@ main() {
         echo "  (default)       Install / upgrade the Multica CLI"
         echo "  --with-server   Install CLI + provision a self-host server (Docker)"
         echo "  --stop          Stop a self-hosted installation"
+        echo ""
+        echo "Environment variables:"
+        echo "  MULTICA_INSTALL_DIR   Self-host server install directory"
+        echo "                        (default: \$HOME/.multica/server)"
+        echo "  MULTICA_BIN_DIR       Target directory for the CLI binary when"
+        echo "                        installing from GitHub Releases"
+        echo "                        (default: /usr/local/bin, then \$HOME/.local/bin)"
+        echo "  MULTICA_SELFHOST_REF  Git ref to check out for self-host assets"
+        echo "                        (default: latest release tag, falling back to main)"
         echo ""
         echo "After installation, run 'multica setup' to configure your environment."
         exit 0

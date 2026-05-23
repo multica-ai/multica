@@ -2,8 +2,23 @@ import type {
   DashboardUsageDaily,
   DashboardUsageByAgent,
   DashboardAgentRunTime,
+  DashboardRunTimeDaily,
 } from "@multica/core/types";
-import { estimateCost, estimateCostBreakdown, type DailyTokenData } from "../runtimes/utils";
+import {
+  addDaysIso,
+  estimateCost,
+  estimateCostBreakdown,
+  formatShortDate,
+  todayIso,
+  weekStartIso,
+  type DailyTokenData,
+} from "../runtimes/utils";
+import type {
+  DailyTimeData,
+  DailyTasksData,
+  WeeklyTimeData,
+  WeeklyTasksData,
+} from "../runtimes/components/charts";
 
 // ---------------------------------------------------------------------------
 // Dashboard data aggregations
@@ -210,6 +225,134 @@ export function mergeAgentDashboardRows(
     if (b.cost !== a.cost) return b.cost - a.cost;
     return b.seconds - a.seconds;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Weekly fold for run-time + tasks. Mirrors `aggregateByWeek` in
+// `runtimes/utils.ts` which already covers cost / tokens — same calendar
+// week semantics (Mon–Sun anchored at today-in-tz), same pre-zeroed buckets,
+// same partial-week metadata. Workspace dashboard uses the user-chosen
+// timezone here; the runtime page uses the runtime's IANA tz. Behaviour is
+// identical apart from where the tz comes from.
+// ---------------------------------------------------------------------------
+
+interface WeekShell {
+  weekStart: string;
+  weekEnd: string;
+  label: string;
+  rangeLabel: string;
+  partial: boolean;
+  daysCovered: number;
+}
+
+// Build N trailing calendar week shells anchored at today-in-tz. Each shell
+// carries the labels and partial-week metadata the chart components consume;
+// downstream aggregators fold their own per-week values onto the matching
+// shell.
+function buildWeekShells(tz: string, weekCount: number): WeekShell[] {
+  const count = Math.max(1, Math.floor(weekCount));
+  const today = todayIso(tz);
+  const currentWeekStart = weekStartIso(today);
+  const firstWeekStart = addDaysIso(currentWeekStart, -(count - 1) * 7);
+  const shells: WeekShell[] = [];
+  for (let i = 0; i < count; i++) {
+    const weekStart = addDaysIso(firstWeekStart, i * 7);
+    const weekEnd = addDaysIso(weekStart, 6);
+    const partial = today < weekEnd;
+    // Inclusive count of how many days of this week have actually elapsed.
+    // Closed weeks sit at 7; the current week reports 1..6.
+    const clampedToday =
+      today < weekStart ? weekStart : today < weekEnd ? today : weekEnd;
+    const elapsed = Math.min(7, Math.max(1, diffDaysIso(weekStart, clampedToday) + 1));
+    shells.push({
+      weekStart,
+      weekEnd,
+      label: formatShortDate(weekStart),
+      rangeLabel: `${formatShortDate(weekStart)} – ${formatShortDate(weekEnd)}`,
+      partial,
+      daysCovered: partial ? elapsed : 7,
+    });
+  }
+  return shells;
+}
+
+function diffDaysIso(from: string, to: string): number {
+  const [y1, m1, d1] = from.split("-").map(Number);
+  const [y2, m2, d2] = to.split("-").map(Number);
+  const a = Date.UTC(y1 ?? 1970, (m1 ?? 1) - 1, d1 ?? 1);
+  const b = Date.UTC(y2 ?? 1970, (m2 ?? 1) - 1, d2 ?? 1);
+  return Math.round((b - a) / 86_400_000);
+}
+
+export function aggregateWeeklyTime(
+  rows: DashboardRunTimeDaily[],
+  tz: string,
+  weekCount: number,
+): WeeklyTimeData[] {
+  const shells = buildWeekShells(tz, weekCount);
+  const totals = new Map<string, number>();
+  for (const shell of shells) totals.set(shell.weekStart, 0);
+  for (const r of rows) {
+    const wkStart = weekStartIso(r.date);
+    if (!totals.has(wkStart)) continue;
+    totals.set(wkStart, (totals.get(wkStart) ?? 0) + r.total_seconds);
+  }
+  return shells.map((s) => ({ ...s, totalSeconds: totals.get(s.weekStart) ?? 0 }));
+}
+
+export function aggregateWeeklyTasks(
+  rows: DashboardRunTimeDaily[],
+  tz: string,
+  weekCount: number,
+): WeeklyTasksData[] {
+  const shells = buildWeekShells(tz, weekCount);
+  const buckets = new Map<string, { completed: number; failed: number }>();
+  for (const shell of shells)
+    buckets.set(shell.weekStart, { completed: 0, failed: 0 });
+  for (const r of rows) {
+    const wkStart = weekStartIso(r.date);
+    const bucket = buckets.get(wkStart);
+    if (!bucket) continue;
+    const failed = r.failed_count;
+    const completed = Math.max(0, r.task_count - failed);
+    bucket.completed += completed;
+    bucket.failed += failed;
+  }
+  return shells.map((s) => {
+    const b = buckets.get(s.weekStart) ?? { completed: 0, failed: 0 };
+    return { ...s, completed: b.completed, failed: b.failed };
+  });
+}
+
+// Per-date run-time rows → one row per date with `totalSeconds` for the
+// DailyTimeChart. Sorted ascending so the x-axis reads oldest-to-newest,
+// matching the cost / tokens aggregators.
+export function aggregateDailyTime(rows: DashboardRunTimeDaily[]): DailyTimeData[] {
+  return [...rows]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((r) => ({
+      date: r.date,
+      label: formatDateLabel(r.date),
+      totalSeconds: r.total_seconds,
+    }));
+}
+
+// Per-date run-time rows → one row per date with `completed` and `failed`
+// counts for the DailyTasksChart's stacked bar (failed_count is a subset
+// of task_count, so completed = task_count - failed_count).
+export function aggregateDailyTasks(rows: DashboardRunTimeDaily[]): DailyTasksData[] {
+  return [...rows]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((r) => {
+      const failed = r.failed_count;
+      const completed = Math.max(0, r.task_count - failed);
+      return {
+        date: r.date,
+        label: formatDateLabel(r.date),
+        completed,
+        failed,
+      };
+    });
 }
 
 // Compact human duration: "1h 23m" / "12m 30s" / "45s" / "<1m". Used for

@@ -3,6 +3,8 @@ package daemon
 import (
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 func TestClassifyPoisonedOutput(t *testing.T) {
@@ -59,10 +61,10 @@ Detection markers under consideration:
 
 The implementation looks correct: the daemon classifies these as
 fallback output, persists a dedicated failure_reason, and the SQL
-filter excludes them from the resume lookup. Auto-retry of mid-flight
-orphans still keeps the resume contract because CreateRetryTask does
-not set force_fresh_session. Approving with a follow-up note about
-the matcher being too permissive on long outputs.`,
+filter excludes them from the resume lookup. Resume-safe auto-retry
+still keeps the resume contract, while poisoned sessions are filtered.
+Approving with a follow-up note about the matcher being too permissive
+on long outputs.`,
 			wantOK: false,
 		},
 		{
@@ -165,6 +167,54 @@ func TestClassifyPoisonedError(t *testing.T) {
 			}
 			if ok && reason != tc.wantReason {
 				t.Fatalf("classifyPoisonedError(%q) reason=%q, want %q", tc.errMsg, reason, tc.wantReason)
+			}
+		})
+	}
+}
+
+func TestClassifyResumeUnsafeTimeout(t *testing.T) {
+	cases := []struct {
+		name       string
+		provider   string
+		errMsg     string
+		wantOK     bool
+		wantReason string
+	}{
+		{
+			name:       "codex semantic inactivity",
+			provider:   "codex",
+			errMsg:     agent.CodexSemanticInactivityMarker + " after 10m0s without agent progress (last activity: tool-result:exec_command)",
+			wantOK:     true,
+			wantReason: FailureReasonCodexSemanticInactivity,
+		},
+		{
+			name:     "codex ordinary timeout remains resumable",
+			provider: "codex",
+			errMsg:   "codex timed out after 30m0s",
+			wantOK:   false,
+		},
+		{
+			name:     "other provider same text is not classified",
+			provider: "claude",
+			errMsg:   agent.CodexSemanticInactivityMarker + " after 10m0s without agent progress",
+			wantOK:   false,
+		},
+		{
+			name:     "empty error",
+			provider: "codex",
+			errMsg:   "",
+			wantOK:   false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reason, ok := classifyResumeUnsafeTimeout(tc.provider, tc.errMsg)
+			if ok != tc.wantOK {
+				t.Fatalf("classifyResumeUnsafeTimeout(%q, %q) ok=%v, want %v", tc.provider, tc.errMsg, ok, tc.wantOK)
+			}
+			if ok && reason != tc.wantReason {
+				t.Fatalf("classifyResumeUnsafeTimeout(%q, %q) reason=%q, want %q", tc.provider, tc.errMsg, reason, tc.wantReason)
 			}
 		})
 	}

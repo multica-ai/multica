@@ -25,17 +25,38 @@
   animation: entrance-spin 0.6s ease-out forwards;
 }
 
-/* Onboarding: step / phase entry — 400ms fade + 4px rise.
- * Matches the design prototype's .fade-in. Applied on mount so every new
- * step (and intra-step phase switch, via key=phase remount) plays once.
- * `both` fill-mode commits the `from` styles pre-animation to avoid a
- * single-frame flash at natural state before the animation grabs. */
+/* Onboarding: step / phase entry — 400ms fade.
+ * Applied on mount so every new step (and intra-step phase switch, via
+ * key=phase remount) plays once. `both` fill-mode commits the `from`
+ * styles pre-animation to avoid a single-frame flash at natural state
+ * before the animation grabs.
+ *
+ * Earlier iteration also included a 4px translateY rise. Removed because
+ * the transform on h-full step roots was getting counted into the
+ * parent's scrollable overflow (web onboarding page + desktop
+ * WindowOverlay both wrap with overflow-y-auto), producing a brief
+ * scrollbar flash on each step entry. Pure opacity has no such side
+ * effect. */
 @keyframes onboarding-enter {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0; }
 }
 
 .animate-onboarding-enter {
   animation: onboarding-enter 0.4s ease both;
+}
+
+/* Welcome-after-onboarding Modal: emoji pops in with two quick scale
+ * bounces so the celebration registers visually without being
+ * disruptive. ~700ms total. */
+@keyframes welcome-emoji-pop {
+  0%   { transform: scale(0.4); opacity: 0; }
+  35%  { transform: scale(1.25); opacity: 1; }
+  55%  { transform: scale(0.92); }
+  75%  { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+.animate-welcome-emoji-pop {
+  animation: welcome-emoji-pop 0.7s cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
 /* Onboarding completion: success badge spring-pop.
@@ -114,17 +135,18 @@
   animation: chat-text-shimmer 2.5s linear infinite;
 }
 
-/* Navigation progress bar: 1px brand-tinted indeterminate sweep that shows
- * across the top of the dashboard while a transition-wrapped push/replace is
- * committing. Driven by useIsNavigating(); independent of the actual network,
- * so it disappears the moment React commits the new route. */
+/* Navigation progress bar: 2px brand-colored indeterminate sweep with a
+ * right-edge glow that shows across the top of the dashboard while a
+ * transition-wrapped push/replace is committing. Driven by useIsNavigating();
+ * independent of the actual network, so it disappears the moment React commits
+ * the new route. */
 @keyframes nav-progress-sweep {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(100%); }
 }
 
 .animate-nav-progress-sweep {
-  animation: nav-progress-sweep 1.1s ease-in-out infinite;
+  animation: nav-progress-sweep 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
 /* Border beam: a brand-tinted highlight sweeps continuously around the

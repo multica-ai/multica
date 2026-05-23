@@ -267,6 +267,91 @@ func (q *Queries) ListAllSquads(ctx context.Context, workspaceID pgtype.UUID) ([
 	return items, nil
 }
 
+const listSquadMemberStatusRows = `-- name: ListSquadMemberStatusRows :many
+SELECT
+    sm.id              AS squad_member_id,
+    sm.member_type     AS member_type,
+    sm.member_id       AS member_id,
+    a.archived_at      AS agent_archived_at,
+    ar.status          AS runtime_status,
+    ar.last_seen_at    AS runtime_last_seen_at,
+    atq.id             AS task_id,
+    atq.status         AS task_status,
+    atq.issue_id       AS task_issue_id,
+    atq.dispatched_at  AS task_dispatched_at,
+    i.number           AS issue_number,
+    i.title            AS issue_title,
+    i.status           AS issue_status
+FROM squad_member sm
+LEFT JOIN agent a
+       ON sm.member_type = 'agent' AND a.id = sm.member_id
+LEFT JOIN agent_runtime ar
+       ON ar.id = a.runtime_id
+LEFT JOIN agent_task_queue atq
+       ON sm.member_type = 'agent'
+      AND atq.agent_id = sm.member_id
+      AND atq.status IN ('dispatched', 'running')
+LEFT JOIN issue i
+       ON i.id = atq.issue_id
+WHERE sm.squad_id = $1
+ORDER BY sm.created_at ASC, atq.dispatched_at DESC NULLS LAST
+`
+
+type ListSquadMemberStatusRowsRow struct {
+	SquadMemberID     pgtype.UUID        `json:"squad_member_id"`
+	MemberType        string             `json:"member_type"`
+	MemberID          pgtype.UUID        `json:"member_id"`
+	AgentArchivedAt   pgtype.Timestamptz `json:"agent_archived_at"`
+	RuntimeStatus     pgtype.Text        `json:"runtime_status"`
+	RuntimeLastSeenAt pgtype.Timestamptz `json:"runtime_last_seen_at"`
+	TaskID            pgtype.UUID        `json:"task_id"`
+	TaskStatus        pgtype.Text        `json:"task_status"`
+	TaskIssueID       pgtype.UUID        `json:"task_issue_id"`
+	TaskDispatchedAt  pgtype.Timestamptz `json:"task_dispatched_at"`
+	IssueNumber       pgtype.Int4        `json:"issue_number"`
+	IssueTitle        pgtype.Text        `json:"issue_title"`
+	IssueStatus       pgtype.Text        `json:"issue_status"`
+}
+
+// Per-row join used to build the squad-members status view. One row per
+// (squad_member × active_task); members with no active task return a
+// single row with NULL task_* columns. Human members and agent members
+// with no agent row also return one row with NULL agent_/runtime_ columns.
+// The handler aggregates rows by member_id.
+func (q *Queries) ListSquadMemberStatusRows(ctx context.Context, squadID pgtype.UUID) ([]ListSquadMemberStatusRowsRow, error) {
+	rows, err := q.db.Query(ctx, listSquadMemberStatusRows, squadID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSquadMemberStatusRowsRow{}
+	for rows.Next() {
+		var i ListSquadMemberStatusRowsRow
+		if err := rows.Scan(
+			&i.SquadMemberID,
+			&i.MemberType,
+			&i.MemberID,
+			&i.AgentArchivedAt,
+			&i.RuntimeStatus,
+			&i.RuntimeLastSeenAt,
+			&i.TaskID,
+			&i.TaskStatus,
+			&i.TaskIssueID,
+			&i.TaskDispatchedAt,
+			&i.IssueNumber,
+			&i.IssueTitle,
+			&i.IssueStatus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSquadMembers = `-- name: ListSquadMembers :many
 SELECT id, squad_id, member_type, member_id, role, created_at FROM squad_member WHERE squad_id = $1 ORDER BY created_at ASC
 `
@@ -414,6 +499,30 @@ type TransferSquadAssigneesParams struct {
 // Transfer all issues assigned to a squad to the squad's leader agent.
 func (q *Queries) TransferSquadAssignees(ctx context.Context, arg TransferSquadAssigneesParams) error {
 	_, err := q.db.Exec(ctx, transferSquadAssignees, arg.AssigneeID, arg.AssigneeID_2)
+	return err
+}
+
+const transferSquadAutopilotsToLeader = `-- name: TransferSquadAutopilotsToLeader :exec
+UPDATE autopilot
+SET assignee_type = 'agent',
+    assignee_id = $2,
+    updated_at = now()
+WHERE assignee_type = 'squad' AND assignee_id = $1
+`
+
+type TransferSquadAutopilotsToLeaderParams struct {
+	AssigneeID   pgtype.UUID `json:"assignee_id"`
+	AssigneeID_2 pgtype.UUID `json:"assignee_id_2"`
+}
+
+// Mirrors TransferSquadAssignees for autopilot rows: when a squad is archived,
+// any autopilot still pointing at the squad would otherwise dangle and the
+// admission gate would skip every subsequent dispatch with "assignee squad
+// cannot be resolved". Rewrite the assignee in place to the leader agent so
+// the autopilot keeps firing under the same leader-only execution semantics
+// it had a moment before the archive (Path A from MUL-2429).
+func (q *Queries) TransferSquadAutopilotsToLeader(ctx context.Context, arg TransferSquadAutopilotsToLeaderParams) error {
+	_, err := q.db.Exec(ctx, transferSquadAutopilotsToLeader, arg.AssigneeID, arg.AssigneeID_2)
 	return err
 }
 

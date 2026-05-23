@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -15,6 +17,50 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 )
+
+// stderrCapture redirects os.Stderr through a pipe so a test can assert on
+// the human-facing strings runIssueCommentList prints alongside its JSON
+// output. Read() drains the pipe and is safe to call multiple times.
+type stderrCapture struct {
+	t       *testing.T
+	orig    *os.File
+	r, w    *os.File
+	out     strings.Builder
+	doneCh  chan struct{}
+	stopped bool
+}
+
+func captureStderr(t *testing.T) *stderrCapture {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	c := &stderrCapture{t: t, orig: os.Stderr, r: r, w: w, doneCh: make(chan struct{})}
+	os.Stderr = w
+	go func() {
+		buf, _ := io.ReadAll(r)
+		c.out.Write(buf)
+		close(c.doneCh)
+	}()
+	return c
+}
+
+func (c *stderrCapture) restore() {
+	if c.stopped {
+		return
+	}
+	c.stopped = true
+	os.Stderr = c.orig
+	_ = c.w.Close()
+	<-c.doneCh
+	_ = c.r.Close()
+}
+
+func (c *stderrCapture) read() string {
+	c.restore()
+	return c.out.String()
+}
 
 // pipeStdin replaces os.Stdin with a pipe seeded by the given body for the
 // duration of fn, so resolveTextFlag's --content-stdin / --description-stdin
@@ -178,6 +224,98 @@ func TestResolveTextFlag(t *testing.T) {
 			t.Fatalf("expected mutually-exclusive error for stdin + file")
 		}
 	})
+}
+
+func newIssueCreateTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "create"}
+	cmd.Flags().String("title", "", "")
+	cmd.Flags().String("description", "", "")
+	cmd.Flags().Bool("description-stdin", false, "")
+	cmd.Flags().String("description-file", "", "")
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("priority", "", "")
+	cmd.Flags().String("assignee", "", "")
+	cmd.Flags().String("assignee-id", "", "")
+	cmd.Flags().String("parent", "", "")
+	cmd.Flags().String("project", "", "")
+	cmd.Flags().String("due-date", "", "")
+	cmd.Flags().Bool("allow-duplicate", false, "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().StringSlice("attachment", nil, "")
+	return cmd
+}
+
+func TestRunIssueCreateSendsAllowDuplicate(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/issues" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":         "issue-1",
+			"identifier": "MUL-1",
+			"title":      "Duplicate allowed",
+			"status":     "todo",
+			"priority":   "none",
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Duplicate allowed")
+	_ = cmd.Flags().Set("allow-duplicate", "true")
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatalf("runIssueCreate: %v", err)
+	}
+	if got := body["allow_duplicate"]; got != true {
+		t.Fatalf("allow_duplicate = %#v, want true in request body", got)
+	}
+}
+
+func TestRunIssueCreateShowsDuplicateMessage(t *testing.T) {
+	want := "Active duplicate issue exists: YUA-36 SH-PM-SYNTH-01 Synthesize recommendation-to-shortlist planning outputs (status: in_progress). Set allow_duplicate=true or use --allow-duplicate to create another."
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/issues" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]any{
+			"code":  "active_duplicate_issue",
+			"error": want,
+			"issue": map[string]any{
+				"id":         "issue-id",
+				"identifier": "YUA-36",
+				"status":     "in_progress",
+			},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "SH-PM-SYNTH-01 Synthesize recommendation-to-shortlist planning outputs")
+	err := runIssueCreate(cmd, nil)
+	if err == nil {
+		t.Fatal("runIssueCreate: expected duplicate error")
+	}
+	if got := err.Error(); got != want {
+		t.Fatalf("error = %q, want %q", got, want)
+	}
 }
 
 func TestTruncateID(t *testing.T) {
@@ -1403,6 +1541,242 @@ func TestIssueSubscriberMutationBody(t *testing.T) {
 				t.Errorf("expected empty body, got %+v", gotBody)
 			}
 		})
+	}
+}
+
+// newIssueCommentListTestCmd mirrors the flag set wired in main.init() for
+// the comment list command. We replicate it here so the runIssueCommentList
+// guards can be exercised in isolation — the real command tree pulls in the
+// daemon init path.
+func newIssueCommentListTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "list"}
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("since", "", "")
+	cmd.Flags().String("thread", "", "")
+	cmd.Flags().Int("recent", 0, "")
+	cmd.Flags().Int("tail", 0, "")
+	cmd.Flags().String("before", "", "")
+	cmd.Flags().String("before-id", "", "")
+	return cmd
+}
+
+// TestRunIssueCommentListFlagGuards locks the CLI-side flag combination
+// matrix. Two behaviours matter here:
+//
+//   - --recent 0 / --recent -3 must error rather than silently fall back to
+//     the default list path. Previously `recent > 0` collapsed "not passed"
+//     and "passed an invalid value" into the same branch; using
+//     Flags().Changed("recent") distinguishes them so an explicit non-
+//     positive value is rejected.
+//   - --before / --before-id without --recent must error. Before this fix
+//     the cursor would be sent to the server but ignored because RecentN=0,
+//     so callers asking for "comments before X" got the full timeline.
+//
+// All four cases must fail before any HTTP round-trip — verified by an
+// httptest server that fatals if /api/issues/<key>/comments is hit.
+func TestRunIssueCommentListFlagGuards(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// resolveIssueRef hits GET /api/issues/<ref>; everything else means
+		// the guard let an invalid combination through to the wire.
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/issues/") && !strings.Contains(r.URL.Path, "/comments") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+			})
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cases := []struct {
+		name    string
+		setup   func(c *cobra.Command)
+		wantMsg string
+	}{
+		{
+			name: "explicit zero recent rejected",
+			setup: func(c *cobra.Command) {
+				_ = c.Flags().Set("recent", "0")
+			},
+			wantMsg: "--recent must be a positive integer",
+		},
+		{
+			name: "negative recent rejected",
+			setup: func(c *cobra.Command) {
+				_ = c.Flags().Set("recent", "-3")
+			},
+			wantMsg: "--recent must be a positive integer",
+		},
+		{
+			name: "before + before-id without recent or thread+tail rejected",
+			setup: func(c *cobra.Command) {
+				_ = c.Flags().Set("before", "2026-01-01T00:00:00Z")
+				_ = c.Flags().Set("before-id", "00000000-0000-0000-0000-000000000001")
+			},
+			wantMsg: "require --recent",
+		},
+		{
+			name: "thread + recent still rejected when --recent explicit zero", // also covers the Changed() path
+			setup: func(c *cobra.Command) {
+				_ = c.Flags().Set("thread", "00000000-0000-0000-0000-000000000001")
+				_ = c.Flags().Set("recent", "5")
+			},
+			wantMsg: "--thread and --recent are mutually exclusive",
+		},
+		{
+			// --tail is a thread-scoped limit. Outside of --thread it
+			// would be silently dropped at the server, so the CLI rejects
+			// it locally with a clear hint.
+			name: "tail without thread rejected",
+			setup: func(c *cobra.Command) {
+				_ = c.Flags().Set("tail", "5")
+			},
+			wantMsg: "--tail requires --thread",
+		},
+		{
+			// tail=0 is allowed (root-only) but a negative value would
+			// round-trip to LIMIT -N on the server. Catch at the CLI so
+			// the user sees a useful message instead of a 400.
+			name: "negative tail rejected",
+			setup: func(c *cobra.Command) {
+				_ = c.Flags().Set("thread", "00000000-0000-0000-0000-000000000001")
+				_ = c.Flags().Set("tail", "-2")
+			},
+			wantMsg: "--tail must be a non-negative integer",
+		},
+		{
+			// --thread + --before without --tail used to be rejected
+			// outright. Now it requires --tail so the cursor's "scroll
+			// older replies" semantics has somewhere to land.
+			name: "thread + before without tail rejected",
+			setup: func(c *cobra.Command) {
+				_ = c.Flags().Set("thread", "00000000-0000-0000-0000-000000000001")
+				_ = c.Flags().Set("before", "2026-01-01T00:00:00Z")
+				_ = c.Flags().Set("before-id", "00000000-0000-0000-0000-000000000002")
+			},
+			wantMsg: "require --recent",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newIssueCommentListTestCmd()
+			tc.setup(cmd)
+			err := runIssueCommentList(cmd, []string{"MUL-1"})
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tc.wantMsg)
+			}
+			if !strings.Contains(err.Error(), tc.wantMsg) {
+				t.Fatalf("error = %q, want substring %q", err.Error(), tc.wantMsg)
+			}
+		})
+	}
+}
+
+// TestRunIssueCommentList_ThreadTailPassesThroughAndPrintsReplyCursor pins
+// the positive path for --thread + --tail: the CLI forwards `thread` +
+// `tail` query params and, on response, prints "Next reply cursor" (not
+// "Next thread cursor") so an operator can scroll older replies inside
+// the same thread without guessing which cursor model the server emitted.
+func TestRunIssueCommentList_ThreadTailPassesThroughAndPrintsReplyCursor(t *testing.T) {
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/issues/") && !strings.Contains(r.URL.Path, "/comments") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+			})
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/comments") {
+			gotQuery = r.URL.Query()
+			// Emit a cursor so we can prove the CLI labels it "reply"
+			// when the call was a --thread + --tail combo.
+			w.Header().Set("X-Multica-Next-Before", "2026-01-01T00:00:00.000000001Z")
+			w.Header().Set("X-Multica-Next-Before-Id", "00000000-0000-0000-0000-000000000999")
+			w.Write([]byte("[]"))
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	// Redirect stderr so we can assert on the "Next reply cursor" line —
+	// that's the user-visible signal that the CLI knew it was paging
+	// within a thread, not across threads.
+	stderr := captureStderr(t)
+	defer stderr.restore()
+
+	cmd := newIssueCommentListTestCmd()
+	if err := cmd.Flags().Set("thread", "00000000-0000-0000-0000-000000000001"); err != nil {
+		t.Fatalf("set thread: %v", err)
+	}
+	if err := cmd.Flags().Set("tail", "5"); err != nil {
+		t.Fatalf("set tail: %v", err)
+	}
+	if err := runIssueCommentList(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueCommentList: %v", err)
+	}
+
+	if got := gotQuery.Get("thread"); got != "00000000-0000-0000-0000-000000000001" {
+		t.Errorf("thread query = %q, want the passed anchor", got)
+	}
+	if got := gotQuery.Get("tail"); got != "5" {
+		t.Errorf("tail query = %q, want %q", got, "5")
+	}
+	out := stderr.read()
+	if !strings.Contains(out, "Next reply cursor: --before 2026-01-01T00:00:00.000000001Z --before-id 00000000-0000-0000-0000-000000000999") {
+		t.Errorf("stderr missing reply-cursor line, got: %q", out)
+	}
+}
+
+// TestRunIssueCommentList_RecentStillLabelsCursorAsThread is the negative
+// counterpart: under --recent the CLI must keep printing "Next thread
+// cursor". A regression that printed "reply" here would mis-signal the
+// cursor semantics to anyone copy-pasting it.
+func TestRunIssueCommentList_RecentStillLabelsCursorAsThread(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/issues/") && !strings.Contains(r.URL.Path, "/comments") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+			})
+			return
+		}
+		w.Header().Set("X-Multica-Next-Before", "2026-01-01T00:00:00.000000001Z")
+		w.Header().Set("X-Multica-Next-Before-Id", "00000000-0000-0000-0000-000000000777")
+		w.Write([]byte("[]"))
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	stderr := captureStderr(t)
+	defer stderr.restore()
+
+	cmd := newIssueCommentListTestCmd()
+	if err := cmd.Flags().Set("recent", "3"); err != nil {
+		t.Fatalf("set recent: %v", err)
+	}
+	if err := runIssueCommentList(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueCommentList: %v", err)
+	}
+
+	out := stderr.read()
+	if !strings.Contains(out, "Next thread cursor:") {
+		t.Errorf("stderr missing thread-cursor line, got: %q", out)
 	}
 }
 

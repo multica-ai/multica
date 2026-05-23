@@ -43,12 +43,14 @@ import {
 import { StatusIcon, PriorityIcon } from "../../issues/components";
 import {
   SORT_OPTIONS,
+  GROUPING_OPTIONS,
   CARD_PROPERTY_OPTIONS,
 } from "@multica/core/issues/stores/view-store";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import type { Issue } from "@multica/core/types";
 import { myIssuesViewStore, type MyIssuesScope } from "@multica/core/issues/stores/my-issues-view-store";
 import { useT } from "../../i18n";
+import { WorkspaceAgentWorkingChip } from "../../issues/components/workspace-agent-working-chip";
 
 // ---------------------------------------------------------------------------
 // HoverCheck
@@ -106,7 +108,12 @@ function useIssueCounts(allIssues: Issue[]) {
 
 export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
   const { t } = useT("my-issues");
+  // Pulls the chip-wide "Viewing only working agents" label from the
+  // shared issues namespace so the copy stays identical with the global
+  // /issues page header — single source of truth for this filter cue.
+  const { t: tIssues } = useT("issues");
   const SCOPES: { value: MyIssuesScope; label: string; description: string }[] = [
+    { value: "all", label: t(($) => $.header.scope.all_label), description: t(($) => $.header.scope.all_description) },
     { value: "assigned", label: t(($) => $.header.scope.assigned_label), description: t(($) => $.header.scope.assigned_description) },
     { value: "created", label: t(($) => $.header.scope.created_label), description: t(($) => $.header.scope.created_description) },
     { value: "agents", label: t(($) => $.header.scope.agents_label), description: t(($) => $.header.scope.agents_description) },
@@ -116,9 +123,19 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
   const priorityFilters = useStore(myIssuesViewStore, (s) => s.priorityFilters);
   const sortBy = useStore(myIssuesViewStore, (s) => s.sortBy);
   const sortDirection = useStore(myIssuesViewStore, (s) => s.sortDirection);
+  const grouping = useStore(myIssuesViewStore, (s) => s.grouping);
   const cardProperties = useStore(myIssuesViewStore, (s) => s.cardProperties);
   const scope = useStore(myIssuesViewStore, (s) => s.scope);
+  const agentRunningFilter = useStore(myIssuesViewStore, (s) => s.agentRunningFilter);
   const act = myIssuesViewStore.getState();
+  // Limit the chip to issues actually visible on the My Issues page —
+  // without this scoping, the chip would report workspace-wide running
+  // agents (e.g. 3) while the my-scope list only contains one of them,
+  // and the post-toggle list count would never match the chip number.
+  const scopedIssueIds = useMemo(
+    () => new Set(allIssues.map((i) => i.id)),
+    [allIssues],
+  );
 
   const counts = useIssueCounts(allIssues);
 
@@ -127,6 +144,11 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
 
   const sortLabel =
     SORT_OPTIONS.find((o) => o.value === sortBy)?.label ?? t(($) => $.header.sort_manual);
+  const GROUPING_LABEL_KEY: Record<typeof GROUPING_OPTIONS[number]["value"], "group_status" | "group_assignee"> = {
+    status: "group_status",
+    assignee: "group_assignee",
+  };
+  const groupingLabel = t(($) => $.header[GROUPING_LABEL_KEY[grouping]]);
 
   return (
     <div className="flex h-12 shrink-0 items-center justify-between px-4">
@@ -155,8 +177,18 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
         ))}
       </div>
 
-      {/* Right: filter + display + view toggle */}
+      {/* Right: agent working chip + filter + display + view toggle */}
       <div className="flex items-center gap-1">
+        {agentRunningFilter && (
+          <span className="mr-1 text-xs text-muted-foreground">
+            {tIssues(($) => $.agent_activity.filter_active_label)}
+          </span>
+        )}
+        <WorkspaceAgentWorkingChip
+          value={agentRunningFilter}
+          onToggle={act.toggleAgentRunningFilter}
+          scopedIssueIds={scopedIssueIds}
+        />
         {/* Filter */}
         <DropdownMenu>
           <Tooltip>
@@ -278,6 +310,40 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
             <TooltipContent side="bottom">{t(($) => $.header.display_settings)}</TooltipContent>
           </Tooltip>
           <PopoverContent align="end" className="w-64 p-0">
+            {viewMode === "board" && (
+              <div className="border-b px-3 py-2.5">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {t(($) => $.header.grouping)}
+                </span>
+                <div className="mt-2">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full justify-between text-xs"
+                        >
+                          {groupingLabel}
+                          <ChevronDown className="size-3 text-muted-foreground" />
+                        </Button>
+                      }
+                    />
+                    <DropdownMenuContent align="start" className="w-auto">
+                      {GROUPING_OPTIONS.map((opt) => (
+                        <DropdownMenuItem
+                          key={opt.value}
+                          onClick={() => act.setGrouping(opt.value)}
+                        >
+                          {t(($) => $.header[GROUPING_LABEL_KEY[opt.value]])}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
+            )}
+
             <div className="border-b px-3 py-2.5">
               <span className="text-xs font-medium text-muted-foreground">
                 {t(($) => $.header.ordering)}

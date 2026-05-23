@@ -1094,25 +1094,279 @@ func TestExecuteAndDrain_ContextCancelled_ReportsCancelled(t *testing.T) {
 	}
 }
 
-func TestEnsureRepoReadyFastPathDoesNotRefresh(t *testing.T) {
+// idleWatchdogBackend simulates the MUL-2225 hang: emit one message to mark
+// activity, then go silent forever. With a short AgentIdleWatchdog, the
+// watchdog should fire and short-circuit executeAndDrain instead of waiting
+// for the full drainTimeout (which is ~21 minutes by default).
+type idleWatchdogBackend struct {
+	emitOne bool // when true, emit one message before going silent; when false, never emit anything
+}
+
+func (b idleWatchdogBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message, 1)
+	resCh := make(chan agent.Result)
+	if b.emitOne {
+		msgCh <- agent.Message{Type: agent.MessageText, Content: "hello"}
+	}
+	// Deliberately do NOT close msgCh and never write to resCh — this models
+	// a backend whose subprocess is hung and will never naturally complete.
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func TestExecuteAndDrain_IdleWatchdog_FiresOnInactivity(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	start := time.Now()
+	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: true}, "p", agent.ExecOptions{}, slog.Default(), "t-idle")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "idle_watchdog" {
+		t.Fatalf("expected status=idle_watchdog, got %q (err=%q)", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "idle watchdog") {
+		t.Fatalf("expected error to mention idle watchdog, got %q", result.Error)
+	}
+	// The watchdog should fire within a few ticks (interval = window/2 with
+	// no floor for sub-minute windows). 5× window is generous and keeps the
+	// test from racing in slow CI.
+	if elapsed := time.Since(start); elapsed > 5*d.cfg.AgentIdleWatchdog {
+		t.Fatalf("watchdog took too long to fire: %s (window=%s)", elapsed, d.cfg.AgentIdleWatchdog)
+	}
+}
+
+func TestExecuteAndDrain_IdleWatchdog_FiresWhenNoMessageEverArrives(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// emitOne=false models a backend that hangs before sending any message.
+	// lastActivityAt is initialised at executeAndDrain entry, so the same
+	// window applies even with zero traffic.
+	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: false}, "p", agent.ExecOptions{}, slog.Default(), "t-idle-zero")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "idle_watchdog" {
+		t.Fatalf("expected status=idle_watchdog when backend never emits, got %q (err=%q)", result.Status, result.Error)
+	}
+}
+
+func TestExecuteAndDrain_IdleWatchdog_DisabledWhenZero(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	// Default zero value — watchdog disabled. Without a parent cancel the
+	// blockingBackend would otherwise hang the test, so we cancel after a
+	// short delay to confirm the run does NOT terminate as idle_watchdog.
+	d.cfg.AgentIdleWatchdog = 0
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(80*time.Millisecond, cancel)
+
+	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: true}, "p", agent.ExecOptions{}, slog.Default(), "t-idle-off")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status == "idle_watchdog" {
+		t.Fatalf("watchdog should not fire when AgentIdleWatchdog=0, got status=%q", result.Status)
+	}
+	if result.Status != "cancelled" {
+		t.Fatalf("expected status=cancelled (parent ctx fired), got %q", result.Status)
+	}
+}
+
+func TestExecuteAndDrain_IdleWatchdog_HappyPathDoesNotFire(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 200 * time.Millisecond
+
+	// fakeBackend completes immediately with a normal result, well inside the
+	// idle window. The watchdog must not corrupt the disposition.
+	fb := &fakeBackend{
+		results: []agent.Result{
+			{Status: "completed", Output: "done"},
+		},
+	}
+
+	result, _, err := d.executeAndDrain(context.Background(), fb, "p", agent.ExecOptions{}, slog.Default(), "t-idle-happy")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("expected status=completed on happy path, got %q (err=%q)", result.Status, result.Error)
+	}
+	if result.Output != "done" {
+		t.Fatalf("expected output preserved, got %q", result.Output)
+	}
+}
+
+// longToolCallBackend simulates a legitimate long-running tool call (e.g.
+// `npm install`, `docker build`, full test suite). The backend emits a
+// tool_use, stays silent past the idle window while the tool runs, then emits
+// a tool_result and completes. This is the false-positive case the watchdog
+// must NOT misfire on: an in-flight tool call is forward progress, not a hang.
+type longToolCallBackend struct {
+	toolSilence time.Duration // how long to stay silent between tool_use and tool_result
+}
+
+func (b longToolCallBackend) Execute(ctx context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message, 4)
+	resCh := make(chan agent.Result, 1)
+
+	msgCh <- agent.Message{
+		Type:   agent.MessageToolUse,
+		Tool:   "Bash",
+		CallID: "call-1",
+		Input:  map[string]any{"cmd": "npm install"},
+	}
+
+	go func() {
+		select {
+		case <-time.After(b.toolSilence):
+		case <-ctx.Done():
+			// Watchdog cancelled us — propagate so the caller sees aborted.
+			resCh <- agent.Result{Status: "aborted", Error: ctx.Err().Error()}
+			close(msgCh)
+			close(resCh)
+			return
+		}
+		msgCh <- agent.Message{
+			Type:   agent.MessageToolResult,
+			Tool:   "Bash",
+			CallID: "call-1",
+			Output: "installed 142 packages",
+		}
+		msgCh <- agent.Message{Type: agent.MessageText, Content: "done"}
+		close(msgCh)
+		resCh <- agent.Result{Status: "completed", Output: "done"}
+		close(resCh)
+	}()
+
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func TestExecuteAndDrain_IdleWatchdog_DoesNotFireDuringInFlightToolCall(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	// 50 ms window; tool stays silent for ~4× the window. Without the
+	// in-flight-tool gate, the watchdog would fire and the run would come
+	// back as idle_watchdog. With the gate, it must complete normally.
+	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
+
+	result, _, err := d.executeAndDrain(
+		context.Background(),
+		longToolCallBackend{toolSilence: 200 * time.Millisecond},
+		"p",
+		agent.ExecOptions{},
+		slog.Default(),
+		"t-long-tool",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status == "idle_watchdog" {
+		t.Fatalf("watchdog must not fire while a tool_use is in flight, got status=%q (err=%q)", result.Status, result.Error)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("expected status=completed, got %q (err=%q)", result.Status, result.Error)
+	}
+}
+
+// tailIdleAfterToolBackend exercises the boundary case: a tool call completes,
+// and THEN the backend goes silent without ever finishing. After the
+// tool_result lands, in-flight count returns to zero and lastActivityAt is
+// fresh; the watchdog should fire exactly one window later, not earlier.
+type tailIdleAfterToolBackend struct{}
+
+func (tailIdleAfterToolBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message, 4)
+	resCh := make(chan agent.Result)
+	msgCh <- agent.Message{Type: agent.MessageToolUse, Tool: "Bash", CallID: "c1"}
+	msgCh <- agent.Message{Type: agent.MessageToolResult, Tool: "Bash", CallID: "c1", Output: "ok"}
+	// Deliberately leave msgCh open and never write to resCh.
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func TestExecuteAndDrain_IdleWatchdog_FiresAfterToolResultIfBackendStaysSilent(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	result, _, err := d.executeAndDrain(ctx, tailIdleAfterToolBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t-tail-idle")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "idle_watchdog" {
+		t.Fatalf("expected status=idle_watchdog after tool_result with no further activity, got %q (err=%q)", result.Status, result.Error)
+	}
+}
+
+// ensureRepoReady must refresh `workspaceState.settings` on every checkout —
+// even when the repo cache already holds the URL. The /repo/checkout handler
+// reads `workspaceCoAuthoredByEnabled` right after, and the 30s workspace
+// sync tick is too slow to make a freshly-flipped GitHub toggle feel live.
+// PR #2847 review by Emacs caught this fast-path regression; the test
+// asserts the cached-repo path still issues exactly one refresh.
+func TestEnsureRepoReadyCachedRepoStillRefreshesSettings(t *testing.T) {
 	t.Parallel()
 
 	sourceRepo := createDaemonTestRepo(t)
 	var refreshCalls atomic.Int32
 	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/daemon/workspaces/ws-1/repos" {
+			http.NotFound(w, r)
+			return
+		}
 		refreshCalls.Add(1)
-		http.Error(w, "unexpected refresh", http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID:  "ws-1",
+			Repos:        []RepoData{{URL: sourceRepo}},
+			ReposVersion: "v2",
+			Settings:     json.RawMessage(`{"github_enabled":false,"co_authored_by_enabled":true}`),
+		})
 	})
 	if err := d.repoCache.Sync("ws-1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("seed repo cache: %v", err)
 	}
-	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: sourceRepo}}, nil)
+	// Workspace starts with the master switch ON. The server above will return
+	// the user's just-flipped OFF state — ensureRepoReady must pick that up
+	// before the handler reads workspaceCoAuthoredByEnabled.
+	d.workspaces["ws-1"] = newWorkspaceState(
+		"ws-1",
+		nil,
+		"v1",
+		[]RepoData{{URL: sourceRepo}},
+		json.RawMessage(`{"github_enabled":true,"co_authored_by_enabled":true}`),
+	)
+	if !d.workspaceCoAuthoredByEnabled("ws-1") {
+		t.Fatalf("precondition: expected co-author hook enabled before checkout")
+	}
 
 	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
 		t.Fatalf("ensureRepoReady: %v", err)
 	}
-	if got := refreshCalls.Load(); got != 0 {
-		t.Fatalf("expected no refresh calls, got %d", got)
+	if got := refreshCalls.Load(); got != 1 {
+		t.Fatalf("expected exactly 1 refresh call on cached repo, got %d", got)
+	}
+	if d.workspaceCoAuthoredByEnabled("ws-1") {
+		t.Fatalf("expected co-author hook disabled after server-side toggle; daemon used stale workspaceState.settings via cache fast path")
 	}
 }
 
@@ -1122,20 +1376,29 @@ func TestEnsureRepoReadyTrimsURL(t *testing.T) {
 	sourceRepo := createDaemonTestRepo(t)
 	var refreshCalls atomic.Int32
 	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/daemon/workspaces/ws-1/repos" {
+			http.NotFound(w, r)
+			return
+		}
 		refreshCalls.Add(1)
-		http.Error(w, "unexpected refresh", http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID:  "ws-1",
+			Repos:        []RepoData{{URL: sourceRepo}},
+			ReposVersion: "v2",
+		})
 	})
 	if err := d.repoCache.Sync("ws-1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("seed repo cache: %v", err)
 	}
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: sourceRepo}}, nil)
 
-	// URL with trailing whitespace should still hit the fast path.
+	// URL with trailing whitespace should still resolve to the cached repo.
 	if err := d.ensureRepoReady(context.Background(), "ws-1", "  "+sourceRepo+"  "); err != nil {
 		t.Fatalf("ensureRepoReady with padded URL: %v", err)
 	}
-	if got := refreshCalls.Load(); got != 0 {
-		t.Fatalf("expected no refresh calls for trimmed URL, got %d", got)
+	// Even on cache hit we refresh settings once so toggle flips feel live.
+	if got := refreshCalls.Load(); got != 1 {
+		t.Fatalf("expected 1 refresh call for trimmed URL, got %d", got)
 	}
 }
 
@@ -1214,8 +1477,12 @@ func TestRegisterTaskReposAllowsProjectOnlyURL(t *testing.T) {
 	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
 		t.Fatalf("ensureRepoReady: %v", err)
 	}
-	if got := refreshCalls.Load(); got != 0 {
-		t.Fatalf("expected zero workspace-repos refreshes (URL came from project), got %d", got)
+	// ensureRepoReady refreshes settings on every call (RFC MUL-2414 §4.8; PR
+	// #2847 review by Emacs) so a freshly-flipped GitHub toggle takes effect
+	// without waiting for the 30s sync tick. We expect exactly one refresh —
+	// the project-only URL still skips re-cloning because the cache is warm.
+	if got := refreshCalls.Load(); got != 1 {
+		t.Fatalf("expected 1 workspace-repos refresh (settings live-refresh on checkout), got %d", got)
 	}
 }
 
