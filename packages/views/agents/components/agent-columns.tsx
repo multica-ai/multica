@@ -15,6 +15,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { availabilityConfig, workloadConfig } from "../presence";
 import { AgentRowActions } from "./agent-row-actions";
 import { Sparkline } from "./sparkline";
@@ -312,12 +313,16 @@ function RuntimeCell({ row }: { row: AgentRow }) {
   const { t } = useT("agents");
   const { agent, runtime } = row;
   const isCloud = agent.runtime_mode === "cloud";
-  const RuntimeIcon = isCloud ? Cloud : Monitor;
+  const FallbackIcon = isCloud ? Cloud : Monitor;
   const runtimeLabel = runtime?.name ?? (isCloud ? t(($) => $.row.fallback_runtime_cloud) : t(($) => $.row.fallback_runtime_local));
 
   return (
     <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-      <RuntimeIcon className="h-3 w-3 shrink-0" />
+      {runtime ? (
+        <ProviderLogo provider={runtime.provider} className="h-3 w-3 shrink-0" />
+      ) : (
+        <FallbackIcon className="h-3 w-3 shrink-0" />
+      )}
       <Tooltip>
         <TooltipTrigger
           render={

@@ -112,6 +112,15 @@ function CursorLogo({ className }: { className: string }) {
   );
 }
 
+// Warp — official Simple Icons mark (simpleicons.org/icons/warp.svg, CC0 1.0).
+function WarpLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="#01A4FF" className={className}>
+      <path d="M12.035 2.723h9.253A2.712 2.712 0 0 1 24 5.435v10.529a2.712 2.712 0 0 1-2.712 2.713H8.047Zm-1.681 2.6L6.766 19.677h5.598l-.399 1.6H2.712A2.712 2.712 0 0 1 0 18.565V8.036a2.712 2.712 0 0 1 2.712-2.712Z" />
+    </svg>
+  );
+}
+
 // Kimi (Moonshot AI) — wordmark "K" mark in Moonshot brand purple, simple
 // rounded-square logotype suitable for small icon sizes.
 function KimiLogo({ className }: { className: string }) {
@@ -199,7 +208,7 @@ export function ProviderLogo({
   provider: string;
   className?: string;
 }) {
-  switch (provider) {
+  switch (provider.trim().toLowerCase()) {
     case "claude":
       return <ClaudeLogo className={className} />;
     case "codex":
@@ -216,6 +225,11 @@ export function ProviderLogo({
       return <CopilotLogo className={className} />;
     case "cursor":
       return <CursorLogo className={className} />;
+    case "warp":
+    case "warp-oz":
+    case "warp_oz":
+    case "oz":
+      return <WarpLogo className={className} />;
     case "kimi":
       return <KimiLogo className={className} />;
     case "kiro":

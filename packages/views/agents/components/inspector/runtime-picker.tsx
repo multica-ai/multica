@@ -41,7 +41,7 @@ export function RuntimePicker({
   const [filter, setFilter] = useState<Filter>("mine");
 
   const selected = runtimes.find((r) => r.id === value) ?? null;
-  const Icon = selected?.runtime_mode === "cloud" ? Cloud : Monitor;
+  const FallbackIcon = selected?.runtime_mode === "cloud" ? Cloud : Monitor;
 
   // Compute filtered list unconditionally — the early `!canEdit` return
   // below would otherwise re-order this hook across renders.
@@ -73,7 +73,11 @@ export function RuntimePicker({
     const isOnline = selected?.status === "online";
     return (
       <span className="inline-flex min-w-0 items-center gap-1.5 px-1.5 py-0.5 text-xs text-muted-foreground">
-        <Icon className="h-3 w-3 shrink-0" />
+        {selected ? (
+          <ProviderLogo provider={selected.provider} className="h-3 w-3 shrink-0" />
+        ) : (
+          <FallbackIcon className="h-3 w-3 shrink-0" />
+        )}
         <span className="min-w-0 truncate font-mono">
           {selected?.name ?? t(($) => $.pickers.runtime_none)}
         </span>
@@ -127,7 +131,11 @@ export function RuntimePicker({
       }
       trigger={
         <>
-          <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
+          {selected ? (
+            <ProviderLogo provider={selected.provider} className="h-3 w-3 shrink-0" />
+          ) : (
+            <FallbackIcon className="h-3 w-3 shrink-0 text-muted-foreground" />
+          )}
           <span className="min-w-0 truncate font-mono">{triggerLabel}</span>
           {selected && (
             <span
