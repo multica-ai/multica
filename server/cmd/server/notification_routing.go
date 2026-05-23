@@ -146,10 +146,10 @@ var defaultChannelTransport = map[string]channelTransport{
 // only (matches existing resolveRoute behavior for non-members).
 //
 // Master toggle: when `preferences.notifications.notify_all_mobile_inbox` is
-// true, the mobile channel mirrors the inbox channel's resolution for the
-// same key — every event that lands in inbox also fires a Web Push,
-// regardless of per-key mobile prefs. Implements JEH-737. Other channels
-// are unaffected.
+// true, the mobile channel mirrors the inbox channel's resolution only for
+// keys whose default primary channel is inbox. General notification-primary
+// events (for example new_comment) are not promoted to mobile by the master
+// toggle. Implements JEH-737 / FIR-1839. Other channels are unaffected.
 func resolveChannelChoice(
 	ctx context.Context,
 	queries *db.Queries,
@@ -176,10 +176,14 @@ func resolveChannelChoice(
 	}
 
 	// CEREBRO-PATCH(notify-all-mobile-inbox): JEH-737 master toggle — when set,
-	// the mobile channel mirrors inbox routing for the same key, so every
-	// inbox event also fires a Web Push without curating the per-key matrix.
+	// the mobile channel mirrors inbox routing only for inbox-primary keys, so
+	// focused inbox events also fire a Web Push without promoting general
+	// notification-primary chatter like new_comment.
 	if channel == channelMobile {
 		if notifyAll, _ := notifBlock["notify_all_mobile_inbox"].(bool); notifyAll {
+			if primaryChannelForKey(key) != channelInbox {
+				return false
+			}
 			return resolveChannelChoiceFromBlock(notifBlock, channelInbox, key)
 		}
 	}
@@ -261,6 +265,22 @@ func channelDefault(channel, key string) bool {
 		return false
 	}
 	return defaults[key]
+}
+
+// CEREBRO-PATCH(notify-all-mobile-inbox-primary): keep the mobile inbox
+// master toggle scoped to default inbox-primary routing keys only.
+// primaryChannelForKey returns the default storage channel a routing key
+// belongs to. The notify-all-mobile-inbox master toggle uses this to avoid
+// promoting notification-primary events to mobile push just because the user
+// manually routes that key into inbox.
+func primaryChannelForKey(key string) string {
+	if defaultChannelChoices[channelInbox][key] {
+		return channelInbox
+	}
+	if defaultChannelChoices[channelNotifications][key] {
+		return channelNotifications
+	}
+	return ""
 }
 
 // splitTypes carry an .assignee / .follower suffix when looking up routing.

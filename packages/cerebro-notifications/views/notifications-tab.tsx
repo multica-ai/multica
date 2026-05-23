@@ -342,7 +342,7 @@ export function NotificationsTab() {
       setUser(updated);
       if (next) {
         toast.success(
-          "Mobile push will now fire for everything in your inbox. Make sure Push notifications are turned on below.",
+          "Mobile push will now fire for inbox events like mentions and tasks. Make sure Push notifications are turned on below.",
         );
       }
     } catch (e) {
@@ -411,11 +411,10 @@ interface NotifyAllMobileInboxCardProps {
   onChange: (next: boolean) => void | Promise<void>;
 }
 
-// Master toggle: when ON, the server fires a Web Push for every event that
-// lands in the recipient's inbox, regardless of the per-key mobile prefs in
-// the matrix above. JEH-737 — paired visually with the "Push notifications"
-// device subscribe section so users see the two pieces (turn on the device,
-// turn on "everything") together.
+// Master toggle: when ON, the server fires a Web Push for inbox-primary
+// events, regardless of the per-key mobile prefs in the matrix above. JEH-737
+// / FIR-1839 — paired visually with the "Push notifications" device subscribe
+// section so users see the two pieces together.
 function NotifyAllMobileInboxCard({
   user,
   saving,
@@ -433,9 +432,8 @@ function NotifyAllMobileInboxCard({
               Send mobile push for everything in my inbox
             </Label>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Overrides the per-event toggles above for the Mobile channel —
-              every inbox item also fires a Web Push. Turn this on if you'd
-              rather not curate the matrix.
+              Sends a mobile push when something lands in your inbox, like
+              mentions and tasks — not general comments.
             </p>
           </div>
           <Switch

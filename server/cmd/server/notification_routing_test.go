@@ -11,6 +11,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -54,9 +55,10 @@ func setUserChannelPrefs(t *testing.T, userID string, channels map[string]map[st
 // translated into the channel-first storage format. Tests written before
 // channel-first stays readable; the translation is exactly what migration
 // 9011 does for live data:
-//   "inbox"         -> inbox.<key>=on,  notifications.<key>=off
-//   "notifications" -> inbox.<key>=off, notifications.<key>=on
-//   "off"           -> inbox.<key>=off, notifications.<key>=off
+//
+//	"inbox"         -> inbox.<key>=on,  notifications.<key>=off
+//	"notifications" -> inbox.<key>=off, notifications.<key>=on
+//	"off"           -> inbox.<key>=off, notifications.<key>=off
 //
 // Mobile/desktop/mail are left to the resolver's default tables. Tests that
 // need to touch those channels should use setUserChannelPrefs instead.
@@ -143,6 +145,39 @@ func TestTruncateForPush(t *testing.T) {
 			got := truncateForPush(tc.in, tc.max)
 			if got != tc.want {
 				t.Errorf("truncateForPush(%q, %d) = %q, want %q", tc.in, tc.max, got, tc.want)
+			}
+		})
+	}
+}
+
+// CEREBRO-PATCH(mobile-inbox-push-regressions): regression coverage for
+// FIR-1838/FIR-1839 mobile push dedupe and inbox-primary scoping.
+func TestStripMentionMarkdownForPush(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "member mention with visible at",
+			in:   "hey [@Jesper Hvejsel](mention://member/00000000-0000-0000-0000-000000000001)",
+			want: "hey @Jesper Hvejsel",
+		},
+		{
+			name: "member mention without visible at",
+			in:   "ask [Sara](mention://member/00000000-0000-0000-0000-000000000002)",
+			want: "ask @Sara",
+		},
+		{
+			name: "leaves normal text alone",
+			in:   "plain comment",
+			want: "plain comment",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := stripMentionMarkdownForPush(tc.in); got != tc.want {
+				t.Errorf("stripMentionMarkdownForPush() = %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -289,16 +324,15 @@ func TestResolveChannelChoice_NotifyAllMobileInbox(t *testing.T) {
 	t.Cleanup(func() { clearUserPrefs(t, testUserID) })
 
 	// Compose a prefs blob with the master toggle ON, an inbox.new_comment
-	// override flipped off (default would be off too — we set it explicitly
-	// to assert the inbox-mirror reads our block), an inbox.assignee_changed
-	// override flipped on (default off, so this proves the mirror picks up
-	// user overrides not just defaults), and a mobile.issue_assigned=off
-	// override that should be IGNORED while the master toggle is on.
+	// override flipped on (notifications-primary, so it must not promote to
+	// mobile), an inbox.assignee_changed override flipped on (also
+	// notifications-primary), and a mobile.issue_assigned=off override that
+	// should be IGNORED while the master toggle is on for inbox-primary keys.
 	blob := map[string]any{
 		"notifications": map[string]any{
 			"notify_all_mobile_inbox": true,
 			"inbox": map[string]any{
-				"new_comment":      "off",
+				"new_comment":      "on",
 				"assignee_changed": "on",
 			},
 			"mobile": map[string]any{
@@ -327,10 +361,11 @@ func TestResolveChannelChoice_NotifyAllMobileInbox(t *testing.T) {
 		// mobile.issue_assigned: master ON → mirrors inbox.issue_assigned (default true).
 		// User's own mobile.issue_assigned=off override is bypassed.
 		{"mobile mirrors inbox default", channelMobile, "issue_assigned", true},
-		// mobile.new_comment: master ON → mirrors inbox.new_comment (override off).
-		{"mobile honours inbox override", channelMobile, "new_comment", false},
-		// mobile.assignee_changed: master ON → mirrors inbox override (on, even though default is off).
-		{"mobile picks up inbox override that flips default", channelMobile, "assignee_changed", true},
+		// mobile.new_comment: master ON does not promote notifications-primary keys,
+		// even if the user manually routes that key into inbox.
+		{"mobile ignores notification-primary inbox override", channelMobile, "new_comment", false},
+		// mobile.assignee_changed: same notifications-primary guard.
+		{"mobile ignores notification-primary override that flips default", channelMobile, "assignee_changed", false},
 		// mobile.task_failed: master ON → mirrors inbox.task_failed default (true).
 		{"mobile uses inbox default for untouched key", channelMobile, "task_failed", true},
 		// notifications channel unaffected by master toggle.
@@ -345,6 +380,42 @@ func TestResolveChannelChoice_NotifyAllMobileInbox(t *testing.T) {
 				t.Errorf("resolveChannelChoice(%q, %q) = %v, want %v", tc.channel, tc.key, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestResolveChannelChoice_NotifyAllMobileInbox_OnlyInboxPrimary(t *testing.T) {
+	queries := db.New(testPool)
+	t.Cleanup(func() { clearUserPrefs(t, testUserID) })
+
+	blob := map[string]any{
+		"notifications": map[string]any{
+			"notify_all_mobile_inbox": true,
+			"inbox": map[string]any{
+				"mentioned":   "on",
+				"new_comment": "on",
+			},
+			"mobile": map[string]any{
+				"mentioned": "off",
+			},
+		},
+	}
+	raw, err := json.Marshal(blob)
+	if err != nil {
+		t.Fatalf("marshal prefs: %v", err)
+	}
+	if _, err := testPool.Exec(
+		context.Background(),
+		`UPDATE "user" SET preferences = $1::jsonb WHERE id = $2`,
+		raw, testUserID,
+	); err != nil {
+		t.Fatalf("set prefs: %v", err)
+	}
+
+	if got := resolveChannelChoice(context.Background(), queries, "member", testUserID, channelMobile, "mentioned"); !got {
+		t.Errorf("master on: inbox-primary mentioned should fire mobile push")
+	}
+	if got := resolveChannelChoice(context.Background(), queries, "member", testUserID, channelMobile, "new_comment"); got {
+		t.Errorf("master on: notifications-primary new_comment should not fire mobile push")
 	}
 }
 
@@ -731,6 +802,103 @@ func TestRouting_MentionBumping(t *testing.T) {
 	}
 	if !hasType(inbox, "mentioned") {
 		t.Errorf("expected mentioned on inbox route, got: inbox=%+v", inbox)
+	}
+}
+
+type capturePushNotifier struct {
+	mu      sync.Mutex
+	pushes  []service.Payload
+	userIDs []string
+}
+
+func (c *capturePushNotifier) Enabled() bool { return true }
+
+func (c *capturePushNotifier) SendToUser(_ context.Context, userID string, p service.Payload) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.userIDs = append(c.userIDs, userID)
+	c.pushes = append(c.pushes, p)
+}
+
+func (c *capturePushNotifier) snapshot() ([]string, []service.Payload) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	userIDs := append([]string(nil), c.userIDs...)
+	pushes := append([]service.Payload(nil), c.pushes...)
+	return userIDs, pushes
+}
+
+func TestPushDedup_MentionWinsOverNewComment(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	commenterEmail := "notif-push-dedupe-commenter@multica.ai"
+	commenterID := createTestUser(t, commenterEmail)
+	t.Cleanup(func() { cleanupTestUser(t, commenterEmail) })
+
+	mentionedEmail := "notif-push-dedupe-mentioned@multica.ai"
+	mentionedID := createTestUser(t, mentionedEmail)
+	t.Cleanup(func() {
+		cleanupTestUser(t, mentionedEmail)
+		clearUserPrefs(t, mentionedID)
+	})
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	addTestSubscriber(t, issueID, "member", mentionedID, "creator")
+	setUserChannelPrefs(t, mentionedID, map[string]map[string]string{
+		channelMobile: {"new_comment": "on", "mentioned": "on"},
+	}, nil)
+
+	pushCapture := &capturePushNotifier{}
+	prevPushNotifier := pushNotifier
+	pushNotifier = pushCapture
+	t.Cleanup(func() { pushNotifier = prevPushNotifier })
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     commenterID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-000000000199",
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   commenterID,
+				Content:    stringPtr("hey [@Jesper Hvejsel](mention://member/" + mentionedID + ") take a look"),
+				Type:       "comment",
+			},
+			"issue_title":  "mention-push-dedupe",
+			"issue_status": "todo",
+		},
+	})
+
+	notifs := inboxItemsByRoute(t, mentionedID, routeNotifications)
+	inbox := inboxItemsByRoute(t, mentionedID, routeInbox)
+	if len(notifs) != 1 || notifs[0].Type != "new_comment" {
+		t.Fatalf("expected new_comment item to remain on notifications route, got %+v", notifs)
+	}
+	if len(inbox) != 1 || inbox[0].Type != "mentioned" {
+		t.Fatalf("expected mentioned item to remain on inbox route, got %+v", inbox)
+	}
+
+	userIDs, pushes := pushCapture.snapshot()
+	if len(pushes) != 1 {
+		t.Fatalf("expected exactly 1 push for mention recipient, got %d: %+v", len(pushes), pushes)
+	}
+	if userIDs[0] != mentionedID {
+		t.Fatalf("push recipient = %q, want %q", userIDs[0], mentionedID)
+	}
+	if pushes[0].Type != "mentioned" {
+		t.Fatalf("push type = %q, want mentioned", pushes[0].Type)
+	}
+	if strings.Contains(pushes[0].Body, "mention://") || strings.Contains(pushes[0].Body, "[@") {
+		t.Fatalf("push body still contains mention markdown: %q", pushes[0].Body)
 	}
 }
 
