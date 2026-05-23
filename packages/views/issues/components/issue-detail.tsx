@@ -82,7 +82,6 @@ import { cn } from "@multica/ui/lib/utils";
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
-import { mutationErrorMessage } from "../utils/errors";
 
 function SubscriberPopoverContent({
   members,
@@ -503,7 +502,14 @@ function SubIssueRow({ child }: { child: Issue }) {
     (updates: Partial<UpdateIssueRequest>) => {
       updateIssue.mutate(
         { id: child.id, ...updates },
-        { onError: (err) => toast.error(mutationErrorMessage(err, t(($) => $.detail.update_failed))) },
+        {
+          onError: (err) =>
+            toast.error(
+              err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.detail.update_failed),
+            ),
+        },
       );
     },
     [child.id, updateIssue, t],

@@ -19,7 +19,6 @@ import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-st
 import { useBatchUpdateIssues, useBatchDeleteIssues } from "@multica/core/issues/mutations";
 import { StatusPicker, PriorityPicker, AssigneePicker } from "./pickers";
 import { useT } from "../../i18n";
-import { mutationErrorMessage } from "../utils/errors";
 import { cn } from "@multica/ui/lib/utils";
 
 export function BatchActionToolbar({
@@ -55,7 +54,11 @@ export function BatchActionToolbar({
       await batchUpdate.mutateAsync({ ids, updates });
       toast.success(t(($) => $.batch.update_success, { count }));
     } catch (err) {
-      toast.error(mutationErrorMessage(err, t(($) => $.batch.update_failed)));
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.batch.update_failed),
+      );
     }
   };
 

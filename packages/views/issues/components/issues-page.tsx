@@ -24,7 +24,6 @@ import { BoardView } from "./board-view";
 import { ListView } from "./list-view";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import { useT } from "../../i18n";
-import { mutationErrorMessage } from "../utils/errors";
 
 export function IssuesPage() {
   const { t } = useT("issues");
@@ -139,7 +138,14 @@ export function IssuesPage() {
     (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position">) => {
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
-        { onError: (err) => toast.error(mutationErrorMessage(err, t(($) => $.page.move_failed))) },
+        {
+          onError: (err) =>
+            toast.error(
+              err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.page.move_failed),
+            ),
+        },
       );
     },
     [updateIssueMutation, t],
