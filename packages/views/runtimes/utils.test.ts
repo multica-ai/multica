@@ -196,6 +196,65 @@ describe("estimateCost", () => {
     expect(isModelPriced("claude-opus-4-7[1m]")).toBe(true);
   });
 
+  it("prices the provider-prefixed OpenAI form (openai/gpt-4o)", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "openai/gpt-4o",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(2.5 + 10, 5);
+  });
+
+  it("prices the provider-prefixed Google form (google/gemini-2.5-pro)", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "google/gemini-2.5-pro",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(1.25 + 10, 5);
+  });
+
+  it("prices the provider-prefixed xAI form (xai/grok-4)", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "xai/grok-4",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(1.25 + 2.5, 5);
+  });
+
+  it("prices the provider-prefixed DeepSeek form (deepseek/deepseek-chat)", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "deepseek/deepseek-chat",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(0.14 + 0.28, 5);
+  });
+
+  it("prices a dated provider-prefixed OpenAI snapshot (openai/gpt-4o-2024-08-06)", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "openai/gpt-4o-2024-08-06",
+      input_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(2.5, 5);
+  });
+
+  it("returns 0 for an unknown provider/model", () => {
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "unknown/some-model",
+        input_tokens: 1_000_000,
+      }),
+    ).toBe(0);
+  });
+
   it("prices each dotted Codex catalog SKU at its own tier, not gpt-5", () => {
     // Every dotted minor version is priced independently. The resolver does
     // exact-match-after-date-strip (no startsWith fallback), so each row
@@ -385,6 +444,17 @@ describe("isModelPriced", () => {
     expect(isModelPriced("anthropic/claude-fable-5")).toBe(true);
     expect(isModelPriced("anthropic/claude-opus-4.7")).toBe(true);
     expect(isModelPriced("anthropic/claude-sonnet-4-6")).toBe(true);
+  });
+
+  it("recognises provider-prefixed OpenAI, Google, xAI and DeepSeek IDs", () => {
+    expect(isModelPriced("openai/gpt-4o")).toBe(true);
+    expect(isModelPriced("google/gemini-2.5-pro")).toBe(true);
+    expect(isModelPriced("xai/grok-4")).toBe(true);
+    expect(isModelPriced("deepseek/deepseek-chat")).toBe(true);
+  });
+
+  it("rejects unknown provider/model combinations", () => {
+    expect(isModelPriced("unknown/some-model")).toBe(false);
   });
 
   it("still rejects OpenAI dotted variants that don't have their own row", () => {
