@@ -130,10 +130,12 @@ func backfill(ctx context.Context, pool *pgxpool.Pool, q *db.Queries, dagSvc *se
 	}
 
 	// Use raw query for dependencies since there's no list-all sqlc query.
+	// issue_dependency does not have workspace_id; we join with issue to get it.
 	const depQuery = `
-		SELECT id, workspace_id, issue_id, depends_on_issue_id, type
-		FROM issue_dependency
-		ORDER BY id
+		SELECT d.id, i.workspace_id, d.issue_id, d.depends_on_issue_id, d.type
+		FROM issue_dependency d
+		JOIN issue i ON i.id = d.issue_id
+		ORDER BY d.id
 		LIMIT $1 OFFSET $2
 	`
 	for {
