@@ -205,7 +205,7 @@ function FixedRepoDialogBody({
       <div className="flex flex-col gap-4">
         <div>
           <Label className="text-xs text-muted-foreground">{t(($) => $.fixed_repo.vcs_type_label)}</Label>
-          <Select value={vcsType} onValueChange={setVcsType}>
+          <Select value={vcsType} onValueChange={(v) => v && setVcsType(v)}>
             <SelectTrigger className="mt-1 h-8">
               <SelectValue>
                 {() => vcsType === "none" ? t(($) => $.fixed_repo.vcs_none) : vcsType || t(($) => $.fixed_repo.vcs_type_placeholder)}
