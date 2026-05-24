@@ -16,9 +16,7 @@ import {
 } from "@dnd-kit/core";
 import type { QueryKey } from "@tanstack/react-query";
 import { arrayMove } from "@dnd-kit/sortable";
-import { Eye, MoreHorizontal } from "lucide-react";
 import type { Issue, IssueAssigneeGroup, IssueAssigneeType, IssueStatus, UpdateIssueRequest } from "@multica/core/types";
-import { Button } from "@multica/ui/components/ui/button";
 import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus } from "@multica/core/issues/mutations";
 import type { AssigneeGroupedIssuesFilter, MyIssuesFilter } from "@multica/core/issues/queries";
 import {
@@ -33,6 +31,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { StatusIcon } from "./status-icon";
 import { BoardColumn, BOARD_CARD_WIDTH, type BoardColumnGroup } from "./board-column";
 import { BoardCardContent } from "./board-card";
+import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
@@ -534,7 +533,7 @@ export function BoardView({
         )}
 
         {grouping === "status" && hiddenStatuses.length > 0 && (
-          <HiddenColumnsPanel
+          <BoardHiddenColumnsPanel
             hiddenStatuses={hiddenStatuses}
             myIssuesOpts={myIssuesOpts}
           />
@@ -637,74 +636,41 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
   );
 });
 
-function HiddenColumnsPanel({
-  hiddenStatuses,
-  myIssuesOpts,
-}: {
-  hiddenStatuses: IssueStatus[];
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
-}) {
-  const { t } = useT("issues");
-  return (
-    <div className="flex w-[240px] shrink-0 flex-col">
-      <div className="mb-2 flex items-center gap-2 px-1">
-        <span className="text-sm font-medium text-muted-foreground">
-          {t(($) => $.board.hidden_columns_label)}
-        </span>
-      </div>
-      <div className="flex-1 space-y-0.5">
-        {hiddenStatuses.map((status) => (
-          <HiddenColumnRow
-            key={status}
-            status={status}
-            myIssuesOpts={myIssuesOpts}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function HiddenColumnRow({
+/**
+ * Board-view-specific row that pulls the server-aggregated total from
+ * `useLoadMoreByStatus` and hands it to the shared {@link HiddenColumnRow}.
+ * Lives here (not in `hidden-columns-panel.tsx`) so the shared panel stays
+ * free of `useLoadMoreByStatus` / `myIssuesOpts` coupling — the swimlane
+ * uses an in-memory total instead.
+ */
+function BoardHiddenColumnRow({
   status,
   myIssuesOpts,
 }: {
   status: IssueStatus;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
 }) {
-  const { t } = useT("issues");
-  const viewStoreApi = useViewStoreApi();
   const { total } = useLoadMoreByStatus(status, myIssuesOpts);
+  return <HiddenColumnRow status={status} total={total} />;
+}
+
+function BoardHiddenColumnsPanel({
+  hiddenStatuses,
+  myIssuesOpts,
+}: {
+  hiddenStatuses: IssueStatus[];
+  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+}) {
   return (
-    <div className="flex items-center justify-between rounded-lg px-2.5 py-2 hover:bg-muted/50">
-      <div className="flex items-center gap-2">
-        <StatusIcon status={status} className="h-3.5 w-3.5" />
-        <span className="text-sm">{t(($) => $.status[status])}</span>
-      </div>
-      <div className="flex items-center gap-1.5">
-        <span className="text-xs text-muted-foreground">{total}</span>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="rounded-full text-muted-foreground"
-              >
-                <MoreHorizontal className="size-3.5" />
-              </Button>
-            }
-          />
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              onClick={() => viewStoreApi.getState().showStatus(status)}
-            >
-              <Eye className="size-3.5" />
-              {t(($) => $.board.show_column)}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </div>
+    <HiddenColumnsPanel
+      hiddenStatuses={hiddenStatuses}
+      renderRow={(status) => (
+        <BoardHiddenColumnRow
+          key={status}
+          status={status}
+          myIssuesOpts={myIssuesOpts}
+        />
+      )}
+    />
   );
 }
