@@ -3,10 +3,17 @@ import { QueryClient } from "@tanstack/react-query";
 
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
-import type { Issue, ListIssuesParams, ListIssuesResponse } from "../types";
+import type {
+  GroupedIssuesResponse,
+  Issue,
+  ListGroupedIssuesParams,
+  ListIssuesParams,
+  ListIssuesResponse,
+} from "../types";
 import {
   PROJECT_GANTT_MAX_ISSUES,
   PROJECT_GANTT_PAGE_LIMIT,
+  issueAssigneeGroupsOptions,
   issueKeys,
   projectGanttIssuesOptions,
   issueListOptions,
@@ -41,9 +48,18 @@ function makeIssue(idx: number): Issue {
   };
 }
 
-// Type-only shim — only the methods the queries.ts code path under test calls.
-function installFakeApi(listIssues: (params?: ListIssuesParams) => Promise<ListIssuesResponse>) {
-  setApiInstance({ listIssues } as unknown as ApiClient);
+// Type-only shim — only the methods the queries.ts code paths under test call.
+function installFakeApi({
+  listIssues,
+  listGroupedIssues,
+}: {
+  listIssues?: (params?: ListIssuesParams) => Promise<ListIssuesResponse>;
+  listGroupedIssues?: (params: ListGroupedIssuesParams) => Promise<GroupedIssuesResponse>;
+}) {
+  setApiInstance({
+    listIssues: listIssues ?? vi.fn().mockResolvedValue({ issues: [], total: 0 }),
+    listGroupedIssues: listGroupedIssues ?? vi.fn().mockResolvedValue({ groups: [] }),
+  } as unknown as ApiClient);
 }
 
 describe("projectGanttIssuesOptions", () => {
@@ -67,7 +83,7 @@ describe("projectGanttIssuesOptions", () => {
         issues: [makeIssue(1), makeIssue(2)],
         total: 2,
       });
-    installFakeApi(listIssues);
+    installFakeApi({ listIssues });
 
     const data = await qc.fetchQuery(projectGanttIssuesOptions(WS_ID, PROJECT_ID));
 
@@ -101,7 +117,7 @@ describe("projectGanttIssuesOptions", () => {
           return { issues: secondPage, total };
         throw new Error(`unexpected offset ${offset}`);
       });
-    installFakeApi(listIssues);
+    installFakeApi({ listIssues });
 
     const data = await qc.fetchQuery(projectGanttIssuesOptions(WS_ID, PROJECT_ID));
 
@@ -118,7 +134,7 @@ describe("projectGanttIssuesOptions", () => {
         issues: [makeIssue(1)],
         total: PROJECT_GANTT_MAX_ISSUES,
       });
-    installFakeApi(listIssues);
+    installFakeApi({ listIssues });
 
     const data = await qc.fetchQuery(projectGanttIssuesOptions(WS_ID, PROJECT_ID));
 
@@ -150,7 +166,7 @@ describe("issueListOptions", () => {
     const listIssues = vi
       .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
       .mockResolvedValue({ issues: [], total: 0 });
-    installFakeApi(listIssues);
+    installFakeApi({ listIssues });
 
     await qc.fetchQuery(
       issueListOptions(WS_ID, {
@@ -164,5 +180,44 @@ describe("issueListOptions", () => {
         reference: "github_pr:firtal-group/firtal-cerebro#525",
       });
     }
+  });
+});
+
+describe("issueAssigneeGroupsOptions", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("passes the reference filter through grouped assignee requests", async () => {
+    const listGroupedIssues = vi
+      .fn<(params: ListGroupedIssuesParams) => Promise<GroupedIssuesResponse>>()
+      .mockResolvedValue({ groups: [] });
+    installFakeApi({ listGroupedIssues });
+
+    await qc.fetchQuery(
+      issueAssigneeGroupsOptions(WS_ID, {
+        statuses: ["todo"],
+        reference: "github_pr:firtal-group/firtal-cerebro#525",
+      }),
+    );
+
+    expect(listGroupedIssues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        group_by: "assignee",
+        limit: 50,
+        offset: 0,
+        statuses: ["todo"],
+        reference: "github_pr:firtal-group/firtal-cerebro#525",
+      }),
+    );
   });
 });

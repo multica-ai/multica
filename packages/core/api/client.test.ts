@@ -164,6 +164,28 @@ describe("ApiClient", () => {
     expect(init?.body).toBe(JSON.stringify({ submit_on_enter: true }));
   });
 
+  it("passes reference filters to grouped issue requests", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ groups: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.listGroupedIssues({
+      group_by: "assignee",
+      statuses: ["todo"],
+      reference: "github_pr:firtal-group/firtal-cerebro#525",
+    });
+
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(url).toBe(
+      "https://api.example.test/api/issues/grouped?group_by=assignee&statuses=todo&reference=github_pr%3Afirtal-group%2Ffirtal-cerebro%23525",
+    );
+  });
+
   it("emits X-Client-* headers when identity is configured", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify([]), {

@@ -491,6 +491,7 @@ describe("IssuesPage (shared)", () => {
     mockViewState.grouping = "status";
     mockViewState.statusFilters = [];
     mockViewState.priorityFilters = [];
+    mockNavigationSearchParams.delete("reference");
     mockScope = "all";
   });
 

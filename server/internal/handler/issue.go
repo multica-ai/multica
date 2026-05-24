@@ -800,14 +800,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	// narrows the issue list to rows that carry a matching cerebro edge.
 	var referenceObjectFilter pgtype.Text
 	var referenceRefIDFilter pgtype.Text
-	if raw := strings.TrimSpace(r.URL.Query().Get("reference")); raw != "" {
-		object, refID, found := strings.Cut(raw, ":")
-		object = strings.TrimSpace(object)
-		refID = strings.TrimSpace(refID)
-		if !found || object == "" || refID == "" {
-			writeError(w, http.StatusBadRequest, "reference must be <object>:<ref_id>")
-			return
-		}
+	if object, refID, ok := parseIssueReferenceFilter(w, r.URL.Query().Get("reference")); !ok {
+		return
+	} else if object != "" {
 		referenceObjectFilter = pgtype.Text{String: object, Valid: true}
 		referenceRefIDFilter = pgtype.Text{String: refID, Valid: true}
 	}
@@ -1016,6 +1011,21 @@ func parseActorFilterList(w http.ResponseWriter, raw, fieldName string) ([]issue
 		})
 	}
 	return filters, true
+}
+
+func parseIssueReferenceFilter(w http.ResponseWriter, raw string) (string, string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", true
+	}
+	object, refID, found := strings.Cut(raw, ":")
+	object = strings.TrimSpace(object)
+	refID = strings.TrimSpace(refID)
+	if !found || object == "" || refID == "" {
+		writeError(w, http.StatusBadRequest, "reference must be <object>:<ref_id>")
+		return "", "", false
+	}
+	return object, refID, true
 }
 
 func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
@@ -1252,6 +1262,22 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		where = append(where, fmt.Sprintf(
 			"EXISTS (SELECT 1 FROM issue_to_label itl WHERE itl.issue_id = i.id AND itl.label_id = ANY(%s::uuid[]))",
 			addArg(labelIDs),
+		))
+	}
+
+	if referenceObject, referenceRefID, ok := parseIssueReferenceFilter(w, r.URL.Query().Get("reference")); !ok {
+		return
+	} else if referenceObject != "" {
+		where = append(where, fmt.Sprintf(
+			`EXISTS (
+				SELECT 1
+				FROM cerebro_issue_reference cir
+				WHERE cir.issue_id = i.id
+				  AND cir.object = %s::text
+				  AND cir.ref_id = %s::text
+			)`,
+			addArg(referenceObject),
+			addArg(referenceRefID),
 		))
 	}
 

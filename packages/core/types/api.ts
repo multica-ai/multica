@@ -92,6 +92,11 @@ export interface ListGroupedIssuesParams {
   reference?: string;
   group_assignee_type?: IssueAssigneeType | "none";
   group_assignee_id?: string;
+  /**
+   * Cerebro edge-reference filter encoded as `<object>:<ref_id>`, for example
+   * `github_pr:firtal-group/firtal-cerebro#525`.
+   */
+  reference?: string;
 }
 
 /** Raw backend response shape for `GET /api/issues`. */
