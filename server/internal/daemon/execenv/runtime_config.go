@@ -488,6 +488,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 // writeVCSGuidance injects VCS-specific guidance into the agent brief.
 func writeVCSGuidance(b *strings.Builder, vcsType string) {
 	switch vcsType {
+	case "":
+		// No VCS configured — produce no output
 	case "git":
 		b.WriteString("## VCS: git\n\n")
 		b.WriteString("This agent works on a real local repository. Follow these guidelines:\n\n")
