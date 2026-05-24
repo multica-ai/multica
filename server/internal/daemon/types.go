@@ -97,7 +97,11 @@ type AgentData struct {
 	CustomArgs    []string          `json:"custom_args,omitempty"`
 	McpConfig     json.RawMessage   `json:"mcp_config,omitempty"`
 	Model         string            `json:"model,omitempty"`
-	ThinkingLevel string            `json:"thinking_level,omitempty"`
+	ThinkingLevel    string   `json:"thinking_level,omitempty"`
+	FixedRepoEnabled bool     `json:"fixed_repo_enabled"`
+	FixedRepoPaths   []string          `json:"fixed_repo_paths"`
+	VCSType          string            `json:"vcs_type"`
+	CleanupScript    string            `json:"cleanup_script"`
 }
 
 // SkillData represents a structured skill for task execution.

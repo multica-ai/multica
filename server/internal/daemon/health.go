@@ -148,6 +148,15 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 			return
 		}
 
+		// Fixed-repo agents cannot use repo checkout.
+		d.mu.Lock()
+		_, isFixed := d.fixedRepoTasks[req.TaskID]
+		d.mu.Unlock()
+		if isFixed {
+			http.Error(w, "fixed repo mode: repo checkout is not available. Use the directory from MULTICA_WORK_DIR environment variable.", http.StatusBadRequest)
+			return
+		}
+
 		if err := d.ensureRepoReady(r.Context(), req.WorkspaceID, req.URL); err != nil {
 			statusCode := http.StatusInternalServerError
 			if errors.Is(err, ErrRepoNotConfigured) {

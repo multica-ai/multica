@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -140,6 +141,8 @@ type Daemon struct {
 
 	runner             taskRunner    // executes agent tasks; set to d.runTask by New(), overridable in tests
 	cancelPollInterval time.Duration // how often handleTask polls for server-side cancellation; overridable in tests
+	fixedRepoLocks     *fixedRepoLockTable
+	fixedRepoTasks     map[string]struct{}          // task IDs currently in fixed repo mode (for /repo/checkout gate)
 	// runUpdateFn executes the brew-or-download upgrade. Set to d.runUpdate by
 	// New() and overridable in tests so the auto-update poller can be exercised
 	// without touching the real network or the brew CLI.
@@ -168,6 +171,8 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
 		cancelPollInterval:        5 * time.Second,
+		fixedRepoLocks:            newFixedRepoLockTable(),
+		fixedRepoTasks:            make(map[string]struct{}),
 	}
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
@@ -2263,64 +2268,133 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		WorkspaceContext:                 task.WorkspaceContext,
 	}
 
-	// Mark candidate env roots as active before any env work so the GC loop
-	// can't reclaim artifacts inside them mid-execution. We mark both the
-	// predicted root for a fresh Prepare and the prior root for Reuse — they
-	// usually differ (Reuse keeps the original task's directory).
-	predictedRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
-	d.markActiveEnvRoot(predictedRoot)
-	defer d.unmarkActiveEnvRoot(predictedRoot)
-	if task.PriorWorkDir != "" {
-		priorRoot := filepath.Dir(task.PriorWorkDir)
-		if priorRoot != predictedRoot {
-			d.markActiveEnvRoot(priorRoot)
-			defer d.unmarkActiveEnvRoot(priorRoot)
-		}
-	}
-
-	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
-	var env *execenv.Environment
+	// Resolve agent backend info (needed by both fixed-repo and normal flows).
 	codexVersion := d.agentVersion("codex")
 	openclawBin := ""
 	if provider == "openclaw" {
 		openclawBin = entry.Path
 	}
-	if task.PriorWorkDir != "" {
-		env = execenv.Reuse(execenv.ReuseParams{
-			WorkDir:      task.PriorWorkDir,
-			Provider:     provider,
-			CodexVersion: codexVersion,
-			OpenclawBin:  openclawBin,
-			Task:         taskCtx,
-		}, d.logger)
-	}
-	if env == nil {
-		var err error
-		env, err = execenv.Prepare(execenv.PrepareParams{
-			WorkspacesRoot: d.cfg.WorkspacesRoot,
-			WorkspaceID:    task.WorkspaceID,
-			TaskID:         task.ID,
-			AgentName:      agentName,
-			Provider:       provider,
-			CodexVersion:   codexVersion,
-			OpenclawBin:    openclawBin,
-			Task:           taskCtx,
-		}, d.logger)
-		if err != nil {
-			return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
-		}
-	}
-	// Belt-and-suspenders: also mark whatever root we ended up with, in case
-	// future changes diverge from PredictRootDir.
-	if env.RootDir != predictedRoot && env.RootDir != "" {
-		d.markActiveEnvRoot(env.RootDir)
-		defer d.unmarkActiveEnvRoot(env.RootDir)
-	}
 
-	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
-	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
-	if err != nil {
-		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
+	var env *execenv.Environment
+	var runtimeBrief string
+
+	// Fixed repo mode: agent works in a pre-existing local directory instead
+	// of a per-task worktree. Select an idle path, lock it, and skip the
+	// normal Prepare/Reuse flow.
+	if task.Agent != nil && task.Agent.FixedRepoEnabled {
+		if len(task.Agent.FixedRepoPaths) == 0 {
+			return TaskResult{}, fmt.Errorf("fixed repo mode enabled but no paths configured for agent %s", task.Agent.Name)
+		}
+
+		var selectedPath string
+		for _, p := range task.Agent.FixedRepoPaths {
+			if _, err := os.Stat(p); err != nil {
+				taskLog.Warn("fixed repo path not found, skipping", "path", p)
+				continue
+			}
+			if d.fixedRepoLocks.tryLock(p, task.ID) {
+				selectedPath = p
+				break
+			}
+		}
+		if selectedPath == "" {
+			return TaskResult{}, fmt.Errorf("no fixed repo path available (all locked or missing)")
+		}
+		defer d.fixedRepoLocks.unlock(selectedPath)
+
+		taskCtx.FixedRepoEnabled = true
+		taskCtx.FixedRepoPath = selectedPath
+		taskCtx.VCSType = task.Agent.VCSType
+		taskCtx.CleanupScript = task.Agent.CleanupScript
+
+		// Register this task so /repo/checkout can reject it.
+		d.mu.Lock()
+		d.fixedRepoTasks[task.ID] = struct{}{}
+		d.mu.Unlock()
+		defer func() {
+			d.mu.Lock()
+			delete(d.fixedRepoTasks, task.ID)
+			d.mu.Unlock()
+		}()
+
+		env = &execenv.Environment{
+			WorkDir: selectedPath,
+			RootDir: selectedPath,
+		}
+
+		r, ierr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+		if ierr != nil {
+			taskLog.Warn("execenv: inject runtime config failed (non-fatal)", "error", ierr)
+		}
+		runtimeBrief = r
+
+		// Cleanup script (if configured) — run after task completes.
+		if task.Agent.CleanupScript != "" {
+			defer func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, task.Agent.CleanupScript)
+				cmd.Env = append(os.Environ(), "MULTICA_WORK_DIR="+selectedPath)
+				if out, err := cmd.CombinedOutput(); err != nil {
+					taskLog.Warn("cleanup script failed", "script", task.Agent.CleanupScript, "output", string(out), "error", err)
+				}
+			}()
+		}
+	} else {
+		// Mark candidate env roots as active before any env work so the GC loop
+		// can't reclaim artifacts inside them mid-execution. We mark both the
+		// predicted root for a fresh Prepare and the prior root for Reuse — they
+		// usually differ (Reuse keeps the original task's directory).
+		predictedRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
+		d.markActiveEnvRoot(predictedRoot)
+		defer d.unmarkActiveEnvRoot(predictedRoot)
+		if task.PriorWorkDir != "" {
+			priorRoot := filepath.Dir(task.PriorWorkDir)
+			if priorRoot != predictedRoot {
+				d.markActiveEnvRoot(priorRoot)
+				defer d.unmarkActiveEnvRoot(priorRoot)
+			}
+		}
+
+		// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
+		if task.PriorWorkDir != "" {
+			env = execenv.Reuse(execenv.ReuseParams{
+				WorkDir:      task.PriorWorkDir,
+				Provider:     provider,
+				CodexVersion: codexVersion,
+				OpenclawBin:  openclawBin,
+				Task:         taskCtx,
+			}, d.logger)
+		}
+		if env == nil {
+			var perr error
+			env, perr = execenv.Prepare(execenv.PrepareParams{
+				WorkspacesRoot: d.cfg.WorkspacesRoot,
+				WorkspaceID:    task.WorkspaceID,
+				TaskID:         task.ID,
+				AgentName:      agentName,
+				Provider:       provider,
+				CodexVersion:   codexVersion,
+				OpenclawBin:    openclawBin,
+				Task:           taskCtx,
+			}, d.logger)
+			if perr != nil {
+				return TaskResult{}, fmt.Errorf("prepare execution environment: %w", perr)
+			}
+		}
+		// Belt-and-suspenders: also mark whatever root we ended up with, in case
+		// future changes diverge from PredictRootDir.
+		if env.RootDir != predictedRoot && env.RootDir != "" {
+			d.markActiveEnvRoot(env.RootDir)
+			defer d.unmarkActiveEnvRoot(env.RootDir)
+		}
+
+		// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
+		r, ierr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+		if ierr != nil {
+			d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", ierr)
+		}
+		runtimeBrief = r
 	}
 	// NOTE: No cleanup — workdir is preserved for reuse by future tasks on
 	// the same (agent, issue) pair. The work_dir path is stored in DB on
@@ -2355,6 +2429,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// deterministically (see GetIssueByOrigin).
 	if task.QuickCreatePrompt != "" {
 		agentEnv["MULTICA_QUICK_CREATE_TASK_ID"] = task.ID
+	}
+	// Fixed repo mode markers.
+	if taskCtx.FixedRepoEnabled {
+		agentEnv["MULTICA_FIXED_REPO"] = "1"
+		agentEnv["MULTICA_WORK_DIR"] = taskCtx.FixedRepoPath
 	}
 	// Ensure the multica CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not

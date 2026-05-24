@@ -44,6 +44,10 @@ type Agent struct {
 	McpConfig          []byte             `json:"mcp_config"`
 	Model              pgtype.Text        `json:"model"`
 	ThinkingLevel      pgtype.Text        `json:"thinking_level"`
+	FixedRepoEnabled   bool               `json:"fixed_repo_enabled"`
+	FixedRepoPaths     []string           `json:"fixed_repo_paths"`
+	VcsType            string             `json:"vcs_type"`
+	CleanupScript      string             `json:"cleanup_script"`
 }
 
 type AgentRuntime struct {

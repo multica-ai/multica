@@ -129,6 +129,88 @@ func TestBriefHasNoParentNotificationGuidance(t *testing.T) {
 	}
 }
 
+func TestWriteVCSGuidance_Git(t *testing.T) {
+	t.Parallel()
+
+	var b strings.Builder
+	writeVCSGuidance(&b, "git")
+	out := b.String()
+
+	if !strings.Contains(out, "## VCS: git") {
+		t.Fatal("expected '## VCS: git' heading")
+	}
+	if !strings.Contains(out, "git fetch origin") {
+		t.Fatal("expected fetch guidance")
+	}
+	if !strings.Contains(out, "git push --force") {
+		t.Fatal("expected destructive command warning")
+	}
+}
+
+func TestWriteVCSGuidance_P4(t *testing.T) {
+	t.Parallel()
+
+	var b strings.Builder
+	writeVCSGuidance(&b, "p4")
+	out := b.String()
+
+	if !strings.Contains(out, "## VCS: Perforce") {
+		t.Fatal("expected Perforce heading")
+	}
+	if !strings.Contains(out, "p4 sync") {
+		t.Fatal("expected p4 sync guidance")
+	}
+}
+
+func TestWriteVCSGuidance_SVN(t *testing.T) {
+	t.Parallel()
+
+	var b strings.Builder
+	writeVCSGuidance(&b, "svn")
+	out := b.String()
+
+	if !strings.Contains(out, "## VCS: SVN") {
+		t.Fatal("expected SVN heading")
+	}
+	if !strings.Contains(out, "svn update") {
+		t.Fatal("expected svn update guidance")
+	}
+}
+
+func TestWriteVCSGuidance_None(t *testing.T) {
+	t.Parallel()
+
+	var b strings.Builder
+	writeVCSGuidance(&b, "")
+	if b.Len() != 0 {
+		t.Fatal("empty vcs_type should produce no output")
+	}
+}
+
+func TestBuildMetaSkillContent_FixedRepoSection(t *testing.T) {
+	t.Parallel()
+
+	ctx := TaskContextForEnv{
+		FixedRepoEnabled: true,
+		FixedRepoPath:    "/data/repos/test-project",
+		VCSType:          "git",
+	}
+	content := buildMetaSkillContent("claude", ctx)
+
+	if !strings.Contains(content, "## Fixed Repository") {
+		t.Fatal("expected Fixed Repository section")
+	}
+	if !strings.Contains(content, "/data/repos/test-project") {
+		t.Fatal("expected path in output")
+	}
+	if strings.Contains(content, "## Repositories") {
+		t.Fatal("should NOT contain Repositories section when FixedRepoEnabled")
+	}
+	if !strings.Contains(content, "## VCS: git") {
+		t.Fatal("expected VCS section")
+	}
+}
+
 // Comment-triggered briefs must NOT carry any unconditional status-flip
 // command targeting the current issue. Previous revisions had a
 // dedicated protocol step that wrote `multica issue status <this-issue-id> in_review`;

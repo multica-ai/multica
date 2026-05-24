@@ -48,6 +48,10 @@ func (q *Queries) ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Age
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
+		&i.FixedRepoEnabled,
+		&i.FixedRepoPaths,
+		&i.VcsType,
+		&i.CleanupScript,
 	)
 	return i, err
 }
@@ -100,6 +104,10 @@ func (q *Queries) ArchiveAgentsByRuntime(ctx context.Context, arg ArchiveAgentsB
 			&i.McpConfig,
 			&i.Model,
 			&i.ThinkingLevel,
+			&i.FixedRepoEnabled,
+			&i.FixedRepoPaths,
+			&i.VcsType,
+			&i.CleanupScript,
 		); err != nil {
 			return nil, err
 		}
@@ -549,6 +557,10 @@ func (q *Queries) ClearAgentMcpConfig(ctx context.Context, id pgtype.UUID) (Agen
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
+		&i.FixedRepoEnabled,
+		&i.FixedRepoPaths,
+		&i.VcsType,
+		&i.CleanupScript,
 	)
 	return i, err
 }
@@ -588,6 +600,10 @@ func (q *Queries) ClearAgentThinkingLevel(ctx context.Context, id pgtype.UUID) (
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
+		&i.FixedRepoEnabled,
+		&i.FixedRepoPaths,
+		&i.VcsType,
+		&i.CleanupScript,
 	)
 	return i, err
 }
@@ -682,6 +698,10 @@ type CreateAgentParams struct {
 	McpConfig          []byte      `json:"mcp_config"`
 	Model              pgtype.Text `json:"model"`
 	ThinkingLevel      pgtype.Text `json:"thinking_level"`
+	FixedRepoEnabled   bool        `json:"fixed_repo_enabled"`
+	FixedRepoPaths     []string    `json:"fixed_repo_paths"`
+	VcsType            string      `json:"vcs_type"`
+	CleanupScript      string      `json:"cleanup_script"`
 }
 
 func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent, error) {
@@ -702,6 +722,10 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		arg.McpConfig,
 		arg.Model,
 		arg.ThinkingLevel,
+		arg.FixedRepoEnabled,
+		arg.FixedRepoPaths,
+		arg.VcsType,
+		arg.CleanupScript,
 	)
 	var i Agent
 	err := row.Scan(
@@ -727,6 +751,10 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
+		&i.FixedRepoEnabled,
+		&i.FixedRepoPaths,
+		&i.VcsType,
+		&i.CleanupScript,
 	)
 	return i, err
 }
@@ -1172,6 +1200,10 @@ func (q *Queries) GetAgent(ctx context.Context, id pgtype.UUID) (Agent, error) {
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
+		&i.FixedRepoEnabled,
+		&i.FixedRepoPaths,
+		&i.VcsType,
+		&i.CleanupScript,
 	)
 	return i, err
 }
@@ -1212,6 +1244,10 @@ func (q *Queries) GetAgentInWorkspace(ctx context.Context, arg GetAgentInWorkspa
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
+		&i.FixedRepoEnabled,
+		&i.FixedRepoPaths,
+		&i.VcsType,
+		&i.CleanupScript,
 	)
 	return i, err
 }
@@ -1662,6 +1698,10 @@ func (q *Queries) ListAgents(ctx context.Context, workspaceID pgtype.UUID) ([]Ag
 			&i.McpConfig,
 			&i.Model,
 			&i.ThinkingLevel,
+			&i.FixedRepoEnabled,
+			&i.FixedRepoPaths,
+			&i.VcsType,
+			&i.CleanupScript,
 		); err != nil {
 			return nil, err
 		}
@@ -1711,6 +1751,10 @@ func (q *Queries) ListAllAgents(ctx context.Context, workspaceID pgtype.UUID) ([
 			&i.McpConfig,
 			&i.Model,
 			&i.ThinkingLevel,
+			&i.FixedRepoEnabled,
+			&i.FixedRepoPaths,
+			&i.VcsType,
+			&i.CleanupScript,
 		); err != nil {
 			return nil, err
 		}
@@ -2124,6 +2168,10 @@ func (q *Queries) RefreshAgentStatusFromTasks(ctx context.Context, id pgtype.UUI
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
+		&i.FixedRepoEnabled,
+		&i.FixedRepoPaths,
+		&i.VcsType,
+		&i.CleanupScript,
 	)
 	return i, err
 }
@@ -2160,6 +2208,10 @@ func (q *Queries) RestoreAgent(ctx context.Context, id pgtype.UUID) (Agent, erro
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
+		&i.FixedRepoEnabled,
+		&i.FixedRepoPaths,
+		&i.VcsType,
+		&i.CleanupScript,
 	)
 	return i, err
 }
@@ -2243,6 +2295,10 @@ type UpdateAgentParams struct {
 	McpConfig          []byte      `json:"mcp_config"`
 	Model              pgtype.Text `json:"model"`
 	ThinkingLevel      pgtype.Text `json:"thinking_level"`
+	FixedRepoEnabled   pgtype.Bool `json:"fixed_repo_enabled"`
+	FixedRepoPaths     []string    `json:"fixed_repo_paths"`
+	VcsType            pgtype.Text `json:"vcs_type"`
+	CleanupScript      pgtype.Text `json:"cleanup_script"`
 }
 
 func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent, error) {
@@ -2263,6 +2319,10 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		arg.McpConfig,
 		arg.Model,
 		arg.ThinkingLevel,
+		arg.FixedRepoEnabled,
+		arg.FixedRepoPaths,
+		arg.VcsType,
+		arg.CleanupScript,
 	)
 	var i Agent
 	err := row.Scan(
@@ -2288,6 +2348,10 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
+		&i.FixedRepoEnabled,
+		&i.FixedRepoPaths,
+		&i.VcsType,
+		&i.CleanupScript,
 	)
 	return i, err
 }
@@ -2329,6 +2393,10 @@ func (q *Queries) UpdateAgentStatus(ctx context.Context, arg UpdateAgentStatusPa
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
+		&i.FixedRepoEnabled,
+		&i.FixedRepoPaths,
+		&i.VcsType,
+		&i.CleanupScript,
 	)
 	return i, err
 }

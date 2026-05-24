@@ -137,6 +137,10 @@ func init() {
 	agentCreateCmd.Flags().String("custom-env-file", "", "Read the --custom-env JSON object from a file path (suggested mode: 0600). Mutually exclusive with --custom-env and --custom-env-stdin.")
 	agentCreateCmd.Flags().String("visibility", "private", "Visibility: private or workspace")
 	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent tasks")
+	agentCreateCmd.Flags().Bool("fixed-repo-enabled", false, "Enable fixed repository mode")
+	agentCreateCmd.Flags().StringArray("fixed-repo-path", nil, "Fixed repo local path (repeatable)")
+	agentCreateCmd.Flags().String("vcs-type", "", "VCS type for fixed repo mode: git, p4, svn, or none")
+	agentCreateCmd.Flags().String("cleanup-script", "", "Optional cleanup script path for fixed repo mode")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent update
@@ -153,6 +157,10 @@ func init() {
 	agentUpdateCmd.Flags().String("visibility", "", "New visibility: private or workspace")
 	agentUpdateCmd.Flags().String("status", "", "New status")
 	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent tasks")
+	agentUpdateCmd.Flags().Bool("fixed-repo-enabled", false, "Enable fixed repository mode")
+	agentUpdateCmd.Flags().StringArray("fixed-repo-path", nil, "Fixed repo local path (repeatable)")
+	agentUpdateCmd.Flags().String("vcs-type", "", "VCS type for fixed repo mode: git, p4, svn, or none")
+	agentUpdateCmd.Flags().String("cleanup-script", "", "Optional cleanup script path for fixed repo mode")
 	agentUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent archive
@@ -420,6 +428,22 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 		v, _ := cmd.Flags().GetInt32("max-concurrent-tasks")
 		body["max_concurrent_tasks"] = v
 	}
+	if cmd.Flags().Changed("fixed-repo-enabled") {
+		v, _ := cmd.Flags().GetBool("fixed-repo-enabled")
+		body["fixed_repo_enabled"] = v
+	}
+	if cmd.Flags().Changed("fixed-repo-path") {
+		v, _ := cmd.Flags().GetStringArray("fixed-repo-path")
+		body["fixed_repo_paths"] = v
+	}
+	if cmd.Flags().Changed("vcs-type") {
+		v, _ := cmd.Flags().GetString("vcs-type")
+		body["vcs_type"] = v
+	}
+	if cmd.Flags().Changed("cleanup-script") {
+		v, _ := cmd.Flags().GetString("cleanup-script")
+		body["cleanup_script"] = v
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -547,9 +571,25 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetInt32("max-concurrent-tasks")
 		body["max_concurrent_tasks"] = v
 	}
+	if cmd.Flags().Changed("fixed-repo-enabled") {
+		v, _ := cmd.Flags().GetBool("fixed-repo-enabled")
+		body["fixed_repo_enabled"] = v
+	}
+	if cmd.Flags().Changed("fixed-repo-path") {
+		v, _ := cmd.Flags().GetStringArray("fixed-repo-path")
+		body["fixed_repo_paths"] = v
+	}
+	if cmd.Flags().Changed("vcs-type") {
+		v, _ := cmd.Flags().GetString("vcs-type")
+		body["vcs_type"] = v
+	}
+	if cmd.Flags().Changed("cleanup-script") {
+		v, _ := cmd.Flags().GetString("cleanup-script")
+		body["cleanup_script"] = v
+	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --custom-args, --custom-env (or --custom-env-stdin, --custom-env-file), --visibility, --status, or --max-concurrent-tasks")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --custom-args, --custom-env (or --custom-env-stdin, --custom-env-file), --visibility, --status, --max-concurrent-tasks, --fixed-repo-enabled, --fixed-repo-path, --vcs-type, or --cleanup-script")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

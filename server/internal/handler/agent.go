@@ -50,8 +50,12 @@ type AgentResponse struct {
 	// ThinkingLevel is the runtime-native reasoning/effort token persisted
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
-	ThinkingLevel string              `json:"thinking_level"`
-	OwnerID       *string             `json:"owner_id"`
+	ThinkingLevel    string              `json:"thinking_level"`
+	FixedRepoEnabled bool                `json:"fixed_repo_enabled"`
+	FixedRepoPaths   []string            `json:"fixed_repo_paths"`
+	VCSType          string              `json:"vcs_type"`
+	CleanupScript    string              `json:"cleanup_script"`
+	OwnerID          *string             `json:"owner_id"`
 	Skills        []AgentSkillSummary `json:"skills"`
 	CreatedAt     string              `json:"created_at"`
 	UpdatedAt     string              `json:"updated_at"`
@@ -111,6 +115,10 @@ func agentToResponse(a db.Agent) AgentResponse {
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
 		Model:              a.Model.String,
 		ThinkingLevel:      a.ThinkingLevel.String,
+		FixedRepoEnabled:   a.FixedRepoEnabled,
+		FixedRepoPaths:     a.FixedRepoPaths,
+		VCSType:            a.VcsType,
+		CleanupScript:      a.CleanupScript,
 		OwnerID:            uuidToPtr(a.OwnerID),
 		Skills:             []AgentSkillSummary{},
 		CreatedAt:          timestampToString(a.CreatedAt),
@@ -450,7 +458,11 @@ type CreateAgentRequest struct {
 	// the caller didn't come from a template picker — the `agent_created`
 	// event still fires with `template=""`, which is the correct signal
 	// for "manually authored agent".
-	Template string `json:"template"`
+	Template         string   `json:"template"`
+	FixedRepoEnabled bool     `json:"fixed_repo_enabled"`
+	FixedRepoPaths   []string `json:"fixed_repo_paths"`
+	VCSType          string   `json:"vcs_type"`
+	CleanupScript    string   `json:"cleanup_script"`
 }
 
 func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMessage, error) {
@@ -591,6 +603,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		McpConfig:          mc,
 		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
 		ThinkingLevel:      pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
+		FixedRepoEnabled:   req.FixedRepoEnabled,
+		FixedRepoPaths:     req.FixedRepoPaths,
+		VcsType:            req.VCSType,
+		CleanupScript:      req.CleanupScript,
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -648,7 +664,11 @@ type UpdateAgentRequest struct {
 	//   - field present with non-empty value → set (validated server-side)
 	// Distinguishing those modes is why this is a pointer; the raw-fields
 	// map captured at decode time tells us whether the key was sent.
-	ThinkingLevel *string `json:"thinking_level"`
+	ThinkingLevel     *string  `json:"thinking_level"`
+	FixedRepoEnabled *bool    `json:"fixed_repo_enabled"`
+	FixedRepoPaths   []string `json:"fixed_repo_paths"`
+	VCSType          *string  `json:"vcs_type"`
+	CleanupScript    *string  `json:"cleanup_script"`
 }
 
 // workspaceAlwaysRedactEnv checks whether the workspace has opted into
@@ -871,6 +891,19 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			))
 			return
 		}
+	}
+
+	if req.FixedRepoEnabled != nil {
+		params.FixedRepoEnabled = pgtype.Bool{Bool: *req.FixedRepoEnabled, Valid: true}
+	}
+	if req.FixedRepoPaths != nil {
+		params.FixedRepoPaths = req.FixedRepoPaths
+	}
+	if req.VCSType != nil {
+		params.VcsType = pgtype.Text{String: *req.VCSType, Valid: true}
+	}
+	if req.CleanupScript != nil {
+		params.CleanupScript = pgtype.Text{String: *req.CleanupScript, Valid: true}
 	}
 
 	updated, err := h.Queries.UpdateAgent(r.Context(), params)

@@ -243,7 +243,22 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	}
 
 	// Inject available repositories section.
-	if len(ctx.Repos) > 0 {
+	if ctx.FixedRepoEnabled {
+		b.WriteString("## Fixed Repository\n\n")
+		b.WriteString("This agent works in a fixed local directory. Do NOT use `multica repo checkout`.\n\n")
+		fmt.Fprintf(&b, "**Working directory:** `%s` (set in `MULTICA_WORK_DIR`)\n\n", ctx.FixedRepoPath)
+		b.WriteString("Rules:\n")
+		b.WriteString("- Stay in this directory for the entire task. Do not cd elsewhere.\n")
+		b.WriteString("- You are responsible for VCS operations before starting work.\n")
+		b.WriteString("- Read `CLAUDE.md` and `.claude/skills/` from this directory if they exist.\n")
+		b.WriteString("- At the end of the task, commit/push changes as appropriate.\n")
+		b.WriteString("- Before exiting, clean up temporary build artifacts (node_modules/, __pycache__/, build/, dist/).\n\n")
+
+		// Inject VCS guidance if configured.
+		if ctx.VCSType != "" {
+			writeVCSGuidance(&b, ctx.VCSType)
+		}
+	} else if len(ctx.Repos) > 0 {
 		b.WriteString("## Repositories\n\n")
 		b.WriteString("The following code repositories are available in this workspace.\n")
 		b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory. Add `--ref <branch-or-sha>` when you need an exact branch, tag, or commit.\n\n")
@@ -468,4 +483,48 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	}
 
 	return b.String()
+}
+
+// writeVCSGuidance injects VCS-specific guidance into the agent brief.
+func writeVCSGuidance(b *strings.Builder, vcsType string) {
+	switch vcsType {
+	case "git":
+		b.WriteString("## VCS: git\n\n")
+		b.WriteString("This agent works on a real local repository. Follow these guidelines:\n\n")
+		b.WriteString("**Before starting:**\n")
+		b.WriteString("- `git fetch origin` to get latest changes\n")
+		b.WriteString("- Create a work branch for your changes\n\n")
+		b.WriteString("**While working:**\n")
+		b.WriteString("- Commit incrementally with clear messages\n")
+		b.WriteString("- NEVER run destructive commands: `git push --force`, `git reset --hard <remote>`,\n")
+		b.WriteString("  `git clean -fd`, `rm -rf .git`\n")
+		b.WriteString("- NEVER force-push to shared branches (main, master, develop)\n\n")
+		b.WriteString("**Before exiting:**\n")
+		b.WriteString("- Push your branch to remote\n")
+		b.WriteString("- Clean up build artifacts (node_modules/, __pycache__/, build/, dist/)\n\n")
+	case "p4":
+		b.WriteString("## VCS: Perforce\n\n")
+		b.WriteString("This agent works on a real Perforce workspace. Follow these guidelines:\n\n")
+		b.WriteString("**Before starting:**\n")
+		b.WriteString("- `p4 sync` to get latest changes\n")
+		b.WriteString("- Create a numbered changelist for your changes\n\n")
+		b.WriteString("**While working:**\n")
+		b.WriteString("- Shelve work-in-progress periodically\n")
+		b.WriteString("- NEVER run: `p4 revert -w`, `p4 clean`, `rm -rf <depot>`\n")
+		b.WriteString("- NEVER submit without review unless explicitly instructed\n\n")
+		b.WriteString("**Before exiting:**\n")
+		b.WriteString("- Shelve or submit your changelist\n")
+		b.WriteString("- Clean up build artifacts\n\n")
+	case "svn":
+		b.WriteString("## VCS: SVN\n\n")
+		b.WriteString("This agent works on a real SVN working copy. Follow these guidelines:\n\n")
+		b.WriteString("**Before starting:**\n")
+		b.WriteString("- `svn update` to get latest changes\n\n")
+		b.WriteString("**While working:**\n")
+		b.WriteString("- NEVER run: `svn revert -R .`, `rm -rf .svn`\n")
+		b.WriteString("- NEVER commit without review unless explicitly instructed\n\n")
+		b.WriteString("**Before exiting:**\n")
+		b.WriteString("- Commit or create a patch for your changes\n")
+		b.WriteString("- Clean up build artifacts\n\n")
+	}
 }
