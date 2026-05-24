@@ -1990,6 +1990,22 @@ export class ApiClient {
     return this.fetch(`/api/inbox/${id}/unread`, { method: "POST" });
   }
 
+  // CEREBRO-PATCH(inbox-reminders-client): create global reminders from the inbox toolbar.
+  async createInboxReminder(params: {
+    text: string;
+    plannedAt: Date;
+    issueId?: string | null;
+  }): Promise<InboxItem> {
+    return this.fetch("/api/inbox/reminders", {
+      method: "POST",
+      body: JSON.stringify({
+        text: params.text,
+        planned_at: params.plannedAt.toISOString(),
+        issue_id: params.issueId ?? null,
+      }),
+    });
+  }
+
   async getUnreadInboxCount(): Promise<{ count: number }> {
     return this.fetch("/api/inbox/unread-count");
   }

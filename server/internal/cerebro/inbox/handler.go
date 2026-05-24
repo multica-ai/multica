@@ -6,6 +6,7 @@ package inbox
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -38,6 +39,12 @@ type inboxItemResponse struct {
 	Read       bool    `json:"read"`
 	Archived   bool    `json:"archived"`
 	MutedUntil *string `json:"muted_until"`
+}
+
+type createReminderRequest struct {
+	Text      string  `json:"text"`
+	PlannedAt string  `json:"planned_at"`
+	IssueID   *string `json:"issue_id"`
 }
 
 // MuteInboxItem mutes an inbox item until the timestamp supplied in the
@@ -149,6 +156,107 @@ func (h *Handler) UnarchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, toResponse(item))
+}
+
+// CreateReminder creates a personal reminder by inserting a muted inbox row.
+// The row is visible in the Muted/Snooze inbox view until planned_at, then it
+// automatically becomes active because the regular inbox filters stop treating
+// muted_until as muted once the timestamp has passed.
+func (h *Handler) CreateReminder(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	wsID := middleware.WorkspaceIDFromContext(r.Context())
+	wsUUID, err := util.ParseUUID(wsID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace id")
+		return
+	}
+	var body createReminderRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	text := strings.TrimSpace(body.Text)
+	if text == "" {
+		writeError(w, http.StatusBadRequest, "text is required")
+		return
+	}
+	plannedAt, err := time.Parse(time.RFC3339, body.PlannedAt)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "planned_at must be RFC3339")
+		return
+	}
+	if !plannedAt.After(time.Now()) {
+		writeError(w, http.StatusBadRequest, "planned_at must be in the future")
+		return
+	}
+
+	var issueID pgtype.UUID
+	title := "Reminder"
+	if body.IssueID != nil && strings.TrimSpace(*body.IssueID) != "" {
+		parsedIssueID, err := util.ParseUUID(strings.TrimSpace(*body.IssueID))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid issue_id")
+			return
+		}
+		issue, err := h.Upstream.GetIssue(r.Context(), parsedIssueID)
+		if err != nil || util.UUIDToString(issue.WorkspaceID) != wsID {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return
+		}
+		issueID = parsedIssueID
+		title = "Reminder: " + issue.Title
+	}
+
+	planned := pgtype.Timestamptz{Time: plannedAt, Valid: true}
+	recipientID, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+	details, _ := json.Marshal(map[string]string{
+		"planned_at": plannedAt.Format(time.RFC3339),
+		"text":       text,
+	})
+	existing, err := h.Cerebro.FindPendingReminder(r.Context(), cerebrodb.FindPendingReminderParams{
+		WorkspaceID: wsUUID,
+		RecipientID: recipientID,
+		Column3:     issueID,
+		Title:       title,
+		Body:        pgtype.Text{String: text, Valid: true},
+	})
+	if err == nil {
+		item, err := h.Cerebro.UpdateReminderInboxItem(r.Context(), cerebrodb.UpdateReminderInboxItemParams{
+			ID:         existing.ID,
+			MutedUntil: planned,
+			Details:    details,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update reminder")
+			return
+		}
+		writeJSON(w, http.StatusOK, toResponse(item))
+		return
+	}
+
+	item, err := h.Cerebro.CreateReminderInboxItem(r.Context(), cerebrodb.CreateReminderInboxItemParams{
+		WorkspaceID: wsUUID,
+		RecipientID: recipientID,
+		IssueID:     issueID,
+		Title:       title,
+		Body:        pgtype.Text{String: text, Valid: true},
+		ActorType:   pgtype.Text{String: "member", Valid: true},
+		ActorID:     recipientID,
+		Details:     details,
+		MutedUntil:  planned,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create reminder")
+		return
+	}
+	writeJSON(w, http.StatusCreated, toResponse(item))
 }
 
 // ListActiveIssueTasks returns issue IDs in the current workspace that have

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { formatMutedUntilTime, isMuted, nextLocalEightAm } from "./mute-time";
+import {
+  formatMutedUntilTime,
+  isMuted,
+  nextBusinessDayNineAm,
+  nextLocalEightAm,
+  toDateTimeLocalValue,
+} from "./mute-time";
 
 describe("nextLocalEightAm", () => {
   it("returns today's 08:00 when called before 08:00", () => {
@@ -54,5 +60,21 @@ describe("formatMutedUntilTime", () => {
     const got = formatMutedUntilTime(future, "en-US");
     expect(got).toBeTruthy();
     expect(got!).toMatch(/\d/);
+  });
+});
+
+describe("nextBusinessDayNineAm", () => {
+  it("skips the weekend", () => {
+    const friday = new Date(2026, 4, 22, 14, 0);
+    const got = nextBusinessDayNineAm(friday);
+    expect(got.getDay()).toBe(1);
+    expect(got.getDate()).toBe(25);
+    expect(got.getHours()).toBe(9);
+    expect(got.getMinutes()).toBe(0);
+  });
+
+  it("formats datetime-local values without timezone conversion", () => {
+    const got = toDateTimeLocalValue(new Date(2026, 4, 25, 9, 5));
+    expect(got).toBe("2026-05-25T09:05");
   });
 });

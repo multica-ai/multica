@@ -37,3 +37,38 @@ export function formatMutedUntilTime(
   const fmt = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" });
   return fmt.format(new Date(mutedUntil!));
 }
+
+export function formatPlannedDateTime(
+  value: string | null | undefined,
+  locale?: string,
+): string | null {
+  if (!value) return null;
+  return new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+export function nextLocalNineAm(now: Date = new Date()): Date {
+  const target = new Date(now);
+  target.setDate(target.getDate() + 1);
+  target.setHours(9, 0, 0, 0);
+  return target;
+}
+
+export function nextBusinessDayNineAm(now: Date = new Date()): Date {
+  const target = new Date(now);
+  target.setDate(target.getDate() + 1);
+  while (target.getDay() === 0 || target.getDay() === 6) {
+    target.setDate(target.getDate() + 1);
+  }
+  target.setHours(9, 0, 0, 0);
+  return target;
+}
+
+export function toDateTimeLocalValue(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}

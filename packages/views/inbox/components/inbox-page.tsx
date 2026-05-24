@@ -28,7 +28,17 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 // CEREBRO-PATCH(inbox-keyboard-shortcuts): cerebro keyboard shortcuts (e = archive)
 // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166 — useUnarchiveInbox for archived view
 // CEREBRO-PATCH(inbox-muted-filter): JEH-663 — `isMuted` powers the muted/non-muted view filter
-import { useInboxKeyboardShortcuts, CerebroSwipeArchive, useUnarchiveInbox, isMuted } from "@multica/cerebro-inbox";
+import {
+  useInboxKeyboardShortcuts,
+  CerebroSwipeArchive,
+  useUnarchiveInbox,
+  useCreateInboxReminder, // CEREBRO-PATCH(inbox-reminders-ui): mutation powering toolbar reminder dialog.
+  isMuted,
+  nextBusinessDayNineAm,
+  nextLocalNineAm,
+  toDateTimeLocalValue,
+  formatPlannedDateTime,
+} from "@multica/cerebro-inbox";
 // CEREBRO-PATCH(inbox-channel-archive-import): JEH-851 — per-user channel archive mutation.
 import { useArchiveChannel } from "@multica/cerebro-channels";
 import { useInboxViewStore, INBOX_VIEW_OPTIONS, type InboxView } from "@multica/core/inbox";
@@ -50,6 +60,7 @@ import {
   ListChecks,
   ArrowLeft,
   Plus,
+  BellPlus, // CEREBRO-PATCH(inbox-reminders-ui): toolbar icon for reminder creation.
   Bot,
   ChevronRight,
   ChevronDown,
@@ -69,6 +80,16 @@ import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
 import { chatKeys } from "@multica/core/chat/queries";
 import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
+import { Label } from "@multica/ui/components/ui/label";
+import { Textarea } from "@multica/ui/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@multica/ui/components/ui/dialog";
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -121,6 +142,12 @@ export function InboxPage() {
 
   const [selectedKey, setSelectedKeyState] = useState(() => urlSelected);
   const [viewMode, setViewMode] = useState<ViewMode>({ kind: "inbox" });
+  // CEREBRO-PATCH(inbox-reminders-ui): local dialog state for global reminder creation.
+  const [showReminder, setShowReminder] = useState(false);
+  const [reminderText, setReminderText] = useState("");
+  const [reminderPlanned, setReminderPlanned] = useState(() =>
+    toDateTimeLocalValue(nextBusinessDayNineAm()),
+  );
 
   useEffect(() => {
     setSelectedKeyState(urlSelected);
@@ -387,6 +414,7 @@ export function InboxPage() {
   const archiveAllMutation = useArchiveAllInbox();
   const archiveAllReadMutation = useArchiveAllReadInbox();
   const archiveCompletedMutation = useArchiveCompletedInbox();
+  const createReminderMutation = useCreateInboxReminder();
   const timeAgo = useTimeAgo();
   const typeLabels = useTypeLabels();
 
@@ -489,6 +517,31 @@ export function InboxPage() {
     setSelectedKey("chat", "new-chat");
   };
 
+  const handleCreateReminder = () => {
+    const plannedAt = new Date(reminderPlanned);
+    if (!reminderText.trim()) {
+      toast.error(t(($) => $.reminders.missing_text));
+      return;
+    }
+    if (Number.isNaN(plannedAt.getTime()) || plannedAt.getTime() <= Date.now()) {
+      toast.error(t(($) => $.reminders.future_time));
+      return;
+    }
+    createReminderMutation.mutate(
+      { text: reminderText.trim(), plannedAt },
+      {
+        onSuccess: () => {
+          setReminderText("");
+          setReminderPlanned(toDateTimeLocalValue(nextBusinessDayNineAm()));
+          setShowReminder(false);
+          setView("muted");
+          toast.success(t(($) => $.reminders.planned));
+        },
+        onError: () => toast.error(t(($) => $.reminders.create_failed)),
+      },
+    );
+  };
+
   // Cmd/Ctrl+Shift+M opens the new-message modal globally. Shift is added
   // because plain Cmd+M is the macOS minimize-window shortcut and Cmd+N
   // collides with new-window/new-doc bindings in the desktop app.
@@ -578,6 +631,15 @@ export function InboxPage() {
           }
         >
           <Plus className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="text-muted-foreground"
+          title={t(($) => $.reminders.new)}
+          onClick={() => setShowReminder(true)}
+        >
+          <BellPlus className="h-4 w-4" />
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -1029,6 +1091,71 @@ export function InboxPage() {
     </div>
   );
 
+  const reminderDialog = (
+    <Dialog open={showReminder} onOpenChange={setShowReminder}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{t(($) => $.reminders.new)}</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-4 py-1">
+          <div className="grid gap-2">
+            <Label htmlFor="inbox-reminder-text">{t(($) => $.reminders.reminder)}</Label>
+            <Textarea
+              id="inbox-reminder-text"
+              value={reminderText}
+              onChange={(e) => setReminderText(e.target.value)}
+              placeholder={t(($) => $.reminders.placeholder)}
+              className="min-h-24 resize-none"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="inbox-reminder-planned">{t(($) => $.reminders.planned_for)}</Label>
+            <Input
+              id="inbox-reminder-planned"
+              type="datetime-local"
+              value={reminderPlanned}
+              onChange={(e) => setReminderPlanned(e.target.value)}
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setReminderPlanned(toDateTimeLocalValue(nextLocalNineAm()))}
+            >
+              {t(($) => $.reminders.tomorrow_9)}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setReminderPlanned(toDateTimeLocalValue(nextBusinessDayNineAm()))}
+            >
+              {t(($) => $.reminders.next_workday_9)}
+            </Button>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setShowReminder(false)}
+          >
+            {t(($) => $.reminders.cancel)}
+          </Button>
+          <Button
+            type="button"
+            onClick={handleCreateReminder}
+            disabled={createReminderMutation.isPending}
+          >
+            {t(($) => $.reminders.plan)}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
   const selectedChannel = selectedKey ? channelMap.get(selectedKey) ?? null : null;
   // CEREBRO-PATCH(inbox-mobile-detail-title): Mobile detail header shows the selected message/chat/channel title next to Back (JEH-1515).
   const selectedDetailTitle = selectedChannel
@@ -1099,6 +1226,12 @@ export function InboxPage() {
         <div className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-foreground/80">
           {selected.body}
         </div>
+      )}
+      {selected.type === "reminder" && (
+        <p className="mt-3 text-sm text-muted-foreground">
+          {t(($) => $.reminders.planned_for)}{" "}
+          {formatPlannedDateTime(selected.details?.planned_at ?? selected.muted_until) ?? t(($) => $.reminders.later)}
+        </p>
       )}
       {selected.type === "quick_create_failed" && selected.details?.original_prompt && (
         <div className="mt-4 rounded-md border bg-muted/40 p-3">
@@ -1224,6 +1357,7 @@ export function InboxPage() {
             setSelectedKey("chat", "new-chat");
           }}
         />
+        {reminderDialog}
       </>
     );
   }
@@ -1297,6 +1431,7 @@ export function InboxPage() {
           setSelectedKey("chat", "new-chat");
         }}
       />
+      {reminderDialog}
     </>
   );
 }

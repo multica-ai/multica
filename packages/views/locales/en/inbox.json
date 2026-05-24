@@ -47,7 +47,8 @@
     "agent_completed": "Agent completed",
     "reaction_added": "Reacted",
     "quick_create_done": "Created with agent",
-    "quick_create_failed": "Create with agent failed"
+    "quick_create_failed": "Create with agent failed",
+    "reminder": "Reminder"
   },
   "labels": {
     "set_status_to": "Set status to",
@@ -61,6 +62,22 @@
     "reacted_to_comment": "Reacted {{emoji}} to your comment",
     "created_with_agent": "Created with agent: {{identifier}}",
     "failed_with_detail": "Failed: {{detail}}"
+  },
+  "reminders": {
+    "_comment": "CEREBRO-PATCH(inbox-reminders-locale): labels and validation messages for reminder creation.",
+    "new": "New reminder",
+    "reminder": "Reminder",
+    "planned_for": "Planned for",
+    "tomorrow_9": "Tomorrow 09:00",
+    "next_workday_9": "Next workday 09:00",
+    "cancel": "Cancel",
+    "plan": "Plan reminder",
+    "placeholder": "Approve access to Sliplane",
+    "missing_text": "Write what you want to be reminded about",
+    "future_time": "Pick a future time",
+    "planned": "Reminder planned",
+    "create_failed": "Failed to create reminder",
+    "later": "later"
   },
   "errors": {
     "mark_read_failed": "Failed to mark as read",

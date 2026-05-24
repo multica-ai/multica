@@ -71,6 +71,123 @@ func (q *Queries) ClearInboxMuteByIssue(ctx context.Context, arg ClearInboxMuteB
 	return result.RowsAffected(), nil
 }
 
+const createReminderInboxItem = `-- name: CreateReminderInboxItem :one
+INSERT INTO inbox_item (
+    workspace_id, recipient_type, recipient_id,
+    type, severity, issue_id, title, body,
+    actor_type, actor_id, details, route, muted_until
+) VALUES ($1, 'member', $2, 'reminder', 'action_required', $3, $4, $5, $6, $7, $8, 'inbox', $9)
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+`
+
+type CreateReminderInboxItemParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	RecipientID pgtype.UUID        `json:"recipient_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	Title       string             `json:"title"`
+	Body        pgtype.Text        `json:"body"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
+	Details     []byte             `json:"details"`
+	MutedUntil  pgtype.Timestamptz `json:"muted_until"`
+}
+
+// A reminder is an inbox item muted until its planned time. It lives in the
+// same Muted/Snooze view as normal muted inbox rows and automatically
+// resurfaces when muted_until passes.
+func (q *Queries) CreateReminderInboxItem(ctx context.Context, arg CreateReminderInboxItemParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, createReminderInboxItem,
+		arg.WorkspaceID,
+		arg.RecipientID,
+		arg.IssueID,
+		arg.Title,
+		arg.Body,
+		arg.ActorType,
+		arg.ActorID,
+		arg.Details,
+		arg.MutedUntil,
+	)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+		&i.Route,
+		&i.MutedUntil,
+	)
+	return i, err
+}
+
+const findPendingReminder = `-- name: FindPendingReminder :one
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+FROM inbox_item
+WHERE workspace_id = $1
+  AND recipient_type = 'member'
+  AND recipient_id = $2
+  AND type = 'reminder'
+  AND archived = false
+  AND (($3::uuid IS NULL AND issue_id IS NULL) OR issue_id = $3)
+  AND title = $4
+  AND COALESCE(body, '') = COALESCE($5, '')
+  AND muted_until IS NOT NULL
+  AND muted_until > NOW()
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type FindPendingReminderParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	Column3     pgtype.UUID `json:"column_3"`
+	Title       string      `json:"title"`
+	Body        pgtype.Text `json:"body"`
+}
+
+// Dedupe guard for user-created reminders. A matching future reminder is
+// rescheduled instead of duplicated, so agents/autopilots can safely retry.
+func (q *Queries) FindPendingReminder(ctx context.Context, arg FindPendingReminderParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, findPendingReminder,
+		arg.WorkspaceID,
+		arg.RecipientID,
+		arg.Column3,
+		arg.Title,
+		arg.Body,
+	)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+		&i.Route,
+		&i.MutedUntil,
+	)
+	return i, err
+}
+
 const setInboxMutedUntil = `-- name: SetInboxMutedUntil :one
 
 UPDATE inbox_item
@@ -223,6 +340,47 @@ RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_
 // archived-view unarchive action without touching upstream SQL.
 func (q *Queries) UnarchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
 	row := q.db.QueryRow(ctx, unarchiveInboxItem, id)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+		&i.Route,
+		&i.MutedUntil,
+	)
+	return i, err
+}
+
+const updateReminderInboxItem = `-- name: UpdateReminderInboxItem :one
+UPDATE inbox_item
+SET muted_until = $2,
+    read = false,
+    details = $3
+WHERE id = $1
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+`
+
+type UpdateReminderInboxItemParams struct {
+	ID         pgtype.UUID        `json:"id"`
+	MutedUntil pgtype.Timestamptz `json:"muted_until"`
+	Details    []byte             `json:"details"`
+}
+
+// Reschedule an existing pending reminder instead of creating another copy.
+func (q *Queries) UpdateReminderInboxItem(ctx context.Context, arg UpdateReminderInboxItemParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, updateReminderInboxItem, arg.ID, arg.MutedUntil, arg.Details)
 	var i InboxItem
 	err := row.Scan(
 		&i.ID,

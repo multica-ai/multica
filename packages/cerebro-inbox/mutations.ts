@@ -165,3 +165,22 @@ export function useMarkInboxUnread() {
     },
   });
 }
+
+export function useCreateInboxReminder() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({
+      text,
+      plannedAt,
+      issueId,
+    }: {
+      text: string;
+      plannedAt: Date;
+      issueId?: string | null;
+    }) => api.createInboxReminder({ text, plannedAt, issueId }),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+    },
+  });
+}

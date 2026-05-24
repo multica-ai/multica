@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import type { InboxItem } from "@multica/core/types";
-import { formatMutedUntilTime } from "../mute-time";
+import { formatMutedUntilTime, formatPlannedDateTime } from "../mute-time";
 import { useCerebroInboxStrings } from "../strings";
 
 /**
@@ -22,6 +22,11 @@ export function CerebroInboxTimestamp({
 }) {
   const { i18n } = useTranslation();
   const strings = useCerebroInboxStrings();
+  if (item.type === "reminder") {
+    const plannedAt = item.details?.planned_at ?? item.muted_until;
+    const planned = formatPlannedDateTime(plannedAt, i18n.language);
+    if (planned) return <>{`${strings.planned_for_prefix} ${planned}`}</>;
+  }
   const time = formatMutedUntilTime(item.muted_until, i18n.language);
   if (!time) return <>{fallback}</>;
   return <>{`${strings.muted_until_prefix} ${time}`}</>;

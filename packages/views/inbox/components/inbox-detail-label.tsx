@@ -31,6 +31,7 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     reaction_added: t(($) => $.types.reaction_added),
     quick_create_done: t(($) => $.types.quick_create_done),
     quick_create_failed: t(($) => $.types.quick_create_failed),
+    reminder: t(($) => $.types.reminder), // CEREBRO-PATCH(inbox-reminders-label): render reminder type labels.
   };
 }
 
@@ -112,6 +113,8 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
       if (detail) return <span>{t(($) => $.labels.failed_with_detail, { detail })}</span>;
       return <span>{typeLabels[item.type]}</span>;
     }
+    case "reminder": // CEREBRO-PATCH(inbox-reminders-label): show reminder body in detail labels.
+      return <span>{item.body || details.text || typeLabels[item.type]}</span>;
     default:
       return <span>{typeLabels[item.type] ?? item.type}</span>;
   }

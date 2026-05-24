@@ -58,3 +58,41 @@ RETURNING *;
 UPDATE inbox_item
 SET archived = false
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = true;
+
+-- name: FindPendingReminder :one
+-- Dedupe guard for user-created reminders. A matching future reminder is
+-- rescheduled instead of duplicated, so agents/autopilots can safely retry.
+SELECT *
+FROM inbox_item
+WHERE workspace_id = $1
+  AND recipient_type = 'member'
+  AND recipient_id = $2
+  AND type = 'reminder'
+  AND archived = false
+  AND (($3::uuid IS NULL AND issue_id IS NULL) OR issue_id = $3)
+  AND title = $4
+  AND COALESCE(body, '') = COALESCE($5, '')
+  AND muted_until IS NOT NULL
+  AND muted_until > NOW()
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: CreateReminderInboxItem :one
+-- A reminder is an inbox item muted until its planned time. It lives in the
+-- same Muted/Snooze view as normal muted inbox rows and automatically
+-- resurfaces when muted_until passes.
+INSERT INTO inbox_item (
+    workspace_id, recipient_type, recipient_id,
+    type, severity, issue_id, title, body,
+    actor_type, actor_id, details, route, muted_until
+) VALUES ($1, 'member', $2, 'reminder', 'action_required', $3, $4, $5, $6, $7, $8, 'inbox', $9)
+RETURNING *;
+
+-- name: UpdateReminderInboxItem :one
+-- Reschedule an existing pending reminder instead of creating another copy.
+UPDATE inbox_item
+SET muted_until = $2,
+    read = false,
+    details = $3
+WHERE id = $1
+RETURNING *;

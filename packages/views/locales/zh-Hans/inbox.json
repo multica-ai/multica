@@ -47,7 +47,8 @@
     "agent_completed": "智能体已完成",
     "reaction_added": "添加了表情反应",
     "quick_create_done": "通过智能体创建",
-    "quick_create_failed": "通过智能体创建失败"
+    "quick_create_failed": "通过智能体创建失败",
+    "reminder": "提醒"
   },
   "labels": {
     "set_status_to": "状态设为",
@@ -61,6 +62,22 @@
     "reacted_to_comment": "用 {{emoji}} 回应了你的评论",
     "created_with_agent": "通过智能体创建：{{identifier}}",
     "failed_with_detail": "失败：{{detail}}"
+  },
+  "reminders": {
+    "_comment": "CEREBRO-PATCH(inbox-reminders-locale): labels and validation messages for reminder creation.",
+    "new": "新提醒",
+    "reminder": "提醒",
+    "planned_for": "计划时间",
+    "tomorrow_9": "明天 09:00",
+    "next_workday_9": "下一个工作日 09:00",
+    "cancel": "取消",
+    "plan": "计划提醒",
+    "placeholder": "批准 Sliplane 访问权限",
+    "missing_text": "写下要提醒你的内容",
+    "future_time": "请选择未来时间",
+    "planned": "提醒已计划",
+    "create_failed": "创建提醒失败",
+    "later": "稍后"
   },
   "errors": {
     "mark_read_failed": "标为已读失败",

@@ -1070,6 +1070,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/unread-count", h.CountUnreadInbox)
 				// CEREBRO-PATCH(cerebro-inbox-routes): cerebro-only handler.
 				r.Get("/active-issue-tasks", cerebroInboxHandler.ListActiveIssueTasks)
+				r.Post("/reminders", cerebroInboxHandler.CreateReminder) // CEREBRO-PATCH(inbox-reminders-route): create muted reminder items.
 				r.Post("/mark-all-read", h.MarkAllInboxRead)
 				r.Post("/archive-all", h.ArchiveAllInbox)
 				r.Post("/archive-all-read", h.ArchiveAllReadInbox)

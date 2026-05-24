@@ -31,6 +31,7 @@ type StringTable = {
   drawer_title: string;
   /** Prefix shown on a row in the Muted filter, e.g. "Muted til 08:00". */
   muted_until_prefix: string;
+  planned_for_prefix: string;
 };
 
 const en: StringTable = {
@@ -51,6 +52,7 @@ const en: StringTable = {
   swipe_archive: "Archive",
   drawer_title: "Actions",
   muted_until_prefix: "Muted until",
+  planned_for_prefix: "Planned for",
 };
 
 const da: StringTable = {
@@ -71,6 +73,7 @@ const da: StringTable = {
   swipe_archive: "Arkivér",
   drawer_title: "Handlinger",
   muted_until_prefix: "Muted til",
+  planned_for_prefix: "Planlagt til",
 };
 
 // JEH-1322 — zh-Hans table for cerebro inbox row actions. Without this the
@@ -95,6 +98,7 @@ const zhHans: StringTable = {
   swipe_archive: "归档",
   drawer_title: "操作",
   muted_until_prefix: "静音至",
+  planned_for_prefix: "计划于",
 };
 
 /**

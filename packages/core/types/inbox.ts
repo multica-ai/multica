@@ -21,7 +21,9 @@ export type InboxItemType =
   | "agent_completed"
   | "reaction_added"
   | "quick_create_done"
-  | "quick_create_failed";
+  | "quick_create_failed"
+  // CEREBRO-PATCH(inbox-reminders-type): reminders are muted inbox items scheduled for later.
+  | "reminder";
 
 // Where the item is rendered in the UI. 'inbox' = persistent inbox queue.
 // 'notifications' = lightweight notifications page anchored in the bottom of

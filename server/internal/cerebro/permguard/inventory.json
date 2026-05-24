@@ -569,6 +569,10 @@
       "gate": "self_only"
     },
     {
+      "id": "POST /api/inbox/reminders",
+      "gate": "self_only"
+    },
+    {
       "id": "POST /api/invitations/{id}/accept",
       "gate": "self_only"
     },
