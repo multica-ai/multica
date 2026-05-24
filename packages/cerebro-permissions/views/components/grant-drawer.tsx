@@ -58,9 +58,9 @@ export function GrantDrawer({ wsId, grantId, onClose }: GrantDrawerProps) {
         className="w-full max-w-[520px] overflow-y-auto p-0"
       >
         <SheetHeader className="border-b px-5 py-4">
-          <SheetTitle className="text-sm font-semibold">Grant detaljer</SheetTitle>
+          <SheetTitle className="text-sm font-semibold">Grant details</SheetTitle>
           <SheetDescription className="text-xs">
-            Justér klassifikation, tidsvindue, approval-krav eller status.
+            Adjust classification, time window, approval requirement, or status.
           </SheetDescription>
         </SheetHeader>
 
@@ -68,14 +68,14 @@ export function GrantDrawer({ wsId, grantId, onClose }: GrantDrawerProps) {
           {isPending && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
-              Indlæser…
+              Loading…
             </div>
           )}
 
           {error && (
             <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
-              Kunne ikke hente grant:{" "}
-              {error instanceof Error ? error.message : "ukendt fejl"}
+              Couldn't load grant:{" "}
+              {error instanceof Error ? error.message : "unknown error"}
             </div>
           )}
 
@@ -147,21 +147,21 @@ function GrantEditor({
     };
     try {
       await update.mutateAsync({ id: grantId, body });
-      toast.success("Grant opdateret");
+      toast.success("Grant updated");
       onDone();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Kunne ikke opdatere grant");
+      toast.error(e instanceof Error ? e.message : "Couldn't update grant");
     }
   };
 
   const handleDelete = async () => {
     try {
       await update.mutateAsync({ id: grantId, body: { status: "revoked" } });
-      toast.success("Grant tilbagekaldt");
+      toast.success("Grant revoked");
       setConfirmDelete(false);
       onDone();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Kunne ikke tilbagekalde grant");
+      toast.error(e instanceof Error ? e.message : "Couldn't revoke grant");
     }
   };
 
@@ -170,22 +170,22 @@ function GrantEditor({
       <ReadOnlySection
         rows={[
           {
-            label: "Subjekt",
+            label: "Subject",
             value: `${g.subject.type} · ${
               g.subject.display_name ?? g.subject.id ?? "—"
             }`,
           },
           {
-            label: "Ressource",
+            label: "Resource",
             value: `${g.resource.type} : ${g.resource.pattern}`,
           },
-          { label: "Kapabilitet", value: g.capability },
-          { label: "Oprettet", value: formatDateTime(g.created_at) },
-          { label: "Opdateret", value: formatDateTime(g.updated_at) },
+          { label: "Capability", value: g.capability },
+          { label: "Created", value: formatDateTime(g.created_at) },
+          { label: "Updated", value: formatDateTime(g.updated_at) },
         ]}
       />
 
-      <Field label="Klassifikations-loft">
+      <Field label="Classification ceiling">
         <Select
           value={classification}
           onValueChange={(v) => {
@@ -216,52 +216,52 @@ function GrantEditor({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="active">Aktiv</SelectItem>
-            <SelectItem value="pending_approval">Afventer approval</SelectItem>
-            <SelectItem value="expired">Udløbet</SelectItem>
-            <SelectItem value="revoked">Tilbagekaldt</SelectItem>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="pending_approval">Awaiting approval</SelectItem>
+            <SelectItem value="expired">Expired</SelectItem>
+            <SelectItem value="revoked">Revoked</SelectItem>
           </SelectContent>
         </Select>
       </Field>
 
-      <Field label="Approval påkrævet">
+      <Field label="Requires approval">
         <div className="flex items-center gap-2">
           <Switch
             checked={approval}
             onCheckedChange={setApproval}
-            aria-label="Approval påkrævet"
+            aria-label="Requires approval"
           />
           <span className="text-xs text-muted-foreground">
-            Subjektet skal ind via approval-flow før kapabiliteten bruges.
+            When on, the subject has to ask before using this capability — the request lands in the Pending tab.
           </span>
         </div>
       </Field>
 
-      <Field label="Tidsvindue">
+      <Field label="Time window">
         <div className="grid grid-cols-2 gap-2">
           <Input
             type="datetime-local"
             value={toLocalInput(startsAt)}
             onChange={(e) => setStartsAt(fromLocalInput(e.target.value))}
-            aria-label="Starter"
+            aria-label="Starts at"
           />
           <Input
             type="datetime-local"
             value={toLocalInput(endsAt)}
             onChange={(e) => setEndsAt(fromLocalInput(e.target.value))}
-            aria-label="Slutter"
+            aria-label="Ends at"
           />
         </div>
         <p className="mt-1 text-[11px] text-muted-foreground">
-          Tomme felter = grant gælder uden tidsbegrænsning.
+          Empty fields = the grant has no time limit.
         </p>
       </Field>
 
-      <Field label="Beskrivelse">
+      <Field label="Description">
         <Textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="Hvorfor er denne adgang nødvendig?"
+          placeholder="Why is this access needed?"
           rows={3}
         />
       </Field>
@@ -272,21 +272,21 @@ function GrantEditor({
           size="sm"
           className="text-destructive hover:bg-destructive/10 hover:text-destructive"
           onClick={() => setConfirmDelete(true)}
-          aria-label="Tilbagekald grant"
+          aria-label="Revoke grant"
         >
           <Trash2 className="size-4" />
-          Tilbagekald grant
+          Revoke grant
         </Button>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={onDone}>
-            Annullér
+            Cancel
           </Button>
           <Button
             size="sm"
             onClick={handleSave}
             disabled={update.isPending}
           >
-            {update.isPending ? "Gemmer…" : "Gem ændringer"}
+            {update.isPending ? "Saving…" : "Save changes"}
           </Button>
         </div>
       </div>
@@ -294,16 +294,15 @@ function GrantEditor({
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Tilbagekald grant?</AlertDialogTitle>
+            <AlertDialogTitle>Revoke grant?</AlertDialogTitle>
             <AlertDialogDescription>
-              {g.subject.display_name ?? g.subject.id ?? "Subjektet"} mister
-              kapabiliteten "{g.capability}" på {g.resource.type}:
-              {g.resource.pattern}. Dette kan ikke fortrydes.
+              {g.subject.display_name ?? g.subject.id ?? "The subject"} will lose the capability "{g.capability}" on {g.resource.type}:
+              {g.resource.pattern}. This can't be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={update.isPending}>
-              Annullér
+              Cancel
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => {
@@ -312,7 +311,7 @@ function GrantEditor({
               }}
               disabled={update.isPending}
             >
-              {update.isPending ? "Tilbagekalder…" : "Tilbagekald"}
+              {update.isPending ? "Revoking…" : "Revoke"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

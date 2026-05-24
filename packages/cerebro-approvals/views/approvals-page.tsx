@@ -39,7 +39,7 @@ export function ApprovalsPage() {
   useWSEvent(
     "approval:created",
     useCallback(() => {
-      toast.info("Ny ask i approval-indbakken", { description: "Kræver godkendelse" });
+      toast.info("New request in the approval inbox", { description: "Requires approval" });
       invalidate();
     }, [invalidate]),
   );
@@ -50,7 +50,7 @@ export function ApprovalsPage() {
   if (!workspace || memberLoading) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Workspace context indlæses…
+        Loading workspace…
       </div>
     );
   }
@@ -60,9 +60,9 @@ export function ApprovalsPage() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
         <ShieldOff className="size-8 text-muted-foreground" />
-        <h2 className="text-base font-medium">Adgang nægtet</h2>
+        <h2 className="text-base font-medium">Access denied</h2>
         <p className="max-w-sm text-sm text-muted-foreground">
-          Kun workspace-owners og -admins kan behandle approval-asks.
+          Only workspace owners and admins can handle approval requests.
         </p>
       </div>
     );
@@ -75,7 +75,7 @@ export function ApprovalsPage() {
           <Inbox className="h-4 w-4 text-muted-foreground" />
           <h1 className="text-sm font-medium">Approvals</h1>
           <p className="ml-2 hidden truncate text-xs text-muted-foreground md:block">
-            Asks der venter på en menneskelig beslutning
+            Requests waiting on a human decision
           </p>
         </div>
       </PageHeader>
@@ -87,8 +87,8 @@ export function ApprovalsPage() {
       >
         <div className="border-b px-4">
           <TabsList variant="line" className="h-10">
-            <TabsTrigger value="pending">Afventer</TabsTrigger>
-            <TabsTrigger value="all">Alle</TabsTrigger>
+            <TabsTrigger value="pending">Pending</TabsTrigger>
+            <TabsTrigger value="all">All</TabsTrigger>
           </TabsList>
         </div>
 

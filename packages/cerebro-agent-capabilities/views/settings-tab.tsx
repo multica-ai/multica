@@ -61,7 +61,7 @@ export function AgentCapabilitiesSettingsTab() {
   }, [agents, selectedAgentId]);
 
   if (!workspace || memberLoading) {
-    return <div className="py-8 text-sm text-muted-foreground">Workspace context indlæses…</div>;
+    return <div className="py-8 text-sm text-muted-foreground">Loading workspace…</div>;
   }
 
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? agents[0];
@@ -110,9 +110,9 @@ export function AgentCapabilitiesSettingsTab() {
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((ws) => (ws.id === updated.id ? updated : ws)),
       );
-      toast.success("Agent capabilities gemt");
+      toast.success("Agent capabilities saved");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Kunne ikke gemme agent capabilities");
+      toast.error(error instanceof Error ? error.message : "Couldn't save agent capabilities");
     } finally {
       setSaving(false);
     }
@@ -126,19 +126,19 @@ export function AgentCapabilitiesSettingsTab() {
           <div>
             <h2 className="text-sm font-semibold">Agent capabilities</h2>
             <p className="text-xs text-muted-foreground">
-              Multica håndhæver sandbox-profiler og blokerede MCP-servere ved agent start.
+              Multica enforces sandbox profiles and blocked MCP servers when an agent starts.
             </p>
           </div>
         </div>
         <Button size="sm" onClick={save} disabled={!canManage || saving}>
           <Save className="h-4 w-4" />
-          {saving ? "Gemmer…" : "Gem"}
+          {saving ? "Saving…" : "Save"}
         </Button>
       </div>
 
       {!canManage && (
         <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-          Kun workspace-owners og admins kan ændre agent capabilities.
+          Only workspace owners and admins can change agent capabilities.
         </div>
       )}
 
@@ -146,22 +146,22 @@ export function AgentCapabilitiesSettingsTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-sm">
             <Database className="h-4 w-4 text-muted-foreground" />
-            Capability-register
+            Capability register
           </CardTitle>
         </CardHeader>
         <CardContent>
           {capabilitiesLoading ? (
-            <p className="text-xs text-muted-foreground">Indlæser capabilities…</p>
+            <p className="text-xs text-muted-foreground">Loading capabilities…</p>
           ) : groupedCapabilities.length === 0 ? (
             <p className="text-xs text-muted-foreground">
-              Ingen capabilities registreret endnu. Runtimes rapporterer ind ved næste capability refresh.
+              No capabilities reported yet. Runtimes will report in at the next capability refresh.
             </p>
           ) : (
             <div className="overflow-hidden rounded-md border">
               <div className="grid grid-cols-[minmax(120px,0.8fr)_minmax(160px,1fr)_minmax(180px,1.2fr)] border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">
                 <span>Type</span>
                 <span>Capability</span>
-                <span>Ejere &amp; brugere</span>
+                <span>Owners &amp; users</span>
               </div>
               <div className="divide-y">
                 {groupedCapabilities.map((capability) => (
@@ -178,7 +178,7 @@ export function AgentCapabilitiesSettingsTab() {
                         ? capabilitySubjects(capability)
                             .map((subject) => `${subject.type}:${subject.id.slice(0, 8)}`)
                             .join(", ")
-                        : "Ingen subjects"}
+                        : "No subjects"}
                     </span>
                   </div>
                 ))}
@@ -190,7 +190,7 @@ export function AgentCapabilitiesSettingsTab() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Sandbox-profiler</CardTitle>
+          <CardTitle className="text-sm">Sandbox profiles</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
@@ -203,7 +203,7 @@ export function AgentCapabilitiesSettingsTab() {
               />
             </Field>
             <Button variant="outline" size="sm" onClick={applyStrictDefault} disabled={!canManage}>
-              Brug Strict
+              Use Strict
             </Button>
           </div>
 
@@ -217,7 +217,7 @@ export function AgentCapabilitiesSettingsTab() {
                 <p className="text-xs text-muted-foreground">
                   {profile.network_allowlist.length > 0
                     ? profile.network_allowlist.join(", ")
-                    : "Ingen ekstra netværksåbninger."}
+                    : "No extra network access."}
                 </p>
               </div>
             ))}
@@ -234,7 +234,7 @@ export function AgentCapabilitiesSettingsTab() {
         </CardHeader>
         <CardContent className="space-y-3">
           {runtimes.length === 0 ? (
-            <p className="text-xs text-muted-foreground">Ingen runtimes fundet.</p>
+            <p className="text-xs text-muted-foreground">No runtimes found.</p>
           ) : (
             runtimes.map((runtime) => (
               <RuntimeRow
@@ -254,12 +254,12 @@ export function AgentCapabilitiesSettingsTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-sm">
             <Bot className="h-4 w-4 text-muted-foreground" />
-            Agent-permissions
+            Agent permissions
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           {agents.length === 0 ? (
-            <p className="text-xs text-muted-foreground">Ingen agenter fundet.</p>
+            <p className="text-xs text-muted-foreground">No agents found.</p>
           ) : (
             <>
               <Field label="Agent">
@@ -277,7 +277,7 @@ export function AgentCapabilitiesSettingsTab() {
                 </NativeSelect>
               </Field>
               <div className="max-w-xl">
-                <Field label="Blokerede MCP-servere">
+                <Field label="Blocked MCP servers">
                   <Input
                     value={selectedPermissions.mcp_denied_servers.join(", ")}
                     disabled={!canManage}

@@ -117,9 +117,9 @@ describe("AccessPage", () => {
     const { ui } = makePage();
     render(ui);
     // Subjects tab trigger should be visible
-    expect(await screen.findByRole("tab", { name: /Subjects/i })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: /People & Agents/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Pending/i })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Grants/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /^Permissions$/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Audit/i })).toBeInTheDocument();
   }, 15_000);
 
@@ -133,7 +133,7 @@ describe("AccessPage", () => {
     });
     const { ui } = makePage();
     render(ui);
-    expect(await screen.findByText(/Adgang nægtet/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Access denied/i)).toBeInTheDocument();
   }, 15_000);
 
   it("Pending tab shows empty state when no pending asks", async () => {
@@ -142,7 +142,7 @@ describe("AccessPage", () => {
     render(ui);
 
     await user.click(await screen.findByRole("tab", { name: /Pending/i }));
-    expect(await screen.findByText(/Ingen afventende godkendelser/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Nothing waiting for approval/i)).toBeInTheDocument();
   }, 15_000);
 
   it("Grants tab renders table when switched to", async () => {
@@ -156,7 +156,7 @@ describe("AccessPage", () => {
     const { ui } = makePage();
     render(ui);
 
-    await user.click(await screen.findByRole("tab", { name: /Grants/i }));
+    await user.click(await screen.findByRole("tab", { name: /^Permissions$/i }));
     expect(await screen.findByText("Fætta")).toBeInTheDocument();
     expect(screen.getByText("issue.read")).toBeInTheDocument();
   }, 15_000);
@@ -167,7 +167,7 @@ describe("AccessPage", () => {
     render(ui);
 
     await user.click(await screen.findByRole("tab", { name: /Audit/i }));
-    expect(await screen.findByText(/Ingen audit-hændelser/i)).toBeInTheDocument();
+    expect(await screen.findByText(/No audit events/i)).toBeInTheDocument();
   }, 15_000);
 
   it("Audit tab passes capability filter to the API", async () => {
@@ -176,7 +176,7 @@ describe("AccessPage", () => {
     render(ui);
 
     await user.click(await screen.findByRole("tab", { name: /Audit/i }));
-    const capInput = screen.getByRole("textbox", { name: /Filtrér på kapabilitet/i });
+    const capInput = screen.getByRole("textbox", { name: /Filter by capability/i });
     await user.type(capInput, "issue.read");
 
     await waitFor(() => {
@@ -193,7 +193,7 @@ describe("AccessPage", () => {
 
     await user.click(await screen.findByRole("tab", { name: /Audit/i }));
     // Set a since date (datetime-local inputs)
-    const sinceInput = screen.getByLabelText(/Fra dato/i);
+    const sinceInput = screen.getByLabelText(/From date/i);
     await user.type(sinceInput, "2026-05-01T00:00");
 
     await waitFor(() => {
@@ -210,10 +210,10 @@ describe("AccessPage", () => {
     render(ui);
 
     await user.click(await screen.findByRole("tab", { name: /Audit/i }));
-    await screen.findByText(/Ingen audit-hændelser/i);
+    await screen.findByText(/No audit events/i);
 
-    const prevBtn = screen.getByRole("button", { name: /Forrige/i });
-    const nextBtn = screen.getByRole("button", { name: /Næste/i });
+    const prevBtn = screen.getByRole("button", { name: /Previous/i });
+    const nextBtn = screen.getByRole("button", { name: /Next/i });
     expect(prevBtn).toBeDisabled();
     expect(nextBtn).toBeDisabled();
   }, 15_000);
@@ -245,7 +245,7 @@ describe("AccessPage", () => {
     const aliceMatches = await screen.findAllByText("Alice");
     expect(aliceMatches.length).toBeGreaterThan(0);
 
-    const nextBtn = screen.getByRole("button", { name: /Næste/i });
+    const nextBtn = screen.getByRole("button", { name: /Next/i });
     expect(nextBtn).not.toBeDisabled();
     await user.click(nextBtn);
 
@@ -267,7 +267,7 @@ describe("AccessPage", () => {
       actor_name: "Bob",
       actor_type: "member",
       via: "api",
-      summary: "Grant oprettet",
+      summary: "Grant created",
       before: null,
       after: { capability: "issue.read" },
       created_at: "2026-05-24T10:00:00Z",
@@ -281,10 +281,10 @@ describe("AccessPage", () => {
     const row = await screen.findByText("Bob");
     await user.click(row.closest("button")!);
 
-    // Detail panel should show — "Grant oprettet" appears in both list and detail panel
-    expect(await screen.findByText("Detaljer")).toBeInTheDocument();
+    // Detail panel should show — the summary appears in both list and detail panel
+    expect(await screen.findByText("Details")).toBeInTheDocument();
     expect(screen.getByText("api")).toBeInTheDocument();
-    const summaryMatches = screen.getAllByText("Grant oprettet");
+    const summaryMatches = screen.getAllByText("Grant created");
     expect(summaryMatches.length).toBeGreaterThan(0);
   }, 15_000);
 
@@ -297,7 +297,7 @@ describe("AccessPage", () => {
     await user.click(await screen.findByRole("tab", { name: /Audit/i }));
     // parseWithFallback should return empty page — empty state shown
     await waitFor(() =>
-      expect(screen.getByText(/Ingen audit-hændelser/i)).toBeInTheDocument(),
+      expect(screen.getByText(/No audit events/i)).toBeInTheDocument(),
     );
   }, 15_000);
 });

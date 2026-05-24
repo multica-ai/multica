@@ -5,12 +5,12 @@ import { Badge } from "@multica/ui/components/ui/badge";
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
 
 const LABELS: Record<string, string> = {
-  pending: "Afventer",
-  approved: "Godkendt",
-  rejected: "Afvist",
-  delegated: "Delegeret",
-  expired: "Udløbet",
-  cancelled: "Annulleret",
+  pending: "Pending",
+  approved: "Approved",
+  rejected: "Rejected",
+  delegated: "Delegated",
+  expired: "Expired",
+  cancelled: "Cancelled",
 };
 
 const VARIANTS: Record<string, BadgeVariant> = {

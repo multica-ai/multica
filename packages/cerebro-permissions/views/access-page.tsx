@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ShieldCheck, ShieldOff } from "lucide-react";
+import { Info, ShieldCheck, ShieldOff } from "lucide-react";
 import { useCurrentMember } from "@multica/core/permissions";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import {
@@ -38,7 +38,7 @@ export function AccessPage() {
   if (!workspace || isMemberLoading) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Workspace context indlæses…
+        Loading workspace…
       </div>
     );
   }
@@ -48,9 +48,9 @@ export function AccessPage() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
         <ShieldOff className="size-8 text-muted-foreground" />
-        <h2 className="text-base font-medium">Adgang nægtet</h2>
+        <h2 className="text-base font-medium">Access denied</h2>
         <p className="max-w-sm text-sm text-muted-foreground">
-          Kun workspace-owners og -admins kan administrere adgang og se audit-loggen.
+          Only workspace owners and admins can manage access and view the audit log.
         </p>
       </div>
     );
@@ -64,12 +64,26 @@ export function AccessPage() {
       <PageHeader className="justify-between gap-3 px-5">
         <div className="flex min-w-0 items-center gap-2">
           <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-          <h1 className="text-sm font-medium">Adgang</h1>
+          <h1 className="text-sm font-medium">Access</h1>
           <p className="ml-2 hidden truncate text-xs text-muted-foreground md:block">
-            Alle subjects, deres permissions, pending asks og audit-historik
+            Who can do what — and what needs your approval first.
           </p>
         </div>
       </PageHeader>
+
+      <div className="border-b bg-muted/30 px-5 py-3 text-xs text-muted-foreground">
+        <div className="flex items-start gap-2">
+          <Info className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+          <div className="space-y-1">
+            <p>
+              <strong className="text-foreground">People &amp; Agents</strong> — see who has access to what, expand a row to view their capabilities.{" "}
+              <strong className="text-foreground">Pending</strong> — requests waiting for you to approve or reject.{" "}
+              <strong className="text-foreground">Permissions</strong> — create or edit grants; flip <em>Requires approval</em> to make a subject ask you first.{" "}
+              <strong className="text-foreground">Audit</strong> — every change to permissions, with who/when/what.
+            </p>
+          </div>
+        </div>
+      </div>
 
       <Tabs
         value={activeTab}
@@ -78,7 +92,7 @@ export function AccessPage() {
       >
         <div className="border-b px-4">
           <TabsList variant="line" className="h-10">
-            <TabsTrigger value="subjects">Subjects</TabsTrigger>
+            <TabsTrigger value="subjects">People &amp; Agents</TabsTrigger>
             <TabsTrigger value="pending" className="relative">
               Pending
               {pendingTotal > 0 && (
@@ -87,7 +101,7 @@ export function AccessPage() {
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="grants">Grants</TabsTrigger>
+            <TabsTrigger value="grants">Permissions</TabsTrigger>
             <TabsTrigger value="audit">Audit</TabsTrigger>
           </TabsList>
         </div>

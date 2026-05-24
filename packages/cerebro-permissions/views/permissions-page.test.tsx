@@ -135,7 +135,7 @@ describe("PermissionsPage", () => {
     });
     const { ui } = makePage();
     render(ui);
-    expect(await screen.findByText(/Ingen grants matcher/i)).toBeInTheDocument();
+    expect(await screen.findByText(/No grants match/i)).toBeInTheDocument();
     expect(mockListGrants).toHaveBeenCalled();
   }, 15_000);
 
@@ -150,9 +150,9 @@ describe("PermissionsPage", () => {
     render(ui);
 
     await waitFor(() =>
-      expect(screen.getByText(/Ingen grants matcher/i)).toBeInTheDocument(),
+      expect(screen.getByText(/No grants match/i)).toBeInTheDocument(),
     );
-    expect(screen.getByRole("button", { name: /Nyt grant/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /New grant/i })).toBeInTheDocument();
   }, 15_000);
 
   it("renders a row for each grant", async () => {
@@ -191,9 +191,9 @@ describe("PermissionsPage", () => {
 
     await user.click(await screen.findByText("Marketing"));
     await user.click(
-      await screen.findByRole("button", { name: /Tilbagekald grant/i }),
+      await screen.findByRole("button", { name: /Revoke grant/i }),
     );
-    await user.click(screen.getByRole("button", { name: /^Tilbagekald$/i }));
+    await user.click(screen.getByRole("button", { name: /^Revoke$/i }));
 
     await waitFor(() =>
       expect(mockUpdateGrant).toHaveBeenCalledWith("ws-1", "grant-1", {
@@ -209,7 +209,7 @@ describe("PermissionsPage", () => {
     expect(mockDeleteGrant).not.toHaveBeenCalled();
   }, 10_000);
 
-  it("opens the create-grant dialog when 'Nyt grant' is clicked", async () => {
+  it("opens the create-grant dialog when 'New grant' is clicked", async () => {
     const user = userEvent.setup();
     mockListGrants.mockResolvedValueOnce({
       items: [],
@@ -220,12 +220,12 @@ describe("PermissionsPage", () => {
     const { ui } = makePage();
     render(ui);
 
-    await user.click(screen.getByRole("button", { name: /Nyt grant/i }));
+    await user.click(screen.getByRole("button", { name: /New grant/i }));
     expect(
-      await screen.findByRole("heading", { name: /Nyt grant/i }),
+      await screen.findByRole("heading", { name: /New grant/i }),
     ).toBeInTheDocument();
     // Capability select defaults to the canonical issue-read capability.
-    expect(screen.getByRole("combobox", { name: "Kapabilitet" })).toHaveTextContent(
+    expect(screen.getByRole("combobox", { name: "Capability" })).toHaveTextContent(
       "issue.read",
     );
   }, 10_000);
@@ -251,11 +251,11 @@ describe("PermissionsPage", () => {
     const { ui } = makePage();
     render(ui);
 
-    await user.click(screen.getByRole("button", { name: /Nyt grant/i }));
-    await screen.findByRole("heading", { name: /Nyt grant/i });
+    await user.click(screen.getByRole("button", { name: /New grant/i }));
+    await screen.findByRole("heading", { name: /New grant/i });
 
     const submitBtn = screen.getByRole("button", {
-      name: /^Opret grant$/,
+      name: /^Create grant$/,
     }) as HTMLButtonElement;
     expect(submitBtn.type).toBe("submit");
     const form = submitBtn.closest("form");
@@ -271,11 +271,11 @@ describe("PermissionsPage", () => {
     render(ui);
 
     await waitFor(() =>
-      expect(screen.getByText(/Ingen grants matcher/i)).toBeInTheDocument(),
+      expect(screen.getByText(/No grants match/i)).toBeInTheDocument(),
     );
   }, 15_000);
 
-  it("renders 'Adgang nægtet' when the current member is not admin/owner", async () => {
+  it("renders 'Access denied' when the current member is not admin/owner", async () => {
     mockUseCurrentMember.mockReturnValueOnce({
       userId: "user-1",
       role: "member" as const,
@@ -285,7 +285,7 @@ describe("PermissionsPage", () => {
     const { ui } = makePage();
     render(ui);
     expect(
-      await screen.findByText(/Adgang nægtet/i),
+      await screen.findByText(/Access denied/i),
     ).toBeInTheDocument();
     expect(mockListGrants).not.toHaveBeenCalled();
   }, 15_000);
@@ -302,6 +302,6 @@ describe("PermissionsPage", () => {
     render(ui);
 
     await user.click(screen.getByRole("tab", { name: "Audit" }));
-    expect(await screen.findByText(/Ingen audit-hændelser/i)).toBeInTheDocument();
+    expect(await screen.findByText(/No audit events/i)).toBeInTheDocument();
   }, 15_000);
 });

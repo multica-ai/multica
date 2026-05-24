@@ -39,7 +39,7 @@ export function PermissionsPage() {
   if (!workspace || isMemberLoading) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Workspace context indlæses…
+        Loading workspace…
       </div>
     );
   }
@@ -49,9 +49,9 @@ export function PermissionsPage() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
         <ShieldOff className="size-8 text-muted-foreground" />
-        <h2 className="text-base font-medium">Adgang nægtet</h2>
+        <h2 className="text-base font-medium">Access denied</h2>
         <p className="max-w-sm text-sm text-muted-foreground">
-          Kun workspace-owners og -admins kan administrere Persona grants.
+          Only workspace owners and admins can manage permissions.
         </p>
       </div>
     );
@@ -66,7 +66,7 @@ export function PermissionsPage() {
           <ShieldCheck className="h-4 w-4 text-muted-foreground" />
           <h1 className="text-sm font-medium">Permissions</h1>
           <p className="ml-2 hidden truncate text-xs text-muted-foreground md:block">
-            Workspace grants og policies (Persona)
+            Workspace grants and policies
           </p>
         </div>
       </PageHeader>

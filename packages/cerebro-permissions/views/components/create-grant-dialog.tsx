@@ -113,11 +113,11 @@ export function CreateGrantDialog({ wsId: _wsId, onClose }: CreateGrantDialogPro
     };
     try {
       await create.mutateAsync(body);
-      toast.success("Grant oprettet");
+      toast.success("Grant created");
       onClose();
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Kunne ikke oprette grant",
+        err instanceof Error ? err.message : "Couldn't create grant",
       );
     }
   };
@@ -126,10 +126,9 @@ export function CreateGrantDialog({ wsId: _wsId, onClose }: CreateGrantDialogPro
     <Dialog open={true} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Nyt grant</DialogTitle>
+          <DialogTitle>New grant</DialogTitle>
           <DialogDescription>
-            Giv et subjekt en kapabilitet på en ressource. Audit logger
-            handlingen som "{wsActorPlaceholder()} via UI oprettede grant".
+            Give a subject a capability on a resource. The audit log records the action with your user as the actor.
           </DialogDescription>
         </DialogHeader>
 
@@ -142,7 +141,7 @@ export function CreateGrantDialog({ wsId: _wsId, onClose }: CreateGrantDialogPro
         >
         <div className="grid gap-4 py-2 text-sm">
           <div className="grid grid-cols-3 gap-2">
-            <Field label="Subjekt-type">
+            <Field label="Subject type">
               <Select
                 value={subjectType}
                 onValueChange={(v) => {
@@ -161,27 +160,27 @@ export function CreateGrantDialog({ wsId: _wsId, onClose }: CreateGrantDialogPro
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Subjekt-ID">
+            <Field label="Subject ID">
               <Input
                 value={subjectId}
                 onChange={(e) => setSubjectId(e.target.value)}
-                placeholder={subjectFreeOfId ? "n/a" : "UUID eller slug"}
+                placeholder={subjectFreeOfId ? "n/a" : "UUID or slug"}
                 disabled={subjectFreeOfId}
-                aria-label="Subjekt-ID"
+                aria-label="Subject ID"
               />
             </Field>
-            <Field label="Vis-navn (valgfri)">
+            <Field label="Display name (optional)">
               <Input
                 value={subjectName}
                 onChange={(e) => setSubjectName(e.target.value)}
-                placeholder="fx Marketing"
-                aria-label="Subjekt vis-navn"
+                placeholder="e.g. Marketing"
+                aria-label="Subject display name"
               />
             </Field>
           </div>
 
           <div className="grid grid-cols-3 gap-2">
-            <Field label="Ressource-type">
+            <Field label="Resource type">
               <Select
                 value={resourceType}
                 onValueChange={(v) => {
@@ -204,18 +203,18 @@ export function CreateGrantDialog({ wsId: _wsId, onClose }: CreateGrantDialogPro
               <Input
                 value={resourcePattern}
                 onChange={(e) => setResourcePattern(e.target.value)}
-                placeholder="* eller UUID/glob"
-                aria-label="Ressource-pattern"
+                placeholder="* or UUID/glob"
+                aria-label="Resource pattern"
               />
             </Field>
-            <Field label="Kapabilitet">
+            <Field label="Capability">
               <Select
                 value={capability}
                 onValueChange={(v) => {
                   if (v) setCapability(v);
                 }}
               >
-                <SelectTrigger size="sm" aria-label="Kapabilitet">
+                <SelectTrigger size="sm" aria-label="Capability">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -230,7 +229,7 @@ export function CreateGrantDialog({ wsId: _wsId, onClose }: CreateGrantDialogPro
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            <Field label="Klassifikations-loft">
+            <Field label="Classification ceiling">
               <Select
                 value={classification}
                 onValueChange={(v) => {
@@ -249,34 +248,34 @@ export function CreateGrantDialog({ wsId: _wsId, onClose }: CreateGrantDialogPro
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Udløber">
+            <Field label="Expires">
               <Input
                 type="datetime-local"
                 value={endsAt}
                 onChange={(e) => setEndsAt(e.target.value)}
-                aria-label="Udløber"
+                aria-label="Expires"
               />
             </Field>
           </div>
 
-          <Field label="Approval påkrævet">
+          <Field label="Requires approval">
             <div className="flex items-center gap-2">
               <Switch
                 checked={approvalRequired}
                 onCheckedChange={setApprovalRequired}
-                aria-label="Approval påkrævet"
+                aria-label="Requires approval"
               />
               <span className="text-xs text-muted-foreground">
-                Persona spørger workspace-admin før kapabiliteten må bruges.
+                Workspace admin must approve every use of this capability before it runs.
               </span>
             </div>
           </Field>
 
-          <Field label="Beskrivelse (valgfri)">
+          <Field label="Description (optional)">
             <Textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Hvad er grantet til?"
+              placeholder="What is this grant for?"
               rows={2}
             />
           </Field>
@@ -289,10 +288,10 @@ export function CreateGrantDialog({ wsId: _wsId, onClose }: CreateGrantDialogPro
             onClick={onClose}
             disabled={create.isPending}
           >
-            Annullér
+            Cancel
           </Button>
           <Button type="submit" disabled={!canSubmit}>
-            {create.isPending ? "Opretter…" : "Opret grant"}
+            {create.isPending ? "Creating…" : "Create grant"}
           </Button>
         </DialogFooter>
         </form>
@@ -316,11 +315,4 @@ function Field({
       {children}
     </label>
   );
-}
-
-function wsActorPlaceholder(): string {
-  // Audit trail is "actor via flade gjorde X" — we don't have the current
-  // user's name in this scope; the server fills in the real actor from the
-  // auth context. Placeholder is only for the description copy.
-  return "du";
 }

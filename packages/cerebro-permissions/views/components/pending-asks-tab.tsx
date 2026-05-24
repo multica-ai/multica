@@ -35,8 +35,8 @@ export function PendingAsksTab({ wsId }: PendingAsksTabProps) {
       <div className="flex items-center justify-between border-t bg-background/50 px-4 py-2 text-xs text-muted-foreground">
         <span className="font-mono tabular-nums">
           {total === 0
-            ? "0 afventer"
-            : `${offset + 1}–${offset + items.length} af ${total}`}
+            ? "0 pending"
+            : `${offset + 1}–${offset + items.length} of ${total}`}
         </span>
         <div className="flex gap-1">
           <Button
@@ -45,7 +45,7 @@ export function PendingAsksTab({ wsId }: PendingAsksTabProps) {
             disabled={offset === 0}
             onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
           >
-            Forrige
+            Previous
           </Button>
           <Button
             variant="outline"
@@ -53,7 +53,7 @@ export function PendingAsksTab({ wsId }: PendingAsksTabProps) {
             disabled={items.length === 0 || offset + items.length >= total}
             onClick={() => setOffset(offset + PAGE_SIZE)}
           >
-            Næste
+            Next
           </Button>
         </div>
       </div>
@@ -77,9 +77,9 @@ function AskList({
       <div className="m-4 flex items-start gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
         <AlertCircle className="mt-0.5 size-4 shrink-0" />
         <div className="min-w-0">
-          <div className="font-medium">Kunne ikke hente pending asks</div>
+          <div className="font-medium">Couldn't load pending requests</div>
           <div className="text-xs text-destructive/80 truncate">
-            {error instanceof Error ? error.message : "ukendt fejl"}
+            {error instanceof Error ? error.message : "unknown error"}
           </div>
         </div>
       </div>
@@ -100,9 +100,12 @@ function AskList({
     return (
       <div className="m-4 rounded-md border border-dashed p-12 text-center">
         <Inbox className="mx-auto size-8 text-muted-foreground/60" />
-        <p className="mt-3 text-sm font-medium">Ingen afventende godkendelser</p>
+        <p className="mt-3 text-sm font-medium">Nothing waiting for approval</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Approval-asks fra fase 3 dukker op her, når en agent eller et runtime beder om adgang.
+          When an agent or runtime tries to use a capability marked <em>Requires approval</em>, the request lands here for you to approve or reject.
+        </p>
+        <p className="mt-3 text-xs text-muted-foreground">
+          To set up the approval gate: open the <strong>Permissions</strong> tab → edit (or create) a grant for the subject → turn on <em>Requires approval</em>.
         </p>
       </div>
     );
@@ -143,13 +146,13 @@ function AskRow({ ask, wsId }: { ask: PendingAsk; wsId: string }) {
               {ask.subject.type}
             </span>
             <span className="font-medium">
-              {ask.subject.display_name ?? ask.subject.id ?? "Ukendt"}
+              {ask.subject.display_name ?? ask.subject.id ?? "Unknown"}
             </span>
-            <span className="text-muted-foreground">vil bruge</span>
+            <span className="text-muted-foreground">wants to use</span>
             <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
               {ask.capability}
             </code>
-            <span className="text-muted-foreground">på</span>
+            <span className="text-muted-foreground">on</span>
             <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-muted-foreground">
               {ask.resource.pattern}
             </code>
@@ -160,7 +163,7 @@ function AskRow({ ask, wsId }: { ask: PendingAsk; wsId: string }) {
           <div className="mt-1 flex items-center gap-3 text-[11px] text-muted-foreground">
             <time dateTime={ask.requested_at}>{formatDateTime(ask.requested_at)}</time>
             {ask.expires_at && (
-              <span>udløber {formatDateTime(ask.expires_at)}</span>
+              <span>expires {formatDateTime(ask.expires_at)}</span>
             )}
           </div>
         </div>
@@ -174,10 +177,10 @@ function AskRow({ ask, wsId }: { ask: PendingAsk; wsId: string }) {
                 className={cn("h-7 gap-1 text-xs text-success border-success/40 hover:bg-success/10")}
                 onClick={() => approveMut.mutate()}
                 disabled={approveMut.isPending || rejectMut.isPending}
-                aria-label="Godkend"
+                aria-label="Approve"
               >
                 <Check className="size-3" />
-                Godkend
+                Approve
               </Button>
               <Button
                 variant="outline"
@@ -185,10 +188,10 @@ function AskRow({ ask, wsId }: { ask: PendingAsk; wsId: string }) {
                 className="h-7 gap-1 text-xs text-destructive border-destructive/40 hover:bg-destructive/10"
                 onClick={() => rejectMut.mutate()}
                 disabled={approveMut.isPending || rejectMut.isPending}
-                aria-label="Afvis"
+                aria-label="Reject"
               >
                 <X className="size-3" />
-                Afvis
+                Reject
               </Button>
             </>
           ) : (
@@ -209,11 +212,11 @@ function AskStatusBadge({ status }: { status: string }) {
         : "bg-muted text-muted-foreground border-border";
   const label =
     status === "approved"
-      ? "godkendt"
+      ? "approved"
       : status === "rejected"
-        ? "afvist"
+        ? "rejected"
         : status === "delegated"
-          ? "delegeret"
+          ? "delegated"
           : status;
   return (
     <Badge variant="outline" className={cn("text-[10px]", tone)}>
@@ -224,7 +227,7 @@ function AskStatusBadge({ status }: { status: string }) {
 
 function formatDateTime(iso: string): string {
   try {
-    return new Date(iso).toLocaleString("da-DK", {
+    return new Date(iso).toLocaleString(undefined, {
       dateStyle: "short",
       timeStyle: "short",
     });

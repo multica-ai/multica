@@ -45,7 +45,7 @@ export function AccessNavItem({ workspaceSlug, onClick }: AccessNavItemProps) {
         )}
       >
         <ShieldCheck />
-        <span>Adgang</span>
+        <span>Access</span>
         {pending > 0 && (
           <span className="ml-auto inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-warning text-[10px] font-semibold text-warning-foreground px-1">
             {pending > 99 ? "99+" : pending}

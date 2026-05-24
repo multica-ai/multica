@@ -85,21 +85,21 @@ export function GrantsToolbar({ wsId, onCreate }: GrantsToolbarProps) {
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Søg kapabilitet / ressource…"
+          placeholder="Search capability / resource…"
           className="h-8 w-64 pl-8 text-sm"
-          aria-label="Søg grants"
+          aria-label="Search grants"
         />
       </div>
 
       <FilterSelect
-        label="Subjekt"
+        label="Subject"
         value={subjectType ?? ""}
         onValueChange={(v) => setSubjectType((v as GrantSubjectType) || null)}
         options={SUBJECT_TYPES.map((t) => ({ value: t, label: formatSubject(t) }))}
       />
 
       <FilterSelect
-        label="Ressource"
+        label="Resource"
         value={resourceType ?? ""}
         onValueChange={(v) => setResourceType(v || null)}
         options={RESOURCE_TYPES.map((t) => ({ value: t, label: t }))}
@@ -113,7 +113,7 @@ export function GrantsToolbar({ wsId, onCreate }: GrantsToolbarProps) {
       />
 
       <FilterSelect
-        label="Klassifikation"
+        label="Classification"
         value={classification ?? ""}
         onValueChange={(v) =>
           setClassification((v as GrantClassification) || null)
@@ -129,7 +129,7 @@ export function GrantsToolbar({ wsId, onCreate }: GrantsToolbarProps) {
           className="text-muted-foreground"
         >
           <X className="size-3" />
-          Nulstil
+          Reset
         </Button>
       )}
 
@@ -142,11 +142,11 @@ export function GrantsToolbar({ wsId, onCreate }: GrantsToolbarProps) {
             qc.invalidateQueries({ queryKey: permissionsKeys.all(wsId) });
           }}
         >
-          Genindlæs
+          Reload
         </Button>
         <Button type="button" size="sm" onClick={onCreate}>
           <Plus className="size-3" />
-          Nyt grant
+          New grant
         </Button>
       </div>
     </div>
@@ -175,7 +175,7 @@ function FilterSelect({
         <SelectValue placeholder={label} />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="__any__">Alle {label.toLowerCase()}</SelectItem>
+        <SelectItem value="__any__">All {label.toLowerCase()}</SelectItem>
         {options.map((opt) => (
           <SelectItem key={opt.value} value={opt.value}>
             {opt.label}
@@ -210,13 +210,13 @@ function formatSubject(t: GrantSubjectType): string {
 function formatStatus(s: GrantStatus): string {
   switch (s) {
     case "active":
-      return "Aktiv";
+      return "Active";
     case "pending_approval":
-      return "Afventer approval";
+      return "Awaiting approval";
     case "expired":
-      return "Udløbet";
+      return "Expired";
     case "revoked":
-      return "Tilbagekaldt";
+      return "Revoked";
     default:
       return s;
   }

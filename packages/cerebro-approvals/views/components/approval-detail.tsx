@@ -47,16 +47,16 @@ export function ApprovalDetail({ wsId, approvalId, onClose }: ApprovalDetailProp
     <Sheet open={true} onOpenChange={(o) => !o && onClose()}>
       <SheetContent side="right" className="w-full max-w-[560px] overflow-y-auto p-0">
         <SheetHeader className="border-b px-5 py-4">
-          <SheetTitle className="text-sm font-semibold">Ask-detalje</SheetTitle>
+          <SheetTitle className="text-sm font-semibold">Request details</SheetTitle>
           <SheetDescription className="text-xs">
-            Kontekst for anmodningen plus godkend, afvis eller delegér.
+            Context for the request, then approve, reject, or delegate.
           </SheetDescription>
         </SheetHeader>
 
         <div className="space-y-5 p-5">
           {detail.isLoading && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" /> Indlæser…
+              <Loader2 className="size-4 animate-spin" /> Loading…
             </div>
           )}
           {ask && <AskBody wsId={wsId} ask={ask} onClose={onClose} />}
@@ -91,9 +91,9 @@ function AskBody({
   const handleConflict = (err: unknown) => {
     const msg = err instanceof Error ? err.message : "";
     if (msg.includes("409") || /already decided/i.test(msg)) {
-      toast.error("En anden godkender nåede det først");
+      toast.error("Another approver got to it first");
     } else {
-      toast.error("Handlingen fejlede");
+      toast.error("Action failed");
     }
   };
 
@@ -108,25 +108,25 @@ function AskBody({
       <Field label="Resource">
         <code className="text-xs">{ask.resource || "*"}</code>
       </Field>
-      <Field label="Anmoder">
+      <Field label="Requester">
         {ask.requester_type} · {ask.requester_id || "—"}
         {ask.agent_id ? ` (agent ${ask.agent_id})` : ""}
       </Field>
-      {ask.reason && <Field label="Begrundelse">{ask.reason}</Field>}
+      {ask.reason && <Field label="Reason">{ask.reason}</Field>}
       {ask.matched_grant_ids.length > 0 && (
-        <Field label="Matchede grants">
+        <Field label="Matched grants">
           {ask.matched_grant_ids.join(", ")}
         </Field>
       )}
-      {ask.expires_at && <Field label="Udløber">{ask.expires_at}</Field>}
+      {ask.expires_at && <Field label="Expires">{ask.expires_at}</Field>}
       {ask.decided_by_id && (
-        <Field label="Besluttet af">
+        <Field label="Decided by">
           {ask.decided_by_id}
           {ask.decision_note ? ` — “${ask.decision_note}”` : ""}
         </Field>
       )}
       {ask.delegated_to_id && (
-        <Field label="Delegeret til">
+        <Field label="Delegated to">
           {ask.delegated_to_type} · {ask.delegated_to_id}
         </Field>
       )}
@@ -136,7 +136,7 @@ function AskBody({
           <Textarea
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Note (valgfri) — vises i audit"
+            placeholder="Note (optional) — shown in audit"
             rows={2}
           />
           <div className="flex flex-wrap gap-2">
@@ -148,7 +148,7 @@ function AskBody({
                   { id: ask.id, note },
                   {
                     onSuccess: () => {
-                      toast.success("Godkendt");
+                      toast.success("Approved");
                       onClose();
                     },
                     onError: handleConflict,
@@ -156,7 +156,7 @@ function AskBody({
                 )
               }
             >
-              <Check className="size-4" /> Godkend
+              <Check className="size-4" /> Approve
             </Button>
             <Button
               size="sm"
@@ -167,7 +167,7 @@ function AskBody({
                   { id: ask.id, note },
                   {
                     onSuccess: () => {
-                      toast.success("Afvist");
+                      toast.success("Rejected");
                       onClose();
                     },
                     onError: handleConflict,
@@ -175,7 +175,7 @@ function AskBody({
                 )
               }
             >
-              <X className="size-4" /> Afvis
+              <X className="size-4" /> Reject
             </Button>
             <Button
               size="sm"
@@ -183,7 +183,7 @@ function AskBody({
               disabled={busy}
               onClick={() => setDelegateOpen((v) => !v)}
             >
-              <Share2 className="size-4" /> Delegér
+              <Share2 className="size-4" /> Delegate
             </Button>
           </div>
 
@@ -205,7 +205,7 @@ function AskBody({
                 <Input
                   value={toId}
                   onChange={(e) => setToId(e.target.value)}
-                  placeholder={`${toType}-id (UUID)`}
+                  placeholder={`${toType} id (UUID)`}
                   className="flex-1"
                 />
               </div>
@@ -218,7 +218,7 @@ function AskBody({
                     { id: ask.id, body: { to_type: toType, to_id: toId, note } },
                     {
                       onSuccess: () => {
-                        toast.success("Delegeret");
+                        toast.success("Delegated");
                         onClose();
                       },
                       onError: handleConflict,
@@ -226,7 +226,7 @@ function AskBody({
                   )
                 }
               >
-                Bekræft delegering
+                Confirm delegation
               </Button>
             </div>
           )}
@@ -235,7 +235,7 @@ function AskBody({
 
       <div>
         <h4 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Historik
+          History
         </h4>
         <ul className="space-y-1.5 text-xs text-muted-foreground">
           {(audit.data?.items ?? []).map((e) => (

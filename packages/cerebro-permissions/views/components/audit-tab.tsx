@@ -59,35 +59,35 @@ export function AuditTab({ wsId }: AuditTabProps) {
         <Input
           value={subjectId}
           onChange={(e) => { setSubjectId(e.target.value); setOffset(0); }}
-          placeholder="Subjekt-ID"
+          placeholder="Subject ID"
           className="h-8 w-52 text-sm"
-          aria-label="Filtrér på subjekt"
+          aria-label="Filter by subject"
         />
         <Input
           value={capability}
           onChange={(e) => { setCapability(e.target.value); setOffset(0); }}
-          placeholder="Kapabilitet (fx issue.read)"
+          placeholder="Capability (e.g. issue.read)"
           className="h-8 w-52 text-sm"
-          aria-label="Filtrér på kapabilitet"
+          aria-label="Filter by capability"
         />
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
-          <span>Fra</span>
+          <span>From</span>
           <input
             type="datetime-local"
             value={since}
             onChange={(e) => { setSince(e.target.value); setOffset(0); }}
             className="h-8 rounded-md border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-            aria-label="Fra dato"
+            aria-label="From date"
           />
         </div>
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
-          <span>Til</span>
+          <span>To</span>
           <input
             type="datetime-local"
             value={until}
             onChange={(e) => { setUntil(e.target.value); setOffset(0); }}
             className="h-8 rounded-md border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-            aria-label="Til dato"
+            aria-label="To date"
           />
         </div>
         {hasFilter && (
@@ -98,7 +98,7 @@ export function AuditTab({ wsId }: AuditTabProps) {
             className="gap-1 text-muted-foreground"
           >
             <X className="size-3" />
-            Nulstil
+            Reset
           </Button>
         )}
       </div>
@@ -125,8 +125,8 @@ export function AuditTab({ wsId }: AuditTabProps) {
       <div className="flex items-center justify-between border-t bg-background/50 px-4 py-2 text-xs text-muted-foreground">
         <span className="font-mono tabular-nums">
           {(list.data?.items.length ?? 0) === 0
-            ? "0 hændelser"
-            : `${offset + 1}–${offset + (list.data?.items.length ?? 0)} af ${list.data?.total ?? 0}`}
+            ? "0 events"
+            : `${offset + 1}–${offset + (list.data?.items.length ?? 0)} of ${list.data?.total ?? 0}`}
         </span>
         <div className="flex gap-1">
           <Button
@@ -135,7 +135,7 @@ export function AuditTab({ wsId }: AuditTabProps) {
             disabled={offset === 0}
             onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
           >
-            Forrige
+            Previous
           </Button>
           <Button
             variant="outline"
@@ -146,7 +146,7 @@ export function AuditTab({ wsId }: AuditTabProps) {
             }
             onClick={() => setOffset(offset + PAGE_SIZE)}
           >
-            Næste
+            Next
           </Button>
         </div>
       </div>
@@ -168,9 +168,9 @@ function AuditList({ list, isLoading, error, selectedId, onSelect }: AuditListPr
       <div className="m-4 flex items-start gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
         <AlertCircle className="size-4 mt-0.5 shrink-0" />
         <div className="min-w-0">
-          <div className="font-medium">Kunne ikke hente audit-log</div>
+          <div className="font-medium">Couldn't load audit log</div>
           <div className="text-xs text-destructive/80 truncate">
-            {error instanceof Error ? error.message : "ukendt fejl"}
+            {error instanceof Error ? error.message : "unknown error"}
           </div>
         </div>
       </div>
@@ -191,9 +191,9 @@ function AuditList({ list, isLoading, error, selectedId, onSelect }: AuditListPr
     return (
       <div className="m-4 rounded-md border border-dashed p-12 text-center">
         <FileClock className="mx-auto size-8 text-muted-foreground/60" />
-        <p className="mt-3 text-sm font-medium">Ingen audit-hændelser</p>
+        <p className="mt-3 text-sm font-medium">No audit events</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Ændringer til grants logges her — via UI, API, CLI eller MCP.
+          Every change to grants — via UI, API, CLI or MCP — shows up here.
         </p>
       </div>
     );
@@ -216,7 +216,7 @@ function AuditList({ list, isLoading, error, selectedId, onSelect }: AuditListPr
               <ActionBadge action={entry.action} />
               <div className="min-w-0 flex-1">
                 <div className="font-medium">
-                  {entry.actor_name ?? entry.actor_id ?? "Ukendt aktør"}
+                  {entry.actor_name ?? entry.actor_id ?? "Unknown actor"}
                   <span className="ml-1.5 font-normal text-muted-foreground">
                     via {entry.via ?? "?"}
                   </span>
@@ -254,16 +254,16 @@ function AuditDetailPanel({
   return (
     <div className="w-80 shrink-0 overflow-y-auto border-l bg-background">
       <div className="flex items-center justify-between border-b px-4 py-3">
-        <span className="text-sm font-medium">Detaljer</span>
-        <Button variant="ghost" size="sm" onClick={onClose} aria-label="Luk detaljer">
+        <span className="text-sm font-medium">Details</span>
+        <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close details">
           <X className="size-4" />
         </Button>
       </div>
       <div className="space-y-4 p-4 text-sm">
-        <DetailRow label="Handling">
+        <DetailRow label="Action">
           <ActionBadge action={entry.action} />
         </DetailRow>
-        <DetailRow label="Aktør">
+        <DetailRow label="Actor">
           <span className="font-medium">{entry.actor_name ?? entry.actor_id ?? "—"}</span>
           {entry.actor_type && (
             <span className="ml-1.5 text-xs text-muted-foreground">({entry.actor_type})</span>
@@ -279,22 +279,22 @@ function AuditDetailPanel({
             </code>
           </DetailRow>
         )}
-        <DetailRow label="Tidspunkt">
+        <DetailRow label="When">
           <time dateTime={entry.created_at} className="font-mono text-xs">
-            {new Date(entry.created_at).toLocaleString("da-DK")}
+            {new Date(entry.created_at).toLocaleString()}
           </time>
         </DetailRow>
         {entry.summary && (
-          <DetailRow label="Opsummering">
+          <DetailRow label="Summary">
             <span className="text-muted-foreground">{entry.summary}</span>
           </DetailRow>
         )}
 
         {entry.before !== null && entry.before !== undefined && (
-          <DiffSection label="Før" value={entry.before} />
+          <DiffSection label="Before" value={entry.before} />
         )}
         {entry.after !== null && entry.after !== undefined && (
-          <DiffSection label="Efter" value={entry.after} />
+          <DiffSection label="After" value={entry.after} />
         )}
       </div>
     </div>
@@ -339,7 +339,7 @@ function ActionBadge({ action }: { action: string }) {
 
 function formatDateTime(iso: string): string {
   try {
-    return new Date(iso).toLocaleString("da-DK", { dateStyle: "short", timeStyle: "short" });
+    return new Date(iso).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
   } catch {
     return iso;
   }

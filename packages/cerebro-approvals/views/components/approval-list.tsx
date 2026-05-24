@@ -40,7 +40,7 @@ export function ApprovalList({
     return (
       <div className="flex h-40 flex-col items-center justify-center gap-2 text-center text-muted-foreground">
         <Inbox className="size-6" />
-        <p className="text-sm">Ingen asks i indbakken</p>
+        <p className="text-sm">Nothing in the inbox</p>
       </div>
     );
   }
@@ -51,9 +51,9 @@ export function ApprovalList({
         <tr>
           <th className="px-4 py-2.5 text-left font-medium">Capability</th>
           <th className="px-4 py-2.5 text-left font-medium">Resource</th>
-          <th className="px-4 py-2.5 text-left font-medium">Anmoder</th>
+          <th className="px-4 py-2.5 text-left font-medium">Requester</th>
           <th className="px-4 py-2.5 text-left font-medium">Status</th>
-          <th className="px-4 py-2.5 text-left font-medium">Oprettet</th>
+          <th className="px-4 py-2.5 text-left font-medium">Created</th>
         </tr>
       </thead>
       <tbody>

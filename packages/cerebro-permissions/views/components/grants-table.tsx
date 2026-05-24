@@ -57,7 +57,7 @@ export function GrantsTable({ wsId, onRowClick }: GrantsTableProps) {
 
   // Server-driven search would be nicer, but until JEH-1179 surfaces a
   // `q=` param we do a client-side filter on the current page so the
-  // toolbar Søg input still works during the API-shape sketch phase.
+  // toolbar Search input still works during the API-shape sketch phase.
   const grants = useMemo(() => {
     const items = list.data?.items ?? [];
     const q = search.trim().toLowerCase();
@@ -77,15 +77,14 @@ export function GrantsTable({ wsId, onRowClick }: GrantsTableProps) {
       <div className="m-4 flex items-start gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
         <AlertCircle className="size-4 mt-0.5 shrink-0" />
         <div className="min-w-0">
-          <div className="font-medium">Kunne ikke hente grants</div>
+          <div className="font-medium">Couldn't load grants</div>
           <div className="text-xs text-destructive/80 truncate">
             {list.error instanceof Error
               ? list.error.message
-              : "Ukendt fejl. Genindlæs siden eller prøv igen om lidt."}
+              : "Unknown error. Reload the page or try again in a moment."}
           </div>
           <div className="mt-2 text-xs text-muted-foreground">
-            Grant-API (JEH-1179) er muligvis endnu ikke deployed i dette
-            miljø — slå feature-flaget fra hvis det blokerer.
+            The grants API may not be deployed in this environment — turn off the feature flag if it blocks you.
           </div>
         </div>
       </div>
@@ -106,9 +105,9 @@ export function GrantsTable({ wsId, onRowClick }: GrantsTableProps) {
     return (
       <div className="m-4 rounded-md border border-dashed p-12 text-center">
         <ShieldCheck className="mx-auto size-8 text-muted-foreground/60" />
-        <p className="mt-3 text-sm font-medium">Ingen grants matcher</p>
+        <p className="mt-3 text-sm font-medium">No grants match</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Justér filtrene eller opret et nyt grant for at give adgang.
+          Adjust the filters or create a new grant to give someone access.
         </p>
       </div>
     );
@@ -120,12 +119,12 @@ export function GrantsTable({ wsId, onRowClick }: GrantsTableProps) {
         <table className="w-full text-sm">
           <thead className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/70">
             <tr className="border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-              <Th>Subjekt</Th>
-              <Th>Ressource</Th>
-              <Th>Kapabilitet</Th>
-              <Th>Klassifikation</Th>
+              <Th>Subject</Th>
+              <Th>Resource</Th>
+              <Th>Capability</Th>
+              <Th>Classification</Th>
               <Th>Status</Th>
-              <Th>Tidsvindue</Th>
+              <Th>Time window</Th>
               <Th>Approval</Th>
             </tr>
           </thead>
@@ -148,7 +147,7 @@ export function GrantsTable({ wsId, onRowClick }: GrantsTableProps) {
             onClick={prevPage}
             disabled={offset === 0}
           >
-            Forrige
+            Previous
           </Button>
           <Button
             variant="outline"
@@ -156,7 +155,7 @@ export function GrantsTable({ wsId, onRowClick }: GrantsTableProps) {
             onClick={nextPage}
             disabled={offset + grants.length >= total}
           >
-            Næste
+            Next
           </Button>
         </div>
       </div>
@@ -212,15 +211,15 @@ function GrantRow({
       <td className="px-4 py-2 text-xs text-muted-foreground">
         {grant.time_window?.ends_at
           ? `→ ${formatDate(grant.time_window.ends_at)}`
-          : "altid"}
+          : "always"}
       </td>
       <td className="px-4 py-2">
         {grant.approval_required ? (
           <span className="inline-flex items-center gap-1 text-xs text-warning">
-            <Lock className="size-3" /> påkrævet
+            <Lock className="size-3" /> required
           </span>
         ) : (
-          <span className="text-xs text-muted-foreground">nej</span>
+          <span className="text-xs text-muted-foreground">no</span>
         )}
       </td>
     </tr>
@@ -273,13 +272,13 @@ function StatusBadge({ value }: { value: string }) {
 function labelStatus(s: GrantStatus): string {
   switch (s) {
     case "active":
-      return "aktiv";
+      return "active";
     case "pending_approval":
       return "approval";
     case "expired":
-      return "udløbet";
+      return "expired";
     case "revoked":
-      return "tilbagekaldt";
+      return "revoked";
   }
 }
 
