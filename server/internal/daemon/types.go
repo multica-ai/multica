@@ -102,6 +102,7 @@ type AgentData struct {
 	FixedRepoPaths   []string          `json:"fixed_repo_paths"`
 	VCSType          string            `json:"vcs_type"`
 	CleanupScript    string            `json:"cleanup_script"`
+	InitScript       string            `json:"init_script"`
 }
 
 // SkillData represents a structured skill for task execution.

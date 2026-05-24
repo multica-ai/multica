@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"context"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestFixedRepoLock_TryLockExclusive(t *testing.T) {
@@ -111,4 +113,73 @@ func TestFixedRepoLock_ConcurrentTryLock(t *testing.T) {
 	if winners != 10 {
 		t.Fatalf("all 10 goroutines should eventually acquire the lock (serially), got %d", winners)
 	}
+}
+
+func TestFixedRepoLock_WaitAndLock_ImmediateSuccess(t *testing.T) {
+	t.Parallel()
+
+	table := newFixedRepoLockTable()
+	ctx := context.Background()
+
+	path := table.waitAndLock([]string{"/data/repos/a"}, "task-1", ctx)
+	if path != "/data/repos/a" {
+		t.Fatalf("expected /data/repos/a, got %q", path)
+	}
+	table.unlock(path)
+}
+
+func TestFixedRepoLock_WaitAndLock_BlocksUntilUnlock(t *testing.T) {
+	t.Parallel()
+
+	table := newFixedRepoLockTable()
+	ctx := context.Background()
+
+	// Lock the only candidate.
+	table.tryLock("/data/repos/a", "task-1")
+
+	var wg sync.WaitGroup
+	var gotPath string
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		gotPath = table.waitAndLock([]string{"/data/repos/a"}, "task-2", ctx)
+	}()
+
+	// Give the goroutine time to block.
+	time.Sleep(50 * time.Millisecond)
+	table.unlock("/data/repos/a")
+
+	wg.Wait()
+	if gotPath != "/data/repos/a" {
+		t.Fatalf("expected /data/repos/a after unlock, got %q", gotPath)
+	}
+	table.unlock(gotPath)
+}
+
+func TestFixedRepoLock_WaitAndLock_ContextCancel(t *testing.T) {
+	t.Parallel()
+
+	table := newFixedRepoLockTable()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Lock the only candidate.
+	table.tryLock("/data/repos/a", "task-1")
+
+	var wg sync.WaitGroup
+	var gotPath string
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		gotPath = table.waitAndLock([]string{"/data/repos/a"}, "task-2", ctx)
+	}()
+
+	// Cancel the context.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	wg.Wait()
+	if gotPath != "" {
+		t.Fatalf("expected empty string on context cancel, got %q", gotPath)
+	}
+	table.unlock("/data/repos/a")
 }

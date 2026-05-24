@@ -80,6 +80,7 @@ type TaskContextForEnv struct {
 	FixedRepoPath    string // selected local path for this task
 	VCSType          string // git / p4 / svn / none
 	CleanupScript    string // optional cleanup script path
+	InitScript       string // optional init script path
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

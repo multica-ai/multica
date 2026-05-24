@@ -141,6 +141,7 @@ func init() {
 	agentCreateCmd.Flags().StringArray("fixed-repo-path", nil, "Fixed repo local path (repeatable)")
 	agentCreateCmd.Flags().String("vcs-type", "", "VCS type for fixed repo mode: git, p4, svn, or none")
 	agentCreateCmd.Flags().String("cleanup-script", "", "Optional cleanup script path for fixed repo mode")
+	agentCreateCmd.Flags().String("init-script", "", "Optional init script path for fixed repo mode")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent update
@@ -161,6 +162,7 @@ func init() {
 	agentUpdateCmd.Flags().StringArray("fixed-repo-path", nil, "Fixed repo local path (repeatable)")
 	agentUpdateCmd.Flags().String("vcs-type", "", "VCS type for fixed repo mode: git, p4, svn, or none")
 	agentUpdateCmd.Flags().String("cleanup-script", "", "Optional cleanup script path for fixed repo mode")
+	agentUpdateCmd.Flags().String("init-script", "", "Optional init script path for fixed repo mode")
 	agentUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent archive
@@ -444,6 +446,10 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 		v, _ := cmd.Flags().GetString("cleanup-script")
 		body["cleanup_script"] = v
 	}
+	if cmd.Flags().Changed("init-script") {
+		v, _ := cmd.Flags().GetString("init-script")
+		body["init_script"] = v
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -584,12 +590,16 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		body["vcs_type"] = v
 	}
 	if cmd.Flags().Changed("cleanup-script") {
+	if cmd.Flags().Changed("init-script") {
+		v, _ := cmd.Flags().GetString("init-script")
+		body["init_script"] = v
+	}
 		v, _ := cmd.Flags().GetString("cleanup-script")
 		body["cleanup_script"] = v
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --custom-args, --custom-env (or --custom-env-stdin, --custom-env-file), --visibility, --status, --max-concurrent-tasks, --fixed-repo-enabled, --fixed-repo-path, --vcs-type, or --cleanup-script")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --custom-args, --custom-env (or --custom-env-stdin, --custom-env-file), --visibility, --status, --max-concurrent-tasks, --fixed-repo-enabled, --fixed-repo-path, --vcs-type, or --cleanup-script, or --init-script")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

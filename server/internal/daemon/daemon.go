@@ -2279,26 +2279,29 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var runtimeBrief string
 
 	// Fixed repo mode: agent works in a pre-existing local directory instead
-	// of a per-task worktree. Select an idle path, lock it, and skip the
-	// normal Prepare/Reuse flow.
+	// of a per-task worktree. Block until a path is available, lock it, and
+	// skip the normal Prepare/Reuse flow.
 	if task.Agent != nil && task.Agent.FixedRepoEnabled {
 		if len(task.Agent.FixedRepoPaths) == 0 {
 			return TaskResult{}, fmt.Errorf("fixed repo mode enabled but no paths configured for agent %s", task.Agent.Name)
 		}
 
-		var selectedPath string
+		// Filter to paths that exist on disk.
+		var availablePaths []string
 		for _, p := range task.Agent.FixedRepoPaths {
 			if _, err := os.Stat(p); err != nil {
 				taskLog.Warn("fixed repo path not found, skipping", "path", p)
 				continue
 			}
-			if d.fixedRepoLocks.tryLock(p, task.ID) {
-				selectedPath = p
-				break
-			}
+			availablePaths = append(availablePaths, p)
 		}
+		if len(availablePaths) == 0 {
+			return TaskResult{}, fmt.Errorf("no fixed repo path available (all missing)")
+		}
+		// Block until a path frees up or the task is cancelled.
+		selectedPath := d.fixedRepoLocks.waitAndLock(availablePaths, task.ID, ctx)
 		if selectedPath == "" {
-			return TaskResult{}, fmt.Errorf("no fixed repo path available (all locked or missing)")
+			return TaskResult{Status: "blocked", FailureReason: "fixed_repo_locked", Comment: "task cancelled while waiting for a fixed repo path"}, nil
 		}
 		defer d.fixedRepoLocks.unlock(selectedPath)
 
@@ -2306,6 +2309,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		taskCtx.FixedRepoPath = selectedPath
 		taskCtx.VCSType = task.Agent.VCSType
 		taskCtx.CleanupScript = task.Agent.CleanupScript
+		taskCtx.InitScript = task.Agent.InitScript
 
 		// Register this task so /repo/checkout can reject it.
 		d.mu.Lock()
@@ -2316,6 +2320,25 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			delete(d.fixedRepoTasks, task.ID)
 			d.mu.Unlock()
 		}()
+
+		// Init script (if configured) — run before the agent starts.
+		if task.Agent.InitScript != "" {
+			initCtx, initCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer initCancel()
+			cmd := exec.CommandContext(initCtx, task.Agent.InitScript)
+			cmd.Dir = selectedPath
+			cmd.Env = append(os.Environ(),
+				"MULTICA_WORK_DIR="+selectedPath,
+				"MULTICA_TASK_ID="+task.ID,
+				"MULTICA_AGENT_ID="+task.Agent.ID,
+				"MULTICA_AGENT_NAME="+task.Agent.Name,
+				"MULTICA_VCS_TYPE="+task.Agent.VCSType,
+			)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return TaskResult{}, fmt.Errorf("init script failed: %s: %w", string(out), err)
+			}
+			taskLog.Info("init script completed")
+		}
 
 		env = &execenv.Environment{
 			WorkDir: selectedPath,
@@ -2328,7 +2351,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 				defer cancel()
 				cmd := exec.CommandContext(ctx, task.Agent.CleanupScript)
-				cmd.Env = append(os.Environ(), "MULTICA_WORK_DIR="+selectedPath)
+				cmd.Dir = selectedPath
+				cmd.Env = append(os.Environ(),
+					"MULTICA_WORK_DIR="+selectedPath,
+					"MULTICA_TASK_ID="+task.ID,
+					"MULTICA_AGENT_ID="+task.Agent.ID,
+					"MULTICA_AGENT_NAME="+task.Agent.Name,
+					"MULTICA_VCS_TYPE="+task.Agent.VCSType,
+				)
 				if out, err := cmd.CombinedOutput(); err != nil {
 					taskLog.Warn("cleanup script failed", "script", task.Agent.CleanupScript, "output", string(out), "error", err)
 				}

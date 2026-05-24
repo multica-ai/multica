@@ -48,6 +48,7 @@ type Agent struct {
 	FixedRepoPaths     []string           `json:"fixed_repo_paths"`
 	VcsType            string             `json:"vcs_type"`
 	CleanupScript      string             `json:"cleanup_script"`
+	InitScript         string             `json:"init_script"`
 }
 
 type AgentRuntime struct {

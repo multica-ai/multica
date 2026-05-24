@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -15,12 +16,16 @@ type fixedRepoLock struct {
 // fixedRepoLockTable manages exclusive access to fixed-repo directories.
 // Each path can be locked by at most one task at a time.
 type fixedRepoLockTable struct {
-	mu    sync.Mutex
-	locks map[string]*fixedRepoLock
+	mu     sync.Mutex
+	locks  map[string]*fixedRepoLock
+	notify chan struct{} // broadcast when any path is unlocked
 }
 
 func newFixedRepoLockTable() *fixedRepoLockTable {
-	return &fixedRepoLockTable{locks: make(map[string]*fixedRepoLock)}
+	return &fixedRepoLockTable{
+		locks:  make(map[string]*fixedRepoLock),
+		notify: make(chan struct{}, 1),
+	}
 }
 
 // tryLock attempts to lock a path for a task. Returns true on success.
@@ -53,6 +58,33 @@ func (t *fixedRepoLockTable) unlock(path string) {
 	t.mu.Unlock()
 	lk.taskID = ""
 	lk.mu.Unlock()
+
+	// Non-blocking send to wake up waiters.
+	select {
+	case t.notify <- struct{}{}:
+	default:
+	}
+}
+
+// waitAndLock blocks until a path from candidates can be locked or ctx is done.
+// Returns the locked path, or empty string if all paths are missing or context expired.
+func (t *fixedRepoLockTable) waitAndLock(candidates []string, taskID string, ctx context.Context) string {
+	for {
+		// Try each candidate path.
+		for _, p := range candidates {
+			if t.tryLock(p, taskID) {
+				return p
+			}
+		}
+
+		// Wait for an unlock signal or context cancellation.
+		select {
+		case <-t.notify:
+			// A path was unlocked; loop to retry.
+		case <-ctx.Done():
+			return ""
+		}
+	}
 }
 
 // lockedPaths returns all currently locked paths (for GC and diagnostics).

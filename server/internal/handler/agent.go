@@ -55,6 +55,7 @@ type AgentResponse struct {
 	FixedRepoPaths   []string            `json:"fixed_repo_paths"`
 	VCSType          string              `json:"vcs_type"`
 	CleanupScript    string              `json:"cleanup_script"`
+	InitScript       string              `json:"init_script"`
 	OwnerID          *string             `json:"owner_id"`
 	Skills        []AgentSkillSummary `json:"skills"`
 	CreatedAt     string              `json:"created_at"`
@@ -119,6 +120,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		FixedRepoPaths:     a.FixedRepoPaths,
 		VCSType:            a.VcsType,
 		CleanupScript:      a.CleanupScript,
+		InitScript:      a.InitScript,
 		OwnerID:            uuidToPtr(a.OwnerID),
 		Skills:             []AgentSkillSummary{},
 		CreatedAt:          timestampToString(a.CreatedAt),
@@ -462,6 +464,7 @@ type CreateAgentRequest struct {
 	FixedRepoEnabled bool     `json:"fixed_repo_enabled"`
 	FixedRepoPaths   []string `json:"fixed_repo_paths"`
 	VCSType          string   `json:"vcs_type"`
+	InitScript      string   `json:"init_script"`
 	CleanupScript    string   `json:"cleanup_script"`
 }
 
@@ -605,6 +608,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		ThinkingLevel:      pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
 		FixedRepoEnabled:   req.FixedRepoEnabled,
 		FixedRepoPaths:     defaultSlice(req.FixedRepoPaths),
+		InitScript:      req.InitScript,
 		VcsType:            req.VCSType,
 		CleanupScript:      req.CleanupScript,
 	})
@@ -666,6 +670,7 @@ type UpdateAgentRequest struct {
 	// map captured at decode time tells us whether the key was sent.
 	ThinkingLevel     *string  `json:"thinking_level"`
 	FixedRepoEnabled *bool    `json:"fixed_repo_enabled"`
+	InitScript      *string  `json:"init_script"`
 	FixedRepoPaths   []string `json:"fixed_repo_paths"`
 	VCSType          *string  `json:"vcs_type"`
 	CleanupScript    *string  `json:"cleanup_script"`
@@ -904,6 +909,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.CleanupScript != nil {
 		params.CleanupScript = pgtype.Text{String: *req.CleanupScript, Valid: true}
+	}
+	if req.InitScript != nil {
+		params.InitScript = pgtype.Text{String: *req.InitScript, Valid: true}
 	}
 
 	updated, err := h.Queries.UpdateAgent(r.Context(), params)
