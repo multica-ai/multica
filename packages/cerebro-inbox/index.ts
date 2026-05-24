@@ -22,9 +22,11 @@ export {
 } from "./mutations";
 export {
   isMuted,
+  addHours,
   nextLocalEightAm,
   nextLocalNineAm,
   nextBusinessDayNineAm,
+  nextMondayNineAm,
   toDateTimeLocalValue,
   formatMutedUntilTime,
   formatPlannedDateTime,

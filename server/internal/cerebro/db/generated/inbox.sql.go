@@ -191,7 +191,8 @@ func (q *Queries) FindPendingReminder(ctx context.Context, arg FindPendingRemind
 const setInboxMutedUntil = `-- name: SetInboxMutedUntil :one
 
 UPDATE inbox_item
-SET muted_until = $2
+SET muted_until = $2,
+    read = false
 WHERE id = $1
 RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
 `
@@ -236,7 +237,8 @@ func (q *Queries) SetInboxMutedUntil(ctx context.Context, arg SetInboxMutedUntil
 
 const setInboxMutedUntilByIssue = `-- name: SetInboxMutedUntilByIssue :execrows
 UPDATE inbox_item
-SET muted_until = $5
+SET muted_until = $5,
+    read = false
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = false
 `
 

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  addHours,
   formatMutedUntilTime,
   isMuted,
   nextBusinessDayNineAm,
   nextLocalEightAm,
+  nextMondayNineAm,
   toDateTimeLocalValue,
 } from "./mute-time";
 
@@ -76,5 +78,23 @@ describe("nextBusinessDayNineAm", () => {
   it("formats datetime-local values without timezone conversion", () => {
     const got = toDateTimeLocalValue(new Date(2026, 4, 25, 9, 5));
     expect(got).toBe("2026-05-25T09:05");
+  });
+});
+
+describe("reminder preset helpers", () => {
+  it("adds exact hour durations without snapping to the hour", () => {
+    const now = new Date(2026, 4, 22, 14, 37);
+    const got = addHours(3, now);
+    expect(got.getHours()).toBe(17);
+    expect(got.getMinutes()).toBe(37);
+  });
+
+  it("returns the next Monday at 09:00", () => {
+    const sunday = new Date(2026, 4, 24, 12, 0);
+    const got = nextMondayNineAm(sunday);
+    expect(got.getDay()).toBe(1);
+    expect(got.getDate()).toBe(25);
+    expect(got.getHours()).toBe(9);
+    expect(got.getMinutes()).toBe(0);
   });
 });

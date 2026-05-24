@@ -489,7 +489,10 @@ WHERE i.workspace_id = $1
   AND i.recipient_id = $3
   AND i.archived = false
   AND i.route = 'inbox'
-ORDER BY i.created_at DESC
+ORDER BY CASE
+  WHEN i.muted_until IS NOT NULL AND i.muted_until <= NOW() THEN i.muted_until
+  ELSE i.created_at
+END DESC
 `
 
 type ListInboxFeedParams struct {
@@ -522,6 +525,7 @@ type ListInboxFeedRow struct {
 
 // Inbox-routed items (route='inbox') for a user, not archived. Backs the
 // default inbox view.
+// CEREBRO-PATCH(sqlc-inbox-remind-sort): resurfaced reminders sort by muted_until so they re-enter the feed at the planned time.
 func (q *Queries) ListInboxFeed(ctx context.Context, arg ListInboxFeedParams) ([]ListInboxFeedRow, error) {
 	rows, err := q.db.Query(ctx, listInboxFeed, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
 	if err != nil {
@@ -568,7 +572,10 @@ SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severit
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
 WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND i.archived = false
-ORDER BY i.created_at DESC
+ORDER BY CASE
+  WHEN i.muted_until IS NOT NULL AND i.muted_until <= NOW() THEN i.muted_until
+  ELSE i.created_at
+END DESC
 `
 
 type ListInboxItemsParams struct {
@@ -602,6 +609,7 @@ type ListInboxItemsRow struct {
 // Generic non-archived listing across both routes. Used only by tests today;
 // production paths use the route-specific ListInboxFeed (route='inbox')
 // and ListNotificationsItems (route='notifications') queries.
+// CEREBRO-PATCH(sqlc-inbox-remind-sort): resurfaced reminders sort by muted_until so they re-enter the feed at the planned time.
 func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) ([]ListInboxItemsRow, error) {
 	rows, err := q.db.Query(ctx, listInboxItems, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
 	if err != nil {

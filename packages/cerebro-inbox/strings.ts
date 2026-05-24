@@ -28,6 +28,14 @@ type StringTable = {
   unmute: string;
   mute_tooltip: string;
   unmute_tooltip: string;
+  remind_title: string;
+  remind_one_hour: string;
+  remind_three_hours: string;
+  remind_tomorrow_morning: string;
+  remind_monday: string;
+  remind_custom: string;
+  remind_save: string;
+  remind_cancel: string;
   swipe_archive: string;
   drawer_title: string;
   /** Prefix shown on a row in the Muted filter, e.g. "Muted til 08:00". */
@@ -61,10 +69,18 @@ const en: StringTable = {
   mark_unread: "Mark as unread",
   mark_read_tooltip: "Mark as read",
   mark_unread_tooltip: "Mark as unread",
-  mute: "Mute until 8 AM",
+  mute: "Remind me",
   unmute: "Unmute",
-  mute_tooltip: "Mute until 8 AM",
+  mute_tooltip: "Remind me",
   unmute_tooltip: "Unmute",
+  remind_title: "Remind me",
+  remind_one_hour: "In 1 hour",
+  remind_three_hours: "In 3 hours",
+  remind_tomorrow_morning: "Tomorrow morning",
+  remind_monday: "Monday morning",
+  remind_custom: "Choose time",
+  remind_save: "Save",
+  remind_cancel: "Cancel",
   swipe_archive: "Archive",
   drawer_title: "Actions",
   muted_until_prefix: "Muted until",
@@ -83,10 +99,18 @@ const da: StringTable = {
   mark_unread: "Marker som ulæst",
   mark_read_tooltip: "Marker som læst",
   mark_unread_tooltip: "Marker som ulæst",
-  mute: "Mute til kl. 08",
+  mute: "Påmind mig",
   unmute: "Unmute",
-  mute_tooltip: "Mute til kl. 08",
+  mute_tooltip: "Påmind mig",
   unmute_tooltip: "Unmute",
+  remind_title: "Påmind mig",
+  remind_one_hour: "Om 1 time",
+  remind_three_hours: "Om 3 timer",
+  remind_tomorrow_morning: "I morgen tidlig",
+  remind_monday: "Mandag morgen",
+  remind_custom: "Vælg tidspunkt",
+  remind_save: "Gem",
+  remind_cancel: "Annuller",
   swipe_archive: "Arkivér",
   drawer_title: "Handlinger",
   muted_until_prefix: "Muted til",
@@ -109,10 +133,18 @@ const zhHans: StringTable = {
   mark_unread: "标为未读",
   mark_read_tooltip: "标为已读",
   mark_unread_tooltip: "标为未读",
-  mute: "静音至早上 8 点",
+  mute: "提醒我",
   unmute: "取消静音",
-  mute_tooltip: "静音至早上 8 点",
+  mute_tooltip: "提醒我",
   unmute_tooltip: "取消静音",
+  remind_title: "提醒我",
+  remind_one_hour: "1 小时后",
+  remind_three_hours: "3 小时后",
+  remind_tomorrow_morning: "明早",
+  remind_monday: "周一早上",
+  remind_custom: "选择时间",
+  remind_save: "保存",
+  remind_cancel: "取消",
   swipe_archive: "归档",
   drawer_title: "操作",
   muted_until_prefix: "静音至",

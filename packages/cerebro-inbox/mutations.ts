@@ -68,7 +68,7 @@ export function useMuteInbox() {
       const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
       qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
         updateInboxIssueSiblings(old, id, (item) =>
-          ({ ...item, muted_until: mutedUntil.toISOString() }),
+          ({ ...item, muted_until: mutedUntil.toISOString(), read: false }),
         ),
       );
       return { prev };

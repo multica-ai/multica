@@ -7,6 +7,7 @@ import {
   SWIPE_RELEASE_ARCHIVE_PX,
   shouldArchiveOnRelease,
   commitThresholdPx,
+  leftPanelCommitThresholdPx,
   shouldCommitHeldSwipe,
   shouldInstantArchive,
 } from "./swipe-thresholds";
@@ -43,6 +44,16 @@ describe("commitThresholdPx", () => {
 
   it("never falls below the minimum even at zero", () => {
     expect(commitThresholdPx(0)).toBe(SWIPE_COMMIT_MIN_PX);
+  });
+});
+
+describe("leftPanelCommitThresholdPx", () => {
+  it("locks the left action panel at 40% of a phone-width row", () => {
+    expect(leftPanelCommitThresholdPx(414)).toBeCloseTo(165.6, 1);
+  });
+
+  it("never reveals less than the full action panel width", () => {
+    expect(leftPanelCommitThresholdPx(320)).toBe(144);
   });
 });
 

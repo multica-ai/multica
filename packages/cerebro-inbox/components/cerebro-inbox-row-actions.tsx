@@ -5,6 +5,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type FormEvent,
   type ReactNode,
 } from "react";
 import {
@@ -29,11 +30,20 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@multica/ui/components/ui/drawer";
+import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
+import { Label } from "@multica/ui/components/ui/label";
 import { useMarkInboxRead } from "@multica/core/inbox/mutations";
 import type { InboxItem } from "@multica/core/types";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useMuteInbox, useUnmuteInbox, useMarkInboxUnread } from "../mutations";
-import { isMuted, nextLocalEightAm } from "../mute-time";
+import {
+  addHours,
+  isMuted,
+  nextBusinessDayNineAm,
+  nextMondayNineAm,
+  toDateTimeLocalValue,
+} from "../mute-time";
 import { useCerebroInboxStrings } from "../strings";
 import {
   ARCHIVE_HOLD_COMMIT_MS,
@@ -45,6 +55,7 @@ import {
   SWIPE_INTENT_PX,
   SWIPE_ROW_TRANSITION_MS,
   commitThresholdPx,
+  leftPanelCommitThresholdPx,
   shouldArchiveOnRelease,
   shouldCommitHeldSwipe,
   shouldInstantArchive,
@@ -100,6 +111,10 @@ export function CerebroInboxRowActions({ item, onArchive }: Props) {
   const unmute = useUnmuteInbox();
   const strings = useCerebroInboxStrings();
   const muted = isMuted(item.muted_until);
+  const [reminderOpen, setReminderOpen] = useState(false);
+  const [customReminder, setCustomReminder] = useState(() =>
+    toDateTimeLocalValue(nextBusinessDayNineAm()),
+  );
 
   const handleToggleRead = useCallback(() => {
     if (item.read) markUnread.mutate(item.id);
@@ -108,8 +123,17 @@ export function CerebroInboxRowActions({ item, onArchive }: Props) {
 
   const handleToggleMute = useCallback(() => {
     if (muted) unmute.mutate(item.id);
-    else mute.mutate({ id: item.id, mutedUntil: nextLocalEightAm() });
-  }, [item.id, muted, mute, unmute]);
+    else setReminderOpen(true);
+  }, [item.id, muted, unmute]);
+
+  const handleScheduleReminder = useCallback(
+    (mutedUntil: Date) => {
+      mute.mutate({ id: item.id, mutedUntil });
+      setReminderOpen(false);
+      setCustomReminder(toDateTimeLocalValue(mutedUntil));
+    },
+    [item.id, mute],
+  );
 
   // Feature-flag off — render the simple hover-only archive button so the
   // user still has the upstream archive UX. Mirrors the icon used in the
@@ -129,50 +153,70 @@ export function CerebroInboxRowActions({ item, onArchive }: Props) {
 
   if (isMobile) {
     return (
-      <MobileRowActions
-        muted={muted}
-        strings={strings}
-        onArchive={onArchive}
-        onToggleRead={handleToggleRead}
-        onToggleMute={handleToggleMute}
-        unread={!item.read}
-        renderDrawerMenu={(close) => (
-          // The long-press drawer is NOT a Menu.Root — Base UI's
-          // `DropdownMenuItem` (Menu.Item) silently no-ops onClick when
-          // rendered outside a menu context, which caused mute / mark-unread
-          // to feel "dead" when triggered from the drawer. Render plain
-          // buttons here instead and close the drawer on selection.
-          <DrawerActionList
-            item={item}
-            muted={muted}
-            strings={strings}
-            onToggleRead={() => {
-              close();
-              handleToggleRead();
-            }}
-            onToggleMute={() => {
-              close();
-              handleToggleMute();
-            }}
-            onArchive={() => {
-              close();
-              onArchive();
-            }}
-          />
-        )}
-      />
+      <>
+        <MobileRowActions
+          muted={muted}
+          strings={strings}
+          onArchive={onArchive}
+          onToggleRead={handleToggleRead}
+          onToggleMute={handleToggleMute}
+          unread={!item.read}
+          renderDrawerMenu={(close) => (
+            // The long-press drawer is NOT a Menu.Root — Base UI's
+            // `DropdownMenuItem` (Menu.Item) silently no-ops onClick when
+            // rendered outside a menu context, which caused mute / mark-unread
+            // to feel "dead" when triggered from the drawer. Render plain
+            // buttons here instead and close the drawer on selection.
+            <DrawerActionList
+              item={item}
+              muted={muted}
+              strings={strings}
+              onToggleRead={() => {
+                close();
+                handleToggleRead();
+              }}
+              onToggleMute={() => {
+                close();
+                handleToggleMute();
+              }}
+              onArchive={() => {
+                close();
+                onArchive();
+              }}
+            />
+          )}
+        />
+        <ReminderSheet
+          customReminder={customReminder}
+          open={reminderOpen}
+          strings={strings}
+          onCustomReminderChange={setCustomReminder}
+          onOpenChange={setReminderOpen}
+          onSchedule={handleScheduleReminder}
+        />
+      </>
     );
   }
   return (
-    <DesktopRowActions
-      strings={strings}
-      menuItems={menuItems}
-      onArchive={onArchive}
-      onToggleRead={handleToggleRead}
-      onToggleMute={handleToggleMute}
-      muted={muted}
-      unread={!item.read}
-    />
+    <>
+      <DesktopRowActions
+        strings={strings}
+        menuItems={menuItems}
+        onArchive={onArchive}
+        onToggleRead={handleToggleRead}
+        onToggleMute={handleToggleMute}
+        muted={muted}
+        unread={!item.read}
+      />
+      <ReminderSheet
+        customReminder={customReminder}
+        open={reminderOpen}
+        strings={strings}
+        onCustomReminderChange={setCustomReminder}
+        onOpenChange={setReminderOpen}
+        onSchedule={handleScheduleReminder}
+      />
+    </>
   );
 }
 
@@ -472,7 +516,7 @@ function MobileRowActions({
       const live = offsetXRef.current;
       const row = overlay.parentElement;
       const rowWidth = row?.clientWidth ?? 360;
-      const commitPx = commitThresholdPx(rowWidth);
+      const leftCommitPx = leftPanelCommitThresholdPx(rowWidth);
 
       // Suppress the synthetic click after any meaningful horizontal
       // motion, even if the swipe didn't reach the commit threshold —
@@ -490,7 +534,7 @@ function MobileRowActions({
         setRevealed(false);
         resetArchiveHold();
         animateRowArchiveExit(row, rowWidth, onArchiveRef.current);
-      } else if (live <= -commitPx) {
+      } else if (live <= -leftCommitPx) {
         setOffsetX(0);
         setRevealed(true);
       } else {
@@ -635,6 +679,77 @@ function MobileRowActions({
         </DrawerContent>
       </Drawer>
     </>
+  );
+}
+
+function ReminderSheet({
+  customReminder,
+  open,
+  strings,
+  onCustomReminderChange,
+  onOpenChange,
+  onSchedule,
+}: {
+  customReminder: string;
+  open: boolean;
+  strings: ReturnType<typeof useCerebroInboxStrings>;
+  onCustomReminderChange: (value: string) => void;
+  onOpenChange: (open: boolean) => void;
+  onSchedule: (mutedUntil: Date) => void;
+}) {
+  const reminderOptions = [
+    { label: strings.remind_one_hour, date: addHours(1) },
+    { label: strings.remind_three_hours, date: addHours(3) },
+    { label: strings.remind_tomorrow_morning, date: nextBusinessDayNineAm() },
+    { label: strings.remind_monday, date: nextMondayNineAm() },
+  ];
+
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const planned = new Date(customReminder);
+    if (Number.isNaN(planned.getTime()) || planned.getTime() <= Date.now()) return;
+    onSchedule(planned);
+  };
+
+  return (
+    <Drawer open={open} onOpenChange={onOpenChange}>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>{strings.remind_title}</DrawerTitle>
+        </DrawerHeader>
+        <div className="grid grid-cols-2 gap-2 px-4 pb-3">
+          {reminderOptions.map((option) => (
+            <Button
+              key={option.label}
+              type="button"
+              variant="outline"
+              className="justify-start"
+              onClick={() => onSchedule(option.date)}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
+        <form className="space-y-3 px-4 pb-6" onSubmit={handleSubmit}>
+          <div className="space-y-1.5">
+            <Label htmlFor="inbox-row-reminder-custom">{strings.remind_custom}</Label>
+            <Input
+              id="inbox-row-reminder-custom"
+              type="datetime-local"
+              value={customReminder}
+              min={toDateTimeLocalValue(new Date())}
+              onChange={(e) => onCustomReminderChange(e.currentTarget.value)}
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+              {strings.remind_cancel}
+            </Button>
+            <Button type="submit">{strings.remind_save}</Button>
+          </div>
+        </form>
+      </DrawerContent>
+    </Drawer>
   );
 }
 

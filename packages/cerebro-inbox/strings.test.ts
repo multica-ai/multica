@@ -19,6 +19,7 @@ describe("pickCerebroInboxStrings", () => {
   it("returns the Danish table for da / da-DK", () => {
     expect(pickCerebroInboxStrings("da").unarchive_label).toBe("Gendan");
     expect(pickCerebroInboxStrings("da-DK").unarchive_label).toBe("Gendan");
+    expect(pickCerebroInboxStrings("da-DK").mute).toBe("Påmind mig");
   });
 
   it("falls back to English for unsupported locales and missing language", () => {

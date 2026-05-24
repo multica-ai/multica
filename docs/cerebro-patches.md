@@ -568,6 +568,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `sqlc-chat-list-recent` | server/pkg/db/queries/chat.sql | 6 | JEH-757 — ListRecentChatMessages caps claim-path chat history at the SQL layer for long-lived sessions |
 | `daemon-handler-chat-history-cap` | server/internal/handler/daemon.go | 7 | JEH-757 — claim path uses ListRecentChatMessages(limit=30) and reverses to chronological order |
 | `sqlc-inbox` | server/pkg/db/queries/inbox.sql | 30 | Cerebro sqlc query additions |
+| `sqlc-inbox-remind-sort` | server/pkg/db/queries/inbox.sql | 2 | FIR-2016 — resurfaced reminders sort by muted_until so they re-enter the feed at the planned time |
 | `sqlc-inbox-folder` | server/pkg/db/queries/inbox_folder.sql | 175 | Cerebro sqlc query additions |
 | `sqlc-issue` | server/pkg/db/queries/issue.sql | 40 | Cerebro sqlc query additions |
 | `sqlc-member` | server/pkg/db/queries/member.sql | 21 | Cerebro sqlc query additions |

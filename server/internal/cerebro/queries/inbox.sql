@@ -9,7 +9,8 @@
 -- local" or whatever duration applies). Idempotent — re-muting just updates
 -- the timestamp.
 UPDATE inbox_item
-SET muted_until = $2
+SET muted_until = $2,
+    read = false
 WHERE id = $1
 RETURNING *;
 
@@ -18,7 +19,8 @@ RETURNING *;
 -- deduplicates rows by issue_id, so muting only the clicked notification can
 -- make an unmuted sibling resurface after refetch.
 UPDATE inbox_item
-SET muted_until = $5
+SET muted_until = $5,
+    read = false
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = false;
 
 -- name: ClearInboxMute :one

@@ -13,6 +13,10 @@ export function nextLocalEightAm(now: Date = new Date()): Date {
   return target;
 }
 
+export function addHours(hours: number, now: Date = new Date()): Date {
+  return new Date(now.getTime() + hours * 60 * 60 * 1000);
+}
+
 /** Whether an inbox item is currently muted (muted_until is in the future). */
 export function isMuted(mutedUntil: string | null | undefined, now: Date = new Date()): boolean {
   if (!mutedUntil) return false;
@@ -64,6 +68,14 @@ export function nextBusinessDayNineAm(now: Date = new Date()): Date {
   while (target.getDay() === 0 || target.getDay() === 6) {
     target.setDate(target.getDate() + 1);
   }
+  target.setHours(9, 0, 0, 0);
+  return target;
+}
+
+export function nextMondayNineAm(now: Date = new Date()): Date {
+  const target = new Date(now);
+  const daysUntilMonday = (8 - target.getDay()) % 7 || 7;
+  target.setDate(target.getDate() + daysUntilMonday);
   target.setHours(9, 0, 0, 0);
   return target;
 }

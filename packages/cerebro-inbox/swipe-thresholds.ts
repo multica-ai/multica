@@ -42,9 +42,11 @@
  *        the commit threshold. Any swipe reaching 80% now archives immediately
  *        on release; the hold-to-commit path is only reached at exactly the
  *        commit boundary, making the two thresholds consistent.
- *  - v10 (current): release-to-archive threshold changed to >50 px. This
+ *  - v10: release-to-archive threshold changed to >50 px. This
  *        matches the mobile inbox requirement and makes the gesture feel like
  *        a quick dismiss instead of a near-full-row drag.
+ *  - v11 (current): left-swipe action reveal commits at 40% while archive
+ *        keeps its separate right-swipe threshold.
  *
  * Sources:
  *  - "Pointer events vs touch events for swipe" — react-swipeable's README
@@ -93,6 +95,7 @@ export const LONG_PRESS_MS = 500;
 
 /** Width (px) of the swipe-left action panel once it locks open. */
 export const LEFT_PANEL_REVEAL_PX = 144;
+export const LEFT_PANEL_COMMIT_FRACTION = 0.40;
 
 /**
  * Commit threshold (px) needed to fire archive / panel-reveal for a row of
@@ -106,6 +109,10 @@ export const LEFT_PANEL_REVEAL_PX = 144;
 export function commitThresholdPx(rowWidth: number): number {
   const target = rowWidth * SWIPE_COMMIT_FRACTION;
   return Math.max(SWIPE_COMMIT_MIN_PX, Math.min(target, SWIPE_COMMIT_MAX_PX));
+}
+
+export function leftPanelCommitThresholdPx(rowWidth: number): number {
+  return Math.max(LEFT_PANEL_REVEAL_PX, rowWidth * LEFT_PANEL_COMMIT_FRACTION);
 }
 
 export function shouldCommitHeldSwipe(
