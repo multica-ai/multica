@@ -90,7 +90,7 @@ func TestLaunchHeaderReturnsEmptyForUnknownType(t *testing.T) {
 
 func TestLaunchHeaderUsesAgyForGeminiProvider(t *testing.T) {
 	t.Parallel()
-	if header := LaunchHeader("gemini"); header != "agy (print)" {
-		t.Errorf("LaunchHeader(%q) = %q, want %q", "gemini", header, "agy (print)")
+	if header := LaunchHeader("gemini"); header != "agy (json hooks)" {
+		t.Errorf("LaunchHeader(%q) = %q, want %q", "gemini", header, "agy (json hooks)")
 	}
 }
