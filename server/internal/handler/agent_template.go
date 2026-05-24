@@ -126,9 +126,9 @@ type CreateAgentFromTemplateRequest struct {
 	// Optional overrides — let the picker UI customise the template before
 	// creation without forcing a second round-trip to the detail page.
 	// When nil/empty, the template's own values are used.
-	Description     *string  `json:"description,omitempty"`
-	Instructions    *string  `json:"instructions,omitempty"`
-	AvatarURL       *string  `json:"avatar_url,omitempty"`
+	Description  *string `json:"description,omitempty"`
+	Instructions *string `json:"instructions,omitempty"`
+	AvatarURL    *string `json:"avatar_url,omitempty"`
 	// Workspace skill IDs to attach **in addition to** the template's
 	// skills. The merge dedupes against template skills automatically
 	// (agent_skill INSERT uses ON CONFLICT DO NOTHING).
@@ -446,6 +446,8 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 		CustomArgs:         ca,
 		McpConfig:          nil,
 		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
+		FixedRepoPaths:     []byte("[]"),
+		FixedRepoVcsType:   defaultFixedRepoVcsType,
 	})
 	if err != nil {
 		// Mirror handler/agent.go:CreateAgent: when the duplicate is the
@@ -660,4 +662,3 @@ func fetchSkillFromURL(client *http.Client, rawURL string) (*importedSkill, erro
 	}
 	return nil, fmt.Errorf("unknown import source for %s", rawURL)
 }
-
