@@ -109,6 +109,8 @@ export type {
   CreateChannelRequest,
 } from "./channel";
 export type { StorageAdapter } from "./storage";
+// CEREBRO-PATCH(core-capability-types): FIR-2129 re-export capability register types.
+export type { Capability, CapabilityListResponse, CapabilityReportInput, CapabilitySubject, CapabilitySubjectType } from "./capability";
 export type {
   Project,
   ProjectStatus,
@@ -173,3 +175,11 @@ export type {
   UpdateSquadMemberRoleRequest,
   CreateSquadActivityLogRequest,
 } from "./squad";
+// CEREBRO-PATCH(capability-register-types): FIR-2129 capability register types.
+export type {
+  CapabilitySubjectType,
+  CapabilitySubject,
+  CapabilityReportInput,
+  Capability,
+  CapabilityListResponse,
+} from "./capability";

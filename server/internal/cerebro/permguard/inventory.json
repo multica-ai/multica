@@ -337,6 +337,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "POST /api/capabilities/report",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/cerebro/agent-passes/",
       "gate": "workspace_admin"
     },

@@ -146,6 +146,8 @@ type Handler struct {
 	runtimeToolsAdmin RuntimeToolsAdminService
 	// CEREBRO-PATCH(handler-runtime-tools-scan): JEH-1710 daemon-side ingest
 	runtimeToolsScan RuntimeToolsScanService
+	// CEREBRO-PATCH(handler-capability-register): FIR-2129 normalized capability register.
+	capabilityRegister CapabilityRegisterService
 }
 
 // RuntimePauseInvoker is the upstream-side seam that the cerebro runtime

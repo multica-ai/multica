@@ -259,6 +259,35 @@ export const RuntimeToolGrantsSchema = z.object({
   user_grants: z.array(RuntimeToolUserGrantSchema).default([]),
 }).loose();
 
+// CEREBRO-PATCH(capability-register-schema): FIR-2129 capability register schema.
+const CapabilitySubjectSchema = z.object({
+  type: z.enum(["member", "agent", "group", "runtime", "workspace"]),
+  id: z.string().default(""),
+  display_name: z.string().optional().default(""),
+  metadata: z.record(z.string(), z.unknown()).optional().default({}),
+}).loose();
+
+const CapabilitySchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  key: z.string().default(""),
+  title: z.string().default(""),
+  category: z.string().default(""),
+  description: z.string().default(""),
+  source: z.string().default("report"),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  owners: z.array(CapabilitySubjectSchema).default([]),
+  users: z.array(CapabilitySubjectSchema).default([]),
+  reporters: z.array(CapabilitySubjectSchema).default([]),
+  first_seen_at: z.string().default(""),
+  last_reported_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const CapabilityListResponseSchema = z.object({
+  capabilities: z.array(CapabilitySchema).default([]),
+}).loose();
+
 export const OnboardingRuntimeBootstrapResponseSchema = z.object({
   workspace_id: z.string(),
   agent_id: z.string(),

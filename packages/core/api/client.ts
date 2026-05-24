@@ -136,6 +136,10 @@ import type {
   GitHubConnectResponse,
   Squad,
   SquadMember,
+  // CEREBRO-PATCH(capability-register-client): FIR-2129 capability register types.
+  CapabilityListResponse,
+  CapabilityReportInput,
+  CapabilitySubject,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -146,6 +150,7 @@ import {
   AgentToolsListSchema,
   RuntimeToolsListSchema,
   RuntimeToolGrantsSchema,
+  CapabilityListResponseSchema,
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
   AttachmentResponseSchema,
@@ -1542,6 +1547,38 @@ export class ApiClient {
       { group_grants: [], user_grants: [] },
       { endpoint: path },
     ) as import("@multica/cerebro-types").RuntimeToolGrants;
+  }
+
+  // CEREBRO-PATCH(capability-register-client): FIR-2129 single capability register client API.
+  async listCapabilities(params: {
+    workspace_id: string;
+    subject?: string;
+    key?: string;
+  }): Promise<CapabilityListResponse> {
+    const search = new URLSearchParams();
+    search.set("workspace_id", params.workspace_id);
+    if (params.subject) search.set("subject", params.subject);
+    if (params.key) search.set("key", params.key);
+    const path = `/api/capabilities?${search}`;
+    const raw = await this.fetch(path);
+    return parseWithFallback(raw, CapabilityListResponseSchema, { capabilities: [] }, {
+      endpoint: path,
+    }) as CapabilityListResponse;
+  }
+
+  async reportCapabilities(body: {
+    workspace_id: string;
+    subject: CapabilitySubject;
+    capabilities: CapabilityReportInput[];
+  }): Promise<CapabilityListResponse> {
+    const path = "/api/capabilities/report";
+    const raw = await this.fetch(path, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return parseWithFallback(raw, CapabilityListResponseSchema, { capabilities: [] }, {
+      endpoint: path,
+    }) as CapabilityListResponse;
   }
 
   async addRuntimeToolGroupGrant(

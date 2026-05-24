@@ -754,7 +754,8 @@ type RefreshRuntimeCapabilitiesRequest struct {
 // UI which proxies through their cerebro session.
 func (h *Handler) RefreshRuntimeCapabilities(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	if _, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID); !ok {
+	rt, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
+	if !ok {
 		return
 	}
 
@@ -785,6 +786,7 @@ func (h *Handler) RefreshRuntimeCapabilities(w http.ResponseWriter, r *http.Requ
 			slog.Warn("manual refresh cli_version failed", "runtime_id", runtimeID, "error", err)
 		}
 	}
+	h.persistRuntimeCapabilitySnapshot(r, rt.ID, rt.WorkspaceID, req.Capabilities) // CEREBRO-PATCH(capability-register): sync daemon reports into normalized registry.
 
 	slog.Info("runtime capabilities manually refreshed", "runtime_id", runtimeID, "cli_version", req.CLIVersion)
 	w.WriteHeader(http.StatusNoContent)
@@ -960,6 +962,7 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 			}); err != nil {
 				slog.Warn("update runtime capabilities on cli upgrade failed", "runtime_id", req.RuntimeID, "error", err)
 			}
+			h.persistRuntimeCapabilitySnapshot(r, rt.ID, rt.WorkspaceID, req.Capabilities) // CEREBRO-PATCH(capability-register): keep normalized registry in step with heartbeat drift reports.
 		}
 		slog.Info("runtime cli upgrade detected",
 			"runtime_id", req.RuntimeID,

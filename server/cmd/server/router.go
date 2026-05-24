@@ -51,6 +51,8 @@ import (
 	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
 	// CEREBRO-PATCH(router-runtime-tools-admin): JEH-1710 unified runtime tool admin service.
 	"github.com/multica-ai/multica/server/internal/cerebro/runtimetools"
+	// CEREBRO-PATCH(router-capability-register): FIR-2129 capability register service.
+	cerebrocapabilityregistry "github.com/multica-ai/multica/server/internal/cerebro/capabilityregistry"
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler import
 	cerebrotasks "github.com/multica-ai/multica/server/internal/cerebro/tasks"
 	// CEREBRO-PATCH(sharetoken-routes): JEH-1076 public-link share-token handler import
@@ -305,6 +307,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	runtimeToolsSvc := runtimetools.New(pool)
 	h.SetRuntimeToolsAdmin(newRuntimeToolsAdminAdapter(runtimeToolsSvc))
 	h.SetRuntimeToolsScan(newRuntimeToolsScanAdapter(runtimeToolsSvc))
+	// CEREBRO-PATCH(router-capability-register): FIR-2129 wire capability register API.
+	h.SetCapabilityRegister(newCapabilityRegisterAdapter(cerebrocapabilityregistry.New(pool)))
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler instance
 	cerebroTasksHandler := cerebrotasks.New(cerebroQueries)
 	// CEREBRO-PATCH(sharetoken-routes): JEH-1076 public-link share-token handler
@@ -947,6 +951,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/usage/by-agent", h.GetDashboardUsageByAgent)
 				r.Get("/agent-runtime", h.GetDashboardAgentRunTime)
 				r.Get("/runtime/daily", h.GetDashboardRunTimeDaily)
+			})
+
+			// CEREBRO-PATCH(router-capability-register): FIR-2129 normalized capability registry.
+			r.Route("/api/capabilities", func(r chi.Router) {
+				r.Get("/", h.ListCapabilities)
+				r.Post("/report", h.ReportCapabilities)
 			})
 
 			// Runtimes
