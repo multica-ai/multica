@@ -10,12 +10,14 @@ umiddelbart efter merge. Der er ingen manuel deploy-kommando.
 ## Deploy-processen trin for trin
 
 1. `.deploy/deploy.sh` henter seneste `main` fra GitHub
-2. Bygger Next.js-frontend (`apps/web`) til `.next.new/`
-3. Atomisk swap: `.next` → `.next.old`, `.next.new` → `.next`
-4. Genstarter launchd-jobs: `com.multica.frontend`, `com.multica.backend`,
-   `com.multica.daemon`
-5. Smoke-test: HTTP 200 på `/` og én chunk-route
-6. Fejler smoke-test → automatisk rollback til `.next.old`
+2. Bygger backend og kører migrationer
+3. Genstarter `com.multica.backend` og `com.multica.daemon` straks efter
+   migrationer, så gamle binaries ikke serverer trafik mod nyt schema
+4. Bygger Next.js-frontend (`apps/web`) til `.next.new/`
+5. Atomisk swap: `.next` → `.next.old`, `.next.new` → `.next`
+6. Genstarter `com.multica.frontend`
+7. Smoke-test: HTTP 200 på `/` og én chunk-route
+8. Fejler smoke-test → automatisk rollback til `.next.old`
 
 Concurrent merges serialiseres via lock i `.deploy/logs/deploy.lock`.
 Se `JEH-628` for baggrunden (parallelle builds der SIGTERM'ede hinanden).

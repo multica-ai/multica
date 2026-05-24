@@ -111,6 +111,14 @@ fi
 echo "Running migrations…"
 make migrate-up || echo "WARN: migrate-up failed (may be no-op)"
 
+echo "Restarting backend and daemon after migrations…"
+# Keep the schema window short: once migrations have run, the old
+# backend/daemon binaries must stop serving traffic before the frontend
+# build starts. Frontend remains untouched until the out-of-tree build
+# and atomic swap below have succeeded.
+launchctl kickstart -k gui/$(id -u)/com.multica.backend || true
+launchctl kickstart -k gui/$(id -u)/com.multica.daemon || true
+
 echo "Building Next.js frontend (out-of-tree)…"
 # Build into apps/web/.next.new while the live next-server keeps serving
 # from apps/web/.next. After a successful build we stop the frontend,
@@ -190,14 +198,7 @@ mv "$NEXT_NEW" "$NEXT_LIVE"
 # || true on launchctl: it returns non-zero on benign races (job in
 # transition, kickstart between KeepAlive respawns). Hard failures
 # surface as the smoke test below failing.
-#
-# JEH-438: restart com.multica.daemon too — `make build` rewrote the
-# binary but the running launchd job keeps executing the old one until
-# kickstart. Forgetting daemon was the root cause of JEH-418 looking
-# broken after deploy.
-launchctl kickstart -k gui/$(id -u)/com.multica.backend || true
 launchctl kickstart -k gui/$(id -u)/com.multica.frontend || true
-launchctl kickstart -k gui/$(id -u)/com.multica.daemon || true
 
 # ---------------------------------------------------------------------
 # Post-deploy smoke test + rollback.
