@@ -1,3 +1,4 @@
+import { agentCapabilitiesSettingsTab } from "@multica/cerebro-agent-capabilities";
 import { cerebroFeatureFlagTabs } from "@multica/cerebro-feature-flags";
 import { DocsPanel } from "./docs-panel";
 import { SettingsPageClient } from "./settings-page-client";
@@ -5,7 +6,7 @@ import { SettingsPageClient } from "./settings-page-client";
 export default function Page() {
   return (
     <SettingsPageClient
-      extraAccountTabs={cerebroFeatureFlagTabs}
+      extraAccountTabs={[agentCapabilitiesSettingsTab, ...cerebroFeatureFlagTabs]}
       documentationContent={<DocsPanel />}
     />
   );

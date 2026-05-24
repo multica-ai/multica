@@ -247,6 +247,8 @@ type TaskAgentData struct {
 	McpConfig     json.RawMessage          `json:"mcp_config,omitempty"`
 	Model         string                   `json:"model,omitempty"`
 	ThinkingLevel string                   `json:"thinking_level,omitempty"`
+	// CEREBRO-PATCH(agent-capabilities-claim): workspace capability policy passed to daemon sandbox.
+	SandboxAllowlist []string `json:"sandbox_allowlist,omitempty"`
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {

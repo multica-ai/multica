@@ -1563,10 +1563,18 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 			if len(projectRepos) > 0 {
 				resp.Repos = projectRepos
-			} else if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
+				// CEREBRO-PATCH(agent-capabilities-claim): settings still apply when project repos override workspace repos.
+				if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil {
+					applyCapabilityPolicyToClaim(&resp, ws.Settings, runtimeID)
+				}
+			} else if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil {
+				// CEREBRO-PATCH(agent-capabilities-claim): local fallback capability policy.
+				applyCapabilityPolicyToClaim(&resp, ws.Settings, runtimeID)
+				if ws.Repos != nil {
+					var repos []RepoData
+					if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+						resp.Repos = repos
+					}
 				}
 			}
 

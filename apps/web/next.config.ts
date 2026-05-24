@@ -43,6 +43,7 @@ const nextConfig: NextConfig = {
   ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
   transpilePackages: [
     "@multica/cerebro-access",
+    "@multica/cerebro-agent-capabilities",
     "@multica/cerebro-artifacts",
     "@multica/cerebro-attachments",
     "@multica/cerebro-budgets",

@@ -12,6 +12,7 @@ import { IssueDetailPage } from "./pages/issue-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { AutopilotCreatePage, AutopilotEditPage } from "@multica/cerebro-autopilot-pages";
+import { agentCapabilitiesSettingsTab } from "@multica/cerebro-agent-capabilities";
 import { SkillDetailPage } from "./pages/skill-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
 import { RuntimeDetailPage } from "./pages/runtime-detail-page";
@@ -100,6 +101,7 @@ function SettingsRoute() {
           icon: Download,
           content: <UpdatesSettingsTab />,
         },
+        agentCapabilitiesSettingsTab,
         ...cerebroFeatureFlagTabs,
       ]}
       membersTabCerebroExtras={membersTabCerebroExtras}
