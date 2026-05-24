@@ -17,6 +17,36 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { Loader2 } from "lucide-react";
 
+const VALID_START_PAGES = new Set([
+  "issues",
+  "inbox",
+  "my-issues",
+  "projects",
+  "documents",
+  "notifications",
+]);
+
+function getStartPage(
+  preferences: Record<string, unknown> | undefined,
+  key: string,
+) {
+  const value = preferences?.[key];
+  return typeof value === "string" && VALID_START_PAGES.has(value)
+    ? value
+    : "issues";
+}
+
+function writeStartPageCookies(
+  preferences: Record<string, unknown> | undefined,
+) {
+  const oneYear = 60 * 60 * 24 * 365;
+  const secure = location.protocol === "https:" ? "; Secure" : "";
+  const desktop = getStartPage(preferences, "start_page_desktop");
+  const mobile = getStartPage(preferences, "start_page_mobile");
+  document.cookie = `start_page_desktop=${encodeURIComponent(desktop)}; path=/; max-age=${oneYear}; SameSite=Lax${secure}`;
+  document.cookie = `start_page_mobile=${encodeURIComponent(mobile)}; path=/; max-age=${oneYear}; SameSite=Lax${secure}`;
+}
+
 function CallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -102,14 +132,15 @@ function CallbackContent() {
           // 3. Default: hand off to the resolver (onboarding for first-timers,
           //    first workspace for returning users, /workspaces/new for
           //    onboarded users with zero workspaces).
-          // CEREBRO-PATCH(jeh-1642-start-page): apply mobile start page preference on login
+          // CEREBRO-PATCH(jeh-1642-start-page): apply start page preference on login
           const defaultDest = resolvePostAuthDestination(wsList, onboarded);
-          const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
           const firstWs = wsList[0];
-          if (onboarded && firstWs && isMobile) {
-            const VALID = new Set(["issues", "inbox", "my-issues", "projects", "documents", "notifications"]);
-            const pref = loggedInUser.preferences["start_page_mobile"];
-            const page = typeof pref === "string" && VALID.has(pref) ? pref : "issues";
+          if (onboarded && firstWs) {
+            writeStartPageCookies(loggedInUser.preferences);
+            const isMobile =
+              typeof window !== "undefined" && window.innerWidth < 768;
+            const key = isMobile ? "start_page_mobile" : "start_page_desktop";
+            const page = getStartPage(loggedInUser.preferences, key);
             router.push(`/${firstWs.slug}/${page}`);
           } else {
             router.push(defaultDest);

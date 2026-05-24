@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { paths } from "@multica/core/paths";
+import { cookies, headers } from "next/headers";
+import { startPagePath } from "@/lib/start-page-redirect";
 
 export default async function WorkspaceRootPage({
   params,
@@ -7,5 +8,5 @@ export default async function WorkspaceRootPage({
   params: Promise<{ workspaceSlug: string }>;
 }) {
   const { workspaceSlug } = await params;
-  redirect(paths.workspace(workspaceSlug).root());
+  redirect(startPagePath(workspaceSlug, await cookies(), await headers()));
 }
