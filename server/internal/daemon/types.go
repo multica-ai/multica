@@ -102,6 +102,7 @@ type AgentData struct {
 
 // SkillData represents a structured skill for task execution.
 type SkillData struct {
+	ID          string          `json:"id"`
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Content     string          `json:"content"`
