@@ -166,6 +166,24 @@ describe("estimateCost", () => {
     expect(cost).toBeCloseTo(5 + 25, 5);
   });
 
+  it("prices the 1M-context Anthropic tag form (claude-opus-4-7[1m]) at the standard Opus tier", () => {
+    // Claude Code reports the 1M-context beta as `claude-opus-4-7[1m]`.
+    // Anthropic prices it at the standard Opus rate for prompts ≤200K
+    // input tokens (with a 2× surcharge above that, which we can't see
+    // from aggregated daily totals). Strip the bracketed context tag so
+    // the tokens still land in the cost total at standard pricing —
+    // mild under-estimate, but the alternative was excluding them
+    // entirely (the bug this fixes).
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "claude-opus-4-7[1m]",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(5 + 25, 5);
+    expect(isModelPriced("claude-opus-4-7[1m]")).toBe(true);
+  });
+
   it("prices each dotted Codex catalog SKU at its own tier, not gpt-5", () => {
     // Every dotted minor version is priced independently. The resolver does
     // exact-match-after-date-strip (no startsWith fallback), so each row

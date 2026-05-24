@@ -187,7 +187,7 @@ const MODEL_PRICING: Record<
   "gpt-4o":             { input: 2.50, output: 10,   cacheRead: 1.25,  cacheWrite: 2.50 },
 };
 
-// Resolve a model string to its pricing tier. Exact match, with three
+// Resolve a model string to its pricing tier. Exact match, with four
 // tolerances applied in order:
 //
 //  1. Provider-prefixed IDs (`anthropic/claude-opus-4.7` from openclaw /
@@ -201,6 +201,12 @@ const MODEL_PRICING: Record<
 //  3. Trailing dated snapshots (`claude-sonnet-4-5-20250929`,
 //     `gpt-5-2025-08-07`) — the family is what we price, the date is
 //     volatile, so we strip a trailing date / "latest" tag.
+//  4. Trailing context-window tag (`claude-opus-4-7[1m]`) — Anthropic's
+//     1M-context beta is the same SKU at standard rates for prompts
+//     ≤200K input tokens, with a 2× surcharge above that. Aggregated
+//     usage rows don't carry per-request prompt sizes, so we price the
+//     bracketed variant at the standard tier. Slight under-estimate
+//     beats the previous behaviour of dropping the row entirely.
 //
 // Anything still unmapped falls back to the user-supplied custom pricing
 // store. No startsWith fallback: variants like `gpt-5.5-mini` must have
@@ -240,17 +246,24 @@ function canonicalCandidates(model: string): string[] {
   // semantic, so we leave `gpt-5.4` etc. alone.
   const canonAnthropic = (s: string) =>
     s.startsWith("claude-") ? s.replace(/\./g, "-") : s;
+  // Trailing context-window tag (`claude-opus-4-7[1m]`). Same family,
+  // same price tier — see resolver comment above for the 1M-context
+  // pricing trade-off.
+  const stripContextTag = (s: string) => s.replace(/\[[^\]]+\]$/, "");
 
   const raw = model;
   const noProvider = stripProvider(raw);
   const dashed = canonAnthropic(noProvider);
+  const noTag = stripContextTag(dashed);
 
   push(raw);
   push(noProvider);
   push(dashed);
+  push(noTag);
   push(stripDate(raw));
   push(stripDate(noProvider));
   push(stripDate(dashed));
+  push(stripDate(noTag));
   return out;
 }
 
