@@ -28,6 +28,9 @@ import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
+// CEREBRO-PATCH(settings-page-github-tab): restore upstream GitHub tab dropped in merge (FIR-2172)
+import { GitHubTab } from "./github-tab";
+import { GitHubMark } from "./github-mark";
 import { IntegrationsTab } from "./integrations-tab";
 import { LabsTab } from "./labs-tab";
 // CEREBRO-PATCH(settings-page-notifications): use cerebro notifications-tab (Phase 1b relocation + push UI)
@@ -59,10 +62,12 @@ const AGENT_PROFILE_TAB_VALUE = "agent-profile";
 // CEREBRO-PATCH(settings-page-accounts-key): cerebro Konti tab value (JEH-999)
 const ACCOUNTS_TAB_VALUE = "accounts";
 
-const WORKSPACE_TAB_KEYS = ["general", "repositories", "integrations", "labs", "members"] as const;
+// CEREBRO-PATCH(settings-page-github-tab): "github" key restored from upstream (FIR-2172)
+const WORKSPACE_TAB_KEYS = ["general", "repositories", "github", "integrations", "labs", "members"] as const;
 const WORKSPACE_TAB_VALUES = {
   general: "workspace",
   repositories: "repositories",
+  github: "github",
   integrations: "integrations",
   labs: "labs",
   members: "members",
@@ -70,6 +75,7 @@ const WORKSPACE_TAB_VALUES = {
 const WORKSPACE_TAB_ICONS = {
   general: Settings,
   repositories: FolderGit2,
+  github: GitHubMark,
   integrations: Plug,
   labs: FlaskConical,
   members: Users,
@@ -314,6 +320,8 @@ export function SettingsPage({
             <TabsContent value="tokens"><TokensTab /></TabsContent>
             <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
             <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
+            {/* CEREBRO-PATCH(settings-page-github-tab): GitHub tab content restored from upstream (FIR-2172) */}
+            <TabsContent value="github"><GitHubTab /></TabsContent>
             <TabsContent value="integrations"><IntegrationsTab /></TabsContent>
             <TabsContent value="labs"><LabsTab /></TabsContent>
             {/* CEREBRO-PATCH(settings-page-cerebro-members-extras): JEH-1067 inject Groups column + filter */}
