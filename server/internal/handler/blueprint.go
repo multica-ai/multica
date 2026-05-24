@@ -1,13 +1,17 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/blueprint"
+	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -22,6 +26,32 @@ type PreviewBlueprintRequest struct {
 	Manifest        blueprint.Manifest         `json:"manifest"`
 	RuntimeMappings []blueprint.RuntimeMapping `json:"runtime_mappings"`
 	ProvidedEnv     []blueprint.ProvidedEnvVar `json:"provided_env"`
+}
+
+type ApplyBlueprintRequest struct {
+	Manifest        blueprint.Manifest             `json:"manifest"`
+	RuntimeMappings []blueprint.RuntimeMapping     `json:"runtime_mappings"`
+	ProvidedEnv     []ApplyBlueprintProvidedEnvVar `json:"provided_env"`
+}
+
+type ApplyBlueprintProvidedEnvVar struct {
+	AgentRef string `json:"agent_ref"`
+	Name     string `json:"name"`
+	Value    string `json:"value"`
+}
+
+type ApplyBlueprintResponse struct {
+	Preview blueprint.Preview          `json:"preview"`
+	Squads  []BlueprintApplyResultItem `json:"squads"`
+	Agents  []BlueprintApplyResultItem `json:"agents"`
+	Skills  []BlueprintApplyResultItem `json:"skills"`
+}
+
+type BlueprintApplyResultItem struct {
+	Ref    string `json:"ref"`
+	Name   string `json:"name"`
+	Action string `json:"action"`
+	ID     string `json:"id"`
 }
 
 func (h *Handler) ExportBlueprint(w http.ResponseWriter, r *http.Request) {
@@ -232,6 +262,77 @@ func (h *Handler) PreviewBlueprint(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, preview)
 }
 
+func (h *Handler) ApplyBlueprint(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin")
+	if !ok {
+		return
+	}
+
+	var req ApplyBlueprintRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := blueprint.ValidateManifest(req.Manifest); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid blueprint manifest: "+err.Error())
+		return
+	}
+
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	for _, mapping := range req.RuntimeMappings {
+		if mapping.RuntimeID == "" {
+			continue
+		}
+		if _, ok := parseUUIDOrBadRequest(w, mapping.RuntimeID, "runtime_id"); !ok {
+			return
+		}
+	}
+
+	providedEnv := providedEnvVarsFromApplyValues(req.ProvidedEnv)
+	inventory, ok := h.blueprintPreviewInventory(w, r, wsUUID, req.RuntimeMappings, providedEnv)
+	if !ok {
+		return
+	}
+	preview, err := blueprint.PreviewManifest(req.Manifest, inventory)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid blueprint manifest: "+err.Error())
+		return
+	}
+	if preview.HasBlockingIssues {
+		writeJSON(w, http.StatusUnprocessableEntity, ApplyBlueprintResponse{Preview: preview})
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start blueprint import")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	resp, err := applyBlueprintInTx(r.Context(), h.Queries.WithTx(tx), member, wsUUID, req.Manifest, preview, req.ProvidedEnv)
+	if err != nil {
+		var statusErr blueprintApplyStatusError
+		if errors.As(err, &statusErr) {
+			writeError(w, statusErr.Status, statusErr.Message)
+			return
+		}
+		slog.Warn("blueprint apply failed", "error", err, "workspace_id", workspaceID)
+		writeError(w, http.StatusInternalServerError, "failed to apply blueprint")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to apply blueprint")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func parseBlueprintExportIDs(w http.ResponseWriter, ids []string, fieldName string) ([]string, bool) {
 	out := make([]string, 0, len(ids))
 	for _, id := range ids {
@@ -385,4 +486,306 @@ func (h *Handler) blueprintPreviewInventory(w http.ResponseWriter, r *http.Reque
 		})
 	}
 	return inventory, true
+}
+
+type blueprintApplyStatusError struct {
+	Status  int
+	Message string
+}
+
+func (e blueprintApplyStatusError) Error() string {
+	return e.Message
+}
+
+func applyBlueprintInTx(
+	ctx context.Context,
+	qtx *db.Queries,
+	member db.Member,
+	workspaceID pgtype.UUID,
+	manifest blueprint.Manifest,
+	preview blueprint.Preview,
+	providedEnv []ApplyBlueprintProvidedEnvVar,
+) (ApplyBlueprintResponse, error) {
+	resp := ApplyBlueprintResponse{
+		Preview: preview,
+		Squads:  make([]BlueprintApplyResultItem, 0, len(manifest.Squads)),
+		Agents:  make([]BlueprintApplyResultItem, 0, len(manifest.Agents)),
+		Skills:  make([]BlueprintApplyResultItem, 0, len(manifest.Skills)),
+	}
+	skillPlans := blueprintResourcePlansByRef(preview.Skills)
+	agentPlans := blueprintAgentPlansByRef(preview.Agents)
+	squadPlans := blueprintResourcePlansByRef(preview.Squads)
+	envByAgentRef := applyEnvValuesByAgentRef(providedEnv)
+
+	skillIDs := make(map[string]string, len(manifest.Skills))
+	for _, skill := range manifest.Skills {
+		plan, ok := skillPlans[skill.Ref]
+		if !ok {
+			return ApplyBlueprintResponse{}, blueprintApplyStatusError{Status: http.StatusBadRequest, Message: fmt.Sprintf("missing preview plan for skill %q", skill.Ref)}
+		}
+		if plan.Action == blueprint.PreviewActionReuse {
+			skillIDs[skill.Ref] = plan.ExistingID
+			resp.Skills = append(resp.Skills, applyResultFromPlan(plan, plan.ExistingID))
+			continue
+		}
+
+		files := make([]CreateSkillFileRequest, 0, len(skill.Files))
+		for _, file := range skill.Files {
+			files = append(files, CreateSkillFileRequest{Path: file.Path, Content: file.Content})
+		}
+		config := any(skill.Config)
+		if len(skill.Config) == 0 {
+			config = json.RawMessage(`{}`)
+		}
+		created, err := createSkillWithFilesInTx(ctx, qtx, skillCreateInput{
+			WorkspaceID: workspaceID,
+			CreatorID:   member.UserID,
+			Name:        skill.Name,
+			Description: skill.Description,
+			Content:     skill.Content,
+			Config:      config,
+			Files:       files,
+		})
+		if err != nil {
+			return ApplyBlueprintResponse{}, err
+		}
+		skillIDs[skill.Ref] = created.ID
+		resp.Skills = append(resp.Skills, applyResultFromPlan(plan, created.ID))
+	}
+
+	agentIDs := make(map[string]string, len(manifest.Agents))
+	for _, bpAgent := range manifest.Agents {
+		plan, ok := agentPlans[bpAgent.Ref]
+		if !ok {
+			return ApplyBlueprintResponse{}, blueprintApplyStatusError{Status: http.StatusBadRequest, Message: fmt.Sprintf("missing preview plan for agent %q", bpAgent.Ref)}
+		}
+		if plan.Action == blueprint.PreviewActionReuse {
+			agentIDs[bpAgent.Ref] = plan.ExistingID
+			resp.Agents = append(resp.Agents, applyResultFromPlan(plan.ResourcePlan, plan.ExistingID))
+			continue
+		}
+		if plan.Runtime.RuntimeID == "" {
+			return ApplyBlueprintResponse{}, blueprintApplyStatusError{Status: http.StatusUnprocessableEntity, Message: fmt.Sprintf("missing runtime for agent %q", bpAgent.Ref)}
+		}
+
+		runtimeID := parseUUID(plan.Runtime.RuntimeID)
+		runtime, err := qtx.GetAgentRuntimeForWorkspace(ctx, db.GetAgentRuntimeForWorkspaceParams{
+			ID:          runtimeID,
+			WorkspaceID: workspaceID,
+		})
+		if err != nil {
+			return ApplyBlueprintResponse{}, blueprintApplyStatusError{Status: http.StatusUnprocessableEntity, Message: fmt.Sprintf("runtime for agent %q is no longer available", bpAgent.Ref)}
+		}
+		if !canUseRuntimeForAgent(member, runtime) {
+			return ApplyBlueprintResponse{}, blueprintApplyStatusError{Status: http.StatusForbidden, Message: "this runtime is private; only its owner or a workspace admin can create agents on it"}
+		}
+		if !agentpkg.IsKnownThinkingValue(runtime.Provider, bpAgent.Runtime.ThinkingLevel) {
+			return ApplyBlueprintResponse{}, blueprintApplyStatusError{
+				Status:  http.StatusBadRequest,
+				Message: fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", bpAgent.Runtime.ThinkingLevel, runtime.Provider),
+			}
+		}
+
+		customEnvRaw, err := json.Marshal(applyCustomEnvForAgent(bpAgent, envByAgentRef[bpAgent.Ref]))
+		if err != nil {
+			return ApplyBlueprintResponse{}, err
+		}
+		customArgsRaw, err := json.Marshal(bpAgent.CustomArgs)
+		if err != nil {
+			return ApplyBlueprintResponse{}, err
+		}
+		if bpAgent.CustomArgs == nil {
+			customArgsRaw = []byte("[]")
+		}
+
+		created, err := qtx.CreateAgent(ctx, db.CreateAgentParams{
+			WorkspaceID:        workspaceID,
+			Name:               sanitizeNullBytes(bpAgent.Name),
+			Description:        sanitizeNullBytes(bpAgent.Description),
+			AvatarUrl:          ptrToText(bpAgent.AvatarURL),
+			RuntimeMode:        runtime.RuntimeMode,
+			RuntimeConfig:      []byte("{}"),
+			RuntimeID:          runtime.ID,
+			Visibility:         blueprintAgentVisibility(bpAgent.Visibility),
+			MaxConcurrentTasks: blueprintAgentMaxConcurrentTasks(bpAgent.MaxConcurrentTasks),
+			OwnerID:            member.UserID,
+			Instructions:       sanitizeNullBytes(bpAgent.Instructions),
+			CustomEnv:          customEnvRaw,
+			CustomArgs:         customArgsRaw,
+			McpConfig:          nil,
+			Model:              pgtype.Text{String: bpAgent.Runtime.Model, Valid: bpAgent.Runtime.Model != ""},
+			ThinkingLevel:      pgtype.Text{String: bpAgent.Runtime.ThinkingLevel, Valid: bpAgent.Runtime.ThinkingLevel != ""},
+		})
+		if err != nil {
+			return ApplyBlueprintResponse{}, err
+		}
+		createdID := uuidToString(created.ID)
+		agentIDs[bpAgent.Ref] = createdID
+		resp.Agents = append(resp.Agents, applyResultFromPlan(plan.ResourcePlan, createdID))
+
+		for _, skillRef := range bpAgent.SkillRefs {
+			skillID := skillIDs[skillRef]
+			if skillID == "" {
+				return ApplyBlueprintResponse{}, blueprintApplyStatusError{Status: http.StatusBadRequest, Message: fmt.Sprintf("agent %q references missing skill %q", bpAgent.Ref, skillRef)}
+			}
+			if err := qtx.AddAgentSkill(ctx, db.AddAgentSkillParams{
+				AgentID: created.ID,
+				SkillID: parseUUID(skillID),
+			}); err != nil {
+				return ApplyBlueprintResponse{}, err
+			}
+		}
+	}
+
+	for _, squad := range manifest.Squads {
+		plan, ok := squadPlans[squad.Ref]
+		if !ok {
+			return ApplyBlueprintResponse{}, blueprintApplyStatusError{Status: http.StatusBadRequest, Message: fmt.Sprintf("missing preview plan for squad %q", squad.Ref)}
+		}
+		if plan.Action == blueprint.PreviewActionReuse {
+			resp.Squads = append(resp.Squads, applyResultFromPlan(plan, plan.ExistingID))
+			continue
+		}
+
+		leaderID := agentIDs[squad.LeaderRef]
+		if leaderID == "" {
+			return ApplyBlueprintResponse{}, blueprintApplyStatusError{Status: http.StatusBadRequest, Message: fmt.Sprintf("squad %q references missing leader %q", squad.Ref, squad.LeaderRef)}
+		}
+		created, err := qtx.CreateSquad(ctx, db.CreateSquadParams{
+			WorkspaceID: workspaceID,
+			Name:        sanitizeNullBytes(squad.Name),
+			Description: sanitizeNullBytes(squad.Description),
+			LeaderID:    parseUUID(leaderID),
+			CreatorID:   member.UserID,
+			AvatarUrl:   ptrToText(squad.AvatarURL),
+		})
+		if err != nil {
+			return ApplyBlueprintResponse{}, err
+		}
+		if squad.Instructions != "" {
+			created, err = qtx.UpdateSquad(ctx, db.UpdateSquadParams{
+				ID:           created.ID,
+				Name:         strToText(sanitizeNullBytes(squad.Name)),
+				Description:  strToText(sanitizeNullBytes(squad.Description)),
+				LeaderID:     parseUUID(leaderID),
+				AvatarUrl:    ptrToText(squad.AvatarURL),
+				Instructions: strToText(sanitizeNullBytes(squad.Instructions)),
+			})
+			if err != nil {
+				return ApplyBlueprintResponse{}, err
+			}
+		}
+
+		if err := addBlueprintSquadMembers(ctx, qtx, created.ID, squad, agentIDs); err != nil {
+			return ApplyBlueprintResponse{}, err
+		}
+		resp.Squads = append(resp.Squads, applyResultFromPlan(plan, uuidToString(created.ID)))
+	}
+
+	return resp, nil
+}
+
+func providedEnvVarsFromApplyValues(values []ApplyBlueprintProvidedEnvVar) []blueprint.ProvidedEnvVar {
+	out := make([]blueprint.ProvidedEnvVar, 0, len(values))
+	for _, value := range values {
+		out = append(out, blueprint.ProvidedEnvVar{
+			AgentRef: value.AgentRef,
+			Name:     value.Name,
+		})
+	}
+	return out
+}
+
+func applyEnvValuesByAgentRef(values []ApplyBlueprintProvidedEnvVar) map[string]map[string]string {
+	out := map[string]map[string]string{}
+	for _, value := range values {
+		if out[value.AgentRef] == nil {
+			out[value.AgentRef] = map[string]string{}
+		}
+		out[value.AgentRef][value.Name] = value.Value
+	}
+	return out
+}
+
+func applyCustomEnvForAgent(agent blueprint.Agent, provided map[string]string) map[string]string {
+	out := map[string]string{}
+	for _, env := range agent.CustomEnvSchema {
+		if value, ok := provided[env.Name]; ok {
+			out[env.Name] = value
+		}
+	}
+	return out
+}
+
+func blueprintResourcePlansByRef(plans []blueprint.ResourcePlan) map[string]blueprint.ResourcePlan {
+	out := make(map[string]blueprint.ResourcePlan, len(plans))
+	for _, plan := range plans {
+		out[plan.Ref] = plan
+	}
+	return out
+}
+
+func blueprintAgentPlansByRef(plans []blueprint.AgentPlan) map[string]blueprint.AgentPlan {
+	out := make(map[string]blueprint.AgentPlan, len(plans))
+	for _, plan := range plans {
+		out[plan.Ref] = plan
+	}
+	return out
+}
+
+func applyResultFromPlan(plan blueprint.ResourcePlan, id string) BlueprintApplyResultItem {
+	return BlueprintApplyResultItem{
+		Ref:    plan.Ref,
+		Name:   plan.Name,
+		Action: plan.Action,
+		ID:     id,
+	}
+}
+
+func blueprintAgentVisibility(visibility string) string {
+	if visibility == "" {
+		return "private"
+	}
+	return visibility
+}
+
+func blueprintAgentMaxConcurrentTasks(maxConcurrentTasks int32) int32 {
+	if maxConcurrentTasks == 0 {
+		return 6
+	}
+	return maxConcurrentTasks
+}
+
+func addBlueprintSquadMembers(ctx context.Context, qtx *db.Queries, squadID pgtype.UUID, squad blueprint.Squad, agentIDs map[string]string) error {
+	seen := map[string]struct{}{}
+	addMember := func(ref, role string) error {
+		if ref == "" {
+			return nil
+		}
+		if _, ok := seen[ref]; ok {
+			return nil
+		}
+		seen[ref] = struct{}{}
+		agentID := agentIDs[ref]
+		if agentID == "" {
+			return blueprintApplyStatusError{Status: http.StatusBadRequest, Message: fmt.Sprintf("squad %q references missing member %q", squad.Ref, ref)}
+		}
+		if role == "" && ref == squad.LeaderRef {
+			role = "leader"
+		}
+		_, err := qtx.AddSquadMember(ctx, db.AddSquadMemberParams{
+			SquadID:    squadID,
+			MemberType: "agent",
+			MemberID:   parseUUID(agentID),
+			Role:       role,
+		})
+		return err
+	}
+
+	for _, member := range squad.Members {
+		if err := addMember(member.Ref, member.Role); err != nil {
+			return err
+		}
+	}
+	return addMember(squad.LeaderRef, "leader")
 }
