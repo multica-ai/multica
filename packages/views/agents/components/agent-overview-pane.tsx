@@ -6,6 +6,7 @@ import {
   BookOpenText,
   FileText,
   KeyRound,
+  KeySquare,
   Shield,
   ListTodo,
   Terminal,
@@ -26,6 +27,8 @@ import { ActivityTab } from "./tabs/activity-tab";
 import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
+// CEREBRO-PATCH(agent-infisical-secrets): Infisical secrets tab in agent settings.
+import { InfisicalSecretsTab } from "./tabs/infisical-secrets-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 // CEREBRO-PATCH(agent-sandbox-tab): JEH-1088 — persona sandbox tab (cerebro-only)
 import { SandboxTab } from "./tabs/sandbox-tab";
@@ -38,6 +41,7 @@ type DetailTab =
   | "instructions"
   | "skills"
   | "env"
+  | "infisical"
   | "custom_args"
   | "sandbox";
 
@@ -47,6 +51,7 @@ type TabLabelKey =
   | "instructions"
   | "skills"
   | "environment"
+  | "infisical"
   | "custom_args"
   | "sandbox"
   | "tools";
@@ -57,6 +62,7 @@ const TAB_LABEL_KEY: Record<DetailTab, TabLabelKey> = {
   instructions: "instructions",
   skills: "skills",
   env: "environment",
+  infisical: "infisical",
   custom_args: "custom_args",
   sandbox: "sandbox",
 };
@@ -71,6 +77,7 @@ const coreDetailTabs: {
   { id: "instructions", icon: FileText, labelKey: TAB_LABEL_KEY.instructions },
   { id: "skills", icon: BookOpenText, labelKey: TAB_LABEL_KEY.skills },
   { id: "env", icon: KeyRound, labelKey: TAB_LABEL_KEY.env },
+  { id: "infisical", icon: KeySquare, labelKey: TAB_LABEL_KEY.infisical },
   { id: "custom_args", icon: Terminal, labelKey: TAB_LABEL_KEY.custom_args },
   { id: "sandbox", icon: Shield, labelKey: TAB_LABEL_KEY.sandbox },
 ];
@@ -199,6 +206,15 @@ export function AgentOverviewPane({
               agent={agent}
               readOnly={!canEdit || agent.custom_env_redacted}
               onSave={(updates) => onUpdate(agent.id, updates)}
+              onDirtyChange={setActiveDirty}
+            />
+          </TabContent>
+        )}
+        {activeTab === "infisical" && (
+          <TabContent>
+            <InfisicalSecretsTab
+              agent={agent}
+              readOnly={!canEdit}
               onDirtyChange={setActiveDirty}
             />
           </TabContent>

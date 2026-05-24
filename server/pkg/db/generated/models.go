@@ -280,6 +280,17 @@ type CerebroAccountTokenUsage struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type CerebroAgentInfisicalSecret struct {
+	ID          pgtype.UUID        `json:"id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	EnvVarName  string             `json:"env_var_name"`
+	SecretName  string             `json:"secret_name"`
+	Environment string             `json:"environment"`
+	SecretPath  string             `json:"secret_path"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroAgentPass struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
@@ -341,6 +352,31 @@ type CerebroApprovalRequest struct {
 	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroCapability struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	CapabilityKey  string             `json:"capability_key"`
+	Title          string             `json:"title"`
+	Category       string             `json:"category"`
+	Description    string             `json:"description"`
+	Source         string             `json:"source"`
+	Metadata       []byte             `json:"metadata"`
+	FirstSeenAt    pgtype.Timestamptz `json:"first_seen_at"`
+	LastReportedAt pgtype.Timestamptz `json:"last_reported_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroCapabilitySubject struct {
+	CapabilityID pgtype.UUID        `json:"capability_id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	SubjectType  string             `json:"subject_type"`
+	SubjectID    pgtype.UUID        `json:"subject_id"`
+	Relation     string             `json:"relation"`
+	Metadata     []byte             `json:"metadata"`
+	FirstSeenAt  pgtype.Timestamptz `json:"first_seen_at"`
+	LastSeenAt   pgtype.Timestamptz `json:"last_seen_at"`
 }
 
 type CerebroChannelAgentSetting struct {

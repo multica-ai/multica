@@ -236,6 +236,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO: feature-flag handler kept in dedicated package so upstream-merges
 	// don't conflict on router wiring.
 	cerebroQueries := cerebrodb.New(pool)
+	h.CerebroQueries = cerebroQueries
 	h.PullRequestLinkHealer = cerebrogithubprheal.New(cerebroQueries, queries) // CEREBRO-PATCH(cerebro-github-pr-heal): JEH-1919
 	featureFlagsHandler := feature_flags.New(cerebroQueries, bus)
 	// CEREBRO-PATCH(router-channel-listen): wire the cerebro channel-listen
@@ -904,6 +905,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/tool-overrides", h.ListAgentToolOverrides)
 					r.Put("/tool-overrides/{toolName}", h.PutAgentToolOverride)
 					r.Delete("/tool-overrides/{toolName}", h.DeleteAgentToolOverride)
+					// CEREBRO-PATCH(agent-infisical-secrets): env-var secret references for daemon spawn injection.
+					r.Get("/infisical-secrets", h.ListAgentInfisicalSecrets)
+					r.Put("/infisical-secrets", h.ReplaceAgentInfisicalSecrets)
 				})
 			})
 

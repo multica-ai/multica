@@ -114,19 +114,29 @@ type ChatAttachmentMeta struct {
 
 // AgentData holds agent details returned by the claim endpoint.
 type AgentData struct {
-	ID            string            `json:"id"`
-	Name          string            `json:"name"`
-	Instructions  string            `json:"instructions"`
-	Skills        []SkillData       `json:"skills"`
-	CustomEnv     map[string]string `json:"custom_env,omitempty"`
-	CustomArgs    []string          `json:"custom_args,omitempty"`
-	McpConfig     json.RawMessage   `json:"mcp_config,omitempty"`
-	Model         string            `json:"model,omitempty"`
-	ThinkingLevel string            `json:"thinking_level,omitempty"`
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Instructions string            `json:"instructions"`
+	Skills       []SkillData       `json:"skills"`
+	CustomEnv    map[string]string `json:"custom_env,omitempty"`
+	CustomArgs   []string          `json:"custom_args,omitempty"`
+	McpConfig    json.RawMessage   `json:"mcp_config,omitempty"`
+	// CEREBRO-PATCH(agent-infisical-secrets): secret refs injected as env at spawn.
+	InfisicalSecrets []InfisicalSecretRef `json:"infisical_secrets,omitempty"`
+	Model            string               `json:"model,omitempty"`
+	ThinkingLevel    string               `json:"thinking_level,omitempty"`
 	// CEREBRO-PATCH(daemon-agent-sandbox-allowlist): admin-set list of
 	SandboxAllowlist      []string `json:"sandbox_allowlist,omitempty"`
 	PersonaSandbox        string   `json:"persona_sandbox,omitempty"`
 	RuntimePersonaSandbox string   `json:"runtime_persona_sandbox,omitempty"`
+}
+
+// CEREBRO-PATCH(agent-infisical-secrets): claim payload secret reference.
+type InfisicalSecretRef struct {
+	EnvVarName  string `json:"env_var_name"`
+	SecretName  string `json:"secret_name"`
+	Environment string `json:"environment"`
+	SecretPath  string `json:"secret_path"`
 }
 
 // SkillData represents a structured skill for task execution.

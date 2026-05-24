@@ -2594,6 +2594,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			agentEnv[k] = v
 		}
 	}
+	// CEREBRO-PATCH(agent-infisical-secrets): fetch+inject assigned secrets as env vars.
+	infisicalEnv, ierr := d.prepareInfisicalSpawn(ctx, task.Agent, taskLog)
+	if ierr != nil {
+		return TaskResult{}, fmt.Errorf("infisical prep: %w", ierr)
+	}
+	for k, v := range infisicalEnv {
+		agentEnv[k] = v
+	}
 	// Persona integration (D3): when the agent has persona_sandbox set AND
 	// the daemon is configured for persona, prepare actor + settings.json
 	// before spawn. Adds env vars and a Claude-Code --settings file that

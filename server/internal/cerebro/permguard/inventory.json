@@ -877,6 +877,10 @@
       "gate": "cerebro_agent_access"
     },
     {
+      "id": "PUT /api/agents/{id}/infisical-secrets",
+      "gate": "cerebro_agent_access"
+    },
+    {
       "id": "PUT /api/agents/{id}/skills",
       "gate": "cerebro_agent_access"
     },

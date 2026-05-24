@@ -1,10 +1,12 @@
-import type { NextConfig } from "next";
+// @ts-check
 import { config } from "dotenv";
-import { resolve } from "path";
+import { dirname, resolve } from "path";
+import { fileURLToPath } from "url";
 import { createMDX } from "fumadocs-mdx/next";
 import withSerwistInit from "@serwist/next";
 
 const withMDX = createMDX();
+const currentDir = dirname(fileURLToPath(import.meta.url));
 
 // Service worker for the installable PWA shell. Compiled from app/sw.ts to
 // public/sw.js by serwist's webpack plugin during `next build`. Disabled in
@@ -16,8 +18,8 @@ const withSerwist = withSerwistInit({
   reloadOnOnline: true,
 });
 
-// Load root .env so REMOTE_API_URL is available to next.config.ts
-config({ path: resolve(__dirname, "../../.env") });
+// Load root .env so REMOTE_API_URL is available to next.config.mjs
+config({ path: resolve(currentDir, "../../.env") });
 
 const remoteApiUrl = process.env.REMOTE_API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -35,8 +37,9 @@ const allowedDevOrigins = process.env.CORS_ALLOWED_ORIGINS
       .filter(Boolean)
   : undefined;
 
-const nextConfig: NextConfig = {
-  ...(process.env.STANDALONE === "true" ? { output: "standalone" as const } : {}),
+/** @type {import("next").NextConfig} */
+const nextConfig = {
+  ...(process.env.STANDALONE === "true" ? { output: "standalone" } : {}),
   // Allow deploy.sh to build into a side-by-side directory and atomically
   // swap it in, so the running next-server keeps serving from the previous
   // .next/ for the entire build window. Default (.next) is unchanged for dev.

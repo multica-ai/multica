@@ -198,6 +198,7 @@
     "instructions": "Instructions",
     "skills": "Skills",
     "environment": "Environment",
+    "infisical": "Infisical secrets",
     "custom_args": "Custom Args",
     "sandbox": "Sandbox",
     "tools": "Tools",
@@ -283,6 +284,16 @@
       "duplicate_keys_toast": "Duplicate environment variable keys",
       "saved_toast": "Environment variables saved",
       "save_failed_toast": "Failed to save environment variables"
+    },
+    "infisical": {
+      "_comment": "CEREBRO-PATCH(agent-infisical-secrets): infisical secrets tab strings",
+      "intro": "Map environment variable names to Infisical secret names. Values are fetched by the daemon at spawn and are never returned to the agent as tool output.",
+      "readonly": "Infisical secret references are managed by workspace admins.",
+      "loading": "Loading",
+      "empty": "No Infisical secrets configured.",
+      "duplicate_env_toast": "Environment variable names must be unique",
+      "saved_toast": "Infisical secrets saved",
+      "save_failed_toast": "Could not save Infisical secrets"
     },
     "custom_args": {
       "intro": "Additional CLI arguments appended to the agent command at launch. Multi-token flags can share one row — they'll be split on whitespace before being passed to the CLI.",

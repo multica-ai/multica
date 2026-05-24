@@ -20,6 +20,7 @@ import type {
   CreateAgentFromTemplateRequest,
   CreateAgentFromTemplateResponse,
   UpdateAgentRequest,
+  AgentInfisicalSecret,
   AgentTask,
   AgentActivityBucket,
   AgentRunCount,
@@ -1479,6 +1480,28 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify(data),
     });
+  }
+
+  // CEREBRO-PATCH(agent-infisical-secrets): CRUD for per-agent secret refs.
+  async listAgentInfisicalSecrets(id: string): Promise<AgentInfisicalSecret[]> {
+    const res = await this.fetch<{ secrets?: AgentInfisicalSecret[] }>(
+      `/api/agents/${id}/infisical-secrets`,
+    );
+    return res.secrets ?? [];
+  }
+
+  async replaceAgentInfisicalSecrets(
+    id: string,
+    secrets: AgentInfisicalSecret[],
+  ): Promise<AgentInfisicalSecret[]> {
+    const res = await this.fetch<{ secrets?: AgentInfisicalSecret[] }>(
+      `/api/agents/${id}/infisical-secrets`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ secrets }),
+      },
+    );
+    return res.secrets ?? [];
   }
 
   // Persona pass-through: lists sandboxes the operator can attach to an

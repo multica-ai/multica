@@ -68,6 +68,18 @@ func TestApprovedMulticaMCPToolNamesCoversAllNonExcludedTools(t *testing.T) {
 	}
 }
 
+func TestInfisicalGetSecretToolIsNotRegistered(t *testing.T) {
+	reg := NewDefaultRegistry(nil, nil, ToolContext{})
+	if _, ok := reg.tools["infisical_get_secret"]; ok {
+		t.Fatalf("infisical_get_secret must not be callable; secrets are injected into cmd.Env at spawn")
+	}
+	for _, item := range AllBuiltinToolMeta() {
+		if item.Name == "infisical_get_secret" {
+			t.Fatalf("infisical_get_secret must not be exposed in tool metadata")
+		}
+	}
+}
+
 // CEREBRO-PATCH(firtal-gateway-anthropic-tool-schema): guard Anthropic schema compatibility for built-in runtime tools.
 func TestAnthropicToolSchemasDefineArrayItems(t *testing.T) {
 	reg := NewDefaultRegistry(nil, nil, ToolContext{})

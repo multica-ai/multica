@@ -194,6 +194,7 @@
     "instructions": "指令",
     "skills": "skill",
     "environment": "环境变量",
+    "infisical": "Infisical 密钥",
     "custom_args": "自定义参数",
     "sandbox": "沙箱",
     "tools": "工具",
@@ -278,6 +279,16 @@
       "duplicate_keys_toast": "环境变量 key 重复",
       "saved_toast": "已保存环境变量",
       "save_failed_toast": "保存环境变量失败"
+    },
+    "infisical": {
+      "_comment": "CEREBRO-PATCH(agent-infisical-secrets): infisical secrets tab strings",
+      "intro": "将环境变量名映射到 Infisical 密钥名。daemon 会在启动时获取值；值不会通过工具输出返回给智能体。",
+      "readonly": "Infisical 密钥引用由工作区管理员管理。",
+      "loading": "加载中",
+      "empty": "尚未配置 Infisical 密钥。",
+      "duplicate_env_toast": "环境变量名必须唯一",
+      "saved_toast": "已保存 Infisical 密钥",
+      "save_failed_toast": "保存 Infisical 密钥失败"
     },
     "custom_args": {
       "intro": "在智能体命令启动时追加的额外 CLI 参数。多 token 的参数可以共用一行 —— 在传给 CLI 前会按空白拆分。",

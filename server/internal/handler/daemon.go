@@ -1500,16 +1500,19 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if agent.McpConfig != nil {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
+		// CEREBRO-PATCH(agent-infisical-secrets): attach secret refs to claim payload.
+		infisicalSecrets := h.agentInfisicalSecretsForClaim(r, agent.ID)
 		resp.Agent = &TaskAgentData{
-			ID:            uuidToString(agent.ID),
-			Name:          agent.Name,
-			Instructions:  agent.Instructions,
-			Skills:        skills,
-			CustomEnv:     customEnv,
-			CustomArgs:    customArgs,
-			McpConfig:     mcpConfig,
-			Model:         agent.Model.String,
-			ThinkingLevel: agent.ThinkingLevel.String,
+			ID:               uuidToString(agent.ID),
+			Name:             agent.Name,
+			Instructions:     agent.Instructions,
+			Skills:           skills,
+			CustomEnv:        customEnv,
+			CustomArgs:       customArgs,
+			McpConfig:        mcpConfig,
+			InfisicalSecrets: infisicalSecrets,
+			Model:            agent.Model.String,
+			ThinkingLevel:    agent.ThinkingLevel.String,
 		}
 	}
 

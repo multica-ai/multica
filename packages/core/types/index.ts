@@ -2,6 +2,7 @@
 export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueReaction } from "./issue";
 export type {
   Agent,
+  AgentInfisicalSecret, // CEREBRO-PATCH(agent-infisical-secrets): export secret ref type.
   AgentStatus,
   AgentRuntimeMode,
   AgentVisibility,

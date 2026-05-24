@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -86,7 +87,9 @@ type cloudRuntimeProxy interface {
 }
 
 type Handler struct {
-	Queries               *db.Queries
+	Queries *db.Queries
+	// CEREBRO-PATCH(agent-infisical-secrets): cerebro queries for per-agent secret refs.
+	CerebroQueries        *cerebrodb.Queries
 	DB                    dbExecutor
 	TxStarter             txStarter
 	Hub                   *realtime.Hub
