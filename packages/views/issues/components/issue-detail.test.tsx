@@ -438,6 +438,15 @@ const mockIssue: Issue = {
   updated_at: "2026-01-20T00:00:00Z",
 };
 
+const mockParentIssue: Issue = {
+  ...mockIssue,
+  id: "parent-1",
+  number: 99,
+  identifier: "TES-99",
+  title: "Parent roadmap item",
+  parent_issue_id: null,
+};
+
 const mockTimeline: TimelineEntry[] = [
   {
     type: "comment",
@@ -683,6 +692,34 @@ describe("IssueDetail (shared)", () => {
     // No parent → no standalone Parent issue section either.
     expect(screen.queryByText("Parent issue")).not.toBeInTheDocument();
     expect(screen.getByText("Add property")).toBeInTheDocument();
+  });
+
+  it("removes the current parent issue from the sidebar", async () => {
+    const childIssue = { ...mockIssue, parent_issue_id: mockParentIssue.id };
+    mockApiObj.getIssue.mockImplementation((id: string) => {
+      if (id === mockParentIssue.id) return Promise.resolve(mockParentIssue);
+      return Promise.resolve(childIssue);
+    });
+    mockApiObj.updateIssue.mockResolvedValue({
+      ...childIssue,
+      parent_issue_id: null,
+    });
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Parent issue")).toBeInTheDocument();
+    });
+    expect(screen.getAllByText("TES-99").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Parent roadmap item").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove parent issue" }));
+
+    await waitFor(() => {
+      expect(mockApiObj.updateIssue).toHaveBeenCalledWith("issue-1", {
+        parent_issue_id: null,
+      });
+    });
   });
 
   it("uses a non-resizable layout with the sidebar sheet closed by default on mobile", async () => {

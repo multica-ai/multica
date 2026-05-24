@@ -29,6 +29,7 @@ import {
   Trash2,
   UserMinus,
   Users,
+  X, // CEREBRO-PATCH(remove-parent-issue): issue sidebar clear-parent affordance.
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "../../layout/page-header";
@@ -1399,14 +1400,27 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
             {parentIsRestricted ? (
               <RestrictedRef variant="inline" />
             ) : parentIssue ? (
-              <AppLink
-                href={paths.issueDetail(parentIssue.id)}
-                className="flex items-center gap-1.5 rounded-md px-2 py-1.5 -mx-2 text-xs hover:bg-accent/50 transition-colors group"
-              >
-                <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
-                <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
-                <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
-              </AppLink>
+              <div className="group flex items-center gap-1 rounded-md px-2 py-1.5 -mx-2 text-xs hover:bg-accent/50 transition-colors">
+                <AppLink
+                  href={paths.issueDetail(parentIssue.id)}
+                  className="flex min-w-0 flex-1 items-center gap-1.5"
+                >
+                  <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
+                  <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
+                  <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
+                </AppLink>
+                <Tooltip>
+                  <TooltipTrigger
+                    type="button"
+                    className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-colors transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label="Remove parent issue"
+                    onClick={() => handleUpdateField({ parent_issue_id: null })}
+                  >
+                    <X className="h-3 w-3" />
+                  </TooltipTrigger>
+                  <TooltipContent>Remove parent issue</TooltipContent>
+                </Tooltip>
+              </div>
             ) : null}
           </div>}
         </div>
