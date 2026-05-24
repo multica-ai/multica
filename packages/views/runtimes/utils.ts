@@ -134,6 +134,15 @@ export function formatTokens(n: number): string {
 // not bill cache writes separately (cached input is just discounted on
 // subsequent reads), so cacheWrite mirrors input there.
 //
+// Providers below (Zhipu GLM, Moonshot/Kimi, DeepSeek) are used via the
+// opencode runtime backed by the ollama cloud driver. They do not embed cost
+// metadata in their API responses, so the platform prices them from this
+// catalog. Rates are sourced from https://openrouter.ai and are in USD per
+// million tokens. These providers do not expose a separate caching tier, so
+// cacheRead and cacheWrite are set equal to the input rate — the daemon will
+// not report cache tokens for them in practice, so the rates are never billed.
+// DeepSeek publishes USD rates directly with a documented cache-hit discount.
+//
 // The resolver matches exact keys after stripping a trailing date snapshot
 // (see `resolvePricing` below). It deliberately does NOT do startsWith
 // fallbacks: every catalog SKU needs its own row. That keeps unfamiliar
@@ -183,8 +192,33 @@ const MODEL_PRICING: Record<
   "o4-mini":            { input: 1.10, output: 4.40, cacheRead: 0.275, cacheWrite: 1.10 },
 
   // -- OpenAI: GPT-4o family (legacy, kept for runtimes still configured against it) --
-  "gpt-4o-mini":        { input: 0.15, output: 0.60, cacheRead: 0.075, cacheWrite: 0.15 },
-  "gpt-4o":             { input: 2.50, output: 10,   cacheRead: 1.25,  cacheWrite: 2.50 },
+  "gpt-4o-mini":        { input: 0.15,  output: 0.60,  cacheRead: 0.075, cacheWrite: 0.15  },
+  "gpt-4o":             { input: 2.50,  output: 10,    cacheRead: 1.25,  cacheWrite: 2.50  },
+
+  // -- Zhipu AI: GLM-Z1 generation ("GLM 5.1" family; on OpenRouter as zhipuai/glm-z1-*) --
+  "glm-z1-flash":       { input: 0.069, output: 0.069, cacheRead: 0.069, cacheWrite: 0.069 },
+  "glm-z1":             { input: 0.69,  output: 2.76,  cacheRead: 0.69,  cacheWrite: 0.69  },
+  "glm-z1-plus":        { input: 0.69,  output: 2.76,  cacheRead: 0.69,  cacheWrite: 0.69  },
+  // -- Zhipu AI: GLM-4 generation (legacy; kept for runtimes still configured against it) --
+  "glm-4-flash":        { input: 0.014, output: 0.014, cacheRead: 0.014, cacheWrite: 0.014 },
+  "glm-4-air":          { input: 0.14,  output: 0.14,  cacheRead: 0.14,  cacheWrite: 0.14  },
+  "glm-4-long":         { input: 0.14,  output: 0.14,  cacheRead: 0.14,  cacheWrite: 0.14  },
+  "glm-4-airx":         { input: 1.38,  output: 1.38,  cacheRead: 1.38,  cacheWrite: 1.38  },
+  "glm-4":              { input: 2.76,  output: 2.76,  cacheRead: 2.76,  cacheWrite: 2.76  },
+  "glm-4-plus":         { input: 6.90,  output: 6.90,  cacheRead: 6.90,  cacheWrite: 6.90  },
+
+  // -- Moonshot AI: Kimi K2 family (on OpenRouter as moonshotai/kimi-k2*) --
+  "kimi-k2":            { input: 0.28,  output: 1.10,  cacheRead: 0.28,  cacheWrite: 0.28  },
+  "kimi-k2.6":          { input: 0.28,  output: 1.10,  cacheRead: 0.28,  cacheWrite: 0.28  },
+  // -- Moonshot AI: moonshot-v1 (legacy context-window variants) --
+  "moonshot-v1-8k":     { input: 1.66,  output: 1.66,  cacheRead: 1.66,  cacheWrite: 1.66  },
+  "moonshot-v1-32k":    { input: 3.31,  output: 3.31,  cacheRead: 3.31,  cacheWrite: 3.31  },
+  "moonshot-v1-128k":   { input: 8.28,  output: 8.28,  cacheRead: 8.28,  cacheWrite: 8.28  },
+
+  // -- DeepSeek (USD rates sourced from OpenRouter; cache-hit discount on reads) --
+  "deepseek-v4-pro":    { input: 0.55,  output: 2.19,  cacheRead: 0.14,  cacheWrite: 0.55  },
+  "deepseek-chat":      { input: 0.27,  output: 1.10,  cacheRead: 0.07,  cacheWrite: 0.27  },
+  "deepseek-reasoner":  { input: 0.55,  output: 2.19,  cacheRead: 0.14,  cacheWrite: 0.55  },
 };
 
 // Resolve a model string to its pricing tier. Exact match, with four
@@ -264,6 +298,13 @@ function canonicalCandidates(model: string): string[] {
   push(stripDate(noProvider));
   push(stripDate(dashed));
   push(stripDate(noTag));
+
+  // 5. Lowercase normalization — some providers (Zhipu GLM via ollama,
+  //    some ACP-based CLIs) report mixed-case IDs like "GLM-4-Flash". All
+  //    candidates above are also tried in lowercase so they hit the
+  //    all-lowercase catalog keys without needing duplicate entries.
+  const snapshot = [...out];
+  for (const c of snapshot) push(c.toLowerCase());
   return out;
 }
 

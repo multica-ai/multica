@@ -290,6 +290,132 @@ describe("isModelPriced", () => {
   });
 });
 
+describe("Chinese AI model pricing", () => {
+  it("prices Zhipu GLM-4-Flash at the published CNY-converted rate", () => {
+    // ¥0.1/1M input + ¥0.1/1M output → 1M × $0.014 + 1M × $0.014 = $0.028.
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "glm-4-flash",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(0.028, 4);
+  });
+
+  it("prices Kimi K2 with asymmetric input/output rates", () => {
+    // ¥2/1M input ($0.28) + ¥8/1M output ($1.10): 1M × $0.28 + 1M × $1.10 = $1.38.
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "kimi-k2",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(1.38, 3);
+  });
+
+  it("prices Moonshot moonshot-v1-128k at the long-context rate", () => {
+    // ¥60/1M → $8.28/1M; 1M input + 1M output = $16.56.
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "moonshot-v1-128k",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(16.56, 2);
+  });
+
+  it("prices DeepSeek models at their OpenRouter USD rates", () => {
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "deepseek-chat",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.27 + 1.10, 3);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "deepseek-reasoner",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.55 + 2.19, 3);
+    // DeepSeek V4 Pro (newer generation used via opencode/ollama cloud runtime)
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "deepseek-v4-pro",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.55 + 2.19, 3);
+  });
+
+  it("prices Kimi K2.6 at the same tier as K2", () => {
+    expect(isModelPriced("kimi-k2.6")).toBe(true);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "kimi-k2.6",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.28 + 1.10, 3);
+  });
+
+  it("prices provider-prefixed Chinese models via openrouter IDs (zhipuai/glm-z1, moonshotai/kimi-k2)", () => {
+    // opencode/ollama cloud runtime reports OpenRouter-style provider/model IDs;
+    // the prefix is stripped before catalog lookup.
+    expect(isModelPriced("zhipuai/glm-z1")).toBe(true);
+    expect(isModelPriced("moonshotai/kimi-k2")).toBe(true);
+    expect(isModelPriced("deepseek/deepseek-v4-pro")).toBe(true);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "zhipuai/glm-z1",
+        input_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.69, 3);
+  });
+
+  it("prices mixed-case model IDs via lowercase normalization (GLM-Z1, Kimi-K2)", () => {
+    // Some ollama deployments report model IDs with mixed case.
+    // The fifth tolerance in canonicalCandidates lowercases every candidate.
+    expect(isModelPriced("GLM-Z1")).toBe(true);
+    expect(isModelPriced("GLM-Z1-Flash")).toBe(true);
+    expect(isModelPriced("Kimi-K2")).toBe(true);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "GLM-Z1",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.69 + 2.76, 3);
+  });
+
+  it("prices provider-prefixed mixed-case form (Zhipuai/GLM-Z1)", () => {
+    expect(isModelPriced("Zhipuai/GLM-Z1")).toBe(true);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "Zhipuai/GLM-Z1",
+        input_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.69, 3);
+  });
+
+  it("recognises all current-generation GLM-Z1, Kimi K2, and DeepSeek SKUs as priced", () => {
+    const glmZ1Models = ["glm-z1-flash", "glm-z1", "glm-z1-plus"];
+    const kimiModels = ["kimi-k2", "kimi-k2.6"];
+    const deepseekModels = ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro"];
+    for (const model of [...glmZ1Models, ...kimiModels, ...deepseekModels]) {
+      expect(isModelPriced(model), `${model} should be priced`).toBe(true);
+    }
+  });
+});
+
 describe("collectUnmappedModels", () => {
   it("only surfaces names that miss every pricing tier", () => {
     const rows = [
