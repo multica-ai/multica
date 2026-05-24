@@ -214,18 +214,24 @@ export function createRuntimeColumns({
 // ---------------------------------------------------------------------------
 
 function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
+  const displayName = runtime.display_name;
   const { base: baseName } = splitRuntimeName(runtime.name);
   return (
     <div className="flex min-w-0 items-center gap-2">
       <div className="flex h-8 w-8 shrink-0 items-center justify-center">
         <ProviderLogo provider={runtime.provider} className="h-5 w-5" />
       </div>
-      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+      <div className="flex min-w-0 flex-1 flex-col gap-0">
         <span className="block min-w-0 shrink truncate text-sm font-medium">
-          {baseName}
+          {displayName || baseName}
         </span>
-        <VisibilityBadge runtime={runtime} />
+        {displayName && (
+          <span className="block min-w-0 shrink truncate text-xs text-muted-foreground">
+            {baseName}
+          </span>
+        )}
       </div>
+      <VisibilityBadge runtime={runtime} />
     </div>
   );
 }

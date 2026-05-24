@@ -10,6 +10,8 @@ function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
     workspace_id: "ws-1",
     daemon_id: "daemon-1",
     name: "Test Runtime",
+    display_name: null,
+    machine_alias: null,
     runtime_mode: "local",
     provider: "claude",
     launch_header: "",

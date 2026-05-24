@@ -40,6 +40,7 @@ function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
     id: "rt_test",
     workspace_id: "ws_test",
     name: "Claude Code",
+    display_name: null,
     provider: "claude",
     status: "online",
     runtime_mode: "local",

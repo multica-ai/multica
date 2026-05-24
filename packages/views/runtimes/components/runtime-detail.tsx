@@ -8,6 +8,7 @@ import {
   Cpu,
   Globe,
   Lock,
+  Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
@@ -158,7 +159,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         </Button>
         <ChevronRight className="h-3 w-3 text-muted-foreground" />
         <span className="truncate font-mono text-xs text-foreground">
-          {runtime.name}
+          {runtime.display_name || runtime.name}
         </span>
         <div className="ml-auto flex items-center gap-2">
           {!canDelete && (
@@ -294,7 +295,7 @@ function HeroCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <h2 className="truncate text-base font-semibold tracking-tight">
-              {runtime.name}
+              {runtime.display_name || runtime.name}
             </h2>
             <HealthBadge health={health} />
             <span className="text-xs text-muted-foreground">
@@ -325,16 +326,9 @@ function HeroCard({
         </Fact>
         <Fact label="Device">
           {device?.hostname ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span className="block truncate font-mono text-xs">
-                    {device.hostname}
-                  </span>
-                }
-              />
-              <TooltipContent>{device.hostname}</TooltipContent>
-            </Tooltip>
+            <span className="block truncate font-mono text-xs">
+              {device.hostname}
+            </span>
           ) : (
             <span className="text-sm text-muted-foreground">—</span>
           )}
@@ -510,6 +504,16 @@ function DiagnosticsCard({
         <span className="text-xs font-semibold">{t(($) => $.detail.diagnostics_title)}</span>
       </div>
       <div className="space-y-3 p-4">
+        {canDelete ? (
+          <DisplayNameEditor runtime={runtime} />
+        ) : runtime.display_name ? (
+          <div>
+            <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+              {t(($) => $.detail.diagnostics_alias)}
+            </div>
+            <span className="text-sm">{runtime.display_name}</span>
+          </div>
+        ) : null}
         <div>
           <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
             {t(($) => $.detail.diagnostics_visibility)}
@@ -737,3 +741,105 @@ function TimezoneEditor({ runtime }: { runtime: AgentRuntime }) {
     </div>
   );
 }
+
+function DisplayNameEditor({ runtime }: { runtime: AgentRuntime }) {
+  const { t } = useT("runtimes");
+  const wsId = useWorkspaceId();
+  const updateRuntime = useUpdateRuntime(wsId);
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(runtime.display_name ?? "");
+
+  const handleSave = () => {
+    const trimmed = value.trim();
+    if (trimmed === (runtime.display_name ?? "")) {
+      setEditing(false);
+      return;
+    }
+    updateRuntime.mutate(
+      { runtimeId: runtime.id, patch: { display_name: trimmed } },
+      {
+        onSuccess: () => {
+          toast.success(trimmed ? t(($) => $.detail.diagnostics_alias_toast_updated) : t(($) => $.detail.diagnostics_alias_toast_cleared));
+          setEditing(false);
+        },
+        onError: (err) =>
+          toast.error(
+            err instanceof Error && err.message
+              ? err.message
+              : t(($) => $.detail.diagnostics_alias_toast_failed),
+          ),
+      },
+    );
+  };
+
+  if (!editing) {
+    return (
+      <div>
+        <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+          {t(($) => $.detail.diagnostics_alias)}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm">
+            {runtime.display_name || <span className="text-muted-foreground">—</span>}
+          </span>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => {
+              setValue(runtime.display_name ?? "");
+              setEditing(true);
+            }}
+            className="text-muted-foreground hover:text-foreground"
+            aria-label={t(($) => $.detail.diagnostics_alias)}
+          >
+            <Pencil className="h-3 w-3" />
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+        Alias
+      </div>
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          maxLength={64}
+          placeholder="e.g. My MacBook"
+          className="h-8 flex-1 rounded-md border bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+          autoFocus
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleSave();
+            if (e.key === "Escape") setEditing(false);
+          }}
+          disabled={updateRuntime.isPending}
+        />
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={handleSave}
+          disabled={updateRuntime.isPending}
+        >
+          Save
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setEditing(false)}
+          disabled={updateRuntime.isPending}
+        >
+          Cancel
+        </Button>
+      </div>
+      <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+        {t(($) => $.detail.diagnostics_alias_hint)}
+      </p>
+    </div>
+  );
+}
+

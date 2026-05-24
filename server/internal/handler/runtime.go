@@ -20,6 +20,8 @@ type AgentRuntimeResponse struct {
 	WorkspaceID  string  `json:"workspace_id"`
 	DaemonID     *string `json:"daemon_id"`
 	Name         string  `json:"name"`
+	DisplayName  *string `json:"display_name"`
+	MachineAlias *string `json:"machine_alias"`
 	RuntimeMode  string  `json:"runtime_mode"`
 	Provider     string  `json:"provider"`
 	LaunchHeader string  `json:"launch_header"`
@@ -30,8 +32,8 @@ type AgentRuntimeResponse struct {
 	// Visibility is "private" (default — only the owner / workspace admins
 	// can bind agents) or "public" (any workspace member can). See migration
 	// 083 and canUseRuntimeForAgent.
-	Visibility string  `json:"visibility"`
-	Timezone   string  `json:"timezone"`
+	Visibility string `json:"visibility"`
+	Timezone   string `json:"timezone"`
 	// LocalPaths is the JSON array of {path: "..."} objects reported by the
 	// daemon, or null/empty when no local paths are declared.
 	LocalPaths json.RawMessage `json:"local_paths,omitempty"`
@@ -54,6 +56,8 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		WorkspaceID:  uuidToString(rt.WorkspaceID),
 		DaemonID:     textToPtr(rt.DaemonID),
 		Name:         rt.Name,
+		DisplayName:  textToPtr(rt.DisplayName),
+		MachineAlias: textToPtr(rt.MachineAlias),
 		RuntimeMode:  rt.RuntimeMode,
 		Provider:     rt.Provider,
 		LaunchHeader: agent.LaunchHeader(rt.Provider),
@@ -458,6 +462,12 @@ type UpdateAgentRuntimeRequest struct {
 	// or workspace admins can bind agents) and "public" (any workspace
 	// member can). Owner / workspace admin only, gated by canEditRuntime.
 	Visibility *string `json:"visibility,omitempty"`
+	// DisplayName is a user-friendly alias for the runtime/agent. When set, the UI
+	// shows this instead of the runtime name. Empty string clears it.
+	DisplayName *string `json:"display_name,omitempty"`
+	// MachineAlias is a user-friendly alias for the machine/hostname. When set,
+	// the UI shows this instead of the raw hostname. Empty string clears it.
+	MachineAlias *string `json:"machine_alias,omitempty"`
 }
 
 // UpdateAgentRuntime handles PATCH /api/runtimes/:id. Currently only the
@@ -503,10 +513,14 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	// returned early when `timezone == rt.Timezone`, silently dropping a
 	// concurrent visibility patch in the same request body.
 	var (
-		newTimezone    string
-		needTimezone   bool
-		newVisibility  string
-		needVisibility bool
+		newTimezone      string
+		needTimezone     bool
+		newVisibility    string
+		needVisibility   bool
+		newDisplayName   string
+		needDisplayName  bool
+		newMachineAlias  string
+		needMachineAlias bool
 	)
 	if req.Timezone != nil {
 		tz := *req.Timezone
@@ -531,6 +545,36 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		if v != rt.Visibility {
 			newVisibility = v
 			needVisibility = true
+		}
+	}
+	if req.DisplayName != nil {
+		dn := *req.DisplayName
+		if len(dn) > 64 {
+			writeError(w, http.StatusBadRequest, "display_name must be at most 64 characters")
+			return
+		}
+		currentDN := ""
+		if rt.DisplayName.Valid {
+			currentDN = rt.DisplayName.String
+		}
+		if dn != currentDN {
+			newDisplayName = dn
+			needDisplayName = true
+		}
+	}
+	if req.MachineAlias != nil {
+		ma := *req.MachineAlias
+		if len(ma) > 64 {
+			writeError(w, http.StatusBadRequest, "machine_alias must be at most 64 characters")
+			return
+		}
+		currentMA := ""
+		if rt.MachineAlias.Valid {
+			currentMA = rt.MachineAlias.String
+		}
+		if ma != currentMA {
+			newMachineAlias = ma
+			needMachineAlias = true
 		}
 	}
 
@@ -594,6 +638,46 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		// Notify connected clients that runtime metadata changed so the
 		// list/detail pages refresh — matches the pattern used by
 		// DeleteAgentRuntime.
+		h.publish(protocol.EventDaemonRegister, uuidToString(rt.WorkspaceID), "member", uuidToString(member.UserID), map[string]any{
+			"action": "update",
+		})
+	}
+
+	if needDisplayName {
+		dn := pgtype.Text{String: newDisplayName, Valid: newDisplayName != ""}
+		if newDisplayName == "" {
+			dn = pgtype.Text{Valid: false}
+		}
+		updated, err := h.Queries.UpdateAgentRuntimeDisplayName(r.Context(), db.UpdateAgentRuntimeDisplayNameParams{
+			ID:          runtimeUUID,
+			DisplayName: dn,
+		})
+		if err != nil {
+			slog.Error("UpdateAgentRuntimeDisplayName failed", "error", err, "runtime_id", runtimeID)
+			writeError(w, http.StatusInternalServerError, "failed to update runtime")
+			return
+		}
+		rt = updated
+		h.publish(protocol.EventDaemonRegister, uuidToString(rt.WorkspaceID), "member", uuidToString(member.UserID), map[string]any{
+			"action": "update",
+		})
+	}
+
+	if needMachineAlias {
+		ma := pgtype.Text{String: newMachineAlias, Valid: newMachineAlias != ""}
+		if newMachineAlias == "" {
+			ma = pgtype.Text{Valid: false}
+		}
+		updated, err := h.Queries.UpdateAgentRuntimeMachineAlias(r.Context(), db.UpdateAgentRuntimeMachineAliasParams{
+			ID:           runtimeUUID,
+			MachineAlias: ma,
+		})
+		if err != nil {
+			slog.Error("UpdateAgentRuntimeMachineAlias failed", "error", err, "runtime_id", runtimeID)
+			writeError(w, http.StatusInternalServerError, "failed to update runtime")
+			return
+		}
+		rt = updated
 		h.publish(protocol.EventDaemonRegister, uuidToString(rt.WorkspaceID), "member", uuidToString(member.UserID), map[string]any{
 			"action": "update",
 		})

@@ -17,6 +17,10 @@ export interface RuntimeDevice {
   workspace_id: string;
   daemon_id: string | null;
   name: string;
+  /** User-defined alias for the runtime/agent; displayed instead of runtime name when set. */
+  display_name: string | null;
+  /** User-defined alias for the machine/hostname; displayed instead of hostname when set. */
+  machine_alias: string | null;
   runtime_mode: AgentRuntimeMode;
   provider: string;
   launch_header: string;

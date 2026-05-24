@@ -5,16 +5,19 @@ import { useDefaultLayout } from "react-resizable-panels";
 import {
   Cloud,
   Monitor,
+  Pencil,
   Plus,
   Search,
   Server,
 } from "lucide-react";
+import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { runtimeListOptions, runtimeKeys } from "@multica/core/runtimes/queries";
 import { useUpdatableRuntimeIds } from "@multica/core/runtimes/hooks";
+import { useUpdateRuntime } from "@multica/core/runtimes/mutations";
 import { useWSEvent } from "@multica/core/realtime";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
@@ -486,9 +489,11 @@ function MachineRow({
           <span
             className="truncate text-sm font-medium"
             title={
-              machine.daemonId
-                ? `daemon ${machine.daemonId}`
-                : (machine.subtitle ?? undefined)
+              machine.machineAlias && machine.hostname
+                ? machine.hostname
+                : machine.daemonId
+                  ? `daemon ${machine.daemonId}`
+                  : (machine.subtitle ?? undefined)
             }
           >
             {machine.title}
@@ -553,6 +558,7 @@ function MachineDetail({
 }) {
   const { t } = useT("runtimes");
   const healthLabel = useHealthLabel();
+  const [editingMachineName, setEditingMachineName] = useState(false);
 
   if (!machine) {
     return (
@@ -620,15 +626,34 @@ function MachineDetail({
     );
   }
 
+  // Machine name display: alias if set, otherwise hostname
+  const displayName = machine.machineAlias || machine.hostname || machine.title;
+  // Can edit machine name if there are runtimes and at least one is updatable
+  const canEditMachineName = machine.runtimes.length > 0 && updatableIds.size > 0;
+
   return (
     <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
       <div className="shrink-0 border-b bg-background px-5 py-4">
         <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h2 className="truncate text-xl font-semibold tracking-tight">
-                {machine.title}
-              </h2>
+              {editingMachineName ? (
+                <MachineNameEditor
+                  machine={machine}
+                  onDone={() => setEditingMachineName(false)}
+                />
+              ) : (
+                <h2
+                  className={`truncate text-xl font-semibold tracking-tight ${canEditMachineName ? "cursor-pointer hover:text-primary transition-colors" : ""}`}
+                  onClick={() => canEditMachineName && setEditingMachineName(true)}
+                  title={canEditMachineName ? t(($) => $.machine.name_click_to_edit) : undefined}
+                >
+                  {displayName}
+                  {canEditMachineName && (
+                    <Pencil className="ml-1.5 inline h-3.5 w-3.5 text-muted-foreground" />
+                  )}
+                </h2>
+              )}
               <span className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-0.5 text-xs text-muted-foreground">
                 <HealthIcon health={machine.health} />
                 {healthLabel(machine.health)}
@@ -639,6 +664,11 @@ function MachineDetail({
                 </span>
               )}
             </div>
+            {machine.machineAlias && machine.hostname && (
+              <div className="mt-1 text-xs text-muted-foreground">
+                {t(($) => $.machine.name_original_hostname, { hostname: machine.hostname })}
+              </div>
+            )}
             <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
               {metaParts.map((part, idx) => (
                 <React.Fragment key={idx}>
@@ -660,6 +690,90 @@ function MachineDetail({
         now={now}
       />
     </main>
+  );
+}
+
+function MachineNameEditor({
+  machine,
+  onDone,
+}: {
+  machine: RuntimeMachine;
+  onDone: () => void;
+}) {
+  const { t } = useT("runtimes");
+  const wsId = useWorkspaceId();
+  const updateRuntime = useUpdateRuntime(wsId);
+  const [value, setValue] = useState(machine.machineAlias ?? "");
+
+  const handleSave = () => {
+    const trimmed = value.trim();
+    if (trimmed === (machine.machineAlias ?? "")) {
+      onDone();
+      return;
+    }
+    // Update all runtimes on this machine with the same machine_alias
+    const runtimes = machine.runtimes;
+    const pending = runtimes.length;
+    let completed = 0;
+    let hasError = false;
+
+    for (const runtime of runtimes) {
+      updateRuntime.mutate(
+        { runtimeId: runtime.id, patch: { machine_alias: trimmed } },
+        {
+          onSuccess: () => {
+            completed++;
+            if (completed === pending && !hasError) {
+              toast.success(trimmed ? t(($) => $.machine.name_toast_updated) : t(($) => $.machine.name_toast_cleared));
+              onDone();
+            }
+          },
+          onError: (err) => {
+            hasError = true;
+            toast.error(
+              err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.machine.name_toast_failed),
+            );
+          },
+        },
+      );
+    }
+  };
+
+  return (
+    <div className="flex min-w-0 items-center gap-2">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        maxLength={64}
+        placeholder={machine.hostname || t(($) => $.machine.name_placeholder)}
+        className="h-9 flex-1 rounded-md border bg-background px-3 text-xl font-semibold tracking-tight focus:outline-none focus:ring-1 focus:ring-ring"
+        autoFocus
+        onKeyDown={(e) => {
+          if (e.key === "Enter") handleSave();
+          if (e.key === "Escape") onDone();
+        }}
+        disabled={updateRuntime.isPending}
+      />
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={handleSave}
+        disabled={updateRuntime.isPending}
+      >
+        {t(($) => $.machine.name_save)}
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onDone}
+        disabled={updateRuntime.isPending}
+      >
+        {t(($) => $.machine.name_cancel)}
+      </Button>
+    </div>
   );
 }
 

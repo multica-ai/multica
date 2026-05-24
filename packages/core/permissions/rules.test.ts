@@ -86,6 +86,8 @@ function makeRuntime(ownerId: string | null): RuntimeDevice {
     workspace_id: "ws_1",
     daemon_id: null,
     name: "runtime",
+    display_name: null,
+    machine_alias: null,
     runtime_mode: "local",
     provider: "anthropic",
     launch_header: "",

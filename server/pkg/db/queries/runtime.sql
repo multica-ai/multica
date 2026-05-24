@@ -25,6 +25,7 @@ INSERT INTO agent_runtime (
     workspace_id,
     daemon_id,
     name,
+    display_name,
     runtime_mode,
     provider,
     status,
@@ -34,7 +35,7 @@ INSERT INTO agent_runtime (
     timezone,
     last_seen_at,
     local_paths
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, @timezone, now(), @local_paths)
+) VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, $9, @timezone, now(), @local_paths)
 ON CONFLICT (workspace_id, daemon_id, provider)
 DO UPDATE SET
     name = EXCLUDED.name,
@@ -47,6 +48,18 @@ DO UPDATE SET
     updated_at = now(),
     local_paths = EXCLUDED.local_paths
 RETURNING *, (xmax = 0) AS inserted;
+
+-- name: UpdateAgentRuntimeDisplayName :one
+UPDATE agent_runtime
+SET display_name = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdateAgentRuntimeMachineAlias :one
+UPDATE agent_runtime
+SET machine_alias = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;
 
 -- name: LockTaskUsageDailyRollup :exec
 -- Serialize explicit timezone rebuilds with rollup_task_usage_daily(), which

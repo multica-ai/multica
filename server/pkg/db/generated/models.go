@@ -60,9 +60,11 @@ type AgentRuntime struct {
 	OwnerID        pgtype.UUID        `json:"owner_id"`
 	LegacyDaemonID pgtype.Text        `json:"legacy_daemon_id"`
 	// IANA timezone (e.g. 'Asia/Shanghai'). Bucket boundary for per-day and per-hour token usage aggregation. Defaults to UTC for runtimes that existed before MUL-1950; the daemon registration / web UI overwrites this with an operator-detected value going forward.
-	Timezone   string `json:"timezone"`
-	Visibility string `json:"visibility"`
-	LocalPaths []byte `json:"local_paths"`
+	Timezone     string      `json:"timezone"`
+	Visibility   string      `json:"visibility"`
+	LocalPaths   []byte      `json:"local_paths"`
+	DisplayName  pgtype.Text `json:"display_name"`
+	MachineAlias pgtype.Text `json:"machine_alias"`
 }
 
 type AgentSkill struct {

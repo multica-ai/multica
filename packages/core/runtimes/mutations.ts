@@ -12,7 +12,7 @@ export function useDeleteRuntime(wsId: string) {
   });
 }
 
-// useUpdateRuntime patches editable fields on a runtime (timezone, visibility).
+// useUpdateRuntime patches editable fields on a runtime (timezone, visibility, display_name).
 // Invalidates the runtime list AND any keys downstream of the updated runtime
 // — usage queries are bucketed by tz on the server, so a tz change must blow
 // away cached usage rows or the chart would lie for one polling cycle. A
@@ -26,7 +26,7 @@ export function useUpdateRuntime(wsId: string) {
       patch,
     }: {
       runtimeId: string;
-      patch: { timezone?: string; visibility?: "private" | "public" };
+      patch: { timezone?: string; visibility?: "private" | "public"; display_name?: string; machine_alias?: string };
     }) => api.updateRuntime(runtimeId, patch),
     onSettled: (_data, _err, vars) => {
       qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });

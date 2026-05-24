@@ -14,6 +14,10 @@ export interface RuntimeMachine {
   id: string;
   daemonId: string | null;
   title: string;
+  /** Original hostname extracted from device_info (e.g. iZuf6879qk2er43lht88n5Z). */
+  hostname: string | null;
+  /** User-set machine alias, stored on each runtime's machine_alias field. */
+  machineAlias: string | null;
   subtitle: string | null;
   deviceInfo: string | null;
   cliVersion: string | null;
@@ -108,6 +112,8 @@ function placeholderLocalMachine(
     id: daemonId ? `local:${daemonId}` : "local:placeholder",
     daemonId,
     title: options.localMachineName ?? "This machine",
+    hostname: options.localMachineName ?? null,
+    machineAlias: null,
     subtitle: null,
     deviceInfo: null,
     cliVersion: null,
@@ -142,6 +148,8 @@ export function filterRuntimeMachines(
       machine.deviceInfo,
       machine.daemonId,
       machine.providerNames.join(" "),
+      machine.runtimes.map((runtime) => runtime.display_name).filter(Boolean).join(" "),
+      machine.runtimes.map((runtime) => runtime.machine_alias).filter(Boolean).join(" "),
       machine.runtimes.map((runtime) => runtime.name).join(" "),
     ]
       .filter(Boolean)
@@ -210,10 +218,15 @@ function finalizeRuntimeMachine(
     { runningCount: 0, queuedCount: 0 },
   );
 
+  const hostname = first ? runtimeDeviceName(first) : null;
+  const machineAlias = first?.machine_alias ?? null;
+
   return {
     id: draft.id,
     daemonId: draft.daemonId,
     title,
+    hostname,
+    machineAlias,
     subtitle,
     deviceInfo,
     cliVersion: commonCliVersion(runtimes),
@@ -257,6 +270,8 @@ function machineTitle(
 
   const first = runtimes[0];
   if (!first) return "Unknown machine";
+
+  if (first.machine_alias) return first.machine_alias;
 
   const deviceName = runtimeDeviceName(first);
   if (deviceName) return deviceName;

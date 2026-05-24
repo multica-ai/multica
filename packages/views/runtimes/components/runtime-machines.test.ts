@@ -15,6 +15,8 @@ function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
     workspace_id: "ws-1",
     daemon_id: "daemon-1",
     name: "Claude (dev-machine.local)",
+    display_name: null,
+    machine_alias: null,
     runtime_mode: "local",
     provider: "claude",
     launch_header: "",
@@ -195,5 +197,60 @@ describe("splitRuntimeName", () => {
       base: "Codex cloud",
       hostname: null,
     });
+  });
+});
+
+describe("display_name", () => {
+  it("uses display_name as machine title when set", () => {
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({
+          display_name: "My MacBook",
+          name: "Claude (dev-machine.local)",
+        }),
+      ],
+      { now: NOW },
+    );
+
+    expect(machines[0]).toMatchObject({
+      title: "My MacBook",
+    });
+  });
+
+  it("falls back to device name when display_name is null", () => {
+    const machines = buildRuntimeMachines(
+      [makeRuntime({ display_name: null })],
+      { now: NOW },
+    );
+
+    expect(machines[0]).toMatchObject({
+      title: "dev-machine.local",
+    });
+  });
+
+  it("searches by display_name in filterRuntimeMachines", () => {
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({
+          id: "rt-1",
+          daemon_id: "daemon-1",
+          display_name: "Production Server",
+          name: "Claude (prod.local)",
+        }),
+        makeRuntime({
+          id: "rt-2",
+          daemon_id: "daemon-2",
+          display_name: null,
+          name: "Claude (dev.local)",
+        }),
+      ],
+      { now: NOW },
+    );
+
+    expect(filterRuntimeMachines(machines, "Production", "all")).toHaveLength(1);
+    expect(filterRuntimeMachines(machines, "Production", "all")[0]).toMatchObject({
+      title: "Production Server",
+    });
+    expect(filterRuntimeMachines(machines, "dev.local", "all")).toHaveLength(1);
   });
 });

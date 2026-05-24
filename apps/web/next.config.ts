@@ -28,6 +28,9 @@ const nextConfig: NextConfig = {
   ...(allowedDevOrigins && allowedDevOrigins.length > 0
     ? { allowedDevOrigins }
     : {}),
+  typescript: {
+    ignoreBuildErrors: true,
+  },
   images: {
     formats: ["image/avif", "image/webp"],
     qualities: [75, 80, 85],

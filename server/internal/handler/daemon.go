@@ -838,12 +838,13 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 // heartbeat_scheduler.go for the two implementations.
 func (h *Handler) recordHeartbeat(ctx context.Context, rt db.AgentRuntime) error {
 	now := time.Now()
+	wasOffline := rt.Status != "online"
 
 	// Decide whether the DB row needs a write *before* touching Redis, so a
 	// Touch failure can simply force needDBWrite=true without re-evaluating
 	// the structural reasons.
 	needDBWrite := !h.LivenessStore.Available() ||
-		rt.Status != "online" ||
+		wasOffline ||
 		!rt.LastSeenAt.Valid ||
 		now.Sub(rt.LastSeenAt.Time) >= runtimeHeartbeatDBFlushInterval
 
@@ -866,7 +867,18 @@ func (h *Handler) recordHeartbeat(ctx context.Context, rt db.AgentRuntime) error
 	// Either bumps last_seen_at on an already-online row (Touch + race
 	// fallback) or flips status from offline to online. The scheduler
 	// chooses sync vs batched per case; see HeartbeatScheduler doc.
-	return h.HeartbeatScheduler.Schedule(ctx, rt)
+	if err := h.HeartbeatScheduler.Schedule(ctx, rt); err != nil {
+		return err
+	}
+
+	// Notify frontend when a runtime recovers from offline via heartbeat,
+	// so the UI re-fetches and shows the runtime as online immediately.
+	if wasOffline {
+		h.publish(protocol.EventDaemonRegister, uuidToString(rt.WorkspaceID), "system", "", map[string]any{
+			"action": "heartbeat_revive",
+		})
+	}
+	return nil
 }
 
 // heartbeatMetrics carries per-stage timings out of processHeartbeat so the

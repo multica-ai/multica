@@ -79,6 +79,8 @@ function makeRuntime(overrides: Partial<RuntimeDevice>): RuntimeDevice {
     workspace_id: "ws-1",
     daemon_id: null,
     name: "Test Runtime",
+    display_name: null,
+    machine_alias: null,
     runtime_mode: "local",
     provider: "claude",
     launch_header: "",
