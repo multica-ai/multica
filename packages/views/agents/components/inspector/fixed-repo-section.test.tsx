@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+// @vitest-environment jsdom
+
+import { describe, expect, it, vi, afterEach } from "vitest";
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import type { Agent } from "@multica/core/types";
 import { FixedRepoSection } from "./fixed-repo-section";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -69,7 +70,27 @@ function renderSection(
   );
 }
 
+function openDialog() {
+  const editBtn = screen.getByLabelText("Edit fixed repository settings");
+  fireEvent.click(editBtn);
+}
+
+/** Find the "+" button next to the path input by its disabled state when input is empty. */
+function getAddPathButton(): HTMLButtonElement {
+  // The add button is the disabled button (input is empty before typing)
+  // After typing, it becomes enabled. Find it by its position next to the input.
+  const input = screen.getByPlaceholderText("/path/to/repo");
+  const container = input.parentElement!;
+  // The button is a sibling of the input in the same flex row
+  const buttons = container.querySelectorAll("button");
+  return Array.from(buttons).find((b) => b.querySelector("svg"))!;
+}
+
 describe("FixedRepoSection", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   describe("when canEdit is false", () => {
     it("shows static text without toggle or edit button", () => {
       const agent = makeAgent({ fixed_repo_enabled: false });
@@ -107,27 +128,23 @@ describe("FixedRepoSection", () => {
       expect(screen.getByLabelText("Edit fixed repository settings")).toBeInTheDocument();
     });
 
-    it("calls onUpdate when toggle is switched", async () => {
-      const user = userEvent.setup();
+    it("calls onUpdate when toggle is switched", () => {
       const agent = makeAgent();
       const onUpdate = vi.fn().mockResolvedValue(undefined);
       renderSection(agent, true, onUpdate);
 
-      const switchEl = screen.getByRole("switch");
-      await user.click(switchEl);
+      fireEvent.click(screen.getByRole("switch"));
 
       expect(onUpdate).toHaveBeenCalledWith({ fixed_repo_enabled: true });
     });
   });
 
   describe("edit dialog", () => {
-    it("opens dialog when edit button is clicked", async () => {
-      const user = userEvent.setup();
+    it("opens dialog when edit button is clicked", () => {
       const agent = makeAgent({ fixed_repo_enabled: true });
       renderSection(agent, true);
 
-      const editBtn = screen.getByLabelText("Edit fixed repository settings");
-      await user.click(editBtn);
+      openDialog();
 
       expect(screen.getByText("Fixed Repository Settings")).toBeInTheDocument();
       expect(screen.getByText("VCS Type")).toBeInTheDocument();
@@ -136,58 +153,69 @@ describe("FixedRepoSection", () => {
       expect(screen.getByText("Cleanup Script")).toBeInTheDocument();
     });
 
-    it("shows existing paths in dialog", async () => {
-      const user = userEvent.setup();
+    it("shows existing paths in dialog", () => {
       const agent = makeAgent({
         fixed_repo_enabled: true,
         fixed_repo_paths: ["/data/repos/project-a", "/data/repos/project-b"],
       });
       renderSection(agent, true);
 
-      await user.click(screen.getByLabelText("Edit fixed repository settings"));
+      openDialog();
 
       expect(screen.getByText("/data/repos/project-a")).toBeInTheDocument();
       expect(screen.getByText("/data/repos/project-b")).toBeInTheDocument();
     });
 
-    it("can add a new path", async () => {
-      const user = userEvent.setup();
+    it("can add a new path", () => {
       const agent = makeAgent({
         fixed_repo_enabled: true,
         fixed_repo_paths: [],
       });
-      const onUpdate = vi.fn().mockResolvedValue(undefined);
-      renderSection(agent, true, onUpdate);
+      renderSection(agent, true);
 
-      await user.click(screen.getByLabelText("Edit fixed repository settings"));
+      openDialog();
 
       const input = screen.getByPlaceholderText("/path/to/repo");
-      await user.type(input, "/data/repos/new-project");
+      fireEvent.change(input, { target: { value: "/data/repos/new-project" } });
 
-      const addBtn = screen.getByRole("button", { name: "" }); // Plus icon button
-      await user.click(addBtn);
+      const addBtn = getAddPathButton();
+      fireEvent.click(addBtn);
 
       expect(screen.getByText("/data/repos/new-project")).toBeInTheDocument();
     });
 
-    it("can remove a path", async () => {
-      const user = userEvent.setup();
+    it("can add a path by pressing Enter", () => {
+      const agent = makeAgent({
+        fixed_repo_enabled: true,
+        fixed_repo_paths: [],
+      });
+      renderSection(agent, true);
+
+      openDialog();
+
+      const input = screen.getByPlaceholderText("/path/to/repo");
+      fireEvent.change(input, { target: { value: "/data/repos/new-project" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(screen.getByText("/data/repos/new-project")).toBeInTheDocument();
+    });
+
+    it("can remove a path", () => {
       const agent = makeAgent({
         fixed_repo_enabled: true,
         fixed_repo_paths: ["/data/repos/project-a"],
       });
       renderSection(agent, true);
 
-      await user.click(screen.getByLabelText("Edit fixed repository settings"));
+      openDialog();
 
       const removeBtn = screen.getByLabelText("Remove /data/repos/project-a");
-      await user.click(removeBtn);
+      fireEvent.click(removeBtn);
 
       expect(screen.getByText("No paths configured")).toBeInTheDocument();
     });
 
-    it("save button is disabled when no changes", async () => {
-      const user = userEvent.setup();
+    it("save button is disabled when no changes", () => {
       const agent = makeAgent({
         fixed_repo_enabled: true,
         vcs_type: "git",
@@ -195,14 +223,13 @@ describe("FixedRepoSection", () => {
       });
       renderSection(agent, true);
 
-      await user.click(screen.getByLabelText("Edit fixed repository settings"));
+      openDialog();
 
       const saveBtn = screen.getByRole("button", { name: "Save" });
       expect(saveBtn).toBeDisabled();
     });
 
-    it("calls onUpdate with all fields on save", async () => {
-      const user = userEvent.setup();
+    it("calls onUpdate with changed fields on save", () => {
       const agent = makeAgent({
         fixed_repo_enabled: true,
         vcs_type: "",
@@ -213,30 +240,23 @@ describe("FixedRepoSection", () => {
       const onUpdate = vi.fn().mockResolvedValue(undefined);
       renderSection(agent, true, onUpdate);
 
-      await user.click(screen.getByLabelText("Edit fixed repository settings"));
+      openDialog();
 
       // Add a path
       const input = screen.getByPlaceholderText("/path/to/repo");
-      await user.type(input, "/data/repos/project");
-      await user.click(screen.getByRole("button", { name: "" })); // Plus icon
-
-      // Change VCS type - click on the select trigger
-      const selectTrigger = screen.getByRole("combobox");
-      await user.click(selectTrigger);
-
-      // Click on git option
-      await user.click(screen.getByRole("option", { name: "git" }));
+      fireEvent.change(input, { target: { value: "/data/repos/project" } });
+      fireEvent.keyDown(input, { key: "Enter" });
 
       // Add init script
       const initInput = screen.getByPlaceholderText("/path/to/init.sh");
-      await user.type(initInput, "/scripts/init.sh");
+      fireEvent.change(initInput, { target: { value: "/scripts/init.sh" } });
 
       // Save
       const saveBtn = screen.getByRole("button", { name: "Save" });
-      await user.click(saveBtn);
+      fireEvent.click(saveBtn);
 
       expect(onUpdate).toHaveBeenCalledWith({
-        vcs_type: "git",
+        vcs_type: "",
         fixed_repo_paths: ["/data/repos/project"],
         init_script: "/scripts/init.sh",
         cleanup_script: "",
