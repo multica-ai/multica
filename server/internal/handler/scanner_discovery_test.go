@@ -144,3 +144,86 @@ func TestScannerDiscovery_ReturnsRuntimes(t *testing.T) {
 		t.Errorf("mcp_servers: got nil, want []")
 	}
 }
+
+func TestScannerDiscovery_NormalizesStaleRuntimeCapabilities(t *testing.T) {
+	// CEREBRO-PATCH(runtime-capability-normalize-test): scanner discovery must not expose stale empty runtime snapshots.
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	staleCodexCaps, _ := json.Marshal(map[string]any{
+		"providers":   []string{"codex"},
+		"tools":       []string{},
+		"mcp_servers": []string{},
+	})
+	claudeToolsConfig := []byte(`{"mcpServers":{"browser":{"command":"npx","args":["@railsblueprint/blueprint-mcp@latest"]}}}`)
+	var codexRuntimeID, claudeRuntimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, capabilities, last_seen_at
+		)
+		VALUES ($1, NULL, $2, 'local', 'codex', 'online', $3, '{}'::jsonb, $4::jsonb, now())
+		RETURNING id
+	`, testWorkspaceID, "scanner-disc-stale-codex", "scanner discovery stale codex", staleCodexCaps).Scan(&codexRuntimeID); err != nil {
+		t.Fatalf("seed codex runtime: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, codexRuntimeID)
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, capabilities, tools_config, last_seen_at
+		)
+		VALUES ($1, NULL, $2, 'local', 'claude', 'online', $3, '{}'::jsonb, '{}'::jsonb, $4::jsonb, now())
+		RETURNING id
+	`, testWorkspaceID, "scanner-disc-claude-mcp", "scanner discovery claude mcp", claudeToolsConfig).Scan(&claudeRuntimeID); err != nil {
+		t.Fatalf("seed claude runtime: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, claudeRuntimeID)
+
+	queries := testHandler.Queries
+	pool := testHandler.TxStarter
+	hub := realtime.NewHub()
+	bus := events.New()
+	emailSvc := service.NewEmailService()
+	cfg := Config{ScannerDiscoveryToken: "secret-scanner-token"}
+	gatedHandler := New(queries, pool, hub, bus, emailSvc, nil, nil, nil, nil, cfg)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/scanner-discovery/runtimes", nil)
+	req.Header.Set("Authorization", "Bearer secret-scanner-token")
+	gatedHandler.GetScannerDiscoveryRuntimes(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Runtimes []ScannerDiscoveryRuntime `json:"runtimes"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	var gotCodex, gotClaude *ScannerDiscoveryRuntime
+	for i, rt := range resp.Runtimes {
+		switch rt.Name {
+		case "scanner-disc-stale-codex":
+			gotCodex = &resp.Runtimes[i]
+		case "scanner-disc-claude-mcp":
+			gotClaude = &resp.Runtimes[i]
+		}
+	}
+	if gotCodex == nil {
+		t.Fatalf("stale codex runtime missing from response")
+	}
+	if !containsString(gotCodex.Tools, "bash") || !containsString(gotCodex.Tools, "apply_patch") {
+		t.Fatalf("codex tools not normalized: %v", gotCodex.Tools)
+	}
+	if gotClaude == nil {
+		t.Fatalf("claude mcp runtime missing from response")
+	}
+	if got, want := gotClaude.MCPServers, []string{"browser"}; !equalStringSlices(got, want) {
+		t.Fatalf("claude mcp_servers: got %v, want %v", got, want)
+	}
+}

@@ -2,7 +2,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -58,20 +57,9 @@ func (h *Handler) GetScannerDiscoveryRuntimes(w http.ResponseWriter, r *http.Req
 			Tools:      []string{},
 			MCPServers: []string{},
 		}
-		if len(rt.Capabilities) > 0 {
-			var caps struct {
-				Tools      []string `json:"tools"`
-				MCPServers []string `json:"mcp_servers"`
-			}
-			if err := json.Unmarshal(rt.Capabilities, &caps); err == nil {
-				if caps.Tools != nil {
-					entry.Tools = caps.Tools
-				}
-				if caps.MCPServers != nil {
-					entry.MCPServers = caps.MCPServers
-				}
-			}
-		}
+		caps := normalizedRuntimeCapabilities(rt.Provider, rt.Capabilities, rt.ToolsConfig) // CEREBRO-PATCH(scanner-discovery-capability-normalize): include registry defaults and runtime MCP config.
+		entry.Tools = anyStringSlice(caps["tools"])
+		entry.MCPServers = anyStringSlice(caps["mcp_servers"])
 		resp = append(resp, entry)
 	}
 

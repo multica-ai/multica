@@ -77,13 +77,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		metadata = map[string]any{}
 	}
 
-	var capabilities any
-	if len(rt.Capabilities) > 0 {
-		json.Unmarshal(rt.Capabilities, &capabilities)
-	}
-	if capabilities == nil {
-		capabilities = map[string]any{}
-	}
+	capabilities := normalizedRuntimeCapabilities(rt.Provider, rt.Capabilities, rt.ToolsConfig) // CEREBRO-PATCH(runtime-capability-normalize): include registry defaults and runtime MCP config in API responses.
 
 	return AgentRuntimeResponse{
 		ID:             uuidToString(rt.ID),
