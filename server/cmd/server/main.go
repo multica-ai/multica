@@ -318,6 +318,7 @@ func main() {
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
+	go runTaskUsageRollup(sweepCtx, pool)
 
 	if metricsServer != nil {
 		go func() {
