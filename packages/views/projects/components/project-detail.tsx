@@ -243,6 +243,8 @@ function ProjectIssuesContent({
           hiddenStatuses={hiddenStatuses}
           onMoveIssue={handleMoveIssue}
           childProgressMap={childProgressMap}
+          myIssuesScope={scope}
+          myIssuesFilter={filter}
         />
       )}
     </div>

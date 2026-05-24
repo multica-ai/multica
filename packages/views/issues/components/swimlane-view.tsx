@@ -22,6 +22,8 @@ import type { Issue, IssueStatus } from "@multica/core/types";
 import type { UpdateIssueRequest } from "@multica/core/types";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
+import type { MyIssuesFilter } from "@multica/core/issues/queries";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -128,12 +130,16 @@ export function SwimLaneView({
   hiddenStatuses = [],
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
+  myIssuesScope,
+  myIssuesFilter,
 }: {
   issues: Issue[];
   visibleStatuses?: IssueStatus[];
   hiddenStatuses?: IssueStatus[];
   onMoveIssue: (issueId: string, updates: SwimLaneMoveUpdates) => void;
   childProgressMap?: Map<string, ChildProgress>;
+  myIssuesScope?: string;
+  myIssuesFilter?: MyIssuesFilter;
 }) {
   const { t } = useT("issues");
   const paths = useWorkspacePaths();
@@ -141,6 +147,14 @@ export function SwimLaneView({
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const swimlaneOrder = useViewStore((s) => s.swimlaneOrder);
+
+  const myIssuesOpts = useMemo(
+    () =>
+      myIssuesScope
+        ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
+        : undefined,
+    [myIssuesScope, myIssuesFilter],
+  );
 
   const sortedStatuses = useMemo(
     () => BOARD_STATUSES.filter((s) => visibleStatuses.includes(s)),
@@ -629,7 +643,7 @@ export function SwimLaneView({
         {hiddenStatuses.length > 0 && (
           <SwimLaneHiddenColumnsPanel
             hiddenStatuses={hiddenStatuses}
-            statusTotals={statusTotals}
+            myIssuesOpts={myIssuesOpts}
           />
         )}
       </div>
@@ -855,27 +869,37 @@ function SwimLaneCell({
   );
 }
 
+function SwimLaneHiddenColumnRow({
+  status,
+  myIssuesOpts,
+}: {
+  status: IssueStatus;
+  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+}) {
+  const { total } = useLoadMoreByStatus(status, myIssuesOpts);
+  return <HiddenColumnRow status={status} total={total} />;
+}
+
 /**
  * Swimlane-specific wrapper around the shared {@link HiddenColumnsPanel}.
- * Per-status total is computed from the in-memory `issues` array (already
- * filtered/paginated upstream), so unlike the board this avoids a separate
- * `useLoadMoreByStatus` query per hidden column.
+ * Uses `useLoadMoreByStatus` to get accurate cached/live status counts from
+ * the React Query cache, mirroring the board's hidden column behavior.
  */
 function SwimLaneHiddenColumnsPanel({
   hiddenStatuses,
-  statusTotals,
+  myIssuesOpts,
 }: {
   hiddenStatuses: IssueStatus[];
-  statusTotals: Map<IssueStatus, number>;
+  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
 }) {
   return (
     <HiddenColumnsPanel
       hiddenStatuses={hiddenStatuses}
       renderRow={(status) => (
-        <HiddenColumnRow
+        <SwimLaneHiddenColumnRow
           key={status}
           status={status}
-          total={statusTotals.get(status) ?? 0}
+          myIssuesOpts={myIssuesOpts}
         />
       )}
     />

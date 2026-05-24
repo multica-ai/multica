@@ -263,6 +263,8 @@ export function MyIssuesPage() {
                 hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
+                myIssuesScope={scope}
+                myIssuesFilter={filter}
               />
             ) : (
               <ListView

@@ -76,6 +76,19 @@ vi.mock("@multica/core/issues/config", () => ({
   },
 }));
 
+// Mock @multica/core/issues/mutations for hidden column status counts
+vi.mock("@multica/core/issues/mutations", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/issues/mutations")>();
+  return {
+    ...actual,
+    useLoadMoreByStatus: (status: string) => {
+      if (status === "backlog") return { total: 1, loaded: 1, hasMore: false, isLoading: false, loadMore: vi.fn() };
+      if (status === "blocked") return { total: 0, loaded: 0, hasMore: false, isLoading: false, loadMore: vi.fn() };
+      return { total: 0, loaded: 0, hasMore: false, isLoading: false, loadMore: vi.fn() };
+    },
+  };
+});
+
 // Mock view store. `swimlaneOrder` is mutable on the captured object so
 // tests can simulate persisted lane order and assert that
 // `setSwimlaneOrder` was called by drag-end handlers.
