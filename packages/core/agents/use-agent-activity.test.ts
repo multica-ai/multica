@@ -45,6 +45,11 @@ const fullHistoryAgent: Agent = {
   status: "idle",
   max_concurrent_tasks: 1,
   model: "",
+  fixed_repo_enabled: false,
+  fixed_repo_paths: [],
+  vcs_type: "",
+  init_script: "",
+  cleanup_script: "",
   owner_id: null,
   skills: [],
   // Older than the window so daysSinceCreated saturates at DAYS.

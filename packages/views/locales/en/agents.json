@@ -406,5 +406,25 @@
     "runtime_offline": "Daemon offline",
     "runtime_recovery": "Daemon restarted",
     "manual": "Cancelled by user"
+  },
+  "fixed_repo": {
+    "section_label": "Fixed Repository",
+    "disabled": "Disabled",
+    "enabled": "Enabled",
+    "edit_aria": "Edit fixed repository settings",
+    "dialog_title": "Fixed Repository Settings",
+    "vcs_type_label": "VCS Type",
+    "vcs_type_placeholder": "Select VCS type",
+    "vcs_none": "None",
+    "paths_label": "Paths",
+    "paths_placeholder": "/path/to/repo",
+    "paths_add": "Add path",
+    "paths_empty": "No paths configured",
+    "init_script_label": "Init Script",
+    "init_script_placeholder": "/path/to/init.sh",
+    "cleanup_script_label": "Cleanup Script",
+    "cleanup_script_placeholder": "/path/to/cleanup.sh",
+    "save": "Save",
+    "cancel": "Cancel"
   }
 }

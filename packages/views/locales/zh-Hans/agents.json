@@ -396,5 +396,25 @@
     "runtime_offline": "守护进程离线",
     "runtime_recovery": "守护进程已重启",
     "manual": "用户取消"
+  },
+  "fixed_repo": {
+    "section_label": "固定仓库",
+    "disabled": "未启用",
+    "enabled": "已启用",
+    "edit_aria": "编辑固定仓库设置",
+    "dialog_title": "固定仓库设置",
+    "vcs_type_label": "VCS 类型",
+    "vcs_type_placeholder": "选择 VCS 类型",
+    "vcs_none": "无",
+    "paths_label": "路径",
+    "paths_placeholder": "/path/to/repo",
+    "paths_add": "添加路径",
+    "paths_empty": "未配置路径",
+    "init_script_label": "初始化脚本",
+    "init_script_placeholder": "/path/to/init.sh",
+    "cleanup_script_label": "清理脚本",
+    "cleanup_script_placeholder": "/path/to/cleanup.sh",
+    "save": "保存",
+    "cancel": "取消"
   }
 }

@@ -46,6 +46,7 @@ import { RuntimePicker } from "./inspector/runtime-picker";
 import { SkillAttach } from "./inspector/skill-attach";
 import { ThinkingPropRow } from "./inspector/thinking-prop-row";
 import { VisibilityPicker } from "./inspector/visibility-picker";
+import { FixedRepoSection } from "./inspector/fixed-repo-section";
 
 interface InspectorProps {
   agent: Agent;
@@ -156,6 +157,16 @@ export function AgentDetailInspector({
           />
         </PropRow>
       </Section>
+
+      <FixedRepoSection
+        enabled={agent.fixed_repo_enabled}
+        paths={agent.fixed_repo_paths}
+        vcsType={agent.vcs_type}
+        initScript={agent.init_script}
+        cleanupScript={agent.cleanup_script}
+        canEdit={canEdit}
+        onUpdate={update}
+      />
 
       {/* Details — read-only (no hover, no chip styling — these aren't clickable) */}
       <Section label={t(($) => $.inspector.section_details)}>

@@ -142,6 +142,11 @@ export interface Agent {
    * (MUL-2339).
    */
   thinking_level?: string;
+  fixed_repo_enabled: boolean;
+  fixed_repo_paths: string[];
+  vcs_type: string;
+  init_script: string;
+  cleanup_script: string;
   owner_id: string | null;
   skills: AgentSkillSummary[];
   created_at: string;
@@ -274,9 +279,12 @@ export interface UpdateAgentRequest {
    *     runtime's provider enum, rejected with 400 if not recognised
    */
   thinking_level?: string;
+  fixed_repo_enabled?: boolean;
+  fixed_repo_paths?: string[];
+  vcs_type?: string;
+  init_script?: string;
+  cleanup_script?: string;
 }
-
-// Skills
 
 /**
  * Lightweight skill shape returned by list endpoints (`GET /api/skills`,
