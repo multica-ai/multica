@@ -37,6 +37,7 @@ import { useTranscriptViewStore, type TranscriptSortDirection } from "@multica/c
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
 import { redactSecrets } from "./redact";
 import type { TimelineItem } from "./build-timeline";
+import { mergeStreamingChunks, type MergedItem } from "./step-grouping";
 import { useT } from "../../i18n";
 
 interface AgentTranscriptDialogProps {
@@ -59,7 +60,7 @@ interface AgentTranscriptDialogProps {
 
 type EventColor = "agent" | "thinking" | "tool" | "result" | "error";
 
-function getEventColor(item: TimelineItem): EventColor {
+function getEventColor(item: MergedItem): EventColor {
   switch (item.type) {
     case "text":
       return "agent";
@@ -86,7 +87,7 @@ const colorClasses: Record<EventColor, { bg: string; bgActive: string; label: st
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function getEventLabel(item: TimelineItem): string {
+function getEventLabel(item: MergedItem): string {
   switch (item.type) {
     case "text":
       return "Agent";
@@ -103,7 +104,7 @@ function getEventLabel(item: TimelineItem): string {
   }
 }
 
-function getEventSummary(item: TimelineItem): string {
+function getEventSummary(item: MergedItem): string {
   switch (item.type) {
     case "text":
       return item.content?.split("\n").find((l) => l.trim().length > 0) ?? "";
@@ -217,13 +218,11 @@ export function AgentTranscriptDialog({
     return items.filter((item) => selectedTools.has(itemFilterKey(item)));
   }, [items, selectedTools]);
 
-  // Apply user-chosen sort direction. Reverse is a pure presentation concern —
-  // the underlying timeline (and its seq numbers) is untouched, so copy/filter
-  // and segment navigation continue to work against the same data.
-  const displayItems = useMemo(
-    () => (sortDirection === "newest_first" ? [...filteredItems].reverse() : filteredItems),
-    [filteredItems, sortDirection],
-  );
+  // Apply sort direction, then merge consecutive thinking/text chunks.
+  const displayItems = useMemo(() => {
+    const sorted = sortDirection === "newest_first" ? [...filteredItems].reverse() : filteredItems;
+    return mergeStreamingChunks(sorted);
+  }, [filteredItems, sortDirection]);
 
   // Toggling direction is a manual user action; jump the scroll container back
   // to the top so the newest end of the timeline (per the chosen direction) is
@@ -617,7 +616,7 @@ function TimelineBar({
   selectedSeq,
   onSegmentClick,
 }: {
-  items: TimelineItem[];
+  items: MergedItem[];
   selectedSeq: number | null;
   onSegmentClick: (seq: number) => void;
 }) {
@@ -672,10 +671,12 @@ function TimelineBar({
   );
 }
 
+// ─── Grouped event row ─────────────────────────────────────────────────────
+
 // ─── Transcript event row ───────────────────────────────────────────────────
 
 interface TranscriptEventRowProps {
-  item: TimelineItem;
+  item: MergedItem;
   isSelected: boolean;
 }
 
@@ -695,6 +696,11 @@ const TranscriptEventRow = ({
     (item.type === "thinking" && item.content && item.content.length > 0) ||
     (item.type === "text" && item.content && item.content.length > 0) ||
     (item.type === "error" && item.content && item.content.length > 0);
+
+  const seqLabel = item.lastSeq ? `#${item.seq}–#${item.lastSeq}` : `#${item.seq}`;
+  const mergedBadge = item.mergedCount > 1
+    ? <span className="ml-1 rounded bg-muted px-1 py-px text-[10px] text-muted-foreground">×{item.mergedCount}</span>
+    : null;
 
   return (
     <div
@@ -737,12 +743,13 @@ const TranscriptEventRow = ({
                 />
               )}
               <span className="truncate">{summary || "(empty)"}</span>
+              {mergedBadge}
             </div>
           </CollapsibleTrigger>
 
           {/* Seq number / index */}
           <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1">
-            #{item.seq}
+            {seqLabel}
           </span>
         </div>
 
@@ -763,7 +770,7 @@ const TranscriptEventRow = ({
 
 // ─── Event detail content ───────────────────────────────────────────────────
 
-function EventDetailContent({ item }: { item: TimelineItem }) {
+function EventDetailContent({ item }: { item: MergedItem }) {
   switch (item.type) {
     case "tool_use":
       return (
