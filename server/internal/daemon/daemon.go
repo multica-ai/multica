@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -38,6 +39,27 @@ type taskRunnerFunc func(context.Context, Task, string, int, *slog.Logger) (Task
 
 func (f taskRunnerFunc) run(ctx context.Context, task Task, provider string, slot int, log *slog.Logger) (TaskResult, error) {
 	return f(ctx, task, provider, slot, log)
+}
+
+type multicaTaskMyMirEvent struct {
+	Provider              string `json:"provider"`
+	TaskID                string `json:"task_id"`
+	IssueID               string `json:"issue_id,omitempty"`
+	WorkspaceID           string `json:"workspace_id,omitempty"`
+	ProjectID             string `json:"project_id,omitempty"`
+	ProjectTitle          string `json:"project_title,omitempty"`
+	AgentID               string `json:"agent_id,omitempty"`
+	AgentName             string `json:"agent_name,omitempty"`
+	RuntimeID             string `json:"runtime_id,omitempty"`
+	Status                string `json:"status"`
+	FailureReason         string `json:"failure_reason,omitempty"`
+	SessionID             string `json:"session_id,omitempty"`
+	WorkDir               string `json:"work_dir,omitempty"`
+	TriggerCommentID      string `json:"trigger_comment_id,omitempty"`
+	TriggerCommentContent string `json:"trigger_comment_content,omitempty"`
+	ChatSessionID         string `json:"chat_session_id,omitempty"`
+	ChatMessage           string `json:"chat_message,omitempty"`
+	Comment               string `json:"comment,omitempty"`
 }
 
 var (
@@ -2091,6 +2113,11 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		taskLog.Error("task failed", "error", err)
 		// runTask returned without a TaskResult, so we don't have a SessionID
 		// to forward — best we can do is record the failure.
+		d.writeTaskMyMirEvent(ctx, task, provider, TaskResult{
+			Status:        "blocked",
+			Comment:       err.Error(),
+			FailureReason: "agent_error",
+		}, taskLog)
 		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "agent_error"); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
 		}
@@ -2108,6 +2135,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		return
 	}
 
+	d.writeTaskMyMirEvent(ctx, task, provider, result, taskLog)
 	d.reportTaskResult(ctx, task.ID, result, taskLog)
 
 	// Write GC metadata after the task finishes so the periodic GC loop
@@ -2157,6 +2185,91 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			taskLog.Error("report failed task failed", "error", err)
 		}
 	}
+}
+
+func buildMulticaTaskMyMirEvent(task Task, provider string, result TaskResult) multicaTaskMyMirEvent {
+	agentID := task.AgentID
+	agentName := ""
+	if task.Agent != nil {
+		if task.Agent.ID != "" {
+			agentID = task.Agent.ID
+		}
+		agentName = task.Agent.Name
+	}
+	return multicaTaskMyMirEvent{
+		Provider:              provider,
+		TaskID:                task.ID,
+		IssueID:               task.IssueID,
+		WorkspaceID:           task.WorkspaceID,
+		ProjectID:             task.ProjectID,
+		ProjectTitle:          task.ProjectTitle,
+		AgentID:               agentID,
+		AgentName:             agentName,
+		RuntimeID:             task.RuntimeID,
+		Status:                result.Status,
+		FailureReason:         result.FailureReason,
+		SessionID:             result.SessionID,
+		WorkDir:               result.WorkDir,
+		TriggerCommentID:      task.TriggerCommentID,
+		TriggerCommentContent: truncateLog(task.TriggerCommentContent, 1200),
+		ChatSessionID:         task.ChatSessionID,
+		ChatMessage:           truncateLog(task.ChatMessage, 1200),
+		Comment:               truncateLog(result.Comment, 4000),
+	}
+}
+
+func (d *Daemon) writeTaskMyMirEvent(parent context.Context, task Task, provider string, result TaskResult, taskLog *slog.Logger) {
+	writer := strings.TrimSpace(os.Getenv("CLAWGODE_MYMIR_TASK_EVENT_WRITER"))
+	if writer == "" || provider == "ao" {
+		return
+	}
+	if _, err := os.Stat(writer); err != nil {
+		taskLog.Warn("mymir task event writer unavailable", "writer", writer, "error", err)
+		return
+	}
+
+	event := buildMulticaTaskMyMirEvent(task, provider, result)
+	eventFile, err := os.CreateTemp("", "multica-task-mymir-event-*.json")
+	if err != nil {
+		taskLog.Warn("mymir task event file create failed", "error", err)
+		return
+	}
+	eventPath := eventFile.Name()
+	defer os.Remove(eventPath)
+
+	enc := json.NewEncoder(eventFile)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(event); err != nil {
+		_ = eventFile.Close()
+		taskLog.Warn("mymir task event encode failed", "error", err)
+		return
+	}
+	if err := eventFile.Close(); err != nil {
+		taskLog.Warn("mymir task event file close failed", "error", err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, writer, eventPath)
+	cmd.Env = os.Environ()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		taskLog.Warn("mymir task event writer failed",
+			"writer", writer,
+			"provider", provider,
+			"task", shortID(task.ID),
+			"error", err,
+			"output", truncateLog(string(output), 1000),
+		)
+		return
+	}
+	taskLog.Info("mymir task event mirrored",
+		"writer", writer,
+		"provider", provider,
+		"task", shortID(task.ID),
+		"output", truncateLog(string(output), 500),
+	)
 }
 
 // gcMetaForTask classifies a finished task and produces a GCMeta of the right
