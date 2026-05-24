@@ -15,6 +15,7 @@ export type CerebroFlagKey =
   | "cerebro_web_push"
   | "cerebro_dashboard"
   | "cerebro_inbox_row_actions"
+  | "cerebro_inbox_action_grouping"
   | "cerebro_voice_dictation_enabled"
   | "cerebro_voice_output_enabled"
   | "cerebro_voice_summary_enabled"
@@ -52,6 +53,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_web_push: true,
   cerebro_dashboard: true,
   cerebro_inbox_row_actions: true,
+  cerebro_inbox_action_grouping: true,
   cerebro_voice_dictation_enabled: false,
   cerebro_voice_output_enabled: false,
   cerebro_voice_summary_enabled: false,
@@ -131,6 +133,12 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Inbox row actions",
     description:
       "Show the cerebro inbox row-actions surface: mute, mark-unread, hover menu, mobile swipe gestures, long-press menu, and the `e` keyboard shortcut.",
+  },
+  {
+    key: "cerebro_inbox_action_grouping",
+    label: "Inbox group by action",
+    description:
+      "Add a \"Group by → Action\" option to the inbox that buckets items by what to do next (Act now / Watching / Waiting / Calm) instead of by status. Default grouping for new users; switch it off or pick another grouping from the inbox's Group by menu.",
   },
   {
     key: "cerebro_voice_dictation_enabled",

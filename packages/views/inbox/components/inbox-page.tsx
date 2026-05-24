@@ -38,6 +38,10 @@ import {
   nextLocalNineAm,
   toDateTimeLocalValue,
   formatPlannedDateTime,
+  // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — "Group by → Action" buckets live in cerebro-inbox
+  INBOX_ACTION_GROUP_BY_OPTION,
+  bucketizeInboxAction,
+  useInboxActionGroupLabels,
 } from "@multica/cerebro-inbox";
 // CEREBRO-PATCH(inbox-channel-archive-import): JEH-851 — per-user channel archive mutation.
 import { useArchiveChannel } from "@multica/cerebro-channels";
@@ -114,7 +118,8 @@ import { InboxChatPanel } from "./inbox-chat-panel";
 
 type ViewMode = { kind: "inbox" } | { kind: "archived" };
 
-type GroupByMode = "none" | "project" | "agent" | "type";
+// CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — "action" mode added by cerebro
+type GroupByMode = "none" | "project" | "agent" | "type" | "action";
 
 const GROUP_BY_OPTIONS: { value: GroupByMode; label: string }[] = [
   { value: "none", label: "None" },
@@ -124,7 +129,8 @@ const GROUP_BY_OPTIONS: { value: GroupByMode; label: string }[] = [
 ];
 
 function isGroupByMode(s: string | null): s is GroupByMode {
-  return s === "none" || s === "project" || s === "agent" || s === "type";
+  // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — accept "action"
+  return s === "none" || s === "project" || s === "agent" || s === "type" || s === "action";
 }
 
 export function InboxPage() {
@@ -235,11 +241,15 @@ export function InboxPage() {
 
   const userId = useAuthStore((s) => s.user?.id ?? "");
   const { getActorName } = useActorName();
+  // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — flag gate + bucket-header labels
+  const actionGroupingEnabled = useFeatureFlag("cerebro_inbox_action_grouping");
+  const actionGroupLabels = useInboxActionGroupLabels();
   const groupByStorageKey = `multica_inbox_groupby_${wsId}_${userId}`;
   const [groupBy, setGroupBy] = useState<{ primary: GroupByMode; secondary: GroupByMode }>(() => {
     if (typeof window === "undefined") return { primary: "none", secondary: "none" };
     const saved = window.localStorage.getItem(groupByStorageKey);
-    if (!saved) return { primary: "none", secondary: "none" };
+    // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — new users default to Action grouping
+    if (!saved) return { primary: actionGroupingEnabled ? "action" : "none", secondary: "none" };
     const [p, s] = saved.split(",");
     return {
       primary: isGroupByMode(p ?? null) ? (p as GroupByMode) : "none",
@@ -250,6 +260,15 @@ export function InboxPage() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(groupByStorageKey, `${groupBy.primary},${groupBy.secondary}`);
   }, [groupBy, groupByStorageKey]);
+  // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — snap stale Action grouping back when flag is off
+  useEffect(() => {
+    if (!actionGroupingEnabled && groupBy.primary === "action")
+      setGroupBy({ primary: "none", secondary: "none" });
+  }, [actionGroupingEnabled, groupBy.primary]);
+  // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — prepend flag-gated Action option
+  const groupByOptions = actionGroupingEnabled
+    ? [INBOX_ACTION_GROUP_BY_OPTION, ...GROUP_BY_OPTIONS]
+    : GROUP_BY_OPTIONS;
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const toggleGroup = useCallback((key: string) => {
     setCollapsedGroups((c) => ({ ...c, [key]: !c[key] }));
@@ -655,15 +674,20 @@ export function InboxPage() {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-auto">
             <DropdownMenuItem disabled>Group by</DropdownMenuItem>
-            {GROUP_BY_OPTIONS.map((opt) => (
+            {/* CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — groupByOptions adds the Action entry */}
+            {groupByOptions.map((opt) => (
               <DropdownMenuItem
                 key={`p-${opt.value}`}
                 onClick={() =>
                   setGroupBy((g) => ({
                     primary: opt.value,
-                    // Drop secondary when it would equal new primary or when primary is none.
+                    // Drop secondary when it would equal new primary, or when primary
+                    // is a single-level mode (none / action) that takes no sub-grouping.
                     secondary:
-                      opt.value === "none" || g.secondary === opt.value ? "none" : g.secondary,
+                      // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — action is primary-only
+                      opt.value === "none" || opt.value === "action" || g.secondary === opt.value
+                        ? "none"
+                        : g.secondary,
                   }))
                 }
               >
@@ -673,7 +697,8 @@ export function InboxPage() {
                 {opt.label}
               </DropdownMenuItem>
             ))}
-            {groupBy.primary !== "none" && (
+            {/* CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — action is primary-only, no "Then by" */}
+            {groupBy.primary !== "none" && groupBy.primary !== "action" && (
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem disabled>Then by</DropdownMenuItem>
@@ -896,7 +921,11 @@ export function InboxPage() {
   };
 
   const bucketize = useCallback(
-    (mode: GroupByMode, entry: MergedEntry): { key: string; label: string; isFallback: boolean } => {
+    // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — optional `order` drives fixed action-bucket sort
+    (mode: GroupByMode, entry: MergedEntry): { key: string; label: string; isFallback: boolean; order?: number } => {
+      // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — action buckets live in cerebro-inbox
+      if (mode === "action")
+        return bucketizeInboxAction(entry, { userId, issueRunStates, chatRunStates, mentionedChannels }, actionGroupLabels);
       if (mode === "project") {
         if (entry.kind === "notif" && entry.item.project_id) {
           const proj = projectMap.get(entry.item.project_id);
@@ -968,7 +997,8 @@ export function InboxPage() {
       }
       return { key: "__none__", label: "", isFallback: true };
     },
-    [projectMap, agentMap],
+    // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — action bucketing reads run-state + mention signals
+    [projectMap, agentMap, typeLabels, userId, issueRunStates, chatRunStates, mentionedChannels, actionGroupLabels],
   );
 
   type Group = {
@@ -977,10 +1007,13 @@ export function InboxPage() {
     isFallback: boolean;
     entries: MergedEntry[];
     children?: Group[];
+    order?: number; // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — fixed action-bucket order
   };
 
   const sortGroups = (groups: Group[]) => {
     groups.sort((a, b) => {
+      // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — explicit order (action buckets) beats alphabetical
+      if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
       if (a.isFallback !== b.isFallback) return a.isFallback ? 1 : -1;
       return a.label.localeCompare(b.label);
     });

@@ -29,3 +29,15 @@ export {
   formatMutedUntilTime,
   formatPlannedDateTime,
 } from "./mute-time";
+// FIR-2115 — "Group by → Action" inbox grouping.
+export {
+  INBOX_ACTION_GROUP_BY_OPTION,
+  INBOX_ACTION_ORDER,
+  inboxActionOrderIndex,
+  classifyInboxAction,
+  bucketizeInboxAction,
+  type InboxActionCategory,
+  type InboxActionContext,
+  type InboxActionEntry,
+} from "./action-groups";
+export { useInboxActionGroupLabels } from "./strings";

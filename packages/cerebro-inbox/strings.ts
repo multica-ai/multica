@@ -4,6 +4,7 @@
 // @multica/views/i18n) so this package doesn't depend on @multica/views —
 // which depends on us — and avoid a circular workspace edge.
 import { useTranslation } from "react-i18next";
+import type { InboxActionCategory } from "./action-groups";
 
 /**
  * Localized strings for the cerebro inbox row-actions UI. Kept inside this
@@ -32,7 +33,22 @@ type StringTable = {
   /** Prefix shown on a row in the Muted filter, e.g. "Muted til 08:00". */
   muted_until_prefix: string;
   planned_for_prefix: string;
+  // FIR-2115 — "Group by → Action" bucket headers. English in every locale by
+  // product decision ("Waiting" must stay English; the rest follow suit so the
+  // four headers read as one consistent set).
+  action_act_now: string;
+  action_watching: string;
+  action_waiting: string;
+  action_calm: string;
 };
+
+/** Action-bucket headers, identical across locales (see StringTable note). */
+const actionLabels = {
+  action_act_now: "Act now",
+  action_watching: "Watching",
+  action_waiting: "Waiting",
+  action_calm: "Calm",
+} as const;
 
 const en: StringTable = {
   archive_tooltip: "Archive (e)",
@@ -53,6 +69,7 @@ const en: StringTable = {
   drawer_title: "Actions",
   muted_until_prefix: "Muted until",
   planned_for_prefix: "Planned for",
+  ...actionLabels,
 };
 
 const da: StringTable = {
@@ -74,6 +91,7 @@ const da: StringTable = {
   drawer_title: "Handlinger",
   muted_until_prefix: "Muted til",
   planned_for_prefix: "Planlagt til",
+  ...actionLabels,
 };
 
 // JEH-1322 — zh-Hans table for cerebro inbox row actions. Without this the
@@ -99,6 +117,7 @@ const zhHans: StringTable = {
   drawer_title: "操作",
   muted_until_prefix: "静音至",
   planned_for_prefix: "计划于",
+  ...actionLabels,
 };
 
 /**
@@ -121,4 +140,19 @@ export function pickCerebroInboxStrings(language: string | undefined): StringTab
 export function useCerebroInboxStrings(): StringTable {
   const { i18n } = useTranslation();
   return pickCerebroInboxStrings(i18n.language);
+}
+
+/**
+ * FIR-2115 — "Group by → Action" bucket headers keyed by category, ready to
+ * hand to `bucketizeInboxAction`. Identical across locales today, but routed
+ * through the string table so a future localization lands in one place.
+ */
+export function useInboxActionGroupLabels(): Record<InboxActionCategory, string> {
+  const s = useCerebroInboxStrings();
+  return {
+    act_now: s.action_act_now,
+    watching: s.action_watching,
+    waiting: s.action_waiting,
+    calm: s.action_calm,
+  };
 }
