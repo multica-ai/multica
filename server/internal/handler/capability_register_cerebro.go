@@ -8,7 +8,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"sort"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -73,12 +72,6 @@ type capabilityReportRequest struct {
 	Capabilities []CapabilityReportInput `json:"capabilities"`
 }
 
-type capabilityReportItem struct {
-	Name     string
-	Kind     string
-	Metadata map[string]any
-}
-
 func (h *Handler) ListCapabilities(w http.ResponseWriter, r *http.Request) {
 	if !h.requireCapabilityRegister(w) {
 		return
@@ -140,59 +133,6 @@ func (h *Handler) ReportCapabilities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"capabilities": caps})
-}
-
-func (h *Handler) persistRuntimeCapabilitySnapshot(r *http.Request, rtID, workspaceID pgtype.UUID, snapshot json.RawMessage) {
-	if h.capabilityRegister == nil {
-		return
-	}
-	var raw map[string]json.RawMessage
-	if len(snapshot) == 0 || json.Unmarshal(snapshot, &raw) != nil {
-		return
-	}
-	items := capabilityItemsFromSnapshot(raw)
-	if len(items) == 0 {
-		return
-	}
-	reporter := CapabilitySubject{Type: "runtime", ID: uuidToString(rtID)}
-	reports := make([]CapabilityReportInput, 0, len(items))
-	for _, item := range items {
-		reports = append(reports, CapabilityReportInput{
-			Key:      item.Kind + ":" + item.Name,
-			Title:    item.Name,
-			Category: item.Kind,
-			Source:   "runtime_report",
-			Metadata: item.Metadata,
-			Owners:   []CapabilitySubject{reporter},
-			Users:    []CapabilitySubject{reporter},
-		})
-	}
-	_, _ = h.capabilityRegister.Report(r.Context(), workspaceID, reporter, reports)
-}
-
-func capabilityItemsFromSnapshot(snapshot map[string]json.RawMessage) []capabilityReportItem {
-	kinds := make([]string, 0, len(snapshot))
-	for kind := range snapshot {
-		kinds = append(kinds, kind)
-	}
-	sort.Strings(kinds)
-	items := []capabilityReportItem{}
-	for _, kind := range kinds {
-		if kind == "discovery_method" || kind == "providers" {
-			continue
-		}
-		var names []string
-		if err := json.Unmarshal(snapshot[kind], &names); err != nil {
-			continue
-		}
-		for _, name := range names {
-			name = strings.TrimSpace(name)
-			if name != "" {
-				items = append(items, capabilityReportItem{Name: name, Kind: kind, Metadata: map[string]any{"snapshot_key": kind}})
-			}
-		}
-	}
-	return items
 }
 
 func (h *Handler) capabilityWorkspace(w http.ResponseWriter, r *http.Request) (string, pgtype.UUID, bool) {
