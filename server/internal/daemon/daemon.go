@@ -153,6 +153,13 @@ type Daemon struct {
 	activeEnvRootsMu sync.Mutex
 	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
 
+	// aoIssueSessions is a local fallback for Multica Cloud deployments that do
+	// not yet return prior_session_id for AO comment-triggered issue tasks. AO
+	// follow-ups must route to the existing factory session with `ao send`
+	// instead of spawning cg-N+1 on every evidence/comment reply.
+	aoIssueSessionsMu sync.RWMutex
+	aoIssueSessions   map[string]aoIssueSessionPointer
+
 	// bgSyncs tracks background goroutines started by registerTaskRepos so
 	// callers (notably tests using t.TempDir-backed cache roots) can wait for
 	// them to drain before tearing the daemon down. Without this the bg
@@ -186,6 +193,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		agentVersions:             make(map[string]string),
 		wsHBLastAck:               make(map[string]time.Time),
 		activeEnvRoots:            make(map[string]int),
+		aoIssueSessions:           make(map[string]aoIssueSessionPointer),
 		runtimeGoneInflight:       make(map[string]struct{}),
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
@@ -193,6 +201,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	}
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
+	d.loadAOIssueSessionCache(logger)
 	return d
 }
 
@@ -2124,6 +2133,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		return
 	}
 
+	d.rememberAOIssueSession(task, provider, result, taskLog)
+
 	_ = d.client.ReportProgress(ctx, task.ID, "Finishing task", 2, 2)
 
 	// Final pre-completion check: if the server already moved the task to
@@ -2315,6 +2326,8 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 }
 
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
+	d.applyAOIssueSessionFallback(&task, provider, taskLog)
+
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
 	// CLI would otherwise silently fall back to the user-global config — a
