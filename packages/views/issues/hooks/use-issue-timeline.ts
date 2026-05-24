@@ -33,6 +33,7 @@ import {
   useToggleCommentReaction,
   type ToggleCommentReactionVars,
 } from "@multica/core/issues/mutations";
+import { sortTimelineEntriesAsc } from "@multica/core/issues/timeline-sort";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
@@ -100,12 +101,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           const entry = commentToTimelineEntry(comment);
           if (!old) return [entry];
           if (old.some((e) => e.id === comment.id)) return old;
-          const next = [...old, entry];
-          next.sort((a, b) => {
-            if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
-            return a.id < b.id ? -1 : 1;
-          });
-          return next;
+          return sortTimelineEntriesAsc([...old, entry]);
         });
       },
       [qc, issueId],
@@ -209,12 +205,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) => {
           if (!old) return [entry];
           if (old.some((e) => e.id === entry.id)) return old;
-          const next = [...old, entry];
-          next.sort((a, b) => {
-            if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
-            return a.id < b.id ? -1 : 1;
-          });
-          return next;
+          return sortTimelineEntriesAsc([...old, entry]);
         });
       },
       [qc, issueId],
