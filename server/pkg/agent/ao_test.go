@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -105,6 +106,7 @@ func TestAOBackendExecuteDispatchesSpawn(t *testing.T) {
 	tempDir := t.TempDir()
 	argsFile := filepath.Join(tempDir, "argv.txt")
 	pwdFile := filepath.Join(tempDir, "pwd.txt")
+	eventFile := filepath.Join(tempDir, "mymir-event.json")
 	aoProjectDir := filepath.Join(tempDir, "ao-project")
 	if err := os.MkdirAll(aoProjectDir, 0o755); err != nil {
 		t.Fatalf("mkdir ao project: %v", err)
@@ -114,14 +116,18 @@ func TestAOBackendExecuteDispatchesSpawn(t *testing.T) {
 	}
 	fakePath := filepath.Join(tempDir, "ao")
 	writeTestExecutable(t, fakePath, []byte(fakeAOScript()))
+	fakeWriter := filepath.Join(tempDir, "mymir-writer")
+	writeTestExecutable(t, fakeWriter, []byte("#!/bin/sh\ncp \"$1\" \"$AO_EVENT_FILE\"\n"))
 
 	backend, err := New("ao", Config{
 		ExecutablePath: fakePath,
 		Logger:         slog.Default(),
 		Env: map[string]string{
-			"AO_ARGS_FILE":       argsFile,
-			"AO_PWD_FILE":        pwdFile,
-			"MULTICA_AO_WORKDIR": aoProjectDir,
+			"AO_ARGS_FILE":                   argsFile,
+			"AO_PWD_FILE":                    pwdFile,
+			"AO_EVENT_FILE":                  eventFile,
+			"CLAWGODE_MYMIR_AO_EVENT_WRITER": fakeWriter,
+			"MULTICA_AO_WORKDIR":             aoProjectDir,
 		},
 	})
 	if err != nil {
@@ -169,6 +175,20 @@ func TestAOBackendExecuteDispatchesSpawn(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(pwdRaw)); got != aoProjectDir {
 		t.Fatalf("ao cwd = %q, want %q", got, aoProjectDir)
+	}
+	rawEvent, err := os.ReadFile(eventFile)
+	if err != nil {
+		t.Fatalf("read mymir event: %v", err)
+	}
+	var event aoMyMirEvent
+	if err := json.Unmarshal(rawEvent, &event); err != nil {
+		t.Fatalf("decode mymir event: %v", err)
+	}
+	if event.Operation != "spawn" || event.SessionID != "cg-123" || event.Status != "completed" {
+		t.Fatalf("unexpected mymir event: %#v", event)
+	}
+	if event.AOCwd != aoProjectDir {
+		t.Fatalf("mymir event ao cwd = %q, want %q", event.AOCwd, aoProjectDir)
 	}
 }
 

@@ -43,6 +43,18 @@ type aoBackend struct {
 	cfg Config
 }
 
+type aoMyMirEvent struct {
+	Operation     string `json:"operation"`
+	SessionID     string `json:"session_id,omitempty"`
+	Status        string `json:"status"`
+	DurationMs    int64  `json:"duration_ms"`
+	Cwd           string `json:"cwd,omitempty"`
+	AOCwd         string `json:"ao_cwd,omitempty"`
+	PromptPreview string `json:"prompt_preview,omitempty"`
+	Output        string `json:"output,omitempty"`
+	Error         string `json:"error,omitempty"`
+}
+
 func (b *aoBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
@@ -140,6 +152,18 @@ func (b *aoBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			"duration", duration.Round(time.Millisecond).String(),
 		)
 
+		writeAOMyMirEvent(runCtx, b.cfg, aoMyMirEvent{
+			Operation:     mapAOOperation(isSend),
+			SessionID:     sessionID,
+			Status:        status,
+			DurationMs:    duration.Milliseconds(),
+			Cwd:           opts.Cwd,
+			AOCwd:         aoCwd,
+			PromptPreview: truncateRunes(preparedPrompt, 1200),
+			Output:        truncateRunes(output, 4000),
+			Error:         truncateRunes(errMsg, 1200),
+		})
+
 		resCh <- Result{
 			Status:     status,
 			Output:     output,
@@ -150,6 +174,66 @@ func (b *aoBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func mapAOOperation(isSend bool) string {
+	if isSend {
+		return "send"
+	}
+	return "spawn"
+}
+
+func writeAOMyMirEvent(parent context.Context, cfg Config, event aoMyMirEvent) {
+	writer := strings.TrimSpace(envOrProcess(cfg.Env, "CLAWGODE_MYMIR_AO_EVENT_WRITER"))
+	if writer == "" {
+		return
+	}
+	if _, err := os.Stat(writer); err != nil {
+		cfg.Logger.Warn("ao mymir event writer unavailable", "writer", writer, "error", err)
+		return
+	}
+
+	eventFile, err := os.CreateTemp("", "multica-ao-mymir-event-*.json")
+	if err != nil {
+		cfg.Logger.Warn("ao mymir event file create failed", "error", err)
+		return
+	}
+	eventPath := eventFile.Name()
+	defer os.Remove(eventPath)
+
+	enc := json.NewEncoder(eventFile)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(event); err != nil {
+		_ = eventFile.Close()
+		cfg.Logger.Warn("ao mymir event encode failed", "error", err)
+		return
+	}
+	if err := eventFile.Close(); err != nil {
+		cfg.Logger.Warn("ao mymir event file close failed", "error", err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, writer, eventPath)
+	cmd.Env = buildEnv(cfg.Env)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		cfg.Logger.Warn("ao mymir event writer failed",
+			"writer", writer,
+			"session_id", event.SessionID,
+			"operation", event.Operation,
+			"error", err,
+			"output", truncateRunes(string(output), 1000),
+		)
+		return
+	}
+	cfg.Logger.Info("ao mymir event mirrored",
+		"writer", writer,
+		"session_id", event.SessionID,
+		"operation", event.Operation,
+		"output", truncateRunes(string(output), 500),
+	)
 }
 
 func buildAOArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
