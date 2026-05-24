@@ -87,7 +87,7 @@ const colorClasses: Record<EventColor, { bg: string; bgActive: string; label: st
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function getEventLabel(item: MergedItem): string {
+function getEventLabel(item: { type: TimelineItem["type"]; tool?: string }): string {
   switch (item.type) {
     case "text":
       return "Agent";
