@@ -33,6 +33,27 @@ func TestBuildAOArgs(t *testing.T) {
 	}
 }
 
+func TestBuildAOSendArgs(t *testing.T) {
+	t.Parallel()
+	args := buildAOSendArgs("follow up", ExecOptions{
+		ResumeSessionID: "cg-3",
+		CustomArgs:      []string{"--agent", "codex", "--prompt", "evil", "--no-wait", "--timeout", "30"},
+	}, slog.Default())
+	got := strings.Join(args, "\x00")
+	if !strings.HasPrefix(got, "send\x00cg-3\x00") {
+		t.Fatalf("unexpected prefix: %#v", args)
+	}
+	if strings.Contains(got, "codex") || strings.Contains(got, "evil") {
+		t.Fatalf("spawn-only args leaked into send argv: %#v", args)
+	}
+	if !containsString(args, "--no-wait") || !containsString(args, "--timeout") || !containsString(args, "30") {
+		t.Fatalf("send-safe custom args missing: %#v", args)
+	}
+	if args[len(args)-1] != "follow up" {
+		t.Fatalf("last arg = %q, want prompt; all=%#v", args[len(args)-1], args)
+	}
+}
+
 func TestPrepareAOPrompt(t *testing.T) {
 	t.Parallel()
 	short, err := prepareAOPrompt("prompt", "system", t.TempDir())
@@ -148,6 +169,69 @@ func TestAOBackendExecuteDispatchesSpawn(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(pwdRaw)); got != aoProjectDir {
 		t.Fatalf("ao cwd = %q, want %q", got, aoProjectDir)
+	}
+}
+
+func TestAOBackendExecuteRoutesResumeToSend(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	tempDir := t.TempDir()
+	argsFile := filepath.Join(tempDir, "argv.txt")
+	aoProjectDir := filepath.Join(tempDir, "ao-project")
+	if err := os.MkdirAll(aoProjectDir, 0o755); err != nil {
+		t.Fatalf("mkdir ao project: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(aoProjectDir, "agent-orchestrator.yaml"), []byte("projects: {}\n"), 0o644); err != nil {
+		t.Fatalf("write ao config: %v", err)
+	}
+	fakePath := filepath.Join(tempDir, "ao")
+	writeTestExecutable(t, fakePath, []byte(fakeAOScript()))
+
+	backend, err := New("ao", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"AO_ARGS_FILE":       argsFile,
+			"MULTICA_AO_WORKDIR": aoProjectDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new ao backend: %v", err)
+	}
+
+	session, err := backend.Execute(context.Background(), "please adjust", ExecOptions{
+		ResumeSessionID: "cg-3",
+		Timeout:         5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("status = %q error=%q", result.Status, result.Error)
+	}
+	if result.SessionID != "cg-3" {
+		t.Fatalf("session id = %q, want existing cg-3; output=%s", result.SessionID, result.Output)
+	}
+	if !strings.Contains(result.Output, "AO feedback routed") || !strings.Contains(result.Output, "cg-3") {
+		t.Fatalf("result output missing routed evidence: %q", result.Output)
+	}
+	rawArgs, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args: %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(rawArgs)), "\n")
+	wantPrefix := []string{"send", "cg-3", "please adjust"}
+	for i, want := range wantPrefix {
+		if len(args) <= i || args[i] != want {
+			t.Fatalf("argv[%d]=%q, want %q; all=%q", i, args, want, args)
+		}
 	}
 }
 

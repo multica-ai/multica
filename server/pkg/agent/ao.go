@@ -23,6 +23,18 @@ var aoBlockedArgs = map[string]blockedArgMode{
 	"--open":   blockedStandalone,
 }
 
+// aoSendBlockedArgs are spawn-only flags that are invalid or harmful when a
+// follow-up turn is routed to an already-running AO session via `ao send`.
+var aoSendBlockedArgs = map[string]blockedArgMode{
+	"--prompt":           blockedWithValue,
+	"--open":             blockedStandalone,
+	"--agent":            blockedWithValue,
+	"--claim-pr":         blockedWithValue,
+	"--assign-on-github": blockedStandalone,
+	"-p":                 blockedWithValue,
+	"--project":          blockedWithValue,
+}
+
 // aoBackend implements Backend by spawning `ao spawn --prompt <prompt>` and
 // returning dispatch evidence to Multica. AO itself owns the long-running
 // factory-manager session; Multica stores the AO session id/output as task
@@ -56,7 +68,8 @@ func (b *aoBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		cancel()
 		return nil, err
 	}
-	args := buildAOArgs(preparedPrompt, opts, b.cfg.Logger)
+	args := buildAOCommandArgs(preparedPrompt, opts, b.cfg.Logger)
+	isSend := opts.ResumeSessionID != ""
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	hideAgentWindow(cmd)
@@ -77,7 +90,11 @@ func (b *aoBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		defer close(resCh)
 
 		start := time.Now()
-		trySend(msgCh, Message{Type: MessageStatus, Status: "dispatching to ao"})
+		statusText := "dispatching to ao"
+		if isSend {
+			statusText = "routing feedback to ao session " + opts.ResumeSessionID
+		}
+		trySend(msgCh, Message{Type: MessageStatus, Status: statusText})
 
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
@@ -90,6 +107,9 @@ func (b *aoBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		stderrText := strings.TrimSpace(stderr.String())
 		combined := combineAOOutput(stdoutText, stderrText)
 		sessionID := extractAOSessionID(combined)
+		if isSend {
+			sessionID = opts.ResumeSessionID
+		}
 
 		status := "completed"
 		errMsg := ""
@@ -101,11 +121,15 @@ func (b *aoBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			status = "aborted"
 			errMsg = "execution cancelled"
 		case err != nil:
+			operation := "spawn"
+			if isSend {
+				operation = "send"
+			}
 			status = "failed"
-			errMsg = strings.TrimSpace(fmt.Sprintf("ao spawn failed: %v\n%s", err, stderrText))
+			errMsg = strings.TrimSpace(fmt.Sprintf("ao %s failed: %v\n%s", operation, err, stderrText))
 		}
 
-		output := formatAOResultOutput(combined, sessionID)
+		output := formatAOResultOutput(combined, sessionID, isSend)
 		if output != "" {
 			trySend(msgCh, Message{Type: MessageText, Content: output})
 		}
@@ -136,6 +160,20 @@ func buildAOArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string 
 	}
 	args = append(args, "--prompt", prompt)
 	args = append(args, customArgs...)
+	return args
+}
+
+func buildAOCommandArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
+	if opts.ResumeSessionID != "" {
+		return buildAOSendArgs(prompt, opts, logger)
+	}
+	return buildAOArgs(prompt, opts, logger)
+}
+
+func buildAOSendArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
+	args := []string{"send", opts.ResumeSessionID}
+	args = append(args, filterCustomArgs(opts.CustomArgs, aoSendBlockedArgs, logger)...)
+	args = append(args, prompt)
 	return args
 }
 
@@ -259,13 +297,17 @@ func combineAOOutput(stdoutText, stderrText string) string {
 	}
 }
 
-func formatAOResultOutput(raw, sessionID string) string {
+func formatAOResultOutput(raw, sessionID string, routed bool) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" && sessionID == "" {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("AO dispatch accepted.")
+	if routed {
+		b.WriteString("AO feedback routed to existing session.")
+	} else {
+		b.WriteString("AO dispatch accepted.")
+	}
 	if sessionID != "" {
 		b.WriteString("\nAO session: ")
 		b.WriteString(sessionID)

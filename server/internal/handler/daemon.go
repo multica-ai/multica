@@ -1276,7 +1276,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
 			}); err == nil && prior.SessionID.Valid {
-				if !task.TriggerCommentID.Valid && prior.RuntimeID == task.RuntimeID {
+				if shouldResumeIssueSessionOnClaim(runtime.Provider, task.TriggerCommentID.Valid) && prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
 				}
 				if prior.WorkDir.Valid {
@@ -1529,6 +1529,20 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})
+}
+
+func shouldResumeIssueSessionOnClaim(runtimeProvider string, hasTriggerComment bool) bool {
+	if !hasTriggerComment {
+		return true
+	}
+	// Ordinary coding CLIs intentionally start a fresh chat/thread for
+	// comment-triggered issue follow-ups because resumed conversations can
+	// replay a stale terminal answer ("Done.") instead of focusing on the new
+	// human comment. AO is different: the stored session id is the routing
+	// handle for `ao send <session>`, so preserving it prevents duplicate
+	// worker spawns and forwards feedback to the already-dispatched factory
+	// session.
+	return runtimeProvider == "ao"
 }
 
 // ListPendingTasksByRuntime returns queued/dispatched tasks for a runtime.
