@@ -53,12 +53,36 @@ type SwimLaneMoveUpdates = Pick<
 
 function makeSwimLaneCollision(cellIds: Set<string>): CollisionDetection {
   return (args) => {
+    const activeId = args.active.id as string;
+    const isLaneDrag = activeId.startsWith("lane:");
+
     const pointer = pointerWithin(args);
     if (pointer.length > 0) {
-      const cards = pointer.filter((c) => !cellIds.has(c.id as string));
-      if (cards.length > 0) return cards;
+      let filtered = pointer;
+      if (isLaneDrag) {
+        // Lane dragging: only consider other lane headers
+        filtered = pointer.filter((c) => (c.id as string).startsWith("lane:"));
+      } else {
+        // Card dragging: ignore parent lane headers entirely
+        filtered = pointer.filter((c) => !(c.id as string).startsWith("lane:"));
+      }
+
+      if (filtered.length > 0) {
+        const cards = filtered.filter((c) => !cellIds.has(c.id as string));
+        if (cards.length > 0) return cards;
+        return filtered;
+      }
     }
-    return closestCenter(args);
+
+    const closest = closestCenter(args);
+    let filteredClosest = closest;
+    if (isLaneDrag) {
+      filteredClosest = closest.filter((c) => (c.id as string).startsWith("lane:"));
+    } else {
+      filteredClosest = closest.filter((c) => !(c.id as string).startsWith("lane:"));
+    }
+
+    return filteredClosest;
   };
 }
 
@@ -251,7 +275,7 @@ export function SwimLaneView({
       result[parent.key] = cellMap;
     }
     return result;
-  }, [issues, parentGroups, sortedStatuses, sortBy, sortDirection]);
+  }, [issues, parentGroups, sortedStatuses, sortBy, sortDirection, parentIssueIds]);
 
   const cellSet = useMemo(() => {
     const ids = new Set<string>();
