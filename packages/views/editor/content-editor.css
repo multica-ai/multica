@@ -344,7 +344,8 @@
 
 /* Tables */
 /* CEREBRO-PATCH(editor-mobile-table-overflow): wide tables must scroll inside the wrapper rather than push the page past the viewport on mobile (JEH-707). */
-.rich-text-editor { min-width: 0; max-width: 100%; }
+/* CEREBRO-PATCH(editor-readable-width): FIR-2114 cap rendered prose at the 50-75ch readability sweet spot (Bringhurst, Nielsen Norman); wide tables/code/images still overflow horizontally via their own rules above. */
+.rich-text-editor { min-width: 0; max-width: min(100%, 70ch); }
 .rich-text-editor .tableWrapper {
   overflow-x: auto;
   max-width: 100%;

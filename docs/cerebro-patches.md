@@ -336,6 +336,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `docs-index-cerebro` | packages/views/docs/index.ts | 1 | Docs page additions |
 | `editor-css-cerebro` | packages/views/editor/content-editor.css | 12 | Editor additions |
 | `editor-mobile-table-overflow` | packages/views/editor/content-editor.css | 3 | JEH-707 — wide markdown tables on mobile pushed the page past the viewport because the `.tableWrapper`'s `overflow-x: auto` only clips when the wrapper has a constrained width; `min-width: 0`/`max-width: 100%` on `.rich-text-editor` plus `max-width: 100%` on `.tableWrapper` keep the table scrolling inside its wrapper instead of widening every ancestor. |
+| `editor-readable-width` | packages/views/editor/content-editor.css | 1 | FIR-2114 — cap `.rich-text-editor` at `min(100%, 70ch)` so rendered prose stays within the 50–75ch readability sweet spot (Bringhurst, Nielsen Norman). Long comments and issue descriptions previously ran the full panel width (~130+ chars), causing the eye to lose the line at every wrap. Wide elements (tables/code/images) still overflow horizontally via the rules above. |
 | `editor-link-handler` | packages/views/editor/utils/link-handler.ts | 3 | Editor additions |
 | `editor-preprocess` | packages/views/editor/utils/preprocess.ts | 8 | Editor additions |
 | `enter-preference-section` | packages/views/settings/components/enter-preference-section.tsx | 73 | Settings page cerebro additions |
