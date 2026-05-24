@@ -2322,12 +2322,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			RootDir: selectedPath,
 		}
 
-		r, ierr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
-		if ierr != nil {
-			taskLog.Warn("execenv: inject runtime config failed (non-fatal)", "error", ierr)
-		}
-		runtimeBrief = r
-
 		// Cleanup script (if configured) — run after task completes.
 		if task.Agent.CleanupScript != "" {
 			defer func() {
@@ -2389,13 +2383,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			defer d.unmarkActiveEnvRoot(env.RootDir)
 		}
 
-		// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
-		r, ierr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
-		if ierr != nil {
-			d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", ierr)
-		}
-		runtimeBrief = r
 	}
+
+	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
+	r, ierr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+	if ierr != nil {
+		taskLog.Warn("execenv: inject runtime config failed (non-fatal)", "error", ierr)
+	}
+	runtimeBrief = r
 	// NOTE: No cleanup — workdir is preserved for reuse by future tasks on
 	// the same (agent, issue) pair. The work_dir path is stored in DB on
 	// task completion and passed back via PriorWorkDir on the next claim.

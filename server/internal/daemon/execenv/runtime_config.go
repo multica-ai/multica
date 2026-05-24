@@ -526,5 +526,10 @@ func writeVCSGuidance(b *strings.Builder, vcsType string) {
 		b.WriteString("**Before exiting:**\n")
 		b.WriteString("- Commit or create a patch for your changes\n")
 		b.WriteString("- Clean up build artifacts\n\n")
+	default:
+		fmt.Fprintf(b, "## VCS: %s\n\n", vcsType)
+		b.WriteString("This agent works on a local directory under version control.\n")
+		b.WriteString("Follow standard safe practices for your VCS — avoid destructive commands,\n")
+		b.WriteString("commit incrementally, and push/submit before exiting.\n\n")
 	}
 }

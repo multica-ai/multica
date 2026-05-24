@@ -41,14 +41,16 @@ func (t *fixedRepoLockTable) tryLock(path, taskID string) bool {
 	return true
 }
 
-// unlock releases the lock on a path.
+// unlock releases the lock on a path and removes it from the table.
 func (t *fixedRepoLockTable) unlock(path string) {
 	t.mu.Lock()
 	lk, ok := t.locks[path]
-	t.mu.Unlock()
 	if !ok {
+		t.mu.Unlock()
 		return
 	}
+	delete(t.locks, path)
+	t.mu.Unlock()
 	lk.taskID = ""
 	lk.mu.Unlock()
 }
