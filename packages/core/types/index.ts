@@ -175,11 +175,3 @@ export type {
   UpdateSquadMemberRoleRequest,
   CreateSquadActivityLogRequest,
 } from "./squad";
-// CEREBRO-PATCH(capability-register-types): FIR-2129 capability register types.
-export type {
-  CapabilitySubjectType,
-  CapabilitySubject,
-  CapabilityReportInput,
-  Capability,
-  CapabilityListResponse,
-} from "./capability";

@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"strings"
 
@@ -174,73 +173,6 @@ func validateCapabilitySubject(sub CapabilitySubject) error {
 		return errCapabilityInvalidSubject
 	}
 	return nil
-}
-
-// capabilityReportItem is a single normalized entry pulled out of a runtime's
-// capability snapshot (e.g. one MCP server or one tool).
-type capabilityReportItem struct {
-	Name string
-	Kind string
-}
-
-// capabilitySnapshotKinds is the ordered set of snapshot keys we ingest into
-// the register. Order is deterministic so the register and tests are stable.
-var capabilitySnapshotKinds = []string{"mcp_servers", "tools"}
-
-// capabilityItemsFromSnapshot flattens a daemon capability snapshot into the
-// recognized (kind, name) items, skipping blanks and unknown keys.
-func capabilityItemsFromSnapshot(raw map[string]json.RawMessage) []capabilityReportItem {
-	var items []capabilityReportItem
-	for _, kind := range capabilitySnapshotKinds {
-		msg, ok := raw[kind]
-		if !ok {
-			continue
-		}
-		var names []string
-		if err := json.Unmarshal(msg, &names); err != nil {
-			continue
-		}
-		for _, name := range names {
-			name = strings.TrimSpace(name)
-			if name == "" {
-				continue
-			}
-			items = append(items, capabilityReportItem{Name: name, Kind: kind})
-		}
-	}
-	return items
-}
-
-// persistRuntimeCapabilitySnapshot mirrors a runtime's reported capability
-// snapshot into the normalized register. Best-effort: failures are logged but
-// never block the daemon refresh/heartbeat path that calls it.
-func (h *Handler) persistRuntimeCapabilitySnapshot(r *http.Request, runtimeID, workspaceID pgtype.UUID, capabilities json.RawMessage) {
-	if h.capabilityRegister == nil || len(capabilities) == 0 {
-		return
-	}
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(capabilities, &raw); err != nil {
-		return
-	}
-	items := capabilityItemsFromSnapshot(raw)
-	if len(items) == 0 {
-		return
-	}
-	reporter := CapabilitySubject{Type: "runtime", ID: util.UUIDToString(runtimeID)}
-	reports := make([]CapabilityReportInput, 0, len(items))
-	for _, item := range items {
-		reports = append(reports, CapabilityReportInput{
-			Key:      item.Kind + ":" + item.Name,
-			Title:    item.Name,
-			Category: item.Kind,
-			Source:   "runtime",
-			Owners:   []CapabilitySubject{reporter},
-		})
-	}
-	if _, err := h.capabilityRegister.Report(r.Context(), workspaceID, reporter, reports); err != nil {
-		slog.Warn("persist runtime capability snapshot failed",
-			"runtime_id", util.UUIDToString(runtimeID), "error", err)
-	}
 }
 
 func splitCSV(raw string) []string {
