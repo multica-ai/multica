@@ -79,15 +79,7 @@ export interface IssueViewState {
   listCollapsedStatuses: IssueStatus[];
   ganttZoom: GanttZoom;
   ganttShowCompleted: boolean;
-  // User-defined order for swimlane view parent lanes, keyed by parent
-  // issue id.  Lanes whose id is absent from this array fall back to the
-  // natural order from the data; "No parent" is always pinned at the top
-  // and is not represented here.  Persisted per-workspace.
   swimlaneOrder: string[];
-  // Collapsed swimlane keys.  Entries are parent issue ids, plus the
-  // sentinel string `"none"` for the "No parent" lane.  Membership ==
-  // collapsed; absence == expanded.  Persisted per-workspace so collapsed
-  // state survives reload — mirrors `listCollapsedStatuses`.
   collapsedSwimlanes: string[];
   setViewMode: (mode: ViewMode) => void;
   setGanttZoom: (zoom: GanttZoom) => void;
