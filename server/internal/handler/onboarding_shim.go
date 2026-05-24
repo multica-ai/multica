@@ -231,6 +231,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 			FixedRepoPaths:     []string{},
 			VcsType:            "",
 			CleanupScript:      "",
+			InitScript:         "",
 		})
 		if err != nil {
 			slog.Warn("bootstrap onboarding (shim): create assistant failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)

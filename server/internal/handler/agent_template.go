@@ -450,6 +450,7 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 		FixedRepoPaths:     []string{},
 		VcsType:            "",
 		CleanupScript:      "",
+		InitScript:         "",
 	})
 	if err != nil {
 		// Mirror handler/agent.go:CreateAgent: when the duplicate is the

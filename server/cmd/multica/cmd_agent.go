@@ -590,12 +590,12 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		body["vcs_type"] = v
 	}
 	if cmd.Flags().Changed("cleanup-script") {
+		v, _ := cmd.Flags().GetString("cleanup-script")
+		body["cleanup_script"] = v
+	}
 	if cmd.Flags().Changed("init-script") {
 		v, _ := cmd.Flags().GetString("init-script")
 		body["init_script"] = v
-	}
-		v, _ := cmd.Flags().GetString("cleanup-script")
-		body["cleanup_script"] = v
 	}
 
 	if len(body) == 0 {
