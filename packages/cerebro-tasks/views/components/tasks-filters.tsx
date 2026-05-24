@@ -119,24 +119,28 @@ export function TasksFilters({ wsId }: TasksFiltersProps) {
         )}
       </div>
 
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:overflow-visible sm:pb-0">
-        <FilterGroup label="Status" compact>
-          <PillRow
-            ariaLabel="Filter on status"
-            options={STATUSES}
-            value={status ?? "all"}
-            onChange={(v) => setStatus(v === "all" ? null : (v as TaskStatus))}
-          />
-        </FilterGroup>
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
+        <div className="-mx-2 flex items-center gap-1.5 overflow-x-auto px-2 pb-1 sm:mx-0 sm:overflow-visible sm:px-0 sm:pb-0">
+          <FilterGroup label="Status" compact>
+            <PillRow
+              ariaLabel="Filter on status"
+              options={STATUSES}
+              value={status ?? "all"}
+              onChange={(v) => setStatus(v === "all" ? null : (v as TaskStatus))}
+            />
+          </FilterGroup>
+        </div>
 
-        <FilterGroup label="Range" compact>
-          <PillRow
-            ariaLabel="Filter on time range"
-            options={RANGES}
-            value={range}
-            onChange={(v) => setRange(v as TaskTimeRange)}
-          />
-        </FilterGroup>
+        <div className="-mx-2 flex items-center gap-1.5 overflow-x-auto px-2 pb-1 sm:mx-0 sm:overflow-visible sm:px-0 sm:pb-0">
+          <FilterGroup label="Range" compact>
+            <PillRow
+              ariaLabel="Filter on time range"
+              options={RANGES}
+              value={range}
+              onChange={(v) => setRange(v as TaskTimeRange)}
+            />
+          </FilterGroup>
+        </div>
       </div>
 
       <details className="group sm:hidden">
