@@ -87,6 +87,8 @@ import { WorkflowsNavItem } from "@multica/cerebro-workflows/views/workflows-nav
 import { PermissionsNavItem } from "@multica/cerebro-permissions/views/permissions-nav-item";
 // CEREBRO-PATCH(cerebro-approvals-sidebar): FIR-2131 sidebar entry for cerebro approval inbox
 import { ApprovalsNavItem } from "@multica/cerebro-approvals/views/approvals-nav-item";
+// CEREBRO-PATCH(cerebro-access-sidebar): FIR-2133 sidebar entry for unified access + audit page
+import { AccessNavItem } from "@multica/cerebro-permissions/views/access-nav-item";
 // CEREBRO-PATCH(cerebro-agent-passes-sidebar): JEH-1731 sidebar entry for cerebro agent-passes admin page
 import { AgentPassesNavItem } from "@multica/cerebro-agent-passes/views/agent-passes-nav-item";
 import { useAuthStore } from "@multica/core/auth";
@@ -843,6 +845,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 <PermissionsNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(cerebro-approvals-sidebar): FIR-2131 cerebro approval inbox entry in workspace group */}
                 <ApprovalsNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
+                {/* CEREBRO-PATCH(cerebro-access-sidebar): FIR-2133 unified access + audit page entry */}
+                <AccessNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(cerebro-agent-passes-sidebar): JEH-1731 cerebro agent-passes entry in workspace group */}
                 <AgentPassesNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* Projects — collapsible nav item with sub-items */}

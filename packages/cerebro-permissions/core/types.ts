@@ -215,3 +215,66 @@ export const DEFAULT_GRANTS_FILTER: GrantsFilter = {
   limit: 50,
   offset: 0,
 };
+
+// ---------------------------------------------------------------------------
+// Audit filter — extended with capability + date-range for the access page.
+// ---------------------------------------------------------------------------
+
+export interface AuditFilter {
+  subjectId: string | null;
+  grantId: string | null;
+  capability: string | null;
+  since: string | null;
+  until: string | null;
+  limit: number;
+  offset: number;
+}
+
+export const DEFAULT_AUDIT_FILTER: AuditFilter = {
+  subjectId: null,
+  grantId: null,
+  capability: null,
+  since: null,
+  until: null,
+  limit: 50,
+  offset: 0,
+};
+
+// ---------------------------------------------------------------------------
+// Subject-with-permissions — for the Subjects tab on the access page.
+// Shape is provisional; will be backed by the Phase 1+2 API.
+// ---------------------------------------------------------------------------
+
+export interface SubjectPermission {
+  capability: string;
+  resource_pattern: string;
+  status: GrantStatus | string;
+  approval_required: boolean;
+  grant_id: string;
+}
+
+export interface SubjectWithPermissions {
+  id: string;
+  type: GrantSubjectType | string;
+  display_name: string | null;
+  avatar_url?: string | null;
+  permissions: SubjectPermission[];
+  pending_count: number;
+}
+
+// ---------------------------------------------------------------------------
+// PendingAsk — for the Pending tab on the access page.
+// Shape matches Phase 3 (approval inbox) API contract.
+// ---------------------------------------------------------------------------
+
+export interface PendingAsk {
+  id: string;
+  workspace_id: string;
+  subject: GrantSubject;
+  capability: string;
+  resource: GrantResource;
+  reason: string | null;
+  requested_at: string;
+  expires_at: string | null;
+  status: "pending" | "approved" | "rejected" | "delegated" | string;
+}

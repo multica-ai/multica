@@ -125,7 +125,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 // Audit — GET /api/workspaces/{id}/grants/audit
-// Query params: subject_id, grant_id, since, limit, offset
+// Query params: subject_id, grant_id, since, until, capability, limit, offset
 func (h *Handler) Audit(w http.ResponseWriter, r *http.Request) {
 	_, workspaceID, ok := h.loadWorkspace(w, r)
 	if !ok {
@@ -157,6 +157,10 @@ func (h *Handler) Audit(w http.ResponseWriter, r *http.Request) {
 	if raw := q.Get("since"); raw != "" {
 		filter.Column4 = optTimestamp(&raw)
 	}
+	if raw := q.Get("until"); raw != "" {
+		filter.Column5 = optTimestamp(&raw)
+	}
+	filter.Column6 = q.Get("capability")
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > 200 {

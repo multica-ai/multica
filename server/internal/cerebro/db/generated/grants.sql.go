@@ -200,8 +200,10 @@ WHERE a.workspace_id = $1
   AND ($2::uuid IS NULL OR g.subject_id = $2)
   AND ($3::uuid IS NULL OR a.grant_id = $3)
   AND ($4::timestamptz IS NULL OR a.created_at >= $4)
+  AND ($5::timestamptz IS NULL OR a.created_at <= $5)
+  AND (NULLIF($6::text, '') IS NULL OR g.capability = $6)
 ORDER BY a.created_at DESC
-LIMIT $5 OFFSET $6
+LIMIT $7 OFFSET $8
 `
 
 type ListCerebroGrantAuditParams struct {
@@ -209,6 +211,8 @@ type ListCerebroGrantAuditParams struct {
 	Column2     pgtype.UUID        `json:"column_2"`
 	Column3     pgtype.UUID        `json:"column_3"`
 	Column4     pgtype.Timestamptz `json:"column_4"`
+	Column5     pgtype.Timestamptz `json:"column_5"`
+	Column6     string             `json:"column_6"`
 	Limit       int32              `json:"limit"`
 	Offset      int32              `json:"offset"`
 }
@@ -234,6 +238,8 @@ func (q *Queries) ListCerebroGrantAudit(ctx context.Context, arg ListCerebroGran
 		arg.Column2,
 		arg.Column3,
 		arg.Column4,
+		arg.Column5,
+		arg.Column6,
 		arg.Limit,
 		arg.Offset,
 	)

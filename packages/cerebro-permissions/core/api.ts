@@ -1,13 +1,17 @@
 import { api, parseWithFallback } from "@multica/core/api";
+import { z } from "zod";
 import {
   grantAuditListSchema,
   personaGrantListSchema,
   personaGrantSchema,
+  type AuditFilter,
   type CreatePersonaGrantRequest,
   type GrantAuditEntry,
   type GrantsFilter,
   type PaginatedResponse,
+  type PendingAsk,
   type PersonaGrant,
+  type SubjectWithPermissions,
   type UpdatePersonaGrantRequest,
 } from "./types";
 
@@ -81,26 +85,150 @@ export async function deletePersonaGrant(
   await api.deletePersonaGrant(wsId, grantId);
 }
 
+// CEREBRO-PATCH(audit-extended-filter): capability + until params added by FIR-2133; cast needed until core client type is updated upstream.
+type AuditApiFilter = { subject_id?: string | null; grant_id?: string | null; capability?: string | null; since?: string | null; until?: string | null; limit?: number; offset?: number };
+const _auditApi = api.listPersonaGrantAudit as (wsId: string, f: AuditApiFilter) => Promise<unknown>;
+
 export async function fetchGrantAudit(
   wsId: string,
-  filter: {
-    subjectId: string | null;
-    grantId: string | null;
-    since: string | null;
-    limit: number;
-    offset: number;
-  },
+  filter: AuditFilter,
 ): Promise<PaginatedResponse<GrantAuditEntry>> {
-  const raw = await api.listPersonaGrantAudit<unknown>(wsId, {
+  const raw = await _auditApi(wsId, {
     subject_id: filter.subjectId,
     grant_id: filter.grantId,
+    capability: filter.capability,
     since: filter.since,
+    until: filter.until,
     limit: filter.limit,
     offset: filter.offset,
   });
   return parseWithFallback(raw, grantAuditListSchema, EMPTY_AUDIT_PAGE, {
     endpoint: "listPersonaGrantAudit",
   });
+}
+
+// ---------------------------------------------------------------------------
+// Subjects with permissions — Phase 2 API (mock-ready, stubs until live).
+// ---------------------------------------------------------------------------
+
+const EMPTY_SUBJECTS_PAGE: PaginatedResponse<SubjectWithPermissions> = {
+  items: [],
+  total: 0,
+  limit: 50,
+  offset: 0,
+};
+
+const subjectPermissionSchema = z.object({
+  capability: z.string(),
+  resource_pattern: z.string().default("*"),
+  status: z.string().default("active"),
+  approval_required: z.boolean().default(false),
+  grant_id: z.string(),
+});
+
+const subjectWithPermissionsSchema: z.ZodType<SubjectWithPermissions> = z.object({
+  id: z.string(),
+  type: z.string(),
+  display_name: z.string().nullable().default(null),
+  avatar_url: z.string().nullable().optional(),
+  permissions: z.array(subjectPermissionSchema).default([]),
+  pending_count: z.number().default(0),
+});
+
+const subjectsPageSchema = z.object({
+  items: z.array(subjectWithPermissionsSchema).default([]),
+  total: z.number().default(0),
+  limit: z.number().default(50),
+  offset: z.number().default(0),
+});
+
+export async function fetchSubjectsWithPermissions(
+  wsId: string,
+  filter: { subjectType: string | null; search: string; limit: number; offset: number },
+): Promise<PaginatedResponse<SubjectWithPermissions>> {
+  // CEREBRO-PATCH(access-page-subjects-stub): Phase 2 API not yet deployed — return empty page.
+  // Remove stub and wire `api.listSubjectsWithPermissions` when Phase 2 lands.
+  try {
+    const raw = await (api as unknown as Record<string, (wsId: string, p: unknown) => Promise<unknown>>)
+      .listSubjectsWithPermissions?.(wsId, {
+        subject_type: filter.subjectType,
+        search: filter.search,
+        limit: filter.limit,
+        offset: filter.offset,
+      });
+    if (!raw) return EMPTY_SUBJECTS_PAGE;
+    return parseWithFallback(raw, subjectsPageSchema, EMPTY_SUBJECTS_PAGE, {
+      endpoint: "listSubjectsWithPermissions",
+    });
+  } catch {
+    return EMPTY_SUBJECTS_PAGE;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pending asks — Phase 3 API (mock-ready, stubs until live).
+// ---------------------------------------------------------------------------
+
+const EMPTY_ASKS_PAGE: PaginatedResponse<PendingAsk> = {
+  items: [],
+  total: 0,
+  limit: 50,
+  offset: 0,
+};
+
+const pendingAskSchema: z.ZodType<PendingAsk> = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  subject: z.object({
+    type: z.string(),
+    id: z.string().nullable().default(null),
+    display_name: z.string().nullable().default(null),
+  }),
+  capability: z.string(),
+  resource: z.object({
+    type: z.string(),
+    pattern: z.string().default("*"),
+    display_name: z.string().nullable().optional(),
+  }),
+  reason: z.string().nullable().default(null),
+  requested_at: z.string(),
+  expires_at: z.string().nullable().default(null),
+  status: z.string().default("pending"),
+});
+
+const pendingAsksPageSchema = z.object({
+  items: z.array(pendingAskSchema).default([]),
+  total: z.number().default(0),
+  limit: z.number().default(50),
+  offset: z.number().default(0),
+});
+
+export async function fetchPendingAsks(
+  wsId: string,
+  filter: { limit: number; offset: number },
+): Promise<PaginatedResponse<PendingAsk>> {
+  // CEREBRO-PATCH(access-page-pending-stub): Phase 3 API not yet deployed — return empty page.
+  // Remove stub and wire `api.listPendingApprovalAsks` when Phase 3 lands.
+  try {
+    const raw = await (api as unknown as Record<string, (wsId: string, p: unknown) => Promise<unknown>>)
+      .listPendingApprovalAsks?.(wsId, { limit: filter.limit, offset: filter.offset });
+    if (!raw) return EMPTY_ASKS_PAGE;
+    return parseWithFallback(raw, pendingAsksPageSchema, EMPTY_ASKS_PAGE, {
+      endpoint: "listPendingApprovalAsks",
+    });
+  } catch {
+    return EMPTY_ASKS_PAGE;
+  }
+}
+
+export async function approveAsk(wsId: string, askId: string): Promise<void> {
+  await (api as unknown as Record<string, (wsId: string, askId: string) => Promise<void>>)
+    .approveAsk?.(wsId, askId);
+}
+
+export async function rejectAsk(wsId: string, askId: string): Promise<void> {
+  await (api as unknown as Record<string, (wsId: string, askId: string) => Promise<void>>)
+    .rejectAsk?.(wsId, askId);
 }
 
 function normalizeGrantList(raw: unknown): unknown {

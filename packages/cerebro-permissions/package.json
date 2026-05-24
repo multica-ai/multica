@@ -11,7 +11,8 @@
     ".": "./index.ts",
     "./core": "./core/index.ts",
     "./views": "./views/index.ts",
-    "./views/permissions-nav-item": "./views/components/permissions-nav-item.tsx"
+    "./views/permissions-nav-item": "./views/components/permissions-nav-item.tsx",
+    "./views/access-nav-item": "./views/components/access-nav-item.tsx"
   },
   "dependencies": {
     "@multica/cerebro-feature-flags": "workspace:*",

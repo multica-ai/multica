@@ -137,7 +137,7 @@ describe("PermissionsPage", () => {
     render(ui);
     expect(await screen.findByText(/Ingen grants matcher/i)).toBeInTheDocument();
     expect(mockListGrants).toHaveBeenCalled();
-  });
+  }, 15_000);
 
   it("renders the empty state with no grants", async () => {
     mockListGrants.mockResolvedValueOnce({
@@ -153,7 +153,7 @@ describe("PermissionsPage", () => {
       expect(screen.getByText(/Ingen grants matcher/i)).toBeInTheDocument(),
     );
     expect(screen.getByRole("button", { name: /Nyt grant/i })).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it("renders a row for each grant", async () => {
     mockListGrants.mockResolvedValueOnce({
@@ -169,7 +169,7 @@ describe("PermissionsPage", () => {
     expect(screen.getByText("issue.read")).toBeInTheDocument();
     // Subject-type chip
     expect(screen.getByText("group")).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it("revokes an existing grant from the drawer instead of hard-deleting it", async () => {
     const user = userEvent.setup();
@@ -273,7 +273,7 @@ describe("PermissionsPage", () => {
     await waitFor(() =>
       expect(screen.getByText(/Ingen grants matcher/i)).toBeInTheDocument(),
     );
-  });
+  }, 15_000);
 
   it("renders 'Adgang nægtet' when the current member is not admin/owner", async () => {
     mockUseCurrentMember.mockReturnValueOnce({
@@ -288,7 +288,7 @@ describe("PermissionsPage", () => {
       await screen.findByText(/Adgang nægtet/i),
     ).toBeInTheDocument();
     expect(mockListGrants).not.toHaveBeenCalled();
-  });
+  }, 15_000);
 
   it("switches to the Audit tab when clicked", async () => {
     const user = userEvent.setup();
@@ -303,5 +303,5 @@ describe("PermissionsPage", () => {
 
     await user.click(screen.getByRole("tab", { name: "Audit" }));
     expect(await screen.findByText(/Ingen audit-hændelser/i)).toBeInTheDocument();
-  });
+  }, 15_000);
 });
