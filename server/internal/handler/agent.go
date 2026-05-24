@@ -27,6 +27,15 @@ import (
 // char_length and the front-end's String.prototype.length-with-counter UX.
 const maxAgentDescriptionLength = 255
 
+// validVCSTypes are the accepted vcs_type values for fixed repo mode.
+var validVCSTypes = map[string]bool{
+	"":     true,
+	"git":  true,
+	"p4":   true,
+	"svn":  true,
+	"none": true,
+}
+
 type AgentResponse struct {
 	ID                      string            `json:"id"`
 	WorkspaceID             string            `json:"workspace_id"`
@@ -559,6 +568,11 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !validVCSTypes[req.VCSType] {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("vcs_type %q is not valid; accepted values: git, p4, svn, none", req.VCSType))
+		return
+	}
+
 	// Probe workspace agent count BEFORE the insert so the funnel has a
 	// clean "first agent ever in this workspace" signal — Step 4 of
 	// onboarding always lands in this branch. A non-fatal read: if the
@@ -905,6 +919,10 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.FixedRepoPaths = req.FixedRepoPaths
 	}
 	if req.VCSType != nil {
+		if !validVCSTypes[*req.VCSType] {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("vcs_type %q is not valid; accepted values: git, p4, svn, none", *req.VCSType))
+			return
+		}
 		params.VcsType = pgtype.Text{String: *req.VCSType, Valid: true}
 	}
 	if req.CleanupScript != nil {

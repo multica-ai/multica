@@ -186,12 +186,10 @@ func TestParseCustomEnv(t *testing.T) {
 	}
 }
 
-// TestAgentUpdateNoFieldsErrorMentionsAllCustomEnvFlags actually invokes
-// runAgentUpdate with no flags set and asserts the resulting "no fields"
-// error mentions all three --custom-env channels by name. This guards
-// against the discoverability regression we'd see if a future edit
-// dropped one of the flag names from the hint.
-func TestAgentUpdateNoFieldsErrorMentionsAllCustomEnvFlags(t *testing.T) {
+// TestAgentUpdateNoFieldsErrorPointsToHelp verifies that running
+// runAgentUpdate with no flags produces an error that points the user
+// to the help output, rather than listing every flag inline.
+func TestAgentUpdateNoFieldsErrorPointsToHelp(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:0")
 	t.Setenv("MULTICA_WORKSPACE_ID", "test-ws")
@@ -217,6 +215,11 @@ func TestAgentUpdateNoFieldsErrorMentionsAllCustomEnvFlags(t *testing.T) {
 	cmd.Flags().String("visibility", "", "")
 	cmd.Flags().String("status", "", "")
 	cmd.Flags().Int32("max-concurrent-tasks", 0, "")
+	cmd.Flags().Bool("fixed-repo-enabled", false, "")
+	cmd.Flags().StringArray("fixed-repo-path", nil, "")
+	cmd.Flags().String("vcs-type", "", "")
+	cmd.Flags().String("cleanup-script", "", "")
+	cmd.Flags().String("init-script", "", "")
 	cmd.Flags().String("output", "json", "")
 	cmd.Flags().String("profile", "", "")
 
@@ -225,12 +228,11 @@ func TestAgentUpdateNoFieldsErrorMentionsAllCustomEnvFlags(t *testing.T) {
 		t.Fatal("runAgentUpdate with no flags: expected 'no fields' error, got nil")
 	}
 	msg := err.Error()
-	// "--custom-env (" matches the bare flag specifically, not its -stdin /
-	// -file siblings, so we can prove all three names are present.
-	for _, want := range []string{"--custom-env (", "--custom-env-stdin", "--custom-env-file"} {
-		if !strings.Contains(msg, want) {
-			t.Fatalf("no-fields error must mention %q; got: %q", want, msg)
-		}
+	if !strings.Contains(msg, "--help") {
+		t.Fatalf("no-fields error should mention --help; got: %q", msg)
+	}
+	if !strings.Contains(msg, "no fields to update") {
+		t.Fatalf("no-fields error should describe the problem; got: %q", msg)
 	}
 }
 

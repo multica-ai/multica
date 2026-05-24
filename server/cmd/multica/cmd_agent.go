@@ -599,7 +599,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --custom-args, --custom-env (or --custom-env-stdin, --custom-env-file), --visibility, --status, --max-concurrent-tasks, --fixed-repo-enabled, --fixed-repo-path, --vcs-type, or --cleanup-script, or --init-script")
+		return fmt.Errorf("no fields to update; run `multica agent update --help` to see available flags")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
