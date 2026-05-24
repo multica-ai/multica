@@ -152,7 +152,7 @@ export function RuntimeToolsCard({
       qc.invalidateQueries({ queryKey: runtimeToolsKey(runtime.id) });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Kunne ikke ændre tool-status");
+      toast.error(err instanceof Error ? err.message : "Couldn't change tool status");
     },
   });
 
@@ -202,8 +202,8 @@ export function RuntimeToolsCard({
     // Daemon scans on its heartbeat (~15 min debounce). An admin-triggered
     // immediate-scan endpoint is a separate slice; until then, we tell the
     // admin the system will pick the scan up automatically.
-    toast.message("Scan kø'et", {
-      description: "Daemon scanner runtime'en ved næste heartbeat (cirka 15 min).",
+    toast.message("Scan queued", {
+      description: "Daemon scans the runtime on next heartbeat (~15 min).",
     });
   }
 
@@ -211,10 +211,10 @@ export function RuntimeToolsCard({
     <div className="rounded-md border bg-card">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b p-4">
         <div>
-          <h3 className="text-sm font-medium">Tools på runtime</h3>
+          <h3 className="text-sm font-medium">Tools on runtime</h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Alle tools på <code className="font-mono text-[11px]">{runtime.name}</code>{" "}
-            — cloud og MCP blandet. Per række: aktivér og styr adgang.
+            All tools on <code className="font-mono text-[11px]">{runtime.name}</code>{" "}
+            — cloud and MCP combined. Per row: enable and control access.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -240,7 +240,7 @@ export function RuntimeToolsCard({
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Søg tools, kilder…"
+            placeholder="Search tools, sources…"
             className="h-8 w-full rounded-md border bg-background pl-7 pr-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
         </div>
@@ -371,7 +371,7 @@ function RuntimeToolsBody(props: RuntimeToolsBodyProps) {
       <div className="flex flex-col items-center justify-center gap-1 p-10 text-center">
         <AlertCircle className="h-7 w-7 text-muted-foreground/50" />
         <p className="mt-2 text-sm text-muted-foreground">
-          Kunne ikke hente tools for denne runtime.
+          Couldn't load tools for this runtime.
         </p>
         <Button
           variant="outline"
@@ -379,7 +379,7 @@ function RuntimeToolsBody(props: RuntimeToolsBodyProps) {
           onClick={() => toolsQuery.refetch()}
           className="mt-2"
         >
-          Prøv igen
+          Try again
         </Button>
       </div>
     );
@@ -391,8 +391,8 @@ function RuntimeToolsBody(props: RuntimeToolsBodyProps) {
         <Wrench className="h-7 w-7 text-muted-foreground/40" />
         <p className="mt-2 text-sm text-muted-foreground">
           {toolsQuery.data && toolsQuery.data.length > 0
-            ? "Ingen tools matcher dine filtre."
-            : "Ingen tools registreret endnu — daemon scanner ved næste heartbeat."}
+            ? "No tools match your filters."
+            : "No tools registered yet — daemon scans on next heartbeat."}
         </p>
       </div>
     );
@@ -457,7 +457,7 @@ function RuntimeToolRow({
           checked={tool.enabled}
           onCheckedChange={(v: boolean) => onToggle(tool.name, v)}
           disabled={!canEdit || togglePending}
-          aria-label={`Slå ${tool.name} ${tool.enabled ? "fra" : "til"}`}
+          aria-label={`Turn ${tool.name} ${tool.enabled ? "off" : "on"}`}
         />
       </td>
       <td className="px-4 py-3 align-top">
@@ -534,7 +534,7 @@ function GroupPicker({
   return (
     <div className="flex flex-wrap items-center gap-1">
       {grants.length === 0 && (
-        <span className="text-xs text-muted-foreground">— ingen specifikke</span>
+        <span className="text-xs text-muted-foreground">— none specific</span>
       )}
       {grants.map((g) => (
         <Badge key={g.group_id} variant="secondary" className="gap-1 pr-1">
@@ -545,7 +545,7 @@ function GroupPicker({
               type="button"
               onClick={() => onToggle(g.group_id, false)}
               className="ml-0.5 rounded-sm opacity-50 hover:opacity-100"
-              aria-label={`Fjern gruppe ${g.group_name}`}
+              aria-label={`Remove group ${g.group_name}`}
             >
               <X className="h-3 w-3" />
             </button>
@@ -560,7 +560,7 @@ function GroupPicker({
                 type="button"
                 className="inline-flex h-6 items-center gap-1 rounded-md border border-dashed px-1.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
               >
-                + Tilføj
+                + Add
                 <ChevronDown className="h-3 w-3" />
               </button>
             }
@@ -571,14 +571,14 @@ function GroupPicker({
                 type="search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Søg grupper…"
+                placeholder="Search groups…"
                 className="h-7 w-full rounded-md border bg-background px-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
             <div className="max-h-56 overflow-y-auto p-1">
               {filtered.length === 0 ? (
                 <p className="px-2 py-3 text-center text-xs text-muted-foreground">
-                  Ingen grupper matcher.
+                  No groups match.
                 </p>
               ) : (
                 filtered.map((g) => {
@@ -637,7 +637,7 @@ function UserPicker({
   return (
     <div className="flex flex-wrap items-center gap-1">
       {grants.length === 0 && (
-        <span className="text-xs text-muted-foreground">— ingen specifikke</span>
+        <span className="text-xs text-muted-foreground">— none specific</span>
       )}
       {grants.map((u) => (
         <Badge key={u.user_id} variant="secondary" className="gap-1 pr-1">
@@ -648,7 +648,7 @@ function UserPicker({
               type="button"
               onClick={() => onToggle(u.user_id, false)}
               className="ml-0.5 rounded-sm opacity-50 hover:opacity-100"
-              aria-label={`Fjern bruger ${u.user_name || u.user_email}`}
+              aria-label={`Remove user ${u.user_name || u.user_email}`}
             >
               <X className="h-3 w-3" />
             </button>
@@ -663,7 +663,7 @@ function UserPicker({
                 type="button"
                 className="inline-flex h-6 items-center gap-1 rounded-md border border-dashed px-1.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
               >
-                + Tilføj
+                + Add
                 <ChevronDown className="h-3 w-3" />
               </button>
             }
@@ -674,14 +674,14 @@ function UserPicker({
                 type="search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Søg brugere…"
+                placeholder="Search users…"
                 className="h-7 w-full rounded-md border bg-background px-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
             <div className="max-h-56 overflow-y-auto p-1">
               {filtered.length === 0 ? (
                 <p className="px-2 py-3 text-center text-xs text-muted-foreground">
-                  Ingen brugere matcher.
+                  No users match.
                 </p>
               ) : (
                 filtered.map((m) => {
@@ -713,17 +713,17 @@ function UserPicker({
 
 function formatRelativeTime(iso: string): string {
   const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return "for længe siden";
+  if (Number.isNaN(then)) return "a long time ago";
   const diffSec = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (diffSec < 60) return "for et øjeblik siden";
+  if (diffSec < 60) return "just now";
   if (diffSec < 3600) {
     const m = Math.round(diffSec / 60);
-    return `for ${m} min. siden`;
+    return `${m} min ago`;
   }
   if (diffSec < 86400) {
     const h = Math.round(diffSec / 3600);
-    return `for ${h} t. siden`;
+    return `${h} h ago`;
   }
   const d = Math.round(diffSec / 86400);
-  return `for ${d} d. siden`;
+  return `${d} d ago`;
 }

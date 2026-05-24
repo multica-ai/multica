@@ -65,7 +65,7 @@ describe("EffectiveAccessSection", () => {
     expect(
       screen.getByTestId("effective-access-admin"),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Adgang: Alt/i)).toBeInTheDocument();
+    expect(screen.getByText(/Access: All/i)).toBeInTheDocument();
   });
 
   it("aggregates agents + runtimes via group membership with source chips", async () => {
@@ -158,6 +158,6 @@ describe("EffectiveAccessSection", () => {
     ).toBeInTheDocument();
     expect(
       screen.getAllByTestId("effective-access-source-chip")[0]?.textContent,
-    ).toMatch(/via gruppe: ai-team/);
+    ).toMatch(/via group: ai-team/);
   });
 });

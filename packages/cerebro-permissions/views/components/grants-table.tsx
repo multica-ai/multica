@@ -138,7 +138,7 @@ export function GrantsTable({ wsId, onRowClick }: GrantsTableProps) {
 
       <div className="flex items-center justify-between border-t bg-background/50 px-4 py-2 text-xs text-muted-foreground">
         <span className="font-mono tabular-nums">
-          {offset + 1}–{offset + grants.length} af {total}
+          {offset + 1}–{offset + grants.length} of {total}
         </span>
         <div className="flex gap-1">
           <Button

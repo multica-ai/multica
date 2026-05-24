@@ -114,8 +114,8 @@ function MemberGroupsInner({
       {inGroup.length === 0 ? (
         <p className="text-xs text-muted-foreground">
           {isAdmin
-            ? "Brugeren er ikke i nogen gruppe endnu."
-            : "Brugeren er ikke i nogen gruppe."}
+            ? "This user isn't in any group yet."
+            : "This user isn't in any group."}
         </p>
       ) : (
         <ul
@@ -159,8 +159,8 @@ function MemberGroupsInner({
             {notInGroup.length === 0 && (
               <li className="text-xs text-muted-foreground py-2 px-1">
                 {groups.length === inGroup.length
-                  ? "Brugeren er allerede medlem af alle grupper."
-                  : "Ingen matches."}
+                  ? "Already a member of every group."
+                  : "No matches."}
               </li>
             )}
             {notInGroup.map((g) => (

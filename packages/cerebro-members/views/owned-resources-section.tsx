@@ -1,11 +1,11 @@
 "use client";
 
-// JEH-1067 (Bundle B / PR-B) — Member detail "Egne runtimes" + "Egne agenter".
+// JEH-1067 (Bundle B / PR-B) — Member detail "Owned runtimes" + "Owned agents".
 //
 // Lists workspace runtimes / agents whose `owner_id` equals this member.
 // Visible only to admins or owners. For Bundle B the actions exposed are
 // delete (runtimes: hard delete; agents: archive). Ownership transfer
-// ("overdrag") is a follow-up — the picker UI isn't in scope here.
+// is a follow-up — the picker UI isn't in scope here.
 
 import { useMemo, useState } from "react";
 import { Bot, Cpu, Trash2 } from "lucide-react";
@@ -78,11 +78,11 @@ function OwnedRuntimes({ userId }: { userId: string }) {
     if (!pendingDelete) return;
     try {
       await remove.mutateAsync(pendingDelete.id);
-      toast.success(`Runtime "${pendingDelete.name}" slettet`);
+      toast.success(`Runtime "${pendingDelete.name}" deleted`);
       setPendingDelete(null);
     } catch (e) {
       toast.error(
-        e instanceof Error ? e.message : "Kunne ikke slette runtime",
+        e instanceof Error ? e.message : "Couldn't delete runtime",
       );
     }
   };
@@ -92,10 +92,10 @@ function OwnedRuntimes({ userId }: { userId: string }) {
       className="rounded-md border border-border p-4 space-y-3"
       data-testid="owned-runtimes-section"
     >
-      <h2 className="text-sm font-medium">Egne runtimes ({owned.length})</h2>
+      <h2 className="text-sm font-medium">Owned runtimes ({owned.length})</h2>
       {owned.length === 0 ? (
         <p className="text-xs text-muted-foreground">
-          Ingen runtimes ejet af denne bruger.
+          No runtimes owned by this user.
         </p>
       ) : (
         <ul className="divide-y divide-border/50 rounded-md border border-border/50">
@@ -126,7 +126,7 @@ function OwnedRuntimes({ userId }: { userId: string }) {
                     name: r.name || r.provider || "Runtime",
                   })
                 }
-                aria-label={`Slet runtime ${r.name || r.provider}`}
+                aria-label={`Delete runtime ${r.name || r.provider}`}
               >
                 <Trash2 className="size-4 text-muted-foreground" />
               </Button>
@@ -144,16 +144,16 @@ function OwnedRuntimes({ userId }: { userId: string }) {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Slet runtime "{pendingDelete?.name}"?
+              Delete runtime "{pendingDelete?.name}"?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Alle agents der peger på denne runtime mister deres kørsels-mål
-              indtil de pointes på en anden. Handlingen kan ikke fortrydes.
+              All agents pointing at this runtime will lose their execution
+              target until repointed. This can't be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={remove.isPending}>
-              Annullér
+              Cancel
             </AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
@@ -163,7 +163,7 @@ function OwnedRuntimes({ userId }: { userId: string }) {
               }}
               disabled={remove.isPending}
             >
-              {remove.isPending ? "Sletter…" : "Slet"}
+              {remove.isPending ? "Deleting…" : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -196,11 +196,11 @@ function OwnedAgents({ userId }: { userId: string }) {
     if (!pendingArchive) return;
     try {
       await archive.mutateAsync(pendingArchive.id);
-      toast.success(`Agent "${pendingArchive.name}" arkiveret`);
+      toast.success(`Agent "${pendingArchive.name}" archived`);
       setPendingArchive(null);
     } catch (e) {
       toast.error(
-        e instanceof Error ? e.message : "Kunne ikke arkivere agent",
+        e instanceof Error ? e.message : "Couldn't archive agent",
       );
     }
   };
@@ -210,10 +210,10 @@ function OwnedAgents({ userId }: { userId: string }) {
       className="rounded-md border border-border p-4 space-y-3"
       data-testid="owned-agents-section"
     >
-      <h2 className="text-sm font-medium">Egne agenter ({owned.length})</h2>
+      <h2 className="text-sm font-medium">Owned agents ({owned.length})</h2>
       {owned.length === 0 ? (
         <p className="text-xs text-muted-foreground">
-          Ingen agenter ejet af denne bruger.
+          No agents owned by this user.
         </p>
       ) : (
         <ul className="divide-y divide-border/50 rounded-md border border-border/50">
@@ -243,7 +243,7 @@ function OwnedAgents({ userId }: { userId: string }) {
                 onClick={() =>
                   setPendingArchive({ id: a.id, name: a.name })
                 }
-                aria-label={`Arkiver agent ${a.name}`}
+                aria-label={`Archive agent ${a.name}`}
               >
                 <Trash2 className="size-4 text-muted-foreground" />
               </Button>
@@ -261,16 +261,16 @@ function OwnedAgents({ userId }: { userId: string }) {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Arkiver agent "{pendingArchive?.name}"?
+              Archive agent "{pendingArchive?.name}"?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Agenten kan ikke længere trigges efter arkivering. Historik
-              bevares.
+              The agent can't be triggered after archiving. History is
+              preserved.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={archive.isPending}>
-              Annullér
+              Cancel
             </AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
@@ -280,7 +280,7 @@ function OwnedAgents({ userId }: { userId: string }) {
               }}
               disabled={archive.isPending}
             >
-              {archive.isPending ? "Arkiverer…" : "Arkiver"}
+              {archive.isPending ? "Archiving…" : "Archive"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

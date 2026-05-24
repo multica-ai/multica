@@ -86,7 +86,7 @@ describe("RuntimeToolsCard", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText(/daemon scanner ved næste heartbeat/i),
+        screen.getByText(/daemon scans on next heartbeat/i),
       ).toBeInTheDocument(),
     );
   });
@@ -124,8 +124,8 @@ describe("RuntimeToolsCard", () => {
       expect(screen.getByText("firtal_bq_query")).toBeInTheDocument(),
     );
     expect(screen.getByText("github_create_issue")).toBeInTheDocument();
-    // The mockup spec calls for explicit "ingen specifikke" rather than blanks.
-    expect(screen.getAllByText(/ingen specifikke/i).length).toBeGreaterThan(0);
+    // The mockup spec calls for explicit "none specific" rather than blanks.
+    expect(screen.getAllByText(/none specific/i).length).toBeGreaterThan(0);
     // MCP rows show the server name in the badge.
     expect(screen.getByText(/github-server/)).toBeInTheDocument();
   });
@@ -139,7 +139,7 @@ describe("RuntimeToolsCard", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText(/kunne ikke hente tools/i),
+        screen.getByText(/couldn't load tools/i),
       ).toBeInTheDocument(),
     );
   });

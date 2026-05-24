@@ -76,10 +76,10 @@ export function AccessPage() {
           <Info className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
           <div className="space-y-1">
             <p>
-              <strong className="text-foreground">People &amp; Agents</strong> — see who has access to what, expand a row to view their capabilities.{" "}
+              <strong className="text-foreground">People &amp; Agents</strong> — see who has access to what. <em>Expand a row → flip the &quot;Requires approval&quot; switch</em> to make that subject ask before using a capability.{" "}
               <strong className="text-foreground">Pending</strong> — requests waiting for you to approve or reject.{" "}
-              <strong className="text-foreground">Permissions</strong> — create or edit grants; flip <em>Requires approval</em> to make a subject ask you first.{" "}
-              <strong className="text-foreground">Audit</strong> — every change to permissions, with who/when/what.
+              <strong className="text-foreground">Permissions</strong> — create or edit grants (the base allow/deny rules).{" "}
+              <strong className="text-foreground">Audit</strong> — every change, with who/when/what.
             </p>
           </div>
         </div>

@@ -3,8 +3,8 @@
 // JEH-1067 (Bundle B / PR-B) — Member detail "Effective access" section.
 //
 // Aggregates the agents + runtimes the member can reach through their group
-// allowlists, with a `via gruppe: <name>` chip for each row. For workspace
-// owners and admins the section short-circuits to a single "Adgang: Alt
+// allowlists, with a `via group: <name>` chip for each row. For workspace
+// owners and admins the section short-circuits to a single "Access: All
 // (admin)" line — they bypass group gates server-side and listing every
 // agent/runtime would be noise.
 
@@ -47,7 +47,7 @@ export function EffectiveAccessSection({
           ) : (
             <Shield className="size-4" />
           )}
-          Adgang: Alt ({role})
+          Access: All ({role})
         </div>
       </SectionFrame>
     );
@@ -73,7 +73,7 @@ function ScopedEffectiveAccess({ userId }: { userId: string }) {
 
   // Walk groups, keep only those the user is in, build a source-tagged view
   // of agents and runtimes. Each agent / runtime ID maps to a list of group
-  // names so we can render `via gruppe: ai-team, design` when the same
+  // names so we can render `via group: ai-team, design` when the same
   // resource is reachable through multiple groups.
   const { agentSources, runtimeSources } = useMemo(() => {
     const agentMap = new Map<string, string[]>();
@@ -114,7 +114,7 @@ function ScopedEffectiveAccess({ userId }: { userId: string }) {
       <SubSection
         title="Agents"
         icon={<Bot className="size-3.5 text-muted-foreground" />}
-        empty="Ingen agenter via gruppe-medlemskab."
+        empty="No agents via group membership."
         testId="effective-access-agents"
       >
         {accessibleAgents.map((a) => (
@@ -131,7 +131,7 @@ function ScopedEffectiveAccess({ userId }: { userId: string }) {
       <SubSection
         title="Runtimes"
         icon={<Cpu className="size-3.5 text-muted-foreground" />}
-        empty="Ingen runtimes via gruppe-medlemskab."
+        empty="No runtimes via group membership."
         testId="effective-access-runtimes"
       >
         {accessibleRuntimes.map((r) => (
@@ -213,7 +213,7 @@ function AccessRow({
             className="text-[10px]"
             data-testid="effective-access-source-chip"
           >
-            via gruppe: {name}
+            via group: {name}
           </Badge>
         ))}
       </span>

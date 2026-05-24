@@ -15,7 +15,7 @@ export function OverridesPlaceholder() {
     >
       <h2 className="text-sm font-medium">Overrides</h2>
       <p className="mt-1 text-xs text-muted-foreground">
-        Bundle C tilføjer overrides her.
+        Bundle C adds overrides here.
       </p>
     </section>
   );

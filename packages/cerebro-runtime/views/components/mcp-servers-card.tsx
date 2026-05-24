@@ -105,12 +105,12 @@ export function MCPServersCard({ runtime, workspaceId, canEdit }: MCPServersCard
         <div>
           <h3 className="text-sm font-medium">MCP servers</h3>
           <p className="text-xs text-muted-foreground">
-            Runtime-default MCPs der merges ind i alle agents på denne runtime.
+            Runtime-default MCPs merged into every agent on this runtime.
           </p>
         </div>
         {runtime.tools_config != null && (
           <span className="rounded bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-700">
-            Aktiv
+            Active
           </span>
         )}
       </div>
@@ -121,7 +121,7 @@ export function MCPServersCard({ runtime, workspaceId, canEdit }: MCPServersCard
           setDraft(e.target.value);
           if (error) setError(null);
         }}
-        placeholder={canEdit ? PLACEHOLDER : "Ingen runtime-default MCPs konfigureret."}
+        placeholder={canEdit ? PLACEHOLDER : "No runtime-default MCPs configured."}
         disabled={!canEdit || mutation.isPending}
         spellCheck={false}
         rows={10}
@@ -130,7 +130,7 @@ export function MCPServersCard({ runtime, workspaceId, canEdit }: MCPServersCard
 
       {error && (
         <p className="mt-2 text-xs text-destructive">
-          JSON-fejl: {error}
+          JSON error: {error}
         </p>
       )}
 
@@ -138,7 +138,7 @@ export function MCPServersCard({ runtime, workspaceId, canEdit }: MCPServersCard
         <div className="mt-3 flex items-center justify-between">
           <p className="text-xs text-muted-foreground">
             Format: <code className="text-xs">{`{"mcpServers": {...}}`}</code>.
-            Agent-niveau <code className="text-xs">mcp_config</code> overrider pr. server-nøgle.
+            Agent-level <code className="text-xs">mcp_config</code> overrides per server key.
           </p>
           <div className="flex gap-2">
             {runtime.tools_config != null && !dirty && (
@@ -148,7 +148,7 @@ export function MCPServersCard({ runtime, workspaceId, canEdit }: MCPServersCard
                 onClick={handleClear}
                 disabled={mutation.isPending}
               >
-                Ryd
+                Clear
               </Button>
             )}
             <Button
@@ -156,7 +156,7 @@ export function MCPServersCard({ runtime, workspaceId, canEdit }: MCPServersCard
               onClick={handleSave}
               disabled={!dirty || mutation.isPending}
             >
-              {mutation.isPending ? "Gemmer…" : "Gem"}
+              {mutation.isPending ? "Saving…" : "Save"}
             </Button>
           </div>
         </div>
