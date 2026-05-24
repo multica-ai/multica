@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Search, Server } from "lucide-react";
+import { Cloud, Plus, Search, Server } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -19,6 +19,7 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { PageHeader } from "../../layout/page-header";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
+import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
 import { RuntimeList } from "./runtime-list";
 import { useT } from "../../i18n";
 
@@ -55,6 +56,8 @@ interface RuntimesPageProps {
    * during the boot window. Web omits this.
    */
   bootstrapping?: boolean;
+  /** CEREBRO-PATCH(cloud-runtime-bootstrap): web SaaS-only Cloud Runtime entrypoint. */
+  cloudRuntimeEnabled?: boolean;
 }
 
 // Re-render every 30s so derived health (recently_lost → offline transitions)
@@ -68,7 +71,11 @@ function useNowTick(intervalMs = 30_000): number {
   return now;
 }
 
-export function RuntimesPage({ topSlot, bootstrapping }: RuntimesPageProps = {}) {
+export function RuntimesPage({
+  topSlot,
+  bootstrapping,
+  cloudRuntimeEnabled = false,
+}: RuntimesPageProps = {}) {
   const isLoading = useAuthStore((s) => s.isLoading);
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
@@ -76,6 +83,7 @@ export function RuntimesPage({ topSlot, bootstrapping }: RuntimesPageProps = {})
   const [healthFilter, setHealthFilter] = useState<HealthFilter>("all");
   const [search, setSearch] = useState("");
   const [showConnectDialog, setShowConnectDialog] = useState(false);
+  const [showCloudRuntimeDialog, setShowCloudRuntimeDialog] = useState(false);
 
   // One unified cache per workspace: scope (Mine/All) is a view filter, not
   // a fetch dimension. Splitting on owner used to give us two TanStack cache
@@ -142,6 +150,8 @@ export function RuntimesPage({ topSlot, bootstrapping }: RuntimesPageProps = {})
       <PageHeaderBar
         totalCount={totalCount}
         onConnectRemote={() => setShowConnectDialog(true)}
+        cloudRuntimeEnabled={cloudRuntimeEnabled}
+        onOpenCloudRuntime={() => setShowCloudRuntimeDialog(true)}
       />
 
       <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
@@ -181,6 +191,9 @@ export function RuntimesPage({ topSlot, bootstrapping }: RuntimesPageProps = {})
       {showConnectDialog && (
         <ConnectRemoteDialog onClose={() => setShowConnectDialog(false)} />
       )}
+      {cloudRuntimeEnabled && showCloudRuntimeDialog && (
+        <CloudRuntimeDialog onClose={() => setShowCloudRuntimeDialog(false)} />
+      )}
     </div>
   );
 }
@@ -193,9 +206,13 @@ export function RuntimesPage({ topSlot, bootstrapping }: RuntimesPageProps = {})
 function PageHeaderBar({
   totalCount,
   onConnectRemote,
+  cloudRuntimeEnabled,
+  onOpenCloudRuntime,
 }: {
   totalCount: number;
   onConnectRemote: () => void;
+  cloudRuntimeEnabled: boolean;
+  onOpenCloudRuntime: () => void;
 }) {
   const { t } = useT("runtimes");
   return (
@@ -220,10 +237,23 @@ function PageHeaderBar({
           </a>
         </p>
       </div>
-      <Button type="button" size="sm" onClick={onConnectRemote}>
-        <Plus className="h-3 w-3" />
-        {t(($) => $.page.connect_remote)}
-      </Button>
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        {cloudRuntimeEnabled && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={onOpenCloudRuntime}
+          >
+            <Cloud className="h-3 w-3" />
+            {t(($) => $.cloud_runtime.action)}
+          </Button>
+        )}
+        <Button type="button" size="sm" onClick={onConnectRemote}>
+          <Plus className="h-3 w-3" />
+          {t(($) => $.page.connect_remote)}
+        </Button>
+      </div>
     </PageHeader>
   );
 }

@@ -10,6 +10,7 @@ import type {
   TimelineEntry,
   User,
 } from "../types";
+import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 
 // ---------------------------------------------------------------------------
 // Schemas for the highest-risk API endpoints — those whose responses drive
@@ -196,6 +197,43 @@ export const SubscribersListSchema = z.array(SubscriberSchema);
 export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
 }).loose();
+
+// CEREBRO-PATCH(cloud-runtime-bootstrap): parse Fleet proxy responses defensively for desktop/web clients.
+export const CloudRuntimeNodeSchema = z.object({
+  id: z.string(),
+  owner_id: z.string(),
+  instance_id: z.string(),
+  region: z.string(),
+  instance_type: z.string(),
+  image_id: z.string(),
+  subnet_id: z.string(),
+  name: z.string(),
+  status: z.string(),
+  tags: z.record(z.string(), z.string()).default({}),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const CloudRuntimeNodeListSchema = z.array(CloudRuntimeNodeSchema);
+
+export const EMPTY_CLOUD_RUNTIME_NODE_LIST: CloudRuntimeNode[] = [];
+
+export const EMPTY_CLOUD_RUNTIME_NODE: CloudRuntimeNode = {
+  id: "",
+  owner_id: "",
+  instance_id: "",
+  region: "",
+  instance_type: "",
+  image_id: "",
+  subnet_id: "",
+  name: "",
+  status: "",
+  tags: {},
+  metadata: {},
+  created_at: "",
+  updated_at: "",
+};
 
 // CEREBRO-PATCH(agent-tools-schema): JEH-1353/1359 — tool grant list response shape.
 // name/description come from the server-side tool registry; enabled from the
