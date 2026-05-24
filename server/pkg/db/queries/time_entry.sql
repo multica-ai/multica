@@ -99,3 +99,16 @@ JOIN issue i ON i.id = te.issue_id
 WHERE i.project_id = $1
   AND te.workspace_id = $2
   AND te.stop_time IS NOT NULL;
+
+-- name: ListOverlappingStoppedTimeEntries :many
+SELECT *
+FROM time_entry
+WHERE workspace_id = @workspace_id
+  AND user_id = @user_id
+  AND stop_time IS NOT NULL
+  AND (@exclude_id::uuid IS NULL OR id <> @exclude_id)
+  AND (
+    tstzrange(start_time, stop_time, '[)') &&
+    tstzrange(@range_start::timestamptz, @range_stop::timestamptz, '[)')
+  )
+ORDER BY start_time DESC;

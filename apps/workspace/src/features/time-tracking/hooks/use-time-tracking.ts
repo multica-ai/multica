@@ -4,7 +4,7 @@ import {
   useQueryClient,
   type UseQueryOptions,
 } from "@tanstack/react-query";
-import type { TimeEntry, CreateTimeEntryRequest, UpdateTimeEntryRequest } from "@/shared/types";
+import type { TimeEntry, TimeEntryLabel, CreateTimeEntryRequest, UpdateTimeEntryRequest } from "@/shared/types";
 import { api } from "@/shared/api";
 import { queryKeys } from "@/shared/query";
 import { useWorkspaceStore } from "@/features/workspace";
@@ -80,6 +80,18 @@ export function useTeamTimeStatsQuery(params: { since: string; until: string }) 
     queryKey: queryKeys.timeTracking.teamStats(workspaceId, { since: params.since, until: params.until }),
     queryFn: () => api.getTeamTimeStats(params),
     enabled: !!workspaceId && !!params.since && !!params.until,
+    staleTime: 60_000,
+  });
+}
+
+/** Fetches workspace-scoped labels for time entries. */
+export function useTimeEntryLabelsQuery() {
+  const workspaceId = useWorkspaceStore((s) => s.workspace?.id ?? "");
+
+  return useQuery({
+    queryKey: queryKeys.timeTracking.labels(workspaceId),
+    queryFn: () => api.listTimeEntryLabels(),
+    enabled: !!workspaceId,
     staleTime: 60_000,
   });
 }
@@ -250,4 +262,90 @@ export function useDeleteTimeEntryMutation() {
       }
     },
   });
+}
+
+/** Workspace-level time-entry label CRUD and per-entry assignment helpers. */
+export function useTimeEntryLabelMutations() {
+  const queryClient = useQueryClient();
+  const workspaceId = useWorkspaceStore((s) => s.workspace?.id ?? "");
+
+  function invalidateLabelLists() {
+    queryClient.invalidateQueries({ queryKey: queryKeys.timeTracking.labels(workspaceId) });
+  }
+
+  function invalidateEntryLists() {
+    queryClient.invalidateQueries({ queryKey: queryKeys.timeTracking.entries(workspaceId) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.timeTracking.current(workspaceId) });
+  }
+
+  const createMutation = useMutation({
+    mutationFn: (data: { name: string; color?: string }) => api.createTimeEntryLabel(data),
+    onSuccess: invalidateLabelLists,
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, ...data }: { id: string; name: string; color: string }) =>
+      api.updateTimeEntryLabel(id, data),
+    onSuccess: invalidateLabelLists,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.deleteTimeEntryLabel(id),
+    onSuccess: () => {
+      invalidateLabelLists();
+      invalidateEntryLists();
+    },
+  });
+
+  const setEntryLabelsMutation = useMutation({
+    mutationFn: ({ entryId, labelIds }: { entryId: string; labelIds: string[] }) =>
+      api.setTimeEntryLabels(entryId, { label_ids: labelIds }),
+    onSuccess: (entry) => {
+      invalidateEntryLists();
+      if (entry.issue_id) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.timeTracking.issueEntries(entry.issue_id) });
+      }
+    },
+  });
+
+  const addEntryLabelMutation = useMutation({
+    mutationFn: ({ entryId, input }: { entryId: string; input: { label_id?: string; name?: string; color?: string } }) =>
+      api.addTimeEntryLabel(entryId, input),
+    onSuccess: (entry) => {
+      invalidateEntryLists();
+      if (entry.issue_id) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.timeTracking.issueEntries(entry.issue_id) });
+      }
+    },
+  });
+
+  const removeEntryLabelMutation = useMutation({
+    mutationFn: ({ entryId, labelId }: { entryId: string; labelId: string }) =>
+      api.removeTimeEntryLabel(entryId, labelId),
+    onSuccess: (entry) => {
+      invalidateEntryLists();
+      if (entry.issue_id) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.timeTracking.issueEntries(entry.issue_id) });
+      }
+    },
+  });
+
+  return {
+    createTimeEntryLabel: (data: { name: string; color?: string }) => createMutation.mutateAsync(data),
+    updateTimeEntryLabel: (id: string, data: { name: string; color: string }) =>
+      updateMutation.mutateAsync({ id, ...data }),
+    deleteTimeEntryLabel: (id: string) => deleteMutation.mutateAsync(id),
+    setEntryLabels: (entryId: string, labelIds: string[]) =>
+      setEntryLabelsMutation.mutateAsync({ entryId, labelIds }),
+    addEntryLabel: (entryId: string, input: { label_id?: string; name?: string; color?: string }) =>
+      addEntryLabelMutation.mutateAsync({ entryId, input }),
+    removeEntryLabel: (entryId: string, labelId: string) =>
+      removeEntryLabelMutation.mutateAsync({ entryId, labelId }),
+    creating: createMutation.isPending,
+    updating: updateMutation.isPending,
+    deleting: deleteMutation.isPending,
+    setting: setEntryLabelsMutation.isPending,
+    adding: addEntryLabelMutation.isPending,
+    removing: removeEntryLabelMutation.isPending,
+  };
 }

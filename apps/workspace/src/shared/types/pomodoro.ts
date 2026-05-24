@@ -23,6 +23,7 @@ export interface PomodoroSession {
 export interface CompletePomodoroBody {
   issue_id?: string;
   note?: string;
+  label_ids?: string[];
   /** Override the long-break cycle threshold for this completion. */
   long_break_after?: number;
 }

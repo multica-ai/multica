@@ -108,7 +108,9 @@ test.describe("Issues", () => {
     await issueLink.click();
 
     await page.waitForURL(new RegExp(`/issues/${issue.id}$`));
-    await expect(page.getByText("Properties")).toBeVisible();
+    // Use .last() to target the desktop right sidebar — the first Properties
+    // button is inside a mobile-only md:hidden container.
+    await expect(page.getByText("Properties").last()).toBeVisible();
   });
 
   test("project board shows only issues linked to that project", async ({ page }) => {
@@ -133,7 +135,9 @@ test.describe("Issues", () => {
 
     await expect(page.getByText(linkedTitle).first()).toBeVisible({ timeout: 10000 });
     await expect(page.getByText(unrelatedTitle).first()).not.toBeVisible();
-    await expect(page.getByText(`${project.title} Board`).first()).toBeVisible();
+    // On desktop, the board title is rendered as a breadcrumb (<span>), not an <h1>.
+    // The <h1> with the same text exists in the mobile-only md:hidden container.
+    await expect(page.locator("span").filter({ hasText: `${project.title} Board` }).first()).toBeVisible();
   });
 
   test("can create and edit issue schedule dates", async ({ page }) => {
@@ -141,7 +145,8 @@ test.describe("Issues", () => {
     const schedule = await page.evaluate(() => {
       const build = (offset: number) => {
         const date = new Date();
-        date.setHours(0, 0, 0, 0);
+        // The issue datetime picker defaults to 08:00 local time for new selections.
+        date.setHours(8, 0, 0, 0);
         date.setDate(date.getDate() + offset);
         return {
           dataDay: date.toLocaleDateString(),
@@ -178,8 +183,8 @@ test.describe("Issues", () => {
       throw new Error("Missing issue id from detail URL");
     }
 
-    await expect(page.getByRole("button", { name: schedule.start.label })).toBeVisible();
-    await expect(page.getByRole("button", { name: schedule.end.label })).toBeVisible();
+    await expect(page.getByRole("button", { name: new RegExp(`^${schedule.start.label},`) })).toBeVisible();
+    await expect(page.getByRole("button", { name: new RegExp(`^${schedule.end.label},`) })).toBeVisible();
 
     await expect.poll(async () => {
       const issue = await api.getIssue(issueId);
@@ -192,13 +197,13 @@ test.describe("Issues", () => {
       end_date: schedule.end.iso,
     });
 
-    await page.getByRole("button", { name: schedule.start.label }).click();
+    await page.getByRole("button", { name: new RegExp(`^${schedule.start.label},`) }).click();
     await page.getByRole("button", { name: "Clear date" }).click();
     await expect(page.getByRole("button", { name: "Start date" })).toBeVisible();
 
-    await page.getByRole("button", { name: schedule.end.label }).click();
+    await page.getByRole("button", { name: new RegExp(`^${schedule.end.label},`) }).click();
     await applyDateFromPopover(page, schedule.updatedEnd.dataDay);
-    await expect(page.getByRole("button", { name: schedule.updatedEnd.label })).toBeVisible();
+    await expect(page.getByRole("button", { name: new RegExp(`^${schedule.updatedEnd.label},`) })).toBeVisible();
 
     await expect.poll(async () => {
       const issue = await api.getIssue(issueId);
@@ -215,6 +220,7 @@ test.describe("Issues", () => {
   test("can create child issues and manage labels and dependencies", async ({ page }) => {
     const parent = await api.createIssue("E2E Parent " + Date.now());
     const blocker = await api.createIssue("E2E Blocker " + Date.now());
+    await api.createIssueLabel("Backend");
 
     await page.reload();
     await page.getByRole("button", { name: "New issue" }).click();
@@ -270,7 +276,9 @@ test.describe("Issues", () => {
 
     await page.waitForURL(/\/issues\/[\w-]+/);
     await expect(page.getByRole("button", { name: "Workspace menu" })).toBeVisible();
-    await expect(page.getByText("Properties")).toBeVisible();
+    // Use .last() to target the desktop right sidebar — the first Properties
+    // button is inside a mobile-only md:hidden container.
+    await expect(page.getByText("Properties").last()).toBeVisible();
     await expect(page.getByRole("button", { name: "Post comment" })).toBeVisible();
   });
 

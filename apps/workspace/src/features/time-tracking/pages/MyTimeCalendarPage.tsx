@@ -1,20 +1,21 @@
-"use client";
-
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { Link } from "@tanstack/react-router";
-import { Clock, List } from "lucide-react";
+import { Clock, List, Plus } from "lucide-react";
 import { Views, type View } from "react-big-calendar";
-import { buttonVariants } from "@/components/ui/button";
+import { toast } from "sonner";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { BigDnDCalendar, type EventInteractionArgs } from "@/components/ui/big-calendar";
 import type { TimeEntry } from "@/shared/types";
 import {
   useCurrentTimerQuery,
   useTimeEntriesQuery,
   useUpdateTimeEntryMutation,
-  useStartTimerMutation,
-  useDeleteTimeEntryMutation,
 } from "../hooks/use-time-tracking";
+import { useTimeEntryActions } from "../hooks/use-time-entry-actions";
 import { TimeEntryEditSheet } from "../components/TimeEntryEditSheet";
+import { TimeEntryCreateSheet } from "../components/TimeEntryCreateSheet";
+import { TimeEntryDeleteDialog } from "../components/TimeEntryDeleteDialog";
+import { ConfirmTimerSwitchDialog } from "../components/ConfirmTimerSwitchDialog";
 import { CalendarEventCard, type CalendarEvent } from "../components/calendar/CalendarEventCard";
 import { createDayHeaderComponent } from "../components/calendar/CalendarDayHeader";
 import { CalendarDayColumnWrapper } from "../components/calendar/CalendarDayColumnWrapper";
@@ -148,20 +149,20 @@ function CalendarContextMenu({ state, onClose, onEdit, onContinue, onDelete }: C
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-/**
- * /my-time/calendar — full-featured time entry calendar with DnD, zoom, and custom components.
- */
 export function MyTimeCalendarPage() {
   const { data: running } = useCurrentTimerQuery();
   const updateEntry = useUpdateTimeEntryMutation();
-  const startTimer = useStartTimerMutation();
-  const deleteEntry = useDeleteTimeEntryMutation();
+  const { requestStart, pendingSwitch, confirmSwitch, setPendingSwitch, requestDelete } = useTimeEntryActions({ currentEntry: running });
 
   const [view, setView] = useState<View>(Views.DAY);
   const [date, setDate] = useState(new Date());
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [zoom, setZoom] = useState<-1 | 0 | 1>(0);
+  const [createSheetOpen, setCreateSheetOpen] = useState(false);
+  const [isSwitching, setIsSwitching] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [entryToDelete, setEntryToDelete] = useState<TimeEntry | null>(null);
 
   // Tracks the current time so the running timer event block updates periodically.
   const [now, setNow] = useState(() => new Date());
@@ -243,24 +244,48 @@ export function MyTimeCalendarPage() {
 
   // Start a new timer continuing the given entry.
   const handleContinueEntry = useCallback(
-    (entry: TimeEntry) => {
-      startTimer.mutate({
-        description: entry.description ?? undefined,
-        issue_id: entry.issue_id,
-        start_time: new Date().toISOString(),
-      });
+    async (entry: TimeEntry) => {
+      try {
+        await requestStart({
+          description: entry.description ?? undefined,
+          issue_id: entry.issue_id,
+          start_time: new Date().toISOString(),
+        });
+      } catch (error) {
+        toast.error("Failed to continue timer");
+      }
     },
-    [startTimer],
+    [requestStart],
   );
+
+  const handleConfirmSwitch = useCallback(async () => {
+    setIsSwitching(true);
+    try {
+      await confirmSwitch();
+    } catch (error) {
+      toast.error("Failed to switch timer");
+    } finally {
+      setIsSwitching(false);
+    }
+  }, [confirmSwitch]);
 
   const handleDeleteEntry = useCallback(
     (entry: TimeEntry) => {
-      deleteEntry.mutate({ id: entry.id, issueId: entry.issue_id });
+      setEntryToDelete(entry);
+      setDeleteDialogOpen(true);
     },
-    [deleteEntry],
+    [],
   );
 
-  // Stable event  only recreated when handleContinueEntry changes.card 
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!entryToDelete) return;
+
+    requestDelete(entryToDelete, entryToDelete.issue_id);
+    setDeleteDialogOpen(false);
+    setEntryToDelete(null);
+  }, [entryToDelete, requestDelete]);
+
+  // Keep the event component stable unless the continue handler changes.
   const eventComponent = useCallback(
     (props: { event: CalendarEvent }) => (
       <CalendarEventCard
@@ -273,7 +298,7 @@ export function MyTimeCalendarPage() {
     [handleContinueEntry],
   );
 
-  // Day header  stable as long as dailyTotals reference doesn't change.factory 
+  // Rebuild the day header only when the visible totals change.
   const dayHeaderComponent = useMemo(
     () => createDayHeaderComponent(dailyTotals, new Date()),
     [dailyTotals],
@@ -291,7 +316,16 @@ export function MyTimeCalendarPage() {
     [zoom],
   );
 
-  // Day column  injects a play button in today's column.wrapper 
+  /** Starts a new timer from the current day column. */
+  const handleStartFromColumn = useCallback(async () => {
+    try {
+      await requestStart({ start_time: new Date().toISOString() });
+    } catch (error) {
+      toast.error("Failed to start timer");
+    }
+  }, [requestStart]);
+
+  // Inject the quick-start button into today's column.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const dayColumnWrapper = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -304,14 +338,14 @@ export function MyTimeCalendarPage() {
         <CalendarDayColumnWrapper
           {...props}
           isNow={isNow}
-          onStartEntry={() => startTimer.mutate({ start_time: new Date().toISOString() })}
+          onStartEntry={() => void handleStartFromColumn()}
         />
       );
     },
-    [startTimer],
+    [handleStartFromColumn],
   );
 
-  // DnD  skip running entries.handlers 
+  // Skip drag-and-drop writes for the running entry.
   const handleEventDrop = useCallback(
     ({ event, start, end }: EventInteractionArgs<CalendarEvent>) => {
       if (event.resource.stop_time === null) return;
@@ -364,15 +398,25 @@ export function MyTimeCalendarPage() {
       <div className="flex items-center justify-between border-b px-6 py-4">
         <div className="flex items-center gap-2">
           <Clock className="size-4 text-muted-foreground" />
-          <h1 className="text-sm font-medium">My  Calendar</h1>Time 
+          <h1 className="text-sm font-medium">My Time Calendar</h1>
         </div>
-        <Link to="/my-time" className={buttonVariants({ variant: "outline", size: "sm" })}>
-          <List className="mr-1.5 size-3.5" />
-          List view
-        </Link>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCreateSheetOpen(true)}
+          >
+            <Plus className="mr-1.5 size-3.5" />
+            Add entry
+          </Button>
+          <Link to="/my-time" className={buttonVariants({ variant: "outline", size: "sm" })}>
+            <List className="mr-1.5 size-3.5" />
+            List view
+          </Link>
+        </div>
       </div>
 
-      {/*  fills remaining height */}Calendar 
+      {/* Calendar fills the remaining height. */}
       <div className="relative flex-1 overflow-hidden" ref={calendarRef}>
         <BigDnDCalendar<CalendarEvent>
           events={events}
@@ -397,7 +441,7 @@ export function MyTimeCalendarPage() {
             dayColumnWrapper: dayColumnWrapper,
           }}
           style={{ height: "100%" }}
-          // Let CalendarEventCard handle all visual  strip RBC's defaults.styling 
+          // Let CalendarEventCard handle all visuals and strip RBC defaults.
           eventPropGetter={() => ({
             style: {
               backgroundColor: "transparent",
@@ -420,6 +464,27 @@ export function MyTimeCalendarPage() {
 
       {/* Edit sheet */}
       <TimeEntryEditSheet entry={editingEntry} onClose={() => setEditingEntry(null)} />
+
+      {/* Create sheet */}
+      <TimeEntryCreateSheet open={createSheetOpen} onClose={() => setCreateSheetOpen(false)} />
+
+      {/* Switch confirmation dialog */}
+      <ConfirmTimerSwitchDialog
+        open={!!pendingSwitch}
+        isLoading={isSwitching}
+        onCancel={() => setPendingSwitch(null)}
+        onConfirm={handleConfirmSwitch}
+      />
+
+      {/* Delete confirmation dialog */}
+      <TimeEntryDeleteDialog
+        open={deleteDialogOpen}
+        onCancel={() => {
+          setDeleteDialogOpen(false);
+          setEntryToDelete(null);
+        }}
+        onConfirm={handleDeleteConfirm}
+      />
     </div>
   );
 }

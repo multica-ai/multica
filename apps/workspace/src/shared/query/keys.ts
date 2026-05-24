@@ -61,6 +61,7 @@ export const queryKeys = {
   timeTracking: {
     all: () => ["time-tracking"] as const,
     current: (workspaceId: string) => ["time-tracking", "current", workspaceId] as const,
+    labels: (workspaceId: string) => ["time-tracking", "labels", workspaceId] as const,
     // Broad key used for invalidation (catches all entries sub-keys for the workspace).
     entries: (workspaceId: string) => ["time-tracking", "entries", workspaceId] as const,
     // Specific key used when fetching with params (since/until or limit/offset).

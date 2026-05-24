@@ -1,6 +1,7 @@
 export { useTimeTrackingStore } from "./store";
-export { useCurrentTimerQuery, useTimeEntriesQuery, useIssueTimeEntriesQuery, useTeamTimeStatsQuery } from "./hooks/use-time-tracking";
+export { useCurrentTimerQuery, useTimeEntriesQuery, useIssueTimeEntriesQuery, useTeamTimeStatsQuery, useTimeEntryLabelsQuery } from "./hooks/use-time-tracking";
 export { useStartTimerMutation, useStopTimerMutation, useUpdateTimeEntryMutation, useDeleteTimeEntryMutation } from "./hooks/use-time-tracking";
+export { useTimeEntryLabelMutations } from "./hooks/use-time-tracking";
 export { useTimeTrackingSync } from "./hooks/use-time-tracking-sync";
 export { LiveDuration, formatDuration, getElapsedSeconds } from "./components/LiveDuration";
 export { GlobalTimerWidget } from "./components/GlobalTimerWidget";

@@ -72,7 +72,7 @@ echo "Backend/API: http://localhost:${PORT}"
 echo "Workspace: http://localhost:${FRONTEND_PORT}"
 echo "Starting backend with air and workspace SPA..."
 
-bash "$ROOT_DIR/scripts/check-postgres.sh" "$SELECTED_ENV_FILE"
+bash "$ROOT_DIR/scripts/ensure-postgres.sh" "$SELECTED_ENV_FILE"
 bash "$ROOT_DIR/scripts/check-dev-ports.sh" "$SELECTED_ENV_FILE" backend workspace
 
 (

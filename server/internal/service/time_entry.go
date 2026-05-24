@@ -24,9 +24,26 @@ type txStarter interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
+// TimeEntryOverlapError reports overlapping stopped entries detected inside a mutation transaction.
+type TimeEntryOverlapError struct {
+	Conflicts []db.TimeEntry
+}
+
+func (e *TimeEntryOverlapError) Error() string {
+	return "time entry overlaps an existing entry"
+}
+
 // NewTimeEntryService creates a new TimeEntryService.
 func NewTimeEntryService(q *db.Queries, tx txStarter) *TimeEntryService {
 	return &TimeEntryService{Queries: q, TxStarter: tx}
+}
+
+// LockUserTimeEntryMutations serializes stopped-entry overlap-sensitive mutations for one user.
+func LockUserTimeEntryMutations(ctx context.Context, tx pgx.Tx, workspaceID, userID string) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`, workspaceID, userID); err != nil {
+		return fmt.Errorf("lock time entry mutation scope: %w", err)
+	}
+	return nil
 }
 
 // StartTimer stops any existing running timer for the user, then starts a new
@@ -38,6 +55,7 @@ func (s *TimeEntryService) StartTimer(
 	description *string,
 	issueID *string,
 	startTime time.Time,
+	afterCreate func(context.Context, *db.Queries, db.TimeEntry) error,
 ) (db.TimeEntry, error) {
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
@@ -91,6 +109,11 @@ func (s *TimeEntryService) StartTimer(
 	})
 	if err != nil {
 		return db.TimeEntry{}, fmt.Errorf("start timer: create entry: %w", err)
+	}
+	if afterCreate != nil {
+		if err := afterCreate(ctx, qtx, entry); err != nil {
+			return db.TimeEntry{}, err
+		}
 	}
 
 	// Record the running timer for O(1) lookups.
@@ -240,9 +263,19 @@ func (s *TimeEntryService) UpdateTimeEntry(
 	issueID **string,
 	startTime *time.Time,
 	stopTime *time.Time,
+	confirmOverlap bool,
+	afterUpdate func(context.Context, *db.Queries, db.TimeEntry) error,
 ) (db.TimeEntry, error) {
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.TimeEntry{}, fmt.Errorf("update time entry: begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := s.Queries.WithTx(tx)
+
 	// Verify ownership.
-	entry, err := s.Queries.GetTimeEntryByID(ctx, db.GetTimeEntryByIDParams{
+	entry, err := qtx.GetTimeEntryByID(ctx, db.GetTimeEntryByIDParams{
 		ID:          util.ParseUUID(timeEntryID),
 		WorkspaceID: util.ParseUUID(workspaceID),
 	})
@@ -254,6 +287,40 @@ func (s *TimeEntryService) UpdateTimeEntry(
 	}
 	if util.UUIDToString(entry.UserID) != userID {
 		return db.TimeEntry{}, ErrTimeEntryNotFound
+	}
+
+	if (startTime != nil || stopTime != nil) && !confirmOverlap {
+		if err := LockUserTimeEntryMutations(ctx, tx, workspaceID, userID); err != nil {
+			return db.TimeEntry{}, fmt.Errorf("update time entry: %w", err)
+		}
+
+		effectiveStart := entry.StartTime.Time
+		if startTime != nil {
+			effectiveStart = *startTime
+		}
+
+		var effectiveStop time.Time
+		if stopTime != nil {
+			effectiveStop = *stopTime
+		} else if entry.StopTime.Valid {
+			effectiveStop = entry.StopTime.Time
+		}
+
+		if stopTime != nil || entry.StopTime.Valid {
+			overlaps, err := qtx.ListOverlappingStoppedTimeEntries(ctx, db.ListOverlappingStoppedTimeEntriesParams{
+				WorkspaceID: util.ParseUUID(workspaceID),
+				UserID:      util.ParseUUID(userID),
+				RangeStart:  pgtype.Timestamptz{Time: effectiveStart, Valid: true},
+				RangeStop:   pgtype.Timestamptz{Time: effectiveStop, Valid: true},
+				ExcludeID:   util.ParseUUID(timeEntryID),
+			})
+			if err != nil {
+				return db.TimeEntry{}, fmt.Errorf("update time entry: check overlaps: %w", err)
+			}
+			if len(overlaps) > 0 {
+				return db.TimeEntry{}, &TimeEntryOverlapError{Conflicts: overlaps}
+			}
+		}
 	}
 
 	// Build optional timestamps for the query.
@@ -307,7 +374,7 @@ func (s *TimeEntryService) UpdateTimeEntry(
 		newDuration = entry.DurationSeconds
 	}
 
-	updated, err := s.Queries.UpdateTimeEntry(ctx, db.UpdateTimeEntryParams{
+	updated, err := qtx.UpdateTimeEntry(ctx, db.UpdateTimeEntryParams{
 		ID:              util.ParseUUID(timeEntryID),
 		WorkspaceID:     util.ParseUUID(workspaceID),
 		Description:     util.PtrToText(description),
@@ -318,6 +385,14 @@ func (s *TimeEntryService) UpdateTimeEntry(
 	})
 	if err != nil {
 		return db.TimeEntry{}, fmt.Errorf("update time entry: %w", err)
+	}
+	if afterUpdate != nil {
+		if err := afterUpdate(ctx, qtx, updated); err != nil {
+			return db.TimeEntry{}, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.TimeEntry{}, fmt.Errorf("update time entry: commit: %w", err)
 	}
 	return updated, nil
 }
@@ -363,6 +438,121 @@ func optionalUUID(s *string) pgtype.UUID {
 		return pgtype.UUID{}
 	}
 	return util.ParseUUID(*s)
+}
+
+// FindHistoricalOverlaps returns all stopped time entries that overlap with the
+// given time range, optionally excluding a specific entry (for update scenarios).
+func (s *TimeEntryService) FindHistoricalOverlaps(
+	ctx context.Context,
+	workspaceID, userID string,
+	startTime, stopTime time.Time,
+	excludeID *string,
+) ([]db.TimeEntry, error) {
+	var exclude pgtype.UUID
+	if excludeID != nil {
+		exclude = optionalUUID(excludeID)
+	}
+	return s.Queries.ListOverlappingStoppedTimeEntries(ctx, db.ListOverlappingStoppedTimeEntriesParams{
+		WorkspaceID: util.ParseUUID(workspaceID),
+		UserID:      util.ParseUUID(userID),
+		RangeStart:  pgtype.Timestamptz{Time: startTime, Valid: true},
+		RangeStop:   pgtype.Timestamptz{Time: stopTime, Valid: true},
+		ExcludeID:   exclude,
+	})
+}
+
+// SwitchTimer stops the current running timer and starts a new one atomically.
+// Returns the stopped entry and the newly started entry.
+func (s *TimeEntryService) SwitchTimer(
+	ctx context.Context,
+	workspaceID, userID string,
+	description *string,
+	issueID *string,
+	startTime time.Time,
+	afterCreate func(context.Context, *db.Queries, db.TimeEntry) error,
+) (db.TimeEntry, db.TimeEntry, error) {
+	// Open a transaction to make stop + start atomic.
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.TimeEntry{}, db.TimeEntry{}, fmt.Errorf("switch timer: begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := s.Queries.WithTx(tx)
+
+	// Get the current running timer.
+	current, err := qtx.GetRunningTimerByUser(ctx, db.GetRunningTimerByUserParams{
+		UserID:      util.ParseUUID(userID),
+		WorkspaceID: util.ParseUUID(workspaceID),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.TimeEntry{}, db.TimeEntry{}, ErrTimerNotRunning
+		}
+		return db.TimeEntry{}, db.TimeEntry{}, fmt.Errorf("switch timer: get running: %w", err)
+	}
+
+	// Stop the current timer.
+	stopTime := time.Now()
+	elapsed := int64(stopTime.Sub(current.StartTime.Time).Seconds())
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	stopped, err := qtx.StopTimeEntry(ctx, db.StopTimeEntryParams{
+		ID:              current.ID,
+		WorkspaceID:     current.WorkspaceID,
+		StopTime:        pgtype.Timestamptz{Time: stopTime, Valid: true},
+		DurationSeconds: elapsed,
+	})
+	if err != nil {
+		return db.TimeEntry{}, db.TimeEntry{}, fmt.Errorf("switch timer: stop current: %w", err)
+	}
+
+	// Clear the running timer cache.
+	if err := qtx.ClearRunningTimerByUser(ctx, util.ParseUUID(userID)); err != nil {
+		return db.TimeEntry{}, db.TimeEntry{}, fmt.Errorf("switch timer: clear running timer: %w", err)
+	}
+
+	// Start the new timer.
+	durationSeconds := -startTime.Unix()
+	started, err := qtx.CreateTimeEntry(ctx, db.CreateTimeEntryParams{
+		WorkspaceID:     util.ParseUUID(workspaceID),
+		UserID:          util.ParseUUID(userID),
+		IssueID:         optionalUUID(issueID),
+		Description:     util.PtrToText(description),
+		StartTime:       pgtype.Timestamptz{Time: startTime, Valid: true},
+		StopTime:        pgtype.Timestamptz{}, // NULL: timer is running
+		DurationSeconds: durationSeconds,
+		Type:            "manual",
+	})
+	if err != nil {
+		return db.TimeEntry{}, db.TimeEntry{}, fmt.Errorf("switch timer: create entry: %w", err)
+	}
+	if afterCreate != nil {
+		if err := afterCreate(ctx, qtx, started); err != nil {
+			return db.TimeEntry{}, db.TimeEntry{}, err
+		}
+	}
+
+	// Record the new running timer.
+	if err := qtx.SetRunningTimer(ctx, db.SetRunningTimerParams{
+		UserID:      util.ParseUUID(userID),
+		TimeEntryID: started.ID,
+	}); err != nil {
+		return db.TimeEntry{}, db.TimeEntry{}, fmt.Errorf("switch timer: set running timer: %w", err)
+	}
+
+	// Commit the transaction.
+	if err := tx.Commit(ctx); err != nil {
+		return db.TimeEntry{}, db.TimeEntry{}, fmt.Errorf("switch timer: commit: %w", err)
+	}
+
+	slog.Debug("timer switched",
+		"workspace_id", workspaceID,
+		"user_id", userID,
+		"stopped_id", util.UUIDToString(stopped.ID),
+		"started_id", util.UUIDToString(started.ID))
+	return stopped, started, nil
 }
 
 // Sentinel errors.

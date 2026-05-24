@@ -242,6 +242,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) (chi.Rout
 			// Time entries (standalone, current user)
 			r.Route("/api/time-entries", func(r chi.Router) {
 				r.Post("/", h.CreateTimeEntry)
+				r.Post("/switch", h.SwitchTimeEntry)
 				r.Get("/", h.ListTimeEntries)
 				r.Get("/current", h.GetCurrentTimeEntry)
 				// Workspace-level aggregation for team time review.
@@ -250,7 +251,17 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) (chi.Rout
 					r.Patch("/", h.UpdateTimeEntry)
 					r.Delete("/", h.DeleteTimeEntry)
 					r.Patch("/stop", h.StopTimeEntry)
+					r.Post("/labels", h.AddLabelToTimeEntry)
+					r.Put("/labels", h.SetTimeEntryLabels)
+					r.Delete("/labels/{labelId}", h.RemoveLabelFromTimeEntry)
 				})
+			})
+
+			r.Route("/api/time-entry-labels", func(r chi.Router) {
+				r.Get("/", h.ListTimeEntryLabels)
+				r.Post("/", h.CreateTimeEntryLabel)
+				r.Patch("/{id}", h.UpdateTimeEntryLabel)
+				r.Delete("/{id}", h.DeleteTimeEntryLabel)
 			})
 
 			// Projects

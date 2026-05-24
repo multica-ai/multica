@@ -14,17 +14,25 @@ import {
 } from "../hooks/use-pomodoro";
 import { usePomodoroSettings } from "../hooks/use-pomodoro-settings";
 import { useSoundSystem } from "../hooks/use-sound-system";
+import { useTimeEntryLabelsQuery, useTimeEntryLabelMutations } from "../hooks/use-time-tracking";
+import { TimeEntryLabelPicker } from "./time-entry-label-picker";
 
 interface Props {
   /** Called when a work phase completes (optional — e.g. to auto-stop the live timer). */
   onWorkComplete?: () => void;
+  /**
+   * Controls which presentation is used.
+   * - "compact" (default): sidebar widget — tight row with play/reset controls.
+   * - "page": full /pomodoro page panel — large clock, Current session header, and Quick capture section.
+   */
+  variant?: "compact" | "page";
 }
 
 /** State carried while the user decides what to attach to a completed pomodoro. */
 interface CompletionFlowState {
   isWorkPhase: boolean;
   pendingIssueId?: string;
-  pendingNote?: string;
+  pendingLabelIds: string[];
   showNoteInput?: boolean;
 }
 
@@ -54,10 +62,12 @@ function phaseDuration(
  * Pomodoro timer driven by server-side session state.
  * Survives page refreshes — session is fetched from the backend on mount.
  */
-export function PomodoroTimer({ onWorkComplete }: Props) {
+export function PomodoroTimer({ onWorkComplete, variant = "compact" }: Props) {
   const { data: session, isLoading } = usePomodoroQuery();
   const { settings } = usePomodoroSettings();
   const sound = useSoundSystem(settings);
+  const { data: workspaceLabels = [] } = useTimeEntryLabelsQuery();
+  const { createTimeEntryLabel } = useTimeEntryLabelMutations();
 
   // Local display counter — synced from server on every session change.
   const [remaining, setRemaining] = useState<number>(settings.work_minutes * 60);
@@ -74,6 +84,10 @@ export function PomodoroTimer({ onWorkComplete }: Props) {
   // Prevent firing completePomodoro() more than once per phase transition.
   const completingRef = useRef(false);
 
+  // Guard against a second completeMutation call while one is already in-flight
+  // (e.g. the inline Skip button and the toast Skip action firing independently).
+  const completeMutatingRef = useRef(false);
+
   // Track previous session status to detect transitions.
   const prevStatusRef = useRef<string | undefined>(undefined);
 
@@ -81,6 +95,7 @@ export function PomodoroTimer({ onWorkComplete }: Props) {
   useEffect(() => {
     if (!session) return;
     completingRef.current = false;
+    completeMutatingRef.current = false;
     setRemaining(Math.round(calcRemaining(session)));
   }, [session]);
 
@@ -117,6 +132,11 @@ export function PomodoroTimer({ onWorkComplete }: Props) {
 
   // Helper: fire completePomodoro and handle the full onSuccess flow inline.
   const fireComplete = (body?: CompletePomodoroBody) => {
+    // Guard: ignore any call that arrives while a completion mutation is already
+    // in-flight. This prevents the inline completion controls and the toast Skip
+    // action from both calling completeMutation.mutate on the same phase end.
+    if (completeMutatingRef.current) return;
+    completeMutatingRef.current = true;
     const wasWork = session?.phase === "work";
     completeMutation.mutate(body, {
       onSuccess: () => {
@@ -134,6 +154,11 @@ export function PomodoroTimer({ onWorkComplete }: Props) {
           }
         }
       },
+      onSettled: () => {
+        // Release the guard once the mutation resolves (success or error) so a
+        // retry after a network failure is allowed.
+        completeMutatingRef.current = false;
+      },
     });
   };
 
@@ -148,6 +173,7 @@ export function PomodoroTimer({ onWorkComplete }: Props) {
     const body: CompletePomodoroBody = {
       long_break_after: settings.long_break_after,
       issue_id: completionFlow.pendingIssueId || undefined,
+      label_ids: completionFlow.pendingLabelIds,
       note: noteInputValue || undefined,
     };
     setCompletionFlow(null);
@@ -170,7 +196,7 @@ export function PomodoroTimer({ onWorkComplete }: Props) {
             if (isWorkPhase) {
               // Work phase complete: play sound and show action toast.
               sound.playWorkComplete();
-              setCompletionFlow({ isWorkPhase: true });
+              setCompletionFlow({ isWorkPhase: true, pendingLabelIds: [] });
               toast(
                 "🍅 Pomodoro complete!",
                 {
@@ -245,6 +271,182 @@ export function PomodoroTimer({ onWorkComplete }: Props) {
     completeMutation.isPending ||
     resetMutation.isPending;
 
+  // ── Page variant ─────────────────────────────────────────────────────────
+  if (variant === "page") {
+    const phaseColor =
+      phase === "work"
+        ? "text-foreground"
+        : phase === "long_break"
+          ? "text-blue-500"
+          : "text-green-500";
+
+    return (
+      <section aria-label="Current session" className="rounded-xl border bg-card p-4 sm:p-6">
+        <div className="space-y-6">
+          {/* Header */}
+          <div>
+            <h2 className="text-sm font-medium text-foreground">Current session</h2>
+            <p className="text-xs text-muted-foreground">Stay in the zone.</p>
+          </div>
+
+          {/* Large clock */}
+          <div className="flex flex-col items-center gap-2 py-4">
+            <span className={`text-6xl font-mono font-bold tabular-nums ${phaseColor}`}>
+              {display}
+            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">{phaseLabel}</span>
+              {pomodoroCount !== undefined && pomodoroCount > 0 && (
+                <span className="text-sm text-muted-foreground tabular-nums">
+                  {"🍅".repeat(Math.min(pomodoroCount, 4))}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Controls */}
+          <div className="flex items-center justify-center gap-3">
+            <Button
+              size="lg"
+              className="w-28"
+              disabled={isPending || isLoading}
+              onClick={handleToggle}
+              aria-label={isRunning ? "Pause timer" : "Start timer"}
+            >
+              {isRunning ? <Pause className="mr-2 size-4" /> : <Play className="mr-2 size-4" />}
+              {isRunning ? "Pause" : "Start"}
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-10 text-muted-foreground"
+              disabled={isPending || isLoading}
+              onClick={handleReset}
+              aria-label="Reset timer"
+            >
+              <RotateCcw className="size-4" />
+            </Button>
+          </div>
+
+          {/* Quick capture — always visible in page mode */}
+          <div className="border-t pt-4">
+            <h3 className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Quick capture
+            </h3>
+            {completionFlow ? (
+              // Active completion flow: show full note/label/issue inputs
+              <div className="space-y-2">
+                {completionFlow.showNoteInput ? (
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={noteInputValue}
+                      onChange={(e) => setNoteInputValue(e.target.value)}
+                      placeholder="Add a note…"
+                      className="flex-1 text-sm border rounded px-3 py-1.5 bg-background text-foreground"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleSubmitCompletion();
+                        // Escape backs out of note-input mode only — the completion
+                        // flow stays open so the user can still link an issue or skip.
+                        if (e.key === "Escape")
+                          setCompletionFlow((prev) =>
+                            prev ? { ...prev, showNoteInput: false } : null,
+                          );
+                      }}
+                      autoFocus
+                    />
+                    <Button size="sm" onClick={handleSubmitCompletion}>
+                      Save
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        const id = window.prompt("Enter issue ID to link:");
+                        if (id) {
+                          setCompletionFlow(null);
+                          setNoteInputValue("");
+                          fireComplete({
+                            long_break_after: settings.long_break_after,
+                            issue_id: id,
+                          });
+                        }
+                      }}
+                    >
+                      Link Issue
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        setCompletionFlow((prev) => (prev ? { ...prev, showNoteInput: true } : null))
+                      }
+                    >
+                      Add Note
+                    </Button>
+                    <div className="min-w-[160px]">
+                      <TimeEntryLabelPicker
+                        labels={workspaceLabels}
+                        selectedIds={completionFlow.pendingLabelIds}
+                        onAdd={async ({ labelId, name }) => {
+                          if (labelId) {
+                            setCompletionFlow((prev) => {
+                              if (!prev) return prev;
+                              if (prev.pendingLabelIds.includes(labelId)) return prev;
+                              return { ...prev, pendingLabelIds: [...prev.pendingLabelIds, labelId] };
+                            });
+                            return;
+                          }
+                          if (!name?.trim()) return;
+                          const created = await createTimeEntryLabel({ name: name.trim() });
+                          setCompletionFlow((prev) => {
+                            if (!prev) return prev;
+                            if (prev.pendingLabelIds.includes(created.id)) return prev;
+                            return {
+                              ...prev,
+                              pendingLabelIds: [...prev.pendingLabelIds, created.id],
+                            };
+                          });
+                        }}
+                        onRemove={async (labelId) => {
+                          setCompletionFlow((prev) => {
+                            if (!prev) return prev;
+                            return {
+                              ...prev,
+                              pendingLabelIds: prev.pendingLabelIds.filter((id) => id !== labelId),
+                            };
+                          });
+                        }}
+                        align="start"
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-muted-foreground"
+                      onClick={handleSkip}
+                    >
+                      Skip
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              // Idle state: static placeholder when no completion flow is active
+              <p className="text-xs text-muted-foreground">
+                Capture notes, issues, and labels when the next pomodoro completes.
+              </p>
+            )}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  // ── Compact variant (default) — sidebar widget ────────────────────────────
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-2 px-2 py-1.5">
@@ -295,7 +497,12 @@ export function PomodoroTimer({ onWorkComplete }: Props) {
                 className="flex-1 text-xs border rounded px-2 py-1 bg-background text-foreground"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleSubmitCompletion();
-                  if (e.key === "Escape") setCompletionFlow(null);
+                  // Escape backs out of note-input mode only — the completion
+                  // flow stays open so the user can still link an issue or skip.
+                  if (e.key === "Escape")
+                    setCompletionFlow((prev) =>
+                      prev ? { ...prev, showNoteInput: false } : null,
+                    );
                 }}
                 autoFocus
               />
@@ -334,6 +541,36 @@ export function PomodoroTimer({ onWorkComplete }: Props) {
               >
                 Add Note
               </Button>
+              <div className="min-w-[160px]">
+                <TimeEntryLabelPicker
+                  labels={workspaceLabels}
+                  selectedIds={completionFlow.pendingLabelIds}
+                  onAdd={async ({ labelId, name }) => {
+                    if (labelId) {
+                      setCompletionFlow((prev) => {
+                        if (!prev) return prev;
+                        if (prev.pendingLabelIds.includes(labelId)) return prev;
+                        return { ...prev, pendingLabelIds: [...prev.pendingLabelIds, labelId] };
+                      });
+                      return;
+                    }
+                    if (!name?.trim()) return;
+                    const created = await createTimeEntryLabel({ name: name.trim() });
+                    setCompletionFlow((prev) => {
+                      if (!prev) return prev;
+                      if (prev.pendingLabelIds.includes(created.id)) return prev;
+                      return { ...prev, pendingLabelIds: [...prev.pendingLabelIds, created.id] };
+                    });
+                  }}
+                  onRemove={async (labelId) => {
+                    setCompletionFlow((prev) => {
+                      if (!prev) return prev;
+                      return { ...prev, pendingLabelIds: prev.pendingLabelIds.filter((id) => id !== labelId) };
+                    });
+                  }}
+                  align="start"
+                />
+              </div>
               <Button
                 size="sm"
                 variant="ghost"

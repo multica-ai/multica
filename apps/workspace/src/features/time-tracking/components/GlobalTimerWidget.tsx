@@ -6,9 +6,12 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
-import { useCurrentTimerQuery, useStartTimerMutation, useStopTimerMutation } from "../hooks/use-time-tracking";
+import { usePathname } from "@/shared/router";
+import { useCurrentTimerQuery, useStopTimerMutation } from "../hooks/use-time-tracking";
+import { useTimeEntryActions } from "../hooks/use-time-entry-actions";
 import { LiveDuration } from "./LiveDuration";
 import { PomodoroTimer } from "./PomodoroTimer";
+import { ConfirmTimerSwitchDialog } from "./ConfirmTimerSwitchDialog";
 
 /**
  * Compact timer widget shown in the sidebar footer.
@@ -21,6 +24,8 @@ import { PomodoroTimer } from "./PomodoroTimer";
 export function GlobalTimerWidget() {
   const [expanded, setExpanded] = useState(false);
   const [description, setDescription] = useState("");
+  const [isStarting, setIsStarting] = useState(false);
+  const [isSwitching, setIsSwitching] = useState(false);
   // Toggles between normal time-tracking mode and Pomodoro mode.
   // Persisted in localStorage so the mode survives page refreshes.
   const [pomodoroMode, setPomodoroMode] = useState(() => {
@@ -36,13 +41,15 @@ export function GlobalTimerWidget() {
     try {
       localStorage.setItem("pomodoro-mode", String(val));
     } catch {
-      // noop — localStorage unavailable in restricted environments
+      // Ignore storage writes when the environment does not expose localStorage.
     }
   };
   const inputRef = useRef<HTMLInputElement>(null);
+  // Used to detect the /pomodoro route so we yield document.title to PomodoroTimer there too.
+  const pathname = usePathname();
 
   const { data: currentEntry } = useCurrentTimerQuery();
-  const startMutation = useStartTimerMutation();
+  const { requestStart, pendingSwitch, confirmSwitch, setPendingSwitch } = useTimeEntryActions({ currentEntry });
   const stopMutation = useStopTimerMutation();
 
   const isRunning = !!currentEntry;
@@ -56,7 +63,14 @@ export function GlobalTimerWidget() {
 
   // Update document.title while a timer is running, e.g. "1:23:45 · Multica".
   // Resets to "Multica" when the timer stops or the component unmounts.
+  // Yields title ownership to PomodoroTimer when pomodoroMode is active OR when
+  // the user is on the /pomodoro route (PomodoroTimer variant="page" renders there).
   useEffect(() => {
+    if (pomodoroMode || pathname.startsWith("/pomodoro")) {
+      // PomodoroTimer owns document.title — do nothing here.
+      return;
+    }
+
     if (!currentEntry) {
       document.title = "Multica";
       return;
@@ -78,22 +92,40 @@ export function GlobalTimerWidget() {
       clearInterval(id);
       document.title = "Multica";
     };
-  }, [currentEntry]);
+  }, [currentEntry, pomodoroMode, pathname]);
 
-  const handleStart = () => {
+  const handleStart = async () => {
+    if (isStarting) return;
     const now = new Date().toISOString();
-    startMutation.mutate(
-      { description: description.trim() || undefined, start_time: now },
-      {
-        onSuccess: () => {
-          setDescription("");
-          setExpanded(false);
-        },
-        onError: () => {
-          toast.error("Failed to start timer");
-        },
-      },
-    );
+    setIsStarting(true);
+    try {
+      const result = await requestStart({
+        description: description.trim() || undefined,
+        start_time: now,
+      });
+      // Only clear input and collapse if the timer actually started (not just staged)
+      if (result !== null) {
+        setDescription("");
+        setExpanded(false);
+      }
+    } catch (error) {
+      toast.error("Failed to start timer");
+    } finally {
+      setIsStarting(false);
+    }
+  };
+
+  const handleConfirmSwitch = async () => {
+    setIsSwitching(true);
+    try {
+      await confirmSwitch();
+      setDescription("");
+      setExpanded(false);
+    } catch (error) {
+      toast.error("Failed to switch timer");
+    } finally {
+      setIsSwitching(false);
+    }
   };
 
   const handleStop = () => {
@@ -105,10 +137,19 @@ export function GlobalTimerWidget() {
 
   // ── Pomodoro mode ───────────────────────────────────────────────────────────
   if (pomodoroMode) {
+    // When the user is on /pomodoro, PomodoroTimer variant="page" is already
+    // mounted by PomodoroPage. Rendering the compact variant here as well would
+    // create two live instances sharing the same session — each with its own
+    // countdown interval, completingRef, and completeMutation — which can
+    // trigger double-completion. Suppress the compact timer on that route and
+    // show only the mode-switch control so the sidebar remains useful.
+    const onPomodoroPage = pathname.startsWith("/pomodoro");
     return (
       <SidebarMenuItem>
         <div className="space-y-1">
-          <PomodoroTimer onWorkComplete={() => { if (isRunning && currentEntry) handleStop(); }} />
+          {!onPomodoroPage && (
+            <PomodoroTimer variant="compact" onWorkComplete={() => { if (isRunning && currentEntry) handleStop(); }} />
+          )}
           <div className="px-2">
             <Button
               size="sm"
@@ -158,41 +199,50 @@ export function GlobalTimerWidget() {
   // ── Idle / expanded inline form ─────────────────────────────────────────────
   if (expanded) {
     return (
-      <SidebarMenuItem>
-        <div className="px-2 py-1.5 space-y-2">
-          <Input
-            ref={inputRef}
-            placeholder="What are you working on?"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleStart();
-              if (e.key === "Escape") setExpanded(false);
-            }}
-            className="h-7 text-xs"
-          />
-          <div className="flex gap-1.5">
-            <Button
-              size="sm"
-              className="h-7 flex-1 text-xs"
-              disabled={startMutation.isPending}
-              onClick={handleStart}
-            >
-              <Play className="mr-1 size-3" />
-              Start
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-7 shrink-0 text-muted-foreground"
-              onClick={() => setExpanded(false)}
-              aria-label="Cancel"
-            >
-              <X className="size-3.5" />
-            </Button>
+      <>
+        <SidebarMenuItem>
+          <div className="px-2 py-1.5 space-y-2">
+            <Input
+              ref={inputRef}
+              placeholder="What are you working on?"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void handleStart();
+                if (e.key === "Escape") setExpanded(false);
+              }}
+              className="h-7 text-xs"
+            />
+            <div className="flex gap-1.5">
+              <Button
+                size="sm"
+                className="h-7 flex-1 text-xs"
+                disabled={isStarting}
+                onClick={handleStart}
+              >
+                <Play className="mr-1 size-3" />
+                Start
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-7 shrink-0 text-muted-foreground"
+                onClick={() => setExpanded(false)}
+                aria-label="Cancel"
+              >
+                <X className="size-3.5" />
+              </Button>
+            </div>
           </div>
-        </div>
-      </SidebarMenuItem>
+        </SidebarMenuItem>
+
+        <ConfirmTimerSwitchDialog
+          open={!!pendingSwitch}
+          isLoading={isSwitching}
+          onCancel={() => setPendingSwitch(null)}
+          onConfirm={handleConfirmSwitch}
+        />
+      </>
     );
   }
 

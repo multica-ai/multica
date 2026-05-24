@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -18,26 +19,46 @@ import (
 
 // TimeEntryResponse is the JSON shape returned to clients.
 type TimeEntryResponse struct {
-	ID              string  `json:"id"`
-	WorkspaceID     string  `json:"workspace_id"`
-	UserID          string  `json:"user_id"`
-	IssueID         *string `json:"issue_id"`
-	Description     *string `json:"description"`
-	StartTime       string  `json:"start_time"`
-	StopTime        *string `json:"stop_time"`
-	DurationSeconds int64   `json:"duration_seconds"`
-	CreatedAt       string  `json:"created_at"`
-	UpdatedAt       string  `json:"updated_at"`
+	ID              string                   `json:"id"`
+	WorkspaceID     string                   `json:"workspace_id"`
+	UserID          string                   `json:"user_id"`
+	IssueID         *string                  `json:"issue_id"`
+	Description     *string                  `json:"description"`
+	StartTime       string                   `json:"start_time"`
+	StopTime        *string                  `json:"stop_time"`
+	DurationSeconds int64                    `json:"duration_seconds"`
+	Type            string                   `json:"type"`
+	Labels          []TimeEntryLabelResponse `json:"labels,omitempty"`
+	CreatedAt       string                   `json:"created_at"`
+	UpdatedAt       string                   `json:"updated_at"`
+}
+
+// TimeEntryLabelResponse is the JSON shape of a workspace-scoped time entry label.
+type TimeEntryLabelResponse struct {
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	Color       string `json:"color"`
 }
 
 // CreateTimeEntryRequest is used for both "start live timer" and "create manual entry".
 type CreateTimeEntryRequest struct {
-	Description *string `json:"description"`
-	IssueID     *string `json:"issue_id"`
+	Description    *string  `json:"description"`
+	IssueID        *string  `json:"issue_id"`
+	LabelIDs       []string `json:"label_ids"`
 	// StartTime is required. ISO 8601 / RFC 3339.
 	StartTime string `json:"start_time"`
 	// StopTime is optional. Omit to start a live timer; include for manual entries.
-	StopTime *string `json:"stop_time"`
+	StopTime       *string `json:"stop_time"`
+	ConfirmOverlap bool    `json:"confirm_overlap"`
+}
+
+// SwitchTimeEntryRequest is used to explicitly switch from one timer to another.
+type SwitchTimeEntryRequest struct {
+	Description *string  `json:"description"`
+	IssueID     *string  `json:"issue_id"`
+	LabelIDs    []string `json:"label_ids"`
+	StartTime   string   `json:"start_time"`
 }
 
 // UpdateTimeEntryRequest allows patching description, issue link, and start/stop times.
@@ -48,11 +69,20 @@ type CreateTimeEntryRequest struct {
 //   - "issue_id": null in body   → outer pointer non-nil, inner nil → clear the issue link
 //   - "issue_id": "uuid" in body → both pointers non-nil → link to this issue
 type UpdateTimeEntryRequest struct {
-	Description *string  `json:"description"`
-	IssueID     **string `json:"issue_id"`
+	Description    *string   `json:"description"`
+	IssueID        **string  `json:"issue_id"`
+	LabelIDs       *[]string `json:"label_ids"`
 	// StartTime and StopTime are ISO 8601 / RFC 3339. Only valid for stopped entries.
-	StartTime *string `json:"start_time"`
-	StopTime  *string `json:"stop_time"`
+	StartTime      *string `json:"start_time"`
+	StopTime       *string `json:"stop_time"`
+	ConfirmOverlap bool    `json:"confirm_overlap"`
+}
+
+// TimeEntryOverlapResponse is returned when creating/updating overlapping entries.
+type TimeEntryOverlapResponse struct {
+	Error     string              `json:"error"`
+	Code      string              `json:"code"`
+	Conflicts []TimeEntryResponse `json:"conflicts"`
 }
 
 // timeEntryToResponse converts a db.TimeEntry row into the public response shape.
@@ -66,9 +96,61 @@ func timeEntryToResponse(e db.TimeEntry) TimeEntryResponse {
 		StartTime:       timestampToString(e.StartTime),
 		StopTime:        timestampToPtr(e.StopTime),
 		DurationSeconds: e.DurationSeconds,
+		Type:            e.Type,
 		CreatedAt:       timestampToString(e.CreatedAt),
 		UpdatedAt:       timestampToString(e.UpdatedAt),
 	}
+}
+
+// timeEntryLabelToResponse converts a db.TimeEntryLabel into the public response shape.
+func timeEntryLabelToResponse(label db.TimeEntryLabel) TimeEntryLabelResponse {
+	return TimeEntryLabelResponse{
+		ID:          uuidToString(label.ID),
+		WorkspaceID: uuidToString(label.WorkspaceID),
+		Name:        label.Name,
+		Color:       label.Color,
+	}
+}
+
+// buildTimeEntryResponseWithQueries builds a time entry response and attaches its labels.
+func (h *Handler) buildTimeEntryResponseWithQueries(ctx context.Context, queries *db.Queries, entry db.TimeEntry) (TimeEntryResponse, error) {
+	resp := timeEntryToResponse(entry)
+
+	labels, err := queries.ListLabelsForTimeEntry(ctx, entry.ID)
+	if err != nil {
+		return TimeEntryResponse{}, err
+	}
+	if len(labels) > 0 {
+		resp.Labels = make([]TimeEntryLabelResponse, len(labels))
+		for index, label := range labels {
+			resp.Labels[index] = timeEntryLabelToResponse(label)
+		}
+	}
+
+	return resp, nil
+}
+
+// buildTimeEntryResponse builds a time entry response with the default query handle.
+func (h *Handler) buildTimeEntryResponse(ctx context.Context, entry db.TimeEntry) (TimeEntryResponse, error) {
+	return h.buildTimeEntryResponseWithQueries(ctx, h.Queries, entry)
+}
+
+// buildTimeEntryListResponse converts multiple rows and attaches labels for each row.
+func (h *Handler) buildTimeEntryListResponse(ctx context.Context, entries []db.TimeEntry) ([]TimeEntryResponse, error) {
+	return h.buildTimeEntryListResponseWithQueries(ctx, h.Queries, entries)
+}
+
+// buildTimeEntryListResponseWithQueries converts multiple rows and attaches labels using the provided query handle.
+func (h *Handler) buildTimeEntryListResponseWithQueries(ctx context.Context, queries *db.Queries, entries []db.TimeEntry) ([]TimeEntryResponse, error) {
+	resp := make([]TimeEntryResponse, len(entries))
+	for index, entry := range entries {
+		entryResp, err := h.buildTimeEntryResponseWithQueries(ctx, queries, entry)
+		if err != nil {
+			return nil, err
+		}
+		resp[index] = entryResp
+	}
+	return resp, nil
 }
 
 // timeEntryService returns (creating lazily if not yet cached) the service instance.
@@ -119,17 +201,58 @@ func (h *Handler) CreateTimeEntry(w http.ResponseWriter, r *http.Request) {
 	svc := h.timeEntrySvc()
 
 	if req.StopTime != nil {
-		// Manual/historical entry — just create directly, no auto-stop.
 		stopTime, err := time.Parse(time.RFC3339, *req.StopTime)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "stop_time must be RFC 3339")
 			return
 		}
+		tx, err := h.TxStarter.Begin(r.Context())
+		if err != nil {
+			slog.Warn("begin manual time entry transaction failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to create time entry")
+			return
+		}
+		defer tx.Rollback(r.Context())
+
+		qtx := h.Queries.WithTx(tx)
+		if !req.ConfirmOverlap {
+			if err := service.LockUserTimeEntryMutations(r.Context(), tx, workspaceID, userID); err != nil {
+				slog.Warn("lock manual time entry overlap scope failed", append(logger.RequestAttrs(r), "error", err)...)
+				writeError(w, http.StatusInternalServerError, "failed to check overlaps")
+				return
+			}
+			overlaps, err := qtx.ListOverlappingStoppedTimeEntries(r.Context(), db.ListOverlappingStoppedTimeEntriesParams{
+				WorkspaceID: parseUUID(workspaceID),
+				UserID:      parseUUID(userID),
+				RangeStart:  pgTimestamp(startTime),
+				RangeStop:   pgTimestamp(stopTime),
+			})
+			if err != nil {
+				slog.Warn("check overlaps failed", append(logger.RequestAttrs(r), "error", err)...)
+				writeError(w, http.StatusInternalServerError, "failed to check overlaps")
+				return
+			}
+			if len(overlaps) > 0 {
+				conflicts, buildErr := h.buildTimeEntryListResponseWithQueries(r.Context(), qtx, overlaps)
+				if buildErr != nil {
+					slog.Warn("build overlap response failed", append(logger.RequestAttrs(r), "error", buildErr)...)
+					writeError(w, http.StatusInternalServerError, "failed to check overlaps")
+					return
+				}
+				writeJSON(w, http.StatusConflict, TimeEntryOverlapResponse{
+					Error:     "time entry overlaps an existing entry",
+					Code:      "time_entry_overlap",
+					Conflicts: conflicts,
+				})
+				return
+			}
+		}
+
 		elapsed := int64(stopTime.Sub(startTime).Seconds())
 		if elapsed < 0 {
 			elapsed = 0
 		}
-		entry, err := h.Queries.CreateTimeEntry(r.Context(), db.CreateTimeEntryParams{
+		entry, err := qtx.CreateTimeEntry(r.Context(), db.CreateTimeEntryParams{
 			WorkspaceID:     parseUUID(workspaceID),
 			UserID:          parseUUID(userID),
 			IssueID:         parseOptionalUUID(req.IssueID),
@@ -144,22 +267,113 @@ func (h *Handler) CreateTimeEntry(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to create time entry")
 			return
 		}
-		resp := timeEntryToResponse(entry)
+		if len(req.LabelIDs) > 0 {
+			if err := h.replaceTimeEntryLabelsWithQueries(r.Context(), qtx, entry, req.LabelIDs); err != nil {
+				statusCode, message := timeEntryLabelMutationErrorResponse(err)
+				if statusCode >= http.StatusInternalServerError {
+					slog.Warn("apply manual time entry labels failed", append(logger.RequestAttrs(r), "error", err)...)
+				}
+				writeError(w, statusCode, message)
+				return
+			}
+		}
+		if err := tx.Commit(r.Context()); err != nil {
+			slog.Warn("commit manual time entry transaction failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to create time entry")
+			return
+		}
+		resp, buildErr := h.buildTimeEntryResponse(r.Context(), entry)
+		if buildErr != nil {
+			slog.Warn("build time entry response failed", append(logger.RequestAttrs(r), "error", buildErr)...)
+			writeError(w, http.StatusInternalServerError, "failed to create time entry")
+			return
+		}
 		h.publish(protocol.EventTimeEntryStarted, workspaceID, "member", userID, map[string]any{"time_entry": resp})
 		writeJSON(w, http.StatusCreated, resp)
 		return
 	}
 
 	// Live timer start.
-	entry, err := svc.StartTimer(r.Context(), workspaceID, userID, req.Description, req.IssueID, startTime)
+	entry, err := svc.StartTimer(r.Context(), workspaceID, userID, req.Description, req.IssueID, startTime, func(ctx context.Context, queries *db.Queries, entry db.TimeEntry) error {
+		if len(req.LabelIDs) == 0 {
+			return nil
+		}
+		return h.replaceTimeEntryLabelsWithQueries(ctx, queries, entry, req.LabelIDs)
+	})
 	if err != nil {
+		statusCode, message := timeEntryLabelMutationErrorResponse(err)
+		if len(req.LabelIDs) > 0 && statusCode == http.StatusBadRequest {
+			writeError(w, statusCode, message)
+			return
+		}
 		slog.Warn("start timer failed", append(logger.RequestAttrs(r), "error", err)...)
+		if len(req.LabelIDs) > 0 {
+			writeError(w, statusCode, message)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to start timer")
 		return
 	}
-	resp := timeEntryToResponse(entry)
+	resp, buildErr := h.buildTimeEntryResponse(r.Context(), entry)
+	if buildErr != nil {
+		slog.Warn("build started time entry response failed", append(logger.RequestAttrs(r), "error", buildErr)...)
+		writeError(w, http.StatusInternalServerError, "failed to start timer")
+		return
+	}
 	h.publish(protocol.EventTimeEntryStarted, workspaceID, "member", userID, map[string]any{"time_entry": resp})
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// SwitchTimeEntry handles POST /api/time-entries/switch.
+// Explicitly stops the current timer and starts a new one.
+func (h *Handler) SwitchTimeEntry(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := resolveWorkspaceID(r)
+	var req SwitchTimeEntryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	startTime, err := time.Parse(time.RFC3339, req.StartTime)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "start_time must be RFC 3339")
+		return
+	}
+	_, started, err := h.timeEntrySvc().SwitchTimer(r.Context(), workspaceID, userID, req.Description, req.IssueID, startTime, func(ctx context.Context, queries *db.Queries, entry db.TimeEntry) error {
+		if len(req.LabelIDs) == 0 {
+			return nil
+		}
+		return h.replaceTimeEntryLabelsWithQueries(ctx, queries, entry, req.LabelIDs)
+	})
+	if err != nil {
+		if errors.Is(err, service.ErrTimerNotRunning) {
+			writeError(w, http.StatusBadRequest, "no timer is running")
+			return
+		}
+		statusCode, message := timeEntryLabelMutationErrorResponse(err)
+		if len(req.LabelIDs) > 0 && statusCode == http.StatusBadRequest {
+			writeError(w, statusCode, message)
+			return
+		}
+		slog.Warn("switch timer failed", append(logger.RequestAttrs(r), "error", err)...)
+		if len(req.LabelIDs) > 0 {
+			writeError(w, statusCode, message)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to switch timer")
+		return
+	}
+	startedResp, buildErr := h.buildTimeEntryResponse(r.Context(), started)
+	if buildErr != nil {
+		slog.Warn("build started time entry response failed", append(logger.RequestAttrs(r), "error", buildErr)...)
+		writeError(w, http.StatusInternalServerError, "failed to switch timer")
+		return
+	}
+	h.publish(protocol.EventTimeEntryStarted, workspaceID, "member", userID, map[string]any{"time_entry": startedResp})
+	writeJSON(w, http.StatusCreated, startedResp)
 }
 
 // StopTimeEntry handles PATCH /api/time-entries/:entry_id/stop.
@@ -185,7 +399,12 @@ func (h *Handler) StopTimeEntry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to stop timer")
 		return
 	}
-	resp := timeEntryToResponse(entry)
+	resp, buildErr := h.buildTimeEntryResponse(r.Context(), entry)
+	if buildErr != nil {
+		slog.Warn("build stopped time entry response failed", append(logger.RequestAttrs(r), "error", buildErr)...)
+		writeError(w, http.StatusInternalServerError, "failed to stop timer")
+		return
+	}
 	h.publish(protocol.EventTimeEntryStopped, workspaceID, "member", userID, map[string]any{"time_entry": resp})
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -208,7 +427,13 @@ func (h *Handler) GetCurrentTimeEntry(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, timeEntryToResponse(*entry))
+	resp, buildErr := h.buildTimeEntryResponse(r.Context(), *entry)
+	if buildErr != nil {
+		slog.Warn("build current time entry response failed", append(logger.RequestAttrs(r), "error", buildErr)...)
+		writeError(w, http.StatusInternalServerError, "failed to get current timer")
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ListTimeEntries handles GET /api/time-entries — list time entries for the current user.
@@ -256,9 +481,11 @@ func (h *Handler) ListTimeEntries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := make([]TimeEntryResponse, len(entries))
-	for i, e := range entries {
-		resp[i] = timeEntryToResponse(e)
+	resp, buildErr := h.buildTimeEntryListResponse(r.Context(), entries)
+	if buildErr != nil {
+		slog.Warn("build time entry list response failed", append(logger.RequestAttrs(r), "error", buildErr)...)
+		writeError(w, http.StatusInternalServerError, "failed to list time entries")
+		return
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -282,9 +509,11 @@ func (h *Handler) ListIssueTimeEntries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := make([]TimeEntryResponse, len(entries))
-	for i, e := range entries {
-		resp[i] = timeEntryToResponse(e)
+	resp, buildErr := h.buildTimeEntryListResponse(r.Context(), entries)
+	if buildErr != nil {
+		slog.Warn("build issue time entry list response failed", append(logger.RequestAttrs(r), "error", buildErr, "issue_id", issueID)...)
+		writeError(w, http.StatusInternalServerError, "failed to list time entries")
+		return
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -323,17 +552,50 @@ func (h *Handler) UpdateTimeEntry(w http.ResponseWriter, r *http.Request) {
 		stopTime = &t
 	}
 
-	entry, err := h.timeEntrySvc().UpdateTimeEntry(r.Context(), workspaceID, userID, entryID, req.Description, req.IssueID, startTime, stopTime)
+	entry, err := h.timeEntrySvc().UpdateTimeEntry(r.Context(), workspaceID, userID, entryID, req.Description, req.IssueID, startTime, stopTime, req.ConfirmOverlap, func(ctx context.Context, queries *db.Queries, entry db.TimeEntry) error {
+		if req.LabelIDs == nil {
+			return nil
+		}
+		return h.replaceTimeEntryLabelsWithQueries(ctx, queries, entry, *req.LabelIDs)
+	})
 	if err != nil {
 		if errors.Is(err, service.ErrTimeEntryNotFound) {
 			writeError(w, http.StatusNotFound, "time entry not found")
+			return
+		}
+		var overlapErr *service.TimeEntryOverlapError
+		if errors.As(err, &overlapErr) {
+			conflicts, buildErr := h.buildTimeEntryListResponse(r.Context(), overlapErr.Conflicts)
+			if buildErr != nil {
+				slog.Warn("build overlap response failed", append(logger.RequestAttrs(r), "error", buildErr, "entry_id", entryID)...)
+				writeError(w, http.StatusInternalServerError, "failed to check overlaps")
+				return
+			}
+			writeJSON(w, http.StatusConflict, TimeEntryOverlapResponse{
+				Error:     overlapErr.Error(),
+				Code:      "time_entry_overlap",
+				Conflicts: conflicts,
+			})
+			return
+		}
+		if req.LabelIDs != nil {
+			statusCode, message := timeEntryLabelMutationErrorResponse(err)
+			if statusCode >= http.StatusInternalServerError {
+				slog.Warn("update time entry failed", append(logger.RequestAttrs(r), "error", err, "entry_id", entryID)...)
+			}
+			writeError(w, statusCode, message)
 			return
 		}
 		slog.Warn("update time entry failed", append(logger.RequestAttrs(r), "error", err, "entry_id", entryID)...)
 		writeError(w, http.StatusInternalServerError, "failed to update time entry")
 		return
 	}
-	resp := timeEntryToResponse(entry)
+	resp, buildErr := h.buildTimeEntryResponse(r.Context(), entry)
+	if buildErr != nil {
+		slog.Warn("build updated time entry response failed", append(logger.RequestAttrs(r), "error", buildErr, "entry_id", entryID)...)
+		writeError(w, http.StatusInternalServerError, "failed to update time entry")
+		return
+	}
 	h.publish(protocol.EventTimeEntryUpdated, workspaceID, "member", userID, map[string]any{"time_entry": resp})
 	writeJSON(w, http.StatusOK, resp)
 }
