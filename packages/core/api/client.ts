@@ -1468,7 +1468,7 @@ export class ApiClient {
   }
 
   // Bulk-cancel every active task (queued/dispatched/running) for the agent.
-  // Permission: agent owner or workspace admin/owner. Server returns the
+  // Permission: workspace admin/owner. Server returns the
   // count of cancelled rows; broadcasts task:cancelled for each so other
   // surfaces can clear their live cards.
   async cancelAgentTasks(id: string): Promise<{ cancelled: number }> {

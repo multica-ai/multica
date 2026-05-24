@@ -12,38 +12,33 @@
 import { useQuery } from "@tanstack/react-query";
 import type { Agent } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
-import { memberListOptions } from "@multica/core/workspace/queries";
 import { AgentToolsCard } from "@multica/cerebro-runtime/views";
 
 const runtimeListKey = (wsId: string) =>
   ["workspace", "agent-runtimes", wsId] as const;
 
-export function CerebroToolsTab({ agent }: { agent: Agent }) {
+export function CerebroToolsTab({
+  agent,
+  canEdit = true,
+}: {
+  agent: Agent;
+  canEdit?: boolean;
+}) {
   const wsId = useWorkspaceId();
-  const user = useAuthStore((s) => s.user);
 
-  const { data: members = [] } = useQuery({
-    ...memberListOptions(wsId),
-    enabled: !!wsId,
-  });
   const { data: runtimes = [] } = useQuery({
     queryKey: runtimeListKey(wsId),
     queryFn: () => api.listRuntimes({ workspace_id: wsId }),
     enabled: !!wsId,
   });
 
-  const currentMember = user ? members.find((m) => m.user_id === user.id) : null;
-  const isAdmin = currentMember
-    ? currentMember.role === "owner" || currentMember.role === "admin"
-    : false;
   const runtime = runtimes.find((r) => r.id === agent.runtime_id);
 
   return (
     <AgentToolsCard
       agent={agent}
-      canEdit={isAdmin}
+      canEdit={canEdit}
       runtimeName={runtime?.name}
     />
   );

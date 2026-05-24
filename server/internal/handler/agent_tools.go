@@ -125,6 +125,9 @@ func (h *Handler) UpsertAgentTool(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if _, ok := h.canManageAgent(w, r, agent); !ok {
+		return
+	}
 	toolName := chi.URLParam(r, "name")
 	if toolName == "" {
 		writeError(w, http.StatusBadRequest, "tool name is required")

@@ -58,7 +58,7 @@ const agent: Agent = {
   persona_sandbox: "",
 };
 
-function renderSkillsTab() {
+function renderSkillsTab(opts: { agent?: Agent; canEdit?: boolean } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -70,7 +70,10 @@ function renderSkillsTab() {
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={queryClient}>
-        <SkillsTab agent={agent} />
+        <SkillsTab
+          agent={opts.agent ?? agent}
+          canEdit={opts.canEdit ?? true}
+        />
       </QueryClientProvider>
     </I18nProvider>,
   );
@@ -109,5 +112,26 @@ describe("SkillsTab", () => {
     // already deleted from the mock setup above; this assertion is
     // implicit — the test file would fail to import if the component
     // still referenced runtimeListOptions / runtimeLocalSkillsOptions.)
+  });
+
+  it("hides add and remove actions when canEdit is false", async () => {
+    mockListSkills.mockResolvedValue([
+      { id: "skill-2", name: "Other skill", description: "" },
+    ]);
+    renderSkillsTab({
+      canEdit: false,
+      agent: {
+        ...agent,
+        skills: [{ id: "skill-1", name: "Attached skill", description: "" }],
+      },
+    });
+
+    expect(await screen.findByText("Attached skill")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Add skill/i }),
+    ).toBeDisabled();
+    expect(
+      screen.queryByRole("button", { name: /Remove/i }),
+    ).not.toBeInTheDocument();
   });
 });

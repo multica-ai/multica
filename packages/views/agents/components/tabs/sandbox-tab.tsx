@@ -8,11 +8,8 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Lock } from "lucide-react";
 import { toast } from "sonner";
-import { useAuthStore } from "@multica/core/auth";
 import type { Agent } from "@multica/core/types";
 import { api } from "@multica/core/api";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { memberListOptions } from "@multica/core/workspace/queries";
 import {
   NativeSelect,
   NativeSelectOption,
@@ -27,17 +24,14 @@ interface PersonaSandbox {
 
 export function SandboxTab({
   agent,
+  canEdit = true,
   onSave,
 }: {
   agent: Agent;
+  canEdit?: boolean;
   onSave: (updates: Partial<Agent>) => Promise<void>;
 }) {
   const { t } = useT("agents");
-  const wsId = useWorkspaceId();
-  const userId = useAuthStore((s) => s.user?.id ?? null);
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const myRole = members.find((m) => m.user_id === userId)?.role ?? null;
-  const isAdmin = myRole === "owner" || myRole === "admin";
 
   const {
     data: sandboxes = [],
@@ -79,7 +73,7 @@ export function SandboxTab({
     }
   };
 
-  const disabled = !isAdmin || saving || sandboxesLoading;
+  const disabled = !canEdit || saving || sandboxesLoading;
   const selected = sandboxes.find((sb) => sb.name === current) ?? null;
   const adminOnlyHint = t(($) => $.tab_body.sandbox.admin_only_tooltip);
 
@@ -105,7 +99,7 @@ export function SandboxTab({
             disabled={disabled}
             size="sm"
             className="w-full max-w-sm"
-            title={!isAdmin ? adminOnlyHint : undefined}
+            title={!canEdit ? adminOnlyHint : undefined}
           >
             <NativeSelectOption value="">
               {t(($) => $.tab_body.sandbox.no_gating_option)}
@@ -126,7 +120,7 @@ export function SandboxTab({
           {saving && (
             <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
           )}
-          {!isAdmin && (
+          {!canEdit && (
             <Lock
               className="h-3.5 w-3.5 text-muted-foreground"
               aria-label={adminOnlyHint}

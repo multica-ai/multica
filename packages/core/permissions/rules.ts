@@ -29,15 +29,14 @@ const isAdminLike = (role: MemberRole | null) =>
  * restore identically to edit (`server/internal/handler/agent.go:519-535`),
  * so callers can use `canEditAgent` for all three.
  */
-export function canEditAgent(agent: Agent, ctx: PermissionContext): Decision {
+export function canEditAgent(_agent: Agent, ctx: PermissionContext): Decision {
   if (ctx.userId === null) {
     return deny("not_authenticated", "Sign in to edit this agent.");
   }
   if (isAdminLike(ctx.role)) return ALLOW;
-  if (agent.owner_id !== null && agent.owner_id === ctx.userId) return ALLOW;
   return deny(
-    "not_resource_owner",
-    "Only the agent owner and workspace admins can edit this agent.",
+    "not_admin_role",
+    "Only workspace owners and admins can edit agents.",
   );
 }
 

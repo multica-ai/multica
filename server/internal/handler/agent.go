@@ -563,6 +563,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !roleAllowed(member.Role, "owner", "admin") {
+		writeError(w, http.StatusForbidden, "only workspace owners and admins can create agents")
+		return
+	}
 	if !canUseRuntimeForAgent(member, runtime) {
 		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can create agents on it")
 		return
@@ -723,20 +727,17 @@ func redactMcpConfig(resp *AgentResponse) {
 }
 
 // canManageAgent checks whether the current user can update or archive an agent.
-// Only the agent owner or workspace owner/admin can manage any agent,
-// regardless of whether it is public or private. Returns the resolved member
-// so callers can do additional role-scoped checks (e.g. workspace-admin-only
-// fields like persona_sandbox) without re-loading.
+// Only workspace owner/admin can manage agents, regardless of whether the
+// requester created the agent. Returns the resolved member so callers can do
+// additional role-scoped checks without re-loading.
 func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent db.Agent) (db.Member, bool) {
 	wsID := uuidToString(agent.WorkspaceID)
 	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
 	if !ok {
 		return db.Member{}, false
 	}
-	isAdmin := roleAllowed(member.Role, "owner", "admin")
-	isAgentOwner := uuidToString(agent.OwnerID) == requestUserID(r)
-	if !isAdmin && !isAgentOwner {
-		writeError(w, http.StatusForbidden, "only the agent owner can manage this agent")
+	if !roleAllowed(member.Role, "owner", "admin") {
+		writeError(w, http.StatusForbidden, "only workspace owners and admins can manage agents")
 		return db.Member{}, false
 	}
 	return member, true
@@ -761,9 +762,8 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// E2: persona_sandbox is workspace-scoped policy, not per-agent config.
-	// canManageAgent above lets either the agent owner or a workspace
-	// owner/admin pass; restrict the sandbox field to admins so an agent
-	// owner cannot self-elevate by switching to a more permissive sandbox.
+	// Kept explicit even though canManageAgent is now owner/admin-only, so
+	// future permission changes cannot accidentally widen this field.
 	if _, hasPersonaSandboxField := rawFields["persona_sandbox"]; hasPersonaSandboxField {
 		if !roleAllowed(member.Role, "owner", "admin") {
 			writeError(w, http.StatusForbidden, "only workspace owner/admin can change persona_sandbox")
@@ -1077,8 +1077,7 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 
 // CancelAgentTasks bulk-cancels every active task (queued/dispatched/running)
 // belonging to an agent. Powers the agents-list "Cancel all tasks" row
-// action. Same permission gate as archive (canManageAgent — owner or
-// workspace admin/owner). Each cancelled row triggers a task:cancelled WS
+// action. Same permission gate as archive (workspace admin/owner). Each cancelled row triggers a task:cancelled WS
 // event so connected clients clear their live cards immediately.
 //
 // Note: a `running` task on the daemon side won't actually halt for up to

@@ -17,8 +17,10 @@ import { useT } from "../../../i18n";
 
 export function SkillsTab({
   agent,
+  canEdit = true,
 }: {
   agent: Agent;
+  canEdit?: boolean;
 }) {
   const { t } = useT("agents");
   const qc = useQueryClient();
@@ -59,7 +61,7 @@ export function SkillsTab({
           variant="outline"
           size="sm"
           onClick={() => setShowAdd(true)}
-          disabled={workspaceSkills.length === 0}
+          disabled={!canEdit || workspaceSkills.length === 0}
           className="shrink-0"
         >
           <Plus className="h-3 w-3" />
@@ -83,7 +85,7 @@ export function SkillsTab({
           <p className="mt-1 max-w-xs text-center text-xs text-muted-foreground">
             {t(($) => $.tab_body.skills.empty_hint)}
           </p>
-          {workspaceSkills.length > 0 && (
+          {canEdit && workspaceSkills.length > 0 && (
             <Button
               onClick={() => setShowAdd(true)}
               size="sm"
@@ -110,21 +112,25 @@ export function SkillsTab({
                   </div>
                 )}
               </div>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => handleRemove(skill.id)}
-                disabled={removing}
-                className="text-muted-foreground hover:text-destructive"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              {canEdit && (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => handleRemove(skill.id)}
+                  disabled={removing}
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              )}
             </li>
           ))}
         </ul>
       )}
 
-      <SkillAddDialog agent={agent} open={showAdd} onOpenChange={setShowAdd} />
+      {canEdit && (
+        <SkillAddDialog agent={agent} open={showAdd} onOpenChange={setShowAdd} />
+      )}
     </div>
   );
 }

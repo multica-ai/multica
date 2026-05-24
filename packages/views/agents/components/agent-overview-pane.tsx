@@ -72,6 +72,7 @@ const detailTabs: {
 interface AgentOverviewPaneProps {
   agent: Agent;
   runtimes: AgentRuntime[];
+  canEdit: boolean;
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
 }
 
@@ -101,6 +102,7 @@ interface AgentOverviewPaneProps {
 export function AgentOverviewPane({
   agent,
   runtimes,
+  canEdit,
   onUpdate,
 }: AgentOverviewPaneProps) {
   const { t } = useT("agents");
@@ -169,6 +171,7 @@ export function AgentOverviewPane({
           <TabContent>
             <InstructionsTab
               agent={agent}
+              readOnly={!canEdit}
               onSave={(instructions) => onUpdate(agent.id, { instructions })}
               onDirtyChange={setActiveDirty}
             />
@@ -176,14 +179,14 @@ export function AgentOverviewPane({
         )}
         {activeTab === "skills" && (
           <TabContent>
-            <SkillsTab agent={agent} />
+            <SkillsTab agent={agent} canEdit={canEdit} />
           </TabContent>
         )}
         {activeTab === "env" && (
           <TabContent>
             <EnvTab
               agent={agent}
-              readOnly={agent.custom_env_redacted}
+              readOnly={!canEdit || agent.custom_env_redacted}
               onSave={(updates) => onUpdate(agent.id, updates)}
               onDirtyChange={setActiveDirty}
             />
@@ -194,6 +197,7 @@ export function AgentOverviewPane({
             <CustomArgsTab
               agent={agent}
               runtimeDevice={runtime ?? undefined}
+              readOnly={!canEdit}
               onSave={(updates) => onUpdate(agent.id, updates)}
               onDirtyChange={setActiveDirty}
             />
@@ -204,6 +208,7 @@ export function AgentOverviewPane({
             {/* CEREBRO-PATCH(agent-sandbox-tab): JEH-1088 — sandbox tab body */}
             <SandboxTab
               agent={agent}
+              canEdit={canEdit}
               onSave={(updates) => onUpdate(agent.id, updates)}
             />
           </TabContent>
@@ -211,7 +216,7 @@ export function AgentOverviewPane({
         {/* CEREBRO-PATCH(agent-tools-tab): W8 — tools tab render block */}
         {activeTab === "tools" && (
           <TabContent>
-            <CerebroToolsTab agent={agent} />
+            <CerebroToolsTab agent={agent} canEdit={canEdit} />
           </TabContent>
         )}
       </div>

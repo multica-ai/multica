@@ -114,10 +114,10 @@ function makeRuntime(ownerId: string | null): RuntimeDevice {
 describe("canEditAgent", () => {
   const agent = makeAgent({ owner_id: ALICE });
 
-  it("allows the owner", () => {
-    expect(canEditAgent(agent, { userId: ALICE, role: "member" }).allowed).toBe(
-      true,
-    );
+  it("denies the agent owner when they are a plain member", () => {
+    const d = canEditAgent(agent, { userId: ALICE, role: "member" });
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toBe("not_admin_role");
   });
   it("allows workspace owner", () => {
     expect(canEditAgent(agent, { userId: BOB, role: "owner" }).allowed).toBe(
@@ -132,7 +132,7 @@ describe("canEditAgent", () => {
   it("denies non-owner member", () => {
     const d = canEditAgent(agent, { userId: BOB, role: "member" });
     expect(d.allowed).toBe(false);
-    expect(d.reason).toBe("not_resource_owner");
+    expect(d.reason).toBe("not_admin_role");
   });
   it("denies when userId is null", () => {
     const d = canEditAgent(agent, { userId: null, role: null });

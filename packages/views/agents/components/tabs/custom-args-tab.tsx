@@ -30,11 +30,13 @@ function entriesToArgs(entries: ArgEntry[]): string[] {
 export function CustomArgsTab({
   agent,
   runtimeDevice,
+  readOnly = false,
   onSave,
   onDirtyChange,
 }: {
   agent: Agent;
   runtimeDevice?: RuntimeDevice;
+  readOnly?: boolean;
   onSave: (updates: Partial<Agent>) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
@@ -49,8 +51,8 @@ export function CustomArgsTab({
   const dirty = JSON.stringify(currentArgs) !== JSON.stringify(originalArgs);
 
   useEffect(() => {
-    onDirtyChange?.(dirty);
-  }, [dirty, onDirtyChange]);
+    onDirtyChange?.(!readOnly && dirty);
+  }, [dirty, onDirtyChange, readOnly]);
 
   const addEntry = () => {
     setEntries([...entries, { id: createSafeId(), value: "" }]);
@@ -96,16 +98,18 @@ export function CustomArgsTab({
             </p>
           )}
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={addEntry}
-          className="shrink-0"
-        >
-          <Plus className="h-3 w-3" />
-          {t(($) => $.tab_body.common.add)}
-        </Button>
+        {!readOnly && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={addEntry}
+            className="shrink-0"
+          >
+            <Plus className="h-3 w-3" />
+            {t(($) => $.tab_body.common.add)}
+          </Button>
+        )}
       </div>
 
       {entries.length > 0 && (
@@ -115,36 +119,41 @@ export function CustomArgsTab({
               <Input
                 value={entry.value}
                 onChange={(e) => updateEntry(index, e.target.value)}
+                readOnly={readOnly}
                 placeholder={t(($) => $.tab_body.custom_args.input_placeholder)}
-                className="flex-1 font-mono text-xs"
+                className={`flex-1 font-mono text-xs ${readOnly ? "bg-muted" : ""}`}
               />
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => removeEntry(index)}
-                className="text-muted-foreground hover:text-destructive"
-                aria-label={t(($) => $.tab_body.custom_args.remove_aria)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              {!readOnly && (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => removeEntry(index)}
+                  className="text-muted-foreground hover:text-destructive"
+                  aria-label={t(($) => $.tab_body.custom_args.remove_aria)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              )}
             </div>
           ))}
         </div>
       )}
 
-      <div className="flex items-center justify-end gap-3">
-        {dirty && (
-          <span className="text-xs text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
-        )}
-        <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
-          {saving ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Save className="h-3.5 w-3.5" />
+      {!readOnly && (
+        <div className="flex items-center justify-end gap-3">
+          {dirty && (
+            <span className="text-xs text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
           )}
-          {t(($) => $.tab_body.common.save)}
-        </Button>
-      </div>
+          <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
+            {saving ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Save className="h-3.5 w-3.5" />
+            )}
+            {t(($) => $.tab_body.common.save)}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

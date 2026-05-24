@@ -5,14 +5,17 @@ import { Loader2, Save } from "lucide-react";
 import type { Agent } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { ContentEditor } from "../../../editor/content-editor";
+import { ReadonlyContent } from "../../../editor/readonly-content";
 import { useT } from "../../../i18n";
 
 export function InstructionsTab({
   agent,
+  readOnly = false,
   onSave,
   onDirtyChange,
 }: {
   agent: Agent;
+  readOnly?: boolean;
   onSave: (instructions: string) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
@@ -28,8 +31,8 @@ export function InstructionsTab({
 
   // Report dirty state up so the parent can guard tab switches.
   useEffect(() => {
-    onDirtyChange?.(isDirty);
-  }, [isDirty, onDirtyChange]);
+    onDirtyChange?.(!readOnly && isDirty);
+  }, [isDirty, onDirtyChange, readOnly]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -51,49 +54,63 @@ export function InstructionsTab({
         {t(($) => $.tab_body.instructions.intro)}
       </p>
 
-      <div
-        // flex-1 min-h-0 so the wrapper claims the leftover height in the
-        // column. overflow-y-auto so very long prompts scroll inside the
-        // editor instead of pushing the Save row down.
-        className="flex-1 min-h-0 overflow-y-auto rounded-md border bg-background px-4 py-3 transition-colors focus-within:border-input"
-      >
-        <ContentEditor
-          // Keyed by agent id so navigating between agents fully remounts the
-          // editor — Tiptap's `defaultValue` is read once, so without the key
-          // the second agent's instructions wouldn't load.
-          key={agent.id}
-          defaultValue={value}
-          onUpdate={setValue}
-          placeholder={t(($) => $.tab_body.instructions.placeholder)}
-          debounceMs={150}
-          // Mention has no business meaning in agent system prompts — typing
-          // `@` would just confuse users with a member/agent picker.
-          disableMentions
-          // min-h-full lets the editor fill the wrapper even when the user
-          // has typed nothing yet, so the click target matches the visual
-          // box. Combined with the wrapper's overflow-y-auto, long content
-          // grows past the wrapper height and scrolls within it.
-          className="min-h-full"
-        />
-      </div>
-
-      <div className="flex items-center justify-end gap-3">
-        {isDirty && (
-          <span className="text-xs text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
-        )}
-        <Button
-          size="sm"
-          onClick={handleSave}
-          disabled={!isDirty || saving}
-        >
-          {saving ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      {readOnly ? (
+        <div className="flex-1 min-h-0 overflow-y-auto rounded-md border bg-muted/30 px-4 py-3">
+          {value ? (
+            <ReadonlyContent content={value} className="min-h-full" />
           ) : (
-            <Save className="h-3.5 w-3.5" />
+            <p className="text-sm text-muted-foreground">
+              {t(($) => $.tab_body.instructions.placeholder)}
+            </p>
           )}
-          {t(($) => $.tab_body.common.save)}
-        </Button>
-      </div>
+        </div>
+      ) : (
+        <>
+          <div
+            // flex-1 min-h-0 so the wrapper claims the leftover height in the
+            // column. overflow-y-auto so very long prompts scroll inside the
+            // editor instead of pushing the Save row down.
+            className="flex-1 min-h-0 overflow-y-auto rounded-md border bg-background px-4 py-3 transition-colors focus-within:border-input"
+          >
+            <ContentEditor
+              // Keyed by agent id so navigating between agents fully remounts the
+              // editor — Tiptap's `defaultValue` is read once, so without the key
+              // the second agent's instructions wouldn't load.
+              key={agent.id}
+              defaultValue={value}
+              onUpdate={setValue}
+              placeholder={t(($) => $.tab_body.instructions.placeholder)}
+              debounceMs={150}
+              // Mention has no business meaning in agent system prompts — typing
+              // `@` would just confuse users with a member/agent picker.
+              disableMentions
+              // min-h-full lets the editor fill the wrapper even when the user
+              // has typed nothing yet, so the click target matches the visual
+              // box. Combined with the wrapper's overflow-y-auto, long content
+              // grows past the wrapper height and scrolls within it.
+              className="min-h-full"
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-3">
+            {isDirty && (
+              <span className="text-xs text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
+            )}
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={!isDirty || saving}
+            >
+              {saving ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Save className="h-3.5 w-3.5" />
+              )}
+              {t(($) => $.tab_body.common.save)}
+            </Button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

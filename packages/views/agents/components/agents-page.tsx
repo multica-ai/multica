@@ -130,9 +130,9 @@ export function AgentsPage() {
     return m;
   }, [runCountsRaw]);
 
-  // Workspace role of the current user, used to gate row-level "manage"
-  // operations (archive / cancel-tasks). Mirrors the back-end's
-  // canManageAgent rule: workspace owner/admin OR the agent's owner.
+  // Workspace role of the current user, used to gate create/manage
+  // operations. Mirrors the back-end's canManageAgent rule: workspace
+  // owner/admin only.
   const myRole = useMemo(() => {
     if (!currentUser) return null;
     return members.find((m) => m.user_id === currentUser.id)?.role ?? null;
@@ -319,7 +319,7 @@ export function AgentsPage() {
     return sortedAgents.map((agent) => {
       const isOwner =
         !!currentUser?.id && agent.owner_id === currentUser.id;
-      const canManage = isWorkspaceAdmin || isOwner;
+      const canManage = isWorkspaceAdmin;
       const ownerIdToShow =
         scope === "all" &&
         agent.owner_id &&
@@ -367,7 +367,11 @@ export function AgentsPage() {
   if (isLoading) {
     return (
       <div className="flex flex-1 min-h-0 flex-col">
-        <PageHeaderBar totalCount={0} onCreate={() => setShowCreate(true)} />
+        <PageHeaderBar
+          totalCount={0}
+          canCreate={isWorkspaceAdmin}
+          onCreate={() => setShowCreate(true)}
+        />
         <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
           <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-lg border">
             <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
@@ -392,7 +396,14 @@ export function AgentsPage() {
 
   // ---- List request error ----
   if (listError) {
-    return <ListError onCreate={() => setShowCreate(true)} listError={listError} onRetry={refetchList} />;
+    return (
+      <ListError
+        canCreate={isWorkspaceAdmin}
+        onCreate={() => setShowCreate(true)}
+        listError={listError}
+        onRetry={refetchList}
+      />
+    );
   }
 
   const showEmpty = totalActiveCount === 0 && archivedCount === 0;
@@ -401,13 +412,17 @@ export function AgentsPage() {
     <div className="flex flex-1 min-h-0 flex-col">
       <PageHeaderBar
         totalCount={totalActiveCount}
+        canCreate={isWorkspaceAdmin}
         onCreate={() => setShowCreate(true)}
       />
 
       <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
         {showEmpty ? (
           <div className="flex flex-1 items-center justify-center">
-            <EmptyState onCreate={() => setShowCreate(true)} />
+            <EmptyState
+              canCreate={isWorkspaceAdmin}
+              onCreate={() => setShowCreate(true)}
+            />
           </div>
         ) : (
           <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
@@ -480,9 +495,11 @@ export function AgentsPage() {
 
 function PageHeaderBar({
   totalCount,
+  canCreate,
   onCreate,
 }: {
   totalCount: number;
+  canCreate: boolean;
   onCreate: () => void;
 }) {
   const { t } = useT("agents");
@@ -509,19 +526,23 @@ function PageHeaderBar({
           </a>
         </p>
       </div>
-      <Button type="button" size="sm" onClick={onCreate}>
-        <Plus className="h-3 w-3" />
-        {t(($) => $.page.new_agent)}
-      </Button>
+      {canCreate && (
+        <Button type="button" size="sm" onClick={onCreate}>
+          <Plus className="h-3 w-3" />
+          {t(($) => $.page.new_agent)}
+        </Button>
+      )}
     </PageHeader>
   );
 }
 
 function ListError({
+  canCreate,
   onCreate,
   listError,
   onRetry,
 }: {
+  canCreate: boolean;
   onCreate: () => void;
   listError: unknown;
   onRetry: () => void;
@@ -529,7 +550,7 @@ function ListError({
   const { t } = useT("agents");
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeaderBar totalCount={0} onCreate={onCreate} />
+      <PageHeaderBar totalCount={0} canCreate={canCreate} onCreate={onCreate} />
       <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
         <AlertCircle className="h-8 w-8 text-destructive" />
         <div>
@@ -830,7 +851,13 @@ function ArchivedToolbarRow({
 // Empty / no-matches states
 // ---------------------------------------------------------------------------
 
-function EmptyState({ onCreate }: { onCreate: () => void }) {
+function EmptyState({
+  canCreate,
+  onCreate,
+}: {
+  canCreate: boolean;
+  onCreate: () => void;
+}) {
   const { t } = useT("agents");
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
@@ -841,10 +868,12 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
       <p className="mt-1 max-w-md text-sm text-muted-foreground">
         {t(($) => $.empty.description)}
       </p>
-      <Button type="button" onClick={onCreate} size="sm" className="mt-5">
-        <Plus className="h-3 w-3" />
-        {t(($) => $.page.new_agent)}
-      </Button>
+      {canCreate && (
+        <Button type="button" onClick={onCreate} size="sm" className="mt-5">
+          <Plus className="h-3 w-3" />
+          {t(($) => $.page.new_agent)}
+        </Button>
+      )}
     </div>
   );
 }

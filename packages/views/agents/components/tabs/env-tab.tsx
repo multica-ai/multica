@@ -68,8 +68,8 @@ export function EnvTab({
     JSON.stringify(currentEnvMap) !== JSON.stringify(originalEnvMap);
 
   useEffect(() => {
-    onDirtyChange?.(dirty);
-  }, [dirty, onDirtyChange]);
+    onDirtyChange?.(!readOnly && dirty);
+  }, [dirty, onDirtyChange, readOnly]);
 
   const addEnvEntry = () => {
     setEnvEntries([

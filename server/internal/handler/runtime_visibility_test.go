@@ -132,8 +132,8 @@ func runtimeVisibilityFixture(t *testing.T) (runtimeID, runtimeOwnerID, plainMem
 
 // TestCreateAgent_RejectsPrivateRuntimeForNonOwner walks the gate end-to-end:
 // the runtime is private and owned by a non-admin member, so a workspace
-// owner and the runtime owner can both create agents on it, but a plain
-// workspace member cannot.
+// owner can create agents on it, but runtime ownership no longer bypasses the
+// workspace owner/admin-only agent creation rule.
 func TestCreateAgent_RejectsPrivateRuntimeForNonOwner(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -165,11 +165,11 @@ func TestCreateAgent_RejectsPrivateRuntimeForNonOwner(t *testing.T) {
 		t.Fatalf("CreateAgent as workspace owner: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// Runtime owner: allowed because they own the runtime.
+	// Runtime owner: runtime visibility alone is not enough to create agents.
 	w = httptest.NewRecorder()
 	testHandler.CreateAgent(w, newRequestAs(runtimeOwnerID, http.MethodPost, "/api/agents", body("runtime-visibility-test-runtime-owner")))
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateAgent as runtime owner: expected 201, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("CreateAgent as runtime owner: expected 403, got %d: %s", w.Code, w.Body.String())
 	}
 
 	// Plain member: this is the hole MUL-2062 closes — must be 403.
@@ -180,10 +180,9 @@ func TestCreateAgent_RejectsPrivateRuntimeForNonOwner(t *testing.T) {
 	}
 }
 
-// TestCreateAgent_AllowsPublicRuntimeForPlainMember verifies the "public"
-// half of the visibility predicate: once the runtime owner flips it to
-// public, any workspace member can create agents on it.
-func TestCreateAgent_AllowsPublicRuntimeForPlainMember(t *testing.T) {
+// TestCreateAgent_RejectsPublicRuntimeForPlainMember verifies that public
+// runtime visibility no longer grants agent creation to plain members.
+func TestCreateAgent_RejectsPublicRuntimeForPlainMember(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -211,8 +210,8 @@ func TestCreateAgent_AllowsPublicRuntimeForPlainMember(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 	testHandler.CreateAgent(w, newRequestAs(plainMemberID, http.MethodPost, "/api/agents", body))
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateAgent as plain member on public runtime: expected 201, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("CreateAgent as plain member on public runtime: expected 403, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

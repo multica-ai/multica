@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-// CEREBRO-PATCH(agent-test): persona integration additions.
+	// CEREBRO-PATCH(agent-test): persona integration additions.
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -277,11 +277,46 @@ func TestCreateAgent_RejectsDuplicateName(t *testing.T) {
 	}
 }
 
+func TestCreateAgentRejectsPlainMember(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	memberEmail := "agent-create-member-" + uuid.NewString() + "@multica.ai"
+	var memberUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+	`, "Agent Create Member", memberEmail).Scan(&memberUserID); err != nil {
+		t.Fatalf("create member user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, memberUserID)
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')
+	`, testWorkspaceID, memberUserID); err != nil {
+		t.Fatalf("add member: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodPost, "/api/agents", map[string]any{
+		"name":                 "member-create-denied-" + uuid.NewString()[:8],
+		"runtime_id":           testRuntimeID,
+		"visibility":           "workspace",
+		"max_concurrent_tasks": 1,
+	})
+	req.Header.Set("X-User-ID", memberUserID)
+	testHandler.CreateAgent(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("CreateAgent as member: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // TestUpdateAgentPersonaSandboxRequiresWorkspaceAdmin (E2) verifies that the
-// persona_sandbox field can only be set by a workspace owner/admin. An agent
-// owner who is a plain workspace member can update other fields but not the
-// sandbox — otherwise they could self-elevate by switching to a more
-// permissive named sandbox.
+// persona_sandbox field can only be set by a workspace owner/admin. A plain
+// workspace member cannot manage agents at all, even when they created the
+// agent.
 func TestUpdateAgentPersonaSandboxRequiresWorkspaceAdmin(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -323,16 +358,16 @@ func TestUpdateAgentPersonaSandboxRequiresWorkspaceAdmin(t *testing.T) {
 		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID)
 	})
 
-	// Sanity: the agent owner CAN update non-sandbox fields.
+	// A plain member who owns the agent cannot update regular fields.
 	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
-		"description": "agent owner can edit description",
+		"description": "agent owner cannot edit description",
 	})
 	req.Header.Set("X-User-ID", memberUserID)
 	req = withURLParam(req, "id", agentID)
 	testHandler.UpdateAgent(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("agent owner non-sandbox update: expected 200, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("agent owner non-sandbox update: expected 403, got %d: %s", w.Code, w.Body.String())
 	}
 
 	// Agent owner WITHOUT workspace admin role: must NOT be able to set persona_sandbox.

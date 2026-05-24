@@ -13,19 +13,12 @@ import enAgents from "../../../locales/en/agents.json";
 
 const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 
-const mockUseAuthStore = vi.hoisted(() => vi.fn());
 const mockListRuntimes = vi.hoisted(() => vi.fn());
-const mockListMembers = vi.hoisted(() => vi.fn());
 const mockListRuntimeTools = vi.hoisted(() => vi.fn());
 const mockListAgentToolOverrides = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
-}));
-
-vi.mock("@multica/core/auth", () => ({
-  useAuthStore: (selector: (s: unknown) => unknown) =>
-    mockUseAuthStore(selector),
 }));
 
 vi.mock("@multica/core/api", async () => {
@@ -37,7 +30,6 @@ vi.mock("@multica/core/api", async () => {
     api: {
       ...actual.api,
       listRuntimes: mockListRuntimes,
-      listMembers: mockListMembers,
       listRuntimeTools: mockListRuntimeTools,
       listAgentToolOverrides: mockListAgentToolOverrides,
     },
@@ -72,14 +64,14 @@ const baseAgent: Agent = {
   persona_sandbox: "",
 };
 
-function renderToolsTab(agent: Agent = baseAgent) {
+function renderToolsTab(agent: Agent = baseAgent, canEdit = true) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={qc}>
       <I18nProvider locale="en" resources={TEST_RESOURCES}>
-        <CerebroToolsTab agent={agent} />
+        <CerebroToolsTab agent={agent} canEdit={canEdit} />
       </I18nProvider>
     </QueryClientProvider>,
   );
@@ -87,10 +79,6 @@ function renderToolsTab(agent: Agent = baseAgent) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockUseAuthStore.mockReturnValue({ id: "user-1", email: "x@example.com" });
-  mockListMembers.mockResolvedValue([
-    { user_id: "user-1", role: "admin", name: "Owner", email: "x@example.com" },
-  ]);
   mockListRuntimes.mockResolvedValue([
     { id: "runtime-1", name: "sara-mac-mini", workspace_id: "ws-1" },
   ]);
@@ -114,5 +102,23 @@ describe("CerebroToolsTab", () => {
     expect(
       await screen.findByText(/daemon scanner ved næste heartbeat/i),
     ).toBeInTheDocument();
+  });
+
+  it("hides override controls when canEdit is false", async () => {
+    mockListRuntimeTools.mockResolvedValue([
+      {
+        name: "read_issue",
+        description: "Read an issue",
+        source: "cloud",
+        mcp_server_name: "",
+        enabled: true,
+      },
+    ]);
+    renderToolsTab(baseAgent, false);
+
+    expect(await screen.findByText("read_issue")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: /Skift override/i }),
+    ).not.toBeInTheDocument();
   });
 });

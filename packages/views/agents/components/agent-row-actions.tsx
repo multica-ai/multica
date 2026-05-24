@@ -39,8 +39,8 @@ import { useT } from "../../i18n";
 interface AgentRowActionsProps {
   agent: Agent;
   presence: AgentPresenceDetail | null | undefined;
-  // True when the current user can manage this agent (owner of agent or
-  // workspace admin/owner). Mirrors the back-end's canManageAgent check —
+  // True when the current user can manage this agent (workspace admin/owner).
+  // Mirrors the back-end's canManageAgent check —
   // the server is still the source of truth, this only hides UI for ops
   // the user can't perform.
   canManage: boolean;
@@ -81,7 +81,7 @@ export function AgentRowActions({
   // below a flat list of conditionals rather than a tangle of role/state
   // branches.
   const showStop = canManage && !isArchived && hasActiveWork;
-  const showDuplicate = !isArchived; // any workspace member can duplicate
+  const showDuplicate = canManage && !isArchived;
   const showArchive = canManage && !isArchived;
   const showRestore = canManage && isArchived;
 
