@@ -12,6 +12,14 @@ SELECT * FROM squad WHERE id = $1 AND workspace_id = $2;
 -- name: ListSquads :many
 SELECT * FROM squad WHERE workspace_id = $1 AND archived_at IS NULL ORDER BY created_at ASC;
 
+-- name: ListSquadsWithMemberCount :many
+SELECT s.id, s.workspace_id, s.name, s.description, s.leader_id, s.creator_id, s.created_at, s.updated_at, s.archived_at, s.archived_by, s.avatar_url, s.instructions, count(sm.squad_id)::bigint AS member_count
+FROM squad s
+LEFT JOIN squad_member sm ON sm.squad_id = s.id
+WHERE s.workspace_id = $1 AND s.archived_at IS NULL
+GROUP BY s.id
+ORDER BY s.created_at ASC;
+
 -- name: ListAllSquads :many
 SELECT * FROM squad WHERE workspace_id = $1 ORDER BY created_at ASC;
 

@@ -52,8 +52,8 @@ func runSquadList(cmd *cobra.Command, _ []string) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "ID\tNAME\tLEADER ID\tMEMBERS")
 	for _, s := range squads {
-		fmt.Fprintf(w, "%s\t%s\t%s\t-\n",
-			strVal(s, "id"), strVal(s, "name"), strVal(s, "leader_id"))
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			strVal(s, "id"), strVal(s, "name"), strVal(s, "leader_id"), strVal(s, "member_count"))
 	}
 	return w.Flush()
 }
@@ -208,16 +208,39 @@ func runSquadUpdate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// ── Delete ──────────────────────────────────────────────────────────────────
+// ── Archive ─────────────────────────────────────────────────────────────────
 
-var squadDeleteCmd = &cobra.Command{
-	Use:   "delete <squad-id>",
-	Short: "Delete (archive) a squad",
-	Args:  exactArgs(1),
-	RunE:  runSquadDelete,
+var squadArchiveCmd = &cobra.Command{
+	Use:   "archive <squad-id>",
+	Short: "Archive a squad (issues assigned to it transfer to the leader)",
+	Long: `Archive a squad. This sets archived_at on the squad and transfers any
+issues currently assigned to the squad to the squad's leader agent.
+
+Use --yes to skip the confirmation prompt.`,
+	Args: exactArgs(1),
+	RunE: runSquadArchive,
 }
 
-func runSquadDelete(cmd *cobra.Command, args []string) error {
+var squadDeleteCmd = &cobra.Command{
+	Use:    "delete <squad-id>",
+	Short:  "Archive a squad (alias for 'squad archive')",
+	Hidden: true,
+	Args:   exactArgs(1),
+	RunE:   runSquadArchive,
+}
+
+func runSquadArchive(cmd *cobra.Command, args []string) error {
+	yes, _ := cmd.Flags().GetBool("yes")
+	if !yes {
+		fmt.Fprintf(os.Stderr, "This will archive squad %s and transfer its issues to the leader.\nProceed? [y/N] ", args[0])
+		var answer string
+		fmt.Scanln(&answer)
+		if answer != "y" && answer != "Y" && answer != "yes" {
+			fmt.Fprintln(os.Stderr, "Aborted.")
+			return nil
+		}
+	}
+
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -226,14 +249,14 @@ func runSquadDelete(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	if err := client.DeleteJSON(ctx, "/api/squads/"+args[0]); err != nil {
-		return fmt.Errorf("delete squad: %w", err)
+		return fmt.Errorf("archive squad: %w", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
-		return cli.PrintJSON(os.Stdout, map[string]any{"id": args[0], "deleted": true})
+		return cli.PrintJSON(os.Stdout, map[string]any{"id": args[0], "archived": true})
 	}
-	fmt.Fprintf(os.Stderr, "Squad %s deleted.\n", args[0])
+	fmt.Fprintf(os.Stderr, "Squad %s archived.\n", args[0])
 	return nil
 }
 
@@ -327,6 +350,56 @@ func runSquadMemberAdd(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 	fmt.Printf("Member %s added to squad.\n", memberID)
+	return nil
+}
+
+// ── Member Set-Role ──────────────────────────────────────────────────────────
+
+var squadMemberSetRoleCmd = &cobra.Command{
+	Use:   "set-role <squad-id>",
+	Short: "Update a member's role in a squad",
+	Args:  exactArgs(1),
+	RunE:  runSquadMemberSetRole,
+}
+
+func runSquadMemberSetRole(cmd *cobra.Command, args []string) error {
+	memberID, _ := cmd.Flags().GetString("member-id")
+	memberType, _ := cmd.Flags().GetString("type")
+	role, _ := cmd.Flags().GetString("role")
+
+	if memberID == "" {
+		return fmt.Errorf("--member-id is required")
+	}
+	if memberType != "agent" && memberType != "member" {
+		return fmt.Errorf("--type must be 'agent' or 'member'")
+	}
+	if role == "" {
+		return fmt.Errorf("--role is required")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	body := map[string]any{
+		"member_type": memberType,
+		"member_id":   memberID,
+		"role":        role,
+	}
+
+	var result map[string]any
+	if err := client.PatchJSON(ctx, "/api/squads/"+args[0]+"/members/role", body, &result); err != nil {
+		return fmt.Errorf("set member role: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	fmt.Printf("Member %s role updated to %q.\n", memberID, role)
 	return nil
 }
 
@@ -456,8 +529,13 @@ func init() {
 	squadUpdateCmd.Flags().String("avatar-url", "", "New avatar URL")
 	squadUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
-	// delete
+	// archive
+	squadArchiveCmd.Flags().String("output", "table", "Output format: table or json")
+	squadArchiveCmd.Flags().Bool("yes", false, "Skip confirmation prompt")
+
+	// delete (alias for archive)
 	squadDeleteCmd.Flags().String("output", "table", "Output format: table or json")
+	squadDeleteCmd.Flags().Bool("yes", false, "Skip confirmation prompt")
 
 	// member list
 	squadMemberListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -467,6 +545,12 @@ func init() {
 	squadMemberAddCmd.Flags().String("type", "agent", "Member type: agent or member")
 	squadMemberAddCmd.Flags().String("role", "member", "Role in the squad")
 	squadMemberAddCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// member set-role
+	squadMemberSetRoleCmd.Flags().String("member-id", "", "Member or agent ID (required)")
+	squadMemberSetRoleCmd.Flags().String("type", "agent", "Member type: agent or member")
+	squadMemberSetRoleCmd.Flags().String("role", "", "New role (required)")
+	squadMemberSetRoleCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// member remove
 	squadMemberRemoveCmd.Flags().String("member-id", "", "Member or agent ID (required)")
@@ -479,12 +563,14 @@ func init() {
 
 	squadMemberCmd.AddCommand(squadMemberListCmd)
 	squadMemberCmd.AddCommand(squadMemberAddCmd)
+	squadMemberCmd.AddCommand(squadMemberSetRoleCmd)
 	squadMemberCmd.AddCommand(squadMemberRemoveCmd)
 
 	squadCmd.AddCommand(squadListCmd)
 	squadCmd.AddCommand(squadGetCmd)
 	squadCmd.AddCommand(squadCreateCmd)
 	squadCmd.AddCommand(squadUpdateCmd)
+	squadCmd.AddCommand(squadArchiveCmd)
 	squadCmd.AddCommand(squadDeleteCmd)
 	squadCmd.AddCommand(squadMemberCmd)
 	squadCmd.AddCommand(squadActivityCmd)

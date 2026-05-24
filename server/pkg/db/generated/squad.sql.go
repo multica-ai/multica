@@ -467,6 +467,65 @@ func (q *Queries) ListSquadsByMember(ctx context.Context, arg ListSquadsByMember
 	return items, nil
 }
 
+const listSquadsWithMemberCount = `-- name: ListSquadsWithMemberCount :many
+SELECT s.id, s.workspace_id, s.name, s.description, s.leader_id, s.creator_id, s.created_at, s.updated_at, s.archived_at, s.archived_by, s.avatar_url, s.instructions, count(sm.squad_id)::bigint AS member_count
+FROM squad s
+LEFT JOIN squad_member sm ON sm.squad_id = s.id
+WHERE s.workspace_id = $1 AND s.archived_at IS NULL
+GROUP BY s.id
+ORDER BY s.created_at ASC
+`
+
+type ListSquadsWithMemberCountRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Name         string             `json:"name"`
+	Description  string             `json:"description"`
+	LeaderID     pgtype.UUID        `json:"leader_id"`
+	CreatorID    pgtype.UUID        `json:"creator_id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	ArchivedAt   pgtype.Timestamptz `json:"archived_at"`
+	ArchivedBy   pgtype.UUID        `json:"archived_by"`
+	AvatarUrl    pgtype.Text        `json:"avatar_url"`
+	Instructions string             `json:"instructions"`
+	MemberCount  int64              `json:"member_count"`
+}
+
+func (q *Queries) ListSquadsWithMemberCount(ctx context.Context, workspaceID pgtype.UUID) ([]ListSquadsWithMemberCountRow, error) {
+	rows, err := q.db.Query(ctx, listSquadsWithMemberCount, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSquadsWithMemberCountRow{}
+	for rows.Next() {
+		var i ListSquadsWithMemberCountRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.Description,
+			&i.LeaderID,
+			&i.CreatorID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.AvatarUrl,
+			&i.Instructions,
+			&i.MemberCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const removeSquadMember = `-- name: RemoveSquadMember :execrows
 DELETE FROM squad_member
 WHERE squad_id = $1 AND member_type = $2 AND member_id = $3
