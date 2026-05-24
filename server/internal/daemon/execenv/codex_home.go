@@ -62,6 +62,15 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		return fmt.Errorf("create codex-home dir: %w", err)
 	}
 
+	// Remove stale Codex-generated memories from a prior task so the new
+	// task starts with a clean memory state. On the Prepare path the entire
+	// envRoot is already removed, so this is a harmless no-op; on the Reuse
+	// path (same agent+issue re-run) it prevents cross-task memory leakage
+	// (see #3130).
+	if err := os.RemoveAll(filepath.Join(codexHome, "memories")); err != nil {
+		logger.Warn("execenv: codex-home clean stale memories failed", "error", err)
+	}
+
 	// Symlink shared directories (sessions) so logs stay in the global home.
 	for _, name := range codexSymlinkedDirs {
 		src := filepath.Join(sharedHome, name)
