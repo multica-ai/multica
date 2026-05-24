@@ -181,6 +181,39 @@ func (q *Queries) InsertCerebroGrantAudit(ctx context.Context, arg InsertCerebro
 	return err
 }
 
+const insertCerebroPermissionAuditEvent = `-- name: InsertCerebroPermissionAuditEvent :exec
+INSERT INTO activity_log (
+    workspace_id,
+    actor_type,
+    actor_id,
+    action,
+    details
+) VALUES (
+    $1,
+    $2,
+    $3,
+    'permission_policy_evaluated',
+    $4
+)
+`
+
+type InsertCerebroPermissionAuditEventParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ActorType   pgtype.Text `json:"actor_type"`
+	ActorID     pgtype.UUID `json:"actor_id"`
+	Details     []byte      `json:"details"`
+}
+
+func (q *Queries) InsertCerebroPermissionAuditEvent(ctx context.Context, arg InsertCerebroPermissionAuditEventParams) error {
+	_, err := q.db.Exec(ctx, insertCerebroPermissionAuditEvent,
+		arg.WorkspaceID,
+		arg.ActorType,
+		arg.ActorID,
+		arg.Details,
+	)
+	return err
+}
+
 const listCerebroGrantAudit = `-- name: ListCerebroGrantAudit :many
 
 SELECT

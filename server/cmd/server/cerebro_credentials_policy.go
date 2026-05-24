@@ -27,6 +27,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -34,6 +35,9 @@ import (
 
 	persona "github.com/hvejsel/firtal-persona/sdk/go"
 	"github.com/multica-ai/multica/server/internal/cerebro/credentials"
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	cerebropermissions "github.com/multica-ai/multica/server/internal/cerebro/permissions"
+	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -102,6 +106,65 @@ func (p *personaBackend) CheckCredential(ctx context.Context, action, resource, 
 	return credentials.PolicyDecision{Allowed: true, Reason: res.Reason, DecisionID: res.DecisionID}
 }
 
+// CEREBRO-PATCH(multica-credential-policy): FIR-2130 cut-over plumbing — new
+// Multica permission engine implements the credential PolicyChecker interface
+// alongside the existing Persona backend, feature-flagged via
+// MULTICA_PERMISSION_ENGINE so we can run parallel/shadow before flipping.
+//
+// multicaCredentialPolicy adapts the new Multica permission engine to the
+// credential PolicyChecker interface. It mirrors Persona's two resource scopes:
+// exact credential first, credential-type fallback second.
+type multicaCredentialPolicy struct {
+	resolver *cerebropermissions.Resolver
+}
+
+func (m *multicaCredentialPolicy) Check(ctx context.Context, req credentials.PolicyRequest) credentials.PolicyDecision {
+	if m == nil || m.resolver == nil {
+		return credentials.Deny("multica permission engine not configured")
+	}
+	action := "credential." + string(req.Permission)
+	actor := cerebropermissions.Actor{
+		Type: req.ActorType,
+		ID:   req.ActorID,
+	}
+	idResource := "cerebro-credential:" + util.UUIDToString(req.CredentialID)
+	if dec := m.checkResource(ctx, req, actor, action, idResource); dec.Allowed {
+		return dec
+	}
+	if req.CredentialType == "" {
+		return credentials.Deny("no id-scoped grant; no type fallback")
+	}
+	typeResource := "cerebro-credential-type:" + string(req.CredentialType)
+	if dec := m.checkResource(ctx, req, actor, action, typeResource); dec.Allowed {
+		return dec
+	}
+	return credentials.Deny("no matching credential grant (id or type)")
+}
+
+func (m *multicaCredentialPolicy) checkResource(ctx context.Context, req credentials.PolicyRequest, actor cerebropermissions.Actor, action, resource string) credentials.PolicyDecision {
+	dec, err := m.resolver.Can(ctx, cerebropermissions.Request{
+		WorkspaceID: req.WorkspaceID,
+		Actor:       actor,
+		Capability:  action,
+		Resource:    resource,
+	})
+	if err != nil {
+		return credentials.Deny("multica permission engine failed: " + err.Error())
+	}
+	switch dec.Kind {
+	case cerebropermissions.DecisionAllow:
+		return credentials.Allow("multica grant matched")
+	case cerebropermissions.DecisionNeedsApproval:
+		return credentials.Deny("approval required")
+	default:
+		reason := dec.Reason
+		if reason == "" {
+			reason = "multica deny"
+		}
+		return credentials.Deny(reason)
+	}
+}
+
 // newCredentialsPolicy builds the production chain. queries is the
 // upstream db handle (needed for the owner check). Returns DenyAllChecker
 // when queries is nil, which shouldn't happen in production but keeps
@@ -111,25 +174,48 @@ func (p *personaBackend) CheckCredential(ctx context.Context, action, resource, 
 // are unset, only the owner check fires. This matches the issue's
 // deny-by-default behaviour — non-owners get nothing until persona is
 // configured and grants are issued.
-func newCredentialsPolicy(queries *db.Queries) credentials.PolicyChecker {
+func newCredentialsPolicy(cerebroQueries *cerebrodb.Queries, queries *db.Queries) credentials.PolicyChecker {
 	if queries == nil {
 		return credentials.DenyAllChecker
 	}
 	owner := credentials.NewOwnerPolicyChecker(&memberLookupFromQueries{q: queries})
+	multica := credentials.PolicyChecker(nil)
+	if cerebroQueries != nil {
+		multica = &multicaCredentialPolicy{resolver: cerebropermissions.New(cerebroQueries)}
+	}
 
 	url := strings.TrimSpace(os.Getenv("MULTICA_PERSONA_URL"))
 	token := strings.TrimSpace(os.Getenv("MULTICA_PERSONA_TOKEN"))
 	if url == "" || token == "" {
-		// No persona configured. Owner-only chain — non-owners always
-		// deny, which is the deny-by-default position from JEH-1197.
-		return credentials.NewChainPolicyChecker(owner)
+		return credentials.NewChainPolicyChecker(owner, multica)
 	}
 	client, err := persona.New(persona.Config{Endpoint: url, Token: token})
+	var personaChk credentials.PolicyChecker
 	if err != nil {
 		slog.Default().Warn("credentials policy: persona client init failed, falling back to owner-only",
 			"err", err)
-		return credentials.NewChainPolicyChecker(owner)
+	} else {
+		personaChk = credentials.NewPersonaPolicyChecker(&personaBackend{client: client, log: slog.Default()})
 	}
-	personaChk := credentials.NewPersonaPolicyChecker(&personaBackend{client: client, log: slog.Default()})
-	return credentials.NewChainPolicyChecker(owner, personaChk)
+	cutover := credentials.NewCutoverPolicyChecker(
+		personaChk,
+		multica,
+		credentials.PermissionEngineMode(os.Getenv("MULTICA_PERMISSION_ENGINE")),
+		envInt("MULTICA_PERMISSION_PARALLEL_SAMPLE", 100),
+		slog.Default(),
+	)
+	return credentials.NewChainPolicyChecker(owner, cutover)
+}
+
+func envInt(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		slog.Default().Warn("invalid integer env var, using fallback", "key", key, "value", raw, "fallback", fallback)
+		return fallback
+	}
+	return n
 }

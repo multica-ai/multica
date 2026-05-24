@@ -833,6 +833,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "POST /api/workspaces/{id}/grants/evaluate",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/workspaces/{id}/groups",
       "gate": "workspace_admin"
     },

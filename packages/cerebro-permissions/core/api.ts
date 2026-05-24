@@ -6,6 +6,8 @@ import {
   personaGrantSchema,
   type AuditFilter,
   type CreatePersonaGrantRequest,
+  type EffectivePermissionRequest,
+  type EffectivePermissionResult,
   type GrantAuditEntry,
   type GrantsFilter,
   type PaginatedResponse,
@@ -83,6 +85,25 @@ export async function deletePersonaGrant(
   grantId: string,
 ): Promise<void> {
   await api.deletePersonaGrant(wsId, grantId);
+}
+
+export async function evaluateEffectivePermission(
+  wsId: string,
+  body: EffectivePermissionRequest,
+): Promise<EffectivePermissionResult> {
+  const raw = await api.evaluatePersonaGrant<unknown>(wsId, body);
+  const rec = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  return {
+    decision: typeof rec.decision === "string" ? rec.decision : "deny",
+    reason: typeof rec.reason === "string" ? rec.reason : "no result",
+    matched_grant_ids: Array.isArray(rec.matched_grant_ids)
+      ? rec.matched_grant_ids.filter((id): id is string => typeof id === "string")
+      : [],
+    winning_override_layer:
+      typeof rec.winning_override_layer === "string"
+        ? rec.winning_override_layer
+        : "",
+  };
 }
 
 // CEREBRO-PATCH(audit-extended-filter): capability + until params added by FIR-2133; cast needed until core client type is updated upstream.

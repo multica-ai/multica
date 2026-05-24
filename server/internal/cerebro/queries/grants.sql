@@ -137,3 +137,18 @@ INSERT INTO cerebro_workspace_grant_audit (
     actor_type, actor_id,
     surface, diff
 ) VALUES ($1, $2, $3, $4, $5, $6, $7);
+
+-- name: InsertCerebroPermissionAuditEvent :exec
+INSERT INTO activity_log (
+    workspace_id,
+    actor_type,
+    actor_id,
+    action,
+    details
+) VALUES (
+    $1,
+    $2,
+    $3,
+    'permission_policy_evaluated',
+    $4
+);

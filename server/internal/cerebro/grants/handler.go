@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	cerebropermissions "github.com/multica-ai/multica/server/internal/cerebro/permissions"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -86,6 +87,16 @@ type updateGrantRequest struct {
 	TimeWindowEnd         *string `json:"time_window_end"`
 	ApprovalRequired      *bool   `json:"approval_required"`
 	Status                *string `json:"status"`
+}
+
+type evaluateGrantRequest struct {
+	ActorType  string   `json:"actor_type"`
+	ActorID    string   `json:"actor_id"`
+	GroupIDs   []string `json:"group_ids"`
+	RoleIDs    []string `json:"role_ids"`
+	AgentID    *string  `json:"agent_id"`
+	Capability string   `json:"capability"`
+	Resource   string   `json:"resource"`
 }
 
 // --- handlers ---------------------------------------------------------------
@@ -222,6 +233,64 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, toResponse(g))
+}
+
+// Evaluate — POST /api/workspaces/{id}/grants/evaluate
+func (h *Handler) Evaluate(w http.ResponseWriter, r *http.Request) {
+	_, workspaceID, ok := h.loadWorkspace(w, r)
+	if !ok {
+		return
+	}
+	var req evaluateGrantRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	actorID, err := util.ParseUUID(req.ActorID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid actor_id")
+		return
+	}
+	groupIDs, err := parseUUIDs(req.GroupIDs)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid group_ids")
+		return
+	}
+	roleIDs, err := parseUUIDs(req.RoleIDs)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid role_ids")
+		return
+	}
+	var agentID pgtype.UUID
+	if req.AgentID != nil && *req.AgentID != "" {
+		agentID, err = util.ParseUUID(*req.AgentID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid agent_id")
+			return
+		}
+	}
+	decision, err := cerebropermissions.New(h.Svc.Cerebro).Can(r.Context(), cerebropermissions.Request{
+		WorkspaceID: workspaceID,
+		Actor: cerebropermissions.Actor{
+			Type:     req.ActorType,
+			ID:       actorID,
+			GroupIDs: groupIDs,
+			RoleIDs:  roleIDs,
+		},
+		Agent:      agentID,
+		Capability: req.Capability,
+		Resource:   req.Resource,
+	})
+	if err != nil {
+		h.serverError(w, r, "evaluate grant", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"decision":               decision.Kind,
+		"reason":                 decision.Reason,
+		"matched_grant_ids":      uuidStrings(decision.MatchedGrantIDs),
+		"winning_override_layer": decision.WinningOverrideLayer,
+	})
 }
 
 // Create — POST /api/workspaces/{id}/grants
@@ -494,6 +563,31 @@ func toAuditResponse(row cerebrodb.ListCerebroGrantAuditRow) grantAuditResponse 
 		After:       diff.After,
 		CreatedAt:   util.TimestampToString(row.CreatedAt),
 	}
+}
+
+func parseUUIDs(raw []string) ([]pgtype.UUID, error) {
+	out := make([]pgtype.UUID, 0, len(raw))
+	for _, item := range raw {
+		if item == "" {
+			continue
+		}
+		id, err := util.ParseUUID(item)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+func uuidStrings(ids []pgtype.UUID) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if s := util.UUIDToString(id); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func grantAuditSummary(action string) string {

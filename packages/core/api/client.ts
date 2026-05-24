@@ -1069,6 +1069,20 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(permission-engine-evaluate): FIR-2130 effective-permission endpoint
+  // wired through ApiClient so cerebro-permissions can call it without bypassing
+  // schema/typing. Will move into cerebro-permissions/core/api.ts once upstream
+  // exposes a typed grants-evaluate path; until then we live on client.ts.
+  async evaluatePersonaGrant<T = unknown>(
+    wsId: string,
+    body: unknown,
+  ): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/grants/evaluate`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
   async listPersonaGrantAudit<T = unknown>(
     wsId: string,
     filter: {

@@ -3,6 +3,8 @@ package credentials
 import (
 	"context"
 	"errors"
+	"hash/fnv"
+	"log/slog"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -119,6 +121,145 @@ var DenyAllChecker PolicyChecker = PolicyCheckerFunc(func(_ context.Context, _ P
 var AllowAllChecker PolicyChecker = PolicyCheckerFunc(func(_ context.Context, _ PolicyRequest) PolicyDecision {
 	return Allow("allow-all (test)")
 })
+
+// PermissionEngineMode selects which policy engine's answer is enforced.
+//
+//   - persona: rollback/default path; Persona answers.
+//   - parallel: Persona answers, Multica also runs and mismatches are logged.
+//   - multica: cut-over path; Multica answers. Persona can still be sampled
+//     for comparison when CompareSamplePercent is > 0.
+type PermissionEngineMode string
+
+const (
+	PermissionEnginePersona  PermissionEngineMode = "persona"
+	PermissionEngineParallel PermissionEngineMode = "parallel"
+	PermissionEngineMultica  PermissionEngineMode = "multica"
+)
+
+// CutoverPolicyChecker is the cut-over switch between the legacy Persona
+// policy source and Multica's own permission engine. It is intentionally
+// generic so credential governance can use it without importing server/cmd.
+type CutoverPolicyChecker struct {
+	Persona              PolicyChecker
+	Multica              PolicyChecker
+	Mode                 PermissionEngineMode
+	CompareSamplePercent int
+	Log                  *slog.Logger
+}
+
+func NewCutoverPolicyChecker(persona, multica PolicyChecker, mode PermissionEngineMode, samplePercent int, log *slog.Logger) *CutoverPolicyChecker {
+	return &CutoverPolicyChecker{
+		Persona:              persona,
+		Multica:              multica,
+		Mode:                 normalizePermissionEngineMode(mode),
+		CompareSamplePercent: normalizeSamplePercent(samplePercent),
+		Log:                  log,
+	}
+}
+
+func (c *CutoverPolicyChecker) Check(ctx context.Context, req PolicyRequest) PolicyDecision {
+	if c == nil {
+		return DenyAllChecker.Check(ctx, req)
+	}
+	mode := normalizePermissionEngineMode(c.Mode)
+	switch mode {
+	case PermissionEngineParallel:
+		persona := c.checkPersona(ctx, req)
+		if c.shouldCompare(req) {
+			multica := c.checkMultica(ctx, req)
+			c.logComparison(req, persona, multica, PermissionEnginePersona)
+		}
+		return persona
+	case PermissionEngineMultica:
+		multica := c.checkMultica(ctx, req)
+		if c.shouldCompare(req) {
+			persona := c.checkPersona(ctx, req)
+			c.logComparison(req, persona, multica, PermissionEngineMultica)
+		}
+		return multica
+	default:
+		return c.checkPersona(ctx, req)
+	}
+}
+
+func (c *CutoverPolicyChecker) checkPersona(ctx context.Context, req PolicyRequest) PolicyDecision {
+	if c.Persona == nil {
+		return Deny("persona engine not configured")
+	}
+	return c.Persona.Check(ctx, req)
+}
+
+func (c *CutoverPolicyChecker) checkMultica(ctx context.Context, req PolicyRequest) PolicyDecision {
+	if c.Multica == nil {
+		return Deny("multica permission engine not configured")
+	}
+	return c.Multica.Check(ctx, req)
+}
+
+func (c *CutoverPolicyChecker) shouldCompare(req PolicyRequest) bool {
+	sample := normalizeSamplePercent(c.CompareSamplePercent)
+	if sample <= 0 {
+		return false
+	}
+	if sample >= 100 {
+		return true
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(util.UUIDToString(req.WorkspaceID)))
+	_, _ = h.Write([]byte("|"))
+	_, _ = h.Write([]byte(util.UUIDToString(req.ActorID)))
+	_, _ = h.Write([]byte("|"))
+	_, _ = h.Write([]byte(util.UUIDToString(req.CredentialID)))
+	_, _ = h.Write([]byte("|"))
+	_, _ = h.Write([]byte(req.Permission))
+	return int(h.Sum32()%100) < sample
+}
+
+func (c *CutoverPolicyChecker) logComparison(req PolicyRequest, persona, multica PolicyDecision, answering PermissionEngineMode) {
+	log := c.Log
+	if log == nil {
+		log = slog.Default()
+	}
+	attrs := []any{
+		"workspace_id", util.UUIDToString(req.WorkspaceID),
+		"actor_type", req.ActorType,
+		"actor_id", util.UUIDToString(req.ActorID),
+		"credential_id", util.UUIDToString(req.CredentialID),
+		"credential_type", string(req.CredentialType),
+		"permission", string(req.Permission),
+		"answering_engine", string(answering),
+		"persona_allowed", persona.Allowed,
+		"persona_reason", persona.Reason,
+		"multica_allowed", multica.Allowed,
+		"multica_reason", multica.Reason,
+	}
+	if persona.Allowed != multica.Allowed {
+		log.Warn("permission engine mismatch", attrs...)
+		return
+	}
+	log.Info("permission engine comparison matched", attrs...)
+}
+
+func normalizePermissionEngineMode(mode PermissionEngineMode) PermissionEngineMode {
+	switch PermissionEngineMode(strings.ToLower(strings.TrimSpace(string(mode)))) {
+	case PermissionEngineParallel:
+		return PermissionEngineParallel
+	case PermissionEngineMultica:
+		return PermissionEngineMultica
+	default:
+		return PermissionEnginePersona
+	}
+}
+
+func normalizeSamplePercent(n int) int {
+	if n < 0 {
+		return 0
+	}
+	if n > 100 {
+		return 100
+	}
+	return n
+}
 
 // ChainPolicyChecker evaluates a list of checkers in order. The first
 // Allowed=true decision is returned immediately. If all deny, the LAST

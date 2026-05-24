@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_activity_log_permission_policy_eval;

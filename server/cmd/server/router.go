@@ -266,8 +266,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	channelListenSvc.AgentTriggerGate = mentionGate.ChannelListenGate()
 	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 workspace accounts handler
 	cerebroAccountHandler := cerebroaccount.New(cerebroQueries, bus)
-	// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196/1197 credential registry handler — cipher loaded from MULTICA_CREDENTIALS_KEY, governance policy wired via newCredentialsPolicy (owner-only when persona env is unset).
-	cerebroCredentialsHandler := cerebrocredentials.New(cerebroQueries, cerebrocredentials.MustNewCipherFromEnv(), bus).WithPolicy(newCredentialsPolicy(queries))
+	// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196/1197 credential registry handler — cipher loaded from MULTICA_CREDENTIALS_KEY, governance policy wired via newCredentialsPolicy (Persona/Multica cut-over controlled by MULTICA_PERMISSION_ENGINE).
+	cerebroCredentialsHandler := cerebrocredentials.New(cerebroQueries, cerebrocredentials.MustNewCipherFromEnv(), bus).WithPolicy(newCredentialsPolicy(cerebroQueries, queries))
 	// CEREBRO-PATCH(references-routes): JEH-837 issue references handler instance.
 	cerebroReferencesHandler := cerebroreferences.New(cerebroQueries, queries, bus)
 	// CEREBRO-PATCH(comments-move-to-subissue): JEH-1309 lift a comment thread into a sub-issue.
@@ -598,6 +598,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(cerebro-grants-routes): JEH-1179 grant reads (any member).
 					r.Get("/grants", cerebroGrantsHandler.List)
 					r.Get("/grants/audit", cerebroGrantsHandler.Audit) // CEREBRO-PATCH(persona-permissions-audit): expose grant audit before {grantId}.
+					r.Post("/grants/evaluate", cerebroGrantsHandler.Evaluate)
 					r.Get("/grants/{grantId}", cerebroGrantsHandler.Get)
 					// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval inbox reads (any member). /audit before /{approvalId} so it is not shadowed.
 					r.Get("/approvals", cerebroApprovalsHandler.List)

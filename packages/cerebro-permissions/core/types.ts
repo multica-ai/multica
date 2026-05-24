@@ -115,6 +115,23 @@ export interface GrantAuditEntry {
   created_at: string;
 }
 
+export interface EffectivePermissionRequest {
+  actor_type: "member" | "agent" | string;
+  actor_id: string;
+  group_ids: string[];
+  role_ids: string[];
+  agent_id: string | null;
+  capability: string;
+  resource: string;
+}
+
+export interface EffectivePermissionResult {
+  decision: "allow" | "deny" | "needs_approval" | string;
+  reason: string;
+  matched_grant_ids: string[];
+  winning_override_layer: string;
+}
+
 export interface PaginatedResponse<T> {
   items: T[];
   total: number;

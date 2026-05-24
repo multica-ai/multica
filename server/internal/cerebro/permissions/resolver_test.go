@@ -1,6 +1,9 @@
 package permissions
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -8,6 +11,24 @@ import (
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 )
+
+type fakeStore struct {
+	grants []cerebrodb.CerebroWorkspaceGrant
+	audits []cerebrodb.InsertCerebroPermissionAuditEventParams
+	err    error
+}
+
+func (f *fakeStore) ListCerebroWorkspaceGrants(context.Context, cerebrodb.ListCerebroWorkspaceGrantsParams) ([]cerebrodb.CerebroWorkspaceGrant, error) {
+	return f.grants, nil
+}
+
+func (f *fakeStore) InsertCerebroPermissionAuditEvent(_ context.Context, arg cerebrodb.InsertCerebroPermissionAuditEventParams) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.audits = append(f.audits, arg)
+	return nil
+}
 
 func uuid(b byte) pgtype.UUID {
 	var u pgtype.UUID
@@ -224,5 +245,78 @@ func TestDecide_RecordsMatchedGrantIDs(t *testing.T) {
 	}
 	if len(d.MatchedGrantIDs) != 1 || d.MatchedGrantIDs[0].Bytes != gid.Bytes {
 		t.Fatalf("expected matched grant id %x, got %+v", gid.Bytes, d.MatchedGrantIDs)
+	}
+}
+
+func TestDecide_RecordsWinningOverrideLayer(t *testing.T) {
+	groupID := uuid(7)
+	grants := []cerebrodb.CerebroWorkspaceGrant{
+		grant(subjectWorkspaceDefault, pgtype.UUID{}, "issue.read", "*"),
+		grant(subjectGroup, groupID, "issue.read", "*"),
+	}
+	d := Decide(grants, Request{
+		Actor:      Actor{Type: subjectMember, ID: uuid(1), GroupIDs: []pgtype.UUID{groupID}},
+		Capability: "issue.read",
+	})
+	if d.WinningOverrideLayer != "group" {
+		t.Fatalf("expected group layer to win, got %q", d.WinningOverrideLayer)
+	}
+}
+
+func TestCan_WritesPermissionAuditEvent(t *testing.T) {
+	store := &fakeStore{
+		grants: []cerebrodb.CerebroWorkspaceGrant{grant(subjectWorkspaceDefault, pgtype.UUID{}, "issue.read", "*", withID(uuid(42)))},
+	}
+	resolver := &Resolver{Cerebro: store, Audit: store}
+
+	decision, err := resolver.Can(context.Background(), Request{
+		WorkspaceID: uuid(9),
+		Actor:       Actor{Type: subjectMember, ID: uuid(1)},
+		Capability:  "issue.read",
+		Resource:    "issues/123",
+	})
+	if err != nil {
+		t.Fatalf("Can returned error: %v", err)
+	}
+	if !decision.Allowed() {
+		t.Fatalf("expected allow, got %v", decision.Kind)
+	}
+	if len(store.audits) != 1 {
+		t.Fatalf("expected one audit event, got %d", len(store.audits))
+	}
+	if store.audits[0].ActorType.String != subjectMember || !store.audits[0].ActorID.Valid {
+		t.Fatalf("audit actor not populated: %+v", store.audits[0])
+	}
+
+	var details map[string]any
+	if err := json.Unmarshal(store.audits[0].Details, &details); err != nil {
+		t.Fatalf("audit details should be JSON: %v", err)
+	}
+	if details["capability"] != "issue.read" || details["scope"] != "issues/123" {
+		t.Fatalf("audit details missing request shape: %#v", details)
+	}
+	if details["decision"] != "allow" || details["winning_override_layer"] != "workspace" {
+		t.Fatalf("audit details missing decision/layer: %#v", details)
+	}
+}
+
+func TestCan_ReturnsAuditWriteError(t *testing.T) {
+	wantErr := errors.New("audit unavailable")
+	store := &fakeStore{
+		grants: []cerebrodb.CerebroWorkspaceGrant{grant(subjectWorkspaceDefault, pgtype.UUID{}, "issue.read", "*")},
+		err:    wantErr,
+	}
+	resolver := &Resolver{Cerebro: store, Audit: store}
+
+	decision, err := resolver.Can(context.Background(), Request{
+		WorkspaceID: uuid(9),
+		Actor:       Actor{Type: subjectMember, ID: uuid(1)},
+		Capability:  "issue.read",
+	})
+	if err == nil || !errors.Is(err, wantErr) {
+		t.Fatalf("expected audit error, got %v", err)
+	}
+	if !decision.Allowed() {
+		t.Fatalf("decision should still describe the evaluated policy, got %v", decision.Kind)
 	}
 }

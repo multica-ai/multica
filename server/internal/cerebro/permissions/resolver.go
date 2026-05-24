@@ -17,10 +17,12 @@ package permissions
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
+	googleuuid "github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
@@ -30,9 +32,9 @@ import (
 type DecisionKind string
 
 const (
-	DecisionAllow          DecisionKind = "allow"
-	DecisionDeny           DecisionKind = "deny"
-	DecisionNeedsApproval  DecisionKind = "needs_approval"
+	DecisionAllow         DecisionKind = "allow"
+	DecisionDeny          DecisionKind = "deny"
+	DecisionNeedsApproval DecisionKind = "needs_approval"
 )
 
 // Subject types accepted on grant rows.
@@ -50,9 +52,10 @@ const grantStatusActive = "active"
 // Decision is the resolver output. Reason is a short human-readable explanation
 // suitable for audit rows and error responses.
 type Decision struct {
-	Kind            DecisionKind
-	MatchedGrantIDs []pgtype.UUID
-	Reason          string
+	Kind                 DecisionKind
+	MatchedGrantIDs      []pgtype.UUID
+	Reason               string
+	WinningOverrideLayer string
 }
 
 // Allowed is a convenience for the most common call shape.
@@ -86,14 +89,19 @@ type Request struct {
 // Resolver runs grant evaluation. It is safe for concurrent use.
 type Resolver struct {
 	Cerebro grantLister
+	Audit   permissionAuditWriter
 }
 
 type grantLister interface {
 	ListCerebroWorkspaceGrants(ctx context.Context, arg cerebrodb.ListCerebroWorkspaceGrantsParams) ([]cerebrodb.CerebroWorkspaceGrant, error)
 }
 
+type permissionAuditWriter interface {
+	InsertCerebroPermissionAuditEvent(ctx context.Context, arg cerebrodb.InsertCerebroPermissionAuditEventParams) error
+}
+
 // New constructs a Resolver backed by cerebro queries.
-func New(q *cerebrodb.Queries) *Resolver { return &Resolver{Cerebro: q} }
+func New(q *cerebrodb.Queries) *Resolver { return &Resolver{Cerebro: q, Audit: q} }
 
 // Can fetches the workspace's active grants and resolves them against req.
 // A nil Cerebro field means "no grants known" → deny.
@@ -107,7 +115,11 @@ func (r *Resolver) Can(ctx context.Context, req Request) (Decision, error) {
 	if err != nil {
 		return Decision{Kind: DecisionDeny, Reason: "grant lookup failed"}, fmt.Errorf("list grants: %w", err)
 	}
-	return Decide(rows, req), nil
+	decision := Decide(rows, req)
+	if err := r.writeAuditEvent(ctx, req, decision); err != nil {
+		return decision, err
+	}
+	return decision, nil
 }
 
 // Decide is the pure resolution function. Tests pass synthetic grants directly.
@@ -136,6 +148,7 @@ func Decide(grants []cerebrodb.CerebroWorkspaceGrant, req Request) Decision {
 
 	var matched []pgtype.UUID
 	anyApproval := false
+	winningLayer := "none"
 	for _, g := range grants {
 		if g.Status != grantStatusActive {
 			continue
@@ -156,18 +169,53 @@ func Decide(grants []cerebrodb.CerebroWorkspaceGrant, req Request) Decision {
 			continue
 		}
 		matched = append(matched, g.ID)
+		layer := overrideLayer(g)
+		if overrideLayerRank(layer) >= overrideLayerRank(winningLayer) {
+			winningLayer = layer
+		}
 		if g.ApprovalRequired {
 			anyApproval = true
 		}
 	}
 
 	if len(matched) == 0 {
-		return Decision{Kind: DecisionDeny, Reason: "no matching grant"}
+		return Decision{Kind: DecisionDeny, Reason: "no matching grant", WinningOverrideLayer: "none"}
 	}
 	if anyApproval {
-		return Decision{Kind: DecisionNeedsApproval, MatchedGrantIDs: matched, Reason: "approval required"}
+		return Decision{Kind: DecisionNeedsApproval, MatchedGrantIDs: matched, Reason: "approval required", WinningOverrideLayer: winningLayer}
 	}
-	return Decision{Kind: DecisionAllow, MatchedGrantIDs: matched, Reason: "grant matched"}
+	return Decision{Kind: DecisionAllow, MatchedGrantIDs: matched, Reason: "grant matched", WinningOverrideLayer: winningLayer}
+}
+
+func (r *Resolver) writeAuditEvent(ctx context.Context, req Request, decision Decision) error {
+	if r == nil || r.Audit == nil {
+		return nil
+	}
+	details, err := json.Marshal(map[string]any{
+		"subject_type":           req.Actor.Type,
+		"subject_id":             uuidString(req.Actor.ID),
+		"agent_id":               uuidString(req.Agent),
+		"group_ids":              uuidStrings(req.Actor.GroupIDs),
+		"role_ids":               uuidStrings(req.Actor.RoleIDs),
+		"capability":             req.Capability,
+		"scope":                  req.Resource,
+		"decision":               string(decision.Kind),
+		"winning_override_layer": decision.WinningOverrideLayer,
+		"matched_grant_ids":      uuidStrings(decision.MatchedGrantIDs),
+		"reason":                 decision.Reason,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal permission audit event: %w", err)
+	}
+	if err := r.Audit.InsertCerebroPermissionAuditEvent(ctx, cerebrodb.InsertCerebroPermissionAuditEventParams{
+		WorkspaceID: req.WorkspaceID,
+		ActorType:   pgtype.Text{String: req.Actor.Type, Valid: req.Actor.Type != ""},
+		ActorID:     req.Actor.ID,
+		Details:     details,
+	}); err != nil {
+		return fmt.Errorf("write permission audit event: %w", err)
+	}
+	return nil
 }
 
 // subjectApplies reports whether the grant's subject row applies to this
@@ -207,6 +255,36 @@ func subjectApplies(g cerebrodb.CerebroWorkspaceGrant, actor Actor, agent pgtype
 		return false
 	}
 	return false
+}
+
+func overrideLayer(g cerebrodb.CerebroWorkspaceGrant) string {
+	switch g.SubjectType {
+	case subjectWorkspaceDefault:
+		return "workspace"
+	case subjectRole:
+		return "role"
+	case subjectGroup:
+		return "group"
+	case subjectMember, subjectAgent:
+		return "actor"
+	default:
+		return "unknown"
+	}
+}
+
+func overrideLayerRank(layer string) int {
+	switch layer {
+	case "workspace":
+		return 1
+	case "role":
+		return 2
+	case "group":
+		return 3
+	case "actor":
+		return 4
+	default:
+		return 0
+	}
 }
 
 // capabilityMatches supports three pattern shapes:
@@ -262,4 +340,25 @@ func uuidEqual(a, b pgtype.UUID) bool {
 		return false
 	}
 	return a.Bytes == b.Bytes
+}
+
+func uuidString(v pgtype.UUID) string {
+	if !v.Valid {
+		return ""
+	}
+	id, err := googleuuid.FromBytes(v.Bytes[:])
+	if err != nil {
+		return ""
+	}
+	return id.String()
+}
+
+func uuidStrings(values []pgtype.UUID) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if id := uuidString(value); id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
 }
