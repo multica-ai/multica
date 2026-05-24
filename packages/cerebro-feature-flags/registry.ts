@@ -28,6 +28,7 @@ export type CerebroFlagKey =
   | "cerebro_persona_permissions"
   | "cerebro_skill_mention"
   | "cerebro_grants"
+  | "cerebro_approvals"
   | "cerebro_move_comment_to_subissue"
   | "cerebro_agent_passes"
   | "cerebro_references"
@@ -64,6 +65,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_persona_permissions: true,
   cerebro_skill_mention: true,
   cerebro_grants: false,
+  cerebro_approvals: false,
   cerebro_move_comment_to_subissue: true,
   cerebro_agent_passes: true,
   cerebro_references: true,
@@ -207,6 +209,12 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Grant control plane",
     description:
       "Enable the Persona grant control plane API and CLI (POST/PATCH/DELETE /api/workspaces/{id}/grants and `multica grant` commands).",
+  },
+  {
+    key: "cerebro_approvals",
+    label: "Approval inbox",
+    description:
+      "Enable the approval inbox at /:workspace/approvals — when the permission engine returns needs_approval, the ask lands here for a human to approve, reject, or delegate, with an audit trail per decision. Owner/admin only. FIR-2131.",
   },
   {
     key: "cerebro_move_comment_to_subissue",

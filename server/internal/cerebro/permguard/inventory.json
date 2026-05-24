@@ -793,6 +793,22 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "POST /api/workspaces/{id}/approvals/intake",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/workspaces/{id}/approvals/{approvalId}/approve",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/workspaces/{id}/approvals/{approvalId}/delegate",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/workspaces/{id}/approvals/{approvalId}/reject",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "POST /api/workspaces/{id}/credentials",
       "gate": "workspace_member"
     },

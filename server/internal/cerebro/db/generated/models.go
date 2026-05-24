@@ -308,6 +308,40 @@ type CerebroAgentRuntimeToolOverride struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroApprovalAudit struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ApprovalID  pgtype.UUID        `json:"approval_id"`
+	Action      string             `json:"action"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
+	Surface     string             `json:"surface"`
+	Note        pgtype.Text        `json:"note"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type CerebroApprovalRequest struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	RequesterType   string             `json:"requester_type"`
+	RequesterID     pgtype.UUID        `json:"requester_id"`
+	AgentID         pgtype.UUID        `json:"agent_id"`
+	Capability      string             `json:"capability"`
+	Resource        string             `json:"resource"`
+	Reason          string             `json:"reason"`
+	MatchedGrantIds []byte             `json:"matched_grant_ids"`
+	Context         []byte             `json:"context"`
+	Status          string             `json:"status"`
+	DecidedByID     pgtype.UUID        `json:"decided_by_id"`
+	DecidedAt       pgtype.Timestamptz `json:"decided_at"`
+	DecisionNote    pgtype.Text        `json:"decision_note"`
+	DelegatedToType pgtype.Text        `json:"delegated_to_type"`
+	DelegatedToID   pgtype.UUID        `json:"delegated_to_id"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroChannelAgentSetting struct {
 	ChannelID  pgtype.UUID        `json:"channel_id"`
 	AgentID    pgtype.UUID        `json:"agent_id"`

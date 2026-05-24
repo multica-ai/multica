@@ -103,7 +103,12 @@ export type WSEventType =
   // CEREBRO-PATCH(cerebro-reference-events): JEH-838b — issue reference CRUD WS events.
   | "cerebro.issue_reference.created"
   | "cerebro.issue_reference.updated"
-  | "cerebro.issue_reference.deleted";
+  | "cerebro.issue_reference.deleted"
+  // CEREBRO-PATCH(cerebro-approval-events): FIR-2131 — approval inbox lifecycle WS events.
+  | "approval:created"
+  | "approval:decided"
+  | "approval:delegated"
+  | "approval:expired";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;

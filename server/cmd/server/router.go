@@ -37,6 +37,8 @@ import (
 	cerebrogroups "github.com/multica-ai/multica/server/internal/cerebro/groups"
 	// CEREBRO-PATCH(cerebro-grants-routes): JEH-1179 grant control plane handler import
 	cerebrogrants "github.com/multica-ai/multica/server/internal/cerebro/grants"
+	// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval inbox handler import
+	cerebroapprovals "github.com/multica-ai/multica/server/internal/cerebro/approvals"
 	// CEREBRO-PATCH(cerebro-group-permissions-routes): JEH-1008 permission model handler import
 	cerebrogrouppermissions "github.com/multica-ai/multica/server/internal/cerebro/grouppermissions"
 	// CEREBRO-PATCH(cerebro-github-pr-heal): JEH-1919 PR-card self-heal service import.
@@ -253,6 +255,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroGroupPermissionsHandler := cerebrogrouppermissions.New(cerebroQueries, queries, bus)
 	// CEREBRO-PATCH(cerebro-grants-routes): JEH-1179 grant control plane handler + JEH-1212 upstream queries for subject validation
 	cerebroGrantsHandler := cerebrogrants.NewHandler(cerebrogrants.New(cerebroQueries, queries, pool, bus)) // CEREBRO-PATCH(cerebro-grants-routes): JEH-1213
+	// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval inbox handler — materialises permission-engine needs_approval verdicts into a human inbox.
+	cerebroApprovalsHandler := cerebroapprovals.NewHandler(cerebroapprovals.New(cerebroQueries, pool, bus))
 	// CEREBRO-PATCH(router-group-permissions-seam): JEH-1009 wire capability gate into the upstream handler
 	h.GroupPermissions = cerebrogrouppermissions.NewHandlerSeam(cerebroGroupPermissionsHandler.Service)
 	mentionGate := cerebromentiongate.New(queries, cerebroGroupPermissionsHandler.Service) // CEREBRO-PATCH(router-mention-trigger-gate): JEH-1917.
@@ -591,6 +595,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/grants", cerebroGrantsHandler.List)
 					r.Get("/grants/audit", cerebroGrantsHandler.Audit) // CEREBRO-PATCH(persona-permissions-audit): expose grant audit before {grantId}.
 					r.Get("/grants/{grantId}", cerebroGrantsHandler.Get)
+					// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval inbox reads (any member). /audit before /{approvalId} so it is not shadowed.
+					r.Get("/approvals", cerebroApprovalsHandler.List)
+					r.Get("/approvals/audit", cerebroApprovalsHandler.Audit)
+					r.Get("/approvals/{approvalId}", cerebroApprovalsHandler.Get)
 					// CEREBRO-PATCH(cerebro-account-routes): workspace accounts CRUD + JEH-998 controls patch.
 					r.Get("/accounts", cerebroAccountHandler.List)
 					r.Post("/accounts", cerebroAccountHandler.Create)
@@ -625,6 +633,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/grants", cerebroGrantsHandler.Create)
 					r.Patch("/grants/{grantId}", cerebroGrantsHandler.Update)
 					r.Delete("/grants/{grantId}", cerebroGrantsHandler.Delete)
+					// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval decisions + intake seam (admin/owner only).
+					r.Post("/approvals/intake", cerebroApprovalsHandler.Intake)
+					r.Post("/approvals/{approvalId}/approve", cerebroApprovalsHandler.Approve)
+					r.Post("/approvals/{approvalId}/reject", cerebroApprovalsHandler.Reject)
+					r.Post("/approvals/{approvalId}/delegate", cerebroApprovalsHandler.Delegate)
 					// W4.6: audit feed for sandbox + admin actions.
 					r.Get("/activity", h.ListWorkspaceActivity)
 				})

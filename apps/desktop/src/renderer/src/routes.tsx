@@ -42,6 +42,7 @@ import { useNavigation } from "@multica/views/navigation";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { TasksPage } from "@multica/cerebro-tasks";
 import { PermissionsPage } from "@multica/cerebro-permissions";
+import { ApprovalsPage } from "@multica/cerebro-approvals";
 import { SearchPage } from "@multica/views/search";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { Download, Server } from "lucide-react";
@@ -286,6 +287,11 @@ export const appRoutes: RouteObject[] = [
             path: "permissions",
             element: <PermissionsPage />,
             handle: { title: "Permissions" },
+          },
+          {
+            path: "approvals",
+            element: <ApprovalsPage />,
+            handle: { title: "Approvals" },
           },
           {
             path: "notifications",
