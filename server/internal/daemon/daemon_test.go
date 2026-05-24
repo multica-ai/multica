@@ -1318,25 +1318,55 @@ func TestExecuteAndDrain_IdleWatchdog_FiresAfterToolResultIfBackendStaysSilent(t
 	}
 }
 
-func TestEnsureRepoReadyFastPathDoesNotRefresh(t *testing.T) {
+// ensureRepoReady must refresh `workspaceState.settings` on every checkout —
+// even when the repo cache already holds the URL. The /repo/checkout handler
+// reads `workspaceCoAuthoredByEnabled` right after, and the 30s workspace
+// sync tick is too slow to make a freshly-flipped GitHub toggle feel live.
+// PR #2847 review by Emacs caught this fast-path regression; the test
+// asserts the cached-repo path still issues exactly one refresh.
+func TestEnsureRepoReadyCachedRepoStillRefreshesSettings(t *testing.T) {
 	t.Parallel()
 
 	sourceRepo := createDaemonTestRepo(t)
 	var refreshCalls atomic.Int32
 	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/daemon/workspaces/ws-1/repos" {
+			http.NotFound(w, r)
+			return
+		}
 		refreshCalls.Add(1)
-		http.Error(w, "unexpected refresh", http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID:  "ws-1",
+			Repos:        []RepoData{{URL: sourceRepo}},
+			ReposVersion: "v2",
+			Settings:     json.RawMessage(`{"github_enabled":false,"co_authored_by_enabled":true}`),
+		})
 	})
 	if err := d.repoCache.Sync("ws-1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("seed repo cache: %v", err)
 	}
-	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: sourceRepo}}, nil)
+	// Workspace starts with the master switch ON. The server above will return
+	// the user's just-flipped OFF state — ensureRepoReady must pick that up
+	// before the handler reads workspaceCoAuthoredByEnabled.
+	d.workspaces["ws-1"] = newWorkspaceState(
+		"ws-1",
+		nil,
+		"v1",
+		[]RepoData{{URL: sourceRepo}},
+		json.RawMessage(`{"github_enabled":true,"co_authored_by_enabled":true}`),
+	)
+	if !d.workspaceCoAuthoredByEnabled("ws-1") {
+		t.Fatalf("precondition: expected co-author hook enabled before checkout")
+	}
 
 	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
 		t.Fatalf("ensureRepoReady: %v", err)
 	}
-	if got := refreshCalls.Load(); got != 0 {
-		t.Fatalf("expected no refresh calls, got %d", got)
+	if got := refreshCalls.Load(); got != 1 {
+		t.Fatalf("expected exactly 1 refresh call on cached repo, got %d", got)
+	}
+	if d.workspaceCoAuthoredByEnabled("ws-1") {
+		t.Fatalf("expected co-author hook disabled after server-side toggle; daemon used stale workspaceState.settings via cache fast path")
 	}
 }
 
@@ -1346,20 +1376,29 @@ func TestEnsureRepoReadyTrimsURL(t *testing.T) {
 	sourceRepo := createDaemonTestRepo(t)
 	var refreshCalls atomic.Int32
 	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/daemon/workspaces/ws-1/repos" {
+			http.NotFound(w, r)
+			return
+		}
 		refreshCalls.Add(1)
-		http.Error(w, "unexpected refresh", http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID:  "ws-1",
+			Repos:        []RepoData{{URL: sourceRepo}},
+			ReposVersion: "v2",
+		})
 	})
 	if err := d.repoCache.Sync("ws-1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("seed repo cache: %v", err)
 	}
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: sourceRepo}}, nil)
 
-	// URL with trailing whitespace should still hit the fast path.
+	// URL with trailing whitespace should still resolve to the cached repo.
 	if err := d.ensureRepoReady(context.Background(), "ws-1", "  "+sourceRepo+"  "); err != nil {
 		t.Fatalf("ensureRepoReady with padded URL: %v", err)
 	}
-	if got := refreshCalls.Load(); got != 0 {
-		t.Fatalf("expected no refresh calls for trimmed URL, got %d", got)
+	// Even on cache hit we refresh settings once so toggle flips feel live.
+	if got := refreshCalls.Load(); got != 1 {
+		t.Fatalf("expected 1 refresh call for trimmed URL, got %d", got)
 	}
 }
 
@@ -1438,8 +1477,12 @@ func TestRegisterTaskReposAllowsProjectOnlyURL(t *testing.T) {
 	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
 		t.Fatalf("ensureRepoReady: %v", err)
 	}
-	if got := refreshCalls.Load(); got != 0 {
-		t.Fatalf("expected zero workspace-repos refreshes (URL came from project), got %d", got)
+	// ensureRepoReady refreshes settings on every call (RFC MUL-2414 §4.8; PR
+	// #2847 review by Emacs) so a freshly-flipped GitHub toggle takes effect
+	// without waiting for the 30s sync tick. We expect exactly one refresh —
+	// the project-only URL still skips re-cloning because the cache is warm.
+	if got := refreshCalls.Load(); got != 1 {
+		t.Fatalf("expected 1 workspace-repos refresh (settings live-refresh on checkout), got %d", got)
 	}
 }
 

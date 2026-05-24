@@ -146,11 +146,17 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
       </AppLink>
 
       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pl-6 text-xs sm:contents sm:pl-0">
-        {/* Agent */}
+        {/* Assignee — agent or squad */}
         <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground sm:w-32 sm:shrink-0">
-          <ActorAvatar actorType="agent" actorId={autopilot.assignee_id} size={18} enableHoverCard showStatusDot />
+          <ActorAvatar
+            actorType={autopilot.assignee_type}
+            actorId={autopilot.assignee_id}
+            size={18}
+            enableHoverCard={autopilot.assignee_type === "agent"}
+            showStatusDot={autopilot.assignee_type === "agent"}
+          />
           <span className="truncate">
-            {getActorName("agent", autopilot.assignee_id)}
+            {getActorName(autopilot.assignee_type, autopilot.assignee_id)}
           </span>
         </span>
 

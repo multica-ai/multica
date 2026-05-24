@@ -1,4 +1,4 @@
-import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType } from "./issue";
+import type { Issue, IssueMetadata, IssueStatus, IssuePriority, IssueAssigneeType } from "./issue";
 import type { MemberRole } from "./workspace";
 import type { Project } from "./project";
 
@@ -12,6 +12,7 @@ export interface CreateIssueRequest {
   assignee_id?: string;
   parent_issue_id?: string;
   project_id?: string;
+  start_date?: string;
   due_date?: string;
   attachment_ids?: string[];
 }
@@ -24,6 +25,7 @@ export interface UpdateIssueRequest {
   assignee_type?: IssueAssigneeType | null;
   assignee_id?: string | null;
   position?: number;
+  start_date?: string | null;
   due_date?: string | null;
   parent_issue_id?: string | null;
   project_id?: string | null;
@@ -43,7 +45,25 @@ export interface ListIssuesParams {
   assignee_ids?: string[];
   creator_id?: string;
   project_id?: string;
+  /**
+   * Widen the assignee filter to issues where the user is the *indirect*
+   * assignee — assignee is one of the user's owned agents, or a squad that
+   * involves the user (human member / leader-via-owned-agent / agent member
+   * owned by the user). Direct member assignment is intentionally excluded:
+   * `involves_user_id` and `assignee_id=<user>` (tab "Assigned to me") produce
+   * disjoint result sets by construction.
+   */
+  involves_user_id?: string;
+  /** JSONB containment filter on `issue.metadata`. AND across keys. */
+  metadata?: IssueMetadata;
   open_only?: boolean;
+  /**
+   * Restrict the result to issues with at least one of `start_date` /
+   * `due_date` set. Used by the Project Gantt view so it doesn't have to
+   * page through every issue on the project just to discard the unscheduled
+   * majority on the client.
+   */
+  scheduled?: boolean;
 }
 
 export interface IssueActorRef {
@@ -63,6 +83,10 @@ export interface ListGroupedIssuesParams {
   assignee_ids?: string[];
   creator_id?: string;
   project_id?: string;
+  /** See `ListIssuesParams.involves_user_id` — same semantics. */
+  involves_user_id?: string;
+  /** JSONB containment filter on `issue.metadata`. AND across keys. */
+  metadata?: IssueMetadata;
   assignee_filters?: IssueActorRef[];
   include_no_assignee?: boolean;
   creator_filters?: IssueActorRef[];
@@ -110,6 +134,8 @@ export interface ListIssuesCache {
 export interface SearchIssueResult extends Issue {
   match_source: "title" | "description" | "comment";
   matched_snippet?: string;
+  matched_description_snippet?: string;
+  matched_comment_snippet?: string;
 }
 
 export interface SearchIssuesResponse {
@@ -131,6 +157,10 @@ export interface UpdateMeRequest {
   name?: string;
   avatar_url?: string;
   language?: string;
+  /** Free-form self-description (max 2000 chars). Pass "" to clear. */
+  profile_description?: string;
+  /** IANA tz to pin; "" clears back to browser-tz; undefined leaves untouched. */
+  timezone?: string;
 }
 
 export interface CreateMemberRequest {

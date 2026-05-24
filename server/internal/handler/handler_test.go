@@ -59,6 +59,15 @@ func TestMain(m *testing.M) {
 	bus := events.New()
 	emailSvc := service.NewEmailService()
 	testHandler = New(queries, pool, hub, bus, emailSvc, nil, nil, analytics.NoopClient{}, Config{AllowSignup: true})
+	// httptest.NewRequest defaults RemoteAddr to 192.0.2.1, so every webhook
+	// test in the suite shares one IP bucket. With the production default
+	// (30/min) the budget runs out partway through the suite and unrelated
+	// downstream tests see a 429 from the IP gate instead of the response
+	// they're asserting. Tests that exercise rate limiting deliberately
+	// swap in a tight limiter with t.Cleanup; this generous default keeps
+	// the rest of the suite hermetic.
+	testHandler.WebhookRateLimiter = NewMemoryWebhookRateLimiter(WebhookRateLimit{Limit: 1_000_000, Window: time.Minute})
+	testHandler.WebhookIPRateLimiter = NewMemoryWebhookIPRateLimiter(WebhookRateLimit{Limit: 1_000_000, Window: time.Minute})
 	testPool = pool
 
 	testUserID, testWorkspaceID, err = setupHandlerTestFixture(ctx, pool)
@@ -851,17 +860,15 @@ func TestCreateIssueAllowsDuplicateAfterDone(t *testing.T) {
 	}
 }
 
-func TestTriggerAutopilotRejectsActiveDuplicateIssue(t *testing.T) {
+func TestTriggerAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 	ctx := context.Background()
-	title := fmt.Sprintf("Autopilot duplicate guard %d", time.Now().UnixNano())
-	var issueID, autopilotID string
+	title := fmt.Sprintf("Autopilot duplicate issue %d", time.Now().UnixNano())
+	var autopilotID string
 	defer func() {
 		if autopilotID != "" {
 			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
 		}
-		if issueID != "" {
-			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
-		}
+		testPool.Exec(ctx, `DELETE FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title)
 	}()
 
 	var agentID string
@@ -882,11 +889,10 @@ func TestTriggerAutopilotRejectsActiveDuplicateIssue(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&existing); err != nil {
 		t.Fatalf("decode existing issue: %v", err)
 	}
-	issueID = existing.ID
 
 	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
-		"title":                "Duplicate guard autopilot",
+		"title":                "Duplicate title autopilot",
 		"assignee_id":          agentID,
 		"execution_mode":       "create_issue",
 		"issue_title_template": title,
@@ -905,55 +911,44 @@ func TestTriggerAutopilotRejectsActiveDuplicateIssue(t *testing.T) {
 	req = newRequest("POST", "/api/autopilots/"+autopilotID+"/trigger?workspace_id="+testWorkspaceID, nil)
 	req = withURLParam(req, "id", autopilotID)
 	testHandler.TriggerAutopilot(w, req)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("TriggerAutopilot duplicate: expected 409, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("TriggerAutopilot duplicate title: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	var conflict struct {
-		Code  string `json:"code"`
-		Error string `json:"error"`
-		Issue struct {
-			ID         string `json:"id"`
-			Identifier string `json:"identifier"`
-			Title      string `json:"title"`
-			Status     string `json:"status"`
-		} `json:"issue"`
+	var run AutopilotRunResponse
+	if err := json.NewDecoder(w.Body).Decode(&run); err != nil {
+		t.Fatalf("decode autopilot run: %v", err)
 	}
-	if err := json.NewDecoder(w.Body).Decode(&conflict); err != nil {
-		t.Fatalf("decode duplicate conflict: %v", err)
+	if run.Status != "issue_created" {
+		t.Fatalf("run status = %q, want issue_created", run.Status)
 	}
-	if conflict.Code != "active_duplicate_issue" {
-		t.Fatalf("code = %q, want active_duplicate_issue", conflict.Code)
+	if run.IssueID == nil {
+		t.Fatal("run issue_id is nil, want newly created issue")
 	}
-	if conflict.Issue.ID != issueID || conflict.Issue.Identifier != existing.Identifier || conflict.Issue.Status != "todo" {
-		t.Fatalf("conflict issue = %#v, want existing %s %s todo", conflict.Issue, issueID, existing.Identifier)
+	if *run.IssueID == existing.ID {
+		t.Fatalf("run reused existing issue %s, want a new issue", existing.ID)
 	}
-	if !strings.Contains(conflict.Error, "Active duplicate issue exists: "+existing.Identifier+" "+title) {
-		t.Fatalf("duplicate error did not mention existing issue: %s", conflict.Error)
+	if run.FailureReason != nil {
+		t.Fatalf("run failure_reason = %q, want nil", *run.FailureReason)
 	}
-
-	assertAutopilotDuplicateRunSkipped(t, ctx, autopilotID, issueID, existing.Identifier, title)
-	assertAutopilotNotFailureMonitorCandidate(t, ctx, autopilotID)
 
 	var count int
 	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title).Scan(&count); err != nil {
 		t.Fatalf("count issues: %v", err)
 	}
-	if count != 1 {
-		t.Fatalf("autopilot duplicate guard should leave one matching issue, got %d", count)
+	if count != 2 {
+		t.Fatalf("autopilot should create a new same-title issue, got %d matching issues", count)
 	}
 }
 
-func TestScheduledAutopilotDuplicateIssueSkipsRun(t *testing.T) {
+func TestScheduledAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 	ctx := context.Background()
-	title := fmt.Sprintf("Scheduled autopilot duplicate guard %d", time.Now().UnixNano())
-	var issueID, autopilotID string
+	title := fmt.Sprintf("Scheduled autopilot duplicate issue %d", time.Now().UnixNano())
+	var autopilotID string
 	defer func() {
 		if autopilotID != "" {
 			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
 		}
-		if issueID != "" {
-			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
-		}
+		testPool.Exec(ctx, `DELETE FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title)
 	}()
 
 	var agentID string
@@ -974,11 +969,10 @@ func TestScheduledAutopilotDuplicateIssueSkipsRun(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&existing); err != nil {
 		t.Fatalf("decode existing issue: %v", err)
 	}
-	issueID = existing.ID
 
 	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
-		"title":                "Scheduled duplicate guard autopilot",
+		"title":                "Scheduled duplicate title autopilot",
 		"assignee_id":          agentID,
 		"execution_mode":       "create_issue",
 		"issue_title_template": title,
@@ -1002,66 +996,276 @@ func TestScheduledAutopilotDuplicateIssueSkipsRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DispatchAutopilot schedule duplicate: %v", err)
 	}
-	if run == nil {
-		t.Fatal("expected skipped run, got nil")
+	if run == nil || run.Status != "issue_created" {
+		t.Fatalf("dispatch result = %+v, want status issue_created", run)
 	}
-	if run.Status != "skipped" {
-		t.Fatalf("run status = %q, want skipped", run.Status)
+	newIssueID := uuidToString(run.IssueID)
+	if newIssueID == "" {
+		t.Fatal("run issue_id is empty, want newly created issue")
 	}
-	assertAutopilotDuplicateRunSkipped(t, ctx, autopilotID, issueID, existing.Identifier, title)
-	assertAutopilotNotFailureMonitorCandidate(t, ctx, autopilotID)
+	if newIssueID == existing.ID {
+		t.Fatalf("run reused existing issue %s, want a new issue", existing.ID)
+	}
+	if run.FailureReason.Valid {
+		t.Fatalf("run failure_reason = %q, want empty", run.FailureReason.String)
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title).Scan(&count); err != nil {
+		t.Fatalf("count issues: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("autopilot should create a new same-title issue, got %d matching issues", count)
+	}
 }
 
-func assertAutopilotDuplicateRunSkipped(t *testing.T, ctx context.Context, autopilotID, issueID, identifier, title string) {
-	t.Helper()
-	var status, failureReason string
-	var result []byte
+// TestAutopilotCreatedIssueCreatorIsAssigneeAgent locks in that an issue spawned
+// by an autopilot reports the assignee agent — not the human who configured the
+// autopilot — as its creator. The matching issue:created event must carry the
+// same actor identity so downstream activity / notification listeners stay in
+// sync with the issue row.
+func TestAutopilotCreatedIssueCreatorIsAssigneeAgent(t *testing.T) {
+	ctx := context.Background()
+	title := fmt.Sprintf("Autopilot creator attribution %d", time.Now().UnixNano())
+	var autopilotID, issueID string
+	defer func() {
+		if issueID != "" {
+			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		}
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+	}()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":                "Creator attribution autopilot",
+		"assignee_id":          agentID,
+		"execution_mode":       "create_issue",
+		"issue_title_template": title,
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var autopilot AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
+		t.Fatalf("decode autopilot: %v", err)
+	}
+	autopilotID = autopilot.ID
+	if autopilot.CreatedByType != "member" || autopilot.CreatedByID != testUserID {
+		t.Fatalf("autopilot created_by = %s/%s, want member/%s", autopilot.CreatedByType, autopilot.CreatedByID, testUserID)
+	}
+
+	gotEvent := make(chan events.Event, 1)
+	testHandler.Bus.Subscribe(protocol.EventIssueCreated, func(e events.Event) {
+		select {
+		case gotEvent <- e:
+		default:
+		}
+	})
+
+	queries := db.New(testPool)
+	ap, err := queries.GetAutopilot(ctx, parseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("GetAutopilot: %v", err)
+	}
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	if run == nil || run.Status != "issue_created" {
+		t.Fatalf("dispatch result = %+v, want status issue_created", run)
+	}
+
+	var creatorType, creatorID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT status, failure_reason, result
-		FROM autopilot_run
-		WHERE autopilot_id = $1
+		SELECT id, creator_type, creator_id
+		FROM issue
+		WHERE workspace_id = $1 AND title = $2
 		ORDER BY created_at DESC
 		LIMIT 1
-	`, autopilotID).Scan(&status, &failureReason, &result); err != nil {
-		t.Fatalf("load autopilot run: %v", err)
+	`, testWorkspaceID, title).Scan(&issueID, &creatorType, &creatorID); err != nil {
+		t.Fatalf("load autopilot-created issue: %v", err)
 	}
-	if status != "skipped" {
-		t.Fatalf("autopilot duplicate run status = %q, want skipped", status)
+	if creatorType != "agent" {
+		t.Fatalf("issue creator_type = %q, want agent", creatorType)
 	}
-	if !strings.Contains(failureReason, identifier+" "+title) {
-		t.Fatalf("duplicate run failure_reason = %q, want existing issue details", failureReason)
+	if creatorID != agentID {
+		t.Fatalf("issue creator_id = %q, want assignee agent %q", creatorID, agentID)
 	}
-	var payload struct {
-		Code  string `json:"code"`
-		Issue struct {
-			ID         string `json:"id"`
-			Identifier string `json:"identifier"`
-			Title      string `json:"title"`
-			Status     string `json:"status"`
-		} `json:"issue"`
-	}
-	if err := json.Unmarshal(result, &payload); err != nil {
-		t.Fatalf("decode duplicate run result: %v", err)
-	}
-	if payload.Code != "active_duplicate_issue" || payload.Issue.ID != issueID || payload.Issue.Identifier != identifier || payload.Issue.Title != title {
-		t.Fatalf("duplicate run result = %#v, want issue %s %s %q", payload, issueID, identifier, title)
+
+	select {
+	case ev := <-gotEvent:
+		if ev.ActorType != "agent" {
+			t.Fatalf("issue:created ActorType = %q, want agent", ev.ActorType)
+		}
+		if ev.ActorID != agentID {
+			t.Fatalf("issue:created ActorID = %q, want %q", ev.ActorID, agentID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("did not receive issue:created event")
 	}
 }
 
-func assertAutopilotNotFailureMonitorCandidate(t *testing.T, ctx context.Context, autopilotID string) {
-	t.Helper()
-	candidates, err := db.New(testPool).SelectAutopilotsExceedingFailureThreshold(ctx, db.SelectAutopilotsExceedingFailureThresholdParams{
-		MinRuns:            1,
-		FailRatioThreshold: 1,
-		Since:              pgtype.Timestamptz{Time: time.Now().Add(-time.Hour), Valid: true},
-	})
-	if err != nil {
-		t.Fatalf("SelectAutopilotsExceedingFailureThreshold: %v", err)
-	}
-	for _, candidate := range candidates {
-		if uuidToString(candidate.ID) == autopilotID {
-			t.Fatalf("duplicate skipped run should not be a failure monitor candidate: %+v", candidate)
+func TestAutopilotCreateIssueAssociatesConfiguredProject(t *testing.T) {
+	ctx := context.Background()
+	title := fmt.Sprintf("Autopilot project issue %d", time.Now().UnixNano())
+	var autopilotID, issueID, projectID string
+	defer func() {
+		if issueID != "" {
+			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
 		}
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+		if projectID != "" {
+			testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID)
+		}
+	}()
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id::text
+	`, testWorkspaceID, "Autopilot project target").Scan(&projectID); err != nil {
+		t.Fatalf("create project fixture: %v", err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":                "Project-linked autopilot",
+		"assignee_id":          agentID,
+		"execution_mode":       "create_issue",
+		"issue_title_template": title,
+		"project_id":           projectID,
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var autopilot AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
+		t.Fatalf("decode autopilot: %v", err)
+	}
+	autopilotID = autopilot.ID
+	if autopilot.ProjectID == nil || *autopilot.ProjectID != projectID {
+		t.Fatalf("autopilot project_id = %v, want %q", autopilot.ProjectID, projectID)
+	}
+
+	queries := db.New(testPool)
+	ap, err := queries.GetAutopilot(ctx, parseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("GetAutopilot: %v", err)
+	}
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	if run == nil || !run.IssueID.Valid {
+		t.Fatalf("dispatch run = %+v, want linked issue", run)
+	}
+	issueID = uuidToString(run.IssueID)
+
+	var issueProjectID *string
+	if err := testPool.QueryRow(ctx, `
+		SELECT project_id::text
+		FROM issue
+		WHERE id = $1
+	`, issueID).Scan(&issueProjectID); err != nil {
+		t.Fatalf("load created issue project: %v", err)
+	}
+	if issueProjectID == nil || *issueProjectID != projectID {
+		t.Fatalf("created issue project_id = %v, want %q", issueProjectID, projectID)
+	}
+}
+
+func TestUpdateAutopilotCanSetAndClearProject(t *testing.T) {
+	ctx := context.Background()
+	var autopilotID, projectID string
+	defer func() {
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+		if projectID != "" {
+			testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID)
+		}
+	}()
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id::text
+	`, testWorkspaceID, "Autopilot update project target").Scan(&projectID); err != nil {
+		t.Fatalf("create project fixture: %v", err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":          "Project update autopilot",
+		"assignee_id":    agentID,
+		"execution_mode": "create_issue",
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created autopilot: %v", err)
+	}
+	autopilotID = created.ID
+	if created.ProjectID != nil {
+		t.Fatalf("new autopilot project_id = %v, want nil", created.ProjectID)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("PATCH", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, map[string]any{
+		"project_id": projectID,
+	})
+	req = withURLParam(req, "id", autopilotID)
+	testHandler.UpdateAutopilot(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAutopilot set project: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var updated AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode updated autopilot: %v", err)
+	}
+	if updated.ProjectID == nil || *updated.ProjectID != projectID {
+		t.Fatalf("updated project_id = %v, want %q", updated.ProjectID, projectID)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("PATCH", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, map[string]any{
+		"project_id": nil,
+	})
+	req = withURLParam(req, "id", autopilotID)
+	testHandler.UpdateAutopilot(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAutopilot clear project: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cleared AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&cleared); err != nil {
+		t.Fatalf("decode cleared autopilot: %v", err)
+	}
+	if cleared.ProjectID != nil {
+		t.Fatalf("cleared project_id = %v, want nil", cleared.ProjectID)
 	}
 }
 
@@ -1567,16 +1771,6 @@ func TestRequestBodyUUIDFieldsRejectMalformed(t *testing.T) {
 				},
 			}),
 			handle: testHandler.DaemonRegister,
-		},
-		{
-			name: "import starter content workspace_id",
-			req: newRequest("POST", "/api/onboarding/starter-content/import", map[string]any{
-				"workspace_id": "not-a-uuid",
-				"project": map[string]any{
-					"title": "Getting Started",
-				},
-			}),
-			handle: testHandler.ImportStarterContent,
 		},
 	}
 

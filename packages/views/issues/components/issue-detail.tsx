@@ -8,6 +8,7 @@ import { useNavigation } from "../../navigation";
 import {
   Archive,
   Calendar,
+  CalendarClock,
   CalendarDays,
   ChevronDown,
   ChevronLeft,
@@ -35,6 +36,7 @@ import {
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
 import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/ui/popover";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
@@ -44,7 +46,7 @@ import type { Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, Upda
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
-import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
+import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
@@ -54,12 +56,15 @@ import { collectThreadReplies } from "./thread-utils";
 import { AgentLiveCard } from "./agent-live-card";
 import { ExecutionLogSection } from "./execution-log-section";
 import { PullRequestList } from "./pull-request-list";
+import { useGitHubSettings } from "@multica/core/github";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { projectDetailOptions } from "@multica/core/projects/queries";
+import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
@@ -71,7 +76,7 @@ import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
-import { timeAgo } from "@multica/core/utils";
+import { useTimeAgo } from "../../i18n";
 import { cn } from "@multica/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
@@ -213,6 +218,11 @@ function formatActivity(
       if (details.from_id && !details.to_id) return t(($) => $.activity.removed_assignee);
       return t(($) => $.activity.changed_assignee);
     }
+    case "start_date_changed": {
+      if (!details.to) return t(($) => $.activity.start_date_removed);
+      const formatted = new Date(details.to).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      return t(($) => $.activity.start_date_set, { date: formatted });
+    }
     case "due_date_changed": {
       if (!details.to) return t(($) => $.activity.due_date_removed);
       const formatted = new Date(details.to).toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -282,10 +292,10 @@ const EMPTY_REPLIES: TimelineEntry[] = [];
 // the Properties block, rendered only when the issue actually has a parent.
 //
 // `OPTIONAL_PROP_KEYS` is the open set — adding a new optional field
-// (e.g. `start_date`) means appending here, wiring its row in the JSX
-// switch below, and adding a locale key. The picker, visibility rules,
-// and add-property menu all flow from this one list.
-const OPTIONAL_PROP_KEYS = ["priority", "due_date", "labels"] as const;
+// means appending here, wiring its row in the JSX switch below, and
+// adding a locale key. The picker, visibility rules, and add-property
+// menu all flow from this one list.
+const OPTIONAL_PROP_KEYS = ["priority", "start_date", "due_date", "labels"] as const;
 type OptionalPropKey = (typeof OPTIONAL_PROP_KEYS)[number];
 
 function isOptionalPropSet(
@@ -296,6 +306,8 @@ function isOptionalPropSet(
   switch (key) {
     case "priority":
       return issue.priority !== "none";
+    case "start_date":
+      return !!issue.start_date;
     case "due_date":
       return !!issue.due_date;
     case "labels":
@@ -385,12 +397,14 @@ function ActivityBlock({
   onToggle,
   getActorName,
   t,
+  timeAgo,
 }: {
   entries: TimelineEntry[];
   expanded: boolean;
   onToggle: () => void;
   getActorName: (type: string, id: string) => string;
   t: ActivityT;
+  timeAgo: (dateStr: string) => string;
 }) {
   if (!expanded) {
     const count = entries.length;
@@ -421,6 +435,7 @@ function ActivityBlock({
         const details = (entry.details ?? {}) as Record<string, string>;
         const isStatusChange = entry.action === "status_changed";
         const isPriorityChange = entry.action === "priority_changed";
+        const isStartDateChange = entry.action === "start_date_changed";
         const isDueDateChange = entry.action === "due_date_changed";
 
         let leadIcon: React.ReactNode;
@@ -428,6 +443,8 @@ function ActivityBlock({
           leadIcon = <StatusIcon status={details.to as IssueStatus} className="h-4 w-4 shrink-0" />;
         } else if (isPriorityChange && details.to) {
           leadIcon = <PriorityIcon priority={details.to as IssuePriority} className="h-4 w-4 shrink-0" />;
+        } else if (isStartDateChange) {
+          leadIcon = <CalendarClock className="h-4 w-4 shrink-0 text-muted-foreground" />;
         } else if (isDueDateChange) {
           leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
         } else {
@@ -485,7 +502,14 @@ function SubIssueRow({ child }: { child: Issue }) {
     (updates: Partial<UpdateIssueRequest>) => {
       updateIssue.mutate(
         { id: child.id, ...updates },
-        { onError: () => toast.error(t(($) => $.detail.update_failed)) },
+        {
+          onError: (err) =>
+            toast.error(
+              err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.detail.update_failed),
+            ),
+        },
       );
     },
     [child.id, updateIssue, t],
@@ -592,6 +616,7 @@ interface IssueDetailProps {
 
 export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
   const { t } = useT("issues");
+  const timeAgo = useTimeAgo();
   const id = issueId;
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
@@ -630,7 +655,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
+  const [metadataOpen, setMetadataOpen] = useState(false);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
+  const githubSettings = useGitHubSettings();
 
   // Per-issue, per-session set of optional properties currently visible in
   // the sidebar Properties section. Seeded on issue switch with whichever
@@ -933,6 +960,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     enabled: !!parentIssueId,
     initialData: () => allIssues.find((i) => i.id === parentIssueId),
   });
+
+  // Project segment in the breadcrumb. The issue's project_id is the source of
+  // truth — same URL renders the same breadcrumb regardless of entry path.
+  const issueProjectId = issue?.project_id;
+  const { data: breadcrumbProject = null, isError: breadcrumbProjectError } = useQuery({
+    ...projectDetailOptions(wsId, issueProjectId ?? ""),
+    enabled: !!issueProjectId,
+  });
   const { data: childIssues = [] } = useQuery({
     ...childIssuesOptions(wsId, id),
     enabled: !!issue,
@@ -1233,6 +1268,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               />
             </PropRow>
           )}
+          {visibleOptionalProps.has("start_date") && (
+            <PropRow label={t(($) => $.detail.prop_start_date)}>
+              <StartDatePicker
+                startDate={issue.start_date}
+                onUpdate={handleUpdateField}
+                defaultOpen={autoOpenProp === "start_date"}
+              />
+            </PropRow>
+          )}
           {visibleOptionalProps.has("due_date") && (
             <PropRow label={t(($) => $.detail.prop_due_date)}>
               <DueDatePicker
@@ -1280,6 +1324,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       {k === "priority" && (
                         <PriorityIcon priority="medium" inheritColor className="text-muted-foreground" />
                       )}
+                      {k === "start_date" && (
+                        <CalendarClock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      )}
                       {k === "due_date" && (
                         <CalendarDays className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       )}
@@ -1288,6 +1335,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       )}
                       <span className="truncate">
                         {k === "priority" && t(($) => $.detail.prop_priority)}
+                        {k === "start_date" && t(($) => $.detail.prop_start_date)}
                         {k === "due_date" && t(($) => $.detail.prop_due_date)}
                         {k === "labels" && t(($) => $.detail.prop_labels)}
                       </span>
@@ -1326,17 +1374,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </div>
       )}
 
-      {/* Pull requests */}
-      <div>
-        <button
-          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${pullRequestsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-          onClick={() => setPullRequestsOpen(!pullRequestsOpen)}
-        >
-          {t(($) => $.detail.section_pull_requests)}
-          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${pullRequestsOpen ? "rotate-90" : ""}`} />
-        </button>
-        {pullRequestsOpen && <div className="pl-2"><PullRequestList issueId={id} /></div>}
-      </div>
+      {/* Pull requests — hidden when the workspace disables the PR sidebar
+          (or the GitHub master switch is off). Backend data is kept either
+          way so re-enabling restores the section instantly. */}
+      {githubSettings.prSidebar && (
+        <div>
+          <button
+            className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${pullRequestsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+            onClick={() => setPullRequestsOpen(!pullRequestsOpen)}
+          >
+            {t(($) => $.detail.section_pull_requests)}
+            <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${pullRequestsOpen ? "rotate-90" : ""}`} />
+          </button>
+          {pullRequestsOpen && <div className="pl-2"><PullRequestList issueId={id} /></div>}
+        </div>
+      )}
 
       {/* Details */}
       <div>
@@ -1399,6 +1451,37 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </div>}
         </div>
       )}
+
+      {/* Metadata — agent-facing free-form KV bag. The values almost
+          never mean anything to humans, so the trigger row matches the
+          sibling section headers (Pull requests / Details / Parent issue)
+          but clicking opens a dialog with the raw JSON instead of expanding
+          inline — the payload can be large and pushing the rest of the
+          sidebar down was noisy. */}
+      {Object.keys(issue.metadata ?? {}).length > 0 && (
+        <>
+          <button
+            type="button"
+            className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
+            onClick={() => setMetadataOpen(true)}
+          >
+            {t(($) => $.detail.section_metadata)}
+            <span className="tabular-nums">
+              · {Object.keys(issue.metadata ?? {}).length}
+            </span>
+          </button>
+          <Dialog open={metadataOpen} onOpenChange={setMetadataOpen}>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>{t(($) => $.detail.section_metadata)}</DialogTitle>
+              </DialogHeader>
+              <pre className="max-h-[60vh] overflow-auto rounded-md bg-muted p-3 font-mono text-xs">
+                {JSON.stringify(issue.metadata ?? {}, null, 2)}
+              </pre>
+            </DialogContent>
+          </Dialog>
+        </>
+      )}
     </div>
   );
 
@@ -1451,6 +1534,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         onToggle={() => toggleActivityBlock(item.id, expanded)}
         getActorName={getActorName}
         t={t}
+        timeAgo={timeAgo}
       />
     );
   };
@@ -1467,6 +1551,26 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 >
                   {workspace.name}
                 </AppLink>
+                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+              </>
+            )}
+            {issueProjectId && (
+              <>
+                {breadcrumbProject ? (
+                  <AppLink
+                    href={paths.projectDetail(breadcrumbProject.id)}
+                    className="flex items-center gap-1 min-w-0 max-w-72 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <ProjectIcon project={breadcrumbProject} size="sm" />
+                    <span className="min-w-0 truncate">{breadcrumbProject.title}</span>
+                  </AppLink>
+                ) : breadcrumbProjectError ? (
+                  <span className="italic text-muted-foreground/70 shrink-0">
+                    {t(($) => $.detail.breadcrumb_project_unknown)}
+                  </span>
+                ) : (
+                  <Skeleton className="h-3.5 w-20 shrink-0" />
+                )}
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}

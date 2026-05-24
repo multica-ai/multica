@@ -3,9 +3,10 @@
 /**
  * AttachmentPreviewModal — full-screen inline preview for an attachment.
  *
- * Sibling to the existing `ImageLightbox` (extensions/image-view.tsx) which
- * keeps owning images. This modal handles 6 other PreviewKinds:
+ * Single modal for every previewable kind. Handles 7 PreviewKinds:
  *
+ *   - image : <img className="object-contain"> centered in the modal frame.
+ *             Replaces the previous standalone ImageLightbox.
  *   - pdf   : <iframe src={download_url}> — relies on Chromium's PDFium
  *             plugin. On desktop, requires webPreferences.plugins=true
  *             (see apps/desktop/src/main/index.ts).
@@ -15,10 +16,12 @@
  *   - markdown : fetch text via api.getAttachmentTextContent, render via
  *                the existing ReadonlyContent (full mention/mermaid/katex
  *                pipeline included).
- *   - html     : fetch text, hand to <iframe srcdoc={text} sandbox="">.
- *                Empty sandbox attribute = max restriction (no scripts,
- *                no forms, no top-nav, no popups, no same-origin) — the
- *                recommended pattern for previewing untrusted HTML.
+ *   - html     : fetch text, hand to <iframe srcdoc={text}
+ *                sandbox="allow-scripts">. The iframe runs in an opaque
+ *                origin: scripts execute (chart libraries / vanilla SVG
+ *                JS work), but cookie / localStorage / parent access /
+ *                top-navigation / popups / forms stay blocked because
+ *                `allow-same-origin` is intentionally NOT included.
  *   - text     : fetch text, highlight with lowlight if the extension
  *                maps to a known hljs language; otherwise plain <pre>.
  *
@@ -35,19 +38,15 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { useQuery } from "@tanstack/react-query";
-import { Download, FileText, Loader2, X } from "lucide-react";
-import { createLowlight, common } from "lowlight";
-// @ts-expect-error -- hast-util-to-html has no bundled type declarations
-import { toHtml } from "hast-util-to-html";
-import { cn } from "@multica/ui/lib/utils";
 import {
-  api,
   PreviewTooLargeError,
   PreviewUnsupportedError,
 } from "@multica/core/api";
+import { Download, ExternalLink, FileText, Loader2, X } from "lucide-react";
 import type { Attachment } from "@multica/core/types";
+import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { useT } from "../i18n";
+import { useNavigation } from "../navigation";
 import { openExternal } from "../platform";
 import { ReadonlyContent } from "./readonly-content";
 import {
@@ -56,6 +55,9 @@ import {
   type PreviewKind,
 } from "./utils/preview";
 import { useDownloadAttachment } from "./use-download-attachment";
+import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
+import { HtmlPreviewBody } from "./html-preview-body";
+import { CodeBlockStatic } from "./code-block-static";
 
 // ---------------------------------------------------------------------------
 // Preview source — full attachment, or URL-only (media types only)
@@ -77,7 +79,7 @@ export type PreviewSource =
 
 // PreviewKinds that can render from a URL-only source. Text-based kinds
 // (markdown / html / text) need the /content proxy which is ID-keyed.
-const URL_ONLY_KINDS = new Set<PreviewKind>(["pdf", "video", "audio"]);
+const URL_ONLY_KINDS = new Set<PreviewKind>(["image", "pdf", "video", "audio"]);
 
 // Normalized view used everywhere downstream of `useAttachmentPreview`.
 // `attachmentId === null` signals URL-only mode (download falls back to
@@ -180,6 +182,10 @@ export function AttachmentPreviewModal({
   const { t } = useT("editor");
   const download = useDownloadAttachment();
   const state = normalize(source);
+  // useWorkspaceSlug (not useWorkspacePaths) — returns null outside a
+  // workspace route instead of throwing, so the new-tab button just hides.
+  const slug = useWorkspaceSlug();
+  const navigation = useNavigation();
 
   useEffect(() => {
     if (!open) return;
@@ -201,6 +207,26 @@ export function AttachmentPreviewModal({
     } else {
       openExternal(state.mediaUrl);
     }
+  };
+
+  // Open-in-new-tab mirrors HtmlAttachmentPreview's inline toolbar: only the
+  // `html` kind has a dedicated full-page route (/attachments/{id}/preview).
+  // Gated on slug + attachmentId for the same reason — URL-only sources
+  // can't address the /content proxy the page relies on.
+  const canOpenInNewTab = kind === "html" && !!slug && !!state.attachmentId;
+  const handleOpenInNewTab = () => {
+    if (!slug || !state.attachmentId) return;
+    const nameQuery = state.filename
+      ? `?name=${encodeURIComponent(state.filename)}`
+      : "";
+    const path = `${paths.workspace(slug).attachmentPreview(state.attachmentId)}${nameQuery}`;
+    if (navigation.openInNewTab) {
+      navigation.openInNewTab(path, state.filename, { activate: true });
+    } else {
+      const url = navigation.getShareableUrl(path);
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+    onClose();
   };
 
   if (!open || typeof document === "undefined") return null;
@@ -228,6 +254,17 @@ export function AttachmentPreviewModal({
             {state.contentType || "—"}
           </span>
           <div className="ml-auto flex items-center gap-1">
+            {canOpenInNewTab && (
+              <button
+                type="button"
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                title={t(($) => $.attachment.open_in_new_tab)}
+                aria-label={t(($) => $.attachment.open_in_new_tab)}
+                onClick={handleOpenInNewTab}
+              >
+                <ExternalLink className="size-4" />
+              </button>
+            )}
             <button
               type="button"
               className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
@@ -309,6 +346,16 @@ function PreviewContent({
   }
 
   switch (kind) {
+    case "image":
+      return (
+        <div className="flex h-full w-full items-center justify-center bg-black/40 p-4">
+          <img
+            src={state.mediaUrl}
+            alt={state.filename}
+            className="h-full w-full rounded-lg object-contain"
+          />
+        </div>
+      );
     case "pdf":
       return (
         <iframe
@@ -323,7 +370,7 @@ function PreviewContent({
           <video
             src={state.mediaUrl}
             controls
-            className="max-h-full max-w-full"
+            className="h-full w-full object-contain"
           />
         </div>
       );
@@ -353,11 +400,11 @@ function PreviewContent({
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
           render={(text) => (
-            <iframe
-              srcDoc={text}
-              sandbox=""
-              className="h-full w-full bg-background"
+            <HtmlPreviewBody
+              source={{ kind: "inline", html: text }}
               title={state.filename}
+              className="h-full w-full"
+              iframeClassName="rounded-none border-0"
             />
           )}
         />
@@ -368,7 +415,11 @@ function PreviewContent({
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
           render={(text) => (
-            <CodeBlock language={extensionToLanguage(state.filename)} body={text} />
+            <CodeBlockStatic
+              language={extensionToLanguage(state.filename)}
+              body={text}
+              className="px-6 py-4"
+            />
           )}
         />
       );
@@ -393,19 +444,7 @@ function TextBackedPreview({
   render: (text: string) => ReactNode;
 }) {
   const { t } = useT("editor");
-  const query = useQuery({
-    queryKey: ["attachment-content", attachmentId] as const,
-    queryFn: () => api.getAttachmentTextContent(attachmentId),
-    // Errors are surfaced as typed fallbacks, not retried — 413 / 415 won't
-    // become 200 on a retry, and a transient failure is easier to recover
-    // from by closing and reopening the modal than waiting on background
-    // retries that have no UI affordance.
-    retry: false,
-    // 413 / 415 bodies are tiny; keep the result around for the session so
-    // the user can flip away and back without refetching.
-    staleTime: 5 * 60_000,
-    gcTime: 30 * 60_000,
-  });
+  const query = useAttachmentHtmlText(attachmentId);
 
   if (query.isLoading) {
     return (
@@ -441,44 +480,6 @@ function TextBackedPreview({
   }
   if (!query.data) return null;
   return <>{render(query.data.text)}</>;
-}
-
-// ---------------------------------------------------------------------------
-// Code block — lowlight, matches readonly-content's hljs CSS
-// ---------------------------------------------------------------------------
-
-const lowlight = createLowlight(common);
-
-function CodeBlock({ language, body }: { language: string | undefined; body: string }) {
-  const html = useMemo(() => {
-    const code = body.replace(/\n$/, "");
-    try {
-      const tree = language
-        ? lowlight.highlight(language, code)
-        : lowlight.highlightAuto(code);
-      return toHtml(tree) as string;
-    } catch {
-      // Fallthrough to a plain escaped <pre> when lowlight rejects the
-      // language tag. Avoids crashing the preview on an unknown extension.
-      return escapeHtml(code);
-    }
-  }, [body, language]);
-
-  return (
-    <pre className="rich-text-editor m-0 overflow-auto px-6 py-4 text-sm">
-      <code
-        className={cn("hljs", language && `language-${language}`)}
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
-    </pre>
-  );
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
 }
 
 // ---------------------------------------------------------------------------

@@ -222,7 +222,18 @@
     "skill_description_label": "Description",
     "skill_description_placeholder": "Optional — describe when an agent should use this skill.",
     "toast_imported": "Skill imported",
-    "toast_import_failed": "Failed to import skill"
+    "toast_import_failed": "Failed to import skill",
+    "select_all": "Select all ({{count}})",
+    "bulk_ready": "{{count}} skills selected",
+    "bulk_import_button": "Import {{count}} Skills",
+    "bulk_progress": "Importing {{completed}} / {{total}}…",
+    "bulk_cancel_button": "Cancel",
+    "bulk_complete_hint": "Import complete.",
+    "bulk_cancelled_hint": "Import cancelled.",
+    "bulk_done_button": "Done",
+    "bulk_summary_imported": "Imported",
+    "bulk_summary_skipped": "Skipped",
+    "bulk_summary_failed": "Failed"
   },
   "file_tree": {
     "no_files": "No files"

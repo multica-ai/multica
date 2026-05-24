@@ -15,6 +15,7 @@ import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
+import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 
 export interface ChildProgress {
   done: number;
@@ -50,6 +51,7 @@ export const ListRow = memo(function ListRow({
   const showProject = storeProperties.project && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showAssignee = storeProperties.assignee && issue.assignee_type && issue.assignee_id;
+  const showStartDate = storeProperties.startDate && issue.start_date;
   const showDueDate = storeProperties.dueDate && issue.due_date;
   const showLabels = storeProperties.labels && labels.length > 0;
 
@@ -81,6 +83,8 @@ export const ListRow = memo(function ListRow({
           <span className="w-16 shrink-0 text-xs text-muted-foreground">
             {issue.identifier}
           </span>
+          <IssueAgentActivityIndicator issueId={issue.id} />
+
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className="truncate">{issue.title}</span>
             {showChildProgress && (
@@ -108,6 +112,11 @@ export const ListRow = memo(function ListRow({
             <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground max-w-[140px]">
               <ProjectIcon project={project} size="sm" />
               <span className="truncate">{project!.title}</span>
+            </span>
+          )}
+          {showStartDate && (
+            <span className="shrink-0 text-xs text-muted-foreground">
+              {formatDate(issue.start_date!)}
             </span>
           )}
           {showDueDate && (

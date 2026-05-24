@@ -6,11 +6,18 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { useT } from "../../i18n";
+
+// Mirror server/internal/handler/auth.go:MaxProfileDescriptionLen. Counted in
+// JS String.length (UTF-16 code units) here while the server counts runes,
+// so a profile full of supplementary-plane emoji will trip the client cap
+// before the server's — which is the safer direction of drift.
+const MAX_PROFILE_DESCRIPTION_LEN = 2000;
 
 export function AccountTab() {
   const { t } = useT("settings");
@@ -18,13 +25,19 @@ export function AccountTab() {
   const setUser = useAuthStore((s) => s.setUser);
 
   const [profileName, setProfileName] = useState(user?.name ?? "");
+  const [profileDescription, setProfileDescription] = useState(
+    user?.profile_description ?? "",
+  );
   const [profileSaving, setProfileSaving] = useState(false);
   const { upload, uploading } = useFileUpload(api);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setProfileName(user?.name ?? "");
+    setProfileDescription(user?.profile_description ?? "");
   }, [user]);
+
+  const descriptionTooLong = profileDescription.length > MAX_PROFILE_DESCRIPTION_LEN;
 
   const initials = (user?.name ?? "")
     .split(" ")
@@ -50,9 +63,13 @@ export function AccountTab() {
   };
 
   const handleProfileSave = async () => {
+    if (descriptionTooLong) return;
     setProfileSaving(true);
     try {
-      const updated = await api.updateMe({ name: profileName });
+      const updated = await api.updateMe({
+        name: profileName,
+        profile_description: profileDescription,
+      });
       setUser(updated);
       toast.success(t(($) => $.account.toast_profile_updated));
     } catch (e) {
@@ -117,11 +134,41 @@ export function AccountTab() {
                 className="mt-1"
               />
             </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">
+                {t(($) => $.account.profile_description_label)}
+              </Label>
+              <Textarea
+                value={profileDescription}
+                onChange={(e) => setProfileDescription(e.target.value)}
+                placeholder={t(($) => $.account.profile_description_placeholder)}
+                rows={5}
+                maxLength={MAX_PROFILE_DESCRIPTION_LEN}
+                className="mt-1 resize-y"
+              />
+              <div className="mt-1 flex items-start justify-between gap-3 text-xs text-muted-foreground">
+                <span>{t(($) => $.account.profile_description_hint)}</span>
+                <span
+                  className={descriptionTooLong ? "text-destructive shrink-0" : "shrink-0"}
+                  aria-live="polite"
+                >
+                  {profileDescription.length}/{MAX_PROFILE_DESCRIPTION_LEN}
+                </span>
+              </div>
+              {descriptionTooLong ? (
+                <p className="mt-1 text-xs text-destructive">
+                  {t(($) => $.account.profile_description_too_long, {
+                    max: MAX_PROFILE_DESCRIPTION_LEN,
+                    count: profileDescription.length,
+                  })}
+                </p>
+              ) : null}
+            </div>
             <div className="flex items-center justify-end gap-2 pt-1">
               <Button
                 size="sm"
                 onClick={handleProfileSave}
-                disabled={profileSaving || !profileName.trim()}
+                disabled={profileSaving || !profileName.trim() || descriptionTooLong}
               >
                 <Save className="h-3 w-3" />
                 {profileSaving ? t(($) => $.account.saving) : t(($) => $.account.save)}

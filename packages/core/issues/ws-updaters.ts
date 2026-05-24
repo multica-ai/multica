@@ -7,7 +7,7 @@ import {
   patchIssueInBuckets,
 } from "./cache-helpers";
 import { cleanupDeletedIssueCaches } from "./delete-cache";
-import type { Issue, IssueLabelsResponse, Label } from "../types";
+import type { Issue, IssueLabelsResponse, IssueMetadata, Label } from "../types";
 import type { ListIssuesCache } from "../types";
 
 export function onIssueCreated(
@@ -21,6 +21,11 @@ export function onIssueCreated(
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+  // Refresh every Project Gantt cache that might be observing this issue.
+  // We invalidate the whole prefix rather than the issue's own project
+  // because a fresh issue isn't necessarily scheduled yet; the active Gantt
+  // page (if any) will refetch and pick it up if it qualifies.
+  qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
   if (issue.parent_issue_id) {
     qc.invalidateQueries({ queryKey: issueKeys.children(wsId, issue.parent_issue_id) });
     qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
@@ -52,6 +57,12 @@ export function onIssueUpdated(
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+  // Any field change can shift Gantt membership — start_date / due_date may
+  // have moved in or out of the `scheduled` set, project_id may have
+  // changed, or the row that is in the cache may need to mirror updated
+  // metadata (title, status, assignee). Cheaper to invalidate the prefix
+  // than to mirror the server filter here.
+  qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issue.id), (old) =>
     old ? { ...old, ...issue } : old,
   );
@@ -103,9 +114,47 @@ export function onIssueLabelsChanged(
   qc.setQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId), (old) =>
     old ? { ...old, labels } : old,
   );
+  // Patch the Project Gantt caches in-place: the Gantt view applies
+  // `labelFilters` to the row data, so a stale `labels` array would silently
+  // hide or surface bars after another tab/agent attached or detached a
+  // label. Mutating in place (instead of invalidating) avoids a refetch of
+  // the entire scheduled set on every label toggle.
+  for (const [key, data] of qc.getQueriesData<Issue[]>({
+    queryKey: issueKeys.projectGanttAll(wsId),
+  })) {
+    if (!data) continue;
+    const next = data.map((issue) =>
+      issue.id === issueId ? { ...issue, labels } : issue,
+    );
+    qc.setQueryData<Issue[]>(key, next);
+  }
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+}
+
+/**
+ * Apply a metadata snapshot to the issue detail + list + my-issues caches.
+ * The server emits this whenever a single key is set or deleted, so the
+ * payload is always the FULL post-mutation map — we replace, not merge.
+ *
+ * Used for the read-only metadata strip in issue detail. Updates that arrive
+ * while no view is mounted still keep the caches accurate so the next render
+ * shows the latest state without a refetch.
+ */
+export function onIssueMetadataChanged(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  metadata: IssueMetadata,
+) {
+  qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
+    old ? patchIssueInBuckets(old, issueId, { metadata }) : old,
+  );
+  qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
+    old ? { ...old, metadata } : old,
+  );
+  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
 }
 
 export function onIssueDeleted(

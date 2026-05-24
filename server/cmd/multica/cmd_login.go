@@ -117,7 +117,14 @@ func autoWatchWorkspaces(cmd *cobra.Command) error {
 
 	fmt.Fprintf(os.Stderr, "\nFound %d workspace(s):\n", len(workspaces))
 	for _, ws := range workspaces {
-		fmt.Fprintf(os.Stderr, "  • %s (%s)\n", ws.Name, ws.ID)
+		marker := "  "
+		if ws.ID == cfg.WorkspaceID {
+			marker = "* "
+		}
+		fmt.Fprintf(os.Stderr, "%s%s (%s)\n", marker, ws.Name, ws.ID)
+	}
+	if len(workspaces) > 1 {
+		fmt.Fprintln(os.Stderr, "\nUse 'multica workspace switch <id|slug>' to change the default workspace.")
 	}
 
 	return nil

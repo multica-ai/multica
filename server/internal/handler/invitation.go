@@ -426,14 +426,18 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Accepting an invite is the physical event that "completes" onboarding for an
-	// invitee — atomic with CreateMember so the invariant
-	// "member row exists ↔ onboarded_at != null" cannot be violated.
-	// COALESCE in MarkUserOnboarded keeps this idempotent for users joining
+	// Accepting an invite marks the invitee as onboarded. The web /
+	// desktop workspace layout has a hard onboarded_at gate; without
+	// this mark, an invitee landing on their first workspace would be
+	// redirected back to /onboarding to fill out a questionnaire for a
+	// workspace someone else already set up. Atomic with CreateMember so
+	// `member` and `onboarded_at` can never disagree. COALESCE in
+	// MarkUserOnboarded keeps the call idempotent for users joining
 	// additional workspaces after their first.
 	firstOnboardingCompletion := !user.OnboardedAt.Valid
 	onboardedUser, err := qtx.MarkUserOnboarded(r.Context(), user.ID)
 	if err != nil {
+		slog.Warn("accept invitation: mark user onboarded failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", uuidToString(accepted.WorkspaceID))...)
 		writeError(w, http.StatusInternalServerError, "failed to mark user onboarded")
 		return
 	}

@@ -60,12 +60,14 @@
     "group_assignee": "负责人",
     "sort_manual": "手动",
     "sort_priority": "优先级",
+    "sort_start_date": "开始日期",
     "sort_due_date": "截止日期",
     "sort_created": "创建时间",
     "sort_title": "标题",
     "card_priority": "优先级",
     "card_description": "描述",
     "card_assignee": "负责人",
+    "card_start_date": "开始日期",
     "card_due_date": "截止日期",
     "card_project": "项目",
     "card_labels": "标签",
@@ -74,9 +76,20 @@
   "view": {
     "tooltip_board": "看板视图",
     "tooltip_list": "列表视图",
+    "tooltip_gantt": "甘特图",
     "section": "视图",
     "board": "看板",
-    "list": "列表"
+    "list": "列表",
+    "gantt": "甘特图"
+  },
+  "gantt": {
+    "header_issue": "Issue",
+    "zoom_day": "日",
+    "zoom_week": "周",
+    "zoom_month": "月",
+    "show_completed": "显示已完成",
+    "empty": "暂无已排期的 issue — 给任意 issue 设置开始或截止日期，即可显示在时间轴上。",
+    "inverted_dates_warning": "开始日期晚于截止日期 — 已按区间最小/最大端绘制。"
   },
   "actor_issues": {
     "scope": {
@@ -98,7 +111,9 @@
         "title": "没有已创建的 issue",
         "description": "由这里创建的 issue 会显示在此视图中。"
       }
-    }
+    },
+    "search_placeholder": "搜索 issue...",
+    "search_empty": "没有匹配的 issue。"
   },
   "list": {
     "empty_status": "无 issue",
@@ -114,6 +129,7 @@
   },
   "detail": {
     "not_found": "这个 issue 不存在或已在该工作区被删除。",
+    "breadcrumb_project_unknown": "未知项目",
     "back_to_issues": "返回 issue 列表",
     "title_placeholder": "issue 标题",
     "desc_placeholder": "添加描述...",
@@ -125,6 +141,7 @@
     "section_properties": "属性",
     "section_parent_issue": "父 issue",
     "section_pull_requests": "Pull Request",
+    "section_metadata": "元数据",
     "section_details": "详情",
     "section_token_usage": "Token 用量",
     "pull_requests_loading": "加载中…",
@@ -133,9 +150,28 @@
     "pull_request_state_draft": "Draft",
     "pull_request_state_merged": "Merged",
     "pull_request_state_closed": "Closed",
+    "pull_request_checks_passed": "Checks 通过",
+    "pull_request_checks_failed": "Checks 失败",
+    "pull_request_checks_pending": "Checks 运行中",
+    "pull_request_conflicts_clean": "无冲突",
+    "pull_request_conflicts_dirty": "存在冲突",
+    "pull_request_card_status_closed": "已关闭，未合入",
+    "pull_request_card_status_merged": "已合入",
+    "pull_request_card_status_conflicts": "存在合并冲突",
+    "pull_request_card_status_checks_failed": "部分检查失败",
+    "pull_request_card_status_checks_pending": "部分检查仍在运行",
+    "pull_request_card_status_checks_passed": "全部检查通过",
+    "pull_request_card_status_ready": "可以合入",
+    "pull_request_card_status_unknown": "暂无检查信息",
+    "pull_request_card_draft_prefix": "Draft · {{status}}",
+    "pull_request_card_files_count_one": "{{count}} 个文件",
+    "pull_request_card_files_count_other": "{{count}} 个文件",
+    "pull_request_card_show_more": "展开剩余 {{count}} 个",
+    "pull_request_card_show_less": "收起",
     "prop_status": "状态",
     "prop_priority": "优先级",
     "prop_assignee": "负责人",
+    "prop_start_date": "开始日期",
     "prop_due_date": "截止日期",
     "prop_project": "项目",
     "prop_labels": "标签",
@@ -180,6 +216,8 @@
     "changed_assignee": "更改了负责人",
     "status_changed": "状态从 {{from}} 改为 {{to}}",
     "priority_changed": "优先级从 {{from}} 改为 {{to}}",
+    "start_date_set": "开始日期设为 {{date}}",
+    "start_date_removed": "移除了开始日期",
     "due_date_set": "截止日期设为 {{date}}",
     "due_date_removed": "移除了截止日期",
     "title_renamed": "把这个 issue 从\"{{from}}\"重命名为\"{{to}}\"",
@@ -234,6 +272,14 @@
     "placeholder": "回复...",
     "expand_tooltip": "展开",
     "collapse_tooltip": "收起"
+  },
+  "agent_activity": {
+    "hover_header_other": "{{count}} 个智能体正在工作",
+    "status_running": "正在工作",
+    "status_queued": "排队中",
+    "chip_label": "工作中",
+    "empty_hover": "当前没有智能体在工作",
+    "filter_active_label": "正在查看工作中的智能体"
   },
   "agent_live": {
     "is_working": "{{name}} 正在处理",
@@ -294,12 +340,18 @@
     "cancel": "取消"
   },
   "card": {
-    "update_failed": "更新 issue 失败"
+    "update_failed": "更新 issue 失败",
+    "updated_ago": "更新于 {{time}}"
   },
   "actions": {
     "status": "状态",
     "priority": "优先级",
     "assignee": "负责人",
+    "start_date": "开始日期",
+    "start_today": "今天",
+    "start_tomorrow": "明天",
+    "start_next_week": "下周",
+    "start_clear": "清除日期",
     "due_date": "截止日期",
     "due_today": "今天",
     "due_tomorrow": "明天",
@@ -325,6 +377,10 @@
       "members_group": "成员",
       "agents_group": "智能体",
       "squads_group": "小队"
+    },
+    "start_date": {
+      "trigger_label": "开始日期",
+      "clear_action": "清除日期"
     },
     "due_date": {
       "trigger_label": "截止日期",

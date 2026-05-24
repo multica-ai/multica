@@ -61,12 +61,14 @@
     "group_assignee": "Assignee",
     "sort_manual": "Manual",
     "sort_priority": "Priority",
+    "sort_start_date": "Start date",
     "sort_due_date": "Due date",
     "sort_created": "Created date",
     "sort_title": "Title",
     "card_priority": "Priority",
     "card_description": "Description",
     "card_assignee": "Assignee",
+    "card_start_date": "Start date",
     "card_due_date": "Due date",
     "card_project": "Project",
     "card_labels": "Labels",
@@ -75,9 +77,20 @@
   "view": {
     "tooltip_board": "Board view",
     "tooltip_list": "List view",
+    "tooltip_gantt": "Gantt view",
     "section": "View",
     "board": "Board",
-    "list": "List"
+    "list": "List",
+    "gantt": "Gantt"
+  },
+  "gantt": {
+    "header_issue": "Issue",
+    "zoom_day": "Day",
+    "zoom_week": "Week",
+    "zoom_month": "Month",
+    "show_completed": "Show completed",
+    "empty": "No scheduled issues yet — set a start or due date on any issue to see it on the timeline.",
+    "inverted_dates_warning": "Start date is after due date — bar shown from min to max."
   },
   "actor_issues": {
     "scope": {
@@ -99,7 +112,9 @@
         "title": "No created issues",
         "description": "Issues created here will appear in this view."
       }
-    }
+    },
+    "search_placeholder": "Search issues...",
+    "search_empty": "No issues match your search."
   },
   "list": {
     "empty_status": "No issues",
@@ -115,6 +130,7 @@
   },
   "detail": {
     "not_found": "This issue does not exist or has been deleted in this workspace.",
+    "breadcrumb_project_unknown": "Unknown project",
     "back_to_issues": "Back to Issues",
     "title_placeholder": "Issue title",
     "desc_placeholder": "Add description...",
@@ -126,6 +142,7 @@
     "section_properties": "Properties",
     "section_parent_issue": "Parent issue",
     "section_pull_requests": "Pull requests",
+    "section_metadata": "Metadata",
     "section_details": "Details",
     "section_token_usage": "Token usage",
     "pull_requests_loading": "Loading…",
@@ -134,9 +151,28 @@
     "pull_request_state_draft": "Draft",
     "pull_request_state_merged": "Merged",
     "pull_request_state_closed": "Closed",
+    "pull_request_checks_passed": "Checks passed",
+    "pull_request_checks_failed": "Checks failed",
+    "pull_request_checks_pending": "Checks pending",
+    "pull_request_conflicts_clean": "No conflicts",
+    "pull_request_conflicts_dirty": "Conflicts",
+    "pull_request_card_status_closed": "Closed without merging",
+    "pull_request_card_status_merged": "Merged",
+    "pull_request_card_status_conflicts": "Has merge conflicts",
+    "pull_request_card_status_checks_failed": "Some checks failed",
+    "pull_request_card_status_checks_pending": "Some checks haven't completed yet",
+    "pull_request_card_status_checks_passed": "All checks passed",
+    "pull_request_card_status_ready": "Ready to merge",
+    "pull_request_card_status_unknown": "Checks haven't reported yet",
+    "pull_request_card_draft_prefix": "Draft · {{status}}",
+    "pull_request_card_files_count_one": "{{count}} file",
+    "pull_request_card_files_count_other": "{{count}} files",
+    "pull_request_card_show_more": "Show {{count}} more",
+    "pull_request_card_show_less": "Show less",
     "prop_status": "Status",
     "prop_priority": "Priority",
     "prop_assignee": "Assignee",
+    "prop_start_date": "Start date",
     "prop_due_date": "Due date",
     "prop_project": "Project",
     "prop_labels": "Labels",
@@ -181,6 +217,8 @@
     "changed_assignee": "changed assignee",
     "status_changed": "changed status from {{from}} to {{to}}",
     "priority_changed": "changed priority from {{from}} to {{to}}",
+    "start_date_set": "set start date to {{date}}",
+    "start_date_removed": "removed start date",
     "due_date_set": "set due date to {{date}}",
     "due_date_removed": "removed due date",
     "title_renamed": "renamed this issue from \"{{from}}\" to \"{{to}}\"",
@@ -238,6 +276,15 @@
     "placeholder": "Leave a reply...",
     "expand_tooltip": "Expand",
     "collapse_tooltip": "Collapse"
+  },
+  "agent_activity": {
+    "hover_header_one": "{{count}} agent working",
+    "hover_header_other": "{{count}} agents working",
+    "status_running": "Working",
+    "status_queued": "Queued",
+    "chip_label": "working",
+    "empty_hover": "No agents currently working",
+    "filter_active_label": "Viewing only working agents"
   },
   "agent_live": {
     "is_working": "{{name}} is working",
@@ -303,12 +350,18 @@
     "cancel": "Cancel"
   },
   "card": {
-    "update_failed": "Failed to update issue"
+    "update_failed": "Failed to update issue",
+    "updated_ago": "Updated {{time}}"
   },
   "actions": {
     "status": "Status",
     "priority": "Priority",
     "assignee": "Assignee",
+    "start_date": "Start date",
+    "start_today": "Today",
+    "start_tomorrow": "Tomorrow",
+    "start_next_week": "Next week",
+    "start_clear": "Clear date",
     "due_date": "Due date",
     "due_today": "Today",
     "due_tomorrow": "Tomorrow",
@@ -334,6 +387,10 @@
       "members_group": "Members",
       "agents_group": "Agents",
       "squads_group": "Squads"
+    },
+    "start_date": {
+      "trigger_label": "Start date",
+      "clear_action": "Clear date"
     },
     "due_date": {
       "trigger_label": "Due date",

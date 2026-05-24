@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -91,6 +93,334 @@ func newDaemonTokenRequest(method, path string, body any, workspaceID, daemonID 
 	// No X-User-ID — daemon tokens don't set it.
 	ctx := middleware.WithDaemonContext(req.Context(), workspaceID, daemonID)
 	return req.WithContext(ctx)
+}
+
+func createClaimReclaimRuntime(t *testing.T, ctx context.Context, name string) string {
+	t.Helper()
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider,
+			status, device_info, metadata, last_seen_at, visibility
+		)
+		VALUES ($1, NULL, $2, 'cloud', 'handler_test_runtime', 'online', 'claim reclaim fixture', '{}'::jsonb, now(), 'private')
+		RETURNING id
+	`, testWorkspaceID, name).Scan(&runtimeID); err != nil {
+		t.Fatalf("setup: create runtime: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+
+	return runtimeID
+}
+
+func createClaimReclaimAgentAndIssue(t *testing.T, ctx context.Context, runtimeID, name string) (string, string) {
+	t.Helper()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4)
+		RETURNING id
+	`, testWorkspaceID, name, runtimeID, testUserID).Scan(&agentID); err != nil {
+		t.Fatalf("setup: create agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID) })
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES (
+			$1, $2, 'in_progress', 'none', $3, 'member',
+			(SELECT COALESCE(MAX(number), 82649) + 1 FROM issue WHERE workspace_id = $1),
+			0
+		)
+		RETURNING id
+	`, testWorkspaceID, name+" issue", testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	return agentID, issueID
+}
+
+func createDispatchedClaimFixtureTask(t *testing.T, ctx context.Context, agentID, runtimeID, issueID, dispatchedAge string, started bool) string {
+	t.Helper()
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, dispatched_at, started_at
+		)
+		VALUES ($1, $2, $3, 'dispatched', 0, now() - ($4::interval), CASE WHEN $5::boolean THEN now() ELSE NULL END)
+		RETURNING id
+	`, agentID, runtimeID, issueID, dispatchedAge, started).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create dispatched task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	return taskID
+}
+
+func claimTaskByRuntimeForTest(t *testing.T, runtimeID string) (*struct {
+	ID string `json:"id"`
+}, string) {
+	t.Helper()
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
+		testWorkspaceID, "claim-reclaim-review")
+	req = withURLParam(req, "runtimeId", runtimeID)
+
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ID string `json:"id"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	return resp.Task, w.Body.String()
+}
+
+func TestClaimTaskByRuntime_ReclaimsStaleDispatchedTask(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Stale dispatch reclaim runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Stale dispatch reclaim agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+
+	task, body := claimTaskByRuntimeForTest(t, runtimeID)
+	if task == nil {
+		t.Fatalf("expected stale dispatched task %s to be reclaimed, got nil response: %s", taskID, body)
+	}
+	if task.ID != taskID {
+		t.Fatalf("reclaimed task id = %s, want %s", task.ID, taskID)
+	}
+
+	var refreshed bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT dispatched_at > now() - interval '15 seconds'
+		FROM agent_task_queue
+		WHERE id = $1
+	`, taskID).Scan(&refreshed); err != nil {
+		t.Fatalf("load refreshed dispatched_at: %v", err)
+	}
+	if !refreshed {
+		t.Fatal("expected reclaimed task to refresh dispatched_at")
+	}
+}
+
+func TestClaimTaskByRuntime_DoesNotReclaimFreshDispatchedTask(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Fresh dispatch reclaim runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Fresh dispatch reclaim agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "75 seconds", false)
+
+	task, body := claimTaskByRuntimeForTest(t, runtimeID)
+	if task != nil {
+		t.Fatalf("expected fresh dispatched task %s not to be reclaimed, got %s in %s", taskID, task.ID, body)
+	}
+
+	var stillFresh bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT dispatched_at < now() - interval '70 seconds'
+		FROM agent_task_queue
+		WHERE id = $1
+	`, taskID).Scan(&stillFresh); err != nil {
+		t.Fatalf("load fresh dispatched task: %v", err)
+	}
+	if !stillFresh {
+		t.Fatal("expected fresh dispatched task to keep its original dispatched_at")
+	}
+}
+
+func TestClaimTaskByRuntime_DoesNotReclaimAlreadyStartedTask(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Started dispatch reclaim runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Started dispatch reclaim agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", true)
+
+	task, body := claimTaskByRuntimeForTest(t, runtimeID)
+	if task != nil {
+		t.Fatalf("expected started dispatched task %s not to be reclaimed, got %s in %s", taskID, task.ID, body)
+	}
+
+	var startedAtValid bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT started_at IS NOT NULL
+		FROM agent_task_queue
+		WHERE id = $1
+	`, taskID).Scan(&startedAtValid); err != nil {
+		t.Fatalf("load started dispatched task: %v", err)
+	}
+	if !startedAtValid {
+		t.Fatal("expected started dispatched task to keep started_at")
+	}
+}
+
+func TestClaimTaskByRuntime_DoesNotReclaimDifferentRuntimeTask(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	claimingRuntimeID := createClaimReclaimRuntime(t, ctx, "Claiming dispatch reclaim runtime")
+	owningRuntimeID := createClaimReclaimRuntime(t, ctx, "Owning dispatch reclaim runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, owningRuntimeID, "Different runtime reclaim agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, owningRuntimeID, issueID, "120 seconds", false)
+
+	task, body := claimTaskByRuntimeForTest(t, claimingRuntimeID)
+	if task != nil {
+		t.Fatalf("expected other-runtime task %s not to be reclaimed, got %s in %s", taskID, task.ID, body)
+	}
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT runtime_id::text
+		FROM agent_task_queue
+		WHERE id = $1
+	`, taskID).Scan(&runtimeID); err != nil {
+		t.Fatalf("load other-runtime dispatched task: %v", err)
+	}
+	if runtimeID != owningRuntimeID {
+		t.Fatalf("task runtime_id = %s, want %s", runtimeID, owningRuntimeID)
+	}
+}
+
+// TestClaimTaskByRuntime_PopulatesWorkspaceContext verifies the claim
+// response carries workspace.context so the daemon can inject the
+// workspace-level system prompt into every agent brief. Regression coverage
+// for MUL-2542: before this fix the field was never plumbed through, so
+// even workspaces that had set a context got an empty brief.
+func TestClaimTaskByRuntime_PopulatesWorkspaceContext(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const wsContext = "All comments must be in English. Prefer concise PR descriptions."
+	var prior string
+	if err := testPool.QueryRow(ctx, `SELECT COALESCE(context, '') FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&prior); err != nil {
+		t.Fatalf("read workspace.context: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET context = $1 WHERE id = $2`, wsContext, testWorkspaceID); err != nil {
+		t.Fatalf("set workspace.context: %v", err)
+	}
+	t.Cleanup(func() {
+		if prior == "" {
+			testPool.Exec(ctx, `UPDATE workspace SET context = NULL WHERE id = $1`, testWorkspaceID)
+		} else {
+			testPool.Exec(ctx, `UPDATE workspace SET context = $1 WHERE id = $2`, prior, testWorkspaceID)
+		}
+	})
+
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Workspace context claim runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Workspace context claim agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
+		testWorkspaceID, "workspace-context-claim")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ID               string `json:"id"`
+			WorkspaceContext string `json:"workspace_context"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatalf("expected dispatched task %s to be claimed, got nil response: %s", taskID, w.Body.String())
+	}
+	if resp.Task.ID != taskID {
+		t.Fatalf("claimed task id = %s, want %s", resp.Task.ID, taskID)
+	}
+	if resp.Task.WorkspaceContext != wsContext {
+		t.Errorf("workspace_context = %q, want %q", resp.Task.WorkspaceContext, wsContext)
+	}
+}
+
+// TestClaimTaskByRuntime_WorkspaceContextEmptyWhenUnset verifies the field
+// is omitted (empty string after JSON decode) when the workspace owner has
+// not set a context. Important because the daemon's brief skips the heading
+// only on empty input — a stray "context: null" coming back as the string
+// "null" would render as a bogus paragraph.
+func TestClaimTaskByRuntime_WorkspaceContextEmptyWhenUnset(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	var prior string
+	if err := testPool.QueryRow(ctx, `SELECT COALESCE(context, '') FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&prior); err != nil {
+		t.Fatalf("read workspace.context: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET context = NULL WHERE id = $1`, testWorkspaceID); err != nil {
+		t.Fatalf("clear workspace.context: %v", err)
+	}
+	t.Cleanup(func() {
+		if prior == "" {
+			testPool.Exec(ctx, `UPDATE workspace SET context = NULL WHERE id = $1`, testWorkspaceID)
+		} else {
+			testPool.Exec(ctx, `UPDATE workspace SET context = $1 WHERE id = $2`, prior, testWorkspaceID)
+		}
+	})
+
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Workspace context empty claim runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Workspace context empty claim agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
+		testWorkspaceID, "workspace-context-empty-claim")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ID               string `json:"id"`
+			WorkspaceContext string `json:"workspace_context"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatalf("expected dispatched task %s to be claimed, got nil: %s", taskID, w.Body.String())
+	}
+	if resp.Task.WorkspaceContext != "" {
+		t.Errorf("workspace_context = %q, want empty string when workspace.context is NULL", resp.Task.WorkspaceContext)
+	}
 }
 
 func TestDaemonRegister_WithDaemonToken(t *testing.T) {
@@ -203,7 +533,7 @@ func TestHandleDaemonWSHeartbeat_RuntimeGoneReturnsAckNotError(t *testing.T) {
 	missingRuntime := uuid.New().String()
 	ack, err := testHandler.HandleDaemonWSHeartbeat(context.Background(),
 		daemonws.ClientIdentity{WorkspaceID: testWorkspaceID},
-		missingRuntime)
+		missingRuntime, false)
 	if err != nil {
 		t.Fatalf("HandleDaemonWSHeartbeat: unexpected error %v", err)
 	}
@@ -500,6 +830,21 @@ func withURLParams(req *http.Request, kv ...string) *http.Request {
 		rctx.URLParams.Add(kv[i], kv[i+1])
 	}
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+}
+
+func TestListTaskMessagesByUser_InvalidTaskIDReturnsBadRequest(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/optimistic-optimistic-1778739487737/messages", nil)
+	req = withURLParams(req, "taskId", "optimistic-optimistic-1778739487737")
+
+	(&Handler{}).ListTaskMessagesByUser(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid task id, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "task_id") {
+		t.Fatalf("expected task_id validation error, got %s", w.Body.String())
+	}
 }
 
 // setupForeignWorkspaceFixture creates an isolated workspace (not reachable
@@ -2515,6 +2860,57 @@ func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 	}
 }
 
+func TestClaimTask_ChatForceFreshSessionSkipsPriorSession(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+
+	var chatSessionID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO chat_session (
+			workspace_id, agent_id, creator_id, title,
+			session_id, work_dir, runtime_id
+		)
+		VALUES ($1, $2, $3, 'force fresh chat', 'chat-pointer-session', '/tmp/chat-pointer-workdir', $4)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&chatSessionID); err != nil {
+		t.Fatalf("setup: create chat session: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, chat_session_id,
+			status, priority, started_at, completed_at,
+			session_id, work_dir
+		)
+		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'task-row-session', '/tmp/task-row-workdir')
+	`, agentID, runtimeID, chatSessionID); err != nil {
+		t.Fatalf("setup: create prior chat task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, chat_session_id,
+			status, priority, force_fresh_session
+		)
+		VALUES ($1, $2, $3, 'queued', 0, TRUE)
+	`, agentID, runtimeID, chatSessionID); err != nil {
+		t.Fatalf("setup: create force-fresh chat task: %v", err)
+	}
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorSessionID != "" {
+		t.Fatalf("force fresh chat: expected empty PriorSessionID, got %q", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "" {
+		t.Fatalf("force fresh chat: expected empty PriorWorkDir, got %q", task.PriorWorkDir)
+	}
+}
+
 // Locks the legacy-row fallback: chat_session.runtime_id IS NULL (e.g. a row
 // the migration left untouched because no prior task matched the cs pointer)
 // but a completed task on the claiming runtime exists. ClaimTaskByRuntime
@@ -2781,5 +3177,264 @@ func TestGetTaskGCCheck(t *testing.T) {
 	}
 	if resp.CompletedAt == "" {
 		t.Fatal("expected completed_at to be set for completed task")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Membership Cache Integration Tests
+//
+// These tests don't just exercise the cache primitive (that's covered in
+// auth/membership_cache_test.go). They prove two things that the unit tests
+// can't:
+//
+//  1. requireDaemonWorkspaceAccess actually short-circuits the DB on a cache
+//     hit (the "ghost user" trick below).
+//  2. Each handler that mutates membership actually calls
+//     h.MembershipCache.Invalidate(...) — so a future refactor that drops
+//     one of those calls will fail CI instead of silently leaking a stale
+//     authorization grant for up to MembershipCacheTTL.
+// ---------------------------------------------------------------------------
+
+// installFreshMembershipCache swaps in a Redis-backed MembershipCache against
+// a freshly-flushed Redis DB for the test, restoring the original on cleanup.
+func installFreshMembershipCache(t *testing.T) {
+	t.Helper()
+	rdb := newRedisTestClient(t)
+	origCache := testHandler.MembershipCache
+	testHandler.MembershipCache = auth.NewMembershipCache(rdb)
+	t.Cleanup(func() { testHandler.MembershipCache = origCache })
+}
+
+// createEphemeralUser inserts a throwaway user with a unique email and
+// deletes it on test cleanup. Returns the user id as a string.
+func createEphemeralUser(t *testing.T, label string) string {
+	t.Helper()
+	email := fmt.Sprintf("membership-cache-%s-%s@multica.ai", label, uuid.NewString())
+	var userID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+	`, "Membership Cache Test "+label, email).Scan(&userID); err != nil {
+		t.Fatalf("create ephemeral user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userID)
+	})
+	return userID
+}
+
+// createEphemeralMember creates a throwaway user AND a member row in the
+// given workspace. Returns (userID, memberID). Both rows are cleaned up on
+// test exit.
+func createEphemeralMember(t *testing.T, workspaceID, label, role string) (string, string) {
+	t.Helper()
+	userID := createEphemeralUser(t, label)
+	var memberID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3) RETURNING id
+	`, workspaceID, userID, role).Scan(&memberID); err != nil {
+		t.Fatalf("create ephemeral member: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM member WHERE id = $1`, memberID)
+	})
+	return userID, memberID
+}
+
+// TestRequireDaemonWorkspaceAccess_CacheHit proves the cache lookup actually
+// short-circuits the DB query. The trick: the request actor is a "ghost"
+// user with NO member row in the workspace. With an empty cache the access
+// check must fail; after priming the cache it must succeed. If a future
+// change ever bypasses the cache and falls through to the DB, the priming
+// step stops mattering and the second assertion catches it.
+func TestRequireDaemonWorkspaceAccess_CacheHit(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	installFreshMembershipCache(t)
+	ctx := context.Background()
+
+	ghostUserID := createEphemeralUser(t, "ghost")
+
+	// Baseline: with an empty cache the ghost has no path to access.
+	req := newRequestAsUser(ghostUserID, "GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil)
+	w := httptest.NewRecorder()
+	if testHandler.requireDaemonWorkspaceAccess(w, req, testWorkspaceID) {
+		t.Fatal("setup: ghost user must not be allowed without cache priming")
+	}
+
+	// Priming the cache is the only thing that changes — the access check
+	// must now succeed via the cache short-circuit.
+	testHandler.MembershipCache.Set(ctx, ghostUserID, testWorkspaceID)
+
+	req = newRequestAsUser(ghostUserID, "GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil)
+	w = httptest.NewRecorder()
+	if !testHandler.requireDaemonWorkspaceAccess(w, req, testWorkspaceID) {
+		t.Fatalf("expected access via cache hit, got denied (status %d)", w.Code)
+	}
+}
+
+func TestRequireDaemonWorkspaceAccess_CacheMissBackfills(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	installFreshMembershipCache(t)
+
+	ctx := context.Background()
+
+	// Cache is empty — verify miss.
+	if testHandler.MembershipCache.Get(ctx, testUserID, testWorkspaceID) {
+		t.Fatal("expected cache miss before request")
+	}
+
+	// Make a request that triggers DB lookup.
+	req := newRequest("GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil)
+	w := httptest.NewRecorder()
+	if !testHandler.requireDaemonWorkspaceAccess(w, req, testWorkspaceID) {
+		t.Fatalf("expected access granted via DB lookup, got denied (status %d)", w.Code)
+	}
+
+	// Cache should now be backfilled.
+	if !testHandler.MembershipCache.Get(ctx, testUserID, testWorkspaceID) {
+		t.Fatal("expected cache to be backfilled after DB hit")
+	}
+}
+
+// TestMembershipCache_InvalidatedOnDeleteMember drives a real DeleteMember
+// HTTP handler call and asserts the cache entry for the removed member is
+// gone afterwards. Guards against future refactors that move or drop the
+// h.MembershipCache.Invalidate(...) line in workspace.go.
+func TestMembershipCache_InvalidatedOnDeleteMember(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	installFreshMembershipCache(t)
+	ctx := context.Background()
+
+	targetUserID, targetMemberID := createEphemeralMember(t, testWorkspaceID, "delete", "admin")
+	testHandler.MembershipCache.Set(ctx, targetUserID, testWorkspaceID)
+	if !testHandler.MembershipCache.Get(ctx, targetUserID, testWorkspaceID) {
+		t.Fatal("setup: expected cache hit after Set")
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/members/"+targetMemberID, nil)
+	req = withURLParams(req, "id", testWorkspaceID, "memberId", targetMemberID)
+	testHandler.DeleteMember(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteMember: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if testHandler.MembershipCache.Get(ctx, targetUserID, testWorkspaceID) {
+		t.Fatal("DeleteMember handler did not invalidate membership cache for removed user")
+	}
+}
+
+// TestMembershipCache_InvalidatedOnUpdateMember drives a real UpdateMember
+// (role change) call and asserts the cache entry is invalidated. The cache
+// stores only the existence of membership, but UpdateMember still flushes
+// the entry so any downstream caller that did add role-aware caching later
+// would not silently see a stale role.
+func TestMembershipCache_InvalidatedOnUpdateMember(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	installFreshMembershipCache(t)
+	ctx := context.Background()
+
+	targetUserID, targetMemberID := createEphemeralMember(t, testWorkspaceID, "update", "admin")
+	testHandler.MembershipCache.Set(ctx, targetUserID, testWorkspaceID)
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/workspaces/"+testWorkspaceID+"/members/"+targetMemberID,
+		map[string]any{"role": "member"})
+	req = withURLParams(req, "id", testWorkspaceID, "memberId", targetMemberID)
+	testHandler.UpdateMember(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateMember: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if testHandler.MembershipCache.Get(ctx, targetUserID, testWorkspaceID) {
+		t.Fatal("UpdateMember handler did not invalidate membership cache for updated user")
+	}
+}
+
+// TestMembershipCache_InvalidatedOnLeaveWorkspace exercises the self-removal
+// path (LeaveWorkspace, not DeleteMember). Both handlers route through
+// revokeAndRemoveMember, but the Invalidate call lives in the handler — a
+// refactor that consolidates them could drop one invalidation without the
+// other test catching it.
+func TestMembershipCache_InvalidatedOnLeaveWorkspace(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	installFreshMembershipCache(t)
+	ctx := context.Background()
+
+	targetUserID, _ := createEphemeralMember(t, testWorkspaceID, "leave", "admin")
+	testHandler.MembershipCache.Set(ctx, targetUserID, testWorkspaceID)
+
+	w := httptest.NewRecorder()
+	req := newRequestAsUser(targetUserID, "DELETE", "/api/workspaces/"+testWorkspaceID+"/leave", nil)
+	req = withURLParam(req, "id", testWorkspaceID)
+	testHandler.LeaveWorkspace(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("LeaveWorkspace: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if testHandler.MembershipCache.Get(ctx, targetUserID, testWorkspaceID) {
+		t.Fatal("LeaveWorkspace handler did not invalidate membership cache for leaver")
+	}
+}
+
+// TestMembershipCache_InvalidatedOnDeleteWorkspace exercises the bulk
+// invalidation path: when the workspace is deleted, every member's cache
+// entry must be flushed. We create an isolated workspace with two members
+// (owner + extra) so the shared testWorkspace stays intact.
+func TestMembershipCache_InvalidatedOnDeleteWorkspace(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	installFreshMembershipCache(t)
+	ctx := context.Background()
+
+	const slug = "membership-cache-delete-ws"
+	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+	var wsID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ($1, $2, $3, $4) RETURNING id
+	`, "Membership Cache Delete WS", slug, "DeleteWorkspace cache invalidation test", "MCD").Scan(&wsID); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+	})
+
+	// testUser must be an owner of the isolated workspace to call
+	// DeleteWorkspace.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
+	`, wsID, testUserID); err != nil {
+		t.Fatalf("add owner: %v", err)
+	}
+
+	extraUserID, _ := createEphemeralMember(t, wsID, "ws-delete-extra", "admin")
+
+	testHandler.MembershipCache.Set(ctx, testUserID, wsID)
+	testHandler.MembershipCache.Set(ctx, extraUserID, wsID)
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+wsID, nil)
+	req = withURLParam(req, "id", wsID)
+	testHandler.DeleteWorkspace(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteWorkspace: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if testHandler.MembershipCache.Get(ctx, testUserID, wsID) {
+		t.Fatal("DeleteWorkspace handler did not invalidate owner cache entry")
+	}
+	if testHandler.MembershipCache.Get(ctx, extraUserID, wsID) {
+		t.Fatal("DeleteWorkspace handler did not invalidate extra-member cache entry")
 	}
 }

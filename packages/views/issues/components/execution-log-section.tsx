@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import type { AgentTask, TaskFailureReason } from "@multica/core/types";
-import { timeAgo } from "@multica/core/utils";
+import { useTimeAgo } from "../../i18n";
 import {
   Tooltip,
   TooltipContent,
@@ -209,7 +209,7 @@ const STATUS_TONE: Record<AgentTask["status"], string> = {
 // Time anchor depends on status. Active rows want "Started 2m ago" /
 // "Queued 30s ago" — what's happening now. Past rows want "5m ago" — when
 // the verdict landed.
-function activeTimeText(task: AgentTask): string {
+function activeTimeText(task: AgentTask, timeAgo: (dateStr: string) => string): string {
   if (task.status === "running" && task.started_at) {
     return timeAgo(task.started_at);
   }
@@ -257,12 +257,13 @@ function useStatusLabel(status: AgentTask["status"]): string {
 
 function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const { t } = useT("issues");
+  const timeAgo = useTimeAgo();
   const [cancelling, setCancelling] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
-  const time = activeTimeText(task);
+  const time = activeTimeText(task, timeAgo);
 
   // Transcript only meaningful once messages exist — pure-queued tasks
   // have nothing to show yet.
@@ -337,6 +338,7 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
 
 function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const { t } = useT("issues");
+  const timeAgo = useTimeAgo();
   const [retrying, setRetrying] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
@@ -347,17 +349,18 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
       ? failureReasonLabel[task.failure_reason as TaskFailureReason]
       : null;
 
-  // Retry only makes sense for terminal-but-not-success rows. The rerun
-  // endpoint creates a fresh task on the issue's current agent assignee
-  // (not necessarily this row's agent) — clicking retry on a row whose
-  // agent has since been reassigned will rerun under the new assignee.
+  // Retry only makes sense for terminal-but-not-success rows. Passing
+  // task.id targets this specific row's agent — without it, the rerun
+  // endpoint would fall back to the issue's current assignee and the
+  // wrong agent would fire on rows whose agent has since been displaced
+  // (e.g. reassignment, squad worker, or a one-off @-mention agent).
   const canRetry = task.status === "failed" || task.status === "cancelled";
 
   const handleRetry = async () => {
     if (retrying) return;
     setRetrying(true);
     try {
-      await api.rerunIssue(issueId);
+      await api.rerunIssue(issueId, task.id);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.retry_failed));
     } finally {

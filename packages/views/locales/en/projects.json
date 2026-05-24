@@ -3,7 +3,11 @@
     "title": "Projects",
     "new_project": "New project",
     "empty": "No projects yet",
-    "create_first": "Create your first project"
+    "create_first": "Create your first project",
+    "view_compact": "Compact",
+    "view_comfortable": "Comfortable",
+    "search_placeholder": "Search projects...",
+    "no_search_results": "No results match your search"
   },
   "table": {
     "name": "Name",
@@ -57,6 +61,7 @@
     "empty_issues_title": "No issues linked",
     "empty_issues_hint": "Create a new issue or assign existing ones to this project.",
     "empty_issues_new_button": "New Issue",
+    "no_issues_yet": "No issues yet",
     "toast_link_copied": "Link copied",
     "toast_project_deleted": "Project deleted",
     "toast_move_issue_failed": "Failed to move issue"
@@ -66,6 +71,8 @@
     "empty": "No resources attached.",
     "add_button": "Add resource",
     "popover_title": "Attach a GitHub repo",
+    "repos_search_placeholder": "Search repositories...",
+    "repos_search_empty": "No repositories match your search.",
     "attached_badge": "attached",
     "remove_tooltip": "Remove",
     "url_placeholder": "https://github.com/owner/repo or git@github.com:owner/repo.git",

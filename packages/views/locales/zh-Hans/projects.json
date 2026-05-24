@@ -3,7 +3,11 @@
     "title": "项目",
     "new_project": "新建项目",
     "empty": "还没有项目",
-    "create_first": "创建第一个项目"
+    "create_first": "创建第一个项目",
+    "view_compact": "紧凑视图",
+    "view_comfortable": "舒适视图",
+    "search_placeholder": "搜索项目...",
+    "no_search_results": "未找到匹配的项目"
   },
   "table": {
     "name": "名称",
@@ -57,6 +61,7 @@
     "empty_issues_title": "还没有关联的 issue",
     "empty_issues_hint": "新建一个 issue，或把已有的 issue 关联到这个项目。",
     "empty_issues_new_button": "新建 issue",
+    "no_issues_yet": "目前还没有 issue",
     "toast_link_copied": "已复制链接",
     "toast_project_deleted": "已删除项目",
     "toast_move_issue_failed": "移动 issue 失败"
@@ -66,6 +71,8 @@
     "empty": "还没有关联资源。",
     "add_button": "添加资源",
     "popover_title": "关联 GitHub 仓库",
+    "repos_search_placeholder": "搜索仓库...",
+    "repos_search_empty": "没有匹配的仓库。",
     "attached_badge": "已关联",
     "remove_tooltip": "移除",
     "url_placeholder": "https://github.com/owner/repo 或 git@github.com:owner/repo.git",

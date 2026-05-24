@@ -6,22 +6,87 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	AuthCookieName   = "multica_auth"
-	CSRFCookieName   = "multica_csrf"
-	authCookieMaxAge = 30 * 24 * 60 * 60 // 30 days in seconds
+	AuthCookieName      = "multica_auth"
+	CSRFCookieName      = "multica_csrf"
+	defaultAuthTokenTTL = 30 * 24 * time.Hour // 30 days
 )
 
-var ipCookieDomainWarnOnce sync.Once
+var (
+	ipCookieDomainWarnOnce sync.Once
+	authTokenTTLOnce       sync.Once
+	authTokenTTLCached     time.Duration
+)
+
+// parseAuthTokenTTL parses a raw AUTH_TOKEN_TTL value into a duration.
+// It first tries time.ParseDuration (e.g. "8760h", "720h30m"), then falls
+// back to parsing as integer seconds. Returns the parsed duration and true
+// on success; zero and false when the input is empty or invalid.
+func parseAuthTokenTTL(raw string) (time.Duration, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+
+	// Try Go duration string first (e.g. "8760h", "720h30m").
+	if d, err := time.ParseDuration(raw); err == nil {
+		if d <= 0 {
+			return 0, false
+		}
+		if d > 10*365*24*time.Hour {
+			slog.Warn("AUTH_TOKEN_TTL exceeds 10 years; accepting but verify this is intentional",
+				"value", raw, "hours", d.Hours())
+		}
+		return d, true
+	}
+
+	// Fall back to plain integer seconds.
+	secs, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || secs <= 0 {
+		return 0, false
+	}
+	if secs > int64(math.MaxInt64/int64(time.Second)) {
+		return 0, false
+	}
+	d := time.Duration(secs) * time.Second
+	if d > 10*365*24*time.Hour {
+		slog.Warn("AUTH_TOKEN_TTL exceeds 10 years; accepting but verify this is intentional",
+			"value", raw, "hours", d.Hours())
+	}
+	return d, true
+}
+
+// AuthTokenTTL returns the configured auth token lifetime. It reads the
+// AUTH_TOKEN_TTL environment variable (Go duration string or integer seconds) on first call and caches
+// the result. When the variable is unset or invalid the default of 30 days
+// is used.
+func AuthTokenTTL() time.Duration {
+	authTokenTTLOnce.Do(func() {
+		raw := os.Getenv("AUTH_TOKEN_TTL")
+		if ttl, ok := parseAuthTokenTTL(raw); ok {
+			authTokenTTLCached = ttl
+			slog.Info("auth token TTL configured", "seconds", int(ttl.Seconds()))
+			return
+		}
+		authTokenTTLCached = defaultAuthTokenTTL
+		if strings.TrimSpace(raw) != "" {
+			slog.Warn("AUTH_TOKEN_TTL is not a valid duration or positive integer; using default",
+				"value", raw, "default_seconds", int(defaultAuthTokenTTL.Seconds()))
+		}
+	})
+	return authTokenTTLCached
+}
 
 // cookieDomain returns the trimmed COOKIE_DOMAIN env value, or "" if it looks
 // like an IP address. RFC 6265 §4.1.2.3 forbids IP literals in the cookie
@@ -84,14 +149,16 @@ func generateCSRFToken(authToken string) (string, error) {
 func SetAuthCookies(w http.ResponseWriter, token string) error {
 	secure := isSecureCookie()
 	domain := cookieDomain()
+	ttl := AuthTokenTTL()
+	now := time.Now()
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     AuthCookieName,
 		Value:    token,
 		Path:     "/",
 		Domain:   domain,
-		MaxAge:   authCookieMaxAge,
-		Expires:  time.Now().Add(30 * 24 * time.Hour),
+		MaxAge:   int(ttl.Seconds()),
+		Expires:  now.Add(ttl),
 		HttpOnly: true,
 		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
@@ -107,8 +174,8 @@ func SetAuthCookies(w http.ResponseWriter, token string) error {
 		Value:    csrfToken,
 		Path:     "/",
 		Domain:   domain,
-		MaxAge:   authCookieMaxAge,
-		Expires:  time.Now().Add(30 * 24 * time.Hour),
+		MaxAge:   int(ttl.Seconds()),
+		Expires:  now.Add(ttl),
 		HttpOnly: false,
 		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,

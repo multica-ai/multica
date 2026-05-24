@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
+	"net/netip"
 	"os"
 	"strings"
 	"time"
@@ -57,6 +59,33 @@ func allowedOrigins() []string {
 	return origins
 }
 
+// parseTrustedProxies parses a comma-separated list of CIDR prefixes from the
+// MULTICA_TRUSTED_PROXIES env var. Invalid entries are dropped with a single
+// warn-line per entry rather than crashing the server — a typo in one CIDR
+// shouldn't take the whole API down. Returns nil for empty input, which the
+// rate limiter treats as "trust no proxy headers, use RemoteAddr only".
+func parseTrustedProxies(raw string) []netip.Prefix {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var out []netip.Prefix
+	for _, part := range strings.Split(raw, ",") {
+		s := strings.TrimSpace(part)
+		if s == "" {
+			continue
+		}
+		p, err := netip.ParsePrefix(s)
+		if err != nil {
+			slog.Warn("MULTICA_TRUSTED_PROXIES: ignoring invalid CIDR",
+				"value", s, "error", err)
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
 // NewRouter creates the fully-configured Chi router with all middleware and routes.
 // rdb is optional: when non-nil the runtime local-skill request stores are
 // swapped for Redis-backed implementations so multiple API nodes share the
@@ -102,11 +131,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
 
 	signupConfig := handler.Config{
-		AllowSignup:                   os.Getenv("ALLOW_SIGNUP") != "false",
-		AllowedEmails:                 splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
-		AllowedEmailDomains:           splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
-		UseDailyRollupForRuntimeUsage: os.Getenv("USAGE_DAILY_ROLLUP_ENABLED") == "true",
-		UseDailyRollupForDashboard:    os.Getenv("USAGE_DASHBOARD_ROLLUP_ENABLED") == "true",
+		AllowSignup:              os.Getenv("ALLOW_SIGNUP") != "false",
+		AllowedEmails:            splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
+		AllowedEmailDomains:      splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
+		PublicURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
+		TrustedProxies:           parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
+		CloudRuntimeFleetURL:     cloudRuntimeFleetURLFromEnv(),
+		CloudRuntimeFleetTimeout: envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	if opts.DaemonWakeup != nil {
@@ -118,6 +149,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.LocalSkillListStore = handler.NewRedisLocalSkillListStore(rdb)
 		h.LocalSkillImportStore = handler.NewRedisLocalSkillImportStore(rdb)
 		h.LivenessStore = handler.NewRedisLivenessStore(rdb)
+		h.WebhookRateLimiter = handler.NewRedisWebhookRateLimiter(rdb, handler.DefaultWebhookRateLimit())
+		h.WebhookIPRateLimiter = handler.NewRedisWebhookIPRateLimiter(rdb, handler.DefaultWebhookIPRateLimit())
 	}
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
@@ -131,6 +164,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	daemonTokenCache := auth.NewDaemonTokenCache(rdb)
 	h.PATCache = patCache
 	h.DaemonTokenCache = daemonTokenCache
+	h.MembershipCache = auth.NewMembershipCache(rdb)
 
 	// Empty-claim cache: lets the daemon poll path skip a Postgres
 	// scan when a recent check confirmed the runtime had no queued
@@ -162,7 +196,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   origins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Workspace-ID", "X-Workspace-Slug", "X-Request-ID", "X-Agent-ID", "X-Task-ID", "X-CSRF-Token", "X-Client-Platform", "X-Client-Version", "X-Client-OS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Workspace-ID", "X-Workspace-Slug", "X-Request-ID", "X-Agent-ID", "X-Task-ID", "X-CSRF-Token", "X-Client-Platform", "X-Client-Version", "X-Client-OS", "X-User-PAT"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
@@ -205,15 +239,27 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		})
 	}
 
-	// Auth (public)
-	r.Post("/auth/send-code", h.SendCode)
-	r.Post("/auth/verify-code", h.VerifyCode)
-	r.Post("/auth/google", h.GoogleLogin)
+	// Auth (public) — per-IP rate limiting.
+	if rdb == nil {
+		slog.Warn("rate limiting disabled: REDIS_URL not configured")
+	}
+	trustedProxies := middleware.ParseTrustedProxies(os.Getenv("RATE_LIMIT_TRUSTED_PROXIES"))
+	authRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH", 5), time.Minute, trustedProxies)
+	authVerifyRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH_VERIFY", 20), time.Minute, trustedProxies)
+	contactSalesRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_CONTACT_SALES", 5), time.Hour, trustedProxies)
+	r.With(authRL).Post("/auth/send-code", h.SendCode)
+	r.With(authVerifyRL).Post("/auth/verify-code", h.VerifyCode)
+	r.With(authRL).Post("/auth/google", h.GoogleLogin)
 	r.Post("/auth/logout", h.Logout)
 
 	// Public API
 	r.Get("/api/config", h.GetConfig)
+	r.With(contactSalesRL).Post("/api/contact-sales", h.CreateContactSales)
 
+	// Webhook ingress for autopilots. Outside the authenticated group on
+	// purpose: the bearer token in the URL path IS the credential. Workspace
+	// context is derived from the trigger row, never from request headers.
+	r.Post("/api/webhooks/autopilots/{token}", h.HandleAutopilotWebhook)
 	// GitHub App webhook (no Multica auth — requests are authenticated via
 	// HMAC-SHA256 signature in the handler) and post-install setup callback.
 	r.Post("/api/webhooks/github", h.HandleGitHubWebhook)
@@ -265,8 +311,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
 		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
 		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)
-		r.Post("/api/me/starter-content/import", h.ImportStarterContent)
-		r.Post("/api/me/starter-content/dismiss", h.DismissStarterContent)
+		// DEPRECATED — shim routes for desktop < v3 during the rollout
+		// window. v3 frontend creates the Helper agent + starter issue
+		// via generic CreateAgent / CreateIssue and only calls /complete
+		// here. Remove once X-Client-Version telemetry confirms zero
+		// pre-v3 desktops are still calling these. Handlers live in
+		// server/internal/handler/onboarding_shim.go.
+		r.Post("/api/me/onboarding/runtime-bootstrap", h.BootstrapOnboardingRuntime)
+		r.Post("/api/me/onboarding/no-runtime-bootstrap", h.BootstrapOnboardingNoRuntime)
 		r.Post("/api/cli-token", h.IssueCliToken)
 		r.Post("/api/upload-file", h.UploadFile)
 		r.Post("/api/feedback", h.CreateFeedback)
@@ -282,6 +334,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
+					// Listing GitHub installations is member-visible so the
+					// integrations tab no longer renders blank for non-admins;
+					// the handler strips the management handle and adds a
+					// can_manage hint so the UI can gate connect/disconnect.
+					r.Get("/github/installations", h.ListGitHubInstallations)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -298,12 +355,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// Owner-only access
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
 
-				// GitHub integration — admin-only operations live here so the
-				// nesting matches the rest of /api/workspaces/{id}/* routes.
+				// GitHub integration — connect / disconnect remain admin-only;
+				// the read-only list endpoint lives in the member-level group
+				// above so non-admins can see the workspace's connection state.
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Get("/github/connect", h.GitHubConnect)
-					r.Get("/github/installations", h.ListGitHubInstallations)
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
 				})
 			})
@@ -360,6 +417,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/labels", h.ListLabelsForIssue)
 					r.Post("/labels", h.AttachLabel)
 					r.Delete("/labels/{labelId}", h.DetachLabel)
+					r.Get("/metadata", h.ListIssueMetadata)
+					r.Put("/metadata/{key}", h.SetIssueMetadataKey)
+					r.Delete("/metadata/{key}", h.DeleteIssueMetadataKey)
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
 				})
 			})
@@ -402,6 +462,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/", h.UpdateSquad)
 					r.Delete("/", h.DeleteSquad)
 					r.Get("/members", h.ListSquadMembers)
+					r.Get("/members/status", h.ListSquadMemberStatus)
 					r.Post("/members", h.AddSquadMember)
 					r.Delete("/members", h.RemoveSquadMember)
 					r.Patch("/members/role", h.UpdateSquadMemberRole)
@@ -421,10 +482,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.DeleteAutopilot)
 					r.Post("/trigger", h.TriggerAutopilot)
 					r.Get("/runs", h.ListAutopilotRuns)
+					r.Get("/runs/{runId}", h.GetAutopilotRun)
+					r.Get("/deliveries", h.ListAutopilotDeliveries)
+					r.Get("/deliveries/{deliveryId}", h.GetAutopilotDelivery)
+					r.Post("/deliveries/{deliveryId}/replay", h.ReplayAutopilotDelivery)
 					r.Post("/triggers", h.CreateAutopilotTrigger)
 					r.Route("/triggers/{triggerId}", func(r chi.Router) {
 						r.Patch("/", h.UpdateAutopilotTrigger)
 						r.Delete("/", h.DeleteAutopilotTrigger)
+						r.Post("/rotate-webhook-token", h.RotateAutopilotTriggerWebhookToken)
+						r.Put("/signing-secret", h.SetAutopilotTriggerSigningSecret)
 					})
 				})
 			})
@@ -496,12 +563,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
-			// Usage
-			r.Route("/api/usage", func(r chi.Router) {
-				r.Get("/daily", h.GetWorkspaceUsageByDay)
-				r.Get("/summary", h.GetWorkspaceUsageSummary)
-			})
-
 			// Dashboard — workspace-wide token + run-time rollups for the
 			// "/{slug}/dashboard" page. Optional ?project_id filter scopes
 			// the rollup to a single project.
@@ -531,6 +592,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/local-skills/import/{requestId}", h.GetLocalSkillImportRequest)
 					r.Delete("/", h.DeleteAgentRuntime)
 				})
+			})
+
+			// Cloud Runtime fleet proxy. The remote service URL is configured
+			// on SaaS API nodes only; self-hosted deployments return 503.
+			r.Route("/api/cloud-runtime", func(r chi.Router) {
+				r.Get("/", h.GetCloudRuntimeService)
+				r.Get("/healthz", h.GetCloudRuntimeHealth)
+				r.Get("/readyz", h.GetCloudRuntimeReady)
+				r.Get("/nodes", h.ListCloudRuntimeNodes)
+				r.Post("/nodes", h.CreateCloudRuntimeNode)
+				r.Delete("/nodes", h.DeleteCloudRuntimeNode)
+				r.Post("/nodes/start", h.StartCloudRuntimeNode)
+				r.Post("/nodes/stop", h.StopCloudRuntimeNode)
+				r.Post("/nodes/reboot", h.RebootCloudRuntimeNode)
+				r.Post("/nodes/status", h.GetCloudRuntimeNodeStatus)
+				r.Post("/nodes/exec", h.ExecCloudRuntimeNode)
 			})
 
 			// Tasks (user-facing, with ownership check)
@@ -667,4 +744,11 @@ func splitAndTrim(s string) []string {
 		}
 	}
 	return res
+}
+
+func cloudRuntimeFleetURLFromEnv() string {
+	if url := strings.TrimSpace(os.Getenv("MULTICA_CLOUD_FLEET_URL")); url != "" {
+		return url
+	}
+	return strings.TrimSpace(os.Getenv("MULTICA_FLEET_URL"))
 }
