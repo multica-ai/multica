@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Agent } from "@multica/core/types";
 import { FixedRepoSection } from "./fixed-repo-section";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { I18nProvider, TEST_RESOURCES } from "../../i18n";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../../../locales/en/common.json";
+import enAgents from "../../../locales/en/agents.json";
+
+const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
