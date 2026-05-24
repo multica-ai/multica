@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -101,11 +102,15 @@ func TestFixedRepoLock_ConcurrentTryLock(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			if table.tryLock(path, "task") {
-				mu.Lock()
-				winners++
-				mu.Unlock()
-				table.unlock(path)
+			for {
+				if table.tryLock(path, "task") {
+					mu.Lock()
+					winners++
+					mu.Unlock()
+					table.unlock(path)
+					return
+				}
+				runtime.Gosched()
 			}
 		}(i)
 	}
