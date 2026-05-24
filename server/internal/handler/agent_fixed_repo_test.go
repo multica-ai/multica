@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 )
 
