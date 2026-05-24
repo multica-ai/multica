@@ -2455,7 +2455,7 @@ func createRuntimeGuardAgentWithProvider(t *testing.T, ctx context.Context, prov
 		)
 		VALUES ($1, $2, 'local', '{}'::jsonb, $3, 'workspace', 3)
 		RETURNING id
-	`, testWorkspaceID, "Runtime Guard Agent "+t.Name(), runtimeID).Scan(&agentID); err != nil {
+	`, testWorkspaceID, "Runtime Guard Agent "+provider+" "+t.Name(), runtimeID).Scan(&agentID); err != nil {
 		t.Fatalf("setup: create runtime guard agent: %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID) })
