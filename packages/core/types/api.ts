@@ -85,6 +85,7 @@ export interface ListGroupedIssuesParams {
   project_ids?: string[];
   include_no_project?: boolean;
   label_ids?: string[];
+  // CEREBRO-PATCH(grouped-reference-filter): keep one typed reference filter for grouped issue queries.
   /**
    * Cerebro edge-reference filter encoded as `<object>:<ref_id>`, for example
    * `github_pr:firtal-group/firtal-cerebro#525`.
