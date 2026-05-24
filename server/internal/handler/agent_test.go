@@ -190,6 +190,230 @@ func TestCreateAgent_RejectsDuplicateName(t *testing.T) {
 	}
 }
 
+func createHandlerTestLocalRuntime(t *testing.T, name string) string {
+	t.Helper()
+	ctx := context.Background()
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, owner_id, last_seen_at
+		)
+		VALUES ($1, $2, $3, 'local', 'codex', 'online', $4, '{}'::jsonb, $5, now())
+		RETURNING id
+	`, testWorkspaceID, "fixed-repo-test-daemon-"+name, name, "fixed repo test runtime", testUserID).Scan(&runtimeID); err != nil {
+		t.Fatalf("failed to create local runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+	return runtimeID
+}
+
+func TestCreateAgent_FixedRepoConfig_LocalRuntimePersistsAndReturns(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID := createHandlerTestLocalRuntime(t, "fixed-repo-create-runtime")
+
+	body := map[string]any{
+		"name":                      "fixed-repo-create-agent",
+		"description":               "fixed repo create",
+		"runtime_id":                runtimeID,
+		"visibility":                "private",
+		"max_concurrent_tasks":      2,
+		"fixed_repo_enabled":        true,
+		"fixed_repo_paths":          []string{"/work/game-main", "/work/game-assets"},
+		"fixed_repo_vcs_type":       "perforce",
+		"fixed_repo_cleanup_script": "/work/game-main/scripts/cleanup.sh",
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAgent: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, resp.ID)
+	})
+	if !resp.FixedRepoEnabled {
+		t.Fatal("expected fixed_repo_enabled=true")
+	}
+	if got, want := resp.FixedRepoVcsType, "perforce"; got != want {
+		t.Fatalf("fixed_repo_vcs_type = %q, want %q", got, want)
+	}
+	if resp.FixedRepoCleanupScript == nil || *resp.FixedRepoCleanupScript != "/work/game-main/scripts/cleanup.sh" {
+		t.Fatalf("fixed_repo_cleanup_script = %#v", resp.FixedRepoCleanupScript)
+	}
+	if len(resp.FixedRepoPaths) != 2 || resp.FixedRepoPaths[0] != "/work/game-main" || resp.FixedRepoPaths[1] != "/work/game-assets" {
+		t.Fatalf("fixed_repo_paths = %#v", resp.FixedRepoPaths)
+	}
+
+	getReq := withURLParam(newRequest(http.MethodGet, "/api/agents/"+resp.ID, nil), "id", resp.ID)
+	getW := httptest.NewRecorder()
+	testHandler.GetAgent(getW, getReq)
+	if getW.Code != http.StatusOK {
+		t.Fatalf("GetAgent: expected 200, got %d: %s", getW.Code, getW.Body.String())
+	}
+	var getResp AgentResponse
+	if err := json.NewDecoder(getW.Body).Decode(&getResp); err != nil {
+		t.Fatalf("decode get response: %v", err)
+	}
+	if !getResp.FixedRepoEnabled || len(getResp.FixedRepoPaths) != 2 || getResp.FixedRepoVcsType != "perforce" {
+		t.Fatalf("GetAgent fixed repo fields = %+v", getResp)
+	}
+
+	listW := httptest.NewRecorder()
+	testHandler.ListAgents(listW, newRequest(http.MethodGet, "/api/agents", nil))
+	if listW.Code != http.StatusOK {
+		t.Fatalf("ListAgents: expected 200, got %d: %s", listW.Code, listW.Body.String())
+	}
+	var listResp []AgentResponse
+	if err := json.NewDecoder(listW.Body).Decode(&listResp); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	var found *AgentResponse
+	for i := range listResp {
+		if listResp[i].ID == resp.ID {
+			found = &listResp[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("created agent missing from ListAgents response")
+	}
+	if !found.FixedRepoEnabled || len(found.FixedRepoPaths) != 2 || found.FixedRepoVcsType != "perforce" {
+		t.Fatalf("ListAgents fixed repo fields = %+v", *found)
+	}
+}
+
+func TestCreateAgent_FixedRepoConfig_RejectsCloudRuntime(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	body := map[string]any{
+		"name":                 "fixed-repo-cloud-agent",
+		"runtime_id":           testRuntimeID,
+		"fixed_repo_enabled":   true,
+		"fixed_repo_paths":     []string{"/work/repo"},
+		"fixed_repo_vcs_type":  "git",
+		"max_concurrent_tasks": 1,
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateAgent with cloud runtime: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateAgent_FixedRepoConfig_CanSetAndClearCleanupScript(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID := createHandlerTestLocalRuntime(t, "fixed-repo-update-runtime")
+
+	createBody := map[string]any{
+		"name":                 "fixed-repo-update-agent",
+		"runtime_id":           runtimeID,
+		"visibility":           "private",
+		"max_concurrent_tasks": 1,
+	}
+	createW := httptest.NewRecorder()
+	testHandler.CreateAgent(createW, newRequest(http.MethodPost, "/api/agents", createBody))
+	if createW.Code != http.StatusCreated {
+		t.Fatalf("CreateAgent: expected 201, got %d: %s", createW.Code, createW.Body.String())
+	}
+	var created AgentResponse
+	if err := json.NewDecoder(createW.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, created.ID)
+	})
+
+	updateBody := map[string]any{
+		"fixed_repo_enabled":        true,
+		"fixed_repo_paths":          []string{"/fixed/main"},
+		"fixed_repo_vcs_type":       "git",
+		"fixed_repo_cleanup_script": "/fixed/main/cleanup.sh",
+	}
+	updateReq := withURLParam(newRequest(http.MethodPut, "/api/agents/"+created.ID, updateBody), "id", created.ID)
+	updateW := httptest.NewRecorder()
+	testHandler.UpdateAgent(updateW, updateReq)
+	if updateW.Code != http.StatusOK {
+		t.Fatalf("UpdateAgent set fixed repo: expected 200, got %d: %s", updateW.Code, updateW.Body.String())
+	}
+	var updated AgentResponse
+	if err := json.NewDecoder(updateW.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
+	if !updated.FixedRepoEnabled || len(updated.FixedRepoPaths) != 1 || updated.FixedRepoPaths[0] != "/fixed/main" {
+		t.Fatalf("unexpected fixed repo update response: %+v", updated)
+	}
+	if updated.FixedRepoCleanupScript == nil || *updated.FixedRepoCleanupScript != "/fixed/main/cleanup.sh" {
+		t.Fatalf("fixed_repo_cleanup_script after set = %#v", updated.FixedRepoCleanupScript)
+	}
+
+	clearBody := map[string]any{"fixed_repo_cleanup_script": nil}
+	clearReq := withURLParam(newRequest(http.MethodPut, "/api/agents/"+created.ID, clearBody), "id", created.ID)
+	clearW := httptest.NewRecorder()
+	testHandler.UpdateAgent(clearW, clearReq)
+	if clearW.Code != http.StatusOK {
+		t.Fatalf("UpdateAgent clear cleanup script: expected 200, got %d: %s", clearW.Code, clearW.Body.String())
+	}
+	var cleared AgentResponse
+	if err := json.NewDecoder(clearW.Body).Decode(&cleared); err != nil {
+		t.Fatalf("decode clear response: %v", err)
+	}
+	if cleared.FixedRepoCleanupScript != nil {
+		t.Fatalf("expected cleanup script cleared, got %#v", cleared.FixedRepoCleanupScript)
+	}
+}
+
+func TestUpdateAgent_FixedRepoConfig_RejectsEmptyEnabledPaths(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID := createHandlerTestLocalRuntime(t, "fixed-repo-empty-paths-runtime")
+
+	createBody := map[string]any{
+		"name":                 "fixed-repo-empty-paths-agent",
+		"runtime_id":           runtimeID,
+		"visibility":           "private",
+		"max_concurrent_tasks": 1,
+	}
+	createW := httptest.NewRecorder()
+	testHandler.CreateAgent(createW, newRequest(http.MethodPost, "/api/agents", createBody))
+	if createW.Code != http.StatusCreated {
+		t.Fatalf("CreateAgent: expected 201, got %d: %s", createW.Code, createW.Body.String())
+	}
+	var created AgentResponse
+	if err := json.NewDecoder(createW.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, created.ID)
+	})
+
+	updateBody := map[string]any{
+		"fixed_repo_enabled": true,
+		"fixed_repo_paths":   []string{},
+	}
+	updateReq := withURLParam(newRequest(http.MethodPut, "/api/agents/"+created.ID, updateBody), "id", created.ID)
+	w := httptest.NewRecorder()
+	testHandler.UpdateAgent(w, updateReq)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("UpdateAgent empty paths: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestWorkspaceAlwaysRedactSecrets(t *testing.T) {
 	tests := []struct {
 		name     string
