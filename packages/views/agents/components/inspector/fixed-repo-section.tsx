@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
-import { useT } from "../../i18n";
+import { useT } from "../../../i18n";
 
 interface FixedRepoSectionProps {
   enabled: boolean;
