@@ -1,5 +1,5 @@
 {
-  "name": "@multica/cerebro-runtime",
+  "name": "@multica/cerebro-agent-tools",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -9,20 +9,16 @@
   },
   "exports": {
     ".": "./index.ts",
-    "./views": "./views/index.ts",
-    "./views/docs": "./views/docs/index.ts"
+    "./views": "./views/index.ts"
   },
   "dependencies": {
-    "@multica/cerebro-agent-tools": "workspace:*",
-    "@multica/cerebro-groups": "workspace:*",
-    "@multica/cerebro-runtime-tools": "workspace:*",
     "@multica/cerebro-types": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
-    "@multica/views": "workspace:*",
     "@tanstack/react-query": "catalog:",
     "lucide-react": "catalog:",
-    "sonner": "^2.0.7"
+    "sonner": "^2.0.7",
+    "zod": "catalog:"
   },
   "peerDependencies": {
     "react": "catalog:"
@@ -31,7 +27,6 @@
     "@multica/tsconfig": "workspace:*",
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
-    "@testing-library/user-event": "catalog:",
     "@types/react": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "jsdom": "catalog:",

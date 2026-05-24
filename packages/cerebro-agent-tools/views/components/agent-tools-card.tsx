@@ -31,6 +31,11 @@ import type {
   AgentToolOverride,
   RuntimeTool,
 } from "@multica/cerebro-types";
+import {
+  clearAgentToolOverride,
+  listAgentToolOverrides,
+  setAgentToolOverride,
+} from "../../api";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
@@ -74,12 +79,12 @@ export function AgentToolsCard({ agent, canEdit, runtimeName }: AgentToolsCardPr
 
   const overridesQuery = useQuery({
     queryKey: agentOverridesKey(agent.id),
-    queryFn: () => api.listAgentToolOverrides(agent.id),
+    queryFn: () => listAgentToolOverrides(agent.id),
   });
 
   const setOverrideMutation = useMutation({
     mutationFn: ({ toolName, enabled }: { toolName: string; enabled: boolean }) =>
-      api.setAgentToolOverride(agent.id, toolName, enabled),
+      setAgentToolOverride(agent.id, toolName, enabled),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: agentOverridesKey(agent.id) });
     },
@@ -92,7 +97,7 @@ export function AgentToolsCard({ agent, canEdit, runtimeName }: AgentToolsCardPr
 
   const clearOverrideMutation = useMutation({
     mutationFn: ({ toolName }: { toolName: string }) =>
-      api.clearAgentToolOverride(agent.id, toolName),
+      clearAgentToolOverride(agent.id, toolName),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: agentOverridesKey(agent.id) });
     },

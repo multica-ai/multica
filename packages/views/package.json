@@ -1,5 +1,6 @@
 {
   "_comment": "CEREBRO-PATCH(views-package-cerebro-deps): adds cerebro-* package deps (incl. cerebro-channels — JEH-718, cerebro-groups — JEH-1006, cerebro-pin-input — JEH-1065) + new exports for cerebro views (incl. ./agents/components/avatar-picker — FIR-1918)",
+  "_comment_cerebro_agent_tools": "CEREBRO-PATCH(cerebro-agent-tools-dep): mounts the Cerebro-owned agent Tools tab extension from @multica/views",
   "name": "@multica/views",
   "version": "0.0.0",
   "private": true,
@@ -70,6 +71,7 @@
     "@floating-ui/dom": "^1.7.6",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
+    "@multica/cerebro-agent-tools": "workspace:*",
     "@multica/cerebro-channels": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-groups": "workspace:*",

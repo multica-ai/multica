@@ -1,6 +1,6 @@
 import type React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent } from "@multica/core/types";
@@ -10,9 +10,7 @@ import type {
 } from "@multica/cerebro-types";
 
 const mockListRuntimeTools = vi.hoisted(() => vi.fn());
-const mockListAgentToolOverrides = vi.hoisted(() => vi.fn());
-const mockSetAgentToolOverride = vi.hoisted(() => vi.fn());
-const mockClearAgentToolOverride = vi.hoisted(() => vi.fn());
+const mockCerebroRequest = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/api", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/api")>(
@@ -23,9 +21,7 @@ vi.mock("@multica/core/api", async () => {
     api: {
       ...actual.api,
       listRuntimeTools: mockListRuntimeTools,
-      listAgentToolOverrides: mockListAgentToolOverrides,
-      setAgentToolOverride: mockSetAgentToolOverride,
-      clearAgentToolOverride: mockClearAgentToolOverride,
+      cerebroRequest: mockCerebroRequest,
     },
   };
 });
@@ -108,10 +104,27 @@ const overrides: AgentToolOverride[] = [
   },
 ];
 
-function renderWithClient(node: React.ReactNode) {
+function renderWithClient(
+  node: React.ReactNode,
+  data: {
+    tools?: RuntimeTool[];
+    overrides?: AgentToolOverride[];
+  } = {},
+) {
   const qc = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
+    defaultOptions: {
+      queries: { retry: false, staleTime: Infinity, gcTime: Infinity },
+    },
   });
+  if (data.tools) {
+    qc.setQueryData(["cerebro", "runtime-tools", "rt-1"], data.tools);
+  }
+  if (data.overrides) {
+    qc.setQueryData(
+      ["cerebro", "agent-tool-overrides", "agent-1"],
+      data.overrides,
+    );
+  }
   return render(
     <QueryClientProvider client={qc}>{node}</QueryClientProvider>,
   );
@@ -119,25 +132,18 @@ function renderWithClient(node: React.ReactNode) {
 
 beforeEach(() => {
   mockListRuntimeTools.mockReset();
-  mockListAgentToolOverrides.mockReset();
-  mockSetAgentToolOverride.mockReset();
-  mockClearAgentToolOverride.mockReset();
-  mockSetAgentToolOverride.mockResolvedValue(undefined);
-  mockClearAgentToolOverride.mockResolvedValue(undefined);
+  mockCerebroRequest.mockReset();
+  mockCerebroRequest.mockResolvedValue(overrides);
 });
 
 describe("AgentToolsCard", () => {
-  it("renders one row per runtime tool, marks override rows, and computes effective state", async () => {
-    mockListRuntimeTools.mockResolvedValue(runtimeTools);
-    mockListAgentToolOverrides.mockResolvedValue(overrides);
-
+  it("renders one row per runtime tool, marks override rows, and computes effective state", () => {
     renderWithClient(
       <AgentToolsCard agent={agent} canEdit={true} runtimeName="sara-mac-mini" />,
+      { tools: runtimeTools, overrides },
     );
 
-    await waitFor(() =>
-      expect(screen.getByText("firtal_bq_query")).toBeInTheDocument(),
-    );
+    expect(screen.getByText("firtal_bq_query")).toBeInTheDocument();
 
     // Inherit row: shows "Arver" tag.
     expect(screen.getAllByText("— Arver").length).toBeGreaterThan(0);
@@ -159,20 +165,15 @@ describe("AgentToolsCard", () => {
     expect(inaktive.length).toBe(1);
   });
 
-  it("filters to override-only rows", async () => {
-    const user = userEvent.setup();
-    mockListRuntimeTools.mockResolvedValue(runtimeTools);
-    mockListAgentToolOverrides.mockResolvedValue(overrides);
-
+  it("filters to override-only rows", () => {
     renderWithClient(
       <AgentToolsCard agent={agent} canEdit={true} runtimeName="sara-mac-mini" />,
+      { tools: runtimeTools, overrides },
     );
 
-    await waitFor(() =>
-      expect(screen.getByText("firtal_bq_query")).toBeInTheDocument(),
-    );
+    expect(screen.getByText("firtal_bq_query")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("radio", { name: /Kun override/i }));
+    fireEvent.click(screen.getByText("Kun override (2)"));
 
     // Inherit row is hidden.
     expect(screen.queryByText("firtal_bq_query")).not.toBeInTheDocument();
@@ -181,20 +182,15 @@ describe("AgentToolsCard", () => {
     expect(screen.getByText("slack_post_message")).toBeInTheDocument();
   });
 
-  it("filters to effectively active rows", async () => {
-    const user = userEvent.setup();
-    mockListRuntimeTools.mockResolvedValue(runtimeTools);
-    mockListAgentToolOverrides.mockResolvedValue(overrides);
-
+  it("filters to effectively active rows", () => {
     renderWithClient(
       <AgentToolsCard agent={agent} canEdit={true} runtimeName="sara-mac-mini" />,
+      { tools: runtimeTools, overrides },
     );
 
-    await waitFor(() =>
-      expect(screen.getByText("firtal_bq_query")).toBeInTheDocument(),
-    );
+    expect(screen.getByText("firtal_bq_query")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("radio", { name: /Effektivt aktive/i }));
+    fireEvent.click(screen.getByText("Effektivt aktive (2)"));
 
     // The two effectively-on rows survive.
     expect(screen.getByText("firtal_bq_query")).toBeInTheDocument();
@@ -203,17 +199,13 @@ describe("AgentToolsCard", () => {
     expect(screen.queryByText("github_create_issue")).not.toBeInTheDocument();
   });
 
-  it("hides row actions when canEdit is false", async () => {
-    mockListRuntimeTools.mockResolvedValue(runtimeTools);
-    mockListAgentToolOverrides.mockResolvedValue(overrides);
-
+  it("hides row actions when canEdit is false", () => {
     renderWithClient(
       <AgentToolsCard agent={agent} canEdit={false} runtimeName="sara-mac-mini" />,
+      { tools: runtimeTools, overrides },
     );
 
-    await waitFor(() =>
-      expect(screen.getByText("firtal_bq_query")).toBeInTheDocument(),
-    );
+    expect(screen.getByText("firtal_bq_query")).toBeInTheDocument();
 
     // No action triggers for non-admins.
     expect(
@@ -223,16 +215,14 @@ describe("AgentToolsCard", () => {
 
   it("calls setAgentToolOverride when the admin picks Tving på", async () => {
     const user = userEvent.setup();
-    mockListRuntimeTools.mockResolvedValue(runtimeTools);
-    mockListAgentToolOverrides.mockResolvedValue([]);
+    mockCerebroRequest.mockResolvedValue([]);
 
     renderWithClient(
       <AgentToolsCard agent={agent} canEdit={true} runtimeName="sara-mac-mini" />,
+      { tools: runtimeTools, overrides: [] },
     );
 
-    await waitFor(() =>
-      expect(screen.getByText("firtal_bq_query")).toBeInTheDocument(),
-    );
+    expect(screen.getByText("firtal_bq_query")).toBeInTheDocument();
 
     const selects = screen.getAllByRole("combobox", { name: /Skift override/i });
     expect(selects.length).toBe(3);
@@ -240,25 +230,21 @@ describe("AgentToolsCard", () => {
     // Pick "Tving fra" on the first row (firtal_bq_query, runtime-on).
     await user.selectOptions(selects[0]!, "force_off");
 
-    expect(mockSetAgentToolOverride).toHaveBeenCalledWith(
-      "agent-1",
-      "firtal_bq_query",
-      false,
+    expect(mockCerebroRequest).toHaveBeenCalledWith(
+      "/api/agents/agent-1/tool-overrides/firtal_bq_query",
+      { method: "PUT", body: JSON.stringify({ enabled: false }) },
     );
   });
 
   it("calls clearAgentToolOverride when the admin picks Arv runtime on an override row", async () => {
     const user = userEvent.setup();
-    mockListRuntimeTools.mockResolvedValue(runtimeTools);
-    mockListAgentToolOverrides.mockResolvedValue(overrides);
 
     renderWithClient(
       <AgentToolsCard agent={agent} canEdit={true} runtimeName="sara-mac-mini" />,
+      { tools: runtimeTools, overrides },
     );
 
-    await waitFor(() =>
-      expect(screen.getByText("github_create_issue")).toBeInTheDocument(),
-    );
+    expect(screen.getByText("github_create_issue")).toBeInTheDocument();
 
     // Find the select scoped to the github_create_issue row (the force_off row).
     const githubRow = screen
@@ -271,25 +257,21 @@ describe("AgentToolsCard", () => {
 
     await user.selectOptions(selectInRow, "inherit");
 
-    expect(mockClearAgentToolOverride).toHaveBeenCalledWith(
-      "agent-1",
-      "github_create_issue",
+    expect(mockCerebroRequest).toHaveBeenCalledWith(
+      "/api/agents/agent-1/tool-overrides/github_create_issue",
+      { method: "DELETE" },
     );
   });
 
-  it("falls back to an explicit empty banner when the runtime has no tools yet", async () => {
-    mockListRuntimeTools.mockResolvedValue([]);
-    mockListAgentToolOverrides.mockResolvedValue([]);
-
+  it("falls back to an explicit empty banner when the runtime has no tools yet", () => {
     renderWithClient(
       <AgentToolsCard agent={agent} canEdit={true} runtimeName="sara-mac-mini" />,
+      { tools: [], overrides: [] },
     );
 
-    await waitFor(() =>
-      expect(
-        screen.getByText(/daemon scanner ved næste heartbeat/i),
-      ).toBeInTheDocument(),
-    );
+    expect(
+      screen.getByText(/daemon scanner ved næste heartbeat/i),
+    ).toBeInTheDocument();
   });
 
   it("renders a helper line when the agent has no runtime attached yet", () => {

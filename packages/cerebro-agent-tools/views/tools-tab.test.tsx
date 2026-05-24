@@ -1,21 +1,13 @@
 // @vitest-environment jsdom
-// CEREBRO-PATCH(agent-tools-tab-test): JEH-1710 — wrapper test covers both
-// local- and cloud-runtime agents handing off to AgentToolsCard. The card
-// itself owns the override-table assertions; this test is intentionally thin.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent } from "@multica/core/types";
-import { I18nProvider } from "@multica/core/i18n/react";
-import enCommon from "../../../locales/en/common.json";
-import enAgents from "../../../locales/en/agents.json";
-
-const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 
 const mockListRuntimes = vi.hoisted(() => vi.fn());
 const mockListRuntimeTools = vi.hoisted(() => vi.fn());
-const mockListAgentToolOverrides = vi.hoisted(() => vi.fn());
+const mockCerebroRequest = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -31,12 +23,12 @@ vi.mock("@multica/core/api", async () => {
       ...actual.api,
       listRuntimes: mockListRuntimes,
       listRuntimeTools: mockListRuntimeTools,
-      listAgentToolOverrides: mockListAgentToolOverrides,
+      cerebroRequest: mockCerebroRequest,
     },
   };
 });
 
-import { CerebroToolsTab } from "./cerebro-tools-tab";
+import { CerebroToolsTab } from "./tools-tab";
 
 const baseAgent: Agent = {
   id: "agent-1",
@@ -70,9 +62,7 @@ function renderToolsTab(agent: Agent = baseAgent, canEdit = true) {
   });
   return render(
     <QueryClientProvider client={qc}>
-      <I18nProvider locale="en" resources={TEST_RESOURCES}>
-        <CerebroToolsTab agent={agent} canEdit={canEdit} />
-      </I18nProvider>
+      <CerebroToolsTab agent={agent} canEdit={canEdit} />
     </QueryClientProvider>,
   );
 }
@@ -83,21 +73,19 @@ beforeEach(() => {
     { id: "runtime-1", name: "sara-mac-mini", workspace_id: "ws-1" },
   ]);
   mockListRuntimeTools.mockResolvedValue([]);
-  mockListAgentToolOverrides.mockResolvedValue([]);
+  mockCerebroRequest.mockResolvedValue([]);
 });
 
 describe("CerebroToolsTab", () => {
-  it("renders the AgentToolsCard for local agents (override flow is no longer blocked)", async () => {
+  it("renders the AgentToolsCard for local agents", async () => {
     renderToolsTab({ ...baseAgent, runtime_mode: "local" });
 
     expect(await screen.findByText(/Tools på agenten/i)).toBeInTheDocument();
   });
 
-  it("renders the AgentToolsCard for cloud agents (empty registry surfaces the heartbeat hint)", async () => {
+  it("renders the AgentToolsCard for cloud agents", async () => {
     renderToolsTab();
 
-    // The card title is rendered immediately; the empty-state hint follows
-    // once the runtime-tools fetch resolves.
     expect(await screen.findByText(/Tools på agenten/i)).toBeInTheDocument();
     expect(
       await screen.findByText(/daemon scanner ved næste heartbeat/i),

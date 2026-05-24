@@ -9,9 +9,9 @@ import {
   Shield,
   ListTodo,
   Terminal,
-  Wrench, // CEREBRO-PATCH(agent-tools-tab): W8 tools tab icon
 } from "lucide-react";
 import type { Agent, AgentRuntime } from "@multica/core/types";
+import { createAgentToolsTabs } from "@multica/cerebro-agent-tools/views"; // CEREBRO-PATCH(agent-tools-tab): tab extension
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,7 +29,6 @@ import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 // CEREBRO-PATCH(agent-sandbox-tab): JEH-1088 — persona sandbox tab (cerebro-only)
 import { SandboxTab } from "./tabs/sandbox-tab";
-import { CerebroToolsTab } from "./tabs/cerebro-tools-tab"; // CEREBRO-PATCH(agent-tools-tab): W8 tools tab
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
 
@@ -40,11 +39,19 @@ type DetailTab =
   | "skills"
   | "env"
   | "custom_args"
-  | "sandbox"
-  | "tools"; // CEREBRO-PATCH(agent-tools-tab): W8 tools tab
+  | "sandbox";
 
-// CEREBRO-PATCH(agent-tools-tab): extended with "tools" key for W8
-const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "skills" | "environment" | "custom_args" | "sandbox" | "tools"> = {
+type TabLabelKey =
+  | "activity"
+  | "tasks"
+  | "instructions"
+  | "skills"
+  | "environment"
+  | "custom_args"
+  | "sandbox"
+  | "tools";
+
+const TAB_LABEL_KEY: Record<DetailTab, TabLabelKey> = {
   activity: "activity",
   tasks: "tasks",
   instructions: "instructions",
@@ -52,21 +59,25 @@ const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "
   env: "environment",
   custom_args: "custom_args",
   sandbox: "sandbox",
-  tools: "tools",
 };
 
-const detailTabs: {
+const coreDetailTabs: {
   id: DetailTab;
   icon: typeof FileText;
+  labelKey: TabLabelKey;
 }[] = [
-  { id: "activity", icon: Activity },
-  { id: "tasks", icon: ListTodo },
-  { id: "instructions", icon: FileText },
-  { id: "skills", icon: BookOpenText },
-  { id: "env", icon: KeyRound },
-  { id: "custom_args", icon: Terminal },
-  { id: "sandbox", icon: Shield },
-  { id: "tools", icon: Wrench }, // CEREBRO-PATCH(agent-tools-tab): W8 tools tab entry
+  { id: "activity", icon: Activity, labelKey: TAB_LABEL_KEY.activity },
+  { id: "tasks", icon: ListTodo, labelKey: TAB_LABEL_KEY.tasks },
+  { id: "instructions", icon: FileText, labelKey: TAB_LABEL_KEY.instructions },
+  { id: "skills", icon: BookOpenText, labelKey: TAB_LABEL_KEY.skills },
+  { id: "env", icon: KeyRound, labelKey: TAB_LABEL_KEY.env },
+  { id: "custom_args", icon: Terminal, labelKey: TAB_LABEL_KEY.custom_args },
+  { id: "sandbox", icon: Shield, labelKey: TAB_LABEL_KEY.sandbox },
+];
+
+const detailTabs = [
+  ...coreDetailTabs,
+  ...createAgentToolsTabs(), // CEREBRO-PATCH(agent-tools-tab): Cerebro-owned tab
 ];
 
 interface AgentOverviewPaneProps {
@@ -106,18 +117,18 @@ export function AgentOverviewPane({
   onUpdate,
 }: AgentOverviewPaneProps) {
   const { t } = useT("agents");
-  const [activeTab, setActiveTab] = useState<DetailTab>("activity");
+  const [activeTab, setActiveTab] = useState<string>("activity");
   const [activeDirty, setActiveDirty] = useState(false);
   // Holds the destination when a tab change is intercepted by the dirty
   // guard. Null means no pending change. The AlertDialog reads non-null as
   // "open".
-  const [pendingTab, setPendingTab] = useState<DetailTab | null>(null);
+  const [pendingTab, setPendingTab] = useState<string | null>(null);
 
   const runtime = agent.runtime_id
     ? runtimes.find((r) => r.id === agent.runtime_id) ?? null
     : null;
 
-  const requestTabChange = (next: DetailTab) => {
+  const requestTabChange = (next: string) => {
     if (next === activeTab) return;
     if (activeDirty) {
       setPendingTab(next);
@@ -155,7 +166,7 @@ export function AgentOverviewPane({
             }`}
           >
             <tab.icon className="h-3.5 w-3.5" />
-            {t(($) => $.tabs[TAB_LABEL_KEY[tab.id]])}
+            {t(($) => $.tabs[tab.labelKey])}
           </button>
         ))}
       </div>
@@ -213,11 +224,12 @@ export function AgentOverviewPane({
             />
           </TabContent>
         )}
-        {/* CEREBRO-PATCH(agent-tools-tab): W8 — tools tab render block */}
-        {activeTab === "tools" && (
-          <TabContent>
-            <CerebroToolsTab agent={agent} canEdit={canEdit} />
-          </TabContent>
+        {detailTabs.map((tab) =>
+          "render" in tab && activeTab === tab.id ? (
+            <TabContent key={tab.id}>
+              {tab.render({ agent, runtimes, canEdit })}
+            </TabContent>
+          ) : null,
         )}
       </div>
 

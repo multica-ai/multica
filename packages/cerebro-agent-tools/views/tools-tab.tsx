@@ -1,22 +1,39 @@
 "use client";
 
-// CEREBRO-PATCH(agent-tools-tab): JEH-1710 — agent override UI on top of
-// runtime-level tool inventory. Replaces the previous AgentTool toggle list
-// (which read agent_tool_grant directly) with the runtime-default + per-agent
-// override model. The body lives in @multica/cerebro-runtime/views so the
-// upstream-zone footprint stays minimal — this wrapper just decides admin gate
-// + resolves the runtime name shown in the inherit banner.
-// Local AND cloud runtime agents are supported: both inherit from runtime-level
-// tools (cloud built-ins + scanned MCP-tools) and both can be overridden.
-
+import type { ComponentType, ReactNode } from "react";
+import { Wrench } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import type { Agent } from "@multica/core/types";
+import type { Agent, AgentRuntime } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { api } from "@multica/core/api";
-import { AgentToolsCard } from "@multica/cerebro-runtime/views";
+import { AgentToolsCard } from "./components/agent-tools-card";
+
+export interface AgentDetailTabExtension {
+  id: string;
+  labelKey: "tools";
+  icon: ComponentType<{ className?: string }>;
+  render: (context: {
+    agent: Agent;
+    runtimes: AgentRuntime[];
+    canEdit: boolean;
+  }) => ReactNode;
+}
 
 const runtimeListKey = (wsId: string) =>
   ["workspace", "agent-runtimes", wsId] as const;
+
+export function createAgentToolsTabs(): AgentDetailTabExtension[] {
+  return [
+    {
+      id: "tools",
+      labelKey: "tools",
+      icon: Wrench,
+      render: ({ agent, canEdit }) => (
+        <CerebroToolsTab agent={agent} canEdit={canEdit} />
+      ),
+    },
+  ];
+}
 
 export function CerebroToolsTab({
   agent,
