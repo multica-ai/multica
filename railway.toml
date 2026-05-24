@@ -1,0 +1,18 @@
+# Railway configuration — Backend (API + WebSocket) service.
+#
+# This file is picked up automatically by the Backend service in Railway when
+# the service root directory is set to "/" (repository root).
+#
+# Frontend service: create a second Railway service from this same repo, then
+# in Service → Settings → Build set "Dockerfile Path" to "Dockerfile.web" and
+# "Build Context" to "/". See RAILWAY.md for the full step-by-step guide.
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/live"
+healthcheckTimeout = 300
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10
