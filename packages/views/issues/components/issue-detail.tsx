@@ -66,6 +66,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { ContentEditor, type ContentEditorRef } from "../../editor/content-editor";
 import { FileDropOverlay } from "../../editor/file-drop-overlay";
@@ -634,6 +635,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
+  const [metadataOpen, setMetadataOpen] = useState(false);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   // Issue pages render long timelines; don't yank the user to the bottom on
@@ -1438,6 +1440,35 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           </button>
           {pullRequestsOpen && <div className="pl-2"><PullRequestList issueId={id} /></div>}
         </div>
+      )}
+
+      {/* Metadata is an agent-facing free-form bag. Keep the sidebar quiet,
+          but expose the raw payload when it exists. */}
+      {Object.keys(issue.metadata ?? {}).length > 0 && (
+        <>
+          <button
+            type="button"
+            className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
+            onClick={() => setMetadataOpen(true)}
+          >
+            <span>
+              {t(($) => $.detail.section_metadata)}{" "}
+              <span className="tabular-nums">
+                · {Object.keys(issue.metadata ?? {}).length}
+              </span>
+            </span>
+          </button>
+          <Dialog open={metadataOpen} onOpenChange={setMetadataOpen}>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>{t(($) => $.detail.section_metadata)}</DialogTitle>
+              </DialogHeader>
+              <pre className="max-h-[60vh] overflow-auto rounded-md bg-muted p-3 font-mono text-xs">
+                {JSON.stringify(issue.metadata ?? {}, null, 2)}
+              </pre>
+            </DialogContent>
+          </Dialog>
+        </>
       )}
 
       {/* Details */}

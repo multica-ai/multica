@@ -432,6 +432,7 @@ const mockIssue: Issue = {
   parent_issue_id: null,
   project_id: null,
   position: 0,
+  metadata: {},
   start_date: null,
   due_date: "2026-06-01T00:00:00Z",
   created_at: "2026-01-15T00:00:00Z",
@@ -733,6 +734,43 @@ describe("IssueDetail (shared)", () => {
 
     expect(screen.queryByTestId("panel-group")).not.toBeInTheDocument();
     expect(screen.queryByText("Properties")).not.toBeInTheDocument();
+  });
+
+  it("opens raw metadata JSON from the sidebar trigger", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      metadata: {
+        pr_url: "https://example.com/pr/1",
+        pipeline_status: "running",
+      },
+    });
+
+    renderIssueDetail();
+
+    const button = await screen.findByRole("button", { name: /^Metadata\b/ });
+    expect(button).toHaveTextContent("Metadata · 2");
+    fireEvent.click(button);
+
+    const expected = JSON.stringify(
+      { pr_url: "https://example.com/pr/1", pipeline_status: "running" },
+      null,
+      2,
+    );
+    await waitFor(() => {
+      const pre = document.querySelector("pre");
+      expect(pre).not.toBeNull();
+      expect(pre!.textContent).toBe(expected);
+    });
+  });
+
+  it("hides the Metadata trigger when the bag is empty", async () => {
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Details")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole("button", { name: /^Metadata\b/ })).not.toBeInTheDocument();
   });
 
   it("renders Details section with Created by and dates", async () => {
