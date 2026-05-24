@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { matchLocale, LOCALE_COOKIE } from "@multica/core/i18n";
+import { startPagePath } from "@/lib/start-page-redirect";
 
 // Old workspace-scoped route segments that existed before the URL refactor
 // (pre-#1131). Any URL with these as the FIRST segment is a legacy URL that
@@ -78,7 +79,7 @@ export function proxy(req: NextRequest) {
   // --- Root path: redirect logged-in users to their last workspace ---
   if (pathname === "/" && hasSession && lastSlug) {
     const url = req.nextUrl.clone();
-    url.pathname = `/${lastSlug}/issues`;
+    url.pathname = startPagePath(lastSlug, req.cookies, req.headers);
     return NextResponse.redirect(url);
   }
 

@@ -54,7 +54,13 @@ export default function WorkspaceLayout({
     const oneYear = 60 * 60 * 24 * 365;
     const secure = location.protocol === "https:" ? "; Secure" : "";
     document.cookie = `last_workspace_slug=${encodeURIComponent(workspaceSlug)}; path=/; max-age=${oneYear}; SameSite=Lax${secure}`;
-  }, [workspace, workspaceSlug]);
+    const desktop = user?.preferences?.start_page_desktop;
+    const mobile = user?.preferences?.start_page_mobile;
+    if (typeof desktop === "string")
+      document.cookie = `start_page_desktop=${encodeURIComponent(desktop)}; path=/; max-age=${oneYear}; SameSite=Lax${secure}`;
+    if (typeof mobile === "string")
+      document.cookie = `start_page_mobile=${encodeURIComponent(mobile)}; path=/; max-age=${oneYear}; SameSite=Lax${secure}`;
+  }, [workspace, workspaceSlug, user?.preferences]);
 
   // Remember whether this slug has resolved before. Used below to avoid
   // flashing NoAccessPage during active workspace removal (delete, leave,

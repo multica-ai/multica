@@ -39,6 +39,13 @@ function toStartPage(val: unknown): StartPage {
   return "issues";
 }
 
+function writeStartPageCookie(key: string, value: StartPage) {
+  if (typeof document === "undefined") return;
+  const oneYear = 60 * 60 * 24 * 365;
+  const secure = location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${key}=${encodeURIComponent(value)}; path=/; max-age=${oneYear}; SameSite=Lax${secure}`;
+}
+
 export function StartPagePreferenceSection() {
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
@@ -52,6 +59,7 @@ export function StartPagePreferenceSection() {
     try {
       const updated = await api.updateMyPreferences({ [key]: value });
       setUser(updated);
+      writeStartPageCookie(key, value);
       toast.success("Start page updated");
     } catch (e) {
       toast.error(
