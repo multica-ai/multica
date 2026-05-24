@@ -26,14 +26,19 @@ const VALID_START_PAGES = new Set([
   "notifications",
 ]);
 
-function getStartPage(preferences: Record<string, unknown>, key: string) {
-  const value = preferences[key];
+function getStartPage(
+  preferences: Record<string, unknown> | undefined,
+  key: string,
+) {
+  const value = preferences?.[key];
   return typeof value === "string" && VALID_START_PAGES.has(value)
     ? value
     : "issues";
 }
 
-function writeStartPageCookies(preferences: Record<string, unknown>) {
+function writeStartPageCookies(
+  preferences: Record<string, unknown> | undefined,
+) {
   const oneYear = 60 * 60 * 24 * 365;
   const secure = location.protocol === "https:" ? "; Secure" : "";
   const desktop = getStartPage(preferences, "start_page_desktop");
