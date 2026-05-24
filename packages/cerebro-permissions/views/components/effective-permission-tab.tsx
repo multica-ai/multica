@@ -55,7 +55,7 @@ export function EffectivePermissionTab({ wsId }: { wsId: string }) {
         }}
       >
         <Field label="Actor-type">
-          <Select value={actorType} onValueChange={setActorType}>
+          <Select value={actorType} onValueChange={(value) => setActorType(value ?? "member")}>
             <SelectTrigger size="sm">
               <SelectValue />
             </SelectTrigger>

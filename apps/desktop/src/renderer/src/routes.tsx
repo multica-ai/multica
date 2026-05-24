@@ -49,8 +49,8 @@ import { Download, Server } from "lucide-react";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
 import { UpdatesSettingsTab } from "./components/updates-settings-tab";
 import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
-import { cerebroFeatureFlagTabs } from "@multica/cerebro-feature-flags";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { cerebroFeatureFlagTabs } from "@multica/cerebro-feature-flags/settings-tabs";
 import { IssueListReferenceFilter } from "@multica/cerebro-references/views";
 import { ReferencesByObjectPage } from "@multica/cerebro-references/views/pages";
 

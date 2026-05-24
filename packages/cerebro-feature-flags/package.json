@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./index.tsx"
+    ".": "./index.tsx",
+    "./settings-tabs": "./settings-tabs.tsx"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
