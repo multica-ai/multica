@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -182,4 +183,64 @@ func TestFixedRepoLock_WaitAndLock_ContextCancel(t *testing.T) {
 		t.Fatalf("expected empty string on context cancel, got %q", gotPath)
 	}
 	table.unlock("/data/repos/a")
+}
+
+func TestFixedRepoLock_WaitAndLock_PartiallyAvailable(t *testing.T) {
+	t.Parallel()
+
+	table := newFixedRepoLockTable()
+	ctx := context.Background()
+
+	// Lock path a, leave path b free.
+	table.tryLock("/data/repos/a", "task-1")
+
+	path := table.waitAndLock([]string{"/data/repos/a", "/data/repos/b"}, "task-2", ctx)
+	if path != "/data/repos/b" {
+		t.Fatalf("expected available path /data/repos/b, got %q", path)
+	}
+	table.unlock("/data/repos/a")
+	table.unlock(path)
+}
+
+func TestFixedRepoLock_WaitAndLock_MultipleWaiters(t *testing.T) {
+	t.Parallel()
+
+	table := newFixedRepoLockTable()
+	ctx := context.Background()
+
+	// Lock the only path.
+	table.tryLock("/data/repos/a", "task-0")
+
+	var wg sync.WaitGroup
+	results := make(chan string, 3)
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			p := table.waitAndLock([]string{"/data/repos/a"}, id, ctx)
+			if p != "" {
+				results <- p
+				table.unlock(p)
+			}
+		}(fmt.Sprintf("task-%d", i+1))
+	}
+
+	// Unlock — one waiter should win, others should block again.
+	time.Sleep(50 * time.Millisecond)
+	table.unlock("/data/repos/a")
+
+	// Give time for the winner to be processed, then cancel remaining waiters
+	// by unlocking (which cycles them) and checking results.
+	time.Sleep(100 * time.Millisecond)
+
+	// Collect results: at least one waiter should have acquired the lock.
+	close(results)
+	var acquired []string
+	for p := range results {
+		acquired = append(acquired, p)
+	}
+
+	if len(acquired) < 1 {
+		t.Fatal("expected at least one waiter to acquire the lock after unlock")
+	}
 }

@@ -14,7 +14,8 @@ func TestCreateAgentRequest_FixedRepoFields(t *testing.T) {
 		"fixed_repo_enabled": true,
 		"fixed_repo_paths": ["/data/repos/a", "/data/repos/b"],
 		"vcs_type": "git",
-		"cleanup_script": "/data/repos/scripts/clean.sh"
+		"cleanup_script": "/data/repos/scripts/clean.sh",
+		"init_script": "/data/repos/scripts/init.sh"
 	}`
 
 	var req CreateAgentRequest
@@ -33,6 +34,9 @@ func TestCreateAgentRequest_FixedRepoFields(t *testing.T) {
 	}
 	if req.CleanupScript != "/data/repos/scripts/clean.sh" {
 		t.Fatalf("expected cleanup_script, got %q", req.CleanupScript)
+	}
+	if req.InitScript != "/data/repos/scripts/init.sh" {
+		t.Fatalf("expected init_script, got %q", req.InitScript)
 	}
 }
 
@@ -61,6 +65,9 @@ func TestCreateAgentRequest_FixedRepoFieldsOmitted(t *testing.T) {
 	if req.CleanupScript != "" {
 		t.Fatal("CleanupScript should be empty when omitted")
 	}
+	if req.InitScript != "" {
+		t.Fatal("InitScript should be empty when omitted")
+	}
 }
 
 func TestUpdateAgentRequest_FixedRepoFields(t *testing.T) {
@@ -70,7 +77,8 @@ func TestUpdateAgentRequest_FixedRepoFields(t *testing.T) {
 		"fixed_repo_enabled": true,
 		"fixed_repo_paths": ["/data/repos/x"],
 		"vcs_type": "p4",
-		"cleanup_script": ""
+		"cleanup_script": "",
+		"init_script": "/data/repos/scripts/init.sh"
 	}`
 
 	var req UpdateAgentRequest
@@ -90,6 +98,9 @@ func TestUpdateAgentRequest_FixedRepoFields(t *testing.T) {
 	if req.CleanupScript == nil || *req.CleanupScript != "" {
 		t.Fatal("CleanupScript should be empty string")
 	}
+	if req.InitScript == nil || *req.InitScript != "/data/repos/scripts/init.sh" {
+		t.Fatal("InitScript should be '/data/repos/scripts/init.sh'")
+	}
 }
 
 func TestAgentResponse_FixedRepoFields(t *testing.T) {
@@ -100,6 +111,7 @@ func TestAgentResponse_FixedRepoFields(t *testing.T) {
 		FixedRepoPaths:   []string{"/data/repos/a"},
 		VCSType:          "svn",
 		CleanupScript:    "/clean.sh",
+		InitScript:       "/init.sh",
 	}
 
 	data, err := json.Marshal(resp)
@@ -124,6 +136,9 @@ func TestAgentResponse_FixedRepoFields(t *testing.T) {
 	}
 	if v, ok := out["cleanup_script"].(string); !ok || v != "/clean.sh" {
 		t.Fatal("cleanup_script should be '/clean.sh'")
+	}
+	if v, ok := out["init_script"].(string); !ok || v != "/init.sh" {
+		t.Fatal("init_script should be '/init.sh'")
 	}
 }
 
@@ -164,5 +179,8 @@ func TestUpdateAgentRequest_FixedRepoFieldsOmitted(t *testing.T) {
 	}
 	if req.CleanupScript != nil {
 		t.Fatal("CleanupScript should be nil when omitted")
+	}
+	if req.InitScript != nil {
+		t.Fatal("InitScript should be nil when omitted")
 	}
 }
