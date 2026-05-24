@@ -265,6 +265,8 @@ func (h *Handler) ListWorkspaceActivity(w http.ResponseWriter, r *http.Request) 
 	actions := []string{
 		"agent_persona_sandbox_changed",
 		"runtime_persona_sandbox_changed",
+		"runtime_sandbox_policy_changed",
+		"runtime_sandbox_enforcement_decision",
 	}
 
 	rows, err := h.Queries.ListWorkspaceActivities(r.Context(), db.ListWorkspaceActivitiesParams{

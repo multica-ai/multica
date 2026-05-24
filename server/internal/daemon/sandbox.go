@@ -95,7 +95,7 @@ var providerKeychainItems = map[string][]string{
 //   - the Multica server host derived from cfg.ServerBaseURL,
 //   - loopback to the daemon health port,
 //   - a per-agent override when AgentData.SandboxAllowlist is non-empty.
-func (d *Daemon) buildSandboxConfig(provider string, runtimeOverride *bool, agentData *AgentData) *agent.SandboxConfig {
+func (d *Daemon) buildSandboxConfig(provider string, runtimeOverride *bool, runtimePolicy RuntimeSandboxPolicy, agentData *AgentData) *agent.SandboxConfig {
 	enabled := d.cfg.EnableSandbox
 	if runtimeOverride != nil {
 		enabled = *runtimeOverride
@@ -123,13 +123,17 @@ func (d *Daemon) buildSandboxConfig(provider string, runtimeOverride *bool, agen
 	if hp := serverHostPort(d.cfg.ServerBaseURL); hp != "" {
 		hosts = append(hosts, hp)
 	}
-	// Provider-default endpoints.
-	hosts = append(hosts, providerSandboxAllowlist[provider]...)
-	// Daemon-wide operator-supplied additions.
-	hosts = append(hosts, d.cfg.SandboxAllowlist...)
-	// Per-agent override (admin-gated on the server side).
-	if agentData != nil {
-		hosts = append(hosts, agentData.SandboxAllowlist...)
+	if runtimePolicy.NetworkMode == sandboxNetworkModeCustom {
+		hosts = append(hosts, runtimePolicy.AllowedHosts...)
+	} else {
+		// Provider-default endpoints.
+		hosts = append(hosts, providerSandboxAllowlist[provider]...)
+		// Daemon-wide operator-supplied additions.
+		hosts = append(hosts, d.cfg.SandboxAllowlist...)
+		// Per-agent override (admin-gated on the server side).
+		if agentData != nil {
+			hosts = append(hosts, agentData.SandboxAllowlist...)
+		}
 	}
 
 	keychainAccess := sandbox.KeychainAccessDeny
@@ -140,7 +144,9 @@ func (d *Daemon) buildSandboxConfig(provider string, runtimeOverride *bool, agen
 	return &agent.SandboxConfig{
 		Enabled:              true,
 		NetworkAllowlist:     hosts,
-		WritablePaths:        providerWritablePaths(provider),
+		WritablePaths:        append(providerWritablePaths(provider), runtimePolicy.ExtraWritablePaths...),
+		DeniedPaths:          runtimePolicy.DeniedPaths,
+		DeniedExecutables:    runtimeShellDenyExecutables(runtimePolicy),
 		KeychainAccess:       keychainAccess,
 		KeychainItemsAllowed: providerKeychainItems[provider],
 	}

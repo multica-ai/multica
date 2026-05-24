@@ -36,6 +36,9 @@ type AgentRuntimeResponse struct {
 	// (JEH-418). nil = inherit the daemon's MULTICA_ENABLE_SANDBOX value;
 	// true/false = force on/off for this runtime regardless of env.
 	SandboxEnabled *bool `json:"sandbox_enabled"`
+	// SandboxPolicy is Multica-owned runtime policy that shapes daemon
+	// Seatbelt enforcement for shell, host and path controls.
+	SandboxPolicy any `json:"sandbox_policy"`
 	// CEREBRO-PATCH(runtime): persona integration additions.
 	// PersonaSandbox is the runtime-scoped persona sandbox (E1). When set it
 	// is the hard upper bound for every agent on this runtime — at spawn
@@ -95,6 +98,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		Metadata:       metadata,
 		OwnerID:        uuidToPtr(rt.OwnerID),
 		SandboxEnabled: boolToPtr(rt.SandboxEnabled),
+		SandboxPolicy:  unmarshalJSONMap(rt.SandboxPolicy),
 		PersonaSandbox: rt.PersonaSandbox.String,
 		Capabilities:   capabilities,
 		LastSeenAt:     timestampToPtr(rt.LastSeenAt),
@@ -120,6 +124,17 @@ func unmarshalToolsConfig(raw []byte) any {
 	var out any
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil
+	}
+	return out
+}
+
+func unmarshalJSONMap(raw []byte) any {
+	if len(raw) == 0 {
+		return map[string]any{}
+	}
+	var out any
+	if err := json.Unmarshal(raw, &out); err != nil || out == nil {
+		return map[string]any{}
 	}
 	return out
 }
@@ -693,6 +708,10 @@ type UpdateRuntimeSandboxRequest struct {
 	SandboxEnabled *bool `json:"sandbox_enabled"`
 }
 
+type RuntimeSandboxPolicyRequest struct {
+	SandboxPolicy json.RawMessage `json:"sandbox_policy"`
+}
+
 // UpdateAgentRuntimeSandbox sets or clears the per-runtime sandbox override.
 // Restricted to workspace owner/admin: this is a security-posture toggle and
 // runtime owners shouldn't be able to silently disable sandboxing on a runtime
@@ -747,6 +766,69 @@ func (h *Handler) UpdateAgentRuntimeSandbox(w http.ResponseWriter, r *http.Reque
 	)
 
 	// Notify the frontend to refresh runtime list/details.
+	h.publish(protocol.EventDaemonRegister, wsID, "member", uuidToString(member.UserID), map[string]any{
+		"action":     "update",
+		"runtime_id": runtimeID,
+	})
+
+	writeJSON(w, http.StatusOK, runtimeToResponse(updated))
+}
+
+func (h *Handler) UpdateAgentRuntimeSandboxPolicy(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), parseUUID(runtimeID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+
+	wsID := uuidToString(rt.WorkspaceID)
+	member, ok := h.requireWorkspaceMember(w, r, wsID, "runtime not found")
+	if !ok {
+		return
+	}
+	if !roleAllowed(member.Role, "owner", "admin") {
+		writeError(w, http.StatusForbidden, "only workspace owners and admins can change sandbox policy")
+		return
+	}
+
+	var req RuntimeSandboxPolicyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.SandboxPolicy) == 0 || string(req.SandboxPolicy) == "null" {
+		req.SandboxPolicy = json.RawMessage(`{}`)
+	}
+	if !json.Valid(req.SandboxPolicy) {
+		writeError(w, http.StatusBadRequest, "sandbox_policy must be valid JSON")
+		return
+	}
+
+	updated, err := h.Queries.UpdateAgentRuntimeSandboxPolicy(r.Context(), db.UpdateAgentRuntimeSandboxPolicyParams{
+		ID:            rt.ID,
+		SandboxPolicy: req.SandboxPolicy,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update sandbox policy")
+		return
+	}
+
+	auditDetails, _ := json.Marshal(map[string]any{
+		"runtime_id":     runtimeID,
+		"runtime_name":   rt.Name,
+		"sandbox_policy": json.RawMessage(req.SandboxPolicy),
+	})
+	_, _ = h.Queries.CreateActivity(r.Context(), db.CreateActivityParams{
+		WorkspaceID: rt.WorkspaceID,
+		IssueID:     pgtype.UUID{},
+		ActorType:   pgtype.Text{String: "member", Valid: true},
+		ActorID:     member.UserID,
+		Action:      "runtime_sandbox_policy_changed",
+		Details:     auditDetails,
+	})
+
 	h.publish(protocol.EventDaemonRegister, wsID, "member", uuidToString(member.UserID), map[string]any{
 		"action":     "update",
 		"runtime_id": runtimeID,

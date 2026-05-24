@@ -993,6 +993,9 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 			if override := boolToPtr(rt.SandboxEnabled); override != nil {
 				pingPayload["sandbox_enabled"] = *override
 			}
+			if len(rt.SandboxPolicy) > 0 {
+				pingPayload["runtime_sandbox_policy"] = json.RawMessage(rt.SandboxPolicy)
+			}
 			resp["pending_ping"] = pingPayload
 		}
 	}
@@ -1452,11 +1455,29 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// the override defaults to safe-by-default sandboxing.
 	if rt, err := h.Queries.GetAgentRuntime(r.Context(), task.RuntimeID); err == nil {
 		resp.SandboxEnabled = boolToPtr(rt.SandboxEnabled)
+		if len(rt.SandboxPolicy) > 0 {
+			resp.RuntimeSandboxPolicy = json.RawMessage(rt.SandboxPolicy)
+		}
 		resp.RuntimePersonaSandbox = rt.PersonaSandbox.String
 		// CEREBRO-PATCH(runtime-tools-config-claim-populate): surface runtime tools_config to daemon (9031).
 		if len(rt.ToolsConfig) > 0 {
 			resp.RuntimeToolsConfig = json.RawMessage(rt.ToolsConfig)
 		}
+		auditDetails, _ := json.Marshal(map[string]any{
+			"task_id":                uuidToString(task.ID),
+			"runtime_id":             uuidToString(task.RuntimeID),
+			"agent_id":               uuidToString(task.AgentID),
+			"sandbox_enabled":        boolToPtr(rt.SandboxEnabled),
+			"runtime_sandbox_policy": json.RawMessage(rt.SandboxPolicy),
+		})
+		_, _ = h.Queries.CreateActivity(r.Context(), db.CreateActivityParams{
+			WorkspaceID: rt.WorkspaceID,
+			IssueID:     pgtype.UUID{},
+			ActorType:   pgtype.Text{String: "agent", Valid: true},
+			ActorID:     task.AgentID,
+			Action:      "runtime_sandbox_enforcement_decision",
+			Details:     auditDetails,
+		})
 	} else {
 		slog.Warn("failed to load runtime for sandbox override", "runtime_id", uuidToString(task.RuntimeID), "error", err)
 	}

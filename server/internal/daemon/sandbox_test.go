@@ -18,14 +18,14 @@ func sandboxTestDaemon(cfg Config) *Daemon {
 
 func TestBuildSandboxConfig_DisabledReturnsNil(t *testing.T) {
 	d := sandboxTestDaemon(Config{SandboxConfig: cerebroruntime.SandboxConfig{EnableSandbox: false}})
-	if got := d.buildSandboxConfig("claude", nil, nil); got != nil {
+	if got := d.buildSandboxConfig("claude", nil, RuntimeSandboxPolicy{}, nil); got != nil {
 		t.Errorf("expected nil when sandbox disabled, got %+v", got)
 	}
 }
 
 func TestBuildSandboxConfig_SkipsCodex(t *testing.T) {
 	d := sandboxTestDaemon(Config{SandboxConfig: cerebroruntime.SandboxConfig{EnableSandbox: true}, HealthPort: 19514})
-	if got := d.buildSandboxConfig("codex", nil, nil); got != nil {
+	if got := d.buildSandboxConfig("codex", nil, RuntimeSandboxPolicy{}, nil); got != nil {
 		t.Errorf("expected nil for codex (own sandbox), got %+v", got)
 	}
 }
@@ -36,7 +36,7 @@ func TestBuildSandboxConfig_IncludesLoopbackAndProvider(t *testing.T) {
 		HealthPort:    19514,
 		ServerBaseURL: "https://multica.example.com",
 	})
-	got := d.buildSandboxConfig("claude", nil, nil)
+	got := d.buildSandboxConfig("claude", nil, RuntimeSandboxPolicy{}, nil)
 	if got == nil || !got.Enabled {
 		t.Fatal("expected enabled sandbox config")
 	}
@@ -57,7 +57,7 @@ func TestBuildSandboxConfig_MergesPerAgentOverride(t *testing.T) {
 		SandboxConfig: cerebroruntime.SandboxConfig{EnableSandbox: true},
 		HealthPort:    19514,
 	})
-	got := d.buildSandboxConfig("claude", nil, &AgentData{
+	got := d.buildSandboxConfig("claude", nil, RuntimeSandboxPolicy{}, &AgentData{
 		SandboxAllowlist: []string{"api.openai.com:443"},
 	})
 	if got == nil {
@@ -76,12 +76,56 @@ func TestBuildSandboxConfig_MergesDaemonAllowlist(t *testing.T) {
 		},
 		HealthPort: 19514,
 	})
-	got := d.buildSandboxConfig("claude", nil, nil)
+	got := d.buildSandboxConfig("claude", nil, RuntimeSandboxPolicy{}, nil)
 	if got == nil {
 		t.Fatal("expected sandbox config")
 	}
 	if !slices.Contains(got.NetworkAllowlist, "proxy.internal:8080") {
 		t.Errorf("daemon allowlist not merged: %v", got.NetworkAllowlist)
+	}
+}
+
+func TestBuildSandboxConfig_RuntimePolicyCustomHostsReplaceProviderDefaults(t *testing.T) {
+	d := sandboxTestDaemon(Config{
+		SandboxConfig: cerebroruntime.SandboxConfig{EnableSandbox: true},
+		HealthPort:    19514,
+		ServerBaseURL: "https://multica.example.com",
+	})
+	got := d.buildSandboxConfig("claude", nil, RuntimeSandboxPolicy{
+		NetworkMode:  sandboxNetworkModeCustom,
+		AllowedHosts: []string{"proxy.internal:8443"},
+	}, nil)
+	if got == nil {
+		t.Fatal("expected sandbox config")
+	}
+	for _, want := range []string{"127.0.0.1:19514", "localhost:19514", "multica.example.com:443", "proxy.internal:8443"} {
+		if !slices.Contains(got.NetworkAllowlist, want) {
+			t.Errorf("custom policy allowlist missing %q: %v", want, got.NetworkAllowlist)
+		}
+	}
+	if slices.Contains(got.NetworkAllowlist, "api.anthropic.com:443") {
+		t.Errorf("custom policy must replace provider defaults, got %v", got.NetworkAllowlist)
+	}
+}
+
+func TestBuildSandboxConfig_RuntimePolicyShellAndPaths(t *testing.T) {
+	d := sandboxTestDaemon(Config{SandboxConfig: cerebroruntime.SandboxConfig{EnableSandbox: true}, HealthPort: 19514})
+	got := d.buildSandboxConfig("claude", nil, RuntimeSandboxPolicy{
+		DenyShell:          true,
+		ExtraWritablePaths: []string{"/Users/sandbox/.cache/multica"},
+		DeniedPaths:        []string{"/Users/sandbox/Documents/private"},
+	}, nil)
+	if got == nil {
+		t.Fatal("expected sandbox config")
+	}
+	if !slices.Contains(got.DeniedExecutables, "/bin/sh") || !slices.Contains(got.DeniedExecutables, "/bin/bash") {
+		t.Errorf("deny_shell did not populate shell executable denies: %v", got.DeniedExecutables)
+	}
+	if !slices.Contains(got.WritablePaths, "/Users/sandbox/.cache/multica") {
+		t.Errorf("extra writable path not merged: %v", got.WritablePaths)
+	}
+	if !slices.Contains(got.DeniedPaths, "/Users/sandbox/Documents/private") {
+		t.Errorf("denied path not passed through: %v", got.DeniedPaths)
 	}
 }
 
@@ -93,7 +137,7 @@ func boolPtr(b bool) *bool { return &b }
 // runtime wins and the daemon hands a sandbox config to the backend.
 func TestBuildSandboxConfig_RuntimeOverrideEnables(t *testing.T) {
 	d := sandboxTestDaemon(Config{SandboxConfig: cerebroruntime.SandboxConfig{EnableSandbox: false}, HealthPort: 19514})
-	got := d.buildSandboxConfig("claude", boolPtr(true), nil)
+	got := d.buildSandboxConfig("claude", boolPtr(true), RuntimeSandboxPolicy{}, nil)
 	if got == nil || !got.Enabled {
 		t.Fatalf("expected sandbox enabled by per-runtime override, got %+v", got)
 	}
@@ -105,7 +149,7 @@ func TestBuildSandboxConfig_RuntimeOverrideEnables(t *testing.T) {
 // the sandbox). The override must beat the env-var default.
 func TestBuildSandboxConfig_RuntimeOverrideDisables(t *testing.T) {
 	d := sandboxTestDaemon(Config{SandboxConfig: cerebroruntime.SandboxConfig{EnableSandbox: true}, HealthPort: 19514})
-	if got := d.buildSandboxConfig("claude", boolPtr(false), nil); got != nil {
+	if got := d.buildSandboxConfig("claude", boolPtr(false), RuntimeSandboxPolicy{}, nil); got != nil {
 		t.Errorf("expected nil when per-runtime override disables sandbox, got %+v", got)
 	}
 }
@@ -115,11 +159,11 @@ func TestBuildSandboxConfig_RuntimeOverrideDisables(t *testing.T) {
 // existing runtimes (sandbox_enabled IS NULL) keep their previous behaviour.
 func TestBuildSandboxConfig_NilOverrideUsesEnvDefault(t *testing.T) {
 	dOn := sandboxTestDaemon(Config{SandboxConfig: cerebroruntime.SandboxConfig{EnableSandbox: true}, HealthPort: 19514})
-	if got := dOn.buildSandboxConfig("claude", nil, nil); got == nil {
+	if got := dOn.buildSandboxConfig("claude", nil, RuntimeSandboxPolicy{}, nil); got == nil {
 		t.Errorf("EnableSandbox=true + nil override: expected sandbox config, got nil")
 	}
 	dOff := sandboxTestDaemon(Config{SandboxConfig: cerebroruntime.SandboxConfig{EnableSandbox: false}, HealthPort: 19514})
-	if got := dOff.buildSandboxConfig("claude", nil, nil); got != nil {
+	if got := dOff.buildSandboxConfig("claude", nil, RuntimeSandboxPolicy{}, nil); got != nil {
 		t.Errorf("EnableSandbox=false + nil override: expected nil, got %+v", got)
 	}
 }
@@ -132,7 +176,7 @@ func TestBuildSandboxConfig_NilOverrideUsesEnvDefault(t *testing.T) {
 // list per provider.
 func TestBuildSandboxConfig_PopulatesProviderWritePaths(t *testing.T) {
 	d := sandboxTestDaemon(Config{SandboxConfig: cerebroruntime.SandboxConfig{EnableSandbox: true}, HealthPort: 19514})
-	got := d.buildSandboxConfig("claude", nil, nil)
+	got := d.buildSandboxConfig("claude", nil, RuntimeSandboxPolicy{}, nil)
 	if got == nil {
 		t.Fatal("expected sandbox config")
 	}
@@ -170,7 +214,7 @@ func TestBuildSandboxConfig_LegacyProviderGetsReadOnlyKeychain(t *testing.T) {
 	d := sandboxTestDaemon(Config{SandboxConfig: cerebroruntime.SandboxConfig{EnableSandbox: true}, HealthPort: 19514})
 	for _, provider := range []string{"claude", "cursor", "gemini", "copilot"} {
 		t.Run(provider, func(t *testing.T) {
-			got := d.buildSandboxConfig(provider, nil, nil)
+			got := d.buildSandboxConfig(provider, nil, RuntimeSandboxPolicy{}, nil)
 			if got == nil {
 				t.Fatal("expected sandbox config")
 			}
@@ -191,7 +235,7 @@ func TestBuildSandboxConfig_LegacyProviderGetsReadOnlyKeychain(t *testing.T) {
 // against any keychain item.
 func TestBuildSandboxConfig_NewProviderGetsKeychainDeny(t *testing.T) {
 	d := sandboxTestDaemon(Config{SandboxConfig: cerebroruntime.SandboxConfig{EnableSandbox: true}, HealthPort: 19514})
-	got := d.buildSandboxConfig("unknown-cli", nil, nil)
+	got := d.buildSandboxConfig("unknown-cli", nil, RuntimeSandboxPolicy{}, nil)
 	if got == nil {
 		t.Fatal("expected sandbox config")
 	}
@@ -205,7 +249,7 @@ func TestBuildSandboxConfig_NewProviderGetsKeychainDeny(t *testing.T) {
 
 func TestBuildSandboxConfig_NoWritePathsForUnknownProvider(t *testing.T) {
 	d := sandboxTestDaemon(Config{SandboxConfig: cerebroruntime.SandboxConfig{EnableSandbox: true}, HealthPort: 19514})
-	got := d.buildSandboxConfig("unknown-cli", nil, nil)
+	got := d.buildSandboxConfig("unknown-cli", nil, RuntimeSandboxPolicy{}, nil)
 	if got == nil {
 		t.Fatal("expected sandbox config")
 	}

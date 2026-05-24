@@ -1649,6 +1649,16 @@ export class ApiClient {
     });
   }
 
+  async updateRuntimeSandboxPolicy(
+    runtimeId: string,
+    sandboxPolicy: AgentRuntime["sandbox_policy"],
+  ): Promise<AgentRuntime> {
+    return this.fetch(`/api/runtimes/${runtimeId}/sandbox-policy`, {
+      method: "PATCH",
+      body: JSON.stringify({ sandbox_policy: sandboxPolicy }),
+    });
+  }
+
   // updateRuntimePersonaSandbox sets (or clears, via empty string) the
 // CEREBRO-PATCH(client): persona integration additions.
   // runtime-level persona sandbox cap (E1). Server-side the field is gated to

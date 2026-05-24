@@ -219,6 +219,14 @@ SET sandbox_enabled = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateAgentRuntimeSandboxPolicy :one
+-- Sets the Multica-owned per-runtime sandbox policy used by the daemon to
+-- shape shell, host and path enforcement at spawn time.
+UPDATE agent_runtime
+SET sandbox_policy = COALESCE($2, '{}'::jsonb), updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: CountActiveAgentsByRuntime :one
 SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL;
 

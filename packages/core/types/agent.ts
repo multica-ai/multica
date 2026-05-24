@@ -13,6 +13,14 @@ export type AgentVisibility = "workspace" | "private";
 // "private" so the strictest behavior is the fallback.
 export type RuntimeVisibility = "private" | "public";
 
+export interface RuntimeSandboxPolicy {
+  network_mode?: "default" | "custom";
+  allowed_hosts?: string[];
+  extra_writable_paths?: string[];
+  denied_paths?: string[];
+  deny_shell?: boolean;
+}
+
 export interface RuntimeDevice {
   id: string;
   workspace_id: string;
@@ -28,6 +36,7 @@ export interface RuntimeDevice {
   // Per-runtime sandbox override (JEH-418). null = inherit the daemon's
   // MULTICA_ENABLE_SANDBOX env var; true/false = explicit on/off override.
   sandbox_enabled: boolean | null;
+  sandbox_policy?: RuntimeSandboxPolicy;
   // Runtime-level persona sandbox upper bound (E1). Empty string means
 // CEREBRO-PATCH(agent): persona integration additions.
   // the agent's own sandbox decides alone; non-empty (e.g. "claude-readonly")

@@ -280,7 +280,8 @@ type PendingPing struct {
 	// nil = inherit the daemon's env-var default. Without this field, an
 	// admin who disabled sandbox via the UI would still see pings fail
 	// because the ping path ran sandboxed against env-var-default=true.
-	SandboxEnabled *bool `json:"sandbox_enabled,omitempty"`
+	SandboxEnabled       *bool           `json:"sandbox_enabled,omitempty"`
+	RuntimeSandboxPolicy json.RawMessage `json:"runtime_sandbox_policy,omitempty"`
 }
 
 // Upstream pending-action types are aliased to the wire protocol so HTTP and WS

@@ -293,6 +293,45 @@ func TestGenerate_WritablePathOverlappingSensitiveStillDenied(t *testing.T) {
 	}
 }
 
+func TestGenerate_RuntimeDeniedPathsOverrideBroadHomeRead(t *testing.T) {
+	out, err := Generate(Profile{
+		Workdir:     "/Users/sandbox/work",
+		Home:        "/Users/sandbox",
+		DeniedPaths: []string{"/Users/sandbox/Documents/private"},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	want := `(deny file-read* file-write* (subpath "/Users/sandbox/Documents/private"))`
+	if !strings.Contains(out, want) {
+		t.Fatalf("profile missing runtime denied-path rule\nprofile:\n%s", out)
+	}
+	idxHome := strings.Index(out, `(allow file-read* (subpath "/Users/sandbox"))`)
+	idxDeny := strings.Index(out, want)
+	if idxHome < 0 || idxDeny < 0 || idxDeny < idxHome {
+		t.Fatalf("runtime denied path must be emitted after broad home read (home@%d deny@%d)", idxHome, idxDeny)
+	}
+}
+
+func TestGenerate_RuntimeDeniedExecutablesBlockShellEscape(t *testing.T) {
+	out, err := Generate(Profile{
+		Workdir:           "/Users/sandbox/work",
+		Home:              "/Users/sandbox",
+		DeniedExecutables: []string{"/bin/sh", "/bin/bash"},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for _, want := range []string{
+		`(deny process-exec (literal "/bin/sh"))`,
+		`(deny process-exec (literal "/bin/bash"))`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("profile missing denied executable rule %q\nprofile:\n%s", want, out)
+		}
+	}
+}
+
 func TestGenerate_AllowsWorkdirReadWrite(t *testing.T) {
 	out, err := Generate(Profile{
 		Workdir: "/Users/sandbox/work",

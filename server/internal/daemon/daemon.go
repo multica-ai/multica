@@ -1360,7 +1360,7 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string, currentVersio
 // toggle take effect for pings as well as task execution, so an unsandboxed
 // runtime doesn't suddenly fail health checks because the ping path ran
 // sandboxed against the env-var default.
-func (d *Daemon) handlePing(ctx context.Context, rt Runtime, pingID string, sandboxOverride *bool) {
+func (d *Daemon) handlePing(ctx context.Context, rt Runtime, pingID string, sandboxOverride *bool, sandboxPolicy RuntimeSandboxPolicy) {
 	d.logger.Info("ping requested", "runtime_id", rt.ID, "ping_id", pingID, "provider", rt.Provider)
 
 	start := time.Now()
@@ -1378,7 +1378,7 @@ func (d *Daemon) handlePing(ctx context.Context, rt Runtime, pingID string, sand
 	backend, err := agent.New(rt.Provider, agent.Config{
 		ExecutablePath: entry.Path,
 		Logger:         d.logger,
-		Sandbox:        d.buildSandboxConfig(rt.Provider, sandboxOverride, nil),
+		Sandbox:        d.buildSandboxConfig(rt.Provider, sandboxOverride, sandboxPolicy, nil),
 	})
 	if err != nil {
 		d.client.ReportPingResult(ctx, rt.ID, pingID, map[string]any{
@@ -1473,7 +1473,7 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	// PendingPing action alongside upstream's pending-action set.
 	if resp.PendingPing != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
-			go d.handlePing(ctx, *rt, resp.PendingPing.ID, resp.PendingPing.SandboxEnabled)
+			go d.handlePing(ctx, *rt, resp.PendingPing.ID, resp.PendingPing.SandboxEnabled, parseRuntimeSandboxPolicy(resp.PendingPing.RuntimeSandboxPolicy))
 		}
 	}
 	if resp.PendingModelList != nil {
@@ -2641,6 +2641,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
 		Logger:         d.logger,
+		Sandbox:        d.buildSandboxConfig(provider, task.SandboxEnabled, parseRuntimeSandboxPolicy(task.RuntimeSandboxPolicy), task.Agent),
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)

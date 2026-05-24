@@ -973,6 +973,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/update/{updateId}", h.GetUpdate)
 					// CEREBRO-PATCH(runtime-sandbox): cerebro daemon sandbox toggle endpoint.
 					r.Patch("/sandbox", h.UpdateAgentRuntimeSandbox)
+					r.Patch("/sandbox-policy", h.UpdateAgentRuntimeSandboxPolicy)
 					// CEREBRO-PATCH(router-runtime-pause): cerebro pause/unpause endpoints.
 					r.Post("/pause", h.PauseRuntime)
 					r.Post("/unpause", h.UnpauseRuntime)

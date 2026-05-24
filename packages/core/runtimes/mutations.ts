@@ -100,3 +100,41 @@ export function useUpdateRuntimeSandbox(wsId: string) {
     },
   });
 }
+
+export function useUpdateRuntimeSandboxPolicy(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (params: {
+      runtimeId: string;
+      sandboxPolicy: AgentRuntime["sandbox_policy"];
+    }) => api.updateRuntimeSandboxPolicy(params.runtimeId, params.sandboxPolicy),
+    onMutate: async (params) => {
+      const keys = [runtimeKeys.list(wsId), runtimeKeys.listMine(wsId)];
+      await Promise.all(keys.map((k) => qc.cancelQueries({ queryKey: k })));
+      const snapshots = keys.map(
+        (k) => [k, qc.getQueryData<AgentRuntime[]>(k)] as const,
+      );
+      for (const [k, list] of snapshots) {
+        if (!list) continue;
+        qc.setQueryData<AgentRuntime[]>(
+          k,
+          list.map((r) =>
+            r.id === params.runtimeId
+              ? { ...r, sandbox_policy: params.sandboxPolicy }
+              : r,
+          ),
+        );
+      }
+      return { snapshots };
+    },
+    onError: (_err, _params, context) => {
+      if (!context) return;
+      for (const [k, value] of context.snapshots) {
+        qc.setQueryData(k, value);
+      }
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+    },
+  });
+}

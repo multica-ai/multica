@@ -35,6 +35,12 @@ type SandboxConfig struct {
 	// Caller is responsible for joining $HOME-relative subpaths to the
 	// real home directory before passing them in.
 	WritablePaths []string
+	// DeniedPaths are absolute paths that remain sealed even if a broader
+	// read or write rule would otherwise expose them.
+	DeniedPaths []string
+	// DeniedExecutables are absolute executable paths blocked by process-exec
+	// rules. Used by runtime shell policy to stop common shell escapes.
+	DeniedExecutables []string
 	// CEREBRO-PATCH(agent-sandbox-cerebro): JEH-1774 keychain access fields.
 	// Plumbing for per-task keychain deny + audit-only item allowlist; the
 	// kernel-level rules live in pkg/agent/sandbox/macos.go.
@@ -111,6 +117,8 @@ func prepareCommand(
 		Home:                 home,
 		AllowedHosts:         sb.NetworkAllowlist,
 		WritablePaths:        sb.WritablePaths,
+		DeniedPaths:          sb.DeniedPaths,
+		DeniedExecutables:    sb.DeniedExecutables,
 		KeychainAccess:       sb.KeychainAccess,
 		KeychainItemsAllowed: sb.KeychainItemsAllowed,
 	})

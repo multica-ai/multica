@@ -100,6 +100,11 @@ type Profile struct {
 	// sensitive-home denies so a path that accidentally overlaps a
 	// denied subpath still gets sealed.
 	WritablePaths []string
+	// DeniedPaths are absolute paths sealed after broad HOME/system allows.
+	DeniedPaths []string
+	// DeniedExecutables are absolute executable paths that cannot be launched
+	// from inside the sandbox. Used for shell-deny policy.
+	DeniedExecutables []string
 	// AllowedHosts is the outbound network allowlist as host:port pairs,
 	// e.g. "api.anthropic.com:443" or "127.0.0.1:19514". Empty list means
 	// outbound network access is fully denied.
@@ -166,6 +171,20 @@ func Generate(p Profile) (string, error) {
 	b.WriteString(";; Process & signal\n")
 	b.WriteString("(allow process-fork)\n")
 	b.WriteString("(allow process-exec)\n")
+	// CEREBRO-PATCH(sandbox-denied-execs-no-symlink-resolve): denied executable
+	// paths must be emitted as-given. The macOS Seatbelt policy is enforced on
+	// macOS hosts at runtime, but tests and tools running on Linux would resolve
+	// symlinks like /bin/sh → /usr/bin/dash via filepath.EvalSymlinks against
+	// the build host's filesystem, producing a policy that does not match the
+	// path the user actually denied. Keep the literal path supplied by the
+	// caller; Seatbelt at runtime applies its own canonicalisation.
+	for _, raw := range normalizePaths(p.DeniedExecutables) {
+		abs, err := filepath.Abs(raw)
+		if err != nil {
+			return "", fmt.Errorf("sandbox: resolve denied executable %q: %w", raw, err)
+		}
+		fmt.Fprintf(&b, "(deny process-exec (literal %s))\n", schemeString(abs))
+	}
 	b.WriteString("(allow signal (target self))\n")
 	b.WriteString("\n")
 
@@ -268,6 +287,13 @@ func Generate(p Profile) (string, error) {
 	b.WriteString(";; Sensitive home subpaths — DENY (defense in depth)\n")
 	for _, sub := range sensitiveHomeSubpaths {
 		fmt.Fprintf(&b, "(deny file-read* file-write* (subpath %s))\n", schemeString(filepath.Join(home, sub)))
+	}
+	for _, raw := range normalizePaths(p.DeniedPaths) {
+		resolved, err := canonicalPath(raw)
+		if err != nil {
+			return "", fmt.Errorf("sandbox: resolve denied path %q: %w", raw, err)
+		}
+		fmt.Fprintf(&b, "(deny file-read* file-write* (subpath %s))\n", schemeString(resolved))
 	}
 	// Keychain DB (JEH-1774): two modes.
 	//
@@ -424,6 +450,27 @@ func normalizeKeychainItems(in []string) []string {
 	for _, raw := range in {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
+			continue
+		}
+		if _, dup := seen[raw]; dup {
+			continue
+		}
+		seen[raw] = struct{}{}
+		out = append(out, raw)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func normalizePaths(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, raw := range in {
+		raw = strings.TrimSpace(raw)
+		if raw == "" || !filepath.IsAbs(raw) {
 			continue
 		}
 		if _, dup := seen[raw]; dup {

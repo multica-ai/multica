@@ -81,6 +81,7 @@ type Task struct {
 	Title                            string               `json:"title,omitempty"`
 	ModelOverride                    string               `json:"model_override,omitempty"` // CEREBRO-PATCH(daemon-task-model-override): per-task model override (JEH-1310).
 	SandboxEnabled                   *bool                `json:"sandbox_enabled,omitempty"`
+	RuntimeSandboxPolicy             json.RawMessage      `json:"runtime_sandbox_policy,omitempty"`
 	RuntimePersonaSandbox            string               `json:"runtime_persona_sandbox,omitempty"`
 	RuntimeToolsConfig               json.RawMessage      `json:"runtime_tools_config,omitempty"`
 	PersonaSpawnUserID               string               `json:"persona_spawn_user_id,omitempty"`
