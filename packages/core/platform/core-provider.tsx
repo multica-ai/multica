@@ -13,6 +13,7 @@ import {
 import { WSProvider } from "../realtime";
 import { QueryProvider } from "../provider";
 import { createLogger } from "../logger";
+import { configStore } from "../config";
 import { defaultStorage } from "./storage";
 import { AuthInitializer } from "./auth-initializer";
 import type { CoreProviderProps, ClientIdentity } from "./types";
@@ -32,6 +33,8 @@ function initCore(
   identity?: ClientIdentity,
 ) {
   if (initialized) return;
+
+  configStore.getState().setApiBaseUrl(apiBaseUrl);
 
   const api = new ApiClient(apiBaseUrl, {
     logger: createLogger("api"),
