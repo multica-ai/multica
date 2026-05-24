@@ -21,13 +21,18 @@ INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
-    composio_toolkit_allowlist, permission_mode
+    composio_toolkit_allowlist, permission_mode,
+    fixed_repo_enabled, fixed_repo_paths, fixed_repo_vcs_type, fixed_repo_cleanup_script
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16,
     sqlc.narg('composio_toolkit_allowlist')::text[],
-    COALESCE(sqlc.narg('permission_mode'), 'private')
+    COALESCE(sqlc.narg('permission_mode'), 'private'),
+    COALESCE(sqlc.narg('fixed_repo_enabled'), false),
+    COALESCE(sqlc.narg('fixed_repo_paths'), '[]'::jsonb),
+    COALESCE(sqlc.narg('fixed_repo_vcs_type'), 'git'),
+    sqlc.narg('fixed_repo_cleanup_script')
 )
 RETURNING *;
 
@@ -79,6 +84,10 @@ UPDATE agent SET
     model = COALESCE(sqlc.narg('model'), model),
     thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
+    fixed_repo_enabled = COALESCE(sqlc.narg('fixed_repo_enabled'), fixed_repo_enabled),
+    fixed_repo_paths = COALESCE(sqlc.narg('fixed_repo_paths'), fixed_repo_paths),
+    fixed_repo_vcs_type = COALESCE(sqlc.narg('fixed_repo_vcs_type'), fixed_repo_vcs_type),
+    fixed_repo_cleanup_script = COALESCE(sqlc.narg('fixed_repo_cleanup_script'), fixed_repo_cleanup_script),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -104,6 +113,11 @@ RETURNING *;
 
 -- name: ClearAgentMcpConfig :one
 UPDATE agent SET mcp_config = NULL, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearAgentFixedRepoCleanupScript :one
+UPDATE agent SET fixed_repo_cleanup_script = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 

@@ -45,6 +45,8 @@ export interface AgentInvocationTargetInput {
   target_id?: string;
 }
 
+export type FixedRepoVcsType = "git" | "perforce" | "none" | "custom";
+
 // Runtime visibility is a separate axis from agent visibility — different
 // vocabulary because it gates a different action. "private" (default) means
 // only the runtime owner and workspace admins can bind agents to it;
@@ -431,6 +433,14 @@ export interface Agent {
   status: AgentStatus;
   max_concurrent_tasks: number;
   model: string;
+  /** Fixed local worktree pool for daemon-executed tasks. Omitted by older backends. */
+  fixed_repo_enabled?: boolean;
+  /** Local paths on the daemon host. Omitted by older backends. */
+  fixed_repo_paths?: string[];
+  /** VCS hint for fixed repo tasks. Defaults to "git" when omitted. */
+  fixed_repo_vcs_type?: FixedRepoVcsType;
+  /** Persisted for future cleanup support; not executed by v1 daemon. */
+  fixed_repo_cleanup_script?: string | null;
   /**
    * Runtime-native reasoning/effort token (e.g. Claude's
    * `low|medium|high|xhigh|max`, Codex's
@@ -487,6 +497,10 @@ export interface CreateAgentRequest {
   invocation_targets?: AgentInvocationTargetInput[];
   max_concurrent_tasks?: number;
   model?: string;
+  fixed_repo_enabled?: boolean;
+  fixed_repo_paths?: string[];
+  fixed_repo_vcs_type?: FixedRepoVcsType;
+  fixed_repo_cleanup_script?: string | null;
   /** Optional runtime-native reasoning/effort token. See `Agent.thinking_level`. */
   thinking_level?: string;
   /** Optional template slug used by the onboarding agent picker. Surfaced
@@ -634,6 +648,10 @@ export interface UpdateAgentRequest {
   status?: AgentStatus;
   max_concurrent_tasks?: number;
   model?: string;
+  fixed_repo_enabled?: boolean;
+  fixed_repo_paths?: string[];
+  fixed_repo_vcs_type?: FixedRepoVcsType;
+  fixed_repo_cleanup_script?: string | null;
   /**
    * Runtime-native reasoning/effort token. Tri-state semantics (MUL-2339):
    *   - field omitted → no change
