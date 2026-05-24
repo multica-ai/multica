@@ -14,7 +14,7 @@ Multica 内置支持 **11 款 AI 编程工具**。它们都实现了同一套接
 | 工具 | 厂商 | 会话恢复 | MCP | Skill 注入路径 | 模型选择 |
 |---|---|---|---|---|---|
 | **Claude Code** | Anthropic | ✅ | **✅（唯一真用）** | `.claude/skills/` | 静态 + flag |
-| **Codex** | OpenAI | ⚠️ 代码存在但不可达 | ❌ | `$CODEX_HOME/skills/` | 静态 |
+| **Codex** | OpenAI | ❌ 有意关闭 | ❌ | `$CODEX_HOME/skills/` | 静态 |
 | **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | 静态（账号权益决定）|
 | **Cursor** | Anysphere | ⚠️ 代码存在但不可用 | ❌ | `.cursor/skills/` | 动态发现 |
 | **Gemini** | Google | ❌ | ❌ | `.agent_context/skills/` | 静态 |
@@ -33,7 +33,7 @@ Anthropic 出品。**新用户首选**——功能最完整：会话恢复真用
 
 ### Codex
 
-OpenAI 出品。使用 JSON-RPC 2.0 协议，状态化更强，approve 机制更细（手动批准 `exec_command` 和 `patch_apply`）。**会话恢复代码存在但当前不可达**——如果你需要 resume，选 Claude Code 或 ACP 系列。
+OpenAI 出品。使用 JSON-RPC 2.0 协议，状态化更强，approve 机制更细（手动批准 `exec_command` 和 `patch_apply`）。Multica 会把 Codex 任务作为 **ephemeral app-server thread** 启动，所以自动化的 Multica 运行不会出现在用户的 Codex 桌面端、移动端或 CLI 历史里。因为这些 thread 有意不落入 Codex 历史，Codex 会话恢复视为不支持——如果你需要 provider 层 resume，选 Claude Code 或 ACP 系列。
 
 ### Copilot
 
@@ -78,7 +78,8 @@ Inflection AI 出品，极简主义。**会话恢复机制特殊**——session 
 | 状态 | 工具 | 含义 |
 |---|---|---|
 | ✅ 真用 | Claude Code、Copilot、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi | 传 resume id，会从上次上下文接着继续 |
-| ⚠️ 代码存在但不可达 | Codex、Cursor | 代码里有 resume 路径但实际走不到（Codex 静默回落、Cursor session id 不回传）—— **当作不支持** |
+| ❌ 有意关闭 | Codex | Multica 使用 ephemeral Codex app-server thread，避免自动运行污染用户的 Codex app 历史 |
+| ⚠️ 代码存在但不可达 | Cursor | 代码里有 resume 路径但实际走不到，因为 CLI 不回传可用的 session id—— **当作不支持** |
 | ❌ 无 | Gemini | CLI 无 resume 机制 |
 
 **对你的决策**：如果工作流需要智能体在多次任务之间保持上下文（失败重试、手动重跑、对话式迭代），只选 ✅ 那一行的工具。

@@ -14,7 +14,7 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 | Tool | Vendor | Session resumption | MCP | Skill injection path | Model selection |
 |---|---|---|---|---|---|
 | **Claude Code** | Anthropic | ✅ | **✅ (the only one that actually uses it)** | `.claude/skills/` | Static + flag |
-| **Codex** | OpenAI | ⚠️ Code exists but unreachable | ❌ | `$CODEX_HOME/skills/` | Static |
+| **Codex** | OpenAI | ❌ Deliberately disabled | ❌ | `$CODEX_HOME/skills/` | Static |
 | **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | Static (determined by account entitlement) |
 | **Cursor** | Anysphere | ⚠️ Code exists but unusable | ❌ | `.cursor/skills/` | Dynamic discovery |
 | **Gemini** | Google | ❌ | ❌ | `.agent_context/skills/` | Static |
@@ -33,7 +33,7 @@ From Anthropic. **First choice for new users** — the most complete feature set
 
 ### Codex
 
-From OpenAI. Uses JSON-RPC 2.0, has stronger statefulness, and a finer-grained approve mechanism (manual approval for `exec_command` and `patch_apply`). **Session resumption code exists but is currently unreachable** — if you need resume, pick Claude Code or one of the ACP family.
+From OpenAI. Uses JSON-RPC 2.0, has stronger statefulness, and a finer-grained approve mechanism (manual approval for `exec_command` and `patch_apply`). Multica starts Codex threads as **ephemeral app-server threads** so automated Multica runs do not appear in the user's Codex desktop, mobile, or CLI history. Because those threads are intentionally not materialized into Codex history, Codex session resumption is treated as unsupported — if you need provider-level resume, pick Claude Code or one of the ACP family.
 
 ### Copilot
 
@@ -78,7 +78,8 @@ The session resumption mechanism is covered in [Tasks](/tasks#can-a-task-continu
 | Status | Tools | Meaning |
 |---|---|---|
 | ✅ Really works | Claude Code, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi | Pass the resume id and it continues from the previous context |
-| ⚠️ Code exists but unreachable | Codex, Cursor | Resume paths exist in the code but aren't actually reached (Codex silently falls back; Cursor doesn't return session id) — **treat as unsupported** |
+| ❌ Deliberately disabled | Codex | Multica uses ephemeral Codex app-server threads so automated runs do not pollute the user's Codex app history |
+| ⚠️ Code exists but unreachable | Cursor | Resume paths exist in the code but aren't actually reached because the CLI doesn't return a usable session id — **treat as unsupported** |
 | ❌ None | Gemini | The CLI has no resume mechanism |
 
 **For your decision**: if your workflow needs agents to preserve context across tasks (failure retries, manual reruns, conversational iteration), pick only from the ✅ row.

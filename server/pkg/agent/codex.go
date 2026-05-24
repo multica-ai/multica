@@ -376,6 +376,9 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		}
 	}
 
+	// Multica keeps task history in its own database. Codex app-server
+	// threads are therefore transient implementation details and should not
+	// be materialized into the user's Codex app history.
 	startParams := map[string]any{
 		"model":                  nilIfEmpty(opts.Model),
 		"modelProvider":          nil,
@@ -388,8 +391,9 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"developerInstructions":  nilIfEmpty(opts.SystemPrompt),
 		"compactPrompt":          nil,
 		"includeApplyPatchTool":  nil,
+		"ephemeral":              true,
 		"experimentalRawEvents":  false,
-		"persistExtendedHistory": true,
+		"persistExtendedHistory": false,
 	}
 	applyCodexReasoningEffort(startParams, opts.ThinkingLevel)
 	startResult, err := c.request(ctx, "thread/start", startParams)
