@@ -604,7 +604,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
 		ThinkingLevel:      pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
 		FixedRepoEnabled:   req.FixedRepoEnabled,
-		FixedRepoPaths:     req.FixedRepoPaths,
+		FixedRepoPaths:     defaultSlice(req.FixedRepoPaths),
 		VcsType:            req.VCSType,
 		CleanupScript:      req.CleanupScript,
 	})
