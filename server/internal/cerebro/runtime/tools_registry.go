@@ -272,6 +272,7 @@ var legacyGatewayToolMeta = []ToolMeta{
 	{Name: "web_fetch", Description: "Fetch the text content of an allowlisted URL.", Status: ToolStatusImplemented},
 	{Name: "firtal_bq_query", Description: "Run a BigQuery SQL query via Firtal Data Registry.", Status: ToolStatusImplemented},
 	{Name: "gogcli_sheets_write", Description: "Write data to a Google Sheets spreadsheet range.", Status: ToolStatusImplemented},
+	{Name: "infisical_get_secret", Description: "Fetch a secret directly from Infisical by name and environment.", Status: ToolStatusImplemented},
 }
 
 var multicaMCPToolMatrix = []ToolMeta{
