@@ -447,7 +447,7 @@ function ScopeSegment({
 }) {
   const { t } = useT("runtimes");
   return (
-    <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
+    <div className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5">
       <button
         type="button"
         onClick={() => setScope("mine")}
