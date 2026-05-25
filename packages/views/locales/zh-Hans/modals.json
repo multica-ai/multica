@@ -106,6 +106,8 @@
     "repos_pill_count_other": "{{count}} 个仓库",
     "repos_heading": "为此项目关联 GitHub 仓库",
     "repos_empty": "还没有工作区级别的仓库。可以在下方粘贴 URL 临时关联一个。",
+    "repos_search_placeholder": "搜索仓库...",
+    "repos_search_empty": "没有匹配的仓库。",
     "repos_url_placeholder": "https://github.com/owner/repo 或 git@github.com:owner/repo.git",
     "repos_add": "添加",
     "repos_selected": "已选"
@@ -135,6 +137,7 @@
     "subissue_of": "{{identifier}} 的子 issue",
     "subissue_chip": "子 issue：{{identifier}}",
     "parent_with_id": "父：{{identifier}}",
+    "set_start_date": "设置开始日期...",
     "set_parent": "设置父 issue...",
     "add_subissue": "添加子 issue...",
     "remove_parent": "移除父级",

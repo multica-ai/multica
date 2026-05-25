@@ -7,6 +7,8 @@
   },
   "header": {
     "scope": {
+      "all_label": "All",
+      "all_description": "Assigned to me, created by me, or involving my agents and squads",
       "assigned_label": "Assigned",
       "assigned_description": "Issues assigned to me",
       "created_label": "Created",

@@ -154,7 +154,15 @@ vi.mock("../issues/components", () => ({
   StatusPicker: () => <div data-testid="status-picker" />,
   PriorityPicker: () => <div data-testid="priority-picker" />,
   AssigneePicker: () => <div data-testid="assignee-picker" />,
-  StartDatePicker: () => <div data-testid="start-date-picker" />,
+  // Surface open/onOpenChange so tests can assert progressive-disclosure
+  // behavior (mounted only when the user has opted in or has a value).
+  StartDatePicker: ({ open, onOpenChange }: { open?: boolean; onOpenChange?: (v: boolean) => void }) => (
+    <div
+      data-testid="start-date-picker"
+      data-open={open ? "true" : "false"}
+      onClick={() => onOpenChange?.(false)}
+    />
+  ),
   DueDatePicker: () => <div data-testid="due-date-picker" />,
 }));
 
@@ -427,5 +435,53 @@ describe("CreateIssueModal", () => {
         project_id: "proj-1",
       }),
     );
+  });
+
+  // Start date is a low-frequency field — by default it lives behind the
+  // ⋯ overflow menu and is not rendered inline. Clicking the overflow
+  // entry opens it (and mounts the inline pill so the popover has an
+  // anchor); closing without picking returns it to the menu-only state.
+  it("hides start date behind the overflow menu and reveals it on demand", async () => {
+    const user = userEvent.setup();
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.queryByTestId("start-date-picker")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Set start date/i }));
+
+    const picker = await screen.findByTestId("start-date-picker");
+    expect(picker).toHaveAttribute("data-open", "true");
+
+    await user.click(picker);
+
+    expect(screen.queryByTestId("start-date-picker")).not.toBeInTheDocument();
+  });
+
+  // Title + description are packed into the agent prompt on switch; if we
+  // leave them in the shared draft store, the next agent→manual switch
+  // surfaces the stale manual draft on top of the prompt-as-description,
+  // duplicating the user's text on every round-trip.
+  it("clears the manual draft when packing title and description into the agent prompt", async () => {
+    const user = userEvent.setup();
+
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={vi.fn()}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+        backlogHintIssueId={null}
+        setBacklogHintIssueId={vi.fn()}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Update");
+    await user.type(screen.getByPlaceholderText("Add description..."), "Some body");
+
+    mockSetDraft.mockClear();
+    await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
+
+    expect(mockSetDraft).toHaveBeenCalledWith({ title: "", description: "" });
   });
 });

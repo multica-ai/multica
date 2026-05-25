@@ -100,7 +100,7 @@ export function FileViewer({
   return (
     <div className="flex h-full flex-col">
       {/* File header */}
-      <div className="flex h-10 items-center justify-between border-b px-4">
+      <div className="flex h-10 items-center justify-between gap-3 border-b px-4">
         <span className="text-xs font-mono text-muted-foreground truncate">
           {path}
         </span>
@@ -136,7 +136,7 @@ export function FileViewer({
       {/* File content */}
       <div className="flex-1 min-h-0 overflow-y-auto">
         {isMd && !editing ? (
-          <div className="p-6">
+          <div className="p-4 sm:p-6">
             {frontmatter && <FrontmatterCard data={frontmatter} />}
             <Markdown mode="full">
               {body || t(($) => $.file_viewer.no_content)}

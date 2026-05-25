@@ -67,6 +67,11 @@ type TaskContextForEnv struct {
 	// communication profile (JEH-304); empty if user has no profile.
 	UserProfilePrompt string
 	IsSquadLeader           bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
+	// WorkspaceContext is the workspace-level system prompt (workspace.context
+	// in the DB). Rendered into the brief as `## Workspace Context` when
+	// non-empty so every agent in the workspace sees the same shared context,
+	// regardless of issue / chat / autopilot / quick-create.
+	WorkspaceContext string
 	// RequestingUserName + RequestingUserProfileDescription describe the
 	// human the agent is acting on behalf of. v1 sources them from the
 	// runtime owner (the user who registered the daemon). Rendered into the

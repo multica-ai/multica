@@ -17,6 +17,7 @@ import { useCurrentWorkspace } from "@multica/core/paths";
 import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueAssigneeGroupsOptions, issueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter } from "@multica/core/issues/queries";
+import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { PageHeader } from "../../layout/page-header";
@@ -61,7 +62,23 @@ export function IssuesPage({
     () => parseReferenceFilter(navigation.searchParams.get("reference")),
     [navigation.searchParams],
   );
+  const agentRunningFilter = useIssueViewStore((s) => s.agentRunningFilter);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
+
+  // Derive the set of issue ids that currently have at least one
+  // `running` agent task. Used by the workspace agents-working filter
+  // chip. Subscribing the page here (not deep in filter.ts) keeps the
+  // filter pure and lets the snapshot stay cached at one workspace-
+  // scoped place — every issue card already subscribes for its own
+  // indicator, so this is a no-op extra fetch.
+  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  const runningIssueIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const t of snapshot) {
+      if (t.status === "running" && t.issue_id) ids.add(t.issue_id);
+    }
+    return ids;
+  }, [snapshot]);
 
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(() => {
     const filter: AssigneeGroupedIssuesFilter = {
@@ -125,8 +142,8 @@ export function IssuesPage({
   }, [scopedIssues, subIssueDisplay]);
 
   const issues = useMemo(
-    () => filterIssues(displayIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters }),
-    [displayIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters],
+    () => filterIssues(displayIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds }),
+    [displayIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
   );
   const headerIssues = usesAssigneeBoard ? assigneeIssues : issues;
 

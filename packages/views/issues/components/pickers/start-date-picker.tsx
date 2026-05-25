@@ -17,6 +17,8 @@ export function StartDatePicker({
   onUpdate,
   trigger: customTrigger,
   triggerRender,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
   align = "start",
   defaultOpen = false,
 }: {
@@ -24,13 +26,17 @@ export function StartDatePicker({
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   trigger?: React.ReactNode;
   triggerRender?: React.ReactElement;
+  open?: boolean;
+  onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
   /** Open the popover on first mount. Used by progressive-disclosure
    *  sidebars so a newly-added field immediately enters edit state. */
   defaultOpen?: boolean;
 }) {
   const { t } = useT("issues");
-  const [open, setOpen] = useState(defaultOpen);
+  const [internalOpen, setInternalOpen] = useState(defaultOpen);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = controlledOnOpenChange ?? setInternalOpen;
   const date = startDate ? new Date(startDate) : undefined;
 
   return (

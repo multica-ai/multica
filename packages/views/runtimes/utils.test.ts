@@ -1,11 +1,13 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
+import type { AgentRuntime } from "@multica/core/types";
 
 import {
   aggregateCostByModel,
   collectUnmappedModels,
   estimateCost,
   isModelPriced,
+  isSelfHealingRuntime,
 } from "./utils";
 
 afterEach(() => {
@@ -19,6 +21,65 @@ const zeroUsage = {
   cache_read_tokens: 0,
   cache_write_tokens: 0,
 };
+
+describe("isSelfHealingRuntime", () => {
+  function makeRuntime(overrides: Partial<AgentRuntime>): AgentRuntime {
+    return {
+      id: "rt-1",
+      workspace_id: "ws-1",
+      daemon_id: null,
+      name: "rt",
+      runtime_mode: "local",
+      provider: "claude",
+      launch_header: "",
+      status: "online",
+      device_info: "",
+      metadata: {},
+      owner_id: null,
+      visibility: "private",
+      timezone: "UTC",
+      sandbox_enabled: null,
+      persona_sandbox: "",
+      capabilities: {},
+      last_seen_at: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  it("flags an online local runtime as self-healing", () => {
+    expect(
+      isSelfHealingRuntime(
+        makeRuntime({ runtime_mode: "local", status: "online" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("treats an offline local runtime as safe to delete", () => {
+    // Daemon isn't running, so the server-side delete is final — no
+    // re-registration race to worry about.
+    expect(
+      isSelfHealingRuntime(
+        makeRuntime({ runtime_mode: "local", status: "offline" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("treats cloud runtimes as safe to delete regardless of status", () => {
+    // Cloud workers are managed by Fleet, not a self-restarting local daemon.
+    expect(
+      isSelfHealingRuntime(
+        makeRuntime({ runtime_mode: "cloud", status: "online" }),
+      ),
+    ).toBe(false);
+    expect(
+      isSelfHealingRuntime(
+        makeRuntime({ runtime_mode: "cloud", status: "offline" }),
+      ),
+    ).toBe(false);
+  });
+});
 
 describe("estimateCost", () => {
   it("prices the canonical Anthropic Sonnet 4.6 SKU", () => {
@@ -101,6 +162,24 @@ describe("estimateCost", () => {
       output_tokens: 1_000_000,
     });
     expect(cost).toBeCloseTo(5 + 25, 5);
+  });
+
+  it("prices the 1M-context Anthropic tag form (claude-opus-4-7[1m]) at the standard Opus tier", () => {
+    // Claude Code reports the 1M-context beta as `claude-opus-4-7[1m]`.
+    // Anthropic prices it at the standard Opus rate for prompts ≤200K
+    // input tokens (with a 2× surcharge above that, which we can't see
+    // from aggregated daily totals). Strip the bracketed context tag so
+    // the tokens still land in the cost total at standard pricing —
+    // mild under-estimate, but the alternative was excluding them
+    // entirely (the bug this fixes).
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "claude-opus-4-7[1m]",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(5 + 25, 5);
+    expect(isModelPriced("claude-opus-4-7[1m]")).toBe(true);
   });
 
   it("prices each dotted Codex catalog SKU at its own tier, not gpt-5", () => {

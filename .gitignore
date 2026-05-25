@@ -23,6 +23,14 @@ dist-electron
 # Desktop production config is public (backend URL, etc.) — track it so
 # `pnpm package` produces a release-ready build without extra setup.
 !apps/desktop/.env.production
+# Mobile staging config is public (staging API URL) — track it so a fresh
+# checkout can run `pnpm dev:mobile:staging` / `ios:mobile*:staging` without
+# the user having to copy `.env.example` first.
+!apps/mobile/.env.staging
+# Mobile production config is public (production API URL) — track it so
+# external users can run `pnpm ios:mobile:device:prod:release` against
+# multica.ai's production backend without copying templates first.
+!apps/mobile/.env.production
 
 # test coverage
 coverage

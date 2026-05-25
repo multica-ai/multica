@@ -7,7 +7,8 @@ import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { isImeComposing, timeAgo } from "@multica/core/utils";
+import { isImeComposing } from "@multica/core/utils";
+import { useTimeAgo } from "../../i18n";
 import { agentListOptions, memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import { CreateAgentDialog } from "../../agents/components/create-agent-dialog";
@@ -723,6 +724,7 @@ function SquadDetailInspector({
   onUpdateDescription: (next: string) => Promise<void>;
 }) {
   const { t } = useT("squads");
+  const timeAgo = useTimeAgo();
   const initials = squad.name
     .split(" ")
     .map((w) => w[0])

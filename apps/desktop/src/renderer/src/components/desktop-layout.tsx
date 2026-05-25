@@ -54,6 +54,20 @@ function SidebarTopBar() {
   );
 }
 
+function useNativeNavigationGestures() {
+  const { goBack, goForward } = useTabHistory();
+
+  useEffect(() => {
+    return window.desktopAPI.onNavigationGesture((gesture) => {
+      if (gesture === "back") {
+        goBack();
+      } else {
+        goForward();
+      }
+    });
+  }, [goBack, goForward]);
+}
+
 // The main area's top bar doubles as a window drag region. When the sidebar
 // is not occupying main-flow width — either user-collapsed (offcanvas) or
 // auto-hidden in mobile mode (<768px, becomes a sheet drawer) — we pad the
@@ -132,6 +146,7 @@ function DesktopInboxBridge() {
 export function DesktopShell() {
   useInternalLinkHandler();
   useActiveTitleSync();
+  useNativeNavigationGestures();
 
   // Reactive read of current workspace slug from the platform singleton.
   // On first mount, slug is null until WorkspaceRouteLayout (inside the tab

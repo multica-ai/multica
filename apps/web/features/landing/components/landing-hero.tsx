@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { Download } from "lucide-react";
+import { ArrowRight, Download } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
 import { captureDownloadIntent } from "@multica/core/analytics";
 import { useLocale } from "../i18n";
@@ -50,6 +50,16 @@ export function LandingHero() {
               >
                 <Download className="size-4" aria-hidden />
                 {t.hero.downloadDesktop}
+              </Link>
+              <Link
+                href="/contact-sales"
+                className="group inline-flex items-center justify-center gap-1.5 rounded-[12px] px-3 py-3 text-[14px] font-semibold text-white/80 transition-colors hover:text-white"
+              >
+                {t.hero.talkToSales}
+                <ArrowRight
+                  className="size-4 transition-transform group-hover:translate-x-0.5"
+                  aria-hidden
+                />
               </Link>
             </div>
           </div>

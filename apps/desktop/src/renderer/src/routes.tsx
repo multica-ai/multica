@@ -44,6 +44,7 @@ import { TasksPage } from "@multica/cerebro-tasks";
 import { PermissionsPage } from "@multica/cerebro-permissions";
 import { ApprovalsPage } from "@multica/cerebro-approvals";
 import { SearchPage } from "@multica/views/search";
+import { useT } from "@multica/views/i18n";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { Download, Server } from "lucide-react";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
@@ -85,6 +86,7 @@ function PageShell() {
 }
 
 function SettingsRoute() {
+  const { t } = useT("settings");
   const membersTabCerebroExtras = useMembersTabCerebroExtras();
 
   return (
@@ -98,7 +100,7 @@ function SettingsRoute() {
         },
         {
           value: "updates",
-          label: "Updates",
+          label: t(($) => $.desktop.tabs.updates),
           icon: Download,
           content: <UpdatesSettingsTab />,
         },

@@ -47,6 +47,7 @@ export interface ListIssuesParams {
   assignee_ids?: string[];
   creator_id?: string;
   project_id?: string;
+  involves_user_id?: string;
   open_only?: boolean;
   /**
    * Restrict the result to issues with at least one of `start_date` /
@@ -79,6 +80,7 @@ export interface ListGroupedIssuesParams {
   assignee_ids?: string[];
   creator_id?: string;
   project_id?: string;
+  involves_user_id?: string;
   assignee_filters?: IssueActorRef[];
   include_no_assignee?: boolean;
   creator_filters?: IssueActorRef[];

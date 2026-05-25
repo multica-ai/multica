@@ -59,9 +59,9 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { MobileSidebarTrigger } from "../../layout/page-header";
-import { AppLink } from "../../navigation";
+import { AppLink, useNavigation } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
-import { formatLastSeen } from "../utils";
+import { formatLastSeen, isSelfHealingRuntime } from "../utils";
 import { HealthBadge } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UpdateSection } from "./update-section";
@@ -122,6 +122,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const user = useAuthStore((s) => s.user);
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
+  const navigation = useNavigation();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
@@ -154,8 +155,9 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const handleDelete = () => {
     deleteMutation.mutate(runtime.id, {
       onSuccess: () => {
-        toast.success(t(($) => $.detail.toast_deleted));
         setDeleteOpen(false);
+        navigation.replace(paths.runtimes());
+        toast.success(t(($) => $.detail.toast_deleted));
       },
       onError: (e) => {
         toast.error(e instanceof Error ? e.message : t(($) => $.detail.toast_delete_failed));
@@ -544,6 +546,7 @@ function DiagnosticsCard({
 }) {
   const { t } = useT("runtimes");
   const isLocal = runtime.runtime_mode === "local";
+  const selfHealing = isSelfHealingRuntime(runtime);
 
   // CEREBRO-PATCH(runtime-detail-sandbox-section): admin-only sandbox override
   // toggle. Rendered for every member for transparency about the current
@@ -804,15 +807,41 @@ function DiagnosticsCard({
 
         {canDelete && (
           <div className="border-t pt-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-full justify-start gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={onDelete}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              {t(($) => $.detail.delete_button)}
-            </Button>
+            {selfHealing ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    // Wrapping span keeps the trigger hoverable — a disabled
+                    // <button> swallows pointer events, so the tooltip would
+                    // never open if it were the trigger itself.
+                    <span className="block w-full">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled
+                        className="h-8 w-full justify-start gap-2 text-destructive"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        {t(($) => $.detail.delete_button)}
+                      </Button>
+                    </span>
+                  }
+                />
+                <TooltipContent>
+                  {t(($) => $.detail.delete_disabled_tooltip)}
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-full justify-start gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={onDelete}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t(($) => $.detail.delete_button)}
+              </Button>
+            )}
           </div>
         )}
       </div>

@@ -110,7 +110,7 @@ export function AssigneePicker({
         setOpen(v);
         if (!v) setFilter("");
       }}
-      width="w-52"
+      width="w-64"
       align={align}
       searchable
       searchPlaceholder={t(($) => $.pickers.assignee.search_placeholder)}
@@ -157,7 +157,7 @@ export function AssigneePicker({
               }}
             >
               <ActorAvatar actorType="member" actorId={m.user_id} size={18} />
-              <span>{m.name}</span>
+              <span className="truncate">{m.name}</span>
             </PickerItem>
           ))}
         </PickerSection>
@@ -205,7 +205,7 @@ export function AssigneePicker({
                 }}
               >
                 <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
-                <span className={allowed ? "" : "text-muted-foreground"}>{a.name}</span>
+                <span className={`truncate ${allowed ? "" : "text-muted-foreground"}`}>{a.name}</span>
                 {(a.visibility === "private" || groupLocked) && (
                   <Lock className="ml-auto h-3 w-3 text-muted-foreground" />
                 )}
@@ -232,7 +232,7 @@ export function AssigneePicker({
               }}
             >
               <ActorAvatar actorType="squad" actorId={s.id} size={18} />
-              <span>{s.name}</span>
+              <span className="truncate">{s.name}</span>
             </PickerItem>
           ))}
         </PickerSection>
