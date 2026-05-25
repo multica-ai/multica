@@ -59,3 +59,4 @@ data/
 .kilo
 .idea
 .crewpilot/
+*.exe

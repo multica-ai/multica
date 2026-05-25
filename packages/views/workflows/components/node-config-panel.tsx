@@ -7,17 +7,32 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@multica/ui/components/ui/select";
 import { useT } from "../../i18n";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useUpdateNode, useDeleteNode } from "@multica/core/workflows/queries";
+import { AssigneePicker } from "../../issues/components/pickers/assignee-picker";
 import type { WorkflowNode, WorkerType, CriticType, UpdateNodeRequest } from "@multica/core/types";
+import type { IssueAssigneeType } from "@multica/core/types/issue";
+
+function toAssigneeType(t: string): IssueAssigneeType | null {
+  if (t === "human") return "member";
+  if (t === "agent" || t === "squad") return t as IssueAssigneeType;
+  return null;
+}
+
+function fromAssigneeType(t: IssueAssigneeType | null): WorkerType {
+  if (t === "member") return "human";
+  if (t === "agent") return "agent";
+  if (t === "squad") return "squad";
+  return "human";
+}
+
+function fromAssigneeTypeCritic(t: IssueAssigneeType | null): CriticType {
+  if (t === "member") return "human";
+  if (t === "agent") return "agent";
+  if (t === "squad") return "squad";
+  return "human";
+}
 
 interface NodeConfigPanelProps {
   node: WorkflowNode;
@@ -36,10 +51,10 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
   const [formatSchema, setFormatSchema] = useState(
     node.format_schema ? JSON.stringify(node.format_schema, null, 2) : ""
   );
-  const [workerType, setWorkerType] = useState<WorkerType>(node.worker_type);
-  const [workerInstructions, setWorkerInstructions] = useState(node.worker_instructions);
-  const [criticType, setCriticType] = useState<CriticType>(node.critic_type);
-  const [criticInstructions, setCriticInstructions] = useState(node.critic_instructions);
+  const [workerType, setWorkerType] = useState(node.worker_type);
+  const [workerId, setWorkerId] = useState<string | null>(node.worker_id ?? null);
+  const [criticType, setCriticType] = useState(node.critic_type);
+  const [criticId, setCriticId] = useState<string | null>(node.critic_id ?? null);
   const [criticApiUrl, setCriticApiUrl] = useState(node.critic_api_url ?? "");
 
   useEffect(() => {
@@ -47,9 +62,9 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
     setDescription(node.description);
     setFormatSchema(node.format_schema ? JSON.stringify(node.format_schema, null, 2) : "");
     setWorkerType(node.worker_type);
-    setWorkerInstructions(node.worker_instructions);
+    setWorkerId(node.worker_id ?? null);
     setCriticType(node.critic_type);
-    setCriticInstructions(node.critic_instructions);
+    setCriticId(node.critic_id ?? null);
     setCriticApiUrl(node.critic_api_url ?? "");
   }, [node]);
 
@@ -68,9 +83,9 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
       description,
       format_schema: formatSchemaParsed,
       worker_type: workerType,
-      worker_instructions: workerInstructions,
+      worker_id: workerId,
       critic_type: criticType,
-      critic_instructions: criticInstructions,
+      critic_id: criticId,
       critic_api_url: criticApiUrl || null,
     };
 
@@ -149,28 +164,17 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
 
           <div className="space-y-1.5">
             <Label className="text-sm">{t(($) => $.node.worker_type_label)}</Label>
-            <Select value={workerType} onValueChange={(v) => setWorkerType(v as WorkerType)}>
-              <SelectTrigger className="h-8 text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="human">{t(($) => $.node.worker_type_human)}</SelectItem>
-                <SelectItem value="agent">{t(($) => $.node.worker_type_agent)}</SelectItem>
-                <SelectItem value="squad">{t(($) => $.node.worker_type_squad)}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-sm">{t(($) => $.node.worker_instructions_label)}</Label>
-            <Textarea
-              value={workerInstructions}
-              onChange={(e) => setWorkerInstructions(e.target.value)}
-              placeholder={t(($) => $.node.worker_instructions_hint)}
-              className="min-h-[60px] text-sm"
-              rows={2}
+            <AssigneePicker
+              assigneeType={toAssigneeType(workerType)}
+              assigneeId={workerId}
+              onUpdate={(u) => {
+                setWorkerType(fromAssigneeType(u.assignee_type ?? null));
+                setWorkerId(u.assignee_id ?? null);
+              }}
+              align="start"
             />
           </div>
+
         </div>
 
         {/* Critic config */}
@@ -181,17 +185,15 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
 
           <div className="space-y-1.5">
             <Label className="text-sm">{t(($) => $.node.critic_type_label)}</Label>
-            <Select value={criticType} onValueChange={(v) => setCriticType(v as CriticType)}>
-              <SelectTrigger className="h-8 text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="human">{t(($) => $.node.critic_type_human)}</SelectItem>
-                <SelectItem value="agent">{t(($) => $.node.critic_type_agent)}</SelectItem>
-                <SelectItem value="squad">{t(($) => $.node.critic_type_squad)}</SelectItem>
-                <SelectItem value="api">{t(($) => $.node.critic_type_api)}</SelectItem>
-              </SelectContent>
-            </Select>
+            <AssigneePicker
+              assigneeType={toAssigneeType(criticType)}
+              assigneeId={criticId}
+              onUpdate={(u) => {
+                setCriticType(fromAssigneeTypeCritic(u.assignee_type ?? null));
+                setCriticId(u.assignee_id ?? null);
+              }}
+              align="start"
+            />
           </div>
 
           {criticType === "api" && (
@@ -207,16 +209,6 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
             </div>
           )}
 
-          <div className="space-y-1.5">
-            <Label className="text-sm">{t(($) => $.node.critic_instructions_label)}</Label>
-            <Textarea
-              value={criticInstructions}
-              onChange={(e) => setCriticInstructions(e.target.value)}
-              placeholder={t(($) => $.node.section_critic)}
-              className="min-h-[60px] text-sm"
-              rows={2}
-            />
-          </div>
         </div>
         </div>
       </div>

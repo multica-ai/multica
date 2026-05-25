@@ -3,7 +3,7 @@
 import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Play, Save, Plus, Pause, Wand } from "lucide-react";
+import { Play, Save, Plus, Wand, Trash2 } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   workflowDetailOptions,
@@ -15,6 +15,7 @@ import {
   useCreateEdge,
   useUpdateWorkflow,
   useStartWorkflowRun,
+  useDeleteWorkflow,
 } from "@multica/core/workflows/queries";
 import { useWorkflowEditorStore } from "@multica/core/workflows/store";
 import { useNavigation } from "../../navigation";
@@ -53,6 +54,7 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
   const createEdgeMutation = useCreateEdge(wsId, id!);
   const updateWorkflowMutation = useUpdateWorkflow(wsId);
   const startRunMutation = useStartWorkflowRun(wsId);
+  const deleteWorkflowMutation = useDeleteWorkflow(wsId);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
 
@@ -93,14 +95,13 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
     }
   };
 
-  const handleActivate = async () => {
-    if (!workflow) return;
-    const newStatus: WorkflowStatus = workflow.status === "active" ? "paused" : "active";
+  const handleDeleteWorkflow = async () => {
+    if (!confirm("Delete this workflow? All nodes, edges and runs will be permanently deleted.")) return;
     try {
-      await updateWorkflowMutation.mutateAsync({ id: id!, status: newStatus });
-      toast.success(t(($) => $.detail.toast_activated));
+      await deleteWorkflowMutation.mutateAsync(id!);
+      navigation.push(wsPaths.workflows());
     } catch {
-      toast.error(t(($) => $.detail.toast_save_failed));
+      toast.error("Failed to delete workflow");
     }
   };
 
@@ -138,8 +139,6 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
       </div>
     );
   }
-
-  const isActive = workflow.status === "active";
 
   return (
     <div className="flex h-full flex-col">
@@ -190,12 +189,8 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
           <Button size="sm" variant="outline" onClick={handleSave}>
             <Save className="h-3.5 w-3.5" />
           </Button>
-          <Button size="sm" variant="outline" onClick={handleActivate}>
-            {isActive ? (
-              <Pause className="h-3.5 w-3.5" />
-            ) : (
-              <Play className="h-3.5 w-3.5" />
-            )}
+          <Button size="sm" variant="outline" onClick={handleDeleteWorkflow} className="text-destructive hover:text-destructive">
+            <Trash2 className="h-3.5 w-3.5" />
           </Button>
           <Button
             size="sm"
