@@ -173,7 +173,7 @@ export function RuntimeToolsCard({
       qc.invalidateQueries({ queryKey: runtimeToolGrantsKey(runtime.id) });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Kunne ikke opdatere gruppeadgang");
+      toast.error(err instanceof Error ? err.message : "Couldn't update group access");
     },
   });
 
@@ -194,17 +194,26 @@ export function RuntimeToolsCard({
       qc.invalidateQueries({ queryKey: runtimeToolGrantsKey(runtime.id) });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Kunne ikke opdatere brugeradgang");
+      toast.error(err instanceof Error ? err.message : "Couldn't update user access");
     },
   });
 
-  function handleScanClick() {
-    // Daemon scans on its heartbeat (~15 min debounce). An admin-triggered
-    // immediate-scan endpoint is a separate slice; until then, we tell the
-    // admin the system will pick the scan up automatically.
-    toast.message("Scan queued", {
-      description: "Daemon scans the runtime on next heartbeat (~15 min).",
-    });
+  // The runtime is scanned automatically by the daemon on its heartbeat; there
+  // is no admin-triggered immediate scan. So this button does the one honest
+  // thing it can: re-fetch the latest inventory the daemon has already reported,
+  // rather than the old fake "scan queued" toast that signalled an action it
+  // never performed (FIR-2193).
+  const [refreshing, setRefreshing] = useState(false);
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      await Promise.all([toolsQuery.refetch(), grantsQuery.refetch()]);
+      toast.success("Refreshed", {
+        description: "Showing the latest tools the daemon reported.",
+      });
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   return (
@@ -214,22 +223,23 @@ export function RuntimeToolsCard({
           <h3 className="text-sm font-medium">Tools on runtime</h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
             All tools on <code className="font-mono text-[11px]">{runtime.name}</code>{" "}
-            — cloud and MCP combined. Per row: enable and control access.
+            — cloud and MCP combined. Per row: enable and control access. The
+            runtime is scanned automatically in the background.
           </p>
         </div>
         <div className="flex items-center gap-2">
           <LastScannedLabel scannedAt={lastScannedAt} />
-          {canEdit && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleScanClick}
-              className="gap-1.5"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              Scan runtime
-            </Button>
-          )}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="gap-1.5"
+            title="Re-fetch the latest tools reported by the background scan"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+            {refreshing ? "Refreshing…" : "Refresh"}
+          </Button>
         </div>
       </div>
 
@@ -273,13 +283,13 @@ function LastScannedLabel({ scannedAt }: { scannedAt: string | null }) {
   if (!scannedAt) {
     return (
       <span className="text-[11px] text-muted-foreground">
-        Aldrig scannet
+        Never scanned
       </span>
     );
   }
   return (
     <span className="text-[11px] text-muted-foreground">
-      Scannet {formatRelativeTime(scannedAt)}
+      Last scanned {formatRelativeTime(scannedAt)}
     </span>
   );
 }
@@ -294,7 +304,7 @@ function FilterChips({
   counts: { all: number; cloud: number; mcp: number };
 }) {
   const options: { value: SourceFilter; label: string; count: number }[] = [
-    { value: "all", label: "Alle", count: counts.all },
+    { value: "all", label: "All", count: counts.all },
     { value: "cloud", label: "Cloud", count: counts.cloud },
     { value: "mcp", label: "MCP", count: counts.mcp },
   ];
@@ -404,10 +414,10 @@ function RuntimeToolsBody(props: RuntimeToolsBodyProps) {
         <thead className="bg-muted/30 text-xs uppercase tracking-wide text-muted-foreground">
           <tr>
             <th className="px-4 py-2.5 text-left font-medium">Tool</th>
-            <th className="px-4 py-2.5 text-left font-medium">Kilde</th>
-            <th className="px-4 py-2.5 text-left font-medium">Aktiv</th>
-            <th className="px-4 py-2.5 text-left font-medium">Grupper</th>
-            <th className="px-4 py-2.5 text-left font-medium">Brugere</th>
+            <th className="px-4 py-2.5 text-left font-medium">Source</th>
+            <th className="px-4 py-2.5 text-left font-medium">Active</th>
+            <th className="px-4 py-2.5 text-left font-medium">Groups</th>
+            <th className="px-4 py-2.5 text-left font-medium">Users</th>
           </tr>
         </thead>
         <tbody>
@@ -501,11 +511,11 @@ function SourceBadge({
     case "mcp":
       return (
         <Badge variant="outline" className="gap-1 font-mono text-[11px]">
-          MCP · {mcpServerName || "ukendt server"}
+          MCP · {mcpServerName || "unknown server"}
         </Badge>
       );
     default:
-      return <Badge variant="outline">{source || "ukendt"}</Badge>;
+      return <Badge variant="outline">{source || "unknown"}</Badge>;
   }
 }
 

@@ -224,9 +224,10 @@ describe("PermissionsPage", () => {
     expect(
       await screen.findByRole("heading", { name: /New grant/i }),
     ).toBeInTheDocument();
-    // Capability select defaults to the canonical issue-read capability.
+    // Capability select defaults to the first sensitive action in the curated
+    // catalog (FIR-2193), shown with its plain-language label.
     expect(screen.getByRole("combobox", { name: "Capability" })).toHaveTextContent(
-      "issue.read",
+      "Run a shell command",
     );
   }, 10_000);
 

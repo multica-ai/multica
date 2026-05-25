@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mcp"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -39,6 +40,17 @@ type FirtalGatewayExecutor struct {
 	sem           chan struct{}
 	logger        *slog.Logger
 	publishedOnce map[string]struct{}
+
+	// gate is the permission→approval enforcement gate (FIR-2193). It is nil
+	// by default, in which case tool execution is completely unchanged — no
+	// resolver lookup, no approval ask, zero blast radius on the fleet. It is
+	// only set via EnableApprovalGate, which the server wires solely when the
+	// CEREBRO_APPROVAL_GATE_ENABLED env flag is on (controlled rollout).
+	gate *permgate.Gate
+	// gateAgents scopes the gate to a controlled set of agents. When non-empty
+	// only these agents are gated; every other agent runs ungated even when the
+	// gate is set. Empty means "all agents" (used once the rollout is broad).
+	gateAgents map[[16]byte]struct{}
 }
 
 func NewFirtalGatewayExecutor(
@@ -685,6 +697,12 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 				}
 			}
 			if !isError {
+				if allowed, reason := e.guardToolCall(ctx, agentID, workspaceID, call.Function.Name, args, meta); !allowed {
+					resultText = fmt.Sprintf("blocked by approval gate: %s", reason)
+					isError = true
+				}
+			}
+			if !isError {
 				var err error
 				resultText, err = registry.Call(ctx, call.Function.Name, args)
 				if err != nil {
@@ -823,7 +841,10 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 				resultText string
 				isError    bool
 			)
-			if useRegistry && registry != nil {
+			if allowed, reason := e.guardToolCall(ctx, agentID, workspaceID, call.Function.Name, decodeToolArgs(call.Function.Arguments), meta); !allowed {
+				resultText = fmt.Sprintf("blocked by approval gate: %s", reason)
+				isError = true
+			} else if useRegistry && registry != nil {
 				args := map[string]any{}
 				if raw := strings.TrimSpace(call.Function.Arguments); raw != "" {
 					if err := json.Unmarshal([]byte(raw), &args); err != nil {

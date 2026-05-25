@@ -18,12 +18,21 @@ import {
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
 import {
+  capabilityDescription,
+  capabilityLabel,
   permissionsKeys,
   subjectsWithPermissionsOptions,
   updatePersonaGrant,
   type GrantSubjectType,
   type SubjectWithPermissions,
 } from "../../core";
+
+// Render a resource pattern in plain language: the catch-all "*"/"" means the
+// grant applies to everything, which reads clearer than a bare asterisk.
+function resourceLabel(pattern: string): string {
+  if (!pattern || pattern === "*") return "Anything";
+  return pattern;
+}
 
 interface SubjectsTabProps {
   wsId: string;
@@ -217,10 +226,10 @@ function SubjectRow({ subject, wsId }: { subject: SubjectWithPermissions; wsId: 
           <table className="w-full text-xs">
             <thead>
               <tr className="text-left text-[10px] uppercase tracking-wide text-muted-foreground">
-                <th className="py-1 pr-3 font-medium">Capability</th>
-                <th className="py-1 pr-3 font-medium">Resource</th>
+                <th className="py-1 pr-3 font-medium">Can</th>
+                <th className="py-1 pr-3 font-medium">On</th>
                 <th className="py-1 pr-3 font-medium">Status</th>
-                <th className="py-1 font-medium">Requires approval</th>
+                <th className="py-1 font-medium">Ask first</th>
               </tr>
             </thead>
             <tbody>
@@ -281,8 +290,12 @@ function PermissionRow({
 
   return (
     <tr className="border-t border-border/50">
-      <td className="py-1.5 pr-3 font-mono">{capability}</td>
-      <td className="py-1.5 pr-3 font-mono text-muted-foreground">{resourcePattern}</td>
+      <td className="py-1.5 pr-3">
+        <span title={capabilityDescription(capability) || capability}>
+          {capabilityLabel(capability)}
+        </span>
+      </td>
+      <td className="py-1.5 pr-3 text-muted-foreground">{resourceLabel(resourcePattern)}</td>
       <td className="py-1.5 pr-3">
         <PermStatusBadge status={status} />
       </td>

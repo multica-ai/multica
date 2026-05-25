@@ -17,11 +17,18 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
 import {
+  capabilityDescription,
+  capabilityLabel,
+  DANGEROUS_CAPABILITIES,
+  DATA_CAPABILITIES,
+  DEFAULT_CAPABILITY_KEY,
   GRANT_CLASSIFICATIONS,
   useCreatePersonaGrant,
   type CreatePersonaGrantRequest,
@@ -56,23 +63,13 @@ const RESOURCE_TYPES = [
   "skill",
 ];
 
-const CAPABILITIES = [
-  "issue.read",
-  "issue.write",
-  "project.read",
-  "project.write",
-  "agent.run",
-  "repo.push",
-  "secret.use",
-];
-
 export function CreateGrantDialog({ wsId: _wsId, onClose }: CreateGrantDialogProps) {
   const [subjectType, setSubjectType] = useState<GrantSubjectType>("group");
   const [subjectId, setSubjectId] = useState("");
   const [subjectName, setSubjectName] = useState("");
   const [resourceType, setResourceType] = useState("issue");
   const [resourcePattern, setResourcePattern] = useState("*");
-  const [capability, setCapability] = useState("issue.read");
+  const [capability, setCapability] = useState(DEFAULT_CAPABILITY_KEY);
   const [classification, setClassification] = useState<string>("unclassified");
   const [approvalRequired, setApprovalRequired] = useState(false);
   const [endsAt, setEndsAt] = useState("");
@@ -207,7 +204,7 @@ export function CreateGrantDialog({ wsId: _wsId, onClose }: CreateGrantDialogPro
                 aria-label="Resource pattern"
               />
             </Field>
-            <Field label="Capability">
+            <Field label="Action">
               <Select
                 value={capability}
                 onValueChange={(v) => {
@@ -215,18 +212,35 @@ export function CreateGrantDialog({ wsId: _wsId, onClose }: CreateGrantDialogPro
                 }}
               >
                 <SelectTrigger size="sm" aria-label="Capability">
-                  <SelectValue />
+                  <SelectValue>{capabilityLabel(capability)}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {CAPABILITIES.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
+                  <SelectGroup>
+                    <SelectLabel>Sensitive actions</SelectLabel>
+                    {DANGEROUS_CAPABILITIES.map((c) => (
+                      <SelectItem key={c.key} value={c.key}>
+                        {c.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                  <SelectGroup>
+                    <SelectLabel>Multica data</SelectLabel>
+                    {DATA_CAPABILITIES.map((c) => (
+                      <SelectItem key={c.key} value={c.key}>
+                        {c.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
                 </SelectContent>
               </Select>
             </Field>
           </div>
+
+          {capabilityDescription(capability) && (
+            <p className="-mt-2 text-xs text-muted-foreground" role="note">
+              {capabilityDescription(capability)}
+            </p>
+          )}
 
           <div className="grid grid-cols-2 gap-2">
             <Field label="Classification ceiling">
