@@ -132,6 +132,14 @@ vi.mock("../../navigation", () => ({
 vi.mock("../../editor", () => ({
   useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
   FileDropOverlay: () => null,
+  AttachmentDownloadProvider: ({ children }: { children: React.ReactNode }) => (
+    <>{children}</>
+  ),
+  Attachment: ({ attachment }: { attachment: { kind: string; attachment?: { filename: string } } }) => (
+    <div data-testid="issue-attachment-renderer">
+      {attachment.kind === "record" ? attachment.attachment?.filename : ""}
+    </div>
+  ),
   // No-op so comment-card's AttachmentList can render without hitting the
   // real API singleton; tests that care about download wiring should write
   // dedicated specs against `use-download-attachment.test.tsx`.
@@ -595,6 +603,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
     // /timeline returns the entries flat in chronological order (oldest first).
     mockApiObj.listTimeline.mockResolvedValue(mockTimeline);
+    mockApiObj.listAttachments.mockResolvedValue([]);
     mockApiObj.listIssueReactions.mockResolvedValue([]);
     mockApiObj.listIssueSubscribers.mockResolvedValue([]);
     mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
@@ -627,6 +636,37 @@ describe("IssueDetail (shared)", () => {
     });
 
     expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+  });
+
+  it("keeps issue-level attachments visible below the description even when referenced inline", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      description: "Spec file: [report.pdf](https://cdn.example.test/report.pdf)",
+    });
+    mockApiObj.listAttachments.mockResolvedValue([
+      {
+        id: "att-1",
+        workspace_id: "ws-1",
+        issue_id: "issue-1",
+        comment_id: null,
+        chat_session_id: null,
+        chat_message_id: null,
+        uploader_type: "member",
+        uploader_id: "user-1",
+        filename: "report.pdf",
+        url: "https://cdn.example.test/report.pdf",
+        download_url: "https://cdn.example.test/report.pdf",
+        content_type: "application/pdf",
+        size_bytes: 123,
+        created_at: "2026-01-20T00:00:00Z",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("issue-attachment-renderer")).toHaveTextContent("report.pdf");
+    });
   });
 
   it("renders issue identifier in the breadcrumb", async () => {
@@ -841,6 +881,8 @@ describe("IssueDetail (shared)", () => {
 
     renderIssueDetail();
 
+    fireEvent.click(await screen.findByRole("tab", { name: "Properties" }));
+
     await waitFor(() => {
       // Trigger label includes a "· N" count so users can see payload size
       // before clicking — accept any count via regex.
@@ -863,6 +905,7 @@ describe("IssueDetail (shared)", () => {
 
     renderIssueDetail();
 
+    fireEvent.click(await screen.findByRole("tab", { name: "Properties" }));
     const button = await screen.findByRole("button", { name: /^Metadata\b/ });
     fireEvent.click(button);
 

@@ -16,6 +16,7 @@ vi.mock("../platform", () => ({
 // declarations.
 const {
   getAttachmentTextContentMock,
+  getAttachmentPreviewURLMock,
   downloadMock,
   FakePreviewTooLargeError,
   FakePreviewUnsupportedError,
@@ -34,6 +35,7 @@ const {
   }
   return {
     getAttachmentTextContentMock: vi.fn(),
+    getAttachmentPreviewURLMock: vi.fn(),
     downloadMock: vi.fn(),
     FakePreviewTooLargeError,
     FakePreviewUnsupportedError,
@@ -41,7 +43,10 @@ const {
 });
 
 vi.mock("@multica/core/api", () => ({
-  api: { getAttachmentTextContent: getAttachmentTextContentMock },
+  api: {
+    getAttachmentTextContent: getAttachmentTextContentMock,
+    getAttachmentPreviewURL: getAttachmentPreviewURLMock,
+  },
   PreviewTooLargeError: FakePreviewTooLargeError,
   PreviewUnsupportedError: FakePreviewUnsupportedError,
 }));
@@ -145,6 +150,12 @@ function makeAttachment(overrides: Partial<Attachment> = {}): Attachment {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  getAttachmentPreviewURLMock.mockImplementation((id: string) =>
+    Promise.resolve({
+      url: `https://signed.example.test/${id}`,
+      expires_at: 1779690199,
+    }),
+  );
   navState.hasOpenInNewTab = true;
   slugState.value = "acme";
 });
@@ -154,12 +165,16 @@ afterEach(() => {
 });
 
 describe("AttachmentPreviewModal — dispatch", () => {
-  it("renders an <img> centered in the modal for image content types", () => {
+  it("renders an <img> centered in the modal for image content types", async () => {
     const att = makeAttachment({ filename: "shot.png", content_type: "image/png" });
     render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
-    const img = document.querySelector("img");
-    expect(img).toBeTruthy();
-    expect(img?.getAttribute("src")).toBe(att.download_url);
+    const img = await waitFor(() => {
+      const node = document.querySelector("img");
+      expect(node).toBeTruthy();
+      return node!;
+    });
+    expect(getAttachmentPreviewURLMock).toHaveBeenCalledWith(att.id);
+    expect(img.getAttribute("src")).toBe("https://signed.example.test/att-1");
     expect(img?.getAttribute("alt")).toBe(att.filename);
   });
 
@@ -176,27 +191,38 @@ describe("AttachmentPreviewModal — dispatch", () => {
     expect(img?.getAttribute("src")).toBe(url);
   });
 
-  it("renders a PDF iframe pointing at the signed download URL", () => {
+  it("renders a PDF iframe pointing at the on-demand preview URL", async () => {
     const att = makeAttachment({ filename: "manual.pdf", content_type: "application/pdf" });
     render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
-    const iframe = document.querySelector("iframe");
-    expect(iframe).toBeTruthy();
-    expect(iframe?.getAttribute("src")).toBe(att.download_url);
+    const iframe = await waitFor(() => {
+      const node = document.querySelector("iframe");
+      expect(node).toBeTruthy();
+      return node!;
+    });
+    expect(getAttachmentPreviewURLMock).toHaveBeenCalledWith(att.id);
+    expect(iframe.getAttribute("src")).toBe("https://signed.example.test/att-1");
   });
 
-  it("renders a <video> for video/* content types", () => {
+  it("renders a <video> for video/* content types", async () => {
     const att = makeAttachment({ filename: "clip.mp4", content_type: "video/mp4" });
     render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
-    const video = document.querySelector("video");
-    expect(video).toBeTruthy();
-    expect(video?.getAttribute("src")).toBe(att.download_url);
+    const video = await waitFor(() => {
+      const node = document.querySelector("video");
+      expect(node).toBeTruthy();
+      return node!;
+    });
+    expect(video.getAttribute("src")).toBe("https://signed.example.test/att-1");
   });
 
-  it("renders an <audio> for audio/* content types", () => {
+  it("renders an <audio> for audio/* content types", async () => {
     const att = makeAttachment({ filename: "note.mp3", content_type: "audio/mpeg" });
     render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
-    const audio = document.querySelector("audio");
-    expect(audio).toBeTruthy();
+    const audio = await waitFor(() => {
+      const node = document.querySelector("audio");
+      expect(node).toBeTruthy();
+      return node!;
+    });
+    expect(audio.getAttribute("src")).toBe("https://signed.example.test/att-1");
   });
 
   it("fetches text and hands it to ReadonlyContent for Markdown", async () => {

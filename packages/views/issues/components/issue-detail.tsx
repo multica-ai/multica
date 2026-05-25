@@ -48,7 +48,7 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/u
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay, AttachmentCard, AttachmentDownloadProvider } from "../../editor";
+import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -342,44 +342,32 @@ function formatTokenCount(n: number): string {
 const EMPTY_REPLIES: TimelineEntry[] = [];
 
 // ---------------------------------------------------------------------------
-// Issue-level attachment list — URL-only filtering, no sibling dedupe.
-// Unlike the comment-card AttachmentList, this only hides attachments whose
-// exact URL appears in the description markdown. Same-name / same-size
-// siblings are NOT collapsed — each attachment is an independent record.
+// Issue-level attachment list. These are explicit issue attachments, so keep
+// every record visible even when the description also references the same URL.
+// This preserves the dedicated attachment area below the issue description.
 // ---------------------------------------------------------------------------
 
 function IssueAttachmentList({
   attachments,
-  content,
   className,
   onDelete,
   onAppendToDesc,
 }: {
   attachments?: Attachment[];
-  content?: string;
   className?: string;
   onDelete?: (id: string) => void;
   onAppendToDesc?: (a: Attachment) => void;
 }) {
   if (!attachments?.length) return null;
-  const standalone = content
-    ? attachments.filter((a) => !content.includes(a.url))
-    : attachments;
-  if (!standalone.length) return null;
 
   return (
     <AttachmentDownloadProvider attachments={attachments}>
       <div className={cn("flex flex-col gap-1", className)}>
-        {standalone.map((a) => (
+        {attachments.map((a) => (
           <div key={a.id} className="flex items-center gap-1 group">
             <div className="flex-1 min-w-0">
-              <AttachmentCard
-                filename={a.filename}
-                contentType={a.content_type ?? undefined}
-                attachmentId={a.id}
-                href={a.url}
-                onPreview={() => { window.open(a.url, "_blank"); }}
-                onDownload={() => { window.open(a.url, "_blank"); }}
+              <AttachmentRenderer
+                attachment={{ kind: "record", attachment: a }}
               />
             </div>
             {(onDelete || onAppendToDesc) && (
@@ -2350,7 +2338,6 @@ export function IssueDetail({
 
           <IssueAttachmentList
             attachments={issueAttachments}
-            content={issue.description ?? ""}
             className="mt-3"
             onDelete={async (attachmentId) => {
               await api.deleteAttachment(attachmentId);
