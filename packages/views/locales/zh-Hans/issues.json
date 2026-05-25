@@ -375,7 +375,8 @@
       "search_placeholder": "分配给...",
       "members_group": "成员",
       "agents_group": "智能体",
-      "squads_group": "小队"
+      "squads_group": "小队",
+      "workflows_group": "工作流"
     },
     "start_date": {
       "trigger_label": "开始日期",

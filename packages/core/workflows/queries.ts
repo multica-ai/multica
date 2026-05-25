@@ -29,6 +29,14 @@ export function workflowListOptions(wsId: string) {
   });
 }
 
+export function workflowActiveListOptions(wsId: string) {
+  return queryOptions({
+    queryKey: [...workflowKeys.list(wsId), "active"],
+    queryFn: () => api.listWorkflows(wsId),
+    select: (data) => data.workflows.filter((w) => w.status === "active"),
+  });
+}
+
 export function workflowDetailOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: workflowKeys.detail(wsId, id),

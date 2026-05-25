@@ -356,6 +356,8 @@ type Issue struct {
 	FirstExecutedAt    pgtype.Timestamptz `json:"first_executed_at"`
 	StartDate          pgtype.Timestamptz `json:"start_date"`
 	Metadata           []byte             `json:"metadata"`
+	WorkflowID         pgtype.UUID        `json:"workflow_id"`
+	WorkflowRunID      pgtype.UUID        `json:"workflow_run_id"`
 }
 
 type IssueDependency struct {

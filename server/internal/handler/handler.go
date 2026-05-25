@@ -136,7 +136,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		_ = workflowSvc.HandleWorkflowTaskCompletion(ctx, task)
 	}
 
-	return &Handler{
+	h := &Handler{
 		Queries:               queries,
 		DB:                    executor,
 		TxStarter:             txStarter,
@@ -164,6 +164,18 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		}),
 		cfg: cfg,
 	}
+
+	// Wire workflow issue-sync callbacks so sub-issue status stays in sync
+	// with node-run state transitions, and the parent issue auto-completes
+	// when the workflow run finishes successfully.
+	workflowSvc.OnNodeStatusChanged = func(ctx context.Context, nodeRun db.WorkflowNodeRun) {
+		h.syncSubIssueForNodeRun(ctx, nodeRun)
+	}
+	workflowSvc.OnRunTerminal = func(ctx context.Context, run db.WorkflowRun, status string) {
+		h.handleWorkflowRunTerminal(ctx, run, status)
+	}
+
+	return h
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

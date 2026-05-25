@@ -20,6 +20,13 @@ type WorkflowService struct {
 	TxStarter TxStarter
 	Bus       *events.Bus
 	TaskSvc   *TaskService
+
+	// OnNodeStatusChanged fires after TransitionNodeRun succeeds.
+	OnNodeStatusChanged func(ctx context.Context, nodeRun db.WorkflowNodeRun)
+
+	// OnRunTerminal fires when a workflow run reaches a terminal status
+	// (completed, failed, or cancelled).
+	OnRunTerminal func(ctx context.Context, run db.WorkflowRun, status string)
 }
 
 func NewWorkflowService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService) *WorkflowService {
@@ -252,6 +259,43 @@ func (s *WorkflowService) StartRun(ctx context.Context, workflow db.Workflow, tr
 	return &run, nil
 }
 
+// StartRunForIssue creates a workflow run from an issue assignment and returns
+// all created node runs so the caller can create corresponding sub-issues.
+func (s *WorkflowService) StartRunForIssue(
+	ctx context.Context,
+	workflow db.Workflow,
+	issue db.Issue,
+	triggeredByType string,
+	triggeredByID string,
+) (*db.WorkflowRun, []db.WorkflowNodeRun, error) {
+	input, err := json.Marshal(map[string]any{
+		"title":       issue.Title,
+		"description": textToString(issue.Description),
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal issue input: %w", err)
+	}
+
+	run, err := s.StartRun(ctx, workflow, triggeredByType, triggeredByID, input)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	nodeRuns, err := s.Queries.ListWorkflowNodeRunsByRun(ctx, run.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list node runs: %w", err)
+	}
+
+	return run, nodeRuns, nil
+}
+
+func textToString(t pgtype.Text) string {
+	if t.Valid {
+		return t.String
+	}
+	return ""
+}
+
 // CancelRun cancels all active node_runs and marks the run as cancelled.
 func (s *WorkflowService) CancelRun(ctx context.Context, runID pgtype.UUID) error {
 	return s.runInTx(ctx, func(qtx *db.Queries) error {
@@ -292,6 +336,11 @@ func (s *WorkflowService) TransitionNodeRun(ctx context.Context, nodeRun db.Work
 	if err != nil {
 		return nil, fmt.Errorf("update node run status: %w", err)
 	}
+
+	if s.OnNodeStatusChanged != nil {
+		s.OnNodeStatusChanged(ctx, updated)
+	}
+
 	return &updated, nil
 }
 
@@ -428,6 +477,10 @@ func (s *WorkflowService) checkRunCompletion(ctx context.Context, runID pgtype.U
 			"run_id":      util.UUIDToString(runID),
 			"workflow_id": util.UUIDToString(run.WorkflowID),
 		})
+	}
+
+	if s.OnRunTerminal != nil {
+		s.OnRunTerminal(ctx, run, status)
 	}
 }
 

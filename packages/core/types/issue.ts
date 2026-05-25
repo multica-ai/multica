@@ -11,7 +11,7 @@ export type IssueStatus =
 
 export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 
-export type IssueAssigneeType = "member" | "agent" | "squad";
+export type IssueAssigneeType = "member" | "agent" | "squad" | "workflow";
 
 export interface IssueReaction {
   id: string;
@@ -47,6 +47,8 @@ export interface Issue {
   creator_id: string;
   parent_issue_id: string | null;
   project_id: string | null;
+  workflow_id: string | null;
+  workflow_run_id: string | null;
   position: number;
   start_date: string | null;
   due_date: string | null;

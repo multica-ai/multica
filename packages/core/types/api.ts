@@ -15,6 +15,8 @@ export interface CreateIssueRequest {
   start_date?: string;
   due_date?: string;
   attachment_ids?: string[];
+  workflow_id?: string;
+  workflow_run_id?: string;
 }
 
 export interface UpdateIssueRequest {
@@ -33,6 +35,8 @@ export interface UpdateIssueRequest {
    *  Used by the description editor to register newly uploaded files so they
    *  surface in `issueAttachments` and keep their preview Eye on refresh. */
   attachment_ids?: string[];
+  workflow_id?: string | null;
+  workflow_run_id?: string | null;
 }
 
 export interface ListIssuesParams {

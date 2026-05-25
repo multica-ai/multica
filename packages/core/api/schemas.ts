@@ -161,6 +161,8 @@ const IssueSchema = z.object({
   creator_id: z.string(),
   parent_issue_id: z.string().nullable(),
   project_id: z.string().nullable(),
+  workflow_id: z.string().nullable().default(null),
+  workflow_run_id: z.string().nullable().default(null),
   position: z.number(),
   start_date: z.string().nullable(),
   due_date: z.string().nullable(),
