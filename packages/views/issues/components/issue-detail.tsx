@@ -48,7 +48,7 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/u
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider } from "../../editor";
+import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay, AttachmentCard, AttachmentDownloadProvider, useAttachmentPreview, useDownloadAttachment } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -337,6 +337,20 @@ function formatTokenCount(n: number): string {
   return String(n);
 }
 
+function mergeAttachments(
+  primary?: Attachment[],
+  pending?: Attachment[],
+): Attachment[] | undefined {
+  const all = [...(primary ?? []), ...(pending ?? [])];
+  if (!all.length) return primary;
+  const seen = new Set<string>();
+  return all.filter((attachment) => {
+    if (seen.has(attachment.id)) return false;
+    seen.add(attachment.id);
+    return true;
+  });
+}
+
 // Stable reference for threads with no replies. Inline `[]` would create a
 // new array on every render and bust React.memo on CommentCard / ResolvedThreadBar.
 const EMPTY_REPLIES: TimelineEntry[] = [];
@@ -349,62 +363,104 @@ const EMPTY_REPLIES: TimelineEntry[] = [];
 
 function IssueAttachmentList({
   attachments,
+  pendingAttachments,
   className,
   onDelete,
   onAppendToDesc,
 }: {
   attachments?: Attachment[];
+  pendingAttachments?: Attachment[];
   className?: string;
   onDelete?: (id: string) => void;
   onAppendToDesc?: (a: Attachment) => void;
 }) {
-  if (!attachments?.length) return null;
+  const visible = mergeAttachments(attachments, pendingAttachments);
+  if (!visible?.length) return null;
+  const persistedIds = new Set((attachments ?? []).map((attachment) => attachment.id));
 
   return (
-    <AttachmentDownloadProvider attachments={attachments}>
+    <AttachmentDownloadProvider attachments={visible}>
       <div className={cn("flex flex-col gap-1", className)}>
-        {attachments.map((a) => (
-          <div key={a.id} className="flex items-center gap-1 group">
-            <div className="flex-1 min-w-0">
-              <AttachmentRenderer
-                attachment={{ kind: "record", attachment: a }}
-              />
-            </div>
-            {(onDelete || onAppendToDesc) && (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <button
-                      type="button"
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-opacity"
-                    >
-                      <MoreHorizontal className="h-3.5 w-3.5" />
-                    </button>
-                  }
-                />
-                <DropdownMenuContent align="end">
-                  {onAppendToDesc && (
-                    <DropdownMenuItem onClick={() => onAppendToDesc(a)}>
-                      引用到描述末尾
-                    </DropdownMenuItem>
-                  )}
-                  {onDelete && onAppendToDesc && <DropdownMenuSeparator />}
-                  {onDelete && (
-                    <DropdownMenuItem
-                      className="text-destructive focus:text-destructive"
-                      onClick={() => onDelete(a.id)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5 mr-2" />
-                      删除
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </div>
+        {visible.map((a) => (
+          <IssueAttachmentRow
+            key={a.id}
+            attachment={a}
+            pending={!persistedIds.has(a.id)}
+            onDelete={onDelete}
+            onAppendToDesc={onAppendToDesc}
+          />
         ))}
       </div>
     </AttachmentDownloadProvider>
+  );
+}
+
+function IssueAttachmentRow({
+  attachment,
+  pending,
+  onDelete,
+  onAppendToDesc,
+}: {
+  attachment: Attachment;
+  pending: boolean;
+  onDelete?: (id: string) => void;
+  onAppendToDesc?: (a: Attachment) => void;
+}) {
+  const preview = useAttachmentPreview();
+  const download = useDownloadAttachment();
+  const handlePreview = () => {
+    preview.tryOpen({ kind: "full", attachment });
+  };
+  const handleDownload = () => {
+    void download(attachment.id);
+  };
+
+  return (
+    <div className="flex items-center gap-1 group">
+      <div className="flex-1 min-w-0">
+        <AttachmentCard
+          filename={attachment.filename}
+          contentType={attachment.content_type ?? undefined}
+          attachmentId={attachment.id}
+          href={attachment.url}
+          className="my-0"
+          onPreview={handlePreview}
+          onDownload={handleDownload}
+        />
+      </div>
+      {preview.modal}
+      {!pending && (onDelete || onAppendToDesc) && (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <button
+                type="button"
+                className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-opacity"
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </button>
+            }
+          />
+          <DropdownMenuContent align="end">
+            {onAppendToDesc && (
+              <DropdownMenuItem onClick={() => onAppendToDesc(attachment)}>
+                引用到描述末尾
+              </DropdownMenuItem>
+            )}
+            {onDelete && onAppendToDesc && <DropdownMenuSeparator />}
+            {onDelete && (
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => onDelete(attachment.id)}
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-2" />
+                删除
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </div>
   );
 }
 
@@ -1374,32 +1430,38 @@ export function IssueDetail({
     router.replace(query ? `${canonicalPath}?${query}` : canonicalPath);
   }, [issue, issueId, paths, router]);
 
+  // Shared issue actions (mutations, pin, copy-link, modal dispatch, etc.).
+  // Called before the `if (!issue)` early return so hook order stays stable.
+  const actions = useIssueActions(issue);
+  const handleUpdateField = actions.updateField;
+
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => descEditorRef.current?.uploadFiles(files),
   });
-  // Pending uploads in the description editor. We don't pass `issueId` on
-  // upload (to avoid orphaning attachments when the user deletes the file
-  // from the markdown), so they start unattached and we re-bind them via
-  // `attachment_ids` on the next description save. Drives editor previews
-  // so text/code attachments show an Eye before the bind round-trips.
+  // Pending uploads in the description editor. We bind them immediately after
+  // upload so IssueAttachmentList can be the canonical display surface while
+  // the description editor keeps the attachment markdown hidden.
   const [descPendingAttachments, setDescPendingAttachments] = useState<Attachment[]>([]);
+  useEffect(() => {
+    setDescPendingAttachments([]);
+  }, [resolvedId]);
   const descEditorAttachments = descPendingAttachments.length > 0
     ? [...(issueAttachments ?? []), ...descPendingAttachments]
     : issueAttachments;
   const handleDescriptionUpload = useCallback(
     async (file: File) => {
       const result = await uploadWithToast(file);
-      if (result) setDescPendingAttachments((prev) => [...prev, result]);
+      if (result) {
+        setDescPendingAttachments((prev) => [...prev, result]);
+        if (issue) {
+          handleUpdateField({ attachment_ids: [result.id] });
+        }
+      }
       return result;
     },
-    [uploadWithToast],
+    [handleUpdateField, issue, uploadWithToast],
   );
-
-  // Shared issue actions (mutations, pin, copy-link, modal dispatch, etc.).
-  // Called before the `if (!issue)` early return so hook order stays stable.
-  const actions = useIssueActions(issue);
-  const handleUpdateField = actions.updateField;
 
   const insertQuoteToNewComment = useCallback((markdown: string) => {
     closeQuoteMenu();
@@ -2312,6 +2374,7 @@ export function IssueDetail({
               debounceMs={1500}
               currentIssueId={resolvedId}
               attachments={descEditorAttachments}
+              hideAttachments
               selectionQuoteActions={{
                 onQuoteToNewComment: handleEditorQuoteToNewComment,
                 onQuoteToReplyTarget: handleEditorQuoteToReplyTarget,
@@ -2338,9 +2401,13 @@ export function IssueDetail({
 
           <IssueAttachmentList
             attachments={issueAttachments}
+            pendingAttachments={descPendingAttachments}
             className="mt-3"
             onDelete={async (attachmentId) => {
               await api.deleteAttachment(attachmentId);
+              setDescPendingAttachments((prev) =>
+                prev.filter((attachment) => attachment.id !== attachmentId),
+              );
               queryClient.invalidateQueries({ queryKey: issueAttachmentsOptions(id).queryKey });
             }}
             onAppendToDesc={(a) => {

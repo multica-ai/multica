@@ -73,6 +73,7 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
   return {
     ...actual,
     useWorkspaceSlug: () => "acme",
+    useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme", slug: "acme" }),
     useWorkspacePaths: () => actual.paths.workspace("acme"),
   };
 });

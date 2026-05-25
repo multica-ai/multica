@@ -23,6 +23,25 @@ const TEST_RESOURCES = {
 };
 
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
+const mockUploadResult = vi.hoisted(() => ({
+  current: {
+    id: "upload-1",
+    workspace_id: "ws-1",
+    issue_id: null,
+    comment_id: null,
+    chat_session_id: null,
+    chat_message_id: null,
+    uploader_type: "member",
+    uploader_id: "user-1",
+    filename: "upload.pdf",
+    url: "https://cdn.example.test/upload.pdf",
+    download_url: "https://cdn.example.test/upload.pdf",
+    content_type: "application/pdf",
+    size_bytes: 100,
+    created_at: "2026-01-20T00:00:00Z",
+    link: "https://cdn.example.test/upload.pdf",
+  },
+}));
 
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => mockViewport.isMobile,
@@ -135,6 +154,21 @@ vi.mock("../../editor", () => ({
   AttachmentDownloadProvider: ({ children }: { children: React.ReactNode }) => (
     <>{children}</>
   ),
+  AttachmentCard: ({
+    filename,
+    onPreview,
+    onDownload,
+  }: {
+    filename: string;
+    onPreview?: () => void;
+    onDownload?: () => void;
+  }) => (
+    <div data-testid="issue-attachment-card">
+      {filename}
+      <button type="button" aria-label={`Preview ${filename}`} onClick={onPreview} />
+      <button type="button" aria-label={`Download ${filename}`} onClick={onDownload} />
+    </div>
+  ),
   Attachment: ({ attachment }: { attachment: { kind: string; attachment?: { filename: string } } }) => (
     <div data-testid="issue-attachment-renderer">
       {attachment.kind === "record" ? attachment.attachment?.filename : ""}
@@ -156,7 +190,7 @@ vi.mock("../../editor", () => ({
     <div data-testid="readonly-content">{content}</div>
   ),
   ContentEditor: forwardRef(function MockContentEditor(
-    { defaultValue, onUpdate, placeholder }: any,
+    { defaultValue, onUpdate, onUploadFile, placeholder, hideAttachments }: any,
     ref: any,
   ) {
     const valueRef = useRef(defaultValue || "");
@@ -166,8 +200,8 @@ vi.mock("../../editor", () => ({
       setMarkdown: (markdown: string) => { valueRef.current = markdown; setValue(markdown); },
       clearContent: () => { valueRef.current = ""; setValue(""); },
       focus: () => {},
-      uploadFile: () => {},
-      uploadFiles: () => {},
+      uploadFile: (file: File) => { void onUploadFile?.(file); },
+      uploadFiles: (files: File[]) => { files.forEach((file) => void onUploadFile?.(file)); },
       hasActiveUploads: () => false,
     }));
     return (
@@ -179,6 +213,7 @@ vi.mock("../../editor", () => ({
           onUpdate?.(e.target.value);
         }}
         placeholder={placeholder}
+        data-hide-attachments={hideAttachments ? "true" : "false"}
         data-testid="rich-text-editor"
       />
     );
@@ -397,7 +432,9 @@ vi.mock("@multica/core/modals", () => ({
 
 // Mock core/hooks/use-file-upload
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
-  useFileUpload: () => ({ uploadWithToast: vi.fn().mockResolvedValue("https://example.com/file.png") }),
+  useFileUpload: () => ({
+    uploadWithToast: vi.fn().mockResolvedValue(mockUploadResult.current),
+  }),
 }));
 
 // Mock realtime
@@ -533,13 +570,14 @@ function renderIssueDetail(
   options: { locale?: SupportedLocale } = {},
 ) {
   const queryClient = createTestQueryClient();
-  return render(
+  const result = render(
     <I18nProvider locale={options.locale ?? "en"} resources={TEST_RESOURCES}>
       <QueryClientProvider client={queryClient}>
         <IssueDetail issueId={issueId} {...props} />
       </QueryClientProvider>
     </I18nProvider>,
   );
+  return { ...result, queryClient };
 }
 
 function renderIssueDetailWithHighlight(
@@ -665,7 +703,32 @@ describe("IssueDetail (shared)", () => {
     renderIssueDetail();
 
     await waitFor(() => {
-      expect(screen.getByTestId("issue-attachment-renderer")).toHaveTextContent("report.pdf");
+      expect(screen.getByTestId("issue-attachment-card")).toHaveTextContent("report.pdf");
+    });
+  });
+
+  it("uploads description files into the attachment area and binds them immediately", async () => {
+    const { container } = renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+    });
+
+    const file = new File(["%PDF-1.4"], "upload.pdf", { type: "application/pdf" });
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("issue-attachment-card")).toHaveTextContent("upload.pdf");
+    });
+    await waitFor(() => {
+      expect(mockApiObj.updateIssue).toHaveBeenCalledWith(
+        "issue-1",
+        {
+          attachment_ids: ["upload-1"],
+        },
+      );
     });
   });
 

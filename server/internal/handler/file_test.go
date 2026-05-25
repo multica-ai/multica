@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/storage"
@@ -78,6 +79,14 @@ func (m *mockStorage) KeyFromURL(rawURL string) string {
 	return rawURL
 }
 func (m *mockStorage) CdnDomain() string { return "cdn.example.com" }
+func (m *mockStorage) PresignedInlineGetURL(_ context.Context, key string, contentType string, filename string, _ time.Duration) (string, error) {
+	return fmt.Sprintf(
+		"https://cdn.example.com/%s?response-content-disposition=inline&response-content-type=%s&filename=%s",
+		key,
+		contentType,
+		filename,
+	), nil
+}
 func (m *mockStorage) GetReader(_ context.Context, key string) (io.ReadCloser, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -441,6 +450,17 @@ func newPreviewRequest(t *testing.T, attachmentID, workspaceID string) (*http.Re
 	return req, httptest.NewRecorder()
 }
 
+func newPreviewURLRequest(t *testing.T, attachmentID, workspaceID string) (*http.Request, *httptest.ResponseRecorder) {
+	t.Helper()
+	req := httptest.NewRequest("GET", "/api/attachments/"+attachmentID+"/preview-url", nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", workspaceID)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", attachmentID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	return req, httptest.NewRecorder()
+}
+
 func TestListAttachmentsOnlyReturnsIssueLevelAttachments(t *testing.T) {
 	ctx := context.Background()
 
@@ -500,6 +520,37 @@ VALUES
 	}
 	if resp[0].CommentID != nil {
 		t.Fatalf("expected issue-level attachment comment_id to be nil, got %v", *resp[0].CommentID)
+	}
+}
+
+func TestGetAttachmentPreviewURL_RequestsInlineDisposition(t *testing.T) {
+	store := &mockStorage{}
+	origStorage := testHandler.Storage
+	origLegacyLocalStorage := testHandler.LegacyLocalStorage
+	testHandler.Storage = store
+	testHandler.LegacyLocalStorage = nil
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.LegacyLocalStorage = origLegacyLocalStorage
+	}()
+
+	id := seedPreviewAttachment(t, store, "manual.pdf", "manual.pdf", "application/pdf", []byte("%PDF-1.4\n"))
+
+	req, w := newPreviewURLRequest(t, id, testWorkspaceID)
+	testHandler.GetAttachmentPreviewURL(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var resp previewURLResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, w.Body.String())
+	}
+	if !strings.Contains(resp.URL, "response-content-disposition=inline") {
+		t.Fatalf("preview URL should override Content-Disposition inline, got %q", resp.URL)
+	}
+	if !strings.Contains(resp.URL, "response-content-type=application/pdf") {
+		t.Fatalf("preview URL should preserve PDF content type, got %q", resp.URL)
 	}
 }
 
