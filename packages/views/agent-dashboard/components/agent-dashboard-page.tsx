@@ -149,7 +149,8 @@ function parseTimeRange(raw: string | null): TimeRange {
   return TIME_RANGES.includes(parsed as TimeRange) ? (parsed as TimeRange) : 30;
 }
 
-function parseHour(raw: string | null, fallback: number): number {
+export function parseHour(raw: string | null, fallback: number): number {
+  if (raw === null || raw.trim() === "") return fallback;
   const parsed = Number(raw);
   return Number.isInteger(parsed) && parsed >= 0 && parsed <= 23 ? parsed : fallback;
 }
