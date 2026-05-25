@@ -346,6 +346,56 @@ func TestCodebuddyHandleAssistantText(t *testing.T) {
 	}
 }
 
+func TestParseCodebuddyModels_FullHelp(t *testing.T) {
+	t.Parallel()
+	helpOutput := `Usage: codebuddy [options] [command] [prompt]
+
+Options:
+  --model <model>                                  Model for the current session. Please provide the model ID. Currently supported: (claude-sonnet-4.6, claude-opus-4.7, gemini-3.1-pro, gpt-5.5, glm-5.1-ioa, minimax-m2.7-ioa, kimi-k2.6-ioa, hy3-preview-ioa, deepseek-v3-2-volc-ioa)
+  --effort <level>                                 Reasoning effort level (low, medium, high, xhigh)
+`
+	models := parseCodebuddyModels(helpOutput)
+	if len(models) != 9 {
+		t.Fatalf("expected 9 models, got %d: %+v", len(models), models)
+	}
+	if !models[0].Default {
+		t.Error("first model should be marked as default")
+	}
+	if models[0].ID != "claude-sonnet-4.6" {
+		t.Errorf("first model ID = %q, want claude-sonnet-4.6", models[0].ID)
+	}
+	if models[0].Provider != "anthropic" {
+		t.Errorf("claude model provider = %q, want anthropic", models[0].Provider)
+	}
+	// Spot check providers
+	providers := map[string]string{}
+	for _, m := range models {
+		providers[m.ID] = m.Provider
+	}
+	checks := map[string]string{
+		"gpt-5.5":                "openai",
+		"gemini-3.1-pro":        "google",
+		"glm-5.1-ioa":           "zhipu",
+		"minimax-m2.7-ioa":      "minimax",
+		"kimi-k2.6-ioa":         "kimi",
+		"hy3-preview-ioa":       "hunyuan",
+		"deepseek-v3-2-volc-ioa": "deepseek",
+	}
+	for id, want := range checks {
+		if got := providers[id]; got != want {
+			t.Errorf("provider(%q) = %q, want %q", id, got, want)
+		}
+	}
+}
+
+func TestParseCodebuddyModels_Malformed(t *testing.T) {
+	t.Parallel()
+	models := parseCodebuddyModels("totally unrelated output\nno model line here")
+	if len(models) != 0 {
+		t.Fatalf("expected 0 models from malformed output, got %d", len(models))
+	}
+}
+
 func TestCodebuddyHandleUserToolResult(t *testing.T) {
 	t.Parallel()
 
