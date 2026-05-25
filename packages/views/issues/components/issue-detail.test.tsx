@@ -865,10 +865,13 @@ describe("IssueDetail (shared)", () => {
 
     renderIssueDetail();
 
-    // The block header reports the full count.
+    // In the truncated default state the "N activities" collapse header
+    // stays hidden — the "Show N more" link is the only control we want
+    // to expose for a glance at recent activity.
     await waitFor(() => {
-      expect(screen.getByText("10 activities")).toBeInTheDocument();
+      expect(screen.getByText("Show 2 more activities")).toBeInTheDocument();
     });
+    expect(screen.queryByText("10 activities")).not.toBeInTheDocument();
 
     // Only the 8 most recent entries (act-3..act-10) are rendered by default.
     // act-1 and act-2 are folded behind the show-more line.
@@ -877,18 +880,15 @@ describe("IssueDetail (shared)", () => {
     expect(screen.queryByText(/from Todo to In Progress/i)).not.toBeInTheDocument(); // act-1
     expect(screen.queryByText(/from Low to Medium/i)).not.toBeInTheDocument(); // act-2
 
-    // The show-more toggle reports the count of hidden older entries (2).
-    const showMore = screen.getByText("Show 2 more activities");
-    expect(showMore).toBeInTheDocument();
-
-    // Clicking the toggle reveals the older entries in place; the rest of the
-    // block stays visible.
-    fireEvent.click(showMore);
+    // Clicking the toggle reveals the older entries in place and brings the
+    // full "N activities" header back (so the user can fold the block).
+    fireEvent.click(screen.getByText("Show 2 more activities"));
     await waitFor(() => {
       expect(screen.getByText(/from Todo to In Progress/i)).toBeInTheDocument();
     });
     expect(screen.getByText(/from Low to Medium/i)).toBeInTheDocument();
     expect(screen.getByText(/set due date to/i)).toBeInTheDocument();
+    expect(screen.getByText("10 activities")).toBeInTheDocument();
     expect(screen.queryByText(/Show \d+ more activit/i)).not.toBeInTheDocument();
   });
 

@@ -442,16 +442,25 @@ function ActivityBlock({
       : 0;
   const visibleEntries =
     hiddenOlderCount > 0 ? entries.slice(-LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT) : entries;
+  // Hide the "v N activities" collapse header while we're in the truncated
+  // default state. The "Show N more" link is the only control users need
+  // when they're glancing at recent activity — stacking two chevron rows
+  // looked like nested folds and added visual noise without value. Once the
+  // user explicitly reveals older entries, the header reappears so they can
+  // fold the whole block back to a single count line.
+  const showHeader = hiddenOlderCount === 0;
   return (
     <div className="pb-3 px-4 flex flex-col gap-3">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ChevronDown className="h-3 w-3 shrink-0" />
-        <span>{t(($) => $.activity.activity_count, { count: entries.length })}</span>
-      </button>
+      {showHeader && (
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronDown className="h-3 w-3 shrink-0" />
+          <span>{t(($) => $.activity.activity_count, { count: entries.length })}</span>
+        </button>
+      )}
       {hiddenOlderCount > 0 && (
         <button
           type="button"
