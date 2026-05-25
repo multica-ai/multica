@@ -289,19 +289,6 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
-        version: "0.3.7",
-        date: "2026-05-25",
-        title: "Per-Agent Local-Skill Toggle",
-        changes: [],
-        features: [
-          "Agents now carry a Skill safety switch on Create Agent and the agent Skills tab. Default is on (merge) — existing personal workflows that rely on locally installed Claude Skills keep working unchanged",
-          "Flip the toggle off to isolate a shared agent from the host machine's user-global skill directory (e.g. ~/.claude/skills/) — a broken local Skill on one operator's machine can no longer crash a teammate's run",
-        ],
-        fixes: [
-          "Claude runtime no longer silently exits with 'broken pipe' when the toggle is off and the host has a malformed local Skill (GitHub #3052)",
-        ],
-      },
-      {
         version: "0.3.6",
         date: "2026-05-22",
         title: "Smarter Welcome, Live Work Signals & Safer Collaboration",
