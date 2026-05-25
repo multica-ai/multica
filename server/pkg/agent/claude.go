@@ -189,8 +189,15 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			}
 		}
 
-		// Wait for process exit
-		exitErr := cmd.Wait()
+		// Wait for process exit. If the subprocess closed stdout (ending
+		// the scanner loop) but fails to exit, kill it — the agent
+		// already finished its work and the Result is ready.
+		exitErr := waitTimeout(cmd, processExitTimeout)
+		if exitErr == ErrProcessKilled {
+			b.cfg.Logger.Warn("subprocess did not exit after stdout close, killed",
+				"pid", cmd.Process.Pid,
+			)
+		}
 		duration := time.Since(startTime)
 
 		if runCtx.Err() == context.DeadlineExceeded {
@@ -199,7 +206,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		} else if runCtx.Err() == context.Canceled {
 			finalStatus = "aborted"
 			finalError = "execution cancelled"
-		} else if exitErr != nil && finalStatus == "completed" {
+		} else if exitErr != nil && exitErr != ErrProcessKilled && finalStatus == "completed" {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("claude exited with error: %v", exitErr)
 		}

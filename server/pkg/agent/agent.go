@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os/exec"
 	"time"
 )
 
@@ -171,4 +172,41 @@ var launchHeaders = map[string]string{
 // users understand which command their custom_args get appended to.
 func LaunchHeader(agentType string) string {
 	return launchHeaders[agentType]
+}
+
+// processExitTimeout is how long waitTimeout allows for a graceful process
+// exit after stdout has been closed. The subprocess already finished its work;
+// this window covers cleanup (session persistence, child reaping, network
+// flush). Anything longer is a genuine hang.
+const processExitTimeout = 60 * time.Second
+
+// ErrProcessKilled is returned by waitTimeout when the process did not exit
+// within the timeout and had to be killed. Callers should treat this as "the
+// agent finished its work but the subprocess hung during cleanup" — the output
+// already collected is still valid.
+var ErrProcessKilled = fmt.Errorf("process killed after %s exit timeout", processExitTimeout)
+
+// waitTimeout waits for cmd to exit within the given timeout. If the process
+// doesn't exit in time, it is killed and ErrProcessKilled is returned. The
+// caller should proceed with whatever output it has already collected. A
+// subprocess that has closed stdout (ending the scanner loop) but failed to
+// exit is a real observed failure mode: the agent completed its work, but a
+// cleanup step (child process, network flush, session persistence) keeps the
+// parent alive. Without a timeout, cmd.Wait() blocks indefinitely and the
+// idle watchdog eventually force-stops the run with a misleading "no new
+// messages" reason.
+func waitTimeout(cmd *exec.Cmd, timeout time.Duration) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-timer.C:
+		_ = cmd.Process.Kill()
+		return ErrProcessKilled
+	}
 }

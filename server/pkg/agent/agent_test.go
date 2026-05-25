@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"os/exec"
 	"testing"
+	"time"
 )
 
 func TestNewReturnsClaudeBackend(t *testing.T) {
@@ -85,5 +87,49 @@ func TestLaunchHeaderReturnsEmptyForUnknownType(t *testing.T) {
 	t.Parallel()
 	if header := LaunchHeader("made-up-agent"); header != "" {
 		t.Errorf("expected empty header for unknown type, got %q", header)
+	}
+}
+
+func TestWaitTimeoutReturnsWhenProcessExits(t *testing.T) {
+	t.Parallel()
+	cmd := exec.Command("true")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	err := waitTimeout(cmd, 5*time.Second)
+	if err != nil {
+		t.Fatalf("expected nil error for successful exit, got %v", err)
+	}
+}
+
+func TestWaitTimeoutKillsStuckProcess(t *testing.T) {
+	t.Parallel()
+	cmd := exec.Command("sleep", "300")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	start := time.Now()
+	err := waitTimeout(cmd, 100*time.Millisecond)
+	elapsed := time.Since(start)
+	if err != ErrProcessKilled {
+		t.Fatalf("expected ErrProcessKilled after kill, got %v", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("expected fast kill, took %v", elapsed)
+	}
+}
+
+func TestWaitTimeoutPropagatesNonZeroExit(t *testing.T) {
+	t.Parallel()
+	cmd := exec.Command("false")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	err := waitTimeout(cmd, 5*time.Second)
+	if err == nil {
+		t.Fatal("expected non-nil error for non-zero exit")
+	}
+	if err == ErrProcessKilled {
+		t.Fatal("expected exit error, not ErrProcessKilled")
 	}
 }

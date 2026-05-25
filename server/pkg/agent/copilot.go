@@ -276,7 +276,12 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 			slog.Warn("copilot stdout scanner error", "err", err)
 		}
 
-		exitErr := cmd.Wait()
+		exitErr := waitTimeout(cmd, processExitTimeout)
+		if exitErr == ErrProcessKilled {
+			b.cfg.Logger.Warn("subprocess did not exit after stdout close, killed",
+				"pid", cmd.Process.Pid,
+			)
+		}
 		duration := time.Since(startTime)
 
 		if runCtx.Err() == context.DeadlineExceeded {
@@ -285,7 +290,7 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		} else if runCtx.Err() == context.Canceled {
 			st.finalStatus = "aborted"
 			st.finalError = "execution cancelled"
-		} else if exitErr != nil && st.finalStatus == "completed" {
+		} else if exitErr != nil && exitErr != ErrProcessKilled && st.finalStatus == "completed" {
 			st.finalStatus = "failed"
 			st.finalError = fmt.Sprintf("copilot exited with error: %v", exitErr)
 		}

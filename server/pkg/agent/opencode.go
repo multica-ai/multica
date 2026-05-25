@@ -136,8 +136,15 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		startTime := time.Now()
 		scanResult := b.processEvents(stdout, msgCh)
 
-		// Wait for process exit.
-		exitErr := cmd.Wait()
+		// Wait for process exit. If the subprocess closed stdout but
+		// fails to exit, kill it and proceed with the output already
+		// collected.
+		exitErr := waitTimeout(cmd, processExitTimeout)
+		if exitErr == ErrProcessKilled {
+			b.cfg.Logger.Warn("subprocess did not exit after stdout close, killed",
+				"pid", cmd.Process.Pid,
+			)
+		}
 		duration := time.Since(startTime)
 
 		if runCtx.Err() == context.DeadlineExceeded {
@@ -146,7 +153,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		} else if runCtx.Err() == context.Canceled {
 			scanResult.status = "aborted"
 			scanResult.errMsg = "execution cancelled"
-		} else if exitErr != nil && scanResult.status == "completed" {
+		} else if exitErr != nil && exitErr != ErrProcessKilled && scanResult.status == "completed" {
 			scanResult.status = "failed"
 			scanResult.errMsg = fmt.Sprintf("opencode exited with error: %v", exitErr)
 		}
