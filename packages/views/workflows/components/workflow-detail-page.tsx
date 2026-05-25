@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Save, Plus, Wand, Trash2, Power } from "lucide-react";
@@ -55,6 +55,9 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
   const deleteWorkflowMutation = useDeleteWorkflow(wsId);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
+
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [draftTitle, setDraftTitle] = useState("");
 
   const handleNodeMoved = useCallback((nodeId: string, x: number, y: number) => {
     updateNodeMutation.mutate({ nodeId, position_x: x, position_y: y });
@@ -143,7 +146,32 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
       {/* Toolbar */}
       <PageHeader className="justify-between px-5 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
-          <h1 className="text-sm font-medium truncate">{workflow.title}</h1>
+          {editingTitle ? (
+            <input
+              className="h-7 px-2 text-sm font-medium border rounded bg-background w-48"
+              value={draftTitle}
+              onChange={(e) => setDraftTitle(e.currentTarget.value)}
+              onBlur={async () => {
+                setEditingTitle(false);
+                if (draftTitle && draftTitle !== workflow?.title) {
+                  await updateWorkflowMutation.mutateAsync({ id: id!, title: draftTitle });
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                if (e.key === "Escape") { setDraftTitle(workflow?.title ?? ""); setEditingTitle(false); }
+              }}
+              autoFocus
+            />
+          ) : (
+            <h1
+              className="text-sm font-medium truncate cursor-pointer hover:text-primary transition-colors"
+              onClick={() => { setDraftTitle(workflow?.title ?? ""); setEditingTitle(true); }}
+              title="Click to rename"
+            >
+              {workflow.title}
+            </h1>
+          )}
           <Badge variant="secondary" className="text-[10px] px-1.5 h-4 shrink-0">
             {t(($) => ($.status as Record<string, string>)[workflow.status as WorkflowStatus] ?? workflow.status)}
           </Badge>

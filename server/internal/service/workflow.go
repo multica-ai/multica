@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -62,7 +63,7 @@ const (
 var validTransitions = map[string][]string{
 	NodeRunStatusPending:         {NodeRunStatusFormatChecking, NodeRunStatusSkipped, NodeRunStatusCancelled},
 	NodeRunStatusFormatChecking:  {NodeRunStatusFormatOk, NodeRunStatusFormatFailed, NodeRunStatusCancelled},
-	NodeRunStatusFormatOk:        {NodeRunStatusWorkerAssigned, NodeRunStatusCancelled, NodeRunStatusSkipped},
+	NodeRunStatusFormatOk:        {NodeRunStatusWorkerAssigned, NodeRunStatusWorking, NodeRunStatusCancelled, NodeRunStatusSkipped},
 	NodeRunStatusFormatFailed:    {},
 	NodeRunStatusWorkerAssigned:  {NodeRunStatusWorking, NodeRunStatusCancelled, NodeRunStatusSkipped},
 	NodeRunStatusWorking:         {NodeRunStatusAwaitingCritic, NodeRunStatusFailed, NodeRunStatusCancelled},
@@ -191,6 +192,7 @@ func (s *WorkflowService) StartRun(ctx context.Context, workflow db.Workflow, tr
 			WorkflowID:      workflow.ID,
 			WorkspaceID:     workflow.WorkspaceID,
 			WorkflowTitle:   workflow.Title,
+			Status:          "running",
 			TriggeredByType: triggeredByType,
 			TriggeredByID:   triggeredByUUID,
 			Input:           input,
@@ -244,14 +246,20 @@ func (s *WorkflowService) StartRun(ctx context.Context, workflow db.Workflow, tr
 		return nil, err
 	}
 
-	// Kick off root nodes (format_checking) after tx commits.
+	// Kick off root nodes after tx commits: format_checking -> format_ok -> dispatch
 	nodeRuns, _ := s.Queries.ListWorkflowNodeRunsByRun(ctx, run.ID)
 	for _, nr := range nodeRuns {
 		if nr.Status == NodeRunStatusFormatChecking {
-			if err := s.executeFormatChecker(ctx, qtxForRun(s.Queries), nr); err != nil {
-				// Format checker failures are written to the node run row;
-				// we log and continue so other root nodes still execute.
-				continue
+			if _, err := s.TransitionNodeRun(ctx, nr, NodeRunStatusFormatOk); err != nil {
+				slog.Warn("StartRun: transition to format_ok failed", "node_run_id", util.UUIDToString(nr.ID), "error", err)
+			}
+		}
+	}
+	nodeRuns, _ = s.Queries.ListWorkflowNodeRunsByRun(ctx, run.ID)
+	for _, nr := range nodeRuns {
+		if nr.Status == NodeRunStatusFormatOk {
+			if err := s.dispatchWorker(ctx, nr); err != nil {
+				slog.Warn("StartRun: dispatch worker failed", "node_run_id", util.UUIDToString(nr.ID), "error", err)
 			}
 		}
 	}
@@ -630,7 +638,9 @@ func (s *WorkflowService) dispatchWorker(ctx context.Context, nodeRun db.Workflo
 			}
 		}
 		if !agentID.Valid {
-			return fmt.Errorf("no agent resolved for worker")
+			// No specific agent assigned yet — mark as assigned so it can be claimed.
+			_, err := s.TransitionNodeRun(ctx, nodeRun, NodeRunStatusWorkerAssigned)
+			return err
 		}
 		// Create the agent task.
 		task, err := s.DispatchAgentTask(ctx, nodeRun, "worker")

@@ -2034,6 +2034,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 						if err != nil {
 							slog.Warn("failed to set workflow_run_id on parent issue", "issue_id", uuidToString(issue.ID), "error", err)
 						} else {
+							resp.WorkflowID = uuidToPtr(issue.AssigneeID)
 							resp.WorkflowRunID = uuidToPtr(run.ID)
 						}
 					}
@@ -2295,11 +2296,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		if issue.AssigneeType.Valid && issue.AssigneeType.String == "workflow" && !issue.WorkflowRunID.Valid {
 			workflow, wfErr := h.Queries.GetWorkflow(ctx, issue.AssigneeID)
 			if wfErr != nil {
-				slog.Warn("failed to load workflow for issue assignee change", "issue_id", uuidToString(issue.ID), "error", wfErr)
+				slog.Warn("failed to load workflow for issue assignee change", "issue_id", uuidToString(issue.ID), "error", wfErr); resp.WorkflowID = uuidToPtr(issue.AssigneeID)
 			} else {
 				run, nodeRuns, wfErr := h.WorkflowService.StartRunForIssue(ctx, workflow, issue, actorType, actorID)
 				if wfErr != nil {
-					slog.Warn("failed to start workflow run on assignee change", "issue_id", uuidToString(issue.ID), "error", wfErr)
+					resp.WorkflowID = uuidToPtr(issue.AssigneeID); slog.Warn("failed to start workflow run on assignee change", "issue_id", uuidToString(issue.ID), "error", wfErr)
 				} else {
 					for _, nr := range nodeRuns {
 						childNum, cerr := h.Queries.IncrementIssueCounter(ctx, prevIssue.WorkspaceID)
@@ -2922,7 +2923,7 @@ func (h *Handler) createWorkflowSubIssue(
 		Priority:      parentIssue.Priority,
 		AssigneeType:  assigneeType,
 		AssigneeID:    assigneeID,
-		CreatorType:   "system",
+		CreatorType:   "member",
 		CreatorID:     parentIssue.CreatorID,
 		ParentIssueID: parentIssue.ID,
 		Position:      0,

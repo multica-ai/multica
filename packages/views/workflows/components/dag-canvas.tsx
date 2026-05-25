@@ -17,6 +17,7 @@ interface DAGCanvasProps {
   onNodeDoubleClick?: (nodeId: string) => void;
   onAutoLayout?: () => void;
   nodeStatusColors?: Record<string, string>;
+  initialScale?: number;
 }
 
 interface NodeRect {
@@ -51,6 +52,7 @@ export function DAGCanvas({
   onNodeClick,
   onNodeDoubleClick,
   nodeStatusColors,
+  initialScale,
 }: DAGCanvasProps) {
   const selectedNodeId = useWorkflowEditorStore((s) => s.selectedNodeId);
   const mode = useWorkflowEditorStore((s) => s.mode);
@@ -63,7 +65,7 @@ export function DAGCanvas({
   const [panning, setPanning] = useState<{ startX: number; startY: number; startOffsetX: number; startOffsetY: number } | null>(null);
   const pannedRef = useRef(false);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
-  const [scale, setScale] = useState(1.5);
+  const [scale, setScale] = useState(initialScale ?? 1.5);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const scaleRef = useRef(scale);
   const offsetRef = useRef(offset);

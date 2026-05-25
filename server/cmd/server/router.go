@@ -492,6 +492,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/runs", h.ListWorkflowRuns)
 					r.Post("/runs", h.StartWorkflowRun)
 					r.Get("/runs/{runId}", h.GetWorkflowRun)
+					r.Get("/runs/{runId}/node-runs", h.ListWorkflowNodeRuns)
 					r.Post("/runs/{runId}/cancel", h.CancelWorkflowRun)
 				})
 			})

@@ -476,3 +476,22 @@ func (h *Handler) ListMyWorkflowTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 func paginationFromQuery(r *http.Request) (int32, int32) { return 50, 0 }
+
+func (h *Handler) ListWorkflowNodeRuns(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	wf, ok := h.loadWorkflowInWorkspace(w, r, id)
+	if !ok { return }
+	runID := chi.URLParam(r, "runId")
+	runUUID, ok := parseUUIDOrBadRequest(w, runID, "run id")
+	if !ok { return }
+	run, err := h.Queries.GetWorkflowRun(r.Context(), runUUID)
+	if err != nil { writeError(w, http.StatusNotFound, "run not found"); return }
+	if uuidToString(run.WorkflowID) != uuidToString(wf.ID) { writeError(w, http.StatusNotFound, "run not found"); return }
+	nodeRuns, err := h.Queries.ListWorkflowNodeRunsByRun(r.Context(), run.ID)
+	if err != nil { nodeRuns = nil }
+	resp := make([]WorkflowNodeRunResponse, 0, len(nodeRuns))
+	for _, nr := range nodeRuns {
+		resp = append(resp, workflowNodeRunToResponse(nr))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"node_runs": resp})
+}
