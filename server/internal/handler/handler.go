@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -518,6 +519,10 @@ func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id, workspaceID 
 	}
 	wsUUID, err := util.ParseUUID(workspaceID)
 	if err != nil {
+		return db.Issue{}, false
+	}
+	prefix := h.getIssuePrefix(ctx, wsUUID)
+	if !strings.EqualFold(parts.prefix, prefix) {
 		return db.Issue{}, false
 	}
 	issue, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{

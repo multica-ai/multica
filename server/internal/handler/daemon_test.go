@@ -1178,6 +1178,153 @@ func TestGetIssueUsage_CrossWorkspace_Returns404(t *testing.T) {
 	}
 }
 
+func TestGetIssueUsage_IncludesLocalCLIUsage(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	createIssue := func(title string) string {
+		t.Helper()
+
+		var issueID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+			VALUES (
+				$1, $2, 'todo', 'medium', $3, 'member',
+				(SELECT COALESCE(MAX(number), 92000) + 1 FROM issue WHERE workspace_id = $1),
+				0
+			)
+			RETURNING id
+		`, testWorkspaceID, title, testUserID).Scan(&issueID); err != nil {
+			t.Fatalf("setup: create issue: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+		return issueID
+	}
+
+	issueID := createIssue("issue usage includes local cli")
+	otherIssueID := createIssue("issue usage excludes other local cli")
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
+		VALUES ($1, $2, 'completed', $3)
+		RETURNING id
+	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_usage (
+			task_id, provider, model,
+			input_tokens, output_tokens, cache_read_tokens, cache_write_tokens
+		)
+		VALUES ($1, 'handler-test', 'remote-model', 10, 20, 3, 4)
+	`, taskID); err != nil {
+		t.Fatalf("setup: create task usage: %v", err)
+	}
+
+	createLocalUsage := func(targetIssueID string, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int) string {
+		t.Helper()
+
+		var runID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO local_cli_run (
+				workspace_id, issue_id, owner_id, cli_name, status, completed_at
+			)
+			VALUES ($1, $2, $3, 'codex', 'completed', now())
+			RETURNING id
+		`, testWorkspaceID, targetIssueID, testUserID).Scan(&runID); err != nil {
+			t.Fatalf("setup: create local run: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM local_cli_run WHERE id = $1`, runID) })
+
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO local_cli_usage (
+				run_id, workspace_id, issue_id, owner_id, cli_name, provider, model,
+				input_tokens, output_tokens, cache_read_tokens, cache_write_tokens
+			)
+			VALUES ($1, $2, $3, $4, 'codex', 'codex', 'local-model', $5, $6, $7, $8)
+		`, runID, testWorkspaceID, targetIssueID, testUserID, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens); err != nil {
+			t.Fatalf("setup: create local usage: %v", err)
+		}
+
+		return runID
+	}
+
+	createLocalUsage(issueID, 30, 40, 5, 6)
+	createLocalUsage(otherIssueID, 900, 900, 900, 900)
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/issues/"+issueID+"/usage", nil)
+	req = withURLParam(req, "id", issueID)
+
+	testHandler.GetIssueUsage(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetIssueUsage: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		TotalInputTokens      int64 `json:"total_input_tokens"`
+		TotalOutputTokens     int64 `json:"total_output_tokens"`
+		TotalCacheReadTokens  int64 `json:"total_cache_read_tokens"`
+		TotalCacheWriteTokens int64 `json:"total_cache_write_tokens"`
+		TaskCount             int32 `json:"task_count"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if resp.TotalInputTokens != 40 {
+		t.Fatalf("total_input_tokens: expected 40, got %d", resp.TotalInputTokens)
+	}
+	if resp.TotalOutputTokens != 60 {
+		t.Fatalf("total_output_tokens: expected 60, got %d", resp.TotalOutputTokens)
+	}
+	if resp.TotalCacheReadTokens != 8 {
+		t.Fatalf("total_cache_read_tokens: expected 8, got %d", resp.TotalCacheReadTokens)
+	}
+	if resp.TotalCacheWriteTokens != 10 {
+		t.Fatalf("total_cache_write_tokens: expected 10, got %d", resp.TotalCacheWriteTokens)
+	}
+	if resp.TaskCount != 2 {
+		t.Fatalf("task_count: expected 2, got %d", resp.TaskCount)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues/"+otherIssueID+"/usage", nil)
+	req = withURLParam(req, "id", otherIssueID)
+
+	testHandler.GetIssueUsage(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetIssueUsage local-only: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode local-only response: %v", err)
+	}
+
+	if resp.TotalInputTokens != 900 {
+		t.Fatalf("local-only total_input_tokens: expected 900, got %d", resp.TotalInputTokens)
+	}
+	if resp.TotalOutputTokens != 900 {
+		t.Fatalf("local-only total_output_tokens: expected 900, got %d", resp.TotalOutputTokens)
+	}
+	if resp.TaskCount != 1 {
+		t.Fatalf("local-only task_count: expected 1, got %d", resp.TaskCount)
+	}
+}
+
 func TestGetDaemonWorkspaceRepos_WithDaemonToken(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
