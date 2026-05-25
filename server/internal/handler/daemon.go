@@ -473,6 +473,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				slog.Warn("failed to write runtime capabilities", "runtime_id", uuidToString(registered.ID), "error", err)
 			} else {
 				registered.Capabilities = runtime.Capabilities
+				h.persistRuntimeCapabilitySnapshot(r, registered.ID, registered.WorkspaceID, runtime.Capabilities) // CEREBRO-PATCH(capability-register-register): FIR-2129 mirror initial daemon snapshot into normalized registry on register.
 			}
 		}
 
