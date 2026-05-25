@@ -286,14 +286,19 @@
       "save_failed_toast": "Failed to save environment variables"
     },
     "infisical": {
-      "_comment": "CEREBRO-PATCH(agent-infisical-secrets): infisical secrets tab strings",
-      "intro": "Map environment variable names to Infisical secret names. Values are fetched by the daemon at spawn and are never returned to the agent as tool output.",
-      "readonly": "Infisical secret references are managed by workspace admins.",
+      "_comment": "CEREBRO-PATCH(agent-infisical-secrets): infisical folder grants tab strings",
+      "intro": "Grant this agent access to Infisical folders. Every secret in a folder is injected into the agent's environment under its own name at spawn — the agent uses them (e.g. $DATABASE_URL) but never sees the values, and they never appear in the transcript.",
+      "readonly": "Infisical folder access is managed by workspace admins.",
       "loading": "Loading",
-      "empty": "No Infisical secrets configured.",
-      "duplicate_env_toast": "Environment variable names must be unique",
-      "saved_toast": "Infisical secrets saved",
-      "save_failed_toast": "Could not save Infisical secrets"
+      "empty": "No Infisical folders granted.",
+      "no_allowed": "No Infisical folders are available to you yet. Ask a workspace admin to allow you folders first (Settings → Members → the member → Infisical).",
+      "duplicate_toast": "Each folder can only be added once",
+      "saved_toast": "Infisical folders saved",
+      "save_failed_toast": "Could not save Infisical folders",
+      "environment_label": "Environment",
+      "path_label": "Folder path",
+      "environment_placeholder": "production",
+      "path_placeholder": "/"
     },
     "custom_args": {
       "intro": "Additional CLI arguments appended to the agent command at launch. Multi-token flags can share one row — they'll be split on whitespace before being passed to the CLI.",

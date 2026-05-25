@@ -281,6 +281,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "PUT /api/workspaces/{id}/members/{memberId}/infisical-folders",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "PATCH /api/workspaces/{id}/members/{memberId}/budget-enforcement",
       "gate": "workspace_admin"
     },
@@ -877,7 +881,7 @@
       "gate": "cerebro_agent_access"
     },
     {
-      "id": "PUT /api/agents/{id}/infisical-secrets",
+      "id": "PUT /api/agents/{id}/infisical-folders",
       "gate": "cerebro_agent_access"
     },
     {

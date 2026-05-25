@@ -59,8 +59,8 @@ type AgentResponse struct {
 	ArchivedAt     *string             `json:"archived_at"`
 	ArchivedBy     *string             `json:"archived_by"`
 	PersonaSandbox string              `json:"persona_sandbox"`
-	// CEREBRO-PATCH(agent-infisical-secrets): per-agent secret refs in agent response.
-	InfisicalSecrets []AgentInfisicalSecretResponse `json:"infisical_secrets,omitempty"`
+	// CEREBRO-PATCH(agent-infisical-secrets): per-agent Infisical folder grants in agent response.
+	InfisicalFolders []AgentInfisicalFolderResponse `json:"infisical_folders,omitempty"`
 	// CEREBRO-PATCH(agent-can-trigger): JEH-1066 — visibility/trigger split.
 	CanTrigger bool `json:"can_trigger"`
 }
@@ -248,7 +248,7 @@ type TaskAgentData struct {
 	CustomEnv        map[string]string              `json:"custom_env,omitempty"`
 	CustomArgs       []string                       `json:"custom_args,omitempty"`
 	McpConfig        json.RawMessage                `json:"mcp_config,omitempty"`
-	InfisicalSecrets []AgentInfisicalSecretResponse `json:"infisical_secrets,omitempty"`
+	InfisicalFolders []AgentInfisicalFolderResponse `json:"infisical_folders,omitempty"`
 	Model            string                         `json:"model,omitempty"`
 	ThinkingLevel    string                         `json:"thinking_level,omitempty"`
 	// CEREBRO-PATCH(agent-capabilities-claim): workspace capability policy passed to daemon sandbox.

@@ -27,8 +27,8 @@ import { ActivityTab } from "./tabs/activity-tab";
 import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
-// CEREBRO-PATCH(agent-infisical-secrets): Infisical secrets tab in agent settings.
-import { InfisicalSecretsTab } from "./tabs/infisical-secrets-tab";
+// CEREBRO-PATCH(agent-infisical-secrets): Infisical folder grants tab in agent settings.
+import { InfisicalFoldersTab } from "./tabs/infisical-folders-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 // CEREBRO-PATCH(agent-sandbox-tab): JEH-1088 — persona sandbox tab (cerebro-only)
 import { SandboxTab } from "./tabs/sandbox-tab";
@@ -212,7 +212,7 @@ export function AgentOverviewPane({
         )}
         {activeTab === "infisical" && (
           <TabContent>
-            <InfisicalSecretsTab
+            <InfisicalFoldersTab
               agent={agent}
               readOnly={!canEdit}
               onDirtyChange={setActiveDirty}

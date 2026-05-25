@@ -20,7 +20,7 @@ import type {
   CreateAgentFromTemplateRequest,
   CreateAgentFromTemplateResponse,
   UpdateAgentRequest,
-  AgentInfisicalSecret,
+  AgentInfisicalFolder,
   AgentTask,
   AgentActivityBucket,
   AgentRunCount,
@@ -1482,26 +1482,64 @@ export class ApiClient {
     });
   }
 
-  // CEREBRO-PATCH(agent-infisical-secrets): CRUD for per-agent secret refs.
-  async listAgentInfisicalSecrets(id: string): Promise<AgentInfisicalSecret[]> {
-    const res = await this.fetch<{ secrets?: AgentInfisicalSecret[] }>(
-      `/api/agents/${id}/infisical-secrets`,
+  // CEREBRO-PATCH(agent-infisical-secrets): CRUD for per-agent Infisical folder grants.
+  async listAgentInfisicalFolders(id: string): Promise<AgentInfisicalFolder[]> {
+    const res = await this.fetch<{ folders?: AgentInfisicalFolder[] }>(
+      `/api/agents/${id}/infisical-folders`,
     );
-    return res.secrets ?? [];
+    return res.folders ?? [];
   }
 
-  async replaceAgentInfisicalSecrets(
+  async replaceAgentInfisicalFolders(
     id: string,
-    secrets: AgentInfisicalSecret[],
-  ): Promise<AgentInfisicalSecret[]> {
-    const res = await this.fetch<{ secrets?: AgentInfisicalSecret[] }>(
-      `/api/agents/${id}/infisical-secrets`,
+    folders: AgentInfisicalFolder[],
+  ): Promise<AgentInfisicalFolder[]> {
+    const res = await this.fetch<{ folders?: AgentInfisicalFolder[] }>(
+      `/api/agents/${id}/infisical-folders`,
       {
         method: "PUT",
-        body: JSON.stringify({ secrets }),
+        body: JSON.stringify({ folders }),
       },
     );
-    return res.secrets ?? [];
+    return res.folders ?? [];
+  }
+
+  // Folders the agent owner is allowed to grant — the picker source for the
+  // agent Infisical tab. Saving a folder outside this list is rejected server-side.
+  async listAgentAllowedInfisicalFolders(
+    id: string,
+  ): Promise<AgentInfisicalFolder[]> {
+    const res = await this.fetch<{ folders?: AgentInfisicalFolder[] }>(
+      `/api/agents/${id}/infisical-allowed-folders`,
+    );
+    return res.folders ?? [];
+  }
+
+  // CEREBRO-PATCH(user-infisical-folders): admin allow-list of Infisical folders
+  // a member may grant to their agents.
+  async listMemberInfisicalFolders(
+    workspaceId: string,
+    memberId: string,
+  ): Promise<AgentInfisicalFolder[]> {
+    const res = await this.fetch<{ folders?: AgentInfisicalFolder[] }>(
+      `/api/workspaces/${workspaceId}/members/${memberId}/infisical-folders`,
+    );
+    return res.folders ?? [];
+  }
+
+  async replaceMemberInfisicalFolders(
+    workspaceId: string,
+    memberId: string,
+    folders: AgentInfisicalFolder[],
+  ): Promise<AgentInfisicalFolder[]> {
+    const res = await this.fetch<{ folders?: AgentInfisicalFolder[] }>(
+      `/api/workspaces/${workspaceId}/members/${memberId}/infisical-folders`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ folders }),
+      },
+    );
+    return res.folders ?? [];
   }
 
   // Persona pass-through: lists sandboxes the operator can attach to an

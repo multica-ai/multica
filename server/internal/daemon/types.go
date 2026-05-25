@@ -121,8 +121,8 @@ type AgentData struct {
 	CustomEnv    map[string]string `json:"custom_env,omitempty"`
 	CustomArgs   []string          `json:"custom_args,omitempty"`
 	McpConfig    json.RawMessage   `json:"mcp_config,omitempty"`
-	// CEREBRO-PATCH(agent-infisical-secrets): secret refs injected as env at spawn.
-	InfisicalSecrets []InfisicalSecretRef `json:"infisical_secrets,omitempty"`
+	// CEREBRO-PATCH(agent-infisical-secrets): folder grants whose secrets are injected as env at spawn.
+	InfisicalFolders []InfisicalFolderRef `json:"infisical_folders,omitempty"`
 	Model            string               `json:"model,omitempty"`
 	ThinkingLevel    string               `json:"thinking_level,omitempty"`
 	// CEREBRO-PATCH(daemon-agent-sandbox-allowlist): admin-set list of
@@ -131,10 +131,8 @@ type AgentData struct {
 	RuntimePersonaSandbox string   `json:"runtime_persona_sandbox,omitempty"`
 }
 
-// CEREBRO-PATCH(agent-infisical-secrets): claim payload secret reference.
-type InfisicalSecretRef struct {
-	EnvVarName  string `json:"env_var_name"`
-	SecretName  string `json:"secret_name"`
+// CEREBRO-PATCH(agent-infisical-secrets): claim payload folder grant.
+type InfisicalFolderRef struct {
 	Environment string `json:"environment"`
 	SecretPath  string `json:"secret_path"`
 }

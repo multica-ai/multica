@@ -183,7 +183,7 @@ export interface Agent {
   runtime_config: Record<string, unknown>;
   custom_env: Record<string, string>;
   custom_args: string[];
-  infisical_secrets?: AgentInfisicalSecret[];
+  infisical_folders?: AgentInfisicalFolder[];
   custom_env_redacted: boolean;
   visibility: AgentVisibility;
   status: AgentStatus;
@@ -226,11 +226,11 @@ export interface Agent {
   can_trigger?: boolean;
 }
 
-// CEREBRO-PATCH(agent-infisical-secrets): per-agent Infisical secret reference.
-export interface AgentInfisicalSecret {
+// CEREBRO-PATCH(agent-infisical-secrets): per-agent Infisical folder grant.
+// At spawn the daemon lists every secret in the folder and injects each under
+// its own Infisical key name, so the value never appears in the transcript.
+export interface AgentInfisicalFolder {
   id?: string;
-  env_var_name: string;
-  secret_name: string;
   environment: string;
   secret_path: string;
 }

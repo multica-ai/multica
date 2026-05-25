@@ -48,6 +48,7 @@ import {
 import { api } from "@multica/core/api";
 import { AppLink } from "@multica/views/navigation";
 import { PageHeader } from "@multica/views/layout/page-header";
+import { MemberInfisicalFoldersCard } from "./member-infisical-folders-card";
 
 const roleConfig: Record<MemberRole, { label: string; icon: typeof Crown }> = {
   owner: { label: "Owner", icon: Crown },
@@ -258,6 +259,14 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
 
       {canManage && (
         <MemberProjectsCard wsId={wsId} memberId={memberId} memberName={member.name} />
+      )}
+
+      {canManage && (
+        <MemberInfisicalFoldersCard
+          wsId={wsId}
+          memberId={resolvedMemberId}
+          memberName={member.name}
+        />
       )}
 
       {/* JEH-1067 (Bundle B / PR-B) — cerebro groups / effective access /

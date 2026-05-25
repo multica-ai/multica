@@ -631,6 +631,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						// Restricted projects this member belongs to —
 						// powers the Projects tab on the detail page.
 						r.Get("/projects", h.ListMemberProjects)
+						// CEREBRO-PATCH(user-infisical-folders): admin allow-list of
+						// Infisical folders this member may grant to their agents.
+						r.Get("/infisical-folders", h.ListMemberInfisicalFolders)
+						r.Put("/infisical-folders", h.ReplaceMemberInfisicalFolders)
 					})
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
 					// CEREBRO-PATCH(cerebro-groups-routes): group create requires admin/owner (JEH-1172).
@@ -905,9 +909,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/tool-overrides", h.ListAgentToolOverrides)
 					r.Put("/tool-overrides/{toolName}", h.PutAgentToolOverride)
 					r.Delete("/tool-overrides/{toolName}", h.DeleteAgentToolOverride)
-					// CEREBRO-PATCH(agent-infisical-secrets): env-var secret references for daemon spawn injection.
-					r.Get("/infisical-secrets", h.ListAgentInfisicalSecrets)
-					r.Put("/infisical-secrets", h.ReplaceAgentInfisicalSecrets)
+					// CEREBRO-PATCH(agent-infisical-secrets): Infisical folder grants for daemon spawn injection.
+					r.Get("/infisical-folders", h.ListAgentInfisicalFolders)
+					r.Put("/infisical-folders", h.ReplaceAgentInfisicalFolders)
+					// Folders the agent owner is allowed to grant — drives the picker.
+					r.Get("/infisical-allowed-folders", h.ListAgentAllowedInfisicalFolders)
 				})
 			})
 

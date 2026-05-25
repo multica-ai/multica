@@ -281,14 +281,19 @@
       "save_failed_toast": "保存环境变量失败"
     },
     "infisical": {
-      "_comment": "CEREBRO-PATCH(agent-infisical-secrets): infisical secrets tab strings",
-      "intro": "将环境变量名映射到 Infisical 密钥名。daemon 会在启动时获取值；值不会通过工具输出返回给智能体。",
-      "readonly": "Infisical 密钥引用由工作区管理员管理。",
+      "_comment": "CEREBRO-PATCH(agent-infisical-secrets): infisical folder grants tab strings",
+      "intro": "为该智能体授予对 Infisical 文件夹的访问权限。文件夹中的每个密钥都会在启动时以其自身名称注入到智能体的运行环境中 —— 智能体可以使用它们（如 $DATABASE_URL），但永远看不到值，值也不会出现在对话记录中。",
+      "readonly": "Infisical 文件夹访问权限由工作区管理员管理。",
       "loading": "加载中",
-      "empty": "尚未配置 Infisical 密钥。",
-      "duplicate_env_toast": "环境变量名必须唯一",
-      "saved_toast": "已保存 Infisical 密钥",
-      "save_failed_toast": "保存 Infisical 密钥失败"
+      "empty": "尚未授予 Infisical 文件夹。",
+      "no_allowed": "目前没有可供你使用的 Infisical 文件夹。请先让工作区管理员为你授权文件夹（设置 → 成员 → 该成员 → Infisical）。",
+      "duplicate_toast": "每个文件夹只能添加一次",
+      "saved_toast": "已保存 Infisical 文件夹",
+      "save_failed_toast": "保存 Infisical 文件夹失败",
+      "environment_label": "环境",
+      "path_label": "文件夹路径",
+      "environment_placeholder": "production",
+      "path_placeholder": "/"
     },
     "custom_args": {
       "intro": "在智能体命令启动时追加的额外 CLI 参数。多 token 的参数可以共用一行 —— 在传给 CLI 前会按空白拆分。",

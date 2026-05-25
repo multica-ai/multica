@@ -1,6 +1,6 @@
 package daemon
 
-// CEREBRO-PATCH(agent-infisical-secrets): tests for spawn-time secret env injection.
+// CEREBRO-PATCH(agent-infisical-secrets): tests for spawn-time folder secret env injection.
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func TestPrepareInfisicalSpawnInjectsEnvAndSkipsBlockedKeys(t *testing.T) {
+func TestPrepareInfisicalSpawnInjectsFolderSecretsAndSkipsBlockedKeys(t *testing.T) {
 	var requested []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requested = append(requested, r.URL.Path)
@@ -28,7 +28,11 @@ func TestPrepareInfisicalSpawnInjectsEnvAndSkipsBlockedKeys(t *testing.T) {
 			t.Fatalf("secretPath = %q", got)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"secret": map[string]string{"secretValue": "postgres://secret-value"},
+			"secrets": []map[string]string{
+				{"secretKey": "DATABASE_URL", "secretValue": "postgres://secret-value"},
+				{"secretKey": "API_KEY", "secretValue": "abc123"},
+				{"secretKey": "MULTICA_INTERNAL", "secretValue": "should-not-inject"},
+			},
 		})
 	}))
 	defer srv.Close()
@@ -39,9 +43,8 @@ func TestPrepareInfisicalSpawnInjectsEnvAndSkipsBlockedKeys(t *testing.T) {
 
 	d := &Daemon{}
 	got, err := d.prepareInfisicalSpawn(context.Background(), &AgentData{
-		InfisicalSecrets: []InfisicalSecretRef{
-			{EnvVarName: "DATABASE_URL", SecretName: "DATABASE_URL", Environment: "production", SecretPath: "/app"},
-			{EnvVarName: "MULTICA_INTERNAL", SecretName: "SHOULD_NOT_FETCH", Environment: "production", SecretPath: "/app"},
+		InfisicalFolders: []InfisicalFolderRef{
+			{Environment: "production", SecretPath: "/app"},
 		},
 	}, slog.Default())
 	if err != nil {
@@ -50,10 +53,13 @@ func TestPrepareInfisicalSpawnInjectsEnvAndSkipsBlockedKeys(t *testing.T) {
 	if got["DATABASE_URL"] != "postgres://secret-value" {
 		t.Fatalf("DATABASE_URL = %q", got["DATABASE_URL"])
 	}
+	if got["API_KEY"] != "abc123" {
+		t.Fatalf("API_KEY = %q", got["API_KEY"])
+	}
 	if _, ok := got["MULTICA_INTERNAL"]; ok {
 		t.Fatalf("blocked MULTICA_INTERNAL key was injected")
 	}
-	if len(requested) != 1 || requested[0] != "/api/v3/secrets/raw/DATABASE_URL" {
+	if len(requested) != 1 || requested[0] != "/api/v3/secrets/raw" {
 		t.Fatalf("requested paths = %#v", requested)
 	}
 }

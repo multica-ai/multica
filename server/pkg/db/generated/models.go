@@ -280,11 +280,9 @@ type CerebroAccountTokenUsage struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
-type CerebroAgentInfisicalSecret struct {
+type CerebroAgentInfisicalFolder struct {
 	ID          pgtype.UUID        `json:"id"`
 	AgentID     pgtype.UUID        `json:"agent_id"`
-	EnvVarName  string             `json:"env_var_name"`
-	SecretName  string             `json:"secret_name"`
 	Environment string             `json:"environment"`
 	SecretPath  string             `json:"secret_path"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
@@ -566,6 +564,16 @@ type CerebroShareToken struct {
 	CreatedByID    pgtype.UUID        `json:"created_by_id"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	RevokedAt      pgtype.Timestamptz `json:"revoked_at"`
+}
+
+type CerebroUserInfisicalFolder struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	Environment string             `json:"environment"`
+	SecretPath  string             `json:"secret_path"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type CerebroWorkflow struct {

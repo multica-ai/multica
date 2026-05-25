@@ -1500,8 +1500,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if agent.McpConfig != nil {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
-		// CEREBRO-PATCH(agent-infisical-secrets): attach secret refs to claim payload.
-		infisicalSecrets := h.agentInfisicalSecretsForClaim(r, agent.ID)
+		// CEREBRO-PATCH(user-infisical-folders): attach folder grants, filtered to the owner's allow-list.
+		infisicalFolders := h.agentInfisicalFoldersForClaim(r, agent.ID, agent.WorkspaceID, agent.OwnerID)
 		resp.Agent = &TaskAgentData{
 			ID:               uuidToString(agent.ID),
 			Name:             agent.Name,
@@ -1510,7 +1510,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			CustomEnv:        customEnv,
 			CustomArgs:       customArgs,
 			McpConfig:        mcpConfig,
-			InfisicalSecrets: infisicalSecrets,
+			InfisicalFolders: infisicalFolders,
 			Model:            agent.Model.String,
 			ThinkingLevel:    agent.ThinkingLevel.String,
 		}
