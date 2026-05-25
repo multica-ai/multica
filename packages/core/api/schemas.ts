@@ -8,6 +8,8 @@ import type {
   GroupedIssuesResponse,
   ListIssuesResponse,
   ListWebhookDeliveriesResponse,
+  BatchImportResponse,
+  Skill,
   TimelineEntry,
   User,
   WebhookDelivery,
@@ -345,6 +347,62 @@ const RuntimeUsageByHourSchema = z.object({
 }).loose();
 
 export const RuntimeUsageByHourListSchema = z.array(RuntimeUsageByHourSchema);
+
+const SkillFileSchema = z.object({
+  id: z.string(),
+  skill_id: z.string(),
+  path: z.string(),
+  content: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const SkillSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  name: z.string(),
+  description: z.string().default(""),
+  config: z.record(z.string(), z.unknown()).default({}),
+  created_by: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  content: z.string().default(""),
+  files: z.array(SkillFileSchema).default([]),
+}).loose();
+
+const BatchImportErrorSchema = z.object({
+  skill_name: z.string().default(""),
+  error: z.string().default(""),
+}).loose();
+
+export const BatchImportResponseSchema = z.object({
+  imported: z.number().default(0),
+  skipped: z.number().default(0),
+  failed: z.number().default(0),
+  skills: z.array(SkillSchema).default([]),
+  errors: z.array(BatchImportErrorSchema).default([]),
+}).loose();
+
+export const EMPTY_SKILL: Skill = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  description: "",
+  config: {},
+  created_by: null,
+  created_at: "",
+  updated_at: "",
+  content: "",
+  files: [],
+};
+
+export const EMPTY_BATCH_IMPORT_RESPONSE: BatchImportResponse = {
+  imported: 0,
+  skipped: 0,
+  failed: 0,
+  skills: [],
+  errors: [],
+};
 
 // ---------------------------------------------------------------------------
 // Agent template catalog — `/api/agent-templates*` and the

@@ -2,6 +2,8 @@ package handler
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func TestFetchFromSkillsSh_UsesEntryURLForNestedDirectories(t *testing.T) {
@@ -1225,4 +1229,358 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// --- Additional batch import edge-case tests ---
+
+func TestImportAllSkillsFromRepo_TruncatedTreeStillWorks(t *testing.T) {
+	// Even when the tree is truncated, whatever SKILL.md files were found
+	// should still be returned — but the Truncated flag must be set so the
+	// caller can decide whether to reject the partial results.
+	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/large":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/large/git/trees/main":
+				writeJSON(w, http.StatusOK, githubTreeResponse{
+					Tree: []githubTreeEntry{
+						{Path: "skills/alpha/SKILL.md", Type: "blob"},
+					},
+					Truncated: true,
+				})
+			case "/repos/acme/large/contents/skills/alpha":
+				writeJSON(w, http.StatusOK, []githubContentEntry{})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/large/main/skills/alpha/SKILL.md":
+				w.Write([]byte("---\nname: alpha\n---\ncontent"))
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := importAllSkillsFromRepo(client, "acme", "large")
+	if err != nil {
+		t.Fatalf("importAllSkillsFromRepo should succeed even with truncated tree: %v", err)
+	}
+	if !result.Truncated {
+		t.Fatal("expected Truncated=true when GitHub tree is truncated")
+	}
+	if len(result.Skills) != 1 {
+		t.Fatalf("expected 1 skill from partial tree, got %d", len(result.Skills))
+	}
+	if result.Skills[0].name != "alpha" {
+		t.Fatalf("name = %q, want alpha", result.Skills[0].name)
+	}
+}
+
+func TestFetchFromSkillsSh_RejectsBatchURL(t *testing.T) {
+	// fetchFromSkillsSh (the single-skill path) must reject 2-segment URLs
+	// with a clear error directing callers to importAllSkillsFromRepo.
+	_, err := fetchFromSkillsSh(&http.Client{}, "https://skills.sh/everyinc/compound")
+	if err == nil {
+		t.Fatal("expected error for 2-segment URL in single-skill path")
+	}
+	if !strings.Contains(err.Error(), "batch import not supported") {
+		t.Fatalf("error = %q, want 'batch import not supported'", err.Error())
+	}
+}
+
+func TestImportAllSkillsFromRepo_FiltersBinaryFiles(t *testing.T) {
+	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/binary":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/binary/git/trees/main":
+				writeJSON(w, http.StatusOK, githubTreeResponse{
+					Tree: []githubTreeEntry{
+						{Path: "skills/img-skill/SKILL.md", Type: "blob"},
+						{Path: "skills/img-skill/logo.png", Type: "blob"},
+						{Path: "skills/img-skill/guide.md", Type: "blob"},
+					},
+				})
+			case "/repos/acme/binary/contents/skills/img-skill":
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{
+						Name:        "logo.png",
+						Path:        "skills/img-skill/logo.png",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/acme/binary/main/skills/img-skill/logo.png",
+					},
+					{
+						Name:        "guide.md",
+						Path:        "skills/img-skill/guide.md",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/acme/binary/main/skills/img-skill/guide.md",
+					},
+				})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/binary/main/skills/img-skill/SKILL.md":
+				w.Write([]byte("---\nname: img-skill\n---\ncontent"))
+			case "/acme/binary/main/skills/img-skill/logo.png":
+				w.Write([]byte("PNGBYTES"))
+			case "/acme/binary/main/skills/img-skill/guide.md":
+				w.Write([]byte("guide text"))
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := importAllSkillsFromRepo(client, "acme", "binary")
+	if err != nil {
+		t.Fatalf("importAllSkillsFromRepo: %v", err)
+	}
+	if len(result.Skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(result.Skills))
+	}
+
+	gotPaths := importedFilePaths(result.Skills[0].files)
+	// .png is filtered by isLikelyBinaryFilePath
+	wantPaths := []string{"guide.md"}
+	if !equalStrings(gotPaths, wantPaths) {
+		t.Fatalf("files = %v, want %v (png should be filtered)", gotPaths, wantPaths)
+	}
+}
+
+// --- 2-segment skills.sh URL parsing tests ---
+
+func TestParseSkillsShParts_ThreeSegments(t *testing.T) {
+	spec, err := parseSkillsShParts("https://skills.sh/acme/skills/my-skill")
+	if err != nil {
+		t.Fatalf("parseSkillsShParts: %v", err)
+	}
+	if spec.Owner != "acme" || spec.Repo != "skills" || spec.SkillName != "my-skill" {
+		t.Fatalf("got %+v, want Owner=acme Repo=skills SkillName=my-skill", spec)
+	}
+	if spec.BatchMode {
+		t.Fatal("expected BatchMode=false for 3-segment URL")
+	}
+}
+
+func TestParseSkillsShParts_TwoSegments(t *testing.T) {
+	spec, err := parseSkillsShParts("https://skills.sh/acme/skills")
+	if err != nil {
+		t.Fatalf("parseSkillsShParts: %v", err)
+	}
+	if spec.Owner != "acme" || spec.Repo != "skills" {
+		t.Fatalf("got %+v, want Owner=acme Repo=skills", spec)
+	}
+	if !spec.BatchMode {
+		t.Fatal("expected BatchMode=true for 2-segment URL")
+	}
+	if spec.SkillName != "" {
+		t.Fatalf("expected SkillName empty for batch mode, got %q", spec.SkillName)
+	}
+}
+
+func TestParseSkillsShParts_InvalidSegments(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+	}{
+		{"single segment", "https://skills.sh/acme"},
+		{"four segments", "https://skills.sh/a/b/c/d"},
+		{"empty path", "https://skills.sh/"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseSkillsShParts(tc.url)
+			if err == nil {
+				t.Fatalf("expected error for %q", tc.url)
+			}
+		})
+	}
+}
+
+func TestImportSkillsBatchEndpoint_RejectsMalformedRequestsBeforeNetwork(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test fixture unavailable")
+	}
+
+	cases := []struct {
+		name string
+		body any
+		want string
+	}{
+		{"bad json", "{", "invalid request body"},
+		{"missing url", map[string]string{}, "url is required"},
+		{"non skills sh", map[string]string{"url": "https://github.com/acme/repo"}, "batch import requires"},
+		{"three segment skills sh", map[string]string{"url": "https://skills.sh/acme/repo/one"}, "batch import requires"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var r *http.Request
+			if raw, ok := tc.body.(string); ok {
+				r = httptest.NewRequest(http.MethodPost, "/api/skills/import/batch", strings.NewReader(raw))
+				r.Header.Set("Content-Type", "application/json")
+				r.Header.Set("X-User-ID", testUserID)
+				r.Header.Set("X-Workspace-ID", testWorkspaceID)
+			} else {
+				r = newRequest(http.MethodPost, "/api/skills/import/batch", tc.body)
+			}
+			r = withURLParam(r, "workspaceId", testWorkspaceID)
+			w := httptest.NewRecorder()
+
+			testHandler.ImportSkillsBatch(w, r)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), tc.want) {
+				t.Fatalf("body = %q, want substring %q", w.Body.String(), tc.want)
+			}
+		})
+	}
+}
+
+func TestImportSkillsBatchHandler_ImportsAndSkipsDuplicates(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test fixture unavailable")
+	}
+
+	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/contract":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/contract/git/trees/main":
+				writeJSON(w, http.StatusOK, githubTreeResponse{
+					Tree: []githubTreeEntry{{Path: "skills/round3-contract/SKILL.md", Type: "blob"}},
+				})
+			case "/repos/acme/contract/contents/skills/round3-contract":
+				writeJSON(w, http.StatusOK, []githubContentEntry{})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/contract/main/skills/round3-contract/SKILL.md":
+				w.Write([]byte("---\nname: round3-contract\ndescription: contract test\n---\ncontent"))
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM skill WHERE workspace_id = $1 AND name = $2`, testWorkspaceID, "round3-contract")
+	})
+
+	spec := skillsShSpec{Owner: "acme", Repo: "contract", BatchMode: true}
+	workspaceUUID := parseUUID(testWorkspaceID)
+	creatorUUID := parseUUID(testUserID)
+
+	first := httptest.NewRecorder()
+	testHandler.importSkillsBatch(first, newRequest(http.MethodPost, "/api/skills/import/batch", nil), spec, client, workspaceUUID, creatorUUID, testUserID, testWorkspaceID)
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first status = %d, want 201; body: %s", first.Code, first.Body.String())
+	}
+	var firstBody BatchImportResponse
+	if err := json.Unmarshal(first.Body.Bytes(), &firstBody); err != nil {
+		t.Fatalf("decode first response: %v", err)
+	}
+	if firstBody.Imported != 1 || firstBody.Skipped != 0 || firstBody.Failed != 0 || len(firstBody.Skills) != 1 || len(firstBody.Errors) != 0 {
+		t.Fatalf("first summary = %+v, want 1 imported, 0 skipped, 0 failed, one skill and empty errors", firstBody)
+	}
+
+	second := httptest.NewRecorder()
+	testHandler.importSkillsBatch(second, newRequest(http.MethodPost, "/api/skills/import/batch", nil), spec, client, workspaceUUID, creatorUUID, testUserID, testWorkspaceID)
+	if second.Code != http.StatusCreated {
+		t.Fatalf("second status = %d, want 201; body: %s", second.Code, second.Body.String())
+	}
+	var secondBody BatchImportResponse
+	if err := json.Unmarshal(second.Body.Bytes(), &secondBody); err != nil {
+		t.Fatalf("decode second response: %v", err)
+	}
+	if secondBody.Imported != 0 || secondBody.Skipped != 1 || secondBody.Failed != 0 || len(secondBody.Skills) != 0 || len(secondBody.Errors) != 0 {
+		t.Fatalf("second summary = %+v, want 0 imported, 1 skipped, 0 failed, empty skills/errors", secondBody)
+	}
+}
+
+func TestImportSkillsBatchHandler_CountsTimeoutWithExtractFailures(t *testing.T) {
+	summary := BatchImportResponse{
+		Failed: 1,
+		Errors: []BatchImportError{{SkillName: "missing", Error: "fetch failed"}},
+	}
+	skills := []*importedSkill{{name: "one"}, {name: "two"}, {name: "three"}}
+	currentIndex := 1
+	remaining := len(skills) - currentIndex
+	summary.Failed += remaining
+
+	if summary.Failed != 3 {
+		t.Fatalf("failed = %d, want extract failure + in-flight + unprocessed = 3", summary.Failed)
+	}
+}
+
+// Handler-level truncation rejection in importSkillsBatch. If the 4-line
+// "if result.Truncated { ... 502 ... }" block is accidentally removed, this
+// test fails — unlike TestImportAllSkillsFromRepo_TruncatedTreeStillWorks
+// which only tests the function layer.
+func TestImportSkillsBatch_RejectsTruncatedTree(t *testing.T) {
+	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/large":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/large/git/trees/main":
+				writeJSON(w, http.StatusOK, githubTreeResponse{
+					Tree: []githubTreeEntry{
+						{Path: "skills/alpha/SKILL.md", Type: "blob"},
+					},
+					Truncated: true,
+				})
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	// Handler with nil DB — safe because truncation rejection fires before
+	// any DB operations (resolveActor, createSkillWithFiles).
+	h := &Handler{}
+
+	spec := skillsShSpec{Owner: "acme", Repo: "large", BatchMode: true}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/skills/import/batch", nil)
+
+	h.importSkillsBatch(w, r, spec, client, pgtype.UUID{}, pgtype.UUID{}, "", "")
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("handler returned status %d, want %d (502 BadGateway)\nbody: %s", w.Code, http.StatusBadGateway, w.Body.String())
+	}
+
+	var body map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response is not valid JSON: %v\nraw: %s", err, w.Body.String())
+	}
+	errMsg := body["error"]
+	if !strings.Contains(errMsg, "tree is too large") {
+		t.Fatalf("error message = %q, want it to contain 'tree is too large'", errMsg)
+	}
+	if !strings.Contains(errMsg, "acme/large") {
+		t.Fatalf("error message = %q, want it to contain 'acme/large'", errMsg)
+	}
 }

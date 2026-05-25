@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -458,6 +459,22 @@ type ImportSkillRequest struct {
 	URL string `json:"url"`
 }
 
+// BatchImportError records a per-skill failure during batch import.
+type BatchImportError struct {
+	SkillName string `json:"skill_name"`
+	Error     string `json:"error"`
+}
+
+// BatchImportResponse is the summary returned when a 2-segment skills.sh URL
+// triggers a batch import of all skills in a repository.
+type BatchImportResponse struct {
+	Imported int                      `json:"imported"`
+	Skipped  int                      `json:"skipped"`
+	Failed   int                      `json:"failed"`
+	Skills   []SkillWithFilesResponse `json:"skills"`
+	Errors   []BatchImportError       `json:"errors"`
+}
+
 // Per-import bundle limits. These mirror the local-runtime importer so that
 // URL imports cannot smuggle in payloads that the rest of the stack would
 // reject. fetchRawFile enforces the per-file cap; importedSkill.addFile
@@ -467,6 +484,18 @@ const (
 	maxImportTotalSize = 8 << 20 // 8 MiB per import bundle (sum of supporting files)
 	maxImportFileCount = 128     // max number of supporting files
 )
+
+// batchTimeout calculates a dynamic timeout based on skill count.
+// Minimum 30s, +30s per 10 skills, capped at 300s.
+// This avoids over-waiting for small imports while covering large repos
+// (e.g. 43 skills → ~150s, well within the 180s we observed in testing).
+func batchTimeout(skillCount int) time.Duration {
+	timeout := 30*time.Second + time.Duration(skillCount/10)*30*time.Second
+	if timeout > 300*time.Second {
+		timeout = 300 * time.Second
+	}
+	return timeout
+}
 
 // importedSkill holds the data extracted from an external source.
 type importedSkill struct {
@@ -792,25 +821,47 @@ func fetchFromClawHub(httpClient *http.Client, rawURL string) (*importedSkill, e
 
 // --- skills.sh import ---
 
-// parseSkillsShParts extracts owner, repo, skill-name from a skills.sh URL.
-// URL format: https://skills.sh/{owner}/{repo}/{skill-name}
-func parseSkillsShParts(raw string) (owner, repo, skillName string, err error) {
+// skillsShSpec captures the parsed components of a skills.sh URL.
+// When SkillName is empty, BatchMode is true and the caller should import
+// every SKILL.md found in the repository.
+type skillsShSpec struct {
+	Owner     string
+	Repo      string
+	SkillName string // empty → batch mode
+	BatchMode bool
+}
+
+// parseSkillsShParts extracts owner, repo, and optionally skill-name from a
+// skills.sh URL. Supports both formats:
+//
+//	https://skills.sh/{owner}/{repo}/{skill-name}  → single skill import
+//	https://skills.sh/{owner}/{repo}                → batch import (all skills)
+func parseSkillsShParts(raw string) (skillsShSpec, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil {
-		return "", "", "", fmt.Errorf("invalid URL: %w", err)
+		return skillsShSpec{}, fmt.Errorf("invalid URL: %w", err)
 	}
 	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
-	if len(parts) != 3 {
-		return "", "", "", fmt.Errorf("expected URL format: skills.sh/{owner}/{repo}/{skill-name}, got: %s", parsed.Path)
+	switch len(parts) {
+	case 2:
+		return skillsShSpec{Owner: parts[0], Repo: parts[1], BatchMode: true}, nil
+	case 3:
+		return skillsShSpec{Owner: parts[0], Repo: parts[1], SkillName: parts[2]}, nil
+	default:
+		return skillsShSpec{}, fmt.Errorf("expected URL format: skills.sh/{owner}/{repo}[/{skill-name}], got: %s", parsed.Path)
 	}
-	return parts[0], parts[1], parts[2], nil
 }
 
 func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, error) {
-	owner, repo, skillName, err := parseSkillsShParts(rawURL)
+	spec, err := parseSkillsShParts(rawURL)
 	if err != nil {
 		return nil, err
 	}
+	if spec.BatchMode {
+		return nil, fmt.Errorf("batch import not supported in single-skill fetch; use importAllSkillsFromRepo")
+	}
+
+	owner, repo, skillName := spec.Owner, spec.Repo, spec.SkillName
 
 	// Skills can be at different paths depending on the repo structure:
 	//   skills/{name}/SKILL.md          (most common)
@@ -927,6 +978,167 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 		}
 	}
 
+	return result, nil
+}
+
+// importAllSkillsFromRepo fetches every SKILL.md in a GitHub repository and
+// returns one importedSkill per skill found. Used for 2-segment skills.sh URLs
+// (batch mode). Each skill's supporting files are collected using the same
+// recursive directory walk that single-skill imports use.
+// batchRepoImportResult holds the outcome of a batch skill extraction from a
+// GitHub repository. It surfaces truncation warnings and extraction-phase
+// failures so the caller can report accurate numbers to the user.
+type batchRepoImportResult struct {
+	Skills          []*importedSkill
+	ExtractFailures []BatchImportError // skills that failed during extraction (fetch/decode/cap)
+	Truncated       bool               // true when the GitHub tree was truncated
+}
+
+func importAllSkillsFromRepo(httpClient *http.Client, owner, repo string) (*batchRepoImportResult, error) {
+	defaultBranch := fetchGitHubDefaultBranch(httpClient, owner, repo)
+	rawPrefix := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s",
+		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(defaultBranch))
+
+	// 1. Get the full recursive tree listing
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/trees/%s?recursive=1",
+		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(defaultBranch))
+	resp, err := doGitHubAPIGet(httpClient, apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch repository tree for %s/%s: %w", owner, repo, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch repository tree for %s/%s: HTTP %d", owner, repo, resp.StatusCode)
+	}
+
+	var tree githubTreeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tree); err != nil {
+		return nil, fmt.Errorf("failed to decode repository tree for %s/%s: %w", owner, repo, err)
+	}
+
+	// 2. Extract all SKILL.md paths
+	skillPaths := extractSkillMdPaths(tree.Tree)
+	if len(skillPaths) == 0 {
+		return nil, fmt.Errorf("no SKILL.md files found in repository %s/%s", owner, repo)
+	}
+
+	result := &batchRepoImportResult{Truncated: tree.Truncated}
+	if tree.Truncated {
+		slog.Warn("skills.sh batch import: repository tree truncated, some skills may be missing",
+			"owner", owner, "repo", repo, "found", len(skillPaths))
+	}
+
+	slog.Info("skills.sh batch import: found SKILL.md files", "owner", owner, "repo", repo, "count", len(skillPaths))
+
+	// 3. For each SKILL.md, fetch the skill and its supporting files
+	for _, skillPath := range skillPaths {
+		skillDir := skillDirFromSkillFilePath(skillPath)
+
+		// Fetch SKILL.md content
+		skillMdURL := buildRawGitHubURL(rawPrefix, skillPath)
+		skillMdBody, err := fetchRawFile(httpClient, skillMdURL)
+		if err != nil {
+			slog.Warn("skills.sh batch import: failed to fetch SKILL.md", "path", skillPath, "error", err)
+			result.ExtractFailures = append(result.ExtractFailures, BatchImportError{
+				SkillName: skillPath,
+				Error:     fmt.Sprintf("failed to fetch SKILL.md: %v", err),
+			})
+			continue
+		}
+
+		// Parse frontmatter for name and description
+		name, description := parseSkillFrontmatter(string(skillMdBody))
+		if name == "" {
+			// Fall back to directory name
+			if skillDir != "" {
+				name = filepath.Base(skillDir)
+			} else {
+				name = repo
+			}
+		}
+
+		skill := &importedSkill{
+			name:        name,
+			description: description,
+			content:     string(skillMdBody),
+			origin: map[string]any{
+				"type":       "skills_sh",
+				"source_url": fmt.Sprintf("https://skills.sh/%s/%s", owner, repo),
+				"owner":      owner,
+				"repo":       repo,
+				"skill":      name,
+			},
+		}
+
+		// Collect supporting files via GitHub Contents API
+		dirAPIURL := buildGitHubContentsURL(owner, repo, skillDir, defaultBranch)
+		dirResp, err := doGitHubAPIGet(httpClient, dirAPIURL)
+		if err != nil || dirResp.StatusCode != http.StatusOK {
+			// Can't list files — return skill with SKILL.md only
+			if dirResp != nil {
+				dirResp.Body.Close()
+			}
+			result.Skills = append(result.Skills, skill)
+			continue
+		}
+
+		var entries []githubContentEntry
+		if err := json.NewDecoder(dirResp.Body).Decode(&entries); err != nil {
+			dirResp.Body.Close()
+			slog.Warn("skills.sh batch import: failed to decode directory listing", "skill", name, "error", err)
+			result.Skills = append(result.Skills, skill)
+			continue
+		}
+		dirResp.Body.Close()
+
+		var allFiles []githubContentEntry
+		collectGitHubFiles(httpClient, entries, &allFiles, dirAPIURL)
+
+		// Download each supporting file
+		basePath := ""
+		if skillDir != "" {
+			basePath = skillDir + "/"
+		}
+		skipSkill := false
+		for _, entry := range allFiles {
+			if entry.DownloadURL == "" {
+				continue
+			}
+			body, err := fetchRawFile(httpClient, entry.DownloadURL)
+			if err != nil {
+				if isCapError(err) {
+					slog.Warn("skills.sh batch import: cap exceeded for skill, skipping", "skill", name, "path", entry.Path, "error", err)
+					skipSkill = true
+					break
+				}
+				slog.Warn("skills.sh batch import: file download failed", "skill", name, "path", entry.Path, "error", err)
+				continue
+			}
+			relPath := strings.TrimPrefix(entry.Path, basePath)
+			if err := skill.addFile(relPath, string(body)); err != nil {
+				if isCapError(err) {
+					slog.Warn("skills.sh batch import: cap exceeded for skill, skipping", "skill", name, "error", err)
+					skipSkill = true
+					break
+				}
+				slog.Warn("skills.sh batch import: failed to add file", "skill", name, "path", relPath, "error", err)
+			}
+		}
+		if skipSkill {
+			result.ExtractFailures = append(result.ExtractFailures, BatchImportError{
+				SkillName: name,
+				Error:     "cap exceeded, skipping skill",
+			})
+			continue
+		}
+
+		result.Skills = append(result.Skills, skill)
+	}
+
+	slog.Info("skills.sh batch import: completed",
+		"owner", owner, "repo", repo,
+		"total", len(skillPaths), "imported", len(result.Skills),
+		"extract_failures", len(result.ExtractFailures), "truncated", result.Truncated)
 	return result, nil
 }
 
@@ -1612,6 +1824,21 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reject 2-segment skills.sh URLs — these must use POST /api/skills/import/batch
+	// to avoid breaking the single-skill response contract expected by UI/CLI clients.
+	if source == sourceSkillsSh {
+		spec, parseErr := parseSkillsShParts(normalized)
+		if parseErr != nil {
+			writeError(w, http.StatusBadRequest, parseErr.Error())
+			return
+		}
+		if spec.BatchMode {
+			writeError(w, http.StatusBadRequest,
+				"2-segment skills.sh URLs (skills.sh/owner/repo) require batch import. Use POST /api/skills/import/batch instead.")
+			return
+		}
+	}
+
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 
 	var imported *importedSkill
@@ -1666,6 +1893,175 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
 	h.publish(protocol.EventSkillCreated, workspaceID, actorType, actorID, map[string]any{"skill": resp})
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// ImportSkillsBatch handles batch import for 2-segment skills.sh URLs
+// (e.g. skills.sh/owner/repo). This is a separate endpoint from the
+// single-skill import so that the response shape (BatchImportResponse)
+// does not break existing UI/CLI clients that expect a single Skill.
+func (h *Handler) ImportSkillsBatch(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "workspaceId")
+	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin", "member")
+	if !ok {
+		return
+	}
+
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.URL == "" {
+		writeError(w, http.StatusBadRequest, "url is required")
+		return
+	}
+
+	// Detect and normalize source — prevents GitHub URLs from being treated as skills.sh
+	source, normalized, err := detectImportSource(req.URL)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid import URL: "+err.Error())
+		return
+	}
+	if source != sourceSkillsSh {
+		writeError(w, http.StatusBadRequest, "batch import requires a 2-segment skills.sh URL (skills.sh/owner/repo)")
+		return
+	}
+
+	// Parse skills.sh URL — must be 2-segment (batch mode)
+	spec, err := parseSkillsShParts(normalized)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !spec.BatchMode {
+		writeError(w, http.StatusBadRequest, "batch import requires a 2-segment skills.sh URL (skills.sh/owner/repo)")
+		return
+	}
+
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	creatorUUID, ok := parseUUIDOrBadRequest(w, member.UserID.String(), "creator_id")
+	if !ok {
+		return
+	}
+
+	batchClient := &http.Client{Timeout: 120 * time.Second}
+	h.importSkillsBatch(w, r, spec, batchClient, workspaceUUID, creatorUUID, member.UserID.String(), workspaceID)
+}
+
+// importSkillsBatch handles the batch import path for 2-segment skills.sh URLs.
+// It fetches all SKILL.md files from the repository and imports each one,
+// skipping skills that already exist (unique violation) without aborting.
+func (h *Handler) importSkillsBatch(w http.ResponseWriter, r *http.Request, spec skillsShSpec, httpClient *http.Client, workspaceUUID, creatorUUID pgtype.UUID, creatorID, workspaceID string) {
+	result, err := importAllSkillsFromRepo(httpClient, spec.Owner, spec.Repo)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	// Reject truncated tree results — partial imports silently violate the
+	// user's expectation of "import ALL skills from this repo".
+	if result.Truncated {
+		writeError(w, http.StatusBadGateway,
+			fmt.Sprintf("repository %s/%s tree is too large to scan exhaustively; batch import aborted to avoid silent data loss", spec.Owner, spec.Repo))
+		return
+	}
+
+	// Resolve actor once outside the loop — request headers don't change
+	// across iterations, so repeated resolveActor calls waste DB queries.
+	actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
+
+	// Independent context with dynamic timeout — decouples DB writes from
+	// HTTP request lifecycle. The timeout scales with skill count to avoid
+	// over-waiting for small imports while covering large repos.
+	ctx, cancel := context.WithTimeout(context.Background(), batchTimeout(len(result.Skills)))
+	defer cancel()
+
+	// Initialize with empty slices so JSON serializes [] instead of null.
+	summary := BatchImportResponse{
+		Skills: make([]SkillWithFilesResponse, 0),
+		Errors: make([]BatchImportError, 0),
+	}
+
+	// Include extraction-phase failures in the summary so numbers are
+	// closed (total = imported + skipped + failed + extract_errors).
+	summary.Failed += len(result.ExtractFailures)
+	summary.Errors = append(summary.Errors, result.ExtractFailures...)
+
+	for i, skill := range result.Skills {
+		files := make([]CreateSkillFileRequest, 0, len(skill.files))
+		for _, f := range skill.files {
+			if !validateFilePath(f.path) {
+				slog.Warn("skills.sh batch import: invalid file path, skipping",
+					"skill", skill.name, "path", f.path)
+				continue
+			}
+			files = append(files, CreateSkillFileRequest{
+				Path:    f.path,
+				Content: f.content,
+			})
+		}
+
+		config := map[string]any{}
+		if skill.origin != nil {
+			config["origin"] = skill.origin
+		}
+
+		resp, err := h.createSkillWithFiles(ctx, skillCreateInput{
+			WorkspaceID: workspaceUUID,
+			CreatorID:   creatorUUID,
+			Name:        skill.name,
+			Description: skill.description,
+			Content:     skill.content,
+			Config:      config,
+			Files:       files,
+		})
+		if err != nil {
+			if isUniqueViolation(err) {
+				summary.Skipped++
+				slog.Info("skills.sh batch import: skill already exists, skipping", "name", skill.name)
+				continue
+			}
+			// Check if context was cancelled (timeout)
+			if ctx.Err() != nil {
+				// Count the in-flight skill and every DB-loop item after it as failed.
+				// Use the loop index rather than summary.Failed because extraction
+				// failures were already counted before this loop and are not part of
+				// result.Skills.
+				remaining := len(result.Skills) - i
+				summary.Failed += remaining
+
+				slog.Warn("skills.sh batch import: context cancelled, aborting",
+					"error", ctx.Err(), "imported", summary.Imported, "skipped", summary.Skipped, "failed", summary.Failed)
+				summary.Errors = append(summary.Errors, BatchImportError{
+					SkillName: "",
+					Error:     fmt.Sprintf("batch import timed out after %s (%d skills remaining)", batchTimeout(len(result.Skills)), remaining),
+				})
+				break
+			}
+			summary.Failed++
+			summary.Errors = append(summary.Errors, BatchImportError{
+				SkillName: skill.name,
+				Error:     err.Error(),
+			})
+			slog.Warn("skills.sh batch import: failed to create skill", "name", skill.name, "error", err)
+			continue
+		}
+
+		summary.Imported++
+		summary.Skills = append(summary.Skills, resp)
+		h.publish(protocol.EventSkillCreated, workspaceID, actorType, actorID, map[string]any{"skill": resp})
+	}
+
+	slog.Info("skills.sh batch import: summary",
+		"owner", spec.Owner, "repo", spec.Repo,
+		"imported", summary.Imported, "skipped", summary.Skipped,
+		"failed", summary.Failed, "errors", len(summary.Errors))
+	writeJSON(w, http.StatusCreated, summary)
 }
 
 // --- Skill File endpoints ---

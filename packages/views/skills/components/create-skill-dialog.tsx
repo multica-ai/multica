@@ -248,6 +248,19 @@ function detectUrlSource(url: string): DetectedSource {
   return null;
 }
 
+function isBatchUrl(url: string): boolean {
+  // Matches https://skills.sh/owner/repo (2 segments after host)
+  const u = url.trim().toLowerCase();
+  if (!u.includes("skills.sh")) return false;
+  try {
+    const parsed = new URL(u.startsWith("http") ? u : `https://${u}`);
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    return parts.length === 2 && !parts[1]?.endsWith(".md");
+  } catch {
+    return false;
+  }
+}
+
 function SourceCard({
   label,
   exampleHost,
@@ -281,7 +294,7 @@ function UrlForm({
   onCreated,
   onCancel,
 }: {
-  onCreated: (skill: Skill) => void;
+  onCreated: (skill: Skill | null) => void;
   onCancel: () => void;
 }) {
   const { t } = useT("skills");
@@ -300,10 +313,19 @@ function UrlForm({
     setLoading(true);
     setError("");
     try {
-      const skill = await api.importSkill({ url: trimmed });
-      seedAfterCreate(qc, wsId, skill);
-      toast.success(t(($) => $.create.url.toast_imported));
-      onCreated(skill);
+      if (isBatchUrl(trimmed)) {
+        const summary = await api.importSkillsBatch({ url: trimmed });
+        const first = summary.skills[0] ?? null;
+        if (first) seedAfterCreate(qc, wsId, first);
+        qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
+        toast.success(t(($) => $.create.url.toast_imported_batch, { count: summary.imported }));
+        onCreated(first);
+      } else {
+        const skill = await api.importSkill({ url: trimmed });
+        seedAfterCreate(qc, wsId, skill);
+        toast.success(t(($) => $.create.url.toast_imported));
+        onCreated(skill);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t(($) => $.create.url.fallback_error));
       setLoading(false);
@@ -434,8 +456,8 @@ export function CreateSkillDialog({
   const { t } = useT("skills");
   const [method, setMethod] = useState<Method>("chooser");
 
-  const handleCreated = (skill: Skill) => {
-    onCreated?.(skill);
+  const handleCreated = (skill: Skill | null) => {
+    if (skill) onCreated?.(skill);
     onClose();
   };
 

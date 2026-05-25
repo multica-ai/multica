@@ -208,7 +208,8 @@
       "name_conflict_hint": "导入的 skill 名称已存在——请先删除已有的再重试。",
       "fallback_error": "导入失败",
       "cancel": "取消",
-      "toast_imported": "已导入 skill"
+      "toast_imported": "已导入 skill",
+      "toast_imported_batch": "已导入 {count} 个 skills"
     }
   },
   "runtime_import": {
