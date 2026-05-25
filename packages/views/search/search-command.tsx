@@ -33,6 +33,7 @@ import type {
 } from "@multica/core/types";
 import { api } from "@multica/core/api";
 import {
+  useActiveIssueContextStore,
   openCreateIssueWithPreference,
   selectRecentIssues,
   useRecentIssuesStore,
@@ -161,9 +162,22 @@ interface SearchResults {
   projects: SearchProjectResult[];
 }
 
-function getCreateIssueModalData(pathname: string) {
+function getCreateIssueModalData(
+  pathname: string,
+  currentIssueProjectId?: string | null,
+) {
   const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
-  return projectMatch ? { project_id: projectMatch[1] } : undefined;
+  if (projectMatch) return { project_id: decodeURIComponent(projectMatch[1]!) };
+  return currentIssueProjectId ? { project_id: currentIssueProjectId } : undefined;
+}
+
+function issueContextMatchesPath(
+  context: { issueId: string; identifier: string } | null,
+  issueIdFromPath: string | null,
+) {
+  if (!context) return false;
+  if (!issueIdFromPath) return true;
+  return context.issueId === issueIdFromPath || context.identifier === issueIdFromPath;
 }
 
 export function SearchCommand() {
@@ -227,6 +241,10 @@ export function SearchCommand() {
     ...issueDetailOptions(wsId, currentIssueId ?? ""),
     enabled: !!currentIssueId,
   });
+  const activeIssueContext = useActiveIssueContextStore((s) => s.current);
+  const activeIssueProjectId = issueContextMatchesPath(activeIssueContext, currentIssueId)
+    ? activeIssueContext?.projectId
+    : null;
 
   const commands = useMemo<CommandItem[]>(() => {
     const activeThemeCheck = (value: ThemeValue) =>
@@ -244,7 +262,12 @@ export function SearchCommand() {
         icon: Plus,
         keywords: ["new", "issue", "create", "add"],
         onSelect: () => {
-          openCreateIssueWithPreference(getCreateIssueModalData(pathname));
+          openCreateIssueWithPreference(
+            getCreateIssueModalData(
+              pathname,
+              currentIssue?.project_id ?? activeIssueProjectId,
+            ),
+          );
           setOpen(false);
         },
       },
@@ -325,7 +348,7 @@ export function SearchCommand() {
     );
 
     return items;
-  }, [currentIssue, getShareableUrl, pathname, setOpen, setTheme, theme, t]);
+  }, [activeIssueProjectId, currentIssue, getShareableUrl, pathname, setOpen, setTheme, theme, t]);
 
   const filteredCommands = useMemo(() => {
     const q = query.trim().toLowerCase();

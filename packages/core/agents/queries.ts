@@ -22,6 +22,12 @@ export const agentAllowedPrincipalKeys = {
     [...agentAllowedPrincipalKeys.all(wsId), agentId] as const,
 };
 
+export const agentDetailKeys = {
+  all: (wsId: string) => ["workspaces", wsId, "agent-detail"] as const,
+  detail: (wsId: string, agentId: string) =>
+    [...agentDetailKeys.all(wsId), agentId] as const,
+};
+
 // Workspace-scoped agent task snapshot — every active task plus each agent's
 // most recent terminal task. This is the single shared source of truth that
 // powers per-agent presence derivation across the app. One fetch per
@@ -74,6 +80,14 @@ export function agentAllowedPrincipalsOptions(wsId: string, agentId: string) {
     queryFn: () => api.listAgentAllowedPrincipals(agentId),
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000,
+  });
+}
+
+export function agentDetailOptions(wsId: string, agentId: string) {
+  return queryOptions({
+    queryKey: agentDetailKeys.detail(wsId, agentId),
+    queryFn: () => api.getAgent(agentId),
+    enabled: !!agentId,
   });
 }
 

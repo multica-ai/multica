@@ -309,3 +309,35 @@ func TestS3StoragePresignedPutURLWithVirtualHostedEndpoint(t *testing.T) {
 		t.Fatalf("Content-Disposition = %q", got)
 	}
 }
+
+func TestS3StoragePresignedInlineGetURLOverridesDisposition(t *testing.T) {
+	cfg := aws.Config{
+		Region:      "cn-east-3",
+		Credentials: credentials.NewStaticCredentialsProvider("test-ak", "test-sk", ""),
+	}
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		o.BaseEndpoint = aws.String("https://obs.cn-east-3.myhuaweicloud.com")
+		o.UsePathStyle = false
+	})
+	s := &S3Storage{
+		client:         client,
+		bucket:         "multica",
+		region:         "cn-east-3",
+		endpointURL:    "https://obs.cn-east-3.myhuaweicloud.com",
+		forcePathStyle: false,
+	}
+
+	rawURL, err := s.PresignedInlineGetURL(context.Background(), "storage/workspaces/ws-1/manual.pdf", "application/pdf", "manual.pdf", 15*time.Minute)
+	if err != nil {
+		t.Fatalf("PresignedInlineGetURL() error = %v", err)
+	}
+	if !strings.HasPrefix(rawURL, "https://multica.obs.cn-east-3.myhuaweicloud.com/storage/workspaces/ws-1/manual.pdf?") {
+		t.Fatalf("PresignedInlineGetURL() = %q", rawURL)
+	}
+	if !strings.Contains(rawURL, "response-content-disposition=inline") {
+		t.Fatalf("PresignedInlineGetURL() missing inline disposition override: %q", rawURL)
+	}
+	if !strings.Contains(rawURL, "response-content-type=application%2Fpdf") {
+		t.Fatalf("PresignedInlineGetURL() missing content-type override: %q", rawURL)
+	}
+}

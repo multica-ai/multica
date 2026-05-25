@@ -265,6 +265,7 @@ func main() {
 	// so subscribers must be written first within the same synchronous event dispatch.
 	registerSubscriberListeners(bus, queries)
 	registerActivityListeners(bus, queries)
+	registerReferenceListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
@@ -332,6 +333,7 @@ func main() {
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
 	go uploadCleanupHandler.RunAttachmentUploadCleanup(sweepCtx, 0)
+	go runUsageHourlyRollup(sweepCtx, pool)
 
 	if metricsServer != nil {
 		go func() {

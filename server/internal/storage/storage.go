@@ -38,6 +38,10 @@ type PresignedGetStorage interface {
 	PresignedGetURL(ctx context.Context, key string, expires time.Duration) (string, error)
 }
 
+type PresignedInlineGetStorage interface {
+	PresignedInlineGetURL(ctx context.Context, key string, contentType string, filename string, expires time.Duration) (string, error)
+}
+
 type MultipartUploadPart struct {
 	PartNumber int32
 	ETag       string

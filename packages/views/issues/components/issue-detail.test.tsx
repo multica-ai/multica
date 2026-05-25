@@ -2,6 +2,7 @@ import { forwardRef, useRef, useState, useImperativeHandle } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useActiveIssueContextStore } from "@multica/core/issues/stores/active-issue-context-store";
 import type { Issue, TimelineEntry } from "@multica/core/types";
 import type { ComponentProps } from "react";
 
@@ -23,6 +24,25 @@ const TEST_RESOURCES = {
 };
 
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
+const mockUploadResult = vi.hoisted(() => ({
+  current: {
+    id: "upload-1",
+    workspace_id: "ws-1",
+    issue_id: null,
+    comment_id: null,
+    chat_session_id: null,
+    chat_message_id: null,
+    uploader_type: "member",
+    uploader_id: "user-1",
+    filename: "upload.pdf",
+    url: "https://cdn.example.test/upload.pdf",
+    download_url: "https://cdn.example.test/upload.pdf",
+    content_type: "application/pdf",
+    size_bytes: 100,
+    created_at: "2026-01-20T00:00:00Z",
+    link: "https://cdn.example.test/upload.pdf",
+  },
+}));
 
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => mockViewport.isMobile,
@@ -132,6 +152,29 @@ vi.mock("../../navigation", () => ({
 vi.mock("../../editor", () => ({
   useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
   FileDropOverlay: () => null,
+  AttachmentDownloadProvider: ({ children }: { children: React.ReactNode }) => (
+    <>{children}</>
+  ),
+  AttachmentCard: ({
+    filename,
+    onPreview,
+    onDownload,
+  }: {
+    filename: string;
+    onPreview?: () => void;
+    onDownload?: () => void;
+  }) => (
+    <div data-testid="issue-attachment-card">
+      {filename}
+      <button type="button" aria-label={`Preview ${filename}`} onClick={onPreview} />
+      <button type="button" aria-label={`Download ${filename}`} onClick={onDownload} />
+    </div>
+  ),
+  Attachment: ({ attachment }: { attachment: { kind: string; attachment?: { filename: string } } }) => (
+    <div data-testid="issue-attachment-renderer">
+      {attachment.kind === "record" ? attachment.attachment?.filename : ""}
+    </div>
+  ),
   // No-op so comment-card's AttachmentList can render without hitting the
   // real API singleton; tests that care about download wiring should write
   // dedicated specs against `use-download-attachment.test.tsx`.
@@ -148,7 +191,7 @@ vi.mock("../../editor", () => ({
     <div data-testid="readonly-content">{content}</div>
   ),
   ContentEditor: forwardRef(function MockContentEditor(
-    { defaultValue, onUpdate, placeholder }: any,
+    { defaultValue, onUpdate, onUploadFile, placeholder, hideAttachments }: any,
     ref: any,
   ) {
     const valueRef = useRef(defaultValue || "");
@@ -158,8 +201,8 @@ vi.mock("../../editor", () => ({
       setMarkdown: (markdown: string) => { valueRef.current = markdown; setValue(markdown); },
       clearContent: () => { valueRef.current = ""; setValue(""); },
       focus: () => {},
-      uploadFile: () => {},
-      uploadFiles: () => {},
+      uploadFile: (file: File) => { void onUploadFile?.(file); },
+      uploadFiles: (files: File[]) => { files.forEach((file) => void onUploadFile?.(file)); },
       hasActiveUploads: () => false,
     }));
     return (
@@ -171,6 +214,7 @@ vi.mock("../../editor", () => ({
           onUpdate?.(e.target.value);
         }}
         placeholder={placeholder}
+        data-hide-attachments={hideAttachments ? "true" : "false"}
         data-testid="rich-text-editor"
       />
     );
@@ -389,7 +433,9 @@ vi.mock("@multica/core/modals", () => ({
 
 // Mock core/hooks/use-file-upload
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
-  useFileUpload: () => ({ uploadWithToast: vi.fn().mockResolvedValue("https://example.com/file.png") }),
+  useFileUpload: () => ({
+    uploadWithToast: vi.fn().mockResolvedValue(mockUploadResult.current),
+  }),
 }));
 
 // Mock realtime
@@ -525,13 +571,14 @@ function renderIssueDetail(
   options: { locale?: SupportedLocale } = {},
 ) {
   const queryClient = createTestQueryClient();
-  return render(
+  const result = render(
     <I18nProvider locale={options.locale ?? "en"} resources={TEST_RESOURCES}>
       <QueryClientProvider client={queryClient}>
         <IssueDetail issueId={issueId} {...props} />
       </QueryClientProvider>
     </I18nProvider>,
   );
+  return { ...result, queryClient };
 }
 
 function renderIssueDetailWithHighlight(
@@ -595,6 +642,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
     // /timeline returns the entries flat in chronological order (oldest first).
     mockApiObj.listTimeline.mockResolvedValue(mockTimeline);
+    mockApiObj.listAttachments.mockResolvedValue([]);
     mockApiObj.listIssueReactions.mockResolvedValue([]);
     mockApiObj.listIssueSubscribers.mockResolvedValue([]);
     mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
@@ -607,6 +655,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listAgents.mockResolvedValue([]);
     window.getSelection()?.removeAllRanges();
     mockApiObj.getProject.mockReset();
+    useActiveIssueContextStore.setState({ current: null });
   });
 
   it("shows loading skeleton while data is loading", () => {
@@ -627,6 +676,62 @@ describe("IssueDetail (shared)", () => {
     });
 
     expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+  });
+
+  it("keeps issue-level attachments visible below the description even when referenced inline", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      description: "Spec file: [report.pdf](https://cdn.example.test/report.pdf)",
+    });
+    mockApiObj.listAttachments.mockResolvedValue([
+      {
+        id: "att-1",
+        workspace_id: "ws-1",
+        issue_id: "issue-1",
+        comment_id: null,
+        chat_session_id: null,
+        chat_message_id: null,
+        uploader_type: "member",
+        uploader_id: "user-1",
+        filename: "report.pdf",
+        url: "https://cdn.example.test/report.pdf",
+        download_url: "https://cdn.example.test/report.pdf",
+        content_type: "application/pdf",
+        size_bytes: 123,
+        created_at: "2026-01-20T00:00:00Z",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("issue-attachment-card")).toHaveTextContent("report.pdf");
+    });
+  });
+
+  it("uploads description files into the attachment area and binds them immediately", async () => {
+    const { container } = renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+    });
+
+    const file = new File(["%PDF-1.4"], "upload.pdf", { type: "application/pdf" });
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("issue-attachment-card")).toHaveTextContent("upload.pdf");
+    });
+    await waitFor(() => {
+      expect(mockApiObj.updateIssue).toHaveBeenCalledWith(
+        "issue-1",
+        {
+          attachment_ids: ["upload-1"],
+        },
+      );
+    });
   });
 
   it("renders issue identifier in the breadcrumb", async () => {
@@ -696,6 +801,24 @@ describe("IssueDetail (shared)", () => {
     // The whole project segment is a single AppLink pointing at the project
     // detail route under the active workspace slug.
     expect(projectLink.closest("a")).toHaveAttribute("href", "/test/projects/p-1");
+  });
+
+  it("publishes and clears active issue context for embedded creation entrypoints", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "p-1" });
+
+    const view = renderIssueDetail();
+
+    await waitFor(() => {
+      expect(useActiveIssueContextStore.getState().current).toEqual({
+        issueId: "issue-1",
+        identifier: "TES-1",
+        projectId: "p-1",
+      });
+    });
+
+    view.unmount();
+
+    expect(useActiveIssueContextStore.getState().current).toBeNull();
   });
 
   it("shows an Unknown project placeholder when the project query fails", async () => {
@@ -841,6 +964,8 @@ describe("IssueDetail (shared)", () => {
 
     renderIssueDetail();
 
+    fireEvent.click(await screen.findByRole("tab", { name: "Properties" }));
+
     await waitFor(() => {
       // Trigger label includes a "· N" count so users can see payload size
       // before clicking — accept any count via regex.
@@ -863,6 +988,7 @@ describe("IssueDetail (shared)", () => {
 
     renderIssueDetail();
 
+    fireEvent.click(await screen.findByRole("tab", { name: "Properties" }));
     const button = await screen.findByRole("button", { name: /^Metadata\b/ });
     fireEvent.click(button);
 

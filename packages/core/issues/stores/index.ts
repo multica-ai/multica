@@ -6,6 +6,10 @@ export {
 } from "./create-mode-store";
 export { useIssueDraftStore } from "./draft-store";
 export {
+  useActiveIssueContextStore,
+  type ActiveIssueContext,
+} from "./active-issue-context-store";
+export {
   useRecentIssuesStore,
   selectRecentIssues,
   type RecentIssueEntry,

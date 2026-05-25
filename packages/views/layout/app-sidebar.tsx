@@ -42,6 +42,7 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui
 import { StatusIcon } from "../issues/components/status-icon";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores/create-mode-store";
+import { useActiveIssueContextStore } from "@multica/core/issues/stores/active-issue-context-store";
 import {
   Sidebar,
   SidebarContent,
@@ -152,9 +153,27 @@ const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[]
   { key: "settings", labelKey: "settings", icon: Settings },
 ];
 
-export function getCreateIssueModalData(pathname: string) {
+export function getCreateIssueModalData(
+  pathname: string,
+  currentIssueProjectId?: string | null,
+) {
   const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
-  return projectMatch ? { project_id: projectMatch[1] } : undefined;
+  if (projectMatch) return { project_id: decodeURIComponent(projectMatch[1]!) };
+  return currentIssueProjectId ? { project_id: currentIssueProjectId } : undefined;
+}
+
+function getIssueIdFromPathname(pathname: string) {
+  const match = pathname.match(/^\/[^/]+\/issues\/([^/]+)$/);
+  return match ? decodeURIComponent(match[1]!) : null;
+}
+
+function issueContextMatchesPath(
+  context: { issueId: string; identifier: string } | null,
+  issueIdFromPath: string | null,
+) {
+  if (!context) return false;
+  if (!issueIdFromPath) return true;
+  return context.issueId === issueIdFromPath || context.identifier === issueIdFromPath;
 }
 
 function DraftDot() {
@@ -373,12 +392,26 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     ...pinListOptions(wsId ?? "", userId ?? ""),
     enabled: !!wsId && !!userId,
   });
+  const currentIssueId = getIssueIdFromPathname(pathname);
+  const { data: currentIssue } = useQuery({
+    ...issueDetailOptions(wsId ?? "", currentIssueId ?? ""),
+    enabled: !!wsId && !!currentIssueId,
+  });
+  const activeIssueContext = useActiveIssueContextStore((s) => s.current);
+  const activeIssueProjectId = issueContextMatchesPath(activeIssueContext, currentIssueId)
+    ? activeIssueContext?.projectId
+    : null;
   const deletePin = useDeletePin();
   const reorderPins = useReorderPins();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const openCreateIssueModal = useCallback(() => {
-    openCreateIssueWithPreference(getCreateIssueModalData(pathname));
-  }, [pathname]);
+    openCreateIssueWithPreference(
+      getCreateIssueModalData(
+        pathname,
+        currentIssue?.project_id ?? activeIssueProjectId,
+      ),
+    );
+  }, [activeIssueProjectId, currentIssue?.project_id, pathname]);
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const sidebarFadeStyle = useScrollFade(sidebarScrollRef, 24);
 

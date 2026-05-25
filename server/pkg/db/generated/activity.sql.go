@@ -11,6 +11,30 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const checkReferenceActivityExists = `-- name: CheckReferenceActivityExists :one
+SELECT 1 FROM activity_log
+WHERE issue_id = $1
+  AND action = 'referenced_by'
+  AND details->>'source_issue_id' = $2
+  AND details->>'source_type' = $3
+  AND details->>'source_id' = $4
+LIMIT 1
+`
+
+type CheckReferenceActivityExistsParams struct {
+	IssueID       pgtype.UUID `json:"issue_id"`
+	SourceIssueID string      `json:"source_issue_id"`
+	SourceType    string      `json:"source_type"`
+	SourceID      string      `json:"source_id"`
+}
+
+func (q *Queries) CheckReferenceActivityExists(ctx context.Context, arg CheckReferenceActivityExistsParams) (int32, error) {
+	row := q.db.QueryRow(ctx, checkReferenceActivityExists, arg.IssueID, arg.SourceIssueID, arg.SourceType, arg.SourceID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countAssigneeChangesByActor = `-- name: CountAssigneeChangesByActor :many
 SELECT
   details->>'to_type' as assignee_type,

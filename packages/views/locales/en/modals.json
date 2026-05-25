@@ -131,6 +131,7 @@
     "toast_created": "Issue created",
     "view_issue": "View issue",
     "toast_failed": "Failed to create issue",
+    "toast_uploading": "Please wait for uploads to finish…",
     "project_required": "Select a project before creating an issue.",
     "attachment_upload_failed": "Attachment upload failed. Try again.",
     "attachment_state_invalid": "Attachment status changed. Re-upload the attachment before creating the issue.",

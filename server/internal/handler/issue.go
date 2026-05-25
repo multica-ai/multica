@@ -1901,6 +1901,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if !projectID.Valid {
+		writeError(w, http.StatusBadRequest, "project_id is required")
+		return
+	}
+
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
 	if !ok {
 		return

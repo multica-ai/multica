@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "../navigation";
 import {
@@ -209,8 +209,11 @@ export function ManualCreatePanel({
 
   // File upload — collect attachment IDs so we can link them after issue creation.
   const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
-  const { uploadWithToast } = useFileUpload(api);
-  const handleUpload = async (file: File) => {
+  const { uploadWithToast, uploading } = useFileUpload(
+    api,
+    () => toast.error(t(($) => $.create_issue.attachment_upload_failed)),
+  );
+  const handleUpload = useCallback(async (file: File) => {
     const result = await uploadWithToast(file);
     if (!result) return null;
     if (!UUID_RE.test(result.id)) {
@@ -219,7 +222,7 @@ export function ManualCreatePanel({
     }
     setAttachmentIds((prev) => [...prev, result.id]);
     return result;
-  };
+  }, [t, uploadWithToast]);
 
   // Sync field changes to draft store
   const updateTitle = (v: string) => { setTitle(v); setDraft({ title: v }); };
@@ -304,6 +307,10 @@ export function ManualCreatePanel({
 
   const handleSubmit = async () => {
     if (!title.trim() || submitting) return;
+    if (uploading || descEditorRef.current?.hasActiveUploads?.()) {
+      toast.error(t(($) => $.create_issue.toast_uploading));
+      return;
+    }
     if (!projectId) {
       toast.error(t(($) => $.create_issue.project_required));
       return;
@@ -856,6 +863,7 @@ export function ManualCreatePanel({
               <div className="flex min-h-7 items-center gap-2">
                 <FileUploadButton
                   multiple
+                  disabled={uploading || submitting}
                   onSelect={(file) => descEditorRef.current?.uploadFile(file)}
                   onSelectMany={(files) => descEditorRef.current?.uploadFiles(files)}
                 />

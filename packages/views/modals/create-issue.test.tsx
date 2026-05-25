@@ -29,6 +29,7 @@ const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
 const mockUploadWithToast = vi.hoisted(() => vi.fn());
+const mockUploadState = vi.hoisted(() => ({ uploading: false }));
 const mockProjects = vi.hoisted(() => ({
   list: [{ id: "proj-1", title: "Default Project" }],
 }));
@@ -119,7 +120,17 @@ vi.mock("@multica/core/issues/mutations", () => ({
 }));
 
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
-  useFileUpload: () => ({ uploadWithToast: mockUploadWithToast }),
+  useFileUpload: (_api: unknown, onError?: (error: Error) => void) => ({
+    uploadWithToast: async (...args: unknown[]) => {
+      try {
+        return await mockUploadWithToast(...args);
+      } catch (err) {
+        onError?.(err instanceof Error ? err : new Error("Upload failed"));
+        return null;
+      }
+    },
+    uploading: mockUploadState.uploading,
+  }),
 }));
 
 // Hoisted ApiError class so both the vi.mock factory and the tests below
@@ -174,6 +185,7 @@ vi.mock("../editor", () => {
       },
       uploadFile: (file: File) => onUploadFile?.(file),
       uploadFiles: vi.fn(),
+      hasActiveUploads: () => false,
     }));
     return (
       <>
@@ -184,6 +196,10 @@ vi.mock("../editor", () => {
             valueRef.current = e.target.value;
             setValue(e.target.value);
             onUpdate?.(e.target.value);
+          }}
+          onPaste={(e) => {
+            const file = Array.from(e.clipboardData?.files ?? [])[0];
+            if (file) void onUploadFile?.(file);
           }}
         />
         {onUploadFile && (
@@ -384,6 +400,7 @@ describe("CreateIssueModal", () => {
       status: "todo",
     });
     mockUploadWithToast.mockResolvedValue(null);
+    mockUploadState.uploading = false;
   });
 
   it("shows success feedback with a direct path to the new issue", async () => {
@@ -546,6 +563,56 @@ describe("CreateIssueModal", () => {
     expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({
       attachment_ids: undefined,
     }));
+  });
+
+  it("shows an upload error when the manual create attachment upload fails", async () => {
+    const user = userEvent.setup();
+    mockUploadWithToast.mockRejectedValue(new Error("upload failed"));
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Editor upload file" }));
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith("Attachment upload failed. Try again.");
+    });
+    expect(mockCreateIssue).not.toHaveBeenCalled();
+  });
+
+  it("shows an upload error when a pasted image upload fails", async () => {
+    mockUploadWithToast.mockRejectedValue(new Error("upload failed"));
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    fireEvent.paste(screen.getByPlaceholderText("Add description..."), {
+      clipboardData: {
+        files: [new File(["image"], "pasted-image.png", { type: "image/png" })],
+      },
+    });
+
+    await waitFor(() => {
+      expect(mockUploadWithToast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "pasted-image.png",
+          type: "image/png",
+        }),
+      );
+      expect(mockToastError).toHaveBeenCalledWith("Attachment upload failed. Try again.");
+    });
+    expect(mockCreateIssue).not.toHaveBeenCalled();
+  });
+
+  it("blocks manual create while an attachment upload is still running", async () => {
+    const user = userEvent.setup();
+    mockUploadState.uploading = true;
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Wait for upload");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    expect(mockCreateIssue).not.toHaveBeenCalled();
+    expect(mockToastError).toHaveBeenCalledWith("Please wait for uploads to finish…");
   });
 
   it("sends selected existing labels in create request", async () => {

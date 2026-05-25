@@ -18,6 +18,7 @@ import {
   CircleCheck,
   Eraser,
   ExternalLink,
+  Link2,
   MoreHorizontal,
   PanelRight,
   Pin,
@@ -48,7 +49,7 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/u
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay, AttachmentCard, AttachmentDownloadProvider } from "../../editor";
+import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay, AttachmentCard, AttachmentDownloadProvider, useAttachmentPreview, useDownloadAttachment } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -98,6 +99,7 @@ import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
+import { useActiveIssueContextStore } from "@multica/core/issues/stores/active-issue-context-store";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
@@ -298,6 +300,11 @@ function formatActivity(
       });
     case "description_updated":
       return t(($) => $.activity.description_updated);
+    case "referenced_by": {
+      const identifier = details.source_issue_identifier ?? details.source_issue_id ?? "?";
+      const title = details.source_issue_title ?? "";
+      return title ? `referenced by ${identifier}: ${title}` : `referenced by ${identifier}`;
+    }
     case "task_completed":
       return t(($) => $.activity.task_completed, { count: entry.coalesced_count ?? 1 });
     case "task_failed":
@@ -337,86 +344,130 @@ function formatTokenCount(n: number): string {
   return String(n);
 }
 
+function mergeAttachments(
+  primary?: Attachment[],
+  pending?: Attachment[],
+): Attachment[] | undefined {
+  const all = [...(primary ?? []), ...(pending ?? [])];
+  if (!all.length) return primary;
+  const seen = new Set<string>();
+  return all.filter((attachment) => {
+    if (seen.has(attachment.id)) return false;
+    seen.add(attachment.id);
+    return true;
+  });
+}
+
 // Stable reference for threads with no replies. Inline `[]` would create a
 // new array on every render and bust React.memo on CommentCard / ResolvedThreadBar.
 const EMPTY_REPLIES: TimelineEntry[] = [];
 
 // ---------------------------------------------------------------------------
-// Issue-level attachment list — URL-only filtering, no sibling dedupe.
-// Unlike the comment-card AttachmentList, this only hides attachments whose
-// exact URL appears in the description markdown. Same-name / same-size
-// siblings are NOT collapsed — each attachment is an independent record.
+// Issue-level attachment list. These are explicit issue attachments, so keep
+// every record visible even when the description also references the same URL.
+// This preserves the dedicated attachment area below the issue description.
 // ---------------------------------------------------------------------------
 
 function IssueAttachmentList({
   attachments,
-  content,
+  pendingAttachments,
   className,
   onDelete,
   onAppendToDesc,
 }: {
   attachments?: Attachment[];
-  content?: string;
+  pendingAttachments?: Attachment[];
   className?: string;
   onDelete?: (id: string) => void;
   onAppendToDesc?: (a: Attachment) => void;
 }) {
-  if (!attachments?.length) return null;
-  const standalone = content
-    ? attachments.filter((a) => !content.includes(a.url))
-    : attachments;
-  if (!standalone.length) return null;
+  const visible = mergeAttachments(attachments, pendingAttachments);
+  if (!visible?.length) return null;
+  const persistedIds = new Set((attachments ?? []).map((attachment) => attachment.id));
 
   return (
-    <AttachmentDownloadProvider attachments={attachments}>
+    <AttachmentDownloadProvider attachments={visible}>
       <div className={cn("flex flex-col gap-1", className)}>
-        {standalone.map((a) => (
-          <div key={a.id} className="flex items-center gap-1 group">
-            <div className="flex-1 min-w-0">
-              <AttachmentCard
-                filename={a.filename}
-                contentType={a.content_type ?? undefined}
-                attachmentId={a.id}
-                href={a.url}
-                onPreview={() => { window.open(a.url, "_blank"); }}
-                onDownload={() => { window.open(a.url, "_blank"); }}
-              />
-            </div>
-            {(onDelete || onAppendToDesc) && (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <button
-                      type="button"
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-opacity"
-                    >
-                      <MoreHorizontal className="h-3.5 w-3.5" />
-                    </button>
-                  }
-                />
-                <DropdownMenuContent align="end">
-                  {onAppendToDesc && (
-                    <DropdownMenuItem onClick={() => onAppendToDesc(a)}>
-                      引用到描述末尾
-                    </DropdownMenuItem>
-                  )}
-                  {onDelete && onAppendToDesc && <DropdownMenuSeparator />}
-                  {onDelete && (
-                    <DropdownMenuItem
-                      className="text-destructive focus:text-destructive"
-                      onClick={() => onDelete(a.id)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5 mr-2" />
-                      删除
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </div>
+        {visible.map((a) => (
+          <IssueAttachmentRow
+            key={a.id}
+            attachment={a}
+            pending={!persistedIds.has(a.id)}
+            onDelete={onDelete}
+            onAppendToDesc={onAppendToDesc}
+          />
         ))}
       </div>
     </AttachmentDownloadProvider>
+  );
+}
+
+function IssueAttachmentRow({
+  attachment,
+  pending,
+  onDelete,
+  onAppendToDesc,
+}: {
+  attachment: Attachment;
+  pending: boolean;
+  onDelete?: (id: string) => void;
+  onAppendToDesc?: (a: Attachment) => void;
+}) {
+  const preview = useAttachmentPreview();
+  const download = useDownloadAttachment();
+  const handlePreview = () => {
+    preview.tryOpen({ kind: "full", attachment });
+  };
+  const handleDownload = () => {
+    void download(attachment.id);
+  };
+
+  return (
+    <div className="flex items-center gap-1 group">
+      <div className="flex-1 min-w-0">
+        <AttachmentCard
+          filename={attachment.filename}
+          contentType={attachment.content_type ?? undefined}
+          attachmentId={attachment.id}
+          href={attachment.url}
+          className="my-0"
+          onPreview={handlePreview}
+          onDownload={handleDownload}
+        />
+      </div>
+      {preview.modal}
+      {!pending && (onDelete || onAppendToDesc) && (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <button
+                type="button"
+                className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-opacity"
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </button>
+            }
+          />
+          <DropdownMenuContent align="end">
+            {onAppendToDesc && (
+              <DropdownMenuItem onClick={() => onAppendToDesc(attachment)}>
+                引用到描述末尾
+              </DropdownMenuItem>
+            )}
+            {onDelete && onAppendToDesc && <DropdownMenuSeparator />}
+            {onDelete && (
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => onDelete(attachment.id)}
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-2" />
+                删除
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </div>
   );
 }
 
@@ -605,6 +656,7 @@ function ActivityBlock({
   t: ActivityT;
   timeAgo: (dateStr: string) => string;
 }) {
+  const paths = useWorkspacePaths();
   if (!expanded) {
     const count = entries.length;
     return (
@@ -636,6 +688,7 @@ function ActivityBlock({
         const isPriorityChange = entry.action === "priority_changed";
         const isStartDateChange = entry.action === "start_date_changed";
         const isDueDateChange = entry.action === "due_date_changed";
+        const isReferencedBy = entry.action === "referenced_by";
 
         let leadIcon: React.ReactNode;
         if (isStatusChange && details.to) {
@@ -646,6 +699,8 @@ function ActivityBlock({
           leadIcon = <CalendarClock className="h-4 w-4 shrink-0 text-muted-foreground" />;
         } else if (isDueDateChange) {
           leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
+        } else if (isReferencedBy) {
+          leadIcon = <Link2 className="h-4 w-4 shrink-0 text-muted-foreground" />;
         } else {
           leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
         }
@@ -657,7 +712,20 @@ function ActivityBlock({
             </div>
             <div className="flex min-w-0 flex-1 items-center gap-1">
               <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
-              <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
+              {isReferencedBy ? (
+                <span className="truncate">
+                  {"referenced by "}
+                  <AppLink
+                    href={paths.issueDetail(details.source_issue_id ?? "")}
+                    className="font-medium text-foreground hover:underline"
+                  >
+                    {details.source_issue_identifier ?? details.source_issue_id ?? "?"}
+                  </AppLink>
+                  {details.source_issue_title ? `: ${details.source_issue_title}` : ""}
+                </span>
+              ) : (
+                <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
+              )}
               {(entry.coalesced_count ?? 1) > 1 &&
                 entry.action !== "task_completed" &&
                 entry.action !== "task_failed" && (
@@ -1007,6 +1075,23 @@ export function IssueDetail({
       return cached?.description != null ? cached : undefined;
     },
   });
+  const setActiveIssueContext = useActiveIssueContextStore((s) => s.setCurrent);
+  const clearActiveIssueContext = useActiveIssueContextStore((s) => s.clearCurrent);
+  useEffect(() => {
+    if (!issue) return;
+    setActiveIssueContext({
+      issueId: issue.id,
+      identifier: issue.identifier,
+      projectId: issue.project_id,
+    });
+    return () => clearActiveIssueContext(issue.id);
+  }, [
+    issue?.id,
+    issue?.identifier,
+    issue?.project_id,
+    setActiveIssueContext,
+    clearActiveIssueContext,
+  ]);
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
   useEffect(() => {
@@ -1386,32 +1471,38 @@ export function IssueDetail({
     router.replace(query ? `${canonicalPath}?${query}` : canonicalPath);
   }, [issue, issueId, paths, router]);
 
+  // Shared issue actions (mutations, pin, copy-link, modal dispatch, etc.).
+  // Called before the `if (!issue)` early return so hook order stays stable.
+  const actions = useIssueActions(issue);
+  const handleUpdateField = actions.updateField;
+
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => descEditorRef.current?.uploadFiles(files),
   });
-  // Pending uploads in the description editor. We don't pass `issueId` on
-  // upload (to avoid orphaning attachments when the user deletes the file
-  // from the markdown), so they start unattached and we re-bind them via
-  // `attachment_ids` on the next description save. Drives editor previews
-  // so text/code attachments show an Eye before the bind round-trips.
+  // Pending uploads in the description editor. We bind them immediately after
+  // upload so IssueAttachmentList can be the canonical display surface while
+  // the description editor keeps the attachment markdown hidden.
   const [descPendingAttachments, setDescPendingAttachments] = useState<Attachment[]>([]);
+  useEffect(() => {
+    setDescPendingAttachments([]);
+  }, [resolvedId]);
   const descEditorAttachments = descPendingAttachments.length > 0
     ? [...(issueAttachments ?? []), ...descPendingAttachments]
     : issueAttachments;
   const handleDescriptionUpload = useCallback(
     async (file: File) => {
       const result = await uploadWithToast(file);
-      if (result) setDescPendingAttachments((prev) => [...prev, result]);
+      if (result) {
+        setDescPendingAttachments((prev) => [...prev, result]);
+        if (issue) {
+          handleUpdateField({ attachment_ids: [result.id] });
+        }
+      }
       return result;
     },
-    [uploadWithToast],
+    [handleUpdateField, issue, uploadWithToast],
   );
-
-  // Shared issue actions (mutations, pin, copy-link, modal dispatch, etc.).
-  // Called before the `if (!issue)` early return so hook order stays stable.
-  const actions = useIssueActions(issue);
-  const handleUpdateField = actions.updateField;
 
   const insertQuoteToNewComment = useCallback((markdown: string) => {
     closeQuoteMenu();
@@ -2325,6 +2416,7 @@ export function IssueDetail({
               debounceMs={1500}
               currentIssueId={resolvedId}
               attachments={descEditorAttachments}
+              hideAttachments
               selectionQuoteActions={{
                 onQuoteToNewComment: handleEditorQuoteToNewComment,
                 onQuoteToReplyTarget: handleEditorQuoteToReplyTarget,
@@ -2351,10 +2443,13 @@ export function IssueDetail({
 
           <IssueAttachmentList
             attachments={issueAttachments}
-            content={issue.description ?? ""}
+            pendingAttachments={descPendingAttachments}
             className="mt-3"
             onDelete={async (attachmentId) => {
               await api.deleteAttachment(attachmentId);
+              setDescPendingAttachments((prev) =>
+                prev.filter((attachment) => attachment.id !== attachmentId),
+              );
               queryClient.invalidateQueries({ queryKey: issueAttachmentsOptions(id).queryKey });
             }}
             onAppendToDesc={(a) => {

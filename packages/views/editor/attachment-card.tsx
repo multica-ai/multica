@@ -97,6 +97,8 @@ export interface AttachmentCardProps {
   href?: string;
   /** True while a synchronous upload is in flight (file-card NodeView only). */
   uploading?: boolean;
+  /** Compact row class override for surfaces that need local spacing control. */
+  className?: string;
   /** Pressed when the Eye button is clicked. */
   onPreview: () => void;
   /** Pressed when the Download button is clicked. */
@@ -109,6 +111,7 @@ export function AttachmentCard({
   attachmentId,
   href,
   uploading,
+  className,
   onPreview,
   onDownload,
 }: AttachmentCardProps) {
@@ -124,7 +127,7 @@ export function AttachmentCard({
     !!href && kind !== null && (!!attachmentId || isUrlPreviewableKind);
 
   return (
-    <div className="my-1">
+    <div className={className ?? "my-1"}>
       <AttachmentCardChrome
         filename={filename}
         uploading={uploading}

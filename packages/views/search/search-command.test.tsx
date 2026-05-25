@@ -38,6 +38,7 @@ const {
   mockOpenModal,
   mockToastSuccess,
   mockClipboardWrite,
+  mockActiveIssueContext,
 } = vi.hoisted(() => ({
   mockPush: vi.fn(),
   mockSearchIssues: vi.fn(),
@@ -63,6 +64,13 @@ const {
   mockOpenModal: vi.fn(),
   mockToastSuccess: vi.fn(),
   mockClipboardWrite: vi.fn(() => Promise.resolve()),
+  mockActiveIssueContext: {
+    current: null as null | {
+      issueId: string;
+      identifier: string;
+      projectId: string | null;
+    },
+  },
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -87,6 +95,8 @@ vi.mock("@multica/core/issues/stores", () => {
       (wsId: string | null) =>
       (state: { byWorkspace: Record<string, typeof mockRecentItems.current> }) =>
         wsId ? (state.byWorkspace[wsId] ?? EMPTY) : EMPTY,
+    useActiveIssueContextStore: (selector: (state: typeof mockActiveIssueContext) => unknown) =>
+      selector(mockActiveIssueContext),
     openCreateIssueWithPreference: (data?: Record<string, unknown> | null) =>
       mockOpenModal("quick-create-issue", data ?? null),
   };
@@ -182,6 +192,7 @@ describe("SearchCommand", () => {
     mockOpenModal.mockReset();
     mockToastSuccess.mockReset();
     mockClipboardWrite.mockReset().mockResolvedValue(undefined);
+    mockActiveIssueContext.current = null;
 
     // cmdk calls scrollIntoView on the first selected item, which jsdom doesn't implement
     Element.prototype.scrollIntoView = vi.fn();
@@ -357,6 +368,58 @@ describe("SearchCommand", () => {
         screen.getByText((_, el) => el?.textContent === "New Project" && el?.tagName === "SPAN"),
       ).toBeInTheDocument();
     });
+
+    const newIssue = await screen.findByText(
+      (_, el) => el?.textContent === "New Issue" && el?.tagName === "SPAN",
+    );
+    await user.click(newIssue);
+
+    expect(mockOpenModal).toHaveBeenCalledWith("quick-create-issue", {
+      project_id: "project-1",
+    });
+    expect(useSearchStore.getState().open).toBe(false);
+  });
+
+  it("opens New Issue from an issue detail page and preserves that issue's project", async () => {
+    const user = userEvent.setup();
+    mockPathname.current = "/ws-test/issues/MUL-1";
+    mockAllIssues.current = [
+      {
+        id: "MUL-1",
+        identifier: "MUL-1",
+        title: "Project issue",
+        status: "todo",
+        project_id: "project-1",
+      },
+    ];
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "new");
+
+    const newIssue = await screen.findByText(
+      (_, el) => el?.textContent === "New Issue" && el?.tagName === "SPAN",
+    );
+    await user.click(newIssue);
+
+    expect(mockOpenModal).toHaveBeenCalledWith("quick-create-issue", {
+      project_id: "project-1",
+    });
+    expect(useSearchStore.getState().open).toBe(false);
+  });
+
+  it("opens New Issue from an embedded issue context and preserves that issue's project", async () => {
+    const user = userEvent.setup();
+    mockPathname.current = "/ws-test/inbox";
+    mockActiveIssueContext.current = {
+      issueId: "issue-1",
+      identifier: "MUL-1",
+      projectId: "project-1",
+    };
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "new");
 
     const newIssue = await screen.findByText(
       (_, el) => el?.textContent === "New Issue" && el?.tagName === "SPAN",
