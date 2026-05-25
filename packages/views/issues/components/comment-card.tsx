@@ -368,6 +368,7 @@ function CommentRow({
           <div className="flex items-center justify-between mt-2">
             <FileUploadButton
               size="sm"
+              multiple
               onSelect={(file) => editEditorRef.current?.uploadFile(file)}
             />
             <div className="flex items-center gap-2">
@@ -667,6 +668,7 @@ function CommentCardImpl({
                 <div className="flex items-center justify-between mt-2">
                   <FileUploadButton
                     size="sm"
+                    multiple
                     onSelect={(file) => editEditorRef.current?.uploadFile(file)}
                   />
                   <div className="flex items-center gap-2">
