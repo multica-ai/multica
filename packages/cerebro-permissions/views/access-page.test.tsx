@@ -16,6 +16,14 @@ const mockAudit = vi.hoisted(() => vi.fn().mockResolvedValue({
   limit: 50,
   offset: 0,
 }));
+const mockListPendingApprovalAsks = vi.hoisted(() => vi.fn().mockResolvedValue({
+  approvals: [],
+  total: 0,
+  limit: 50,
+  offset: 0,
+}));
+const mockApproveAsk = vi.hoisted(() => vi.fn().mockResolvedValue({}));
+const mockRejectAsk = vi.hoisted(() => vi.fn().mockResolvedValue({}));
 
 vi.mock("@multica/core/api", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/api")>(
@@ -31,7 +39,9 @@ vi.mock("@multica/core/api", async () => {
       deletePersonaGrant: mockDeleteGrant,
       listPersonaGrantAudit: mockAudit,
       listSubjectsWithPermissions: undefined,
-      listPendingApprovalAsks: undefined,
+      listPendingApprovalAsks: mockListPendingApprovalAsks,
+      approveAsk: mockApproveAsk,
+      rejectAsk: mockRejectAsk,
     },
   };
 });
@@ -104,6 +114,12 @@ beforeEach(() => {
   mockDeleteGrant.mockReset();
   mockAudit.mockReset();
   mockAudit.mockResolvedValue({ items: [], total: 0, limit: 50, offset: 0 });
+  mockListPendingApprovalAsks.mockReset();
+  mockListPendingApprovalAsks.mockResolvedValue({ approvals: [], total: 0, limit: 50, offset: 0 });
+  mockApproveAsk.mockReset();
+  mockApproveAsk.mockResolvedValue({});
+  mockRejectAsk.mockReset();
+  mockRejectAsk.mockResolvedValue({});
   mockUseCurrentMember.mockReturnValue({
     userId: "user-1",
     role: "admin" as const,

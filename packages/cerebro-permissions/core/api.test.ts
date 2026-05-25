@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockListPersonaGrants = vi.hoisted(() => vi.fn());
 const mockCreatePersonaGrant = vi.hoisted(() => vi.fn());
 const mockUpdatePersonaGrant = vi.hoisted(() => vi.fn());
+const mockListPersonaGrantAudit = vi.hoisted(() => vi.fn());
+const mockListPendingApprovalAsks = vi.hoisted(() => vi.fn());
+const mockApproveAsk = vi.hoisted(() => vi.fn());
+const mockRejectAsk = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/api", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/api")>(
@@ -14,13 +18,21 @@ vi.mock("@multica/core/api", async () => {
       listPersonaGrants: mockListPersonaGrants,
       createPersonaGrant: mockCreatePersonaGrant,
       updatePersonaGrant: mockUpdatePersonaGrant,
+      listPersonaGrantAudit: mockListPersonaGrantAudit,
+      listPendingApprovalAsks: mockListPendingApprovalAsks,
+      approveAsk: mockApproveAsk,
+      rejectAsk: mockRejectAsk,
     },
   };
 });
 
 import {
+  approveAsk,
   createPersonaGrant,
+  fetchGrantAudit,
+  fetchPendingAsks,
   fetchPersonaGrants,
+  rejectAsk,
   updatePersonaGrant,
 } from "./api";
 import type { CreatePersonaGrantRequest, GrantsFilter } from "./types";
@@ -40,6 +52,10 @@ beforeEach(() => {
   mockListPersonaGrants.mockReset();
   mockCreatePersonaGrant.mockReset();
   mockUpdatePersonaGrant.mockReset();
+  mockListPersonaGrantAudit.mockReset();
+  mockListPendingApprovalAsks.mockReset();
+  mockApproveAsk.mockReset();
+  mockRejectAsk.mockReset();
 });
 
 describe("permissions api compatibility", () => {
@@ -128,6 +144,98 @@ describe("permissions api compatibility", () => {
       time_window_end: null,
       approval_required: undefined,
       status: "revoked",
+    });
+  });
+});
+
+describe("audit filter — capability + until forwarded to core client", () => {
+  it("passes capability and until to listPersonaGrantAudit", async () => {
+    mockListPersonaGrantAudit.mockResolvedValueOnce({ items: [], total: 0, limit: 50, offset: 0 });
+
+    await fetchGrantAudit("ws-1", {
+      subjectId: null,
+      grantId: null,
+      capability: "issues.write",
+      since: "2026-01-01T00:00:00Z",
+      until: "2026-06-01T00:00:00Z",
+      limit: 20,
+      offset: 0,
+    });
+
+    expect(mockListPersonaGrantAudit).toHaveBeenCalledWith(
+      "ws-1",
+      expect.objectContaining({
+        capability: "issues.write",
+        until: "2026-06-01T00:00:00Z",
+      }),
+    );
+  });
+
+  it("omits capability and until when not set", async () => {
+    mockListPersonaGrantAudit.mockResolvedValueOnce({ items: [], total: 0, limit: 50, offset: 0 });
+
+    await fetchGrantAudit("ws-1", {
+      subjectId: null,
+      grantId: null,
+      capability: null,
+      since: null,
+      until: null,
+      limit: 50,
+      offset: 0,
+    });
+
+    expect(mockListPersonaGrantAudit).toHaveBeenCalledOnce();
+    const [, filter] = mockListPersonaGrantAudit.mock.calls[0]!;
+    expect((filter as Record<string, unknown>).capability).toBeNull();
+    expect((filter as Record<string, unknown>).until).toBeNull();
+  });
+});
+
+describe("pending asks — approve and reject hit core client", () => {
+  it("approveAsk calls api.approveAsk with correct args", async () => {
+    mockApproveAsk.mockResolvedValueOnce({});
+    await approveAsk("ws-1", "ask-42");
+    expect(mockApproveAsk).toHaveBeenCalledWith("ws-1", "ask-42");
+  });
+
+  it("rejectAsk calls api.rejectAsk with correct args", async () => {
+    mockRejectAsk.mockResolvedValueOnce({});
+    await rejectAsk("ws-1", "ask-42");
+    expect(mockRejectAsk).toHaveBeenCalledWith("ws-1", "ask-42");
+  });
+
+  it("fetchPendingAsks normalizes backend approval list into items shape", async () => {
+    mockListPendingApprovalAsks.mockResolvedValueOnce({
+      approvals: [
+        {
+          id: "appr-1",
+          workspace_id: "ws-1",
+          requester_type: "agent",
+          requester_id: "agent-7",
+          capability: "issues.read",
+          resource: "issue/*",
+          reason: "need access",
+          status: "pending",
+          created_at: "2026-05-24T10:00:00Z",
+          expires_at: null,
+        },
+      ],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    });
+
+    const page = await fetchPendingAsks("ws-1", { limit: 50, offset: 0 });
+
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]).toMatchObject({
+      id: "appr-1",
+      subject: { type: "agent", id: "agent-7" },
+      capability: "issues.read",
+      resource: { pattern: "issue/*" },
+      reason: "need access",
+      requested_at: "2026-05-24T10:00:00Z",
+      status: "pending",
     });
   });
 });

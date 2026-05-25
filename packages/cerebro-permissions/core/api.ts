@@ -106,15 +106,11 @@ export async function evaluateEffectivePermission(
   };
 }
 
-// CEREBRO-PATCH(audit-extended-filter): capability + until params added by FIR-2133; cast needed until core client type is updated upstream.
-type AuditApiFilter = { subject_id?: string | null; grant_id?: string | null; capability?: string | null; since?: string | null; until?: string | null; limit?: number; offset?: number };
-const _auditApi = api.listPersonaGrantAudit as (wsId: string, f: AuditApiFilter) => Promise<unknown>;
-
 export async function fetchGrantAudit(
   wsId: string,
   filter: AuditFilter,
 ): Promise<PaginatedResponse<GrantAuditEntry>> {
-  const raw = await _auditApi(wsId, {
+  const raw = await api.listPersonaGrantAudit(wsId, {
     subject_id: filter.subjectId,
     grant_id: filter.grantId,
     capability: filter.capability,
@@ -228,28 +224,49 @@ export async function fetchPendingAsks(
   wsId: string,
   filter: { limit: number; offset: number },
 ): Promise<PaginatedResponse<PendingAsk>> {
-  // CEREBRO-PATCH(access-page-pending-stub): Phase 3 API not yet deployed — return empty page.
-  // Remove stub and wire `api.listPendingApprovalAsks` when Phase 3 lands.
-  try {
-    const raw = await (api as unknown as Record<string, (wsId: string, p: unknown) => Promise<unknown>>)
-      .listPendingApprovalAsks?.(wsId, { limit: filter.limit, offset: filter.offset });
-    if (!raw) return EMPTY_ASKS_PAGE;
-    return parseWithFallback(raw, pendingAsksPageSchema, EMPTY_ASKS_PAGE, {
-      endpoint: "listPendingApprovalAsks",
-    });
-  } catch {
-    return EMPTY_ASKS_PAGE;
-  }
+  const raw = await api.listPendingApprovalAsks(wsId, { limit: filter.limit, offset: filter.offset });
+  const normalized = normalizeApprovalsList(raw);
+  return parseWithFallback(normalized, pendingAsksPageSchema, EMPTY_ASKS_PAGE, {
+    endpoint: "listPendingApprovalAsks",
+  });
 }
 
 export async function approveAsk(wsId: string, askId: string): Promise<void> {
-  await (api as unknown as Record<string, (wsId: string, askId: string) => Promise<void>>)
-    .approveAsk?.(wsId, askId);
+  await api.approveAsk(wsId, askId);
 }
 
 export async function rejectAsk(wsId: string, askId: string): Promise<void> {
-  await (api as unknown as Record<string, (wsId: string, askId: string) => Promise<void>>)
-    .rejectAsk?.(wsId, askId);
+  await api.rejectAsk(wsId, askId);
+}
+
+// Backend approval list returns { approvals: [...], ... }; frontend schema expects { items: [...], ... }.
+// Each approval item maps requester_type/requester_id → subject, created_at → requested_at.
+function normalizeApprovalsList(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object") return raw;
+  const rec = raw as Record<string, unknown>;
+  if (Array.isArray(rec.items)) return rec;
+  const arr = Array.isArray(rec.approvals) ? rec.approvals : [];
+  const items = arr.map((a: unknown) => {
+    if (!a || typeof a !== "object") return a;
+    const r = a as Record<string, unknown>;
+    return {
+      id: r.id,
+      workspace_id: r.workspace_id,
+      subject: { type: r.requester_type ?? "member", id: r.requester_id ?? null, display_name: null },
+      capability: r.capability ?? "",
+      resource: { type: "resource", pattern: typeof r.resource === "string" ? r.resource : "*" },
+      reason: r.reason ?? null,
+      requested_at: r.created_at ?? "",
+      expires_at: r.expires_at ?? null,
+      status: r.status ?? "pending",
+    };
+  });
+  return {
+    items,
+    total: typeof rec.total === "number" ? rec.total : items.length,
+    limit: typeof rec.limit === "number" ? rec.limit : 50,
+    offset: typeof rec.offset === "number" ? rec.offset : 0,
+  };
 }
 
 function normalizeGrantList(raw: unknown): unknown {

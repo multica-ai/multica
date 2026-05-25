@@ -1159,12 +1159,15 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(grant-audit-capability-until): FIR-2133 — capability + until filter params for audit-UI
   async listPersonaGrantAudit<T = unknown>(
     wsId: string,
     filter: {
       subject_id?: string | null;
       grant_id?: string | null;
+      capability?: string | null;
       since?: string | null;
+      until?: string | null;
       limit?: number;
       offset?: number;
     } = {},
@@ -1172,7 +1175,9 @@ export class ApiClient {
     const params = new URLSearchParams();
     if (filter.subject_id) params.set("subject_id", filter.subject_id);
     if (filter.grant_id) params.set("grant_id", filter.grant_id);
+    if (filter.capability) params.set("capability", filter.capability);
     if (filter.since) params.set("since", filter.since);
+    if (filter.until) params.set("until", filter.until);
     if (filter.limit !== undefined) params.set("limit", String(filter.limit));
     if (filter.offset !== undefined) params.set("offset", String(filter.offset));
     const qs = params.toString();
@@ -1181,6 +1186,28 @@ export class ApiClient {
         ? `/api/workspaces/${wsId}/grants/audit?${qs}`
         : `/api/workspaces/${wsId}/grants/audit`,
     );
+  }
+
+  // CEREBRO-PATCH(approvals-client): FIR-2133 — approval inbox endpoints (list pending / approve / reject)
+  async listPendingApprovalAsks<T = unknown>(
+    wsId: string,
+    filter: { limit?: number; offset?: number } = {},
+  ): Promise<T> {
+    const params = new URLSearchParams({ status: "pending" });
+    if (filter.limit !== undefined) params.set("limit", String(filter.limit));
+    if (filter.offset !== undefined) params.set("offset", String(filter.offset));
+    return this.fetch<T>(`/api/workspaces/${wsId}/approvals?${params.toString()}`);
+  }
+
+  async approveAsk<T = unknown>(wsId: string, askId: string): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/approvals/${askId}/approve`, { method: "POST" });
+  }
+
+  async rejectAsk<T = unknown>(wsId: string, askId: string, reason?: string): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/approvals/${askId}/reject`, {
+      method: "POST",
+      body: reason ? JSON.stringify({ note: reason }) : undefined,
+    });
   }
 
   // Web Push (per-device subscriptions). The server returns enabled=false
