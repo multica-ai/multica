@@ -570,18 +570,25 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	fmt.Fprintf(os.Stdout, "%s:      running (pid %v, uptime %v)\n", label, health["pid"], health["uptime"])
+	printDaemonStatusTable(os.Stdout, label, health)
+	return nil
+}
+
+func printDaemonStatusTable(w io.Writer, label string, health map[string]any) {
+	fmt.Fprintf(w, "%s:      running (pid %v, uptime %v)\n", label, health["pid"], health["uptime"])
+	if version, ok := health["cli_version"].(string); ok && version != "" {
+		fmt.Fprintf(w, "Version:     %s\n", version)
+	}
 	if agents, ok := health["agents"].([]any); ok && len(agents) > 0 {
 		parts := make([]string, len(agents))
 		for i, a := range agents {
 			parts[i] = fmt.Sprint(a)
 		}
-		fmt.Fprintf(os.Stdout, "Agents:      %s\n", strings.Join(parts, ", "))
+		fmt.Fprintf(w, "Agents:      %s\n", strings.Join(parts, ", "))
 	}
 	if ws, ok := health["workspaces"].([]any); ok {
-		fmt.Fprintf(os.Stdout, "Workspaces:  %d\n", len(ws))
+		fmt.Fprintf(w, "Workspaces:  %d\n", len(ws))
 	}
-	return nil
 }
 
 // --- daemon logs ---
