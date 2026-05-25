@@ -556,6 +556,31 @@ describe("CreateIssueModal", () => {
     }));
   });
 
+  it("submits uploaded UUIDv7 attachment ids when creating an issue", async () => {
+    const user = userEvent.setup();
+    const attachmentId = "019e5d0e-6f02-7335-8e7f-8276f3f410df";
+    mockUploadWithToast.mockResolvedValue({
+      id: attachmentId,
+      url: "https://cdn.example.test/uploaded.txt",
+      download_url: "https://cdn.example.test/uploaded.txt",
+      filename: "uploaded.txt",
+      link: "https://cdn.example.test/uploaded.txt",
+    });
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Editor upload file" }));
+    await user.type(screen.getByPlaceholderText("Issue title"), "Submit UUIDv7 attachment");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({
+        attachment_ids: [attachmentId],
+      }));
+    });
+    expect(mockToastError).not.toHaveBeenCalledWith("Attachment upload failed. Try again.");
+  });
+
   it("shows an upload error when the manual create attachment upload fails", async () => {
     const user = userEvent.setup();
     mockUploadWithToast.mockRejectedValue(new Error("upload failed"));
