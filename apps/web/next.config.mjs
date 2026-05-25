@@ -40,6 +40,28 @@ const allowedDevOrigins = process.env.CORS_ALLOWED_ORIGINS
 /** @type {import("next").NextConfig} */
 const nextConfig = {
   ...(process.env.STANDALONE === "true" ? { output: "standalone" } : {}),
+  // Trim the "Collecting build traces" step. On the single-Mac prod runtime
+  // (sara) that step repeatedly SIGTERM'd / OOM'd at the very end of an
+  // otherwise-green build — it walks the dependency graph of every route and
+  // is the heaviest phase of the whole build. We pin the trace root to this
+  // monorepo (so it doesn't try to trace the entire workspace) and exclude
+  // build-only toolchain packages that are never needed at runtime. This cuts
+  // the files traced — and the memory the step holds — without changing what
+  // ships. Excludes are paths relative to outputFileTracingRoot.
+  outputFileTracingRoot: resolve(currentDir, "../.."),
+  outputFileTracingExcludes: {
+    "*": [
+      "node_modules/.pnpm/@swc+core*/**",
+      "node_modules/.pnpm/@esbuild+*/**",
+      "node_modules/.pnpm/esbuild@*/**",
+      "node_modules/.pnpm/webpack@*/**",
+      "node_modules/.pnpm/terser@*/**",
+      "node_modules/.pnpm/@next+swc-*/**",
+      "node_modules/.pnpm/typescript@*/**",
+      "node_modules/.pnpm/@playwright+*/**",
+      "node_modules/.pnpm/playwright*/**",
+    ],
+  },
   // Allow deploy.sh to build into a side-by-side directory and atomically
   // swap it in, so the running next-server keeps serving from the previous
   // .next/ for the entire build window. Default (.next) is unchanged for dev.

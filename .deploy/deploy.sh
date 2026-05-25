@@ -70,12 +70,58 @@ export PATH="/Users/sara/.nvm/versions/node/v24.13.1/bin:/opt/homebrew/bin:/usr/
 LAST_OK_FILE="$LOG_DIR/last-ok-sha"
 LAST_OK_SHA=$(cat "$LAST_OK_FILE" 2>/dev/null || true)
 
+# Optional outbound alert target. When set (in .env or the environment),
+# a failed deploy POSTs a JSON payload here so the failure surfaces in
+# Multica instead of sitting silently in a log file on the Mac — which is
+# exactly how the May 2026 OOM deaths went unnoticed until someone walked
+# past the server. Point it at a Multica autopilot webhook (run_only) whose
+# agent posts the failure onto the deploy issue. Unset → no-op, deploy
+# behaves exactly as before. deploy.sh doesn't source .env, so read it the
+# same lightweight way FRONTEND_PORT is read below.
+if [ -z "${DEPLOY_FAILURE_WEBHOOK_URL:-}" ] && [ -f .env ]; then
+  DEPLOY_FAILURE_WEBHOOK_URL=$(grep -E '^DEPLOY_FAILURE_WEBHOOK_URL=' .env | tail -1 | cut -d= -f2- | tr -d '"' || true)
+fi
+
+notify_deploy_failure() {
+  local rc="$1"
+  local url="${DEPLOY_FAILURE_WEBHOOK_URL:-}"
+  if [ -z "$url" ]; then
+    echo "No DEPLOY_FAILURE_WEBHOOK_URL set — skipping Multica alert." >&2
+    return 0
+  fi
+  # Last 40 log lines give the failing step + error without shipping the
+  # whole build log. jq builds valid JSON (escapes quotes/newlines); if jq
+  # is missing, fall back to a minimal hand-built payload.
+  local tail_log
+  tail_log=$(tail -n 40 "$LOG" 2>/dev/null || true)
+  local payload
+  if command -v jq >/dev/null 2>&1; then
+    payload=$(jq -n \
+      --arg event "deploy_failed" \
+      --arg host "$(hostname)" \
+      --arg sha "${NEW_SHA:-${OLD_SHA:-unknown}}" \
+      --arg rc "$rc" \
+      --arg log "$tail_log" \
+      '{event:$event, host:$host, sha:$sha, exit_code:($rc|tonumber), log_tail:$log}')
+  else
+    payload="{\"event\":\"deploy_failed\",\"host\":\"$(hostname)\",\"sha\":\"${NEW_SHA:-unknown}\",\"exit_code\":$rc}"
+  fi
+  # Fire-and-forget: short timeout, never let a flaky alert hang or fail the
+  # deploy script itself (we're already in the failure path).
+  if curl -fsS --max-time 10 -X POST -H 'Content-Type: application/json' \
+      -d "$payload" "$url" >/dev/null 2>&1; then
+    echo "Multica deploy-failure alert sent." >&2
+  else
+    echo "WARN: could not POST deploy-failure alert to webhook." >&2
+  fi
+}
+
 # Make any non-zero exit loud in the log + mark the run as a failure
 # so it doesn't get mistaken for "deployed cleanly". Webhook scrapes
 # deploy-latest.log; an operator paging on "DEPLOY FAILED" gets an
-# unambiguous signal. Keep this lightweight — Slack/Multica issue
-# integration belongs in run-webhook.sh, not here.
-trap 'rc=$?; if [ "$rc" -ne 0 ]; then echo "=== DEPLOY FAILED (exit $rc): $(date -Iseconds) ===" >&2; fi; cleanup_deploy_lock' EXIT
+# unambiguous signal. On failure we also fire notify_deploy_failure so the
+# alert reaches Multica, not just the log.
+trap 'rc=$?; if [ "$rc" -ne 0 ]; then echo "=== DEPLOY FAILED (exit $rc): $(date -Iseconds) ===" >&2; notify_deploy_failure "$rc"; fi; cleanup_deploy_lock' EXIT
 
 OLD_SHA=$(git rev-parse HEAD)
 echo "Current SHA:    $OLD_SHA"
@@ -135,7 +181,13 @@ NEXT_LIVE=apps/web/.next
 NEXT_OLD=apps/web/.next.old
 
 rm -rf "$NEXT_NEW"
-if ! NEXT_DIST_DIR=.next.new pnpm --filter @multica/web build; then
+# Raise the V8 heap ceiling for the build. The default ceiling is sized off a
+# fraction of system RAM and the "Collecting build traces" step (the last and
+# heaviest phase) was hitting it and dying with SIGTERM on this Mac. Paired
+# with outputFileTracingExcludes in next.config.mjs, which shrinks the work
+# that step has to do in the first place. 8 GiB is comfortably under the
+# mini's RAM while well above what the trace step needs.
+if ! NEXT_DIST_DIR=.next.new NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=8192" pnpm --filter @multica/web build; then
   echo "ERROR: Next.js build failed — live frontend untouched." >&2
   rm -rf "$NEXT_NEW"
   exit 1
