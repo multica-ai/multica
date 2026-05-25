@@ -1,6 +1,4 @@
-import { redirect } from "next/navigation";
-import { cookies, headers } from "next/headers";
-import { startPagePath } from "@/lib/start-page-redirect";
+import { WorkspaceRootRedirect } from "./workspace-root-redirect";
 
 export default async function WorkspaceRootPage({
   params,
@@ -8,5 +6,5 @@ export default async function WorkspaceRootPage({
   params: Promise<{ workspaceSlug: string }>;
 }) {
   const { workspaceSlug } = await params;
-  redirect(startPagePath(workspaceSlug, await cookies(), await headers()));
+  return <WorkspaceRootRedirect workspaceSlug={workspaceSlug} />;
 }

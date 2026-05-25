@@ -40,8 +40,8 @@ export function RedirectIfAuthenticated() {
     const isMobile =
       typeof window !== "undefined" && window.innerWidth < 768;
     const firstWs = list[0];
-    if (hasOnboarded && firstWs && isMobile) {
-      const page = getPreferredStartPage(user, "mobile");
+    if (hasOnboarded && firstWs) {
+      const page = getPreferredStartPage(user, isMobile ? "mobile" : "desktop");
       router.replace(page ? `/${firstWs.slug}/${page}` : fallback);
       return;
     }
