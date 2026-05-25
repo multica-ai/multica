@@ -26,6 +26,21 @@ export interface IssueReaction {
   created_at: string;
 }
 
+// CEREBRO-PATCH(issue-dependencies): blocks / blocked-by / related relation types.
+export interface IssueDependencyRef {
+  id: string;
+  identifier: string;
+  title: string;
+  status: IssueStatus;
+}
+
+// CEREBRO-PATCH(issue-dependencies): grouped dependencies response shape.
+export interface IssueDependenciesResponse {
+  blocks: IssueDependencyRef[];
+  blocked_by: IssueDependencyRef[];
+  related: IssueDependencyRef[];
+}
+
 export interface Issue {
   id: string;
   workspace_id: string;
@@ -50,6 +65,10 @@ export interface Issue {
   reactions?: IssueReaction[];
   attachments?: Attachment[];
   labels?: Label[];
+  // CEREBRO-PATCH(issue-dependencies): embedded relation snapshots (authoritative
+  // source is GET /api/issues/{id}/dependencies; these are a bonus for lists).
+  blocks?: IssueDependencyRef[];
+  blocked_by?: IssueDependencyRef[];
   created_at: string;
   updated_at: string;
 }

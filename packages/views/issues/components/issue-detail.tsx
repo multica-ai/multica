@@ -90,6 +90,8 @@ import type { Issue, IssueStatus, IssuePriority, TimelineEntry, IssueSubscriber,
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { PriorityIcon } from "./priority-icon";
 import { StatusIcon } from "./status-icon";
+// CEREBRO-PATCH(issue-dependencies): FIR-823 blocks/blocked-by/related sidebar section.
+import { DependenciesSection } from "./dependencies-section";
 import { AssigneePicker, canAssignAgent, DueDatePicker, LabelPicker, PriorityPicker, StartDatePicker, StatusPicker } from "./pickers";
 import { useMoveCommentToSubIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueActions } from "../actions";
@@ -634,6 +636,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
+  // CEREBRO-PATCH(issue-dependencies): collapsible state for the dependencies section.
+  const [dependenciesOpen, setDependenciesOpen] = useState(true);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
@@ -1425,6 +1429,20 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               </div>
             ) : null}
           </div>}
+        </div>
+      )}
+
+      {/* Dependencies — CEREBRO-PATCH(issue-dependencies): FIR-823 blocks/blocked-by/related */}
+      {!isChat && (
+        <div>
+          <button
+            className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${dependenciesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+            onClick={() => setDependenciesOpen(!dependenciesOpen)}
+          >
+            {t(($) => $.detail.section_dependencies)}
+            <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${dependenciesOpen ? "rotate-90" : ""}`} />
+          </button>
+          {dependenciesOpen && <div className="pl-2"><DependenciesSection issueId={id} /></div>}
         </div>
       )}
 

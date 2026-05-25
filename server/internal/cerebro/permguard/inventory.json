@@ -93,7 +93,19 @@
       "gate": "issue_scope"
     },
     {
+      "id": "DELETE /api/issues/{id}/blocked-by/{otherId}",
+      "gate": "issue_scope"
+    },
+    {
+      "id": "DELETE /api/issues/{id}/blocks/{otherId}",
+      "gate": "issue_scope"
+    },
+    {
       "id": "DELETE /api/issues/{id}/labels/{labelId}",
+      "gate": "issue_scope"
+    },
+    {
+      "id": "DELETE /api/issues/{id}/related/{otherId}",
       "gate": "issue_scope"
     },
     {
@@ -597,11 +609,23 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/issues/{id}/blocked-by",
+      "gate": "issue_scope"
+    },
+    {
+      "id": "POST /api/issues/{id}/blocks",
+      "gate": "issue_scope"
+    },
+    {
       "id": "POST /api/issues/{id}/comments",
       "gate": "issue_scope"
     },
     {
       "id": "POST /api/issues/{id}/labels",
+      "gate": "issue_scope"
+    },
+    {
+      "id": "POST /api/issues/{id}/related",
       "gate": "issue_scope"
     },
     {
@@ -1561,6 +1585,14 @@
       "gate": "via:POST /api/tasks/{taskId}/cancel"
     },
     {
+      "id": "issue block",
+      "gate": "via:POST /api/issues/{id}/blocked-by"
+    },
+    {
+      "id": "issue blocks",
+      "exempt": "read-only — wraps GET /api/issues/{id}/dependencies"
+    },
+    {
       "id": "issue comment add",
       "gate": "via:POST /api/issues/{id}/comments"
     },
@@ -1591,6 +1623,14 @@
     {
       "id": "issue label remove",
       "gate": "via:DELETE /api/issues/{id}/labels/{labelId}"
+    },
+    {
+      "id": "issue related",
+      "gate": "via:POST /api/issues/{id}/related"
+    },
+    {
+      "id": "issue unblock",
+      "gate": "via:DELETE /api/issues/{id}/blocked-by/{otherId}"
     },
     {
       "id": "issue list",

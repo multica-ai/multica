@@ -6,6 +6,8 @@ import type {
   Attachment,
   CreateAgentFromTemplateResponse,
   GroupedIssuesResponse,
+  // CEREBRO-PATCH(issue-dependencies): dependency response type for the schema.
+  IssueDependenciesResponse,
   ListIssuesResponse,
   TimelineEntry,
   User,
@@ -662,4 +664,28 @@ export const EMPTY_USER: User = {
   profile_description: "",
   created_at: "",
   updated_at: "",
+};
+
+// ---------------------------------------------------------------------------
+// CEREBRO-PATCH(issue-dependencies): schema + fallback for the grouped
+// blocks / blocked-by / related dependencies endpoint. Refs stay `.loose()` so
+// a future server-side field on a ref (e.g. priority) doesn't drop the row.
+// ---------------------------------------------------------------------------
+const IssueDependencyRefSchema = z.object({
+  id: z.string(),
+  identifier: z.string(),
+  title: z.string(),
+  status: z.string(),
+}).loose();
+
+export const IssueDependenciesResponseSchema = z.object({
+  blocks: z.array(IssueDependencyRefSchema).default([]),
+  blocked_by: z.array(IssueDependencyRefSchema).default([]),
+  related: z.array(IssueDependencyRefSchema).default([]),
+}).loose();
+
+export const EMPTY_ISSUE_DEPENDENCIES: IssueDependenciesResponse = {
+  blocks: [],
+  blocked_by: [],
+  related: [],
 };

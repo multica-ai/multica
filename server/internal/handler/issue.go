@@ -63,6 +63,10 @@ type IssueResponse struct {
 	// preserves whatever labels are already in cache. nil pointer = "field
 	// absent, do not touch"; non-nil (incl. empty slice) = authoritative list.
 	Labels *[]LabelResponse `json:"labels,omitempty"`
+	// CEREBRO-PATCH(issue-dependencies): blocks/blocked_by refs for the relations sidebar (FIR-823).
+	// Pointer + omitempty, same contract as Labels: nil = "field absent, don't touch cache".
+	Blocks    *[]IssueDependencyRef `json:"blocks,omitempty"`
+	BlockedBy *[]IssueDependencyRef `json:"blocked_by,omitempty"`
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -840,6 +844,8 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			}
 			resp[i].Labels = &labels
 		}
+		// CEREBRO-PATCH(issue-dependencies): fold blocks/blocked_by into open-list rows (FIR-823).
+		h.attachDependencyRefs(r, wsUUID, prefix, resp)
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"issues": resp,
@@ -943,6 +949,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		resp[i].Labels = &labels
 	}
+	// CEREBRO-PATCH(issue-dependencies): fold blocks/blocked_by into list rows so
+	// the morning overview can dedup on blocked_by (FIR-823).
+	h.attachDependencyRefs(r, wsUUID, prefix, resp)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
@@ -1434,6 +1443,11 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 		detailLabels = []LabelResponse{}
 	}
 	resp.Labels = &detailLabels
+
+	// CEREBRO-PATCH(issue-dependencies): fold blocks/blocked_by into the detail response (FIR-823).
+	deps := h.loadDependencies(r, issue, prefix)
+	resp.Blocks = &deps.Blocks
+	resp.BlockedBy = &deps.BlockedBy
 
 	// Fetch issue reactions.
 	reactions, err := h.Queries.ListIssueReactions(r.Context(), issue.ID)

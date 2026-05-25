@@ -1,5 +1,7 @@
 // CEREBRO-PATCH(core-types-index): cerebro modification of upstream file
 export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueReaction } from "./issue";
+// CEREBRO-PATCH(issue-dependencies): re-export dependency relation types.
+export type { IssueDependencyRef, IssueDependenciesResponse } from "./issue";
 export type {
   Agent,
   AgentInfisicalFolder, // CEREBRO-PATCH(agent-infisical-secrets): export folder grant type.

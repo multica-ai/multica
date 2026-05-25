@@ -1,6 +1,7 @@
 {
   "_comment": "CEREBRO-PATCH(core-package-cerebro-deps): adds inbox/folders + profile/* exports for cerebro features",
   "_comment_nested_projects": "CEREBRO-PATCH(nested-projects): exports project nesting hooks",
+  "_comment_issue_dependencies": "CEREBRO-PATCH(issue-dependencies): exports blocks/blocked-by/related queries + mutations under ./dependencies",
   "name": "@multica/core",
   "version": "0.0.0",
   "private": true,
@@ -72,6 +73,9 @@
     "./labels": "./labels/index.ts",
     "./labels/queries": "./labels/queries.ts",
     "./labels/mutations": "./labels/mutations.ts",
+    "./dependencies": "./dependencies/index.ts",
+    "./dependencies/queries": "./dependencies/queries.ts",
+    "./dependencies/mutations": "./dependencies/mutations.ts",
     "./autopilots": "./autopilots/index.ts",
     "./autopilots/queries": "./autopilots/queries.ts",
     "./autopilots/mutations": "./autopilots/mutations.ts",

@@ -109,6 +109,8 @@ import type {
   UpdateLabelRequest,
   ListLabelsResponse,
   IssueLabelsResponse,
+  // CEREBRO-PATCH(issue-dependencies): dependencies response type.
+  IssueDependenciesResponse,
   PinnedItem,
   CreatePinRequest,
   PinnedItemType,
@@ -176,6 +178,9 @@ import {
   EMPTY_ATTACHMENT,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
+  // CEREBRO-PATCH(issue-dependencies): dependencies schema + fallback.
+  EMPTY_ISSUE_DEPENDENCIES,
+  IssueDependenciesResponseSchema,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
@@ -2821,6 +2826,74 @@ export class ApiClient {
   async detachLabel(issueId: string, labelId: string): Promise<IssueLabelsResponse> {
     return this.fetch(`/api/issues/${issueId}/labels/${labelId}`, {
       method: "DELETE",
+    });
+  }
+
+  // CEREBRO-PATCH(issue-dependencies): blocks / blocked-by / related relations.
+  // Every response runs through IssueDependenciesResponseSchema so backend
+  // drift downgrades to the empty fallback instead of white-screening the
+  // sidebar (API Response Compatibility rule).
+  async getIssueDependencies(issueId: string): Promise<IssueDependenciesResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/dependencies`);
+    return parseWithFallback(raw, IssueDependenciesResponseSchema, EMPTY_ISSUE_DEPENDENCIES, {
+      endpoint: "getIssueDependencies",
+    });
+  }
+
+  async addBlocks(issueId: string, otherId: string): Promise<IssueDependenciesResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/blocks`, {
+      method: "POST",
+      body: JSON.stringify({ issue_id: otherId }),
+    });
+    return parseWithFallback(raw, IssueDependenciesResponseSchema, EMPTY_ISSUE_DEPENDENCIES, {
+      endpoint: "addBlocks",
+    });
+  }
+
+  async addBlockedBy(issueId: string, otherId: string): Promise<IssueDependenciesResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/blocked-by`, {
+      method: "POST",
+      body: JSON.stringify({ issue_id: otherId }),
+    });
+    return parseWithFallback(raw, IssueDependenciesResponseSchema, EMPTY_ISSUE_DEPENDENCIES, {
+      endpoint: "addBlockedBy",
+    });
+  }
+
+  async addRelated(issueId: string, otherId: string): Promise<IssueDependenciesResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/related`, {
+      method: "POST",
+      body: JSON.stringify({ issue_id: otherId }),
+    });
+    return parseWithFallback(raw, IssueDependenciesResponseSchema, EMPTY_ISSUE_DEPENDENCIES, {
+      endpoint: "addRelated",
+    });
+  }
+
+  async removeBlocks(issueId: string, otherId: string): Promise<IssueDependenciesResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/blocks/${otherId}`, {
+      method: "DELETE",
+    });
+    return parseWithFallback(raw, IssueDependenciesResponseSchema, EMPTY_ISSUE_DEPENDENCIES, {
+      endpoint: "removeBlocks",
+    });
+  }
+
+  async removeBlockedBy(issueId: string, otherId: string): Promise<IssueDependenciesResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/blocked-by/${otherId}`, {
+      method: "DELETE",
+    });
+    return parseWithFallback(raw, IssueDependenciesResponseSchema, EMPTY_ISSUE_DEPENDENCIES, {
+      endpoint: "removeBlockedBy",
+    });
+  }
+
+  async removeRelated(issueId: string, otherId: string): Promise<IssueDependenciesResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/related/${otherId}`, {
+      method: "DELETE",
+    });
+    return parseWithFallback(raw, IssueDependenciesResponseSchema, EMPTY_ISSUE_DEPENDENCIES, {
+      endpoint: "removeRelated",
     });
   }
 
