@@ -27,4 +27,15 @@ for _ in 1 2 3 4 5 6; do
   sleep 0.5
 done
 
-exec "$REPO/server/bin/server"
+BACKEND_CMD=("$REPO/server/bin/server")
+
+if [ -n "${INFISICAL_UNIVERSAL_AUTH_CLIENT_ID:-}" ] && [ -n "${INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET:-}" ]; then
+  exec infisical run \
+    --domain="${INFISICAL_DOMAIN:?INFISICAL_DOMAIN required when Infisical auth is configured}" \
+    --projectId="${INFISICAL_PROJECT_ID:?INFISICAL_PROJECT_ID required when Infisical auth is configured}" \
+    --env=prod \
+    -- \
+    "${BACKEND_CMD[@]}"
+else
+  exec "${BACKEND_CMD[@]}"
+fi
