@@ -186,9 +186,9 @@
   },
   "tabs": {
     "activity": "动态",
-    "tasks": "task",
+    "issues": "Issue",
     "instructions": "指令",
-    "skills": "skill",
+    "skills": "Skill",
     "environment": "环境变量",
     "custom_args": "自定义参数",
     "discard_dialog_title": "放弃未保存的修改？",

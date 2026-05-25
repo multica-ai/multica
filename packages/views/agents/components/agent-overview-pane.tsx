@@ -30,15 +30,15 @@ import { useT } from "../../i18n";
 
 type DetailTab =
   | "activity"
-  | "tasks"
+  | "issues"
   | "instructions"
   | "skills"
   | "env"
   | "custom_args";
 
-const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "skills" | "environment" | "custom_args"> = {
+const TAB_LABEL_KEY: Record<DetailTab, "activity" | "issues" | "instructions" | "skills" | "environment" | "custom_args"> = {
   activity: "activity",
-  tasks: "tasks",
+  issues: "issues",
   instructions: "instructions",
   skills: "skills",
   env: "environment",
@@ -50,7 +50,7 @@ const detailTabs: {
   icon: typeof FileText;
 }[] = [
   { id: "activity", icon: Activity },
-  { id: "tasks", icon: ListTodo },
+  { id: "issues", icon: ListTodo },
   { id: "instructions", icon: FileText },
   { id: "skills", icon: BookOpenText },
   { id: "env", icon: KeyRound },
@@ -68,7 +68,7 @@ interface AgentOverviewPaneProps {
  *
  *   - Activity (default) — what the agent is doing now / how it's been doing /
  *     what it just finished. The "watch state" surface.
- *   - Tasks — assigned/created issues using the shared issue board/list.
+ *   - Issues — assigned/created issues using the shared issue board/list.
  *   - Instructions / Skills / Env / Custom Args — four editing surfaces.
  *
  * The previous Settings tab was deleted because every field on it is now
@@ -148,7 +148,7 @@ export function AgentOverviewPane({
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         {activeTab === "activity" && <ActivityTab agent={agent} />}
-        {activeTab === "tasks" && (
+        {activeTab === "issues" && (
           <div className="flex h-full min-h-[520px] flex-col">
             <ActorIssuesPanel actorType="agent" actorId={agent.id} />
           </div>

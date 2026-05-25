@@ -29,7 +29,7 @@ import { filterIssues } from "../issues/utils/filter";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
 import { useT } from "../i18n";
 
-export type TaskActorType = "member" | "agent";
+export type IssueActorType = "member" | "agent";
 
 const SCOPE_VALUES: ActorIssuesScope[] = ["assigned", "created"];
 
@@ -37,7 +37,7 @@ export function ActorIssuesPanel({
   actorType,
   actorId,
 }: {
-  actorType: TaskActorType;
+  actorType: IssueActorType;
   actorId: string;
 }) {
   const { t } = useT("issues");
@@ -58,7 +58,7 @@ export function ActorIssuesPanel({
 
   useClearFiltersOnWorkspaceChange(actorIssuesViewStore, wsId);
 
-  // The actor tasks panel is list-only; clear any persisted "board" state
+  // The actor issues panel is list-only; clear any persisted "board" state
   // so list-only affordances (e.g. BatchActionToolbar) render correctly.
   useEffect(() => {
     setViewMode("list");
