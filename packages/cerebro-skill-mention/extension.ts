@@ -50,17 +50,25 @@ export function createSkillSuggestion(
   let renderer: ReactRenderer<SkillMentionListRef> | null = null;
   let popup: HTMLDivElement | null = null;
 
-  function buildItems(query: string): SkillMentionItem[] {
-    if (!isFeatureEnabled()) return [];
-    const wsId = getCurrentWsId();
-    if (!wsId) return [];
-    const skills =
-      qc.getQueryData<SkillSummary[]>(workspaceKeys.skills(wsId)) ?? [];
-    return skills
+  function filterItems(
+    skills: SkillSummary[] | undefined,
+    query: string,
+  ): SkillMentionItem[] {
+    return (skills ?? [])
       .map(summaryToItem)
       .filter((s) => fuzzyMatches(s, query))
       .sort((a, b) => a.name.localeCompare(b.name))
       .slice(0, MAX_ITEMS);
+  }
+
+  async function buildItems(query: string): Promise<SkillMentionItem[]> {
+    if (!isFeatureEnabled()) return [];
+    const wsId = getCurrentWsId();
+    if (!wsId) return [];
+    const cached = qc.getQueryData<SkillSummary[]>(workspaceKeys.skills(wsId));
+    if (cached) return filterItems(cached, query);
+    const skills = await qc.ensureQueryData(skillListOptions(wsId));
+    return filterItems(skills, query);
   }
 
   return {
@@ -99,11 +107,6 @@ export function createSkillSuggestion(
     render: () => {
       return {
         onStart: (props: SuggestionProps<SkillMentionItem>) => {
-          // Warm the cache so subsequent keystrokes see results even if
-          // the user has never opened the Skills page in this session.
-          const wsId = getCurrentWsId();
-          if (wsId) void qc.prefetchQuery(skillListOptions(wsId));
-
           renderer = new ReactRenderer(SkillMentionList, {
             props: { items: props.items, command: props.command },
             editor: props.editor,
