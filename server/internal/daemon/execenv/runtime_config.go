@@ -245,12 +245,15 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// Inject available repositories section.
 	if len(ctx.Repos) > 0 {
 		b.WriteString("## Repositories\n\n")
-		b.WriteString("The following code repositories are available in this workspace.\n")
-		b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory. Add `--ref <branch-or-sha>` when you need an exact branch, tag, or commit.\n\n")
+		b.WriteString("The following code repositories are available in this workspace. Do not use raw `git clone`; use the checked-out path below or the Multica checkout command so the daemon can manage worktrees.\n\n")
 		for _, repo := range ctx.Repos {
-			fmt.Fprintf(&b, "- %s\n", repo.URL)
+			if strings.TrimSpace(repo.LocalPath) != "" {
+				fmt.Fprintf(&b, "- %s - already checked out at `%s`\n", repo.URL, repo.LocalPath)
+				continue
+			}
+			fmt.Fprintf(&b, "- %s - run `multica repo checkout %s` from this isolated working directory. Add `--ref <branch-or-sha>` when you need an exact branch, tag, or commit.\n", repo.URL, repo.URL)
 		}
-		b.WriteString("\nThe checkout command creates a git worktree with a dedicated branch. You can check out one or more repos as needed, and can pass `--ref` for review/QA on a non-default branch or commit.\n\n")
+		b.WriteString("\n")
 	}
 
 	// Inject project-scoped context (resources attached to the issue's project).

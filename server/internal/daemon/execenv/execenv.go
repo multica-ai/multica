@@ -1,6 +1,7 @@
 // Package execenv manages isolated per-task execution environments for the daemon.
 // Each task gets its own directory with injected context files. Repositories are
-// checked out on demand by the agent via `multica repo checkout`.
+// pre-checked out by the daemon when possible and remain available for on-demand
+// checkout via `multica repo checkout`.
 package execenv
 
 import (
@@ -14,7 +15,8 @@ import (
 
 // RepoContextForEnv describes a workspace repo available for checkout.
 type RepoContextForEnv struct {
-	URL string // remote URL
+	URL       string // remote URL
+	LocalPath string // absolute worktree path when daemon pre-checkout succeeded
 }
 
 // ProjectResourceForEnv describes a single resource attached to the issue's

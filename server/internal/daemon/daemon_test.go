@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
@@ -1516,6 +1518,170 @@ func TestRegisterTaskReposSurvivesWorkspaceRefresh(t *testing.T) {
 
 	if !d.workspaceRepoAllowed("ws-1", sourceRepo) {
 		t.Fatal("project repo URL was wiped by workspace refresh")
+	}
+}
+
+func TestPreCheckoutTaskReposCreatesWorktree(t *testing.T) {
+	t.Parallel()
+
+	sourceRepo := createDaemonTestRepo(t)
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/daemon/workspaces/ws-1/repos" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID:  "ws-1",
+			Repos:        []RepoData{{URL: sourceRepo}},
+			ReposVersion: "v1",
+		})
+	})
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: sourceRepo}}, nil)
+
+	workDir := t.TempDir()
+	repos := d.preCheckoutTaskRepos(context.Background(), "ws-1", "task-1", "agent", workDir, []execenv.RepoContextForEnv{
+		{URL: sourceRepo},
+	})
+
+	if len(repos) != 1 {
+		t.Fatalf("expected one repo, got %d", len(repos))
+	}
+	if repos[0].LocalPath == "" {
+		t.Fatal("expected LocalPath to be populated")
+	}
+	if repos[0].LocalPath != filepath.Join(workDir, filepath.Base(sourceRepo)) {
+		t.Fatalf("LocalPath = %q, want checkout under workdir", repos[0].LocalPath)
+	}
+	if _, err := os.Stat(filepath.Join(repos[0].LocalPath, ".git")); err != nil {
+		t.Fatalf("expected git worktree at LocalPath: %v", err)
+	}
+}
+
+func TestPreCheckoutTaskReposSyncsProjectOnlyRepo(t *testing.T) {
+	t.Parallel()
+
+	sourceRepo := createDaemonTestRepo(t)
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/daemon/workspaces/ws-1/repos" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID:  "ws-1",
+			Repos:        []RepoData{},
+			ReposVersion: "v2",
+		})
+	})
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
+	d.workspaces["ws-1"].taskRepoURLs = map[string]struct{}{sourceRepo: {}}
+
+	workDir := t.TempDir()
+	repos := d.preCheckoutTaskRepos(context.Background(), "ws-1", "task-1", "agent", workDir, []execenv.RepoContextForEnv{
+		{URL: sourceRepo},
+	})
+
+	if len(repos) != 1 {
+		t.Fatalf("expected one repo, got %d", len(repos))
+	}
+	if repos[0].LocalPath == "" {
+		t.Fatal("expected project-only repo LocalPath to be populated")
+	}
+	if _, err := os.Stat(filepath.Join(repos[0].LocalPath, ".git")); err != nil {
+		t.Fatalf("expected git worktree at LocalPath: %v", err)
+	}
+}
+
+func TestPreCheckoutTaskReposWarnsAndKeepsFallbackOnFailure(t *testing.T) {
+	t.Parallel()
+
+	missingRepo := filepath.Join(t.TempDir(), "missing")
+	var log bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&log, nil))
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/daemon/workspaces/ws-1/repos" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID:  "ws-1",
+			Repos:        []RepoData{{URL: missingRepo}},
+			ReposVersion: "v1",
+		})
+	})
+	d.logger = logger
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: missingRepo}}, nil)
+
+	repos := d.preCheckoutTaskRepos(context.Background(), "ws-1", "task-1", "agent", t.TempDir(), []execenv.RepoContextForEnv{
+		{URL: missingRepo},
+	})
+
+	if len(repos) != 1 {
+		t.Fatalf("expected one repo, got %d", len(repos))
+	}
+	if repos[0].LocalPath != "" {
+		t.Fatalf("LocalPath = %q, want empty on failure", repos[0].LocalPath)
+	}
+	if !strings.Contains(log.String(), "daemon pre-checkout failed") {
+		t.Fatalf("expected pre-checkout warning, got logs:\n%s", log.String())
+	}
+}
+
+func TestPreCheckoutTaskReposNilCacheNoops(t *testing.T) {
+	t.Parallel()
+
+	var log bytes.Buffer
+	d := &Daemon{
+		logger:    slog.New(slog.NewTextHandler(&log, nil)),
+		repoCache: nil,
+	}
+	repos := []execenv.RepoContextForEnv{{URL: "https://github.com/org/repo"}}
+
+	got := d.preCheckoutTaskRepos(context.Background(), "ws-1", "task-1", "agent", t.TempDir(), repos)
+
+	if got[0].LocalPath != "" {
+		t.Fatalf("LocalPath = %q, want empty", got[0].LocalPath)
+	}
+	if !strings.Contains(log.String(), "repo cache not initialized") {
+		t.Fatalf("expected nil-cache warning, got logs:\n%s", log.String())
+	}
+}
+
+func TestAuditWorkdirForRawClones(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workDir, "raw-clone", ".git"), 0o755); err != nil {
+		t.Fatalf("create raw clone marker: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(workDir, "worktree"), 0o755); err != nil {
+		t.Fatalf("create worktree dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "worktree", ".git"), []byte("gitdir: /tmp/bare/worktrees/x\n"), 0o644); err != nil {
+		t.Fatalf("create worktree git file: %v", err)
+	}
+
+	var log bytes.Buffer
+	d := &Daemon{logger: slog.New(slog.NewTextHandler(&log, nil))}
+	d.auditWorkdirForRawClones(workDir, "task-1")
+
+	got := log.String()
+	if !strings.Contains(got, "raw git clone detected") {
+		t.Fatalf("expected raw clone warning, got logs:\n%s", got)
+	}
+	if strings.Contains(got, filepath.Join(workDir, "worktree")) {
+		t.Fatalf("did not expect warning for .git file worktree marker, got logs:\n%s", got)
+	}
+}
+
+func TestAuditWorkdirForRawClonesMissingWorkdirDoesNotWarn(t *testing.T) {
+	t.Parallel()
+
+	var log bytes.Buffer
+	d := &Daemon{logger: slog.New(slog.NewTextHandler(&log, nil))}
+	d.auditWorkdirForRawClones(filepath.Join(t.TempDir(), "missing"), "task-1")
+
+	if log.Len() != 0 {
+		t.Fatalf("expected missing workdir to be ignored, got logs:\n%s", log.String())
 	}
 }
 
