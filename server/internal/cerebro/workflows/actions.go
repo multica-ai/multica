@@ -207,9 +207,14 @@ func (s *Service) actionSetStatus(ctx context.Context, wf workflow, te TriggerEv
 	if err != nil {
 		return fmt.Errorf("set_status: %w", err)
 	}
+	wsID, err := parseUUID(te.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("set_status: %w", err)
+	}
 	if _, err := s.issues.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-		ID:     id,
-		Status: cfg.Status,
+		ID:          id,
+		Status:      cfg.Status,
+		WorkspaceID: wsID,
 	}); err != nil {
 		return fmt.Errorf("set_status: %w", err)
 	}

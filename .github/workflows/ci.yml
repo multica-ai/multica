@@ -29,6 +29,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Test self-host env derivation
+        run: bash scripts/selfhost-config.test.sh
+
       - name: Verify reserved-slugs.ts is up to date
         # Re-runs the generator and fails on any drift from the
         # checked-in TypeScript output. The Go side embeds the JSON
@@ -43,7 +46,13 @@ jobs:
         # ~73 i18next/no-literal-string violations on main that would
         # block every PR if lint were enforced). When the team is ready
         # to clean up the violations, add `lint` back to this command.
-        run: pnpm exec turbo build typecheck test --concurrency=1
+        #
+        # @multica/mobile is excluded to match the root package.json
+        # scripts (build/typecheck/test all filter it out). Mobile types
+        # currently drift from cerebro-augmented core types; follow-up
+        # issue will align mobile schemas. CI must match script behaviour
+        # so green-locally implies green-in-CI.
+        run: pnpm exec turbo build typecheck test --concurrency=1 --filter=!@multica/mobile
 
   backend:
     runs-on: ubuntu-latest

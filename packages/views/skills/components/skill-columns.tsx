@@ -15,7 +15,7 @@ import type {
   MemberWithUser,
   SkillSummary,
 } from "@multica/core/types";
-import { timeAgo } from "@multica/core/utils";
+import { useTimeAgo } from "../../i18n";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import {
   Tooltip,
@@ -52,6 +52,7 @@ const COL_WIDTHS = {
 // price for header strings — same pattern used by inbox `useTypeLabels`.
 export function useSkillColumns(): ColumnDef<SkillRow>[] {
   const { t } = useT("skills");
+  const timeAgo = useTimeAgo();
   return [
     {
       id: "name",

@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import type { AgentTask, TaskFailureReason } from "@multica/core/types";
-import { timeAgo } from "@multica/core/utils";
+import { useTimeAgo } from "../../i18n";
 import {
   Tooltip,
   TooltipContent,
@@ -208,7 +208,7 @@ const STATUS_TONE: Record<AgentTask["status"], string> = {
 // Time anchor depends on status. Active rows want "Started 2m ago" /
 // "Queued 30s ago" — what's happening now. Past rows want "5m ago" — when
 // the verdict landed.
-function activeTimeText(task: AgentTask): string {
+function activeTimeText(task: AgentTask, timeAgo: (dateStr: string) => string): string {
   if (task.status === "running" && task.started_at) {
     return timeAgo(task.started_at);
   }
@@ -259,11 +259,12 @@ function useStatusLabel(status: AgentTask["status"]): string {
 
 function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const { t } = useT("issues");
+  const timeAgo = useTimeAgo();
   const [cancelling, setCancelling] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
-  const time = activeTimeText(task);
+  const time = activeTimeText(task, timeAgo);
 
   // Transcript only meaningful once messages exist — pure-queued tasks
   // have nothing to show yet.
@@ -327,6 +328,7 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
 
 function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const { t } = useT("issues");
+  const timeAgo = useTimeAgo();
   const [retrying, setRetrying] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);

@@ -238,7 +238,8 @@ SELECT count(*) > 0 AS has_replied FROM comment
 WHERE parent_id = @parent_id AND author_type = 'agent' AND author_id = @agent_id;
 
 -- name: DeleteComment :exec
-DELETE FROM comment WHERE id = $1;
+-- Defense-in-depth: workspace_id is a SQL-layer tenant guard. See DeleteIssue.
+DELETE FROM comment WHERE id = $1 AND workspace_id = $2;
 
 -- name: ResolveComment :one
 -- Idempotent: re-resolving keeps the original resolved_at + resolver. Always

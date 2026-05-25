@@ -30,6 +30,46 @@ function Test-CommandExists {
     $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+function Get-EnvFileValue {
+    param(
+        [string]$Path,
+        [string]$Name,
+        [string]$Default
+    )
+
+    if (-not (Test-Path $Path)) {
+        return $Default
+    }
+
+    $prefix = "$Name="
+    $line = Get-Content $Path |
+        Where-Object { $_.StartsWith($prefix) } |
+        Select-Object -Last 1
+    if (-not $line) {
+        return $Default
+    }
+
+    $value = $line.Substring($prefix.Length).Trim().Trim('"').Trim("'")
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return $Default
+    }
+    return $value
+}
+
+function Get-SelfHostBackendPort {
+    foreach ($name in @("BACKEND_PORT", "API_PORT", "SERVER_PORT", "PORT")) {
+        $value = Get-EnvFileValue -Path (Join-Path $InstallDir ".env") -Name $name -Default ""
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            return $value
+        }
+    }
+    return "8080"
+}
+
+function Get-SelfHostFrontendPort {
+    return Get-EnvFileValue -Path (Join-Path $InstallDir ".env") -Name "FRONTEND_PORT" -Default "3000"
+}
+
 function Get-LatestVersion {
     try {
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/multica-ai/multica/releases/latest" -ErrorAction Stop
@@ -386,10 +426,11 @@ function Install-Server {
     docker compose -f docker-compose.selfhost.yml up -d
 
     Write-Info "Waiting for backend to be ready..."
+    $backendPort = Get-SelfHostBackendPort
     $ready = $false
     for ($i = 1; $i -le 45; $i++) {
         try {
-            $null = Invoke-WebRequest -Uri "http://localhost:8080/health" -UseBasicParsing -TimeoutSec 2
+            $null = Invoke-WebRequest -Uri "http://localhost:$backendPort/health" -UseBasicParsing -TimeoutSec 2
             $ready = $true
             break
         } catch {
@@ -451,8 +492,10 @@ function Start-LocalInstall {
     Write-Host "  [OK] Multica server is running and CLI is ready!" -ForegroundColor Green
     Write-Host "  ============================================" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  Frontend:  http://localhost:3000"
-    Write-Host "  Backend:   http://localhost:8080"
+    $frontendPort = Get-SelfHostFrontendPort
+    $backendPort = Get-SelfHostBackendPort
+    Write-Host "  Frontend:  http://localhost:$frontendPort"
+    Write-Host "  Backend:   http://localhost:$backendPort"
     Write-Host "  Server at: $InstallDir"
     Write-Host ""
     Write-Host "  Next: configure your CLI to connect"

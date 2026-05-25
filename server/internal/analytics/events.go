@@ -30,6 +30,7 @@ const (
 	EventOnboardingCompleted           = "onboarding_completed"
 	EventCloudWaitlistJoined           = "cloud_waitlist_joined"
 	EventFeedbackSubmitted             = "feedback_submitted"
+	EventContactSalesSubmitted         = "contact_sales_submitted"
 )
 
 const EventSchemaVersion = 2
@@ -538,6 +539,28 @@ func FeedbackSubmitted(userID, workspaceID string, messageLen int, hasImages boo
 			UserID:      userID,
 			WorkspaceID: workspaceID,
 			Source:      "ops_feedback",
+		}),
+	}
+}
+
+// ContactSalesSubmitted fires after a contact-sales inquiry is recorded.
+// The form is public and unauthenticated, so DistinctID is empty (PostHog
+// will treat it as an anonymous event). We carry the coarse company size,
+// country, and intended use case so sales / marketing can split inbound
+// volume without having to query the operational DB.
+func ContactSalesSubmitted(inquiryID, companySize, countryRegion, useCase string, hasGoals bool) Event {
+	props := map[string]any{
+		"inquiry_id":     inquiryID,
+		"company_size":   companySize,
+		"country_region": countryRegion,
+		"use_case":       useCase,
+		"has_goals":      hasGoals,
+	}
+	return Event{
+		Name:       EventContactSalesSubmitted,
+		DistinctID: inquiryID,
+		Properties: withCoreProperties(props, CoreProperties{
+			Source: "marketing_contact_sales",
 		}),
 	}
 }

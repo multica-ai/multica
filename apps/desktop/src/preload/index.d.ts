@@ -1,5 +1,6 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
+import type { NavigationGesture } from "../shared/navigation-gestures";
 
 interface DesktopAPI {
   /** App version + normalized OS, captured synchronously at preload time. */
@@ -42,6 +43,8 @@ interface DesktopAPI {
       issueKey: string;
     }) => void,
   ) => () => void;
+  /** Listen for native macOS back/forward swipe gestures. Returns an unsubscribe function. */
+  onNavigationGesture: (callback: (gesture: NavigationGesture) => void) => () => void;
 }
 
 interface DaemonStatus {
