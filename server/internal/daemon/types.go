@@ -126,20 +126,17 @@ type AgentData struct {
 	CustomEnv    map[string]string `json:"custom_env,omitempty"`
 	CustomArgs   []string          `json:"custom_args,omitempty"`
 	McpConfig    json.RawMessage   `json:"mcp_config,omitempty"`
-	// CEREBRO-PATCH(agent-infisical-secrets): folder grants whose secrets are injected as env at spawn.
-	InfisicalFolders []InfisicalFolderRef `json:"infisical_folders,omitempty"`
-	Model            string               `json:"model,omitempty"`
+	// CEREBRO-PATCH(agent-infisical-secrets): resolved secrets the backend
+	// fetched via the per-user scoped Infisical machine identity, ready to
+	// inject as env at spawn. The daemon no longer talks to Infisical —
+	// secrets arrive over the already-TLS-protected claim path. FIR-2192.
+	InfisicalSecrets map[string]string `json:"infisical_secrets,omitempty"`
+	Model            string            `json:"model,omitempty"`
 	ThinkingLevel    string               `json:"thinking_level,omitempty"`
 	// CEREBRO-PATCH(daemon-agent-sandbox-allowlist): admin-set list of
 	SandboxAllowlist      []string `json:"sandbox_allowlist,omitempty"`
 	PersonaSandbox        string   `json:"persona_sandbox,omitempty"`
 	RuntimePersonaSandbox string   `json:"runtime_persona_sandbox,omitempty"`
-}
-
-// CEREBRO-PATCH(agent-infisical-secrets): claim payload folder grant.
-type InfisicalFolderRef struct {
-	Environment string `json:"environment"`
-	SecretPath  string `json:"secret_path"`
 }
 
 // SkillData represents a structured skill for task execution.

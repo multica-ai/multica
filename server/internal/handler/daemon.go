@@ -1501,8 +1501,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if agent.McpConfig != nil {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
-		// CEREBRO-PATCH(user-infisical-folders): attach folder grants, filtered to the owner's allow-list.
-		infisicalFolders := h.agentInfisicalFoldersForClaim(r, agent.ID, agent.WorkspaceID, agent.OwnerID)
+		// CEREBRO-PATCH(user-infisical-folders): resolve folder grants, filter
+		// to the owner's allow-list, then fetch the secrets via the per-user
+		// scoped Infisical identity so the daemon never holds an Infisical
+		// credential and never talks to Infisical directly.
+		infisicalSecrets := h.resolveInfisicalSecretsForClaim(r, agent.ID, agent.WorkspaceID, agent.OwnerID)
 		resp.Agent = &TaskAgentData{
 			ID:               uuidToString(agent.ID),
 			Name:             agent.Name,
@@ -1511,7 +1514,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			CustomEnv:        customEnv,
 			CustomArgs:       customArgs,
 			McpConfig:        mcpConfig,
-			InfisicalFolders: infisicalFolders,
+			InfisicalSecrets: infisicalSecrets,
 			Model:            agent.Model.String,
 			ThinkingLevel:    agent.ThinkingLevel.String,
 		}

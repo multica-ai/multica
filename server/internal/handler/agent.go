@@ -255,9 +255,14 @@ type TaskAgentData struct {
 	CustomEnv        map[string]string              `json:"custom_env,omitempty"`
 	CustomArgs       []string                       `json:"custom_args,omitempty"`
 	McpConfig        json.RawMessage                `json:"mcp_config,omitempty"`
-	InfisicalFolders []AgentInfisicalFolderResponse `json:"infisical_folders,omitempty"`
-	Model            string                         `json:"model,omitempty"`
-	ThinkingLevel    string                         `json:"thinking_level,omitempty"`
+	// CEREBRO-PATCH(agent-infisical-secrets): resolved key/value secrets for
+	// the agent's granted folders. Backend fetches these via the per-user
+	// scoped Infisical machine identity at claim time so the daemon never
+	// touches Infisical directly. Empty when no folders are granted, the
+	// owner has no provisioned identity, or Infisical is not configured.
+	InfisicalSecrets map[string]string `json:"infisical_secrets,omitempty"`
+	Model            string            `json:"model,omitempty"`
+	ThinkingLevel    string            `json:"thinking_level,omitempty"`
 	// CEREBRO-PATCH(agent-capabilities-claim): workspace capability policy passed to daemon sandbox.
 	SandboxAllowlist []string `json:"sandbox_allowlist,omitempty"`
 }

@@ -271,7 +271,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 workspace accounts handler
 	cerebroAccountHandler := cerebroaccount.New(cerebroQueries, bus)
 	// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196/1197 credential registry handler — cipher loaded from MULTICA_CREDENTIALS_KEY, governance policy wired via newCredentialsPolicy (Persona/Multica cut-over controlled by MULTICA_PERMISSION_ENGINE).
-	cerebroCredentialsHandler := cerebrocredentials.New(cerebroQueries, cerebrocredentials.MustNewCipherFromEnv(), bus).WithPolicy(newCredentialsPolicy(cerebroQueries, queries))
+	cerebroCredentialsCipher := cerebrocredentials.MustNewCipherFromEnv()
+	cerebroCredentialsHandler := cerebrocredentials.New(cerebroQueries, cerebroCredentialsCipher, bus).WithPolicy(newCredentialsPolicy(cerebroQueries, queries))
+	// CEREBRO-PATCH(router-infisical-provisioner): FIR-2192 scoped-per-user
+	// Infisical machine identity provisioner. Reads admin credentials +
+	// project/org IDs from INFISICAL_ADMIN_* env vars. Nil when unset so dev
+	// + self-host instances without Infisical still boot.
+	if provisioner := newInfisicalProvisioner(cerebroQueries, cerebroCredentialsCipher); provisioner != nil {
+		h.InfisicalProvisioner = provisioner
+	}
 	// CEREBRO-PATCH(references-routes): JEH-837 issue references handler instance.
 	cerebroReferencesHandler := cerebroreferences.New(cerebroQueries, queries, bus)
 	// CEREBRO-PATCH(comments-move-to-subissue): JEH-1309 lift a comment thread into a sub-issue.

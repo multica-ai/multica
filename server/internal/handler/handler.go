@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	cerebroinfisical "github.com/multica-ai/multica/server/internal/cerebro/infisical"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -140,6 +141,12 @@ type Handler struct {
 	PersonaMaskAudit PersonaMaskAuditWriter
 	// CEREBRO-PATCH(handler-github-pr-heal): JEH-1919 PR-card self-heal hook.
 	PullRequestLinkHealer PullRequestLinkHealer
+	// CEREBRO-PATCH(handler-infisical-provisioner): scoped-per-user Infisical
+	// machine identity provisioner. Wired by the router from
+	// MULTICA_CREDENTIALS_KEY + INFISICAL_ADMIN_* env. nil = provisioning
+	// disabled (allowlist saves still succeed; secret fetch on claim returns
+	// empty).
+	InfisicalProvisioner *cerebroinfisical.Provisioner
 	// CEREBRO-PATCH(handler-tool-meta): JEH-1353 — ordered list of registered
 	// tools and name→description lookup for the tool grant admin API.
 	cerebroToolItems  []CerebroToolItem

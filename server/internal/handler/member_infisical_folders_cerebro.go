@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	cerebroinfisical "github.com/multica-ai/multica/server/internal/cerebro/infisical"
 	"github.com/multica-ai/multica/server/internal/logger"
 )
 
@@ -107,8 +108,37 @@ func (h *Handler) ReplaceMemberInfisicalFolders(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "failed to save infisical folders")
 		return
 	}
+
+	// Sync the scoped Infisical machine identity to match the new allow-list.
+	// Provisioner is nil in dev/self-hosted instances that haven't set the
+	// admin env vars — that's fine, the allow-list still saves and the agent
+	// claim path will return no Infisical-injected env.
+	if h.InfisicalProvisioner != nil {
+		identityName := infisicalUserIdentityName(target.WorkspaceID, target.UserID)
+		folders := make([]cerebroinfisical.FolderRef, 0, len(out))
+		for _, f := range out {
+			folders = append(folders, cerebroinfisical.FolderRef{Environment: f.Environment, SecretPath: f.SecretPath})
+		}
+		if err := h.InfisicalProvisioner.SyncUserIdentity(r.Context(), target.WorkspaceID, target.UserID, identityName, folders); err != nil {
+			// Provisioning failure does NOT roll back the allow-list save: the
+			// allow-list is the source of truth and the next save (or any
+			// retry hook) will reconcile. We surface a 502 so the admin sees
+			// the failure rather than a silent "saved but won't work".
+			slog.Error("failed to sync infisical identity after allow-list save", append(logger.RequestAttrs(r), "user_id", uuidToString(target.UserID), "error", err)...)
+			writeError(w, http.StatusBadGateway, "allow-list saved but Infisical identity sync failed: "+err.Error())
+			return
+		}
+	}
+
 	slog.Info("member infisical folders updated", "user_id", uuidToString(target.UserID), "count", len(out), "by", uuidToString(caller.UserID))
 	writeJSON(w, http.StatusOK, map[string]any{"folders": out})
+}
+
+// infisicalUserIdentityName builds the human-readable name used when creating
+// the per-user machine identity in Infisical. The IDs make it grep-able from
+// the Infisical admin UI back to the originating workspace member.
+func infisicalUserIdentityName(workspaceID, userID pgtype.UUID) string {
+	return "multica-user-" + uuidToString(workspaceID) + "-" + uuidToString(userID)
 }
 
 // listUserInfisicalFolders returns the allow-list for a user as folder DTOs.

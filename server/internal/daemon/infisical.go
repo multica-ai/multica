@@ -1,46 +1,32 @@
 package daemon
 
-// CEREBRO-PATCH(daemon-infisical-spawn): fetch secrets from assigned Infisical folders as env vars at spawn.
+// CEREBRO-PATCH(daemon-infisical-spawn): inject backend-fetched secrets as env
+// at spawn. The daemon does NOT call Infisical itself — the backend resolves
+// the agent's grants via the per-user scoped Infisical machine identity at
+// claim time and ships the resolved key/value secrets in the claim payload.
+// See FIR-2192.
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
-	"os"
 	"strings"
-
-	"github.com/multica-ai/multica/server/internal/cerebro/infisical"
 )
 
-func (d *Daemon) prepareInfisicalSpawn(ctx context.Context, agent *AgentData, taskLog *slog.Logger) (map[string]string, error) {
-	if agent == nil || len(agent.InfisicalFolders) == 0 {
+func (d *Daemon) prepareInfisicalSpawn(_ context.Context, agent *AgentData, taskLog *slog.Logger) (map[string]string, error) {
+	if agent == nil || len(agent.InfisicalSecrets) == 0 {
 		return nil, nil
 	}
-	client := infisical.Client{
-		SiteURL:   os.Getenv("INFISICAL_SITE_URL"),
-		Token:     os.Getenv("INFISICAL_TOKEN"),
-		ProjectID: os.Getenv("INFISICAL_PROJECT_ID"),
-	}
-	env := make(map[string]string)
-	for _, folder := range agent.InfisicalFolders {
-		secrets, err := client.ListFolderSecrets(ctx, infisical.FolderRef{
-			Environment: folder.Environment,
-			SecretPath:  folder.SecretPath,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("list infisical folder %s%s: %w", folder.Environment, folder.SecretPath, err)
+	env := make(map[string]string, len(agent.InfisicalSecrets))
+	for key, value := range agent.InfisicalSecrets {
+		k := strings.TrimSpace(key)
+		if k == "" {
+			continue
 		}
-		for _, secret := range secrets {
-			key := strings.TrimSpace(secret.Key)
-			if key == "" {
-				continue
-			}
-			if isBlockedEnvKey(key) {
-				taskLog.Warn("infisical secret env: blocked key skipped", "key", key)
-				continue
-			}
-			env[key] = secret.Value
+		if isBlockedEnvKey(k) {
+			taskLog.Warn("infisical secret env: blocked key skipped", "key", k)
+			continue
 		}
+		env[k] = value
 	}
 	return env, nil
 }

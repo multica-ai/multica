@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	cerebroinfisical "github.com/multica-ai/multica/server/internal/cerebro/infisical"
 	"github.com/multica-ai/multica/server/internal/logger"
 )
 
@@ -115,6 +116,35 @@ func (h *Handler) ReplaceAgentInfisicalFolders(w http.ResponseWriter, r *http.Re
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"folders": out})
+}
+
+// resolveInfisicalSecretsForClaim is the spawn-time entry point: it loads the
+// agent's saved folder grants, re-checks them against the owner's current
+// allow-list (defense in depth — admin may have revoked a folder since the
+// grant was last edited), and asks the provisioner to fetch the secrets via
+// the per-user scoped Infisical identity. Returns nil for any failure so the
+// agent still spawns rather than hard-failing the claim.
+func (h *Handler) resolveInfisicalSecretsForClaim(r *http.Request, agentID, workspaceID, ownerID pgtype.UUID) map[string]string {
+	folders := h.agentInfisicalFoldersForClaim(r, agentID, workspaceID, ownerID)
+	if len(folders) == 0 {
+		return nil
+	}
+	if h.InfisicalProvisioner == nil {
+		// Operator hasn't wired Infisical. The grants exist in DB but there
+		// is no machinery to resolve them — log so this is visible.
+		slog.Warn("infisical grants present but provisioner is not configured; skipping injection", append(logger.RequestAttrs(r), "agent_id", uuidToString(agentID), "folder_count", len(folders))...)
+		return nil
+	}
+	refs := make([]cerebroinfisical.FolderRef, 0, len(folders))
+	for _, f := range folders {
+		refs = append(refs, cerebroinfisical.FolderRef{Environment: f.Environment, SecretPath: f.SecretPath})
+	}
+	out, err := h.InfisicalProvisioner.FetchSecretsForFolders(r.Context(), workspaceID, ownerID, refs)
+	if err != nil {
+		slog.Warn("failed to fetch infisical secrets for claim; spawning agent without injected env", append(logger.RequestAttrs(r), "agent_id", uuidToString(agentID), "error", err)...)
+		return nil
+	}
+	return out
 }
 
 func (h *Handler) agentInfisicalFoldersForClaim(r *http.Request, agentID, workspaceID, ownerID pgtype.UUID) []AgentInfisicalFolderResponse {

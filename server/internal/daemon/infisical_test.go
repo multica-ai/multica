@@ -1,50 +1,24 @@
 package daemon
 
-// CEREBRO-PATCH(agent-infisical-secrets): tests for spawn-time folder secret env injection.
+// CEREBRO-PATCH(agent-infisical-secrets): tests for spawn-time secret env
+// injection. The backend hands the daemon resolved secrets via the claim
+// payload; the daemon copies them into env (skipping blocked keys) and never
+// hits Infisical itself. FIR-2192.
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
-func TestPrepareInfisicalSpawnInjectsFolderSecretsAndSkipsBlockedKeys(t *testing.T) {
-	var requested []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requested = append(requested, r.URL.Path)
-		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
-			t.Fatalf("Authorization = %q, want bearer token", got)
-		}
-		if got := r.URL.Query().Get("workspaceId"); got != "project-1" {
-			t.Fatalf("workspaceId = %q", got)
-		}
-		if got := r.URL.Query().Get("environment"); got != "production" {
-			t.Fatalf("environment = %q", got)
-		}
-		if got := r.URL.Query().Get("secretPath"); got != "/app" {
-			t.Fatalf("secretPath = %q", got)
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"secrets": []map[string]string{
-				{"secretKey": "DATABASE_URL", "secretValue": "postgres://secret-value"},
-				{"secretKey": "API_KEY", "secretValue": "abc123"},
-				{"secretKey": "MULTICA_INTERNAL", "secretValue": "should-not-inject"},
-			},
-		})
-	}))
-	defer srv.Close()
-
-	t.Setenv("INFISICAL_SITE_URL", srv.URL)
-	t.Setenv("INFISICAL_TOKEN", "test-token")
-	t.Setenv("INFISICAL_PROJECT_ID", "project-1")
-
+func TestPrepareInfisicalSpawnInjectsClaimedSecretsAndSkipsBlockedKeys(t *testing.T) {
 	d := &Daemon{}
 	got, err := d.prepareInfisicalSpawn(context.Background(), &AgentData{
-		InfisicalFolders: []InfisicalFolderRef{
-			{Environment: "production", SecretPath: "/app"},
+		InfisicalSecrets: map[string]string{
+			"DATABASE_URL":     "postgres://secret-value",
+			"API_KEY":          "abc123",
+			"MULTICA_INTERNAL": "should-not-inject",
+			"":                 "skipped-empty-key",
 		},
 	}, slog.Default())
 	if err != nil {
@@ -59,7 +33,29 @@ func TestPrepareInfisicalSpawnInjectsFolderSecretsAndSkipsBlockedKeys(t *testing
 	if _, ok := got["MULTICA_INTERNAL"]; ok {
 		t.Fatalf("blocked MULTICA_INTERNAL key was injected")
 	}
-	if len(requested) != 1 || requested[0] != "/api/v3/secrets/raw" {
-		t.Fatalf("requested paths = %#v", requested)
+	if _, ok := got[""]; ok {
+		t.Fatalf("empty key was injected")
+	}
+}
+
+func TestPrepareInfisicalSpawnNilAgentReturnsNil(t *testing.T) {
+	d := &Daemon{}
+	got, err := d.prepareInfisicalSpawn(context.Background(), nil, slog.Default())
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil env for nil agent, got %#v", got)
+	}
+}
+
+func TestPrepareInfisicalSpawnEmptySecretsReturnsNil(t *testing.T) {
+	d := &Daemon{}
+	got, err := d.prepareInfisicalSpawn(context.Background(), &AgentData{}, slog.Default())
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil env when no secrets, got %#v", got)
 	}
 }
