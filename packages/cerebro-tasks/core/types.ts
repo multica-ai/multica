@@ -67,6 +67,7 @@ export interface CerebroTask {
   agent_name: string;
   agent_avatar_url?: string;
   task_title?: string;
+  chat_title?: string;
   issue_id?: string;
   issue_title?: string;
   issue_number?: number;

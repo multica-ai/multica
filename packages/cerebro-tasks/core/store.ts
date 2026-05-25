@@ -18,6 +18,7 @@ import {
 // Query keyed on this filter.
 interface TasksPageState extends TasksFilter {
   visibleColumns: Record<ColumnId, boolean>;
+  setFilter: (filter: Partial<TasksFilter>) => void;
   setAgentId: (id: string | null) => void;
   setIssueId: (id: string | null) => void;
   setProjectId: (id: string | null) => void;
@@ -39,6 +40,7 @@ interface TasksPageState extends TasksFilter {
 export const useCerebroTasksStore = create<TasksPageState>((set) => ({
   ...DEFAULT_TASKS_FILTER,
   visibleColumns: { ...DEFAULT_VISIBLE_COLUMNS },
+  setFilter: (filter) => set(filter),
   setAgentId: (agentId) => set({ agentId, offset: 0 }),
   setIssueId: (issueId) => set({ issueId, offset: 0 }),
   setProjectId: (projectId) => set({ projectId, offset: 0 }),

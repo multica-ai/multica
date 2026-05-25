@@ -56,6 +56,7 @@ type taskResponse struct {
 	AgentName               string `json:"agent_name"`
 	AgentAvatarURL          string `json:"agent_avatar_url,omitempty"`
 	TaskTitle               string `json:"task_title,omitempty"`
+	ChatTitle               string `json:"chat_title,omitempty"`
 	IssueID                 string `json:"issue_id,omitempty"`
 	IssueTitle              string `json:"issue_title,omitempty"`
 	IssueNumber             int32  `json:"issue_number,omitempty"`
@@ -94,7 +95,7 @@ type listResponse struct {
 //	until            — RFC3339 timestamp; only tasks older than this point
 //	limit            — page size, default 50, capped at 200
 //	offset           — pagination offset, default 0
-//	q                — free-text search on agent name, task title, and issue title (ILIKE)
+//	q                — free-text search on agent name, task title, chat title, and issue title (ILIKE)
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireUserID(w, r); !ok {
 		return
@@ -248,6 +249,9 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		if row.TaskTitle.Valid {
 			t.TaskTitle = row.TaskTitle.String
+		}
+		if row.ChatTitle.Valid {
+			t.ChatTitle = row.ChatTitle.String
 		}
 		if row.IssueID.Valid {
 			t.IssueID = util.UUIDToString(row.IssueID)

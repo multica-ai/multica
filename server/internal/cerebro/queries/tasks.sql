@@ -7,7 +7,7 @@
 -- name: ListCerebroTasks :many
 SELECT atq.id::uuid AS task_id, atq.agent_id, atq.issue_id, atq.status,
        atq.dispatched_at, atq.started_at, atq.completed_at, atq.created_at,
-       atq.chat_session_id, atq.title AS task_title,
+       atq.chat_session_id, atq.title AS task_title, cs.title AS chat_title,
        a.name AS agent_name, a.avatar_url AS agent_avatar_url,
        i.title AS issue_title, i.number AS issue_number,
        i.parent_issue_id AS parent_issue_id,
@@ -26,6 +26,7 @@ SELECT atq.id::uuid AS task_id, atq.agent_id, atq.issue_id, atq.status,
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 LEFT JOIN issue i ON i.id = atq.issue_id
+LEFT JOIN chat_session cs ON cs.id = atq.chat_session_id
 LEFT JOIN issue pi ON pi.id = i.parent_issue_id
 LEFT JOIN agent pai_agent ON pai_agent.id = pi.assignee_id AND pi.assignee_type = 'agent'
 LEFT JOIN "user" pai_user ON pai_user.id = pi.assignee_id AND pi.assignee_type = 'member'
@@ -62,7 +63,8 @@ WHERE a.workspace_id = $1
   AND (sqlc.narg('q')::text IS NULL
        OR a.name ILIKE ('%' || sqlc.narg('q')::text || '%')
        OR atq.title ILIKE ('%' || sqlc.narg('q')::text || '%')
-       OR i.title ILIKE ('%' || sqlc.narg('q')::text || '%'))
+       OR i.title ILIKE ('%' || sqlc.narg('q')::text || '%')
+       OR cs.title ILIKE ('%' || sqlc.narg('q')::text || '%'))
 ORDER BY COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) DESC,
          atq.id DESC
 LIMIT $2 OFFSET $3;
@@ -72,6 +74,7 @@ SELECT COUNT(*)::int
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 LEFT JOIN issue i ON i.id = atq.issue_id
+LEFT JOIN chat_session cs ON cs.id = atq.chat_session_id
 WHERE a.workspace_id = $1
   AND (sqlc.narg('agent_id')::uuid IS NULL OR atq.agent_id = sqlc.narg('agent_id')::uuid)
   AND (sqlc.narg('filter_issue_id')::uuid IS NULL OR atq.issue_id = sqlc.narg('filter_issue_id')::uuid)
@@ -89,4 +92,5 @@ WHERE a.workspace_id = $1
   AND (sqlc.narg('q')::text IS NULL
        OR a.name ILIKE ('%' || sqlc.narg('q')::text || '%')
        OR atq.title ILIKE ('%' || sqlc.narg('q')::text || '%')
-       OR i.title ILIKE ('%' || sqlc.narg('q')::text || '%'));
+       OR i.title ILIKE ('%' || sqlc.narg('q')::text || '%')
+       OR cs.title ILIKE ('%' || sqlc.narg('q')::text || '%'));

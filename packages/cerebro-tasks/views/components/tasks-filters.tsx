@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Columns3, Search, SlidersHorizontal, X } from "lucide-react";
 import { agentListOptions } from "@multica/core/workspace/queries";
@@ -76,6 +76,19 @@ export function TasksFilters({ wsId }: TasksFiltersProps) {
   const setGroupBy = useCerebroTasksStore((s) => s.setGroupBy);
   const setColumnVisible = useCerebroTasksStore((s) => s.setColumnVisible);
   const reset = useCerebroTasksStore((s) => s.reset);
+  const [draftSearch, setDraftSearch] = useState(search);
+
+  useEffect(() => {
+    setDraftSearch(search);
+  }, [search]);
+
+  useEffect(() => {
+    const nextSearch = draftSearch.trim();
+    const timer = window.setTimeout(() => {
+      if (nextSearch !== search) setSearch(nextSearch);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [draftSearch, search, setSearch]);
 
   const agents = useQuery(agentListOptions(wsId));
   const projects = useQuery(projectListOptions(wsId));
@@ -102,8 +115,8 @@ export function TasksFilters({ wsId }: TasksFiltersProps) {
           <input
             type="search"
             placeholder="Søg i tasks…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            value={draftSearch}
+            onChange={(e) => setDraftSearch(e.target.value)}
             className="h-7 w-full rounded-md border bg-background pl-7 pr-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
         </div>

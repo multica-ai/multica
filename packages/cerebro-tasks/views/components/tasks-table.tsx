@@ -266,6 +266,7 @@ function Row({
   const endedISO = task.completed_at;
   const taskTitle =
     task.task_title ||
+    task.chat_title ||
     task.issue_title ||
     (task.chat_session_id ? "Chat task" : "Uden titel");
 
@@ -400,6 +401,7 @@ function MobileTaskCard({
   const endedISO = task.completed_at;
   const taskTitle =
     task.task_title ||
+    task.chat_title ||
     task.issue_title ||
     (task.chat_session_id ? "Chat task" : "Uden titel");
   const issueLabel = task.issue_number ? `#${task.issue_number}` : null;

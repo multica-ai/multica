@@ -16,6 +16,7 @@ SELECT COUNT(*)::int
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 LEFT JOIN issue i ON i.id = atq.issue_id
+LEFT JOIN chat_session cs ON cs.id = atq.chat_session_id
 WHERE a.workspace_id = $1
   AND ($2::uuid IS NULL OR atq.agent_id = $2::uuid)
   AND ($3::uuid IS NULL OR atq.issue_id = $3::uuid)
@@ -33,7 +34,8 @@ WHERE a.workspace_id = $1
   AND ($9::text IS NULL
        OR a.name ILIKE ('%' || $9::text || '%')
        OR atq.title ILIKE ('%' || $9::text || '%')
-       OR i.title ILIKE ('%' || $9::text || '%'))
+       OR i.title ILIKE ('%' || $9::text || '%')
+       OR cs.title ILIKE ('%' || $9::text || '%'))
 `
 
 type CountCerebroTasksParams struct {
@@ -69,7 +71,7 @@ const listCerebroTasks = `-- name: ListCerebroTasks :many
 
 SELECT atq.id::uuid AS task_id, atq.agent_id, atq.issue_id, atq.status,
        atq.dispatched_at, atq.started_at, atq.completed_at, atq.created_at,
-       atq.chat_session_id, atq.title AS task_title,
+       atq.chat_session_id, atq.title AS task_title, cs.title AS chat_title,
        a.name AS agent_name, a.avatar_url AS agent_avatar_url,
        i.title AS issue_title, i.number AS issue_number,
        i.parent_issue_id AS parent_issue_id,
@@ -88,6 +90,7 @@ SELECT atq.id::uuid AS task_id, atq.agent_id, atq.issue_id, atq.status,
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 LEFT JOIN issue i ON i.id = atq.issue_id
+LEFT JOIN chat_session cs ON cs.id = atq.chat_session_id
 LEFT JOIN issue pi ON pi.id = i.parent_issue_id
 LEFT JOIN agent pai_agent ON pai_agent.id = pi.assignee_id AND pi.assignee_type = 'agent'
 LEFT JOIN "user" pai_user ON pai_user.id = pi.assignee_id AND pi.assignee_type = 'member'
@@ -124,7 +127,8 @@ WHERE a.workspace_id = $1
   AND ($11::text IS NULL
        OR a.name ILIKE ('%' || $11::text || '%')
        OR atq.title ILIKE ('%' || $11::text || '%')
-       OR i.title ILIKE ('%' || $11::text || '%'))
+       OR i.title ILIKE ('%' || $11::text || '%')
+       OR cs.title ILIKE ('%' || $11::text || '%'))
 ORDER BY COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) DESC,
          atq.id DESC
 LIMIT $2 OFFSET $3
@@ -155,6 +159,7 @@ type ListCerebroTasksRow struct {
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	ChatSessionID           pgtype.UUID        `json:"chat_session_id"`
 	TaskTitle               pgtype.Text        `json:"task_title"`
+	ChatTitle               pgtype.Text        `json:"chat_title"`
 	AgentName               string             `json:"agent_name"`
 	AgentAvatarUrl          pgtype.Text        `json:"agent_avatar_url"`
 	IssueTitle              pgtype.Text        `json:"issue_title"`
@@ -211,6 +216,7 @@ func (q *Queries) ListCerebroTasks(ctx context.Context, arg ListCerebroTasksPara
 			&i.CreatedAt,
 			&i.ChatSessionID,
 			&i.TaskTitle,
+			&i.ChatTitle,
 			&i.AgentName,
 			&i.AgentAvatarUrl,
 			&i.IssueTitle,
