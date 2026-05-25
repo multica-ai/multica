@@ -469,6 +469,41 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Workflows
+			r.Route("/api/workflows", func(r chi.Router) {
+				r.Get("/", h.ListWorkflows)
+				r.Post("/", h.CreateWorkflow)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetWorkflow)
+					r.Put("/", h.UpdateWorkflow)
+					r.Delete("/", h.DeleteWorkflow)
+					// Nodes
+					r.Get("/nodes", h.ListWorkflowNodes)
+					r.Post("/nodes", h.CreateWorkflowNode)
+					r.Route("/nodes/{nodeId}", func(r chi.Router) {
+						r.Put("/", h.UpdateWorkflowNode)
+						r.Delete("/", h.DeleteWorkflowNode)
+					})
+					// Edges
+					r.Get("/edges", h.ListWorkflowEdges)
+					r.Post("/edges", h.CreateWorkflowEdge)
+					r.Delete("/edges/{edgeId}", h.DeleteWorkflowEdge)
+					// Runs
+					r.Get("/runs", h.ListWorkflowRuns)
+					r.Post("/runs", h.StartWorkflowRun)
+					r.Get("/runs/{runId}", h.GetWorkflowRun)
+					r.Post("/runs/{runId}/cancel", h.CancelWorkflowRun)
+				})
+			})
+
+			// Node run actions (flat route for clean WS event references)
+			r.Post("/api/node-runs/{nodeRunId}/submit", h.SubmitNodeRun)
+			r.Post("/api/node-runs/{nodeRunId}/review", h.ReviewNodeRun)
+			r.Post("/api/node-runs/{nodeRunId}/skip", h.SkipNodeRun)
+
+			// My workflow tasks
+			r.Get("/api/my-tasks", h.ListMyWorkflowTasks)
+
 			// Squad leader evaluation (writes to activity_log)
 			r.Post("/api/issues/{id}/squad-evaluated", h.RecordSquadLeaderEvaluation)
 

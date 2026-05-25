@@ -110,6 +110,7 @@ export type {
   WebhookSignatureStatus,
   ListWebhookDeliveriesResponse,
 } from "./autopilot";
+export type * from "./workflow";
 export type {
   Squad,
   SquadMember,

@@ -96,6 +96,7 @@ type AgentTaskQueue struct {
 	TriggerSummary    pgtype.Text        `json:"trigger_summary"`
 	ForceFreshSession bool               `json:"force_fresh_session"`
 	IsLeaderTask      bool               `json:"is_leader_task"`
+	WorkflowNodeRunID pgtype.UUID        `json:"workflow_node_run_id"`
 }
 
 type Attachment struct {
@@ -626,6 +627,84 @@ type WebhookDelivery struct {
 	ReceivedAt             pgtype.Timestamptz `json:"received_at"`
 	LastAttemptAt          pgtype.Timestamptz `json:"last_attempt_at"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+}
+
+type Workflow struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Title         string             `json:"title"`
+	Description   string             `json:"description"`
+	Status        string             `json:"status"`
+	MaxRetries    int32              `json:"max_retries"`
+	CreatedByType string             `json:"created_by_type"`
+	CreatedByID   pgtype.UUID        `json:"created_by_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WorkflowEdge struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkflowID   pgtype.UUID        `json:"workflow_id"`
+	SourceNodeID pgtype.UUID        `json:"source_node_id"`
+	TargetNodeID pgtype.UUID        `json:"target_node_id"`
+	Condition    []byte             `json:"condition"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type WorkflowNode struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkflowID         pgtype.UUID        `json:"workflow_id"`
+	Title              string             `json:"title"`
+	Description        string             `json:"description"`
+	PositionX          float64            `json:"position_x"`
+	PositionY          float64            `json:"position_y"`
+	FormatSchema       []byte             `json:"format_schema"`
+	WorkerType         string             `json:"worker_type"`
+	WorkerID           pgtype.UUID        `json:"worker_id"`
+	WorkerInstructions string             `json:"worker_instructions"`
+	CriticType         string             `json:"critic_type"`
+	CriticID           pgtype.UUID        `json:"critic_id"`
+	CriticInstructions string             `json:"critic_instructions"`
+	CriticApiUrl       pgtype.Text        `json:"critic_api_url"`
+	SortOrder          int32              `json:"sort_order"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WorkflowNodeRun struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkflowRunID  pgtype.UUID        `json:"workflow_run_id"`
+	WorkflowNodeID pgtype.UUID        `json:"workflow_node_id"`
+	NodeTitle      string             `json:"node_title"`
+	Status         string             `json:"status"`
+	RetryCount     int32              `json:"retry_count"`
+	WorkerType     string             `json:"worker_type"`
+	WorkerID       pgtype.UUID        `json:"worker_id"`
+	WorkerOutput   []byte             `json:"worker_output"`
+	CriticType     string             `json:"critic_type"`
+	CriticID       pgtype.UUID        `json:"critic_id"`
+	CriticOutput   []byte             `json:"critic_output"`
+	CriticComment  pgtype.Text        `json:"critic_comment"`
+	AgentTaskID    pgtype.UUID        `json:"agent_task_id"`
+	StartedAt      pgtype.Timestamptz `json:"started_at"`
+	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WorkflowRun struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkflowID      pgtype.UUID        `json:"workflow_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	WorkflowTitle   string             `json:"workflow_title"`
+	Status          string             `json:"status"`
+	TriggeredByType string             `json:"triggered_by_type"`
+	TriggeredByID   pgtype.UUID        `json:"triggered_by_id"`
+	Input           []byte             `json:"input"`
+	Output          []byte             `json:"output"`
+	StartedAt       pgtype.Timestamptz `json:"started_at"`
+	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
 type Workspace struct {

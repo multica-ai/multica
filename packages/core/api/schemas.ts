@@ -11,6 +11,11 @@ import type {
   TimelineEntry,
   User,
   WebhookDelivery,
+  Workflow,
+  WorkflowNode,
+  WorkflowEdge,
+  WorkflowRun,
+  WorkflowNodeRun,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 
@@ -609,3 +614,176 @@ export const EMPTY_USER: User = {
   created_at: "",
   updated_at: "",
 };
+
+// ---------------------------------------------------------------------------
+// Workflow schemas
+// ---------------------------------------------------------------------------
+
+const WorkflowSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  title: z.string(),
+  description: z.string().default(""),
+  status: z.string().default("draft"),
+  max_retries: z.number().default(3),
+  created_by_type: z.string().default("member"),
+  created_by_id: z.string().default(""),
+  node_count: z.number().default(0),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export { WorkflowSchema };
+
+export const ListWorkflowsResponseSchema = z.object({
+  workflows: z.array(WorkflowSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_WORKFLOWS_RESPONSE = { workflows: [], total: 0 };
+
+export const EMPTY_WORKFLOW: Workflow = {
+  id: "",
+  workspace_id: "",
+  title: "",
+  description: "",
+  status: "draft",
+  max_retries: 3,
+  created_by_type: "member",
+  created_by_id: "",
+  node_count: 0,
+  created_at: "",
+  updated_at: "",
+};
+
+const WorkflowNodeSchema = z.object({
+  id: z.string(),
+  workflow_id: z.string(),
+  title: z.string(),
+  description: z.string().default(""),
+  position_x: z.number().default(0),
+  position_y: z.number().default(0),
+  format_schema: z.unknown().nullable().optional(),
+  worker_type: z.string().default("human"),
+  worker_id: z.string().nullable().default(null),
+  worker_instructions: z.string().default(""),
+  critic_type: z.string().default("human"),
+  critic_id: z.string().nullable().default(null),
+  critic_instructions: z.string().default(""),
+  critic_api_url: z.string().nullable().default(null),
+  sort_order: z.number().default(0),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const WorkflowNodeListSchema = z.array(WorkflowNodeSchema);
+
+export const EMPTY_WORKFLOW_NODE_LIST: WorkflowNode[] = [];
+
+const WorkflowEdgeSchema = z.object({
+  id: z.string(),
+  workflow_id: z.string(),
+  source_node_id: z.string(),
+  target_node_id: z.string(),
+  condition: z.unknown().nullable().optional(),
+  created_at: z.string().default(""),
+}).loose();
+
+export const WorkflowEdgeListSchema = z.array(WorkflowEdgeSchema);
+
+export const EMPTY_WORKFLOW_EDGE_LIST: WorkflowEdge[] = [];
+
+export const WorkflowDetailResponseSchema = z.object({
+  workflow: z.lazy(() => WorkflowSchema).default(EMPTY_WORKFLOW as any),
+  nodes: z.array(WorkflowNodeSchema).default([]),
+  edges: z.array(WorkflowEdgeSchema).default([]),
+}).loose();
+
+export const EMPTY_WORKFLOW_DETAIL_RESPONSE = {
+  workflow: EMPTY_WORKFLOW,
+  nodes: EMPTY_WORKFLOW_NODE_LIST,
+  edges: EMPTY_WORKFLOW_EDGE_LIST,
+};
+
+export const WorkflowNodesResponseSchema = z.object({
+  nodes: z.array(WorkflowNodeSchema).default([]),
+}).loose();
+
+export const EMPTY_WORKFLOW_NODES_RESPONSE = { nodes: EMPTY_WORKFLOW_NODE_LIST };
+
+export const WorkflowEdgesResponseSchema = z.object({
+  edges: z.array(WorkflowEdgeSchema).default([]),
+}).loose();
+
+export const EMPTY_WORKFLOW_EDGES_RESPONSE = { edges: EMPTY_WORKFLOW_EDGE_LIST };
+
+const WorkflowRunSchema = z.object({
+  id: z.string(),
+  workflow_id: z.string(),
+  workspace_id: z.string(),
+  workflow_title: z.string().default(""),
+  status: z.string().default("running"),
+  triggered_by_type: z.string().default("member"),
+  triggered_by_id: z.string().nullable().default(null),
+  input: z.unknown().optional(),
+  output: z.unknown().nullable().optional(),
+  started_at: z.string().default(""),
+  completed_at: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+}).loose();
+
+export { WorkflowRunSchema };
+
+export const ListWorkflowRunsResponseSchema = z.object({
+  runs: z.array(WorkflowRunSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_WORKFLOW_RUNS_RESPONSE = { runs: [], total: 0 };
+
+export const EMPTY_WORKFLOW_RUN: WorkflowRun = {
+  id: "",
+  workflow_id: "",
+  workspace_id: "",
+  workflow_title: "",
+  status: "running",
+  triggered_by_type: "member",
+  triggered_by_id: null,
+  input: {},
+  output: null,
+  started_at: "",
+  completed_at: null,
+  created_at: "",
+};
+
+const WorkflowNodeRunSchema = z.object({
+  id: z.string(),
+  workflow_run_id: z.string(),
+  workflow_node_id: z.string(),
+  node_title: z.string().default(""),
+  status: z.string().default("pending"),
+  retry_count: z.number().default(0),
+  worker_type: z.string().default("human"),
+  worker_id: z.string().nullable().default(null),
+  worker_output: z.unknown().nullable().optional(),
+  critic_type: z.string().default("human"),
+  critic_id: z.string().nullable().default(null),
+  critic_output: z.unknown().nullable().optional(),
+  critic_comment: z.string().default(""),
+  agent_task_id: z.string().nullable().default(null),
+  started_at: z.string().nullable().default(null),
+  completed_at: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const WorkflowNodeRunListSchema = z.array(WorkflowNodeRunSchema);
+
+export const EMPTY_WORKFLOW_NODE_RUN_LIST: WorkflowNodeRun[] = [];
+
+export const MyWorkflowTasksResponseSchema = z.object({
+  node_runs: z.array(WorkflowNodeRunSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_MY_WORKFLOW_TASKS_RESPONSE = { node_runs: [], total: 0 };

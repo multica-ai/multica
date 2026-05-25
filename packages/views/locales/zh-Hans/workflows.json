@@ -1,0 +1,183 @@
+{
+  "page": {
+    "title": "工作流",
+    "new_workflow": "新建工作流",
+    "table": {
+      "name": "名称",
+      "status": "状态",
+      "nodes": "节点",
+      "last_run": "最近运行"
+    },
+    "last_run_empty": "--",
+    "empty": {
+      "title": "暂无工作流",
+      "description": "创建第一个工作流来编排多步骤 AI 任务。"
+    },
+    "filter": {
+      "all": "全部",
+      "active": "启用",
+      "draft": "草稿",
+      "paused": "暂停",
+      "archived": "归档"
+    }
+  },
+  "status": {
+    "draft": "草稿",
+    "active": "启用",
+    "paused": "暂停",
+    "archived": "归档"
+  },
+  "detail": {
+    "not_found": "未找到工作流",
+    "save": "保存",
+    "saving": "保存中...",
+    "activate": "启用",
+    "deactivate": "停用",
+    "pause": "暂停",
+    "delete": "删除",
+    "start_run": "开始运行",
+    "starting_run": "启动中...",
+    "toolbar": {
+      "edit": "编辑",
+      "view": "查看",
+      "connect": "连线"
+    },
+    "toast_saved": "工作流已保存",
+    "toast_save_failed": "保存工作流失败",
+    "toast_deleted": "工作流已删除",
+    "toast_delete_failed": "删除工作流失败",
+    "toast_activated": "工作流已启用",
+    "toast_run_started": "运行已启动",
+    "toast_run_failed": "启动运行失败",
+    "section_nodes": "节点",
+    "section_run_history": "运行历史",
+    "add_node": "添加节点",
+    "no_nodes": "暂无节点。点击「添加节点」开始构建工作流。",
+    "no_runs": "暂无运行记录。点击「开始运行」执行此工作流。",
+    "delete_dialog": {
+      "title": "删除工作流",
+      "description": "此操作将永久删除「{{title}}」及其所有节点、边和运行历史。此操作不可撤销。",
+      "cancel": "取消",
+      "confirm": "删除",
+      "deleting": "删除中..."
+    },
+    "create_dialog": {
+      "title": "新建工作流",
+      "title_label": "名称",
+      "title_placeholder": "工作流名称",
+      "description_label": "描述",
+      "description_placeholder": "描述此工作流的功能...",
+      "cancel": "取消",
+      "create": "创建",
+      "creating": "创建中..."
+    },
+    "section_danger": "危险区域",
+    "delete_button": "删除工作流"
+  },
+  "node": {
+    "title": "标题",
+    "description": "描述",
+    "title_placeholder": "节点名称",
+    "description_placeholder": "此节点做什么？",
+    "section_format": "格式校验",
+    "format_schema_label": "JSON Schema",
+    "format_schema_hint": "留空跳过格式校验。用于验证输入的 JSON Schema。",
+    "section_worker": "执行者",
+    "worker_type_label": "执行者类型",
+    "worker_type_human": "人工",
+    "worker_type_agent": "Agent",
+    "worker_type_squad": "Squad",
+    "worker_id_label": "指派人",
+    "worker_id_hint": "留空表示任意工作空间成员",
+    "worker_instructions_label": "指令",
+    "worker_instructions_hint": "给执行者的提示或指令",
+    "section_critic": "评审者",
+    "critic_type_label": "评审者类型",
+    "critic_type_human": "人工",
+    "critic_type_agent": "Agent",
+    "critic_type_squad": "Squad",
+    "critic_type_api": "API",
+    "critic_id_label": "评审指派人",
+    "critic_instructions_label": "评审指令",
+    "critic_api_url_label": "API URL",
+    "critic_api_url_hint": "接收执行者输出进行自动评审的 POST 端点",
+    "save": "保存节点",
+    "saving": "保存中...",
+    "delete": "删除节点",
+    "toast_saved": "节点已保存",
+    "toast_save_failed": "保存节点失败",
+    "toast_deleted": "节点已删除",
+    "toast_delete_failed": "删除节点失败"
+  },
+  "edge": {
+    "toast_created": "边已创建",
+    "toast_create_failed": "创建边失败",
+    "toast_deleted": "边已删除",
+    "toast_delete_failed": "删除边失败",
+    "click_to_connect": "点击另一节点完成连线"
+  },
+  "run": {
+    "status": {
+      "running": "运行中",
+      "completed": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消"
+    },
+    "triggered_by": "触发者",
+    "started_at": "开始时间",
+    "completed_at": "完成时间",
+    "cancel": "取消运行",
+    "cancelling": "取消中...",
+    "toast_cancelled": "运行已取消",
+    "toast_cancel_failed": "取消运行失败",
+    "input": "输入",
+    "output": "输出"
+  },
+  "node_run": {
+    "status": {
+      "pending": "等待中",
+      "format_checking": "格式校验中",
+      "format_ok": "格式通过",
+      "format_failed": "格式失败",
+      "worker_assigned": "已分配",
+      "working": "执行中",
+      "awaiting_critic": "等待评审",
+      "critic_reviewing": "评审中",
+      "critic_approved": "评审通过",
+      "critic_rework": "需返工",
+      "completed": "已完成",
+      "failed": "失败",
+      "blocked": "已阻塞",
+      "skipped": "已跳过",
+      "cancelled": "已取消"
+    },
+    "phase": {
+      "format": "格式校验",
+      "worker": "执行者",
+      "critic": "评审者"
+    },
+    "retry_count": "重试 {{current}}/{{max}}",
+    "worker_output": "执行输出",
+    "critic_comment": "评审意见",
+    "format_schema": "格式 Schema",
+    "submit": "提交",
+    "submitting": "提交中...",
+    "approve": "通过",
+    "request_rework": "需返工",
+    "skip": "跳过",
+    "toast_submitted": "输出已提交",
+    "toast_submit_failed": "提交输出失败",
+    "toast_reviewed": "评审已提交",
+    "toast_review_failed": "提交评审失败",
+    "toast_skipped": "节点已跳过",
+    "toast_skip_failed": "跳过节点失败",
+    "review_comment_placeholder": "添加评审意见..."
+  },
+  "my_tasks": {
+    "title": "我的任务",
+    "empty": "暂无待处理的工作流任务",
+    "tab": "工作流任务",
+    "worker_tasks": "待处理",
+    "critic_tasks": "待评审"
+  }
+}

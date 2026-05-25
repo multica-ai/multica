@@ -89,6 +89,7 @@ type Handler struct {
 	Bus                   *events.Bus
 	TaskService           *service.TaskService
 	AutopilotService      *service.AutopilotService
+	WorkflowService       *service.WorkflowService
 	EmailService          *service.EmailService
 	UpdateStore           UpdateStore
 	ModelListStore        ModelListStore
@@ -125,6 +126,16 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
 	taskSvc.Analytics = analyticsClient
+	autopilotSvc := service.NewAutopilotService(queries, txStarter, bus, taskSvc)
+	workflowSvc := service.NewWorkflowService(queries, txStarter, bus, taskSvc)
+
+	// Wire the workflow completion gateway: when an agent task linked to a
+	// workflow node run completes, the WorkflowService transitions the node
+	// run state machine.
+	taskSvc.OnTaskCompleted = func(ctx context.Context, task db.AgentTaskQueue) {
+		_ = workflowSvc.HandleWorkflowTaskCompletion(ctx, task)
+	}
+
 	return &Handler{
 		Queries:               queries,
 		DB:                    executor,
@@ -133,7 +144,8 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		DaemonHub:             daemonHub,
 		Bus:                   bus,
 		TaskService:           taskSvc,
-		AutopilotService:      service.NewAutopilotService(queries, txStarter, bus, taskSvc),
+		AutopilotService:      autopilotSvc,
+		WorkflowService:       workflowSvc,
 		EmailService:          emailService,
 		UpdateStore:           NewInMemoryUpdateStore(),
 		ModelListStore:        NewInMemoryModelListStore(),

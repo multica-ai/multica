@@ -99,6 +99,19 @@ import type {
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
+  Workflow,
+  WorkflowNode,
+  WorkflowEdge,
+  WorkflowRun,
+  WorkflowNodeRun,
+  CreateWorkflowRequest,
+  UpdateWorkflowRequest,
+  CreateNodeRequest,
+  UpdateNodeRequest,
+  CreateEdgeRequest,
+  ListWorkflowsResponse,
+  ListWorkflowRunsResponse,
+  MyWorkflowTaskResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -148,6 +161,28 @@ import {
   TimelineEntriesSchema,
   UserSchema,
   WebhookDeliveryResponseSchema,
+  ListWorkflowsResponseSchema,
+  EMPTY_LIST_WORKFLOWS_RESPONSE,
+  WorkflowSchema,
+  EMPTY_WORKFLOW,
+  WorkflowNodeListSchema,
+  EMPTY_WORKFLOW_NODE_LIST,
+  WorkflowEdgeListSchema,
+  EMPTY_WORKFLOW_EDGE_LIST,
+  WorkflowDetailResponseSchema,
+  EMPTY_WORKFLOW_DETAIL_RESPONSE,
+  WorkflowNodesResponseSchema,
+  EMPTY_WORKFLOW_NODES_RESPONSE,
+  WorkflowEdgesResponseSchema,
+  EMPTY_WORKFLOW_EDGES_RESPONSE,
+  ListWorkflowRunsResponseSchema,
+  EMPTY_LIST_WORKFLOW_RUNS_RESPONSE,
+  WorkflowRunSchema,
+  EMPTY_WORKFLOW_RUN,
+  WorkflowNodeRunListSchema,
+  EMPTY_WORKFLOW_NODE_RUN_LIST,
+  MyWorkflowTasksResponseSchema,
+  EMPTY_MY_WORKFLOW_TASKS_RESPONSE,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1770,5 +1805,146 @@ export class ApiClient {
 
   async listIssuePullRequests(issueId: string): Promise<{ pull_requests: GitHubPullRequest[] }> {
     return this.fetch(`/api/issues/${issueId}/pull-requests`);
+  }
+
+  // ── Workflows ──
+
+  async listWorkflows(wsId: string): Promise<ListWorkflowsResponse> {
+    const raw = await this.fetch<unknown>(`/api/workflows?workspace_id=${wsId}`);
+    return parseWithFallback(raw, ListWorkflowsResponseSchema, EMPTY_LIST_WORKFLOWS_RESPONSE, {
+      endpoint: "GET /api/workflows",
+    });
+  }
+
+  async getWorkflow(id: string): Promise<Workflow> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${id}`);
+    const parsed = parseWithFallback(raw, WorkflowDetailResponseSchema, EMPTY_WORKFLOW_DETAIL_RESPONSE, {
+      endpoint: "GET /api/workflows/:id",
+    });
+    return parsed.workflow;
+  }
+
+  async createWorkflow(req: CreateWorkflowRequest): Promise<Workflow> {
+    return this.fetch("/api/workflows", {
+      method: "POST",
+      body: JSON.stringify(req),
+    });
+  }
+
+  async updateWorkflow(id: string, req: UpdateWorkflowRequest): Promise<Workflow> {
+    return this.fetch(`/api/workflows/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(req),
+    });
+  }
+
+  async deleteWorkflow(id: string): Promise<void> {
+    await this.fetch(`/api/workflows/${id}`, { method: "DELETE" });
+  }
+
+  async listWorkflowNodes(workflowId: string): Promise<WorkflowNode[]> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${workflowId}/nodes`);
+    const parsed = parseWithFallback(raw, WorkflowNodesResponseSchema, EMPTY_WORKFLOW_NODES_RESPONSE, {
+      endpoint: "GET /api/workflows/:id/nodes",
+    });
+    return parsed.nodes;
+  }
+
+  async createWorkflowNode(workflowId: string, req: CreateNodeRequest): Promise<WorkflowNode> {
+    return this.fetch(`/api/workflows/${workflowId}/nodes`, {
+      method: "POST",
+      body: JSON.stringify(req),
+    });
+  }
+
+  async updateWorkflowNode(workflowId: string, nodeId: string, req: UpdateNodeRequest): Promise<WorkflowNode> {
+    return this.fetch(`/api/workflows/${workflowId}/nodes/${nodeId}`, {
+      method: "PUT",
+      body: JSON.stringify(req),
+    });
+  }
+
+  async deleteWorkflowNode(workflowId: string, nodeId: string): Promise<void> {
+    await this.fetch(`/api/workflows/${workflowId}/nodes/${nodeId}`, { method: "DELETE" });
+  }
+
+  async listWorkflowEdges(workflowId: string): Promise<WorkflowEdge[]> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${workflowId}/edges`);
+    const parsed = parseWithFallback(raw, WorkflowEdgesResponseSchema, EMPTY_WORKFLOW_EDGES_RESPONSE, {
+      endpoint: "GET /api/workflows/:id/edges",
+    });
+    return parsed.edges;
+  }
+
+  async createWorkflowEdge(workflowId: string, req: CreateEdgeRequest): Promise<WorkflowEdge> {
+    return this.fetch(`/api/workflows/${workflowId}/edges`, {
+      method: "POST",
+      body: JSON.stringify(req),
+    });
+  }
+
+  async deleteWorkflowEdge(workflowId: string, edgeId: string): Promise<void> {
+    await this.fetch(`/api/workflows/${workflowId}/edges/${edgeId}`, { method: "DELETE" });
+  }
+
+  async listWorkflowRuns(workflowId: string): Promise<ListWorkflowRunsResponse> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${workflowId}/runs`);
+    return parseWithFallback(raw, ListWorkflowRunsResponseSchema, EMPTY_LIST_WORKFLOW_RUNS_RESPONSE, {
+      endpoint: "GET /api/workflows/:id/runs",
+    });
+  }
+
+  async startWorkflowRun(workflowId: string, input?: unknown): Promise<WorkflowRun> {
+    return this.fetch(`/api/workflows/${workflowId}/runs`, {
+      method: "POST",
+      body: JSON.stringify(input ? { input } : {}),
+    });
+  }
+
+  async getWorkflowRun(workflowId: string, runId: string): Promise<WorkflowRun> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${workflowId}/runs/${runId}`);
+    return parseWithFallback(raw, WorkflowRunSchema, EMPTY_WORKFLOW_RUN, {
+      endpoint: "GET /api/workflows/:id/runs/:runId",
+    });
+  }
+
+  async cancelWorkflowRun(workflowId: string, runId: string): Promise<WorkflowRun> {
+    return this.fetch(`/api/workflows/${workflowId}/runs/${runId}/cancel`, {
+      method: "POST",
+    });
+  }
+
+  async listWorkflowNodeRuns(workflowId: string, runId: string): Promise<WorkflowNodeRun[]> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${workflowId}/runs/${runId}/node-runs`);
+    return parseWithFallback(raw, WorkflowNodeRunListSchema, EMPTY_WORKFLOW_NODE_RUN_LIST, {
+      endpoint: "GET /api/workflows/:id/runs/:runId/node-runs",
+    });
+  }
+
+  async submitNodeRun(nodeRunId: string, output: unknown): Promise<WorkflowNodeRun> {
+    return this.fetch(`/api/node-runs/${nodeRunId}/submit`, {
+      method: "POST",
+      body: JSON.stringify({ output }),
+    });
+  }
+
+  async reviewNodeRun(nodeRunId: string, approved: boolean, comment?: string): Promise<WorkflowNodeRun> {
+    return this.fetch(`/api/node-runs/${nodeRunId}/review`, {
+      method: "POST",
+      body: JSON.stringify({ approved, comment }),
+    });
+  }
+
+  async skipNodeRun(nodeRunId: string): Promise<WorkflowNodeRun> {
+    return this.fetch(`/api/node-runs/${nodeRunId}/skip`, {
+      method: "POST",
+    });
+  }
+
+  async listMyWorkflowTasks(wsId: string): Promise<MyWorkflowTaskResponse> {
+    const raw = await this.fetch<unknown>(`/api/my-tasks?workspace_id=${wsId}`);
+    return parseWithFallback(raw, MyWorkflowTasksResponseSchema, EMPTY_MY_WORKFLOW_TASKS_RESPONSE, {
+      endpoint: "GET /api/my-tasks",
+    });
   }
 }

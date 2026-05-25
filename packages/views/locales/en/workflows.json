@@ -1,0 +1,183 @@
+{
+  "page": {
+    "title": "Workflows",
+    "new_workflow": "New workflow",
+    "table": {
+      "name": "Name",
+      "status": "Status",
+      "nodes": "Nodes",
+      "last_run": "Last run"
+    },
+    "last_run_empty": "--",
+    "empty": {
+      "title": "No workflows yet",
+      "description": "Create your first workflow to orchestrate multi-step AI tasks."
+    },
+    "filter": {
+      "all": "All",
+      "active": "Active",
+      "draft": "Draft",
+      "paused": "Paused",
+      "archived": "Archived"
+    }
+  },
+  "status": {
+    "draft": "Draft",
+    "active": "Active",
+    "paused": "Paused",
+    "archived": "Archived"
+  },
+  "detail": {
+    "not_found": "Workflow not found",
+    "save": "Save",
+    "saving": "Saving...",
+    "activate": "Activate",
+    "deactivate": "Deactivate",
+    "pause": "Pause",
+    "delete": "Delete",
+    "start_run": "Start Run",
+    "starting_run": "Starting...",
+    "toolbar": {
+      "edit": "Edit",
+      "view": "View",
+      "connect": "Connect"
+    },
+    "toast_saved": "Workflow saved",
+    "toast_save_failed": "Failed to save workflow",
+    "toast_deleted": "Workflow deleted",
+    "toast_delete_failed": "Failed to delete workflow",
+    "toast_activated": "Workflow activated",
+    "toast_run_started": "Run started",
+    "toast_run_failed": "Failed to start run",
+    "section_nodes": "Nodes",
+    "section_run_history": "Run History",
+    "add_node": "Add node",
+    "no_nodes": "No nodes yet. Click \"Add node\" to start building your workflow.",
+    "no_runs": "No runs yet. Click \"Start Run\" to execute this workflow.",
+    "delete_dialog": {
+      "title": "Delete workflow",
+      "description": "This will permanently delete \"{{title}}\" and all its nodes, edges, and run history. This action cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete",
+      "deleting": "Deleting..."
+    },
+    "create_dialog": {
+      "title": "New workflow",
+      "title_label": "Name",
+      "title_placeholder": "Workflow name",
+      "description_label": "Description",
+      "description_placeholder": "Describe what this workflow does...",
+      "cancel": "Cancel",
+      "create": "Create",
+      "creating": "Creating..."
+    },
+    "section_danger": "Danger Zone",
+    "delete_button": "Delete workflow"
+  },
+  "node": {
+    "title": "Title",
+    "description": "Description",
+    "title_placeholder": "Node name",
+    "description_placeholder": "What does this node do?",
+    "section_format": "Format Checker",
+    "format_schema_label": "JSON Schema",
+    "format_schema_hint": "Leave empty to skip format validation. JSON Schema to validate input against.",
+    "section_worker": "Worker",
+    "worker_type_label": "Worker Type",
+    "worker_type_human": "Human",
+    "worker_type_agent": "Agent",
+    "worker_type_squad": "Squad",
+    "worker_id_label": "Assignee",
+    "worker_id_hint": "Leave empty for any workspace member",
+    "worker_instructions_label": "Instructions",
+    "worker_instructions_hint": "Prompt or instructions for the worker",
+    "section_critic": "Critic",
+    "critic_type_label": "Critic Type",
+    "critic_type_human": "Human",
+    "critic_type_agent": "Agent",
+    "critic_type_squad": "Squad",
+    "critic_type_api": "API",
+    "critic_id_label": "Critic Assignee",
+    "critic_instructions_label": "Review Instructions",
+    "critic_api_url_label": "API URL",
+    "critic_api_url_hint": "POST endpoint that receives worker output for automated review",
+    "save": "Save Node",
+    "saving": "Saving...",
+    "delete": "Delete Node",
+    "toast_saved": "Node saved",
+    "toast_save_failed": "Failed to save node",
+    "toast_deleted": "Node deleted",
+    "toast_delete_failed": "Failed to delete node"
+  },
+  "edge": {
+    "toast_created": "Edge created",
+    "toast_create_failed": "Failed to create edge",
+    "toast_deleted": "Edge deleted",
+    "toast_delete_failed": "Failed to delete edge",
+    "click_to_connect": "Click another node to connect"
+  },
+  "run": {
+    "status": {
+      "running": "Running",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "triggered_by": "Triggered by",
+    "started_at": "Started",
+    "completed_at": "Completed",
+    "cancel": "Cancel Run",
+    "cancelling": "Cancelling...",
+    "toast_cancelled": "Run cancelled",
+    "toast_cancel_failed": "Failed to cancel run",
+    "input": "Input",
+    "output": "Output"
+  },
+  "node_run": {
+    "status": {
+      "pending": "Pending",
+      "format_checking": "Format Checking",
+      "format_ok": "Format OK",
+      "format_failed": "Format Failed",
+      "worker_assigned": "Worker Assigned",
+      "working": "Working",
+      "awaiting_critic": "Awaiting Critic",
+      "critic_reviewing": "Critic Reviewing",
+      "critic_approved": "Critic Approved",
+      "critic_rework": "Critic Rework",
+      "completed": "Completed",
+      "failed": "Failed",
+      "blocked": "Blocked",
+      "skipped": "Skipped",
+      "cancelled": "Cancelled"
+    },
+    "phase": {
+      "format": "Format Checker",
+      "worker": "Worker",
+      "critic": "Critic"
+    },
+    "retry_count": "Retry {{current}}/{{max}}",
+    "worker_output": "Worker Output",
+    "critic_comment": "Critic Comment",
+    "format_schema": "Format Schema",
+    "submit": "Submit",
+    "submitting": "Submitting...",
+    "approve": "Approve",
+    "request_rework": "Request Rework",
+    "skip": "Skip",
+    "toast_submitted": "Output submitted",
+    "toast_submit_failed": "Failed to submit output",
+    "toast_reviewed": "Review submitted",
+    "toast_review_failed": "Failed to submit review",
+    "toast_skipped": "Node skipped",
+    "toast_skip_failed": "Failed to skip node",
+    "review_comment_placeholder": "Add a comment with your review..."
+  },
+  "my_tasks": {
+    "title": "My Tasks",
+    "empty": "No pending workflow tasks",
+    "tab": "Workflow Tasks",
+    "worker_tasks": "To Do",
+    "critic_tasks": "To Review"
+  }
+}

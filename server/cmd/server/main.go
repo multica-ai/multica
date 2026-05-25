@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -117,6 +118,9 @@ func envDuration(name string, def time.Duration) time.Duration {
 }
 
 func main() {
+	// Load .env from project root or current directory.
+	_ = godotenv.Load("../.env")
+	_ = godotenv.Load()
 	logger.Init()
 
 	// Warn about missing configuration

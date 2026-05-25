@@ -37,6 +37,12 @@ type TaskService struct {
 	// client.
 	EmptyClaim *EmptyClaimCache
 
+	// OnTaskCompleted is an optional callback invoked after a task reaches
+	// the completed state. The WorkflowService uses this to detect agent
+	// tasks belonging to workflow node runs and transition the node run
+	// state machine (worker→awaiting_critic, critic→review).
+	OnTaskCompleted func(ctx context.Context, task db.AgentTaskQueue)
+
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
 	analyticsContextOrder []string
@@ -1035,6 +1041,12 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
+
+	// Workflow gateway: if this task belongs to a workflow node run,
+	// transition the node run state machine.
+	if s.OnTaskCompleted != nil && task.WorkflowNodeRunID.Valid {
+		s.OnTaskCompleted(ctx, task)
+	}
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run
