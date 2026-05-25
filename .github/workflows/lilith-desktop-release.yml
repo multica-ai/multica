@@ -80,8 +80,43 @@ jobs:
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-  build:
+  # Wipe historical artifacts before this release builds anything.
+  # Reason: the GitHub Actions artifact storage quota is small (1-2 GB on
+  # most plans) and Electron installers are 100MB+ per platform per
+  # release. Hitting the quota fails uploads silently with
+  # "Artifact storage quota has been hit", which breaks publish.
+  # `retention-days: 7` on the upload step keeps things tidy going
+  # forward; this job sweeps anything that accumulated before that.
+  cleanup-artifacts:
     needs: guard
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Delete previous artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -u
+          ids=$(gh api "repos/$REPO/actions/artifacts" --paginate --jq '.artifacts[].id')
+          if [ -z "$ids" ]; then
+            echo "No artifacts to delete."
+            exit 0
+          fi
+          deleted=0
+          failed=0
+          for id in $ids; do
+            if gh api -X DELETE "repos/$REPO/actions/artifacts/$id" >/dev/null 2>&1; then
+              deleted=$((deleted+1))
+            else
+              failed=$((failed+1))
+            fi
+          done
+          echo "Deleted: $deleted, Failed: $failed"
+
+  build:
+    needs: [guard, cleanup-artifacts]
     strategy:
       # One platform failing means the manifest would point at a build
       # that doesn't exist on OSS, which is worse than not releasing at

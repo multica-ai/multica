@@ -1,10 +1,9 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  # Disabled on the Lilith mirror — CI runs on GitLab (.gitlab-ci.yml).
+  # Keep workflow_dispatch so this can still be triggered manually if needed.
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
