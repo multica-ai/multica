@@ -28,6 +28,15 @@ SELECT EXISTS (
     AND details->>'task_id' = @task_id::text
 ) AS exists;
 
+-- name: CheckReferenceActivityExists :one
+SELECT 1 FROM activity_log
+WHERE issue_id = $1
+  AND action = 'referenced_by'
+  AND details->>'source_issue_id' = $2
+  AND details->>'source_type' = $3
+  AND details->>'source_id' = $4
+LIMIT 1;
+
 -- name: CountAssigneeChangesByActor :many
 -- Count how many times a user assigned each target via assignee_changed activities.
 SELECT
