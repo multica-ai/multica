@@ -4,12 +4,13 @@
 // than by a workflow status field. Top-to-bottom precedence is fixed; every
 // entry lands in exactly one bucket:
 //
-//   act_now  — needs you now: a fresh, unread action-required item (new
+//   act_now  — unread: a fresh, unread action-required item (new
 //              @mention, review request, blocked-on-you, failure, assignment).
-//   watching — an agent is currently running on it; nothing to do but watch.
+//   watching — running: an agent is currently running on it.
+//   calm     — done/read: settled completed/done, reactions, info you've
+//              already seen.
 //   waiting  — an open thread to follow up: you've seen it but the last comment
 //              isn't yours, or you were @mentioned and haven't replied yet.
-//   calm     — settled: completed/done, reactions, info you've already seen.
 //
 // The grouping logic lives here (cerebro zone) so the upstream inbox page only
 // needs a few marked CEREBRO-PATCH touchpoints that delegate into it.
@@ -22,8 +23,8 @@ export type InboxActionCategory = "act_now" | "watching" | "waiting" | "calm";
 export const INBOX_ACTION_ORDER: InboxActionCategory[] = [
   "act_now",
   "watching",
-  "waiting",
   "calm",
+  "waiting",
 ];
 
 /** Zero-based render index for a category. Unknown categories sort last. */

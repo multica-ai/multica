@@ -49,7 +49,7 @@ const notif = (overrides: Partial<InboxItem>) =>
   ({ kind: "notif", item: item(overrides) }) as const;
 
 describe("classifyInboxAction — notifications", () => {
-  it("puts a fresh unread action-required item in Act now", () => {
+  it("puts a fresh unread action-required item in Unread", () => {
     expect(
       classifyInboxAction(notif({ type: "mentioned", severity: "action_required", read: false }), ctx()),
     ).toBe("act_now");
@@ -70,7 +70,7 @@ describe("classifyInboxAction — notifications", () => {
     ).toBe("watching");
   });
 
-  it("keeps a fresh action-required item in Act now even while the agent runs", () => {
+  it("keeps a fresh action-required item in Unread even while the agent runs", () => {
     expect(
       classifyInboxAction(
         notif({ severity: "action_required", issue_id: "issue-9", read: false }),
@@ -126,7 +126,7 @@ describe("classifyInboxAction — chats and channels", () => {
     ).toBe("calm");
   });
 
-  it("puts a mentioned channel in Act now", () => {
+  it("puts a mentioned channel in Unread", () => {
     expect(
       classifyInboxAction(
         { kind: "channel", channel: { id: "ch-1", unread_count: 3 } },
@@ -143,18 +143,18 @@ describe("classifyInboxAction — chats and channels", () => {
 });
 
 describe("ordering + bucketize adapter", () => {
-  it("orders categories Act now → Watching → Waiting → Calm", () => {
-    expect(INBOX_ACTION_ORDER).toEqual(["act_now", "watching", "waiting", "calm"]);
-    expect(inboxActionOrderIndex("act_now")).toBeLessThan(inboxActionOrderIndex("calm"));
+  it("orders categories Unread → Running → Done → Waiting", () => {
+    expect(INBOX_ACTION_ORDER).toEqual(["act_now", "watching", "calm", "waiting"]);
+    expect(inboxActionOrderIndex("act_now")).toBeLessThan(inboxActionOrderIndex("waiting"));
   });
 
   it("returns key, localized label, and sort order from bucketizeInboxAction", () => {
-    const labels = { act_now: "Act now", watching: "Watching", waiting: "Waiting", calm: "Calm" };
+    const labels = { act_now: "Unread", watching: "Running", waiting: "Waiting", calm: "Done" };
     const bucket = bucketizeInboxAction(
       notif({ type: "mentioned", severity: "action_required", read: false }),
       ctx(),
       labels,
     );
-    expect(bucket).toEqual({ key: "act_now", label: "Act now", isFallback: false, order: 0 });
+    expect(bucket).toEqual({ key: "act_now", label: "Unread", isFallback: false, order: 0 });
   });
 });

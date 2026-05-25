@@ -42,8 +42,8 @@ type StringTable = {
   muted_until_prefix: string;
   planned_for_prefix: string;
   // FIR-2115 — "Group by → Action" bucket headers. English in every locale by
-  // product decision ("Waiting" must stay English; the rest follow suit so the
-  // four headers read as one consistent set).
+  // product decision. Names follow the agreed product wording: Unread, Running,
+  // Done, Waiting.
   action_act_now: string;
   action_watching: string;
   action_waiting: string;
@@ -52,10 +52,10 @@ type StringTable = {
 
 /** Action-bucket headers, identical across locales (see StringTable note). */
 const actionLabels = {
-  action_act_now: "Act now",
-  action_watching: "Watching",
+  action_act_now: "Unread",
+  action_watching: "Running",
   action_waiting: "Waiting",
-  action_calm: "Calm",
+  action_calm: "Done",
 } as const;
 
 const en: StringTable = {
