@@ -27,6 +27,9 @@ dist-electron
 # test coverage
 coverage
 
+# upstream-sync bot runtime output
+.upstream-sync/
+
 # Go
 server/bin/
 server/tmp/
