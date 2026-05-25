@@ -139,6 +139,22 @@ describe("AccessPage", () => {
     expect(screen.getByRole("tab", { name: /Audit/i })).toBeInTheDocument();
   });
 
+  it("Subjects tab lists subjects derived from the grants list", async () => {
+    mockListGrants.mockResolvedValue({
+      items: [sampleGrant],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    });
+    const { ui } = makePage();
+    render(ui);
+
+    // Subjects is the default tab — a row for the agent should appear,
+    // even though no dedicated subjects endpoint exists.
+    expect(await screen.findByText("Fætta")).toBeInTheDocument();
+    expect(screen.getByText(/1 grants/)).toBeInTheDocument();
+  });
+
   it("shows access denied for non-admin members", async () => {
     // Use mockReturnValue (not Once) so all re-renders from React Query refetch also see "member"
     mockUseCurrentMember.mockReturnValue({

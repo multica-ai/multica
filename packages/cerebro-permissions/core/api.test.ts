@@ -32,6 +32,7 @@ import {
   fetchGrantAudit,
   fetchPendingAsks,
   fetchPersonaGrants,
+  fetchSubjectsWithPermissions,
   rejectAsk,
   updatePersonaGrant,
 } from "./api";
@@ -145,6 +146,107 @@ describe("permissions api compatibility", () => {
       approval_required: undefined,
       status: "revoked",
     });
+  });
+});
+
+describe("fetchSubjectsWithPermissions — derived from the grants list", () => {
+  const subjectsFilter = { subjectType: null, search: "", limit: 50, offset: 0 };
+
+  it("folds the flat grant list into one row per subject", async () => {
+    mockListPersonaGrants.mockResolvedValueOnce({
+      grants: [
+        {
+          id: "g1",
+          workspace_id: "ws-1",
+          subject_type: "agent",
+          subject_id: "agent-mia",
+          resource_pattern: "issue/*",
+          capability: "issues.read",
+          status: "active",
+          approval_required: false,
+          granted_at: "2026-05-20T10:00:00Z",
+          updated_at: "2026-05-20T10:00:00Z",
+        },
+        {
+          id: "g2",
+          workspace_id: "ws-1",
+          subject_type: "agent",
+          subject_id: "agent-mia",
+          resource_pattern: "repo/*",
+          capability: "repo.push",
+          status: "pending_approval",
+          approval_required: true,
+          granted_at: "2026-05-20T10:01:00Z",
+          updated_at: "2026-05-20T10:01:00Z",
+        },
+        {
+          id: "g3",
+          workspace_id: "ws-1",
+          subject_type: "agent",
+          subject_id: "agent-probe",
+          resource_pattern: "*",
+          capability: "issues.read",
+          status: "active",
+          approval_required: false,
+          granted_at: "2026-05-20T10:02:00Z",
+          updated_at: "2026-05-20T10:02:00Z",
+        },
+      ],
+    });
+
+    const page = await fetchSubjectsWithPermissions("ws-1", subjectsFilter);
+
+    expect(page.total).toBe(2);
+    expect(page.items).toHaveLength(2);
+
+    const mia = page.items.find((s) => s.id === "agent-mia");
+    expect(mia).toBeDefined();
+    expect(mia!.type).toBe("agent");
+    expect(mia!.permissions).toHaveLength(2);
+    expect(mia!.pending_count).toBe(1);
+
+    const probe = page.items.find((s) => s.id === "agent-probe");
+    expect(probe!.permissions).toHaveLength(1);
+    expect(probe!.pending_count).toBe(0);
+  });
+
+  it("filters subjects by the client-side search term", async () => {
+    mockListPersonaGrants.mockResolvedValueOnce({
+      grants: [
+        {
+          id: "g1",
+          workspace_id: "ws-1",
+          subject_type: "agent",
+          subject_id: "agent-mia",
+          resource_pattern: "*",
+          capability: "issues.read",
+          status: "active",
+          approval_required: false,
+          granted_at: "2026-05-20T10:00:00Z",
+          updated_at: "2026-05-20T10:00:00Z",
+        },
+        {
+          id: "g2",
+          workspace_id: "ws-1",
+          subject_type: "member",
+          subject_id: "user-bob",
+          resource_pattern: "*",
+          capability: "issues.read",
+          status: "active",
+          approval_required: false,
+          granted_at: "2026-05-20T10:00:00Z",
+          updated_at: "2026-05-20T10:00:00Z",
+        },
+      ],
+    });
+
+    const page = await fetchSubjectsWithPermissions("ws-1", {
+      ...subjectsFilter,
+      search: "bob",
+    });
+
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]!.id).toBe("user-bob");
   });
 });
 

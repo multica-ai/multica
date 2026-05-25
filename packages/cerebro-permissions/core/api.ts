@@ -125,61 +125,88 @@ export async function fetchGrantAudit(
 }
 
 // ---------------------------------------------------------------------------
-// Subjects with permissions — Phase 2 API (mock-ready, stubs until live).
+// Subjects with permissions — derived from the grants list.
 // ---------------------------------------------------------------------------
 
-const EMPTY_SUBJECTS_PAGE: PaginatedResponse<SubjectWithPermissions> = {
-  items: [],
-  total: 0,
-  limit: 50,
-  offset: 0,
-};
-
-const subjectPermissionSchema = z.object({
-  capability: z.string(),
-  resource_pattern: z.string().default("*"),
-  status: z.string().default("active"),
-  approval_required: z.boolean().default(false),
-  grant_id: z.string(),
-});
-
-const subjectWithPermissionsSchema: z.ZodType<SubjectWithPermissions> = z.object({
-  id: z.string(),
-  type: z.string(),
-  display_name: z.string().nullable().default(null),
-  avatar_url: z.string().nullable().optional(),
-  permissions: z.array(subjectPermissionSchema).default([]),
-  pending_count: z.number().default(0),
-});
-
-const subjectsPageSchema = z.object({
-  items: z.array(subjectWithPermissionsSchema).default([]),
-  total: z.number().default(0),
-  limit: z.number().default(50),
-  offset: z.number().default(0),
-});
-
+// There is no dedicated subjects endpoint yet — the grants list already
+// carries everything the Subjects tab needs (subject, capability, resource,
+// status, approval flag). We fetch the grants for the workspace and fold them
+// into one row per subject. The grants endpoint returns the full set in a
+// single response (no server-side pagination), so a single call is enough;
+// filtering by subject type, search, and pagination all happen client-side.
 export async function fetchSubjectsWithPermissions(
   wsId: string,
   filter: { subjectType: string | null; search: string; limit: number; offset: number },
 ): Promise<PaginatedResponse<SubjectWithPermissions>> {
-  // CEREBRO-PATCH(access-page-subjects-stub): Phase 2 API not yet deployed — return empty page.
-  // Remove stub and wire `api.listSubjectsWithPermissions` when Phase 2 lands.
-  try {
-    const raw = await (api as unknown as Record<string, (wsId: string, p: unknown) => Promise<unknown>>)
-      .listSubjectsWithPermissions?.(wsId, {
-        subject_type: filter.subjectType,
-        search: filter.search,
-        limit: filter.limit,
-        offset: filter.offset,
-      });
-    if (!raw) return EMPTY_SUBJECTS_PAGE;
-    return parseWithFallback(raw, subjectsPageSchema, EMPTY_SUBJECTS_PAGE, {
-      endpoint: "listSubjectsWithPermissions",
+  const grantsPage = await fetchPersonaGrants(wsId, {
+    subjectType: (filter.subjectType as GrantsFilter["subjectType"]) ?? null,
+    subjectId: null,
+    resourceType: null,
+    status: null,
+    classification: null,
+    search: "",
+    // Backend returns every matching grant regardless of limit/offset; a high
+    // limit guards against a future server that honours the param.
+    limit: 1000,
+    offset: 0,
+  });
+
+  const subjects = groupGrantsIntoSubjects(grantsPage.items);
+
+  const q = filter.search.trim().toLowerCase();
+  const filtered = q
+    ? subjects.filter(
+        (s) =>
+          (s.display_name ?? "").toLowerCase().includes(q) ||
+          s.id.toLowerCase().includes(q),
+      )
+    : subjects;
+
+  const total = filtered.length;
+  const offset = Math.max(0, filter.offset);
+  const limit = filter.limit > 0 ? filter.limit : 50;
+  const items = filtered.slice(offset, offset + limit);
+
+  return { items, total, limit, offset };
+}
+
+// Fold a flat grant list into one SubjectWithPermissions per distinct subject.
+// Subjects are keyed by type + id so a member and an agent that happen to share
+// an id never collapse together; subjectless types (workspace_default,
+// anonymous) key on their type alone.
+function groupGrantsIntoSubjects(
+  grants: PersonaGrant[],
+): SubjectWithPermissions[] {
+  const bySubject = new Map<string, SubjectWithPermissions>();
+
+  for (const g of grants) {
+    const subjectId = g.subject.id ?? "";
+    const key = `${g.subject.type}:${subjectId}`;
+    let entry = bySubject.get(key);
+    if (!entry) {
+      entry = {
+        id: subjectId || g.subject.type,
+        type: g.subject.type,
+        display_name: g.subject.display_name ?? g.subject.id ?? null,
+        avatar_url: g.subject.avatar_url ?? null,
+        permissions: [],
+        pending_count: 0,
+      };
+      bySubject.set(key, entry);
+    }
+    entry.permissions.push({
+      capability: g.capability,
+      resource_pattern: g.resource.pattern,
+      status: g.status,
+      approval_required: g.approval_required,
+      grant_id: g.id,
     });
-  } catch {
-    return EMPTY_SUBJECTS_PAGE;
+    if (g.status === "pending_approval") entry.pending_count += 1;
   }
+
+  return Array.from(bySubject.values()).sort((a, b) =>
+    (a.display_name ?? a.id).localeCompare(b.display_name ?? b.id),
+  );
 }
 
 // ---------------------------------------------------------------------------
