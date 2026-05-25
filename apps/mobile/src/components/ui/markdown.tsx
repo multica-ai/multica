@@ -3,6 +3,12 @@ import { Linking, StyleSheet, Text, View } from "react-native";
 import { colors, radii, spacing } from "../../theme/tokens";
 import { tokenizeInline } from "./markdown-tokenize";
 
+const safeOpenUrl = (href: string) => {
+  if (href.startsWith("http://") || href.startsWith("https://")) {
+    void Linking.openURL(href);
+  }
+};
+
 type MarkdownBlock =
   | { type: "code"; content: string }
   | { type: "heading"; level: number; content: string }
@@ -78,7 +84,7 @@ function MarkdownBlockView({
         </View>
       );
     case "paragraph":
-      return <Text style={styles.text}>{renderInline(block.content, onIssueMentionPress)}</Text>;
+      return <Text style={[styles.text, styles.paragraph]}>{renderInline(block.content, onIssueMentionPress)}</Text>;
   }
 }
 
@@ -197,10 +203,10 @@ function renderInline(content: string, onIssueMentionPress?: (issueId: string) =
         return (
           <Text
             key={index}
-            onPress={() => void Linking.openURL(token.href)}
+            onPress={() => safeOpenUrl(token.href)}
             style={styles.link}
           >
-            {renderInline(token.content, onIssueMentionPress)}
+            {token.content}
           </Text>
         );
       case "mention":
@@ -225,21 +231,25 @@ function renderInline(content: string, onIssueMentionPress?: (issueId: string) =
 
 const styles = StyleSheet.create({
   root: {
-    gap: spacing.sm,
+    gap: spacing.md,
   },
   text: {
     color: colors.foreground,
     fontSize: 14,
-    lineHeight: 20,
+    lineHeight: 21,
+  },
+  paragraph: {
+    marginVertical: 1,
   },
   heading: {
-    fontSize: 16,
-    fontWeight: "600",
-    lineHeight: 22,
+    fontSize: 17,
+    fontWeight: "700",
+    lineHeight: 24,
+    marginTop: spacing.xs,
   },
   smallHeading: {
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 15,
+    lineHeight: 22,
   },
   bold: {
     fontWeight: "700",
@@ -266,6 +276,7 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     fontFamily: "Courier",
     fontSize: 13,
+    paddingHorizontal: 3,
   },
   codeBlock: {
     backgroundColor: colors.muted,
@@ -279,15 +290,19 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   quote: {
+    backgroundColor: colors.muted,
     borderLeftColor: colors.border,
     borderLeftWidth: 3,
-    paddingLeft: spacing.md,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
   quoteText: {
     color: colors.mutedForeground,
   },
   list: {
-    gap: spacing.xs,
+    gap: spacing.sm,
+    paddingRight: spacing.xs,
   },
   listItem: {
     alignItems: "flex-start",
@@ -297,8 +312,9 @@ const styles = StyleSheet.create({
   listMarker: {
     color: colors.mutedForeground,
     fontSize: 14,
-    lineHeight: 20,
-    minWidth: 18,
+    lineHeight: 21,
+    minWidth: 22,
+    textAlign: "right",
   },
   listText: {
     flex: 1,

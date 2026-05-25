@@ -6,6 +6,8 @@ export type InlineToken =
   | { type: "mention"; content: string; mentionType: string; mentionId: string }
   | { type: "link"; content: string; href: string };
 
+const trailingUrlPunctuation = new Set([".", ",", "!", "?", ";", ":", "，", "。", "！", "？", "；", "：", "、", ")", "）", "]"]);
+
 export function tokenizeInline(content: string): InlineToken[] {
   const tokens: InlineToken[] = [];
   let index = 0;
@@ -19,14 +21,10 @@ export function tokenizeInline(content: string): InlineToken[] {
       continue;
     }
 
-    const linkMatch = rest.match(/^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/);
-    if (linkMatch) {
-      tokens.push({
-        type: "link",
-        content: linkMatch[1] ?? "",
-        href: linkMatch[2] ?? "",
-      });
-      index += linkMatch[0].length;
+    const markdownLink = parseMarkdownHttpLink(rest);
+    if (markdownLink) {
+      tokens.push({ type: "link", content: markdownLink.content, href: markdownLink.href });
+      index += markdownLink.length;
       continue;
     }
 
@@ -39,6 +37,16 @@ export function tokenizeInline(content: string): InlineToken[] {
         mentionId: mentionMatch[3] ?? "",
       });
       index += mentionMatch[0].length;
+      continue;
+    }
+
+    const bareUrl = parseBareHttpUrl(rest);
+    if (bareUrl) {
+      tokens.push({ type: "link", content: bareUrl.href, href: bareUrl.href });
+      if (bareUrl.trailing) {
+        tokens.push({ type: "text", content: bareUrl.trailing });
+      }
+      index += bareUrl.length;
       continue;
     }
 
@@ -68,9 +76,92 @@ export function tokenizeInline(content: string): InlineToken[] {
   return tokens;
 }
 
+function parseMarkdownHttpLink(content: string) {
+  if (!content.startsWith("[")) {
+    return null;
+  }
+
+  const textEnd = content.indexOf("](", 1);
+  if (textEnd <= 1) {
+    return null;
+  }
+
+  const hrefStart = textEnd + 2;
+  if (!content.startsWith("http://", hrefStart) && !content.startsWith("https://", hrefStart)) {
+    return null;
+  }
+
+  const hrefEnd = content.indexOf(")", hrefStart);
+  if (hrefEnd < 0) {
+    return null;
+  }
+
+  const href = content.slice(hrefStart, hrefEnd);
+  if (hasUrlTerminator(href)) {
+    return null;
+  }
+
+  return {
+    content: content.slice(1, textEnd),
+    href,
+    length: hrefEnd + 1,
+  };
+}
+
+function parseBareHttpUrl(content: string) {
+  if (!content.startsWith("http://") && !content.startsWith("https://")) {
+    return null;
+  }
+
+  let end = 0;
+  while (end < content.length && !isBareUrlTerminator(content[end] ?? "")) {
+    end += 1;
+  }
+
+  if (end === 0) {
+    return null;
+  }
+
+  let hrefEnd = end;
+  while (hrefEnd > 0 && trailingUrlPunctuation.has(content[hrefEnd - 1] ?? "")) {
+    hrefEnd -= 1;
+  }
+
+  if (hrefEnd === 0) {
+    return null;
+  }
+
+  return {
+    href: content.slice(0, hrefEnd),
+    trailing: content.slice(hrefEnd, end),
+    length: end,
+  };
+}
+
+function hasUrlTerminator(content: string) {
+  for (const char of content) {
+    if (isMarkdownLinkUrlTerminator(char)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isMarkdownLinkUrlTerminator(char: string) {
+  return char === "" || isWhitespace(char);
+}
+
+function isBareUrlTerminator(char: string) {
+  return char === "" || char === "<" || char === ">" || char === "(" || char === ")" || isWhitespace(char);
+}
+
+function isWhitespace(char: string) {
+  return char === " " || char === "\n" || char === "\r" || char === "\t" || char === "\f" || char === "\v";
+}
+
 function findNextSpecial(content: string, start: number) {
-  const positions = ["`", "[", "*"]
-    .map((char) => content.indexOf(char, start))
+  const positions = ["`", "[", "*", "http://", "https://"]
+    .map((marker) => content.indexOf(marker, start))
     .filter((position) => position >= 0);
   return positions.length > 0 ? Math.min(...positions) : content.length;
 }
