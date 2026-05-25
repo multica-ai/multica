@@ -1,0 +1,223 @@
+import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "../api";
+import type {
+  CreateWorkflowRequest,
+  UpdateWorkflowRequest,
+  CreateNodeRequest,
+  UpdateNodeRequest,
+  CreateEdgeRequest,
+} from "../types";
+
+export const workflowKeys = {
+  all: (wsId: string) => ["workflows", wsId] as const,
+  list: (wsId: string) => [...workflowKeys.all(wsId), "list"] as const,
+  detail: (wsId: string, id: string) => [...workflowKeys.all(wsId), "detail", id] as const,
+  nodes: (wsId: string, workflowId: string) => [...workflowKeys.detail(wsId, workflowId), "nodes"] as const,
+  edges: (wsId: string, workflowId: string) => [...workflowKeys.detail(wsId, workflowId), "edges"] as const,
+  runs: (wsId: string, workflowId: string) => [...workflowKeys.detail(wsId, workflowId), "runs"] as const,
+  run: (wsId: string, workflowId: string, runId: string) => [...workflowKeys.runs(wsId, workflowId), runId] as const,
+  nodeRuns: (wsId: string, workflowId: string, runId: string) => [...workflowKeys.run(wsId, workflowId, runId), "node-runs"] as const,
+  myTasks: (wsId: string) => [...workflowKeys.all(wsId), "my-tasks"] as const,
+};
+
+// ── Queries ──
+
+export function workflowListOptions(wsId: string) {
+  return queryOptions({
+    queryKey: workflowKeys.list(wsId),
+    queryFn: () => api.listWorkflows(wsId),
+  });
+}
+
+export function workflowDetailOptions(wsId: string, id: string) {
+  return queryOptions({
+    queryKey: workflowKeys.detail(wsId, id),
+    queryFn: () => api.getWorkflow(id),
+  });
+}
+
+export function workflowNodesOptions(wsId: string, workflowId: string) {
+  return queryOptions({
+    queryKey: workflowKeys.nodes(wsId, workflowId),
+    queryFn: () => api.listWorkflowNodes(workflowId),
+  });
+}
+
+export function workflowEdgesOptions(wsId: string, workflowId: string) {
+  return queryOptions({
+    queryKey: workflowKeys.edges(wsId, workflowId),
+    queryFn: () => api.listWorkflowEdges(workflowId),
+  });
+}
+
+export function workflowRunsOptions(wsId: string, workflowId: string) {
+  return queryOptions({
+    queryKey: workflowKeys.runs(wsId, workflowId),
+    queryFn: () => api.listWorkflowRuns(workflowId),
+    select: (data) => data.runs,
+  });
+}
+
+export function workflowRunOptions(wsId: string, workflowId: string, runId: string) {
+  return queryOptions({
+    queryKey: workflowKeys.run(wsId, workflowId, runId),
+    queryFn: () => api.getWorkflowRun(workflowId, runId),
+  });
+}
+
+export function workflowNodeRunsOptions(wsId: string, workflowId: string, runId: string) {
+  return queryOptions({
+    queryKey: workflowKeys.nodeRuns(wsId, workflowId, runId),
+    queryFn: () => api.listWorkflowNodeRuns(workflowId, runId),
+  });
+}
+
+export function myWorkflowTasksOptions(wsId: string) {
+  return queryOptions({
+    queryKey: workflowKeys.myTasks(wsId),
+    queryFn: () => api.listMyWorkflowTasks(wsId),
+    select: (data) => data.node_runs,
+  });
+}
+
+// ── Mutations ──
+
+export function useCreateWorkflow(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (req: CreateWorkflowRequest) => api.createWorkflow(req),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.list(wsId) });
+    },
+  });
+}
+
+export function useUpdateWorkflow(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...req }: UpdateWorkflowRequest & { id: string }) =>
+      api.updateWorkflow(id, req),
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.list(wsId) });
+      queryClient.invalidateQueries({ queryKey: workflowKeys.detail(wsId, vars.id) });
+    },
+  });
+}
+
+export function useDeleteWorkflow(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteWorkflow(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.list(wsId) });
+    },
+  });
+}
+
+export function useCreateNode(wsId: string, workflowId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (req: CreateNodeRequest) => api.createWorkflowNode(workflowId, req),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.nodes(wsId, workflowId) });
+      queryClient.invalidateQueries({ queryKey: workflowKeys.detail(wsId, workflowId) });
+    },
+  });
+}
+
+export function useUpdateNode(wsId: string, workflowId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ nodeId, ...req }: UpdateNodeRequest & { nodeId: string }) =>
+      api.updateWorkflowNode(workflowId, nodeId, req),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.nodes(wsId, workflowId) });
+    },
+  });
+}
+
+export function useDeleteNode(wsId: string, workflowId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (nodeId: string) => api.deleteWorkflowNode(workflowId, nodeId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.nodes(wsId, workflowId) });
+      queryClient.invalidateQueries({ queryKey: workflowKeys.edges(wsId, workflowId) });
+    },
+  });
+}
+
+export function useCreateEdge(wsId: string, workflowId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (req: CreateEdgeRequest) => api.createWorkflowEdge(workflowId, req),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.edges(wsId, workflowId) });
+    },
+  });
+}
+
+export function useDeleteEdge(wsId: string, workflowId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (edgeId: string) => api.deleteWorkflowEdge(workflowId, edgeId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.edges(wsId, workflowId) });
+    },
+  });
+}
+
+export function useStartWorkflowRun(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ workflowId, input }: { workflowId: string; input?: unknown }) =>
+      api.startWorkflowRun(workflowId, input),
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.runs(wsId, vars.workflowId) });
+    },
+  });
+}
+
+export function useCancelWorkflowRun(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ workflowId, runId }: { workflowId: string; runId: string }) =>
+      api.cancelWorkflowRun(workflowId, runId),
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.run(wsId, vars.workflowId, vars.runId) });
+      queryClient.invalidateQueries({ queryKey: workflowKeys.runs(wsId, vars.workflowId) });
+    },
+  });
+}
+
+export function useSubmitNodeRun(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ nodeRunId, output }: { nodeRunId: string; output: unknown }) =>
+      api.submitNodeRun(nodeRunId, output),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.myTasks(wsId) });
+    },
+  });
+}
+
+export function useReviewNodeRun(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ nodeRunId, approved, comment }: { nodeRunId: string; approved: boolean; comment?: string }) =>
+      api.reviewNodeRun(nodeRunId, approved, comment),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.myTasks(wsId) });
+    },
+  });
+}
+
+export function useSkipNodeRun(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (nodeRunId: string) => api.skipNodeRun(nodeRunId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.myTasks(wsId) });
+    },
+  });
+}

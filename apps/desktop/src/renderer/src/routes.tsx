@@ -25,6 +25,9 @@ import { AgentsPage } from "@multica/views/agents";
 import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/views/squads/components";
 import { InboxPage } from "@multica/views/inbox";
 import { SettingsPage } from "@multica/views/settings";
+import { WorkflowsPage } from "@multica/views/workflows/components";
+import { WorkflowDetailPage } from "./pages/workflow-detail-page";
+import { WorkflowRunPage } from "./pages/workflow-run-page";
 import { useT } from "@multica/views/i18n";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { Download, Server } from "lucide-react";
@@ -203,6 +206,25 @@ export const appRoutes: RouteObject[] = [
             path: "settings",
             element: <DesktopSettingsRoute />,
             handle: { title: "Settings" },
+          },
+          {
+            path: "workflows",
+            element: (
+              <ErrorBoundary>
+                <WorkflowsPage />
+              </ErrorBoundary>
+            ),
+            handle: { title: "Workflows" },
+          },
+          {
+            path: "workflows/:id",
+            element: <WorkflowDetailPage />,
+            handle: { title: "Workflow" },
+          },
+          {
+            path: "workflows/:id/runs/:runId",
+            element: <WorkflowRunPage />,
+            handle: { title: "Workflow Run" },
           },
         ],
       },

@@ -122,4 +122,18 @@ const (
 	EventPullRequestLinked         = "pull_request:linked"
 	EventPullRequestUpdated        = "pull_request:updated"
 	EventPullRequestUnlinked       = "pull_request:unlinked"
+
+	// Workflow events
+	EventWorkflowCreated          = "workflow:created"
+	EventWorkflowUpdated          = "workflow:updated"
+	EventWorkflowDeleted          = "workflow:deleted"
+	EventWorkflowRunStarted       = "workflow:run_started"
+	EventWorkflowRunCompleted     = "workflow:run_completed"
+	EventWorkflowRunFailed        = "workflow:run_failed"
+	EventWorkflowRunCancelled     = "workflow:run_cancelled"
+	EventWorkflowNodeRunStarted   = "workflow:node_run_started"
+	EventWorkflowNodeRunCompleted = "workflow:node_run_completed"
+	EventWorkflowNodeRunFailed    = "workflow:node_run_failed"
+	EventWorkflowNodeRunBlocked   = "workflow:node_run_blocked"
+	EventWorkflowNodeRunReviewed  = "workflow:node_run_reviewed"
 )

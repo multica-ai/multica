@@ -58,3 +58,5 @@ server/server
 data/
 .kilo
 .idea
+.crewpilot/
+*.exe

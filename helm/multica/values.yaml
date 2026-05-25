@@ -1,0 +1,164 @@
+# Default values for multica.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+nameOverride: ""
+fullnameOverride: ""
+
+imagePullSecrets: []
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+backend:
+  replicaCount: 1
+
+  image:
+    repository: ghcr.io/multica-ai/multica-backend
+    pullPolicy: IfNotPresent
+    tag: "0.0.1"
+
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext: {}
+
+  service:
+    type: ClusterIP
+    port: 8080
+
+  config:
+    port: "8080"
+    appEnv: "production"
+    corsAllowedOrigins: ""
+    frontendOrigin: ""
+    allowSignup: "true"
+    allowedEmails: []
+    allowedEmailDomains: []
+    publicURL: ""
+    trustedProxies: []
+    rateLimitTrustedProxies: []
+    realtimeMetricsToken: ""
+    multicaCloudFleetUrl: ""
+    multicaFleetUrl: ""
+    redisUrl: ""
+    realtimeRelayMode: ""
+    realtimeRelayShards: ""
+    realtimeRelayStreamMaxLen: ""
+    realtimeRelayXreadCount: ""
+    realtimeRelayXreadBlock: ""
+    metricsAddr: ""
+    posthogApiKey: ""
+    posthogHost: ""
+    analyticsDisabled: "false"
+    analyticsEnvironment: ""
+    localUploadDir: ""
+    localUploadBaseUrl: ""
+    s3Bucket: ""
+    s3Region: ""
+    awsEndpointUrl: ""
+    cloudfrontDomain: ""
+    multicaDevVerificationCode: ""
+
+  secrets:
+    databaseUrl: ""
+    jwtSecret: ""
+    resendApiKey: ""
+    smtpHost: ""
+    smtpPort: ""
+    smtpUser: ""
+    smtpPassword: ""
+    smtpFrom: ""
+    awsAccessKeyId: ""
+    awsSecretAccessKey: ""
+    openaiApiKey: ""
+    anthropicApiKey: ""
+
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  volumes: []
+  volumeMounts: []
+  extraEnv: []
+
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: http
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: ""
+
+web:
+  replicaCount: 1
+
+  image:
+    repository: ghcr.io/multica-ai/multica-web
+    pullPolicy: IfNotPresent
+    tag: "0.0.1"
+
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext: {}
+
+  service:
+    type: ClusterIP
+    port: 3000
+
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  volumes: []
+  volumeMounts: []
+  extraEnv: []
+
+  livenessProbe:
+    httpGet:
+      path: /
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: ""
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []

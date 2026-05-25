@@ -33,7 +33,12 @@ export function RedirectIfAuthenticated() {
   });
 
   useEffect(() => {
-    if (isLoading || !user || !isFetched) return;
+    if (isLoading) return;
+    if (!user) {
+      router.replace("/login");
+      return;
+    }
+    if (!isFetched) return;
     router.replace(resolvePostAuthDestination(list, hasOnboarded));
   }, [isLoading, user, isFetched, list, hasOnboarded, router]);
 
