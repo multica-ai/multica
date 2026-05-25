@@ -157,6 +157,7 @@ export function LabelPicker({
   };
 
   const hasLabels = attachedLabels.length > 0;
+  const compactAddOnly = !hasLabels && appendAddTrigger && !customTrigger && !triggerRender;
   const addLabelText = addTriggerLabel ?? t(($) => $.pickers.label.trigger_label);
 
   return (
@@ -175,6 +176,13 @@ export function LabelPicker({
         triggerRender={
           triggerRender ?? (hasLabels ? (
             <div className="flex flex-wrap items-center gap-1 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors" />
+          ) : compactAddOnly ? (
+            <button
+              type="button"
+              className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-dashed border-border bg-muted/40 px-1.5 text-[10px] leading-none text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-accent hover:text-foreground"
+              aria-label={addLabelText}
+              title={addLabelText}
+            />
           ) : undefined)
         }
         trigger={
@@ -196,6 +204,11 @@ export function LabelPicker({
                   <Plus className="h-3 w-3" />
                 </span>
               )}
+            </>
+          ) : compactAddOnly ? (
+            <>
+              <Plus className="h-3 w-3 shrink-0" />
+              <span>{addLabelText}</span>
             </>
           ) : (
             <>

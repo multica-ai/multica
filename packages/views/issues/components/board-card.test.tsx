@@ -52,6 +52,7 @@ vi.mock("../actions", () => ({
 }));
 
 vi.mock("../../i18n", () => ({
+  useTimeAgo: () => (date: string) => date,
   useT: () => ({
     t: (selector: any) =>
       selector({
@@ -64,6 +65,7 @@ vi.mock("../../i18n", () => ({
 
 vi.mock("./pickers", async () => {
   const { createPortal } = await import("react-dom");
+  const { Plus } = await import("lucide-react");
 
   return {
     LabelPicker: ({
@@ -80,7 +82,16 @@ vi.mock("./pickers", async () => {
       <>
         <div data-testid="label-picker">
           {issueId}:{labels?.length ?? 0}
-          {appendAddTrigger ? <span data-testid="label-picker-add-trigger">{addTriggerLabel}</span> : null}
+          {appendAddTrigger ? (
+            labels?.length ? (
+              <span data-testid="label-picker-add-trigger">{addTriggerLabel}</span>
+            ) : (
+              <button type="button" aria-label={addTriggerLabel} className="text-[10px]" data-testid="label-picker-add-trigger">
+                <Plus aria-hidden className="h-3 w-3" />
+                <span>{addTriggerLabel}</span>
+              </button>
+            )
+          ) : null}
         </div>
         {createPortal(<input data-testid="portal-label-input" />, document.body)}
       </>
@@ -147,6 +158,9 @@ describe("BoardCardContent labels", () => {
     render(<BoardCardContent editable issue={makeIssue()} />);
 
     expect(screen.getByTestId("label-picker")).toHaveTextContent("issue-1:0");
+    expect(screen.getByTestId("label-picker-add-trigger")).toHaveAccessibleName("Add label");
+    expect(screen.getByTestId("label-picker-add-trigger")).toHaveTextContent("Add label");
+    expect(screen.getByTestId("label-picker-add-trigger")).toHaveClass("text-[10px]");
   });
 
   it("does not prevent default events from portaled label management inputs", () => {
