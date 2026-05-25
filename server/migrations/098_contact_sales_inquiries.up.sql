@@ -5,7 +5,7 @@
 -- validation at the handler layer. We store the IP only so the abuse signal
 -- survives a process restart; we never expose it back through the API.
 
-CREATE TABLE contact_sales_inquiry (
+CREATE TABLE IF NOT EXISTS contact_sales_inquiry (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     first_name          TEXT NOT NULL,
     last_name           TEXT NOT NULL,
@@ -22,5 +22,5 @@ CREATE TABLE contact_sales_inquiry (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_contact_sales_inquiry_created ON contact_sales_inquiry(created_at DESC);
-CREATE INDEX idx_contact_sales_inquiry_email_created ON contact_sales_inquiry(business_email, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_contact_sales_inquiry_created ON contact_sales_inquiry(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_contact_sales_inquiry_email_created ON contact_sales_inquiry(business_email, created_at DESC);
