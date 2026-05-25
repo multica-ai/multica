@@ -27,10 +27,11 @@ import { memberListOptions, agentListOptions } from "@multica/core/workspace/que
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
+import { labelListOptions } from "@multica/core/labels/queries";
 import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER } from "@multica/core/projects/config";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { createIssueViewStore } from "@multica/core/issues/stores/view-store";
-import { ViewStoreProvider, useViewStore } from "@multica/core/issues/stores/view-store-context";
+import { ViewStoreProvider, useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { filterIssues } from "../../issues/utils/filter";
 import { buildIssueListServerFilter } from "../../issues/utils/server-filter";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
@@ -109,6 +110,15 @@ function PropRow({
 
 const projectViewStore = createIssueViewStore("project_issues_view");
 
+export function pruneLabelFiltersToVisibleProjectLabels(
+  labelFilters: readonly string[],
+  visibleLabels: readonly { id: string }[],
+) {
+  if (labelFilters.length === 0) return [];
+  const visibleLabelIds = new Set(visibleLabels.map((label) => label.id));
+  return labelFilters.filter((labelId) => visibleLabelIds.has(labelId));
+}
+
 export function ProjectIssuesContent({
   projectId,
   projectIssues,
@@ -118,6 +128,7 @@ export function ProjectIssuesContent({
   scope,
   filter,
   ganttIssues,
+  scopedLabelFilters,
 }: {
   projectId: string;
   projectIssues: Issue[];
@@ -127,6 +138,7 @@ export function ProjectIssuesContent({
   scope: string;
   filter: IssueListFilter;
   ganttIssues: Issue[];
+  scopedLabelFilters?: string[];
 }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
@@ -137,14 +149,15 @@ export function ProjectIssuesContent({
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  const effectiveLabelFilters = scopedLabelFilters ?? labelFilters;
   const issues = projectIssues;
 
   // Gantt rides its own dedicated query (scheduled-only) so it doesn't have
   // to wait for every status bucket to paginate in. View-store filters still
   // apply so toggling priority / assignee / label hides the same bars.
   const filteredGanttIssues = useMemo(
-    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
-    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters: effectiveLabelFilters }),
+    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, effectiveLabelFilters],
   );
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
@@ -236,7 +249,7 @@ export function ProjectIssuesContent({
   );
 }
 
-function ProjectIssuesSurface({
+export function ProjectIssuesSurface({
   projectId,
   scope,
   filter,
@@ -246,6 +259,7 @@ function ProjectIssuesSurface({
   filter: IssueListFilter;
 }) {
   const wsId = useWorkspaceId();
+  const viewStoreApi = useViewStoreApi();
   const viewMode = useViewStore((s) => s.viewMode);
   const grouping = useViewStore((s) => s.grouping);
   const statusFilters = useViewStore((s) => s.statusFilters);
@@ -254,6 +268,15 @@ function ProjectIssuesSurface({
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  // `projectViewStore` is shared between Project Detail routes. Keep the
+  // selected labels inside the current Project's visible Global + Project scope
+  // before those ids hit server filters.
+  const projectLabelsQuery = useQuery(labelListOptions(wsId, { projectId }));
+  const scopedLabelFilters = useMemo(() => {
+    if (labelFilters.length === 0) return [];
+    if (!projectLabelsQuery.isSuccess) return [];
+    return pruneLabelFiltersToVisibleProjectLabels(labelFilters, projectLabelsQuery.data ?? []);
+  }, [labelFilters, projectLabelsQuery.data, projectLabelsQuery.isSuccess]);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
   const usesGantt = viewMode === "gantt";
   const visibleStatuses = useMemo(() => {
@@ -271,7 +294,7 @@ function ProjectIssuesSurface({
           assigneeFilters,
           includeNoAssignee,
           creatorFilters,
-          labelFilters,
+          labelFilters: scopedLabelFilters,
         },
         visibleStatuses,
       ),
@@ -280,7 +303,7 @@ function ProjectIssuesSurface({
       creatorFilters,
       filter,
       includeNoAssignee,
-      labelFilters,
+      scopedLabelFilters,
       priorityFilters,
       statusFilters,
       visibleStatuses,
@@ -294,10 +317,17 @@ function ProjectIssuesSurface({
       assignee_filters: assigneeFilters,
       include_no_assignee: includeNoAssignee,
       creator_filters: creatorFilters,
-      label_ids: labelFilters,
+      label_ids: scopedLabelFilters,
     }),
-    [assigneeFilters, creatorFilters, filter, includeNoAssignee, labelFilters, priorityFilters, statusFilters],
+    [assigneeFilters, creatorFilters, filter, includeNoAssignee, scopedLabelFilters, priorityFilters, statusFilters],
   );
+
+  useEffect(() => {
+    if (!projectLabelsQuery.isSuccess) return;
+    if (labelFilters.length === scopedLabelFilters.length) return;
+    viewStoreApi.setState({ labelFilters: scopedLabelFilters });
+  }, [labelFilters.length, projectLabelsQuery.isSuccess, scopedLabelFilters, viewStoreApi]);
+
   const assigneeGroupsOptions = myIssueAssigneeGroupsOptions(
     wsId,
     scope,
@@ -346,6 +376,7 @@ function ProjectIssuesSurface({
         scope={scope}
         filter={serverFilter}
         ganttIssues={ganttIssues}
+        scopedLabelFilters={scopedLabelFilters}
       />
       <BatchActionToolbar />
     </>
