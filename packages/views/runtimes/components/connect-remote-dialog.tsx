@@ -24,8 +24,8 @@ type Step = "instructions" | "success";
 const INSTALL_CMD =
   "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
 const SETUP_CMD = "multica setup";
-const TOKEN_CMD = `multica config set server_url https://api.multica.ai
-multica config set app_url https://multica.ai
+const TOKEN_CMD = `multica config set server_url https://multica.lilithgames.com
+multica config set app_url https://multica.lilithgames.com
 multica login --token <YOUR_TOKEN>
 multica daemon start`;
 
