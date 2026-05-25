@@ -19,6 +19,17 @@
       "browser_suffix": " (browser)",
       "hint": "Used for dashboards, charts, and any 'today' label shown to you. It's a personal preference that applies across all your workspaces.",
       "sync_failed": "Failed to save your timezone preference."
+    },
+    "input_options": {
+      "title": "Input Options",
+      "enter_key": {
+        "label": "When writing a message, press Enter to",
+        "send": "Send the message",
+        "newline": "Start a new line",
+        "send_hint": "Use Shift+Enter to add a new line.",
+        "newline_hint": "Use {{shortcut}} to send.",
+        "sync_failed": "Failed to save input preference."
+      }
     }
   },
   "page": {

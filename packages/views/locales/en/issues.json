@@ -311,7 +311,8 @@
       "bar_authors_more_other": "{{names}} and {{count}} others",
       "resolve_failed": "Failed to resolve thread",
       "unresolve_failed": "Failed to unresolve thread"
-    }
+    },
+    "send_shortcut_hint": "{{shortcut}} to send"
   },
   "reply": {
     "placeholder": "Leave a reply..."

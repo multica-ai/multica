@@ -16,6 +16,7 @@ const BASE_USER: User = {
   language: null,
   profile_description: "",
   timezone: null,
+  message_enter_key_behavior: "newline",
   created_at: "2025-01-01T00:00:00Z",
   updated_at: "2025-01-01T00:00:00Z",
 };

@@ -19,6 +19,17 @@
       "browser_suffix": "（浏览器）",
       "hint": "用于仪表盘、图表和「今天」标签。这是个人偏好，在你的所有工作区中通用。",
       "sync_failed": "保存时区偏好失败。"
+    },
+    "input_options": {
+      "title": "输入选项",
+      "enter_key": {
+        "label": "撰写消息时，按 Enter 键用于",
+        "send": "发送消息",
+        "newline": "换行",
+        "send_hint": "使用 Shift+Enter 换行。",
+        "newline_hint": "使用 {{shortcut}} 发送。",
+        "sync_failed": "保存输入偏好失败。"
+      }
     }
   },
   "page": {

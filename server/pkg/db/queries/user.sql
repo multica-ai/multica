@@ -34,6 +34,10 @@ UPDATE "user" SET
         WHEN sqlc.narg('timezone')::text = ''    THEN NULL
         ELSE sqlc.narg('timezone')::text
     END,
+    message_enter_key_behavior = COALESCE(
+        sqlc.narg('message_enter_key_behavior'),
+        message_enter_key_behavior
+    ),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

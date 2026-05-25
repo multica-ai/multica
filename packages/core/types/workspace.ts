@@ -27,6 +27,8 @@ export interface Member {
   created_at: string;
 }
 
+export type MessageEnterKeyBehavior = "send" | "newline";
+
 export interface User {
   id: string;
   name: string;
@@ -59,6 +61,7 @@ export interface User {
   profile_description: string;
   /** Pinned IANA tz; null means "use browser-detected tz at render time". */
   timezone: string | null;
+  message_enter_key_behavior: MessageEnterKeyBehavior;
   created_at: string;
   updated_at: string;
 }
