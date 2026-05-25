@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"log/slog"
 	"net/http"
@@ -24,13 +25,36 @@ import (
 const defaultAvatarModel = "openai/gpt-5-image-mini"
 const gatewayChatCompletionsPath = "/api/ai/proxy/v1/chat/completions"
 
-// clothingColors drives visual diversity across agents. The color for each
-// agent is derived deterministically from its name so the result is stable
-// across re-generations without a stored seed.
+// Avatar visual identity is derived deterministically from the agent name so
+// re-generations stay stable without storing a seed. The background colour is
+// the primary way to tell agents apart at a glance (Jesper's requirement:
+// "om ikke andet baggrundsfarver"), so backgrounds carry the distinct hue while
+// clothing stays professionally neutral and the person (gender/hair) varies
+// independently — making every agent read as a different individual.
+
+// backgroundColors are the solid studio backdrops behind each portrait. Twelve
+// clearly distinct, muted-professional hues so adjacent agents never share a
+// background.
+var backgroundColors = []string{
+	"deep teal", "warm amber", "dusty rose", "slate blue",
+	"muted sage green", "soft plum", "terracotta", "steel grey",
+	"ocean blue", "olive gold", "burgundy red", "warm indigo",
+}
+
+// clothingColors stay neutral so the background carries the colour identity and
+// never clashes with it.
 var clothingColors = []string{
-	"navy blue", "forest green", "burgundy", "warm grey",
-	"mustard yellow", "terracotta", "sage green", "slate blue",
-	"plum", "rust orange", "teal", "cream white",
+	"a navy blazer", "a charcoal blazer", "a dark grey suit",
+	"a black turtleneck", "a crisp white shirt", "a deep navy sweater",
+}
+
+// portraitGenders and hairStyles vary the subject so two agents never look like
+// the same person, while keeping the Scandinavian brief.
+var portraitGenders = []string{"man", "woman"}
+
+var hairStyles = []string{
+	"short blond", "light brown", "dark brown",
+	"auburn", "ash grey", "short black",
 }
 
 // workspaceLoader reads a workspace (for its gateway settings). *db.Queries
@@ -104,30 +128,37 @@ func (h *Handler) Generate(w http.ResponseWriter, r *http.Request) {
 }
 
 // buildPrompt returns the generation prompt. A custom prompt is used as-is;
-// otherwise a Scandinavian-appearance prompt with a name-derived clothing
-// colour ensures every agent looks distinct without user effort.
+// otherwise a name-seeded prompt produces a photorealistic Scandinavian
+// headshot with a distinct background colour (the per-agent identifier) and a
+// person that varies by gender/hair so every agent reads as a real, different
+// individual. The closing clause is what keeps the model on photographs rather
+// than the flat illustrations it otherwise drifts to.
 func buildPrompt(agentName, customPrompt string) string {
 	if customPrompt != "" {
 		return customPrompt
 	}
-	color := clothingColors[nameColorIndex(agentName)]
+	background := backgroundColors[nameIndex(agentName, "bg", len(backgroundColors))]
+	clothing := clothingColors[nameIndex(agentName, "clothes", len(clothingColors))]
+	gender := portraitGenders[nameIndex(agentName, "gender", len(portraitGenders))]
+	hair := hairStyles[nameIndex(agentName, "hair", len(hairStyles))]
 	return fmt.Sprintf(
-		"Photorealistic portrait of a person with Scandinavian appearance, "+
-			"%s clothing, professional headshot, soft neutral background, "+
-			"natural light, high quality photo, square format, solo subject",
-		color,
+		"Photorealistic professional headshot portrait of a %s with Scandinavian features, "+
+			"%s hair, wearing %s, against a solid %s studio background, "+
+			"soft natural studio lighting, sharp focus, shallow depth of field, "+
+			"high-quality DSLR photograph, square 1:1 format, centered, single person. "+
+			"A realistic photo of a real person — not an illustration, cartoon, drawing, or 3D render.",
+		gender, hair, clothing, background,
 	)
 }
 
-func nameColorIndex(name string) int {
-	h := 0
-	for _, c := range name {
-		h = h*31 + int(c)
-	}
-	if h < 0 {
-		h = -h
-	}
-	return h % len(clothingColors)
+// nameIndex deterministically maps an agent name into [0,n) for a given trait
+// salt. The salt makes background/clothing/gender/hair vary independently, so
+// two agents that collide on one trait still differ on the others. FNV-1a gives
+// a well-distributed hash — a hand-rolled one bunched names onto the same colour.
+func nameIndex(name, salt string, n int) int {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(salt + "\x00" + name))
+	return int(h.Sum32() % uint32(n))
 }
 
 type gatewayResponse struct {

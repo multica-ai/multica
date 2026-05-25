@@ -6,11 +6,58 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestBuildPrompt(t *testing.T) {
+	t.Run("custom prompt is used verbatim", func(t *testing.T) {
+		got := buildPrompt("Sara", "a watercolor fox")
+		if got != "a watercolor fox" {
+			t.Fatalf("custom prompt = %q, want passthrough", got)
+		}
+	})
+
+	t.Run("auto prompt is photorealistic, not an illustration", func(t *testing.T) {
+		got := strings.ToLower(buildPrompt("Sara", ""))
+		for _, want := range []string{"photorealistic", "scandinavian", "headshot", "studio background"} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("prompt missing %q: %s", want, got)
+			}
+		}
+		// The anti-illustration clause is what stops the model drifting to flat
+		// cartoons — regressing it reintroduces the "håbløs" avatar.
+		if !strings.Contains(got, "not an illustration") {
+			t.Fatalf("prompt missing anti-illustration clause: %s", got)
+		}
+	})
+
+	t.Run("deterministic for the same name", func(t *testing.T) {
+		if buildPrompt("Mia", "") != buildPrompt("Mia", "") {
+			t.Fatal("buildPrompt is not deterministic")
+		}
+	})
+
+	t.Run("different names get different backgrounds", func(t *testing.T) {
+		// Backgrounds are the at-a-glance identifier, so a spread of names must
+		// land on more than one colour.
+		names := []string{"Sara", "Mia", "Sofie", "Franz", "Rasp", "Tine", "GPT-Boy", "Trump"}
+		seen := map[string]bool{}
+		for _, n := range names {
+			for _, bg := range backgroundColors {
+				if strings.Contains(buildPrompt(n, ""), " solid "+bg+" studio background") {
+					seen[bg] = true
+				}
+			}
+		}
+		if len(seen) < 2 {
+			t.Fatalf("expected varied backgrounds across names, got %d distinct", len(seen))
+		}
+	})
+}
 
 type stubWorkspaceLoader struct {
 	settings []byte
