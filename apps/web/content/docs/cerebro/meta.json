@@ -1,5 +1,20 @@
 {
   "title": "Cerebro",
   "icon": "Sparkles",
-  "pages": ["index", "---Guides---", "daemon-setup", "pwa", "release-notes", "..."]
+  "pages": [
+    "index",
+    "release-notes",
+    "---Guides---",
+    "install-as-app",
+    "notifications-mobile",
+    "quick-capture",
+    "inbox",
+    "channels-and-dms",
+    "dashboard",
+    "autopilots",
+    "permissions-ui",
+    "daemon-setup",
+    "pwa",
+    "..."
+  ]
 }
