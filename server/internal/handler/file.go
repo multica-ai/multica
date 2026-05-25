@@ -171,16 +171,6 @@ func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 		SizeBytes:    a.SizeBytes,
 		CreatedAt:    a.CreatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
 	}
-	if h.CFSigner != nil {
-		resp.DownloadURL = h.CFSigner.SignedURL(a.Url, time.Now().Add(30*time.Minute))
-	} else if ps, ok := h.Storage.(storage.PresignedGetStorage); ok {
-		key := h.Storage.KeyFromURL(a.Url)
-		if key != "" {
-			if signed, err := ps.PresignedGetURL(context.Background(), key, 30*time.Minute); err == nil {
-				resp.DownloadURL = signed
-			}
-		}
-	}
 	if a.IssueID.Valid {
 		s := uuidToString(a.IssueID)
 		resp.IssueID = &s
@@ -1255,7 +1245,67 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, h.attachmentToResponse(att))
+	resp := h.attachmentToResponse(att)
+	resp.DownloadURL = h.signedDownloadURL(att.Url)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ---------------------------------------------------------------------------
+// GetAttachmentPreviewURL — GET /api/attachments/{id}/preview-url
+// Returns a short-lived presigned URL for previewing/downloading the attachment.
+// ---------------------------------------------------------------------------
+
+type previewURLResponse struct {
+	URL       string `json:"url"`
+	ExpiresAt int64  `json:"expires_at"`
+}
+
+func (h *Handler) GetAttachmentPreviewURL(w http.ResponseWriter, r *http.Request) {
+	attachmentID := chi.URLParam(r, "id")
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+
+	attUUID, ok := parseUUIDOrBadRequest(w, attachmentID, "attachment id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+
+	att, err := h.Queries.GetAttachment(r.Context(), db.GetAttachmentParams{
+		ID:          attUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "attachment not found")
+		return
+	}
+
+	signed := h.signedDownloadURL(att.Url)
+	expires := time.Now().Add(30 * time.Minute).Unix()
+	writeJSON(w, http.StatusOK, previewURLResponse{URL: signed, ExpiresAt: expires})
+}
+
+// signedDownloadURL returns a presigned/signed URL for the given raw storage URL.
+// Falls back to returning the raw URL when no signing is configured.
+func (h *Handler) signedDownloadURL(rawURL string) string {
+	if h.CFSigner != nil {
+		return h.CFSigner.SignedURL(rawURL, time.Now().Add(30*time.Minute))
+	}
+	if ps, ok := h.Storage.(storage.PresignedGetStorage); ok {
+		key := h.Storage.KeyFromURL(rawURL)
+		if key != "" {
+			if signed, err := ps.PresignedGetURL(context.Background(), key, 30*time.Minute); err == nil {
+				return signed
+			}
+		}
+	}
+	return rawURL
 }
 
 // ---------------------------------------------------------------------------

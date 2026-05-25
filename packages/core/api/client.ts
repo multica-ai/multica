@@ -2131,6 +2131,10 @@ export class ApiClient {
     await this.fetch(`/api/attachments/${id}`, { method: "DELETE" });
   }
 
+  async getAttachmentPreviewURL(id: string): Promise<{ url: string; expires_at: number }> {
+    return this.fetch<{ url: string; expires_at: number }>(`/api/attachments/${id}/preview-url`);
+  }
+
   // Fetches the raw bytes of a text-previewable attachment.
   //
   // The endpoint sidesteps CloudFront CORS (not configured on the CDN) and
