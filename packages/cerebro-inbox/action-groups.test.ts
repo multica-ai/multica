@@ -49,9 +49,9 @@ const notif = (overrides: Partial<InboxItem>) =>
   ({ kind: "notif", item: item(overrides) }) as const;
 
 describe("classifyInboxAction — notifications", () => {
-  it("puts a fresh unread action-required item in Unread", () => {
+  it("puts every unread notification in Unread", () => {
     expect(
-      classifyInboxAction(notif({ type: "mentioned", severity: "action_required", read: false }), ctx()),
+      classifyInboxAction(notif({ type: "new_comment", severity: "info", read: false }), ctx()),
     ).toBe("act_now");
   });
 
@@ -88,18 +88,25 @@ describe("classifyInboxAction — notifications", () => {
     ).toBe("waiting");
   });
 
-  it("treats your own new comment as Calm (you had the last word)", () => {
+  it("keeps a read open issue in Waiting, even when you had the last word", () => {
     expect(
       classifyInboxAction(
-        notif({ type: "new_comment", severity: "info", actor_type: "member", actor_id: USER, read: true }),
+        notif({
+          type: "new_comment",
+          severity: "info",
+          actor_type: "member",
+          actor_id: USER,
+          read: true,
+          issue_status: "in_progress",
+        }),
         ctx(),
       ),
-    ).toBe("calm");
+    ).toBe("waiting");
   });
 
-  it("puts settled info items (e.g. task completed) in Calm", () => {
+  it("puts terminal issues in Done", () => {
     expect(
-      classifyInboxAction(notif({ type: "task_completed", severity: "info", read: true }), ctx()),
+      classifyInboxAction(notif({ type: "new_comment", severity: "info", read: true, issue_status: "done" }), ctx()),
     ).toBe("calm");
   });
 });
@@ -114,10 +121,10 @@ describe("classifyInboxAction — chats and channels", () => {
     ).toBe("watching");
   });
 
-  it("puts an unread chat reply in Waiting", () => {
+  it("puts an unread chat reply in Unread", () => {
     expect(
       classifyInboxAction({ kind: "chat", session: { id: "c-1", has_unread: true } }, ctx()),
-    ).toBe("waiting");
+    ).toBe("act_now");
   });
 
   it("puts a read chat in Calm", () => {
@@ -135,10 +142,10 @@ describe("classifyInboxAction — chats and channels", () => {
     ).toBe("act_now");
   });
 
-  it("puts an unread (non-mentioned) channel in Waiting", () => {
+  it("puts an unread channel in Unread", () => {
     expect(
       classifyInboxAction({ kind: "channel", channel: { id: "ch-1", unread_count: 2 } }, ctx()),
-    ).toBe("waiting");
+    ).toBe("act_now");
   });
 });
 

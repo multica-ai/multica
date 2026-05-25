@@ -4,13 +4,12 @@
 // than by a workflow status field. Top-to-bottom precedence is fixed; every
 // entry lands in exactly one bucket:
 //
-//   act_now  — unread: a fresh, unread action-required item (new
-//              @mention, review request, blocked-on-you, failure, assignment).
+//   act_now  — unread: any unread inbox item.
 //   watching — running: an agent is currently running on it.
-//   calm     — done/read: settled completed/done, reactions, info you've
-//              already seen.
-//   waiting  — an open thread to follow up: you've seen it but the last comment
-//              isn't yours, or you were @mentioned and haven't replied yet.
+//   calm     — done: the issue is terminal (done/cancelled), or a non-issue
+//              chat/channel has been read.
+//   waiting  — an open thread to follow up: you've seen it, but it is not
+//              running or done yet.
 //
 // The grouping logic lives here (cerebro zone) so the upstream inbox page only
 // needs a few marked CEREBRO-PATCH touchpoints that delegate into it.
@@ -65,28 +64,19 @@ export type InboxActionEntry =
   | { kind: "channel"; channel: { id: string; unread_count: number } };
 
 function classifyNotif(item: InboxItem, ctx: InboxActionContext): InboxActionCategory {
-  // 1. Fresh, action-required items demand attention now.
-  if (item.severity === "action_required" && !item.read) return "act_now";
+  // 1. Unread is a literal bucket: any unread notification belongs here.
+  if (!item.read) return "act_now";
 
   // 2. An agent is actively working the issue — watch, don't act. Checked
   //    before "waiting" so a running thread isn't mistaken for a stalled one.
   if (item.issue_id && ctx.issueRunStates.has(item.issue_id)) return "watching";
 
-  // 3. Open threads to follow up on:
-  //    - an action-required item you've already seen (mention you haven't closed),
-  //    - the server's "attention" tier,
-  //    - someone else's new comment (i.e. the last comment isn't yours).
-  if (item.severity === "action_required") return "waiting";
-  if (item.severity === "attention") return "waiting";
-  if (
-    item.type === "new_comment" &&
-    !(item.actor_type === "member" && item.actor_id === ctx.userId)
-  ) {
-    return "waiting";
-  }
+  // 3. Done is also literal for issue notifications. A read item on an open
+  //    issue is still follow-up, not done.
+  if (item.issue_status === "done" || item.issue_status === "cancelled") return "calm";
 
-  // 4. Everything else is settled.
-  return "calm";
+  // 4. Everything else is open and already seen.
+  return "waiting";
 }
 
 /**
@@ -101,14 +91,14 @@ export function classifyInboxAction(
     case "notif":
       return classifyNotif(entry.item, ctx);
     case "chat":
-      // A 1:1 agent chat: a live run is "watching"; an unread reply means the
-      // last message isn't yours → "waiting"; otherwise it's settled.
+      // A 1:1 agent chat: unread is literal, then live run, then read/settled.
+      if (entry.session.has_unread) return "act_now";
       if (ctx.chatRunStates.has(entry.session.id)) return "watching";
-      return entry.session.has_unread ? "waiting" : "calm";
+      return "calm";
     case "channel":
-      // An unread @mention in a channel needs you; other unread is follow-up.
-      if (ctx.mentionedChannels.has(entry.channel.id)) return "act_now";
-      return entry.channel.unread_count > 0 ? "waiting" : "calm";
+      // Channel unread counts are literal; mention state no longer changes the
+      // bucket label because the bucket itself is named Unread.
+      return entry.channel.unread_count > 0 ? "act_now" : "calm";
     default:
       // Enum drift downgrades, not crashes (see API Response Compatibility).
       return "calm";
