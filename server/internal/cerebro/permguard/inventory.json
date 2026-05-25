@@ -85,6 +85,14 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "DELETE /api/roles/{id}",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "DELETE /api/roles/{id}/assignments/{subjectType}/{subjectId}",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "DELETE /api/inbox/{id}/mute",
       "gate": "self_only"
     },
@@ -226,6 +234,10 @@
     },
     {
       "id": "PATCH /api/groups/{id}",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "PATCH /api/roles/{id}",
       "gate": "workspace_admin"
     },
     {
@@ -561,6 +573,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "POST /api/roles/{id}/assignments",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "POST /api/inbox/{id}/archive",
       "gate": "self_only"
     },
@@ -874,6 +890,10 @@
     },
     {
       "id": "POST /api/workspaces/{id}/groups",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/workspaces/{id}/roles",
       "gate": "workspace_admin"
     },
     {

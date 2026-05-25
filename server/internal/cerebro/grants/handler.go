@@ -261,6 +261,20 @@ func (h *Handler) Evaluate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid role_ids")
 		return
 	}
+	// When the caller does not pin explicit role_ids (the "what-if" path), load
+	// the actor's actually-assigned roles so the effective view matches reality.
+	if len(roleIDs) == 0 && (req.ActorType == "member" || req.ActorType == "agent") {
+		assigned, lerr := h.Svc.Cerebro.ListCerebroRoleIDsForSubject(r.Context(), cerebrodb.ListCerebroRoleIDsForSubjectParams{
+			WorkspaceID: workspaceID,
+			SubjectType: req.ActorType,
+			SubjectID:   actorID,
+		})
+		if lerr != nil {
+			h.serverError(w, r, "load actor roles", lerr)
+			return
+		}
+		roleIDs = assigned
+	}
 	var agentID pgtype.UUID
 	if req.AgentID != nil && *req.AgentID != "" {
 		agentID, err = util.ParseUUID(*req.AgentID)

@@ -138,7 +138,7 @@ func (s *Service) Validate(subjectType, resourcePattern, capability string) erro
 }
 
 // ValidateSubjectExists confirms the subject UUID refers to a real entity in the workspace.
-// workspace_default and role subject types are skipped (no per-ID table to check).
+// workspace_default is skipped (no per-ID table to check).
 func (s *Service) ValidateSubjectExists(ctx context.Context, subjectType string, subjectID, workspaceID pgtype.UUID) error {
 	switch subjectType {
 	case SubjectTypeMember:
@@ -168,6 +168,18 @@ func (s *Service) ValidateSubjectExists(ctx context.Context, subjectType string,
 			return err
 		}
 		if g.WorkspaceID != workspaceID {
+			return ErrSubjectNotFound
+		}
+		return nil
+	case SubjectTypeRole:
+		role, err := s.Cerebro.GetCerebroRole(ctx, subjectID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrSubjectNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if role.WorkspaceID != workspaceID {
 			return ErrSubjectNotFound
 		}
 		return nil

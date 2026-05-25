@@ -17,8 +17,10 @@ import { GrantDrawer } from "./components/grant-drawer";
 import { CreateGrantDialog } from "./components/create-grant-dialog";
 import { AuditTab } from "./components/audit-tab";
 import { EffectivePermissionTab } from "./components/effective-permission-tab";
+import { RolesTab } from "./components/roles-tab";
+import { AuthoringMatrixTab } from "./components/authoring-matrix-tab";
 
-type PageTab = "grants" | "effective" | "audit";
+type PageTab = "grants" | "matrix" | "roles" | "effective" | "audit";
 
 // Top-level workspace admin page for Persona grants (JEH-1180). Backed by
 // the `/api/workspaces/{id}/grants` surface in JEH-1179 — UI is built
@@ -79,6 +81,8 @@ export function PermissionsPage() {
         <div className="border-b px-4">
           <TabsList variant="line" className="h-10">
             <TabsTrigger value="grants">Grants</TabsTrigger>
+            <TabsTrigger value="matrix">Matrix</TabsTrigger>
+            <TabsTrigger value="roles">Roles</TabsTrigger>
             <TabsTrigger value="effective">Effective</TabsTrigger>
             <TabsTrigger value="audit">Audit</TabsTrigger>
           </TabsList>
@@ -98,6 +102,20 @@ export function PermissionsPage() {
               onRowClick={(grantId) => setSelectedGrantId(grantId)}
             />
           </div>
+        </TabsContent>
+
+        <TabsContent
+          value="matrix"
+          className="flex flex-1 min-h-0 flex-col"
+        >
+          <AuthoringMatrixTab wsId={wsId} />
+        </TabsContent>
+
+        <TabsContent
+          value="roles"
+          className="flex flex-1 min-h-0 flex-col"
+        >
+          <RolesTab wsId={wsId} />
         </TabsContent>
 
         <TabsContent

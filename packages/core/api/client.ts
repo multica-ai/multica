@@ -777,6 +777,67 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(cerebro-roles-client): FIR-2130 role subject CRUD + assignment.
+  // Server routes are mounted by `cerebro-roles-routes` in router.go on the
+  // generic /api/workspaces/{id}/roles (workspace-scoped) and /api/roles/{id}
+  // (workspace-membership-gated) paths.
+  async listCerebroRoles<T = unknown>(wsId: string): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/roles`);
+  }
+
+  async getCerebroRole<T = unknown>(roleId: string): Promise<T> {
+    return this.fetch<T>(`/api/roles/${roleId}`);
+  }
+
+  async createCerebroRole<T = unknown>(
+    wsId: string,
+    body: { name: string; description?: string | null },
+  ): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/roles`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async updateCerebroRole<T = unknown>(
+    roleId: string,
+    body: { name?: string; description?: string | null },
+  ): Promise<T> {
+    return this.fetch<T>(`/api/roles/${roleId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async deleteCerebroRole(roleId: string): Promise<void> {
+    await this.fetch(`/api/roles/${roleId}`, { method: "DELETE" });
+  }
+
+  async listCerebroRoleAssignments<T = unknown>(roleId: string): Promise<T> {
+    return this.fetch<T>(`/api/roles/${roleId}/assignments`);
+  }
+
+  async assignCerebroRole<T = unknown>(
+    roleId: string,
+    body: { subject_type: string; subject_id: string },
+  ): Promise<T> {
+    return this.fetch<T>(`/api/roles/${roleId}/assignments`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async unassignCerebroRole(
+    roleId: string,
+    subjectType: string,
+    subjectId: string,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/roles/${roleId}/assignments/${subjectType}/${subjectId}`,
+      { method: "DELETE" },
+    );
+  }
+
   // CEREBRO-PATCH(cerebro-group-permissions-client): JEH-1009 wrappers for
   // capability / runtime-allowlist / agent-allowlist / project-group-access
   // endpoints. Server routes are registered in router.go under

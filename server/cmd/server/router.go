@@ -37,6 +37,8 @@ import (
 	cerebrogroups "github.com/multica-ai/multica/server/internal/cerebro/groups"
 	// CEREBRO-PATCH(cerebro-grants-routes): JEH-1179 grant control plane handler import
 	cerebrogrants "github.com/multica-ai/multica/server/internal/cerebro/grants"
+	// CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role subject CRUD + assignment handler import
+	cerebroroles "github.com/multica-ai/multica/server/internal/cerebro/roles"
 	// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval inbox handler import
 	cerebroapprovals "github.com/multica-ai/multica/server/internal/cerebro/approvals"
 	// CEREBRO-PATCH(cerebro-group-permissions-routes): JEH-1008 permission model handler import
@@ -258,6 +260,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroGroupPermissionsHandler := cerebrogrouppermissions.New(cerebroQueries, queries, bus)
 	// CEREBRO-PATCH(cerebro-grants-routes): JEH-1179 grant control plane handler + JEH-1212 upstream queries for subject validation
 	cerebroGrantsHandler := cerebrogrants.NewHandler(cerebrogrants.New(cerebroQueries, queries, pool, bus)) // CEREBRO-PATCH(cerebro-grants-routes): JEH-1213
+	cerebroRolesHandler := cerebroroles.New(cerebroQueries, queries, bus)                                   // CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role subject handler
 	// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval inbox handler — materialises permission-engine needs_approval verdicts into a human inbox.
 	cerebroApprovalsHandler := cerebroapprovals.NewHandler(cerebroapprovals.New(cerebroQueries, pool, bus))
 	// CEREBRO-PATCH(router-group-permissions-seam): JEH-1009 wire capability gate into the upstream handler
@@ -598,6 +601,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/feature-flags/{key}", featureFlagsHandler.Upsert)
 					// CEREBRO-PATCH(cerebro-groups-routes): workspace group list (member-level).
 					r.Get("/groups", cerebroGroupsHandler.List)
+					// CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 workspace role list (member-level).
+					r.Get("/roles", cerebroRolesHandler.List)
 					// CEREBRO-PATCH(cerebro-grants-routes): JEH-1179 grant reads (any member).
 					r.Get("/grants", cerebroGrantsHandler.List)
 					r.Get("/grants/audit", cerebroGrantsHandler.Audit) // CEREBRO-PATCH(persona-permissions-audit): expose grant audit before {grantId}.
@@ -641,6 +646,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
 					// CEREBRO-PATCH(cerebro-groups-routes): group create requires admin/owner (JEH-1172).
 					r.Post("/groups", cerebroGroupsHandler.Create)
+					// CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role create requires admin/owner.
+					r.Post("/roles", cerebroRolesHandler.Create)
 					// CEREBRO-PATCH(cerebro-grants-routes): JEH-1179 grant writes (admin/owner only).
 					r.Post("/grants", cerebroGrantsHandler.Create)
 					r.Patch("/grants/{grantId}", cerebroGrantsHandler.Update)
@@ -709,6 +716,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/{id}/runtimes/{runtimeId}", cerebroGroupPermissionsHandler.RemoveRuntime)
 					r.Post("/{id}/agents", cerebroGroupPermissionsHandler.AddAgent)
 					r.Delete("/{id}/agents/{agentId}", cerebroGroupPermissionsHandler.RemoveAgent)
+				})
+			})
+
+			// CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role CRUD + assignment endpoints.
+			r.Route("/api/roles", func(r chi.Router) {
+				// Read-only: any workspace member.
+				r.Get("/{id}", cerebroRolesHandler.Get)
+				r.Get("/{id}/assignments", cerebroRolesHandler.ListAssignments)
+				// Writes: admin/owner only.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin"))
+					r.Patch("/{id}", cerebroRolesHandler.Update)
+					r.Delete("/{id}", cerebroRolesHandler.Delete)
+					r.Post("/{id}/assignments", cerebroRolesHandler.Assign)
+					r.Delete("/{id}/assignments/{subjectType}/{subjectId}", cerebroRolesHandler.Unassign)
 				})
 			})
 

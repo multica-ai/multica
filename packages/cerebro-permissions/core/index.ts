@@ -4,3 +4,4 @@ export * from "./api";
 export * from "./queries";
 export * from "./mutations";
 export * from "./store";
+export * from "./roles";

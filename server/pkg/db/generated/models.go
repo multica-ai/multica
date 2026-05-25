@@ -525,6 +525,24 @@ type CerebroProjectGroupMember struct {
 	AddedAt   pgtype.Timestamptz `json:"added_at"`
 }
 
+type CerebroRole struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroRoleAssignment struct {
+	RoleID      pgtype.UUID        `json:"role_id"`
+	SubjectType string             `json:"subject_type"`
+	SubjectID   pgtype.UUID        `json:"subject_id"`
+	AddedBy     pgtype.UUID        `json:"added_by"`
+	AddedAt     pgtype.Timestamptz `json:"added_at"`
+}
+
 type CerebroRuntimeTool struct {
 	ID            pgtype.UUID        `json:"id"`
 	RuntimeID     pgtype.UUID        `json:"runtime_id"`
