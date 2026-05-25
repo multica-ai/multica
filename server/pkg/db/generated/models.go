@@ -164,6 +164,7 @@ type AutopilotTrigger struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 	Provider       string             `json:"provider"`
 	SigningSecret  pgtype.Text        `json:"signing_secret"`
+	EventFilters   []byte             `json:"event_filters"`
 }
 
 type ChatMessage struct {

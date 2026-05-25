@@ -523,7 +523,22 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 11. Dispatch synchronously. DispatchAutopilot publishes WS events,
+	// 11. Event filter scope → ignored. If the trigger declares a concrete
+	//     event_filters list and the incoming event is outside that scope,
+	//     record an ignored delivery without creating an expensive run/task.
+	if !webhookEventAllowedByTriggerScope(trigRow.EventFilters, envelope) {
+		respBody := map[string]any{
+			"status":      "ignored",
+			"delivery_id": uuidToString(delivery.ID),
+			"reason":      "event_filtered",
+			"event":       envelope.Event,
+		}
+		h.finaliseDeliveryTerminal(r, delivery.ID, deliveryStatusIgnored, http.StatusOK, respBody, "event_filtered")
+		writeJSON(w, http.StatusOK, respBody)
+		return
+	}
+
+	// 12. Dispatch synchronously. DispatchAutopilot publishes WS events,
 	//     persists trigger_payload on autopilot_run, runs the admission
 	//     check (offline runtime → skipped), and bumps last_run_at.
 	run, err := h.AutopilotService.DispatchAutopilot(
@@ -553,7 +568,7 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 12. Bump last_fired_at after dispatch returns — including the skipped
+	// 13. Bump last_fired_at after dispatch returns — including the skipped
 	//     path — so paused early-returns above don't corrupt "last fired".
 	if err := h.Queries.TouchAutopilotTriggerFiredAt(r.Context(), trigRow.ID); err != nil {
 		slog.Warn("webhook: failed to touch last_fired_at",
@@ -562,7 +577,7 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		)
 	}
 
-	// 13. Persist the linkage delivery → run.
+	// 14. Persist the linkage delivery → run.
 	//
 	// The delivery row is always `dispatched` once we reach here: from the
 	// ingress's perspective we handed the payload off to the autopilot
@@ -591,6 +606,98 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 	h.finaliseDeliveryWithRun(r, delivery.ID, deliveryStatusDispatched, run.ID, http.StatusOK, respBody)
 
 	writeJSON(w, http.StatusOK, respBody)
+}
+
+// ── Event filter helpers ────────────────────────────────────────────────────
+
+// WebhookEventFilter declares one event and an optional list of actions.
+// A nil/empty Actions means "any action" for this event.
+type WebhookEventFilter struct {
+	Event   string   `json:"event"`
+	Actions []string `json:"actions,omitempty"`
+}
+
+// webhookEventAllowedByTriggerScope returns true when the trigger has no
+// filters (NULL / empty) or when the incoming envelope matches at least one
+// declared filter.
+func webhookEventAllowedByTriggerScope(eventFilters []byte, envelope WebhookEnvelope) bool {
+	if len(eventFilters) == 0 {
+		return true
+	}
+	var filters []WebhookEventFilter
+	if err := json.Unmarshal(eventFilters, &filters); err != nil {
+		// Malformed filter JSON is treated as "allow all" so a bad UI save
+		// doesn't silently brick the trigger.
+		slog.Warn("webhook: malformed event_filters, allowing all", "error", err)
+		return true
+	}
+	if len(filters) == 0 {
+		return true
+	}
+	_, eventName, eventAction := splitWebhookEvent(envelope.Event)
+	actionCandidates := webhookActionCandidates(eventAction, envelope.EventPayload)
+	for _, f := range filters {
+		if f.Event != eventName {
+			continue
+		}
+		if len(f.Actions) == 0 {
+			return true
+		}
+		for _, action := range actionCandidates {
+			for _, allowed := range f.Actions {
+				if action == allowed {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return false
+}
+
+// splitWebhookEvent splits a normalized event like "github.workflow_run.completed"
+// into (provider, eventName, action). For unqualified events it returns ("", event, "").
+func splitWebhookEvent(event string) (provider, name, action string) {
+	parts := strings.Split(event, ".")
+	if parts[0] == "github" {
+		if len(parts) >= 3 {
+			return parts[0], parts[1], strings.Join(parts[2:], ".")
+		}
+		if len(parts) == 2 {
+			return parts[0], parts[1], ""
+		}
+	}
+	if len(parts) >= 2 {
+		return "", parts[0], strings.Join(parts[1:], ".")
+	}
+	return "", event, ""
+}
+
+// webhookActionCandidates extracts possible action values from the event
+// action suffix and from well-known payload fields.
+func webhookActionCandidates(eventAction string, payload json.RawMessage) []string {
+	seen := map[string]struct{}{}
+	add := func(v string) {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return
+		}
+		seen[v] = struct{}{}
+	}
+	add(eventAction)
+	var obj map[string]any
+	if err := json.Unmarshal(payload, &obj); err == nil {
+		for _, key := range []string{"action", "state", "conclusion", "status"} {
+			if v, ok := obj[key].(string); ok {
+				add(v)
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for v := range seen {
+		out = append(out, v)
+	}
+	return out
 }
 
 // ── Persistence helpers ─────────────────────────────────────────────────────

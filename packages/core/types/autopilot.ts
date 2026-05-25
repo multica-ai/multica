@@ -41,6 +41,11 @@ export interface Autopilot {
   updated_at: string;
 }
 
+export interface WebhookEventFilter {
+  event: string;
+  actions?: string[];
+}
+
 export interface AutopilotTrigger {
   id: string;
   autopilot_id: string;
@@ -59,6 +64,9 @@ export interface AutopilotTrigger {
   // webhook_path when this is missing.
   webhook_url?: string | null;
   label: string | null;
+  // event_filters is only present for webhook triggers. Null/empty means
+  // "accept all events".
+  event_filters?: WebhookEventFilter[] | null;
   last_fired_at: string | null;
   created_at: string;
   updated_at: string;
@@ -110,6 +118,8 @@ export interface CreateAutopilotTriggerRequest {
   cron_expression?: string;
   timezone?: string;
   label?: string;
+  // event_filters is only meaningful for webhook triggers.
+  event_filters?: WebhookEventFilter[];
 }
 
 export interface UpdateAutopilotTriggerRequest {
@@ -117,6 +127,8 @@ export interface UpdateAutopilotTriggerRequest {
   cron_expression?: string;
   timezone?: string;
   label?: string;
+  // event_filters is only meaningful for webhook triggers.
+  event_filters?: WebhookEventFilter[] | null;
 }
 
 export interface ListAutopilotsResponse {

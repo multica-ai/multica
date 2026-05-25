@@ -78,6 +78,9 @@ type AutopilotTriggerResponse struct {
 	LastFiredAt       *string `json:"last_fired_at"`
 	CreatedAt         string  `json:"created_at"`
 	UpdatedAt         string  `json:"updated_at"`
+	// EventFilters is the raw JSON array of declared event scopes.
+	// Only present for webhook triggers; nil otherwise.
+	EventFilters []byte `json:"event_filters,omitempty"`
 }
 
 type AutopilotRunResponse struct {
@@ -156,6 +159,9 @@ func (h *Handler) triggerToResponse(t db.AutopilotTrigger) AutopilotTriggerRespo
 			resp.HasSigningSecret = true
 			hint := signingSecretHint(t.SigningSecret.String)
 			resp.SigningSecretHint = &hint
+		}
+		if len(t.EventFilters) > 0 {
+			resp.EventFilters = t.EventFilters
 		}
 	}
 	return resp
@@ -249,6 +255,9 @@ type CreateAutopilotTriggerRequest struct {
 	// Provider is currently only meaningful for kind=webhook. Allowed
 	// values: "generic" (default) or "github". Unset → "generic".
 	Provider *string `json:"provider"`
+	// EventFilters is an optional JSON array of {event, actions?} objects.
+	// Only meaningful for webhook triggers. NULL/empty means "accept all".
+	EventFilters []byte `json:"event_filters"`
 }
 
 // SetSigningSecretRequest is the body shape for PUT
@@ -269,6 +278,9 @@ type UpdateAutopilotTriggerRequest struct {
 	CronExpression *string `json:"cron_expression"`
 	Timezone       *string `json:"timezone"`
 	Label          *string `json:"label"`
+	// EventFilters is an optional JSON array of {event, actions?} objects.
+	// Only meaningful for webhook triggers. NULL/empty means "accept all".
+	EventFilters []byte `json:"event_filters"`
 }
 
 // ── Handlers ────────────────────────────────────────────────────────────────
@@ -698,7 +710,7 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		// entry (vanishingly unlikely with 256 bits but the retry keeps
 		// the failure mode obvious if RNG is degraded), we re-generate
 		// and re-INSERT — never UPDATE.
-		trigger, err := h.createWebhookTriggerWithMintedToken(r, ap.ID, ptrToText(req.Label), provider)
+		trigger, err := h.createWebhookTriggerWithMintedToken(r, ap.ID, ptrToText(req.Label), provider, req.EventFilters)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to create trigger")
 			return
@@ -750,6 +762,7 @@ func (h *Handler) createWebhookTriggerWithMintedToken(
 	autopilotID pgtype.UUID,
 	label pgtype.Text,
 	provider string,
+	eventFilters []byte,
 ) (db.AutopilotTrigger, error) {
 	for attempt := 0; attempt < 3; attempt++ {
 		token, err := generateWebhookToken()
@@ -763,6 +776,7 @@ func (h *Handler) createWebhookTriggerWithMintedToken(
 			Label:        label,
 			WebhookToken: pgtype.Text{String: token, Valid: true},
 			Provider:     pgtype.Text{String: provider, Valid: provider != ""},
+			EventFilters: eventFilters,
 		})
 		if err == nil {
 			return trigger, nil
@@ -914,6 +928,9 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	}
 	if req.Label != nil {
 		params.Label = pgtype.Text{String: *req.Label, Valid: true}
+	}
+	if len(req.EventFilters) > 0 {
+		params.EventFilters = req.EventFilters
 	}
 
 	// Recompute next_run_at if cron or timezone changed.

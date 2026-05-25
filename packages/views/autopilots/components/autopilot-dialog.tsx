@@ -66,8 +66,10 @@ import {
   type TriggerConfig,
   type TriggerFrequency,
 } from "./trigger-config";
+import { WebhookEventFilterSection } from "./webhook-event-filter-section";
 import { useT } from "../../i18n";
 import { formatSchedulePartialFailureToast } from "./autopilot-dialog-toast";
+import type { WebhookEventFilter } from "@multica/core/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -296,6 +298,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   })();
   const [triggerKind, setTriggerKind] = useState<"schedule" | "webhook">(initialKind);
 
+  const [eventFilters, setEventFilters] = useState<WebhookEventFilter[]>(
+    !isCreate && props.triggers[0]?.event_filters ? props.triggers[0].event_filters : [],
+  );
+
   const initialCronRef = useRef(toCronExpression(initialCfg));
   const initialTimezoneRef = useRef(initialCfg.timezone);
   const scheduleDirty =
@@ -364,6 +370,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             webhookTrigger = await createTrigger.mutateAsync({
               autopilotId: autopilot.id,
               kind: "webhook",
+              event_filters: eventFilters.length > 0 ? eventFilters : undefined,
             });
           } else {
             await createTrigger.mutateAsync({
@@ -612,7 +619,11 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                 }
               />
             ) : (
-              <WebhookHelpSection isCreate={isCreate} />
+              <WebhookSection
+                isCreate={isCreate}
+                eventFilters={eventFilters}
+                onEventFiltersChange={setEventFilters}
+              />
             )}
           </aside>
         </div>
@@ -1008,16 +1019,30 @@ function TriggerKindButton({
   );
 }
 
-function WebhookHelpSection({ isCreate }: { isCreate: boolean }) {
+function WebhookSection({
+  isCreate,
+  eventFilters,
+  onEventFiltersChange,
+}: {
+  isCreate: boolean;
+  eventFilters: WebhookEventFilter[];
+  onEventFiltersChange: (filters: WebhookEventFilter[]) => void;
+}) {
   const { t } = useT("autopilots");
   return (
-    <div>
-      <SectionLabel>{t(($) => $.dialog.section_webhook)}</SectionLabel>
-      <p className="rounded-md border bg-background px-3 py-2 text-xs text-muted-foreground leading-relaxed">
-        {isCreate
-          ? t(($) => $.dialog.webhook_help_create)
-          : t(($) => $.dialog.webhook_help_edit)}
-      </p>
+    <div className="space-y-3">
+      <div>
+        <SectionLabel>{t(($) => $.dialog.section_webhook)}</SectionLabel>
+        <p className="rounded-md border bg-background px-3 py-2 text-xs text-muted-foreground leading-relaxed">
+          {isCreate
+            ? t(($) => $.dialog.webhook_help_create)
+            : t(($) => $.dialog.webhook_help_edit)}
+        </p>
+      </div>
+      <WebhookEventFilterSection
+        filters={eventFilters}
+        onChange={onEventFiltersChange}
+      />
     </div>
   );
 }

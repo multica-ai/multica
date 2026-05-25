@@ -76,6 +76,110 @@ func createWebhookTriggerViaHandler(t *testing.T, autopilotID string) AutopilotT
 	return resp
 }
 
+func createWebhookTriggerWithFilters(t *testing.T, autopilotID string, filters []byte) AutopilotTriggerResponse {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots/"+autopilotID+"/triggers", map[string]any{
+		"kind": "webhook",
+		"event_filters": filters,
+	})
+	req = withURLParam(req, "id", autopilotID)
+	testHandler.CreateAutopilotTrigger(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilotTrigger: expected 201, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp AutopilotTriggerResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return resp
+}
+
+func TestWebhookHandler_FiltersUndeclaredEvent(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "WebhookFilter Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	filters, _ := json.Marshal([]WebhookEventFilter{
+		{Event: "workflow_run", Actions: []string{"completed"}},
+		{Event: "check_suite", Actions: []string{"completed"}},
+	})
+	trig := createWebhookTriggerWithFilters(t, apID, filters)
+
+	w := postWebhook(t, *trig.WebhookToken, map[string]any{
+		"action": "in_progress",
+		"workflow_run": map[string]any{"id": 123},
+	}, map[string]string{"X-GitHub-Event": "workflow_run"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["status"] != "ignored" || resp["reason"] != "event_filtered" {
+		t.Fatalf("expected ignored/event_filtered, got %#v body=%s", resp, w.Body.String())
+	}
+	if _, ok := resp["run_id"]; ok {
+		t.Fatalf("filtered response must not include run_id: %#v", resp)
+	}
+
+	runs, err := testHandler.Queries.ListAutopilotRuns(context.Background(), db.ListAutopilotRunsParams{
+		AutopilotID: parseUUID(apID),
+		Limit:       10,
+		Offset:      0,
+	})
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("filtered webhook should not create runs, got %d", len(runs))
+	}
+}
+
+func TestWebhookHandler_AllowsDeclaredEvent(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "WebhookAllow Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	filters, _ := json.Marshal([]WebhookEventFilter{
+		{Event: "workflow_run", Actions: []string{"completed"}},
+	})
+	trig := createWebhookTriggerWithFilters(t, apID, filters)
+
+	w := postWebhook(t, *trig.WebhookToken, map[string]any{
+		"action": "completed",
+		"workflow_run": map[string]any{"id": 123},
+	}, map[string]string{"X-GitHub-Event": "workflow_run"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["status"] != "accepted" && resp["status"] != "skipped" {
+		t.Fatalf("expected accepted or skipped, got %#v", resp)
+	}
+}
+
+func TestWebhookHandler_EmptyFiltersAllowsAll(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "WebhookEmptyFilter Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	w := postWebhook(t, *trig.WebhookToken, map[string]any{
+		"action": "in_progress",
+		"workflow_run": map[string]any{"id": 123},
+	}, map[string]string{"X-GitHub-Event": "workflow_run"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["status"] != "accepted" && resp["status"] != "skipped" {
+		t.Fatalf("expected accepted or skipped, got %#v", resp)
+	}
+}
+
 func postWebhook(t *testing.T, token string, body any, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	var buf bytes.Buffer
