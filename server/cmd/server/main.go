@@ -333,6 +333,7 @@ func main() {
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
 	go uploadCleanupHandler.RunAttachmentUploadCleanup(sweepCtx, 0)
+	go runUsageHourlyRollup(sweepCtx, pool)
 
 	if metricsServer != nil {
 		go func() {
