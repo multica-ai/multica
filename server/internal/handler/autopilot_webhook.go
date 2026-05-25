@@ -659,18 +659,27 @@ func webhookEventAllowedByTriggerScope(eventFilters []byte, envelope WebhookEnve
 // into (provider, eventName, action). For unqualified events it returns ("", event, "").
 func splitWebhookEvent(event string) (provider, name, action string) {
 	parts := strings.Split(event, ".")
-	if parts[0] == "github" {
+	if isKnownProvider(parts[0]) {
 		if len(parts) >= 3 {
 			return parts[0], parts[1], strings.Join(parts[2:], ".")
 		}
 		if len(parts) == 2 {
 			return parts[0], parts[1], ""
 		}
+		return parts[0], "", ""
 	}
 	if len(parts) >= 2 {
 		return "", parts[0], strings.Join(parts[1:], ".")
 	}
 	return "", event, ""
+}
+
+func isKnownProvider(prefix string) bool {
+	switch prefix {
+	case "github", "gitlab", "bitbucket", "gitea":
+		return true
+	}
+	return false
 }
 
 // webhookActionCandidates extracts possible action values from the event
