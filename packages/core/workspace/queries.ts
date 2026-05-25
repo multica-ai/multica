@@ -66,7 +66,8 @@ export function squadListOptions(wsId: string) {
 export function skillListOptions(wsId: string) {
   return queryOptions({
     queryKey: workspaceKeys.skills(wsId),
-    queryFn: () => api.listSkills(),
+    // CEREBRO-PATCH(skill-list-workspace-param): FIR-1094 keep /skill mention cache scoped to the active workspace.
+    queryFn: () => api.listSkills({ workspace_id: wsId }),
   });
 }
 

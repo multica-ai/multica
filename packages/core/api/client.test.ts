@@ -186,6 +186,22 @@ describe("ApiClient", () => {
     );
   });
 
+  it("passes workspace_id to skill list requests when provided", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.listSkills({ workspace_id: "ws-1" });
+
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://api.example.test/api/skills?workspace_id=ws-1");
+  });
+
   it("emits X-Client-* headers when identity is configured", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify([]), {

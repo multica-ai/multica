@@ -2339,8 +2339,12 @@ export class ApiClient {
   }
 
   // Skills
-  async listSkills(): Promise<SkillSummary[]> {
-    return this.fetch("/api/skills");
+  // CEREBRO-PATCH(skill-list-workspace-param): FIR-1094 pass workspace_id explicitly so /skill mention lookup does not depend on ambient route context.
+  async listSkills(params?: { workspace_id?: string }): Promise<SkillSummary[]> {
+    const search = new URLSearchParams();
+    if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
+    const query = search.toString();
+    return this.fetch(`/api/skills${query ? `?${query}` : ""}`);
   }
 
   async getSkill(id: string): Promise<Skill> {
