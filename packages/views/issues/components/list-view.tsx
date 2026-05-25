@@ -126,7 +126,7 @@ function StatusAccordionItem({
 
   return (
     <Accordion.Item value={status}>
-      <Accordion.Header className="group/header flex h-10 items-center rounded-lg bg-muted/40 transition-colors hover:bg-accent/30">
+      <Accordion.Header className="group/header sticky top-0 z-10 flex h-10 items-center rounded-lg bg-muted transition-colors hover:bg-accent/50">
         <div className="pl-3 flex items-center">
           <input
             type="checkbox"
