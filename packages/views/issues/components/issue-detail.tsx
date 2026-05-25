@@ -18,6 +18,7 @@ import {
   CircleCheck,
   Eraser,
   ExternalLink,
+  Link2,
   MoreHorizontal,
   PanelRight,
   Pin,
@@ -298,6 +299,11 @@ function formatActivity(
       });
     case "description_updated":
       return t(($) => $.activity.description_updated);
+    case "referenced_by": {
+      const identifier = details.source_issue_identifier ?? details.source_issue_id ?? "?";
+      const title = details.source_issue_title ?? "";
+      return title ? `referenced by ${identifier}: ${title}` : `referenced by ${identifier}`;
+    }
     case "task_completed":
       return t(($) => $.activity.task_completed, { count: entry.coalesced_count ?? 1 });
     case "task_failed":
@@ -605,6 +611,7 @@ function ActivityBlock({
   t: ActivityT;
   timeAgo: (dateStr: string) => string;
 }) {
+  const paths = useWorkspacePaths();
   if (!expanded) {
     const count = entries.length;
     return (
@@ -636,6 +643,7 @@ function ActivityBlock({
         const isPriorityChange = entry.action === "priority_changed";
         const isStartDateChange = entry.action === "start_date_changed";
         const isDueDateChange = entry.action === "due_date_changed";
+        const isReferencedBy = entry.action === "referenced_by";
 
         let leadIcon: React.ReactNode;
         if (isStatusChange && details.to) {
@@ -646,6 +654,8 @@ function ActivityBlock({
           leadIcon = <CalendarClock className="h-4 w-4 shrink-0 text-muted-foreground" />;
         } else if (isDueDateChange) {
           leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
+        } else if (isReferencedBy) {
+          leadIcon = <Link2 className="h-4 w-4 shrink-0 text-muted-foreground" />;
         } else {
           leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
         }
@@ -657,7 +667,20 @@ function ActivityBlock({
             </div>
             <div className="flex min-w-0 flex-1 items-center gap-1">
               <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
-              <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
+              {isReferencedBy ? (
+                <span className="truncate">
+                  {"referenced by "}
+                  <AppLink
+                    href={paths.issueDetail(details.source_issue_id ?? "")}
+                    className="font-medium text-foreground hover:underline"
+                  >
+                    {details.source_issue_identifier ?? details.source_issue_id ?? "?"}
+                  </AppLink>
+                  {details.source_issue_title ? `: ${details.source_issue_title}` : ""}
+                </span>
+              ) : (
+                <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
+              )}
               {(entry.coalesced_count ?? 1) > 1 &&
                 entry.action !== "task_completed" &&
                 entry.action !== "task_failed" && (
