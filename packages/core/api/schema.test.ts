@@ -93,11 +93,15 @@ describe("ApiClient schema fallback", () => {
     it("passes label filters through to the list endpoint", async () => {
       stubFetchJson({ issues: [], total: 0 });
       const client = new ApiClient("https://api.example.test");
-      await client.listIssues({ label_ids: ["lab-bug", "lab-feature"] });
+      await client.listIssues({
+        assignee_types: ["agent", "squad"],
+        label_ids: ["lab-bug", "lab-feature"],
+      });
 
       const fetchMock = vi.mocked(fetch);
       expect(fetchMock).toHaveBeenCalledOnce();
       const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
+      expect(url.searchParams.get("assignee_types")).toBe("agent,squad");
       expect(url.searchParams.get("label_ids")).toBe("lab-bug,lab-feature");
     });
   });

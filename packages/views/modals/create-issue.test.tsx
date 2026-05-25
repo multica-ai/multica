@@ -24,10 +24,12 @@ const mockCreateIssue = vi.hoisted(() => vi.fn());
 const mockSetDraft = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
+const mockCreateLabel = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
 const mockUploadWithToast = vi.hoisted(() => vi.fn());
+const mockUploadState = vi.hoisted(() => ({ uploading: false }));
 const mockProjects = vi.hoisted(() => ({
   list: [{ id: "proj-1", title: "Default Project" }],
 }));
@@ -87,6 +89,18 @@ vi.mock("@multica/core/projects/queries", () => ({
   }),
 }));
 
+vi.mock("@multica/core/labels", () => ({
+  labelListOptions: (wsId: string) => ({
+    queryKey: ["labels", wsId],
+    queryFn: () =>
+      Promise.resolve([
+        { id: "label-1", name: "bug", color: "#ef4444" },
+        { id: "label-2", name: "feature", color: "#22c55e" },
+      ]),
+  }),
+  useCreateLabel: () => ({ mutate: mockCreateLabel, isPending: false }),
+}));
+
 vi.mock("@multica/core/issues/stores/draft-store", () => ({
   useIssueDraftStore: Object.assign(
     (selector?: (state: typeof mockDraftStore) => unknown) =>
@@ -106,7 +120,17 @@ vi.mock("@multica/core/issues/mutations", () => ({
 }));
 
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
-  useFileUpload: () => ({ uploadWithToast: mockUploadWithToast }),
+  useFileUpload: (_api: unknown, onError?: (error: Error) => void) => ({
+    uploadWithToast: async (...args: unknown[]) => {
+      try {
+        return await mockUploadWithToast(...args);
+      } catch (err) {
+        onError?.(err instanceof Error ? err : new Error("Upload failed"));
+        return null;
+      }
+    },
+    uploading: mockUploadState.uploading,
+  }),
 }));
 
 // Hoisted ApiError class so both the vi.mock factory and the tests below
@@ -161,6 +185,7 @@ vi.mock("../editor", () => {
       },
       uploadFile: (file: File) => onUploadFile?.(file),
       uploadFiles: vi.fn(),
+      hasActiveUploads: () => false,
     }));
     return (
       <>
@@ -171,6 +196,10 @@ vi.mock("../editor", () => {
             valueRef.current = e.target.value;
             setValue(e.target.value);
             onUpdate?.(e.target.value);
+          }}
+          onPaste={(e) => {
+            const file = Array.from(e.clipboardData?.files ?? [])[0];
+            if (file) void onUploadFile?.(file);
           }}
         />
         {onUploadFile && (
@@ -211,7 +240,15 @@ vi.mock("../issues/components", () => ({
   StatusPicker: () => <div data-testid="status-picker" />,
   PriorityPicker: () => <div data-testid="priority-picker" />,
   AssigneePicker: () => <div data-testid="assignee-picker" />,
-  StartDatePicker: () => <div data-testid="start-date-picker" />,
+  // Surface open/onOpenChange so tests can assert progressive-disclosure
+  // behavior (mounted only when the user has opted in or has a value).
+  StartDatePicker: ({ open, onOpenChange }: { open?: boolean; onOpenChange?: (v: boolean) => void }) => (
+    <div
+      data-testid="start-date-picker"
+      data-open={open ? "true" : "false"}
+      onClick={() => onOpenChange?.(false)}
+    />
+  ),
   DueDatePicker: () => <div data-testid="due-date-picker" />,
 }));
 
@@ -249,6 +286,7 @@ vi.mock("@multica/ui/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
   TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
 vi.mock("@multica/ui/components/ui/button", () => ({
@@ -337,6 +375,11 @@ describe("CreateIssueModal", () => {
     mockSetKeepOpen.mockImplementation((v: boolean) => {
       mockQuickCreateStore.keepOpen = v;
     });
+    mockCreateLabel.mockImplementation(
+      (_data: { name: string; color: string }, opts?: { onSuccess?: (label: { id: string }) => void }) => {
+        opts?.onSuccess?.({ id: "label-new" });
+      },
+    );
     // Reset the shared draft mock so per-test assignee seeding (squad / agent)
     // doesn't leak into the next test in the suite.
     mockDraftStore.draft.assigneeType = undefined;
@@ -348,6 +391,7 @@ describe("CreateIssueModal", () => {
       status: "todo",
     });
     mockUploadWithToast.mockResolvedValue(null);
+    mockUploadState.uploading = false;
   });
 
   it("shows success feedback with a direct path to the new issue", async () => {
@@ -374,6 +418,7 @@ describe("CreateIssueModal", () => {
         attachment_ids: undefined,
         parent_issue_id: undefined,
         project_id: "proj-1",
+        label_ids: undefined,
       });
     });
 
@@ -422,6 +467,7 @@ describe("CreateIssueModal", () => {
         attachment_ids: undefined,
         parent_issue_id: undefined,
         project_id: "proj-1",
+        label_ids: undefined,
       });
     });
 
@@ -508,6 +554,99 @@ describe("CreateIssueModal", () => {
     expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({
       attachment_ids: undefined,
     }));
+  });
+
+  it("shows an upload error when the manual create attachment upload fails", async () => {
+    const user = userEvent.setup();
+    mockUploadWithToast.mockRejectedValue(new Error("upload failed"));
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Editor upload file" }));
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith("Attachment upload failed. Try again.");
+    });
+    expect(mockCreateIssue).not.toHaveBeenCalled();
+  });
+
+  it("shows an upload error when a pasted image upload fails", async () => {
+    mockUploadWithToast.mockRejectedValue(new Error("upload failed"));
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    fireEvent.paste(screen.getByPlaceholderText("Add description..."), {
+      clipboardData: {
+        files: [new File(["image"], "pasted-image.png", { type: "image/png" })],
+      },
+    });
+
+    await waitFor(() => {
+      expect(mockUploadWithToast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "pasted-image.png",
+          type: "image/png",
+        }),
+      );
+      expect(mockToastError).toHaveBeenCalledWith("Attachment upload failed. Try again.");
+    });
+    expect(mockCreateIssue).not.toHaveBeenCalled();
+  });
+
+  it("blocks manual create while an attachment upload is still running", async () => {
+    const user = userEvent.setup();
+    mockUploadState.uploading = true;
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Wait for upload");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    expect(mockCreateIssue).not.toHaveBeenCalled();
+    expect(mockToastError).toHaveBeenCalledWith("Please wait for uploads to finish…");
+  });
+
+  it("sends selected existing labels in create request", async () => {
+    const user = userEvent.setup();
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Issue with existing label");
+    await user.click(screen.getByLabelText("Select labels"));
+    await user.click(screen.getByRole("button", { name: /bug/i }));
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Issue with existing label",
+          label_ids: ["label-1"],
+        }),
+      );
+    });
+  });
+
+  it("supports creating a new label inline and attaches it on create", async () => {
+    const user = userEvent.setup();
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Issue with new label");
+    await user.click(screen.getByLabelText("Select labels"));
+    await user.type(screen.getByPlaceholderText("Search or type a new label"), "critical");
+    await user.click(screen.getByRole("button", { name: /Create label "critical"/i }));
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "critical" }),
+        expect.any(Object),
+      );
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Issue with new label",
+          label_ids: ["label-new"],
+        }),
+      );
+    });
   });
 
   // Manual → agent must forward the picked project so the new modal pins to
@@ -628,6 +767,27 @@ describe("CreateIssueModal", () => {
         project_id: "proj-1",
       }),
     );
+  });
+
+  // Start date is a low-frequency field — by default it lives behind the
+  // ⋯ overflow menu and is not rendered inline. Clicking the overflow
+  // entry opens it (and mounts the inline pill so the popover has an
+  // anchor); closing without picking returns it to the menu-only state.
+  it("hides start date behind the overflow menu and reveals it on demand", async () => {
+    const user = userEvent.setup();
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.queryByTestId("start-date-picker")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Set start date/i }));
+
+    const picker = await screen.findByTestId("start-date-picker");
+    expect(picker).toHaveAttribute("data-open", "true");
+
+    await user.click(picker);
+
+    expect(screen.queryByTestId("start-date-picker")).not.toBeInTheDocument();
   });
 
   // Title + description are packed into the agent prompt on switch; if we

@@ -4,7 +4,8 @@
  * HtmlBlockPreview — readonly rendering of fenced ```html code blocks.
  *
  * Default view is "preview" (iframe) per the V2 plan; user can flip to
- * "source" to see the highlighted markup and Copy it.
+ * "source" to see the highlighted markup and Copy it. Maximize opens the
+ * same iframe in a full-screen Dialog.
  *
  * Mounted by ReadonlyContent's `code` renderer for `lang === "html"`. The
  * `pre` renderer in ReadonlyContent recognizes this component by reference
@@ -16,13 +17,29 @@
  */
 
 import { useState } from "react";
-import { Check, Code as CodeIcon, Copy, Eye } from "lucide-react";
+import {
+  Check,
+  Code as CodeIcon,
+  Copy,
+  Download,
+  ExternalLink,
+  Eye,
+  Maximize2,
+} from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { useT } from "../i18n";
-import { CodeBlockIframe } from "./code-block-iframe";
+import { useNavigation } from "../navigation";
+import { HtmlPreviewBody } from "./html-preview-body";
 import { CodeBlockStatic } from "./code-block-static";
+import {
+  HtmlArtifactPreviewModal,
+  downloadHtmlArtifact,
+  storeHtmlArtifactPreview,
+} from "./html-artifact-preview";
 
 const CODE_BLOCK_IFRAME_HEIGHT = "h-[480px]";
+const HTML_ARTIFACT_FILENAME = "html-artifact.html";
 
 // Label shown in the code-block header. Not a translatable string — it's a
 // language identifier (matches the `lang === "html"` token below).
@@ -35,8 +52,12 @@ interface HtmlBlockPreviewProps {
 
 export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
   const { t } = useT("editor");
+  const slug = useWorkspaceSlug();
+  const navigation = useNavigation();
   const [view, setView] = useState<"preview" | "source">("preview");
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [_fullscreen, setFullscreen] = useState(false);
 
   const handleCopy = async () => {
     if (!html) return;
@@ -52,6 +73,23 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
 
   const toggleView = () =>
     setView((v) => (v === "preview" ? "source" : "preview"));
+
+  const handleOpenInNewTab = () => {
+    if (!slug || !html) return;
+    const key = storeHtmlArtifactPreview(html, HTML_ARTIFACT_FILENAME);
+    if (!key) return;
+    const path = paths.workspace(slug).htmlArtifactPreview(key);
+    if (navigation.openInNewTab) {
+      navigation.openInNewTab(path, HTML_ARTIFACT_FILENAME, { activate: true });
+      return;
+    }
+    const url = navigation.getShareableUrl(path);
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const handleDownload = () => {
+    downloadHtmlArtifact(html, HTML_ARTIFACT_FILENAME);
+  };
 
   return (
     <div className={cn("code-block-wrapper group/code relative my-2", className)}>
@@ -80,6 +118,46 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
             <Eye className="h-3.5 w-3.5" />
           )}
         </button>
+        {view === "preview" && (
+          <button
+            type="button"
+            onClick={() => setFullscreen(true)}
+            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            title={t(($) => $.code_block.fullscreen)}
+            aria-label={t(($) => $.code_block.fullscreen)}
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => setPreviewOpen(true)}
+          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          title={t(($) => $.attachment.preview)}
+          aria-label={t(($) => $.attachment.preview)}
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+        </button>
+        {slug && (
+          <button
+            type="button"
+            onClick={handleOpenInNewTab}
+            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            title={t(($) => $.attachment.open_in_new_tab)}
+            aria-label={t(($) => $.attachment.open_in_new_tab)}
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={handleDownload}
+          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          title={t(($) => $.image.download)}
+          aria-label={t(($) => $.image.download)}
+        >
+          <Download className="h-3.5 w-3.5" />
+        </button>
         <button
           type="button"
           onClick={handleCopy}
@@ -95,14 +173,23 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
         </button>
       </div>
       {view === "preview" ? (
-        <CodeBlockIframe
-          html={html}
+        <HtmlPreviewBody
+          source={{ kind: "inline", html }}
           title="HTML preview"
-          heightClassName={CODE_BLOCK_IFRAME_HEIGHT}
+          className={CODE_BLOCK_IFRAME_HEIGHT}
         />
       ) : (
         <CodeBlockStatic language="xml" body={html} />
       )}
+      <HtmlArtifactPreviewModal
+        html={html}
+        filename={HTML_ARTIFACT_FILENAME}
+        open={previewOpen}
+        canOpenInNewTab={!!slug}
+        onClose={() => setPreviewOpen(false)}
+        onOpenInNewTab={handleOpenInNewTab}
+        onDownload={handleDownload}
+      />
     </div>
   );
 }

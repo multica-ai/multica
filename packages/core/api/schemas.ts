@@ -12,6 +12,7 @@ import type {
   User,
   WebhookDelivery,
 } from "../types";
+import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 
 // ---------------------------------------------------------------------------
 // Schemas for the highest-risk API endpoints — those whose responses drive
@@ -137,6 +138,11 @@ export const CommentSchema = z.object({
 
 export const CommentsListSchema = z.array(CommentSchema);
 
+// Metadata is primitive-only by API/DB contract. Stay lenient on shape:
+// unknown keys land as `unknown` to a caller, but the field itself defaults
+// to {} so consumers never need to nil-guard `issue.metadata`.
+const IssueMetadataSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({});
+
 const IssueSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
@@ -155,6 +161,7 @@ const IssueSchema = z.object({
   position: z.number(),
   start_date: z.string().nullable(),
   due_date: z.string().nullable(),
+  metadata: IssueMetadataSchema,
   reactions: z.array(z.unknown()).optional(),
   labels: z.array(z.unknown()).optional(),
   created_at: z.string(),
@@ -201,16 +208,41 @@ export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
 }).passthrough();
 
-export const OnboardingRuntimeBootstrapResponseSchema = z.object({
-  workspace_id: z.string(),
-  agent_id: z.string(),
-  issue_id: z.string(),
+export const CloudRuntimeNodeSchema = z.object({
+  id: z.string(),
+  owner_id: z.string(),
+  instance_id: z.string(),
+  region: z.string(),
+  instance_type: z.string(),
+  image_id: z.string(),
+  subnet_id: z.string(),
+  name: z.string(),
+  status: z.string(),
+  tags: z.record(z.string(), z.string()).default({}),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  created_at: z.string(),
+  updated_at: z.string(),
 }).loose();
 
-export const OnboardingNoRuntimeBootstrapResponseSchema = z.object({
-  workspace_id: z.string(),
-  issue_id: z.string(),
-}).loose();
+export const CloudRuntimeNodeListSchema = z.array(CloudRuntimeNodeSchema);
+
+export const EMPTY_CLOUD_RUNTIME_NODE_LIST: CloudRuntimeNode[] = [];
+
+export const EMPTY_CLOUD_RUNTIME_NODE: CloudRuntimeNode = {
+  id: "",
+  owner_id: "",
+  instance_id: "",
+  region: "",
+  instance_type: "",
+  image_id: "",
+  subnet_id: "",
+  name: "",
+  status: "",
+  tags: {},
+  metadata: {},
+  created_at: "",
+  updated_at: "",
+};
 
 // ---------------------------------------------------------------------------
 // Workspace dashboard schemas
@@ -218,13 +250,14 @@ export const OnboardingNoRuntimeBootstrapResponseSchema = z.object({
 // The dashboard hits three independent rollup endpoints. Each returns a flat
 // array, and every field is consumed by chart / KPI math — a missing number
 // silently degrades to NaN downstream, so we coerce missing numbers to 0.
-// String fields stay lenient (no enum narrowing) to survive future model /
-// agent ID drift.
+// String fields default to "" (no enum narrowing) to survive future model /
+// agent ID drift, and so a single null from tz-aware SQL bucketing fails
+// only that row instead of dropping the whole array to the `[]` fallback.
 // ---------------------------------------------------------------------------
 
 const DashboardUsageDailySchema = z.object({
-  date: z.string(),
-  model: z.string(),
+  date: z.string().default(""),
+  model: z.string().default(""),
   input_tokens: z.number().default(0),
   output_tokens: z.number().default(0),
   cache_read_tokens: z.number().default(0),
@@ -235,8 +268,8 @@ const DashboardUsageDailySchema = z.object({
 export const DashboardUsageDailyListSchema = z.array(DashboardUsageDailySchema);
 
 const DashboardUsageByAgentSchema = z.object({
-  agent_id: z.string(),
-  model: z.string(),
+  agent_id: z.string().default(""),
+  model: z.string().default(""),
   input_tokens: z.number().default(0),
   output_tokens: z.number().default(0),
   cache_read_tokens: z.number().default(0),
@@ -277,7 +310,7 @@ export const DashboardLocalRunTimeByRunnerListSchema = z.array(
 );
 
 const DashboardAgentRunTimeSchema = z.object({
-  agent_id: z.string(),
+  agent_id: z.string().default(""),
   total_seconds: z.number().default(0),
   task_count: z.number().default(0),
   failed_count: z.number().default(0),
@@ -286,13 +319,229 @@ const DashboardAgentRunTimeSchema = z.object({
 export const DashboardAgentRunTimeListSchema = z.array(DashboardAgentRunTimeSchema);
 
 const DashboardRunTimeDailySchema = z.object({
-  date: z.string(),
+  date: z.string().default(""),
   total_seconds: z.number().default(0),
   task_count: z.number().default(0),
   failed_count: z.number().default(0),
 }).loose();
 
 export const DashboardRunTimeDailyListSchema = z.array(DashboardRunTimeDailySchema);
+
+const AgentRunDashboardSummarySchema = z.object({
+  total_runs: z.number().default(0),
+  successful_runs: z.number().default(0),
+  failed_runs: z.number().default(0),
+  success_rate: z.number().default(0),
+  active_agent_count: z.number().default(0),
+  average_duration_seconds: z.number().default(0),
+}).passthrough();
+
+const AgentRunDashboardDailySchema = z.object({
+  date: z.string(),
+  total_runs: z.number().default(0),
+  successful_runs: z.number().default(0),
+  failed_runs: z.number().default(0),
+  success_rate: z.number().default(0),
+}).passthrough();
+
+const AgentRunDashboardHeatmapCellSchema = z.object({
+  weekday: z.number().default(0),
+  hour: z.number().default(0),
+  run_count: z.number().default(0),
+}).passthrough();
+
+const AgentRunDashboardFailureReasonSchema = z.object({
+  reason: z.string().default("agent_error"),
+  count: z.number().default(0),
+}).passthrough();
+
+const AgentRunDashboardAgentSchema = z.object({
+  agent_id: z.string(),
+  agent_name: z.string().default(""),
+  agent_status: z.string().default("idle"),
+  total_runs: z.number().default(0),
+  successful_runs: z.number().default(0),
+  failed_runs: z.number().default(0),
+  success_rate: z.number().default(0),
+  average_duration_seconds: z.number().default(0),
+  last_run_at: z.string().nullable().default(null),
+  last_task_id: z.string().nullable().default(null),
+  last_status: z.string().nullable().default(null),
+  project_id: z.string().nullable().default(null),
+  project_title: z.string().nullable().default(null),
+  project_count: z.number().default(0),
+  available_actions: z.array(z.string()).default([]),
+}).passthrough();
+
+const AgentRunDashboardRunSchema = z.object({
+  id: z.string(),
+  agent_id: z.string(),
+  agent_name: z.string().default(""),
+  issue_id: z.string().nullable().default(null),
+  issue_title: z.string().nullable().default(null),
+  issue_number: z.number().nullable().default(null),
+  project_id: z.string().nullable().default(null),
+  project_title: z.string().nullable().default(null),
+  status: z.string().default("queued"),
+  run_at: z.string().default(""),
+  started_at: z.string().nullable().default(null),
+  completed_at: z.string().nullable().default(null),
+  duration_seconds: z.number().default(0),
+  failure_reason: z.string().default(""),
+  error: z.string().nullable().default(null),
+  attempt: z.number().default(1),
+  max_attempts: z.number().default(1),
+}).passthrough();
+
+const AgentRunDashboardRetryDistributionSchema = z.object({
+  attempt: z.number().default(1),
+  count: z.number().default(0),
+}).passthrough();
+
+export const EMPTY_AGENT_RUN_DASHBOARD = {
+  summary: {
+    total_runs: 0,
+    successful_runs: 0,
+    failed_runs: 0,
+    success_rate: 0,
+    active_agent_count: 0,
+    average_duration_seconds: 0,
+  },
+  daily: [],
+  heatmap: [],
+  failure_reasons: [],
+  agents: [],
+  recent_runs: [],
+  recent_failures: [],
+  retry_distribution: [],
+};
+
+export const AgentRunDashboardSchema = z.object({
+  summary: AgentRunDashboardSummarySchema.default(
+    EMPTY_AGENT_RUN_DASHBOARD.summary,
+  ),
+  daily: z.array(AgentRunDashboardDailySchema).default([]),
+  heatmap: z.array(AgentRunDashboardHeatmapCellSchema).default([]),
+  failure_reasons: z.array(AgentRunDashboardFailureReasonSchema).default([]),
+  agents: z.array(AgentRunDashboardAgentSchema).default([]),
+  recent_runs: z.array(AgentRunDashboardRunSchema).default([]),
+  recent_failures: z.array(AgentRunDashboardRunSchema).default([]),
+  retry_distribution: z.array(AgentRunDashboardRetryDistributionSchema).default([]),
+}).passthrough();
+
+const AgentRunTimelineEventSchema = z.object({
+  key: z.string().default("event"),
+  label: z.string().default("Event"),
+  timestamp: z.string().default(""),
+}).passthrough();
+
+const AgentRunDurationBreakdownSchema = z.object({
+  total_seconds: z.number().default(0),
+  llm_seconds: z.number().default(0),
+  tool_call_seconds: z.number().default(0),
+  network_wait_seconds: z.number().default(0),
+}).passthrough();
+
+const AgentRunMessageSchema = z.object({
+  seq: z.number().default(0),
+  type: z.string().default("text"),
+  tool: z.string().optional(),
+  content: z.string().optional(),
+  input: z.record(z.string(), z.unknown()).optional(),
+  output: z.string().optional(),
+  created_at: z.string().default(""),
+}).passthrough();
+
+export const EMPTY_AGENT_RUN_DETAIL = {
+  run: {
+    id: "",
+    agent_id: "",
+    agent_name: "",
+    issue_id: null,
+    issue_title: null,
+    issue_number: null,
+    project_id: null,
+    project_title: null,
+    status: "queued",
+    run_at: "",
+    started_at: null,
+    completed_at: null,
+    duration_seconds: 0,
+    failure_reason: "",
+    error: null,
+    attempt: 1,
+    max_attempts: 1,
+  },
+  timeline: [],
+  duration_breakdown: {
+    total_seconds: 0,
+    llm_seconds: 0,
+    tool_call_seconds: 0,
+    network_wait_seconds: 0,
+  },
+  messages: [],
+};
+
+export const AgentRunDashboardRunDetailSchema = z.object({
+  run: AgentRunDashboardRunSchema.default(EMPTY_AGENT_RUN_DETAIL.run),
+  timeline: z.array(AgentRunTimelineEventSchema).default([]),
+  duration_breakdown: AgentRunDurationBreakdownSchema.default(
+    EMPTY_AGENT_RUN_DETAIL.duration_breakdown,
+  ),
+  messages: z.array(AgentRunMessageSchema).default([]),
+  result: z.unknown().optional(),
+}).passthrough();
+
+// ---------------------------------------------------------------------------
+// Runtime usage schemas — the runtime-detail page's four usage endpoints
+// (`/api/runtimes/:id/usage*`). Same leniency rules as the dashboard
+// schemas above: numbers default to 0, strings to "", `.loose()` passes
+// unknown fields.
+// ---------------------------------------------------------------------------
+
+const RuntimeUsageSchema = z.object({
+  runtime_id: z.string().default(""),
+  date: z.string().default(""),
+  provider: z.string().default(""),
+  model: z.string().default(""),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+}).loose();
+
+export const RuntimeUsageListSchema = z.array(RuntimeUsageSchema);
+
+const RuntimeHourlyActivitySchema = z.object({
+  hour: z.number().default(0),
+  count: z.number().default(0),
+}).loose();
+
+export const RuntimeHourlyActivityListSchema = z.array(RuntimeHourlyActivitySchema);
+
+const RuntimeUsageByAgentSchema = z.object({
+  agent_id: z.string().default(""),
+  model: z.string().default(""),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+  task_count: z.number().default(0),
+}).loose();
+
+export const RuntimeUsageByAgentListSchema = z.array(RuntimeUsageByAgentSchema);
+
+const RuntimeUsageByHourSchema = z.object({
+  hour: z.number().default(0),
+  model: z.string().default(""),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+  task_count: z.number().default(0),
+}).loose();
+
+export const RuntimeUsageByHourListSchema = z.array(RuntimeUsageByHourSchema);
 
 // ---------------------------------------------------------------------------
 // Agent template catalog — `/api/agent-templates*` and the
@@ -538,6 +787,7 @@ export const UserSchema = z.object({
   starter_content_state: z.string().nullable().default(null),
   language: z.string().nullable().default(null),
   profile_description: z.string().default(""),
+  timezone: z.string().nullable().default(null),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();
@@ -552,6 +802,7 @@ export const EMPTY_USER: User = {
   starter_content_state: null,
   language: null,
   profile_description: "",
+  timezone: null,
   created_at: "",
   updated_at: "",
 };

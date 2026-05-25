@@ -1,0 +1,77 @@
+{
+  "title": "智能体运行",
+  "subtitle": "查看工作区内智能体执行的健康度、运行量、失败分布和最近 run 详情。",
+  "filter": {
+    "all_agents": "全部智能体",
+    "agent_count": "{{count}} 个智能体",
+    "mine": "我的",
+    "all_owners": "全部成员",
+    "selected_owner": "已选成员",
+    "to": "至"
+  },
+  "kpi": {
+    "total_runs": "近 {{days}} 天 run 数",
+    "success_rate": "成功率",
+    "success_hint": "{{success}} 个完成 / {{failed}} 个失败",
+    "active_agents": "活跃智能体",
+    "avg_duration": "平均耗时"
+  },
+  "charts": {
+    "run_trend": "运行趋势",
+    "success_trend": "成功率趋势",
+    "heatmap": "时段热力图",
+    "failure_reasons": "失败原因",
+    "workday_weekend": "工作日与周末",
+    "retry_distribution": "重试分布",
+    "no_data": "暂无数据"
+  },
+  "weekday": {
+    "sun": "周日",
+    "mon": "周一",
+    "tue": "周二",
+    "wed": "周三",
+    "thu": "周四",
+    "fri": "周五",
+    "sat": "周六"
+  },
+  "agents": {
+    "title": "智能体明细",
+    "count": "{{count}} 个智能体",
+    "agent": "智能体",
+    "project": "项目",
+    "runs": "Run 数",
+    "success": "成功率",
+    "duration": "平均耗时",
+    "last_run": "最后运行",
+    "status": "状态",
+    "actions": "操作",
+    "view_run": "查看最近 run",
+    "page": "第 {{page}} / {{total}} 页",
+    "prev": "上一页",
+    "next": "下一页"
+  },
+  "failures": {
+    "title": "最近失败",
+    "empty": "当前范围内没有失败 run"
+  },
+  "recent": {
+    "title": "最近 run",
+    "empty": "当前范围内没有最近 run"
+  },
+  "detail": {
+    "title": "Run 详情",
+    "loading": "正在加载 run 详情",
+    "timeline": "时间线",
+    "breakdown": "耗时拆解",
+    "error": "错误堆栈",
+    "messages": "Task 消息",
+    "no_messages": "暂无 task 消息",
+    "llm": "LLM 推理",
+    "tools": "工具调用",
+    "network": "网络等待"
+  },
+  "empty": {
+    "title": "暂无智能体运行",
+    "body": "当前筛选条件下没有匹配的 run。"
+  }
+}

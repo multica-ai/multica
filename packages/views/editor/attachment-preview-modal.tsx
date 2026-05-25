@@ -56,7 +56,8 @@ import {
 } from "./utils/preview";
 import { useDownloadAttachment } from "./use-download-attachment";
 import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
-import { withFragmentNavShim } from "./utils/iframe-fragment-nav";
+import { useAttachmentPreviewURL } from "./hooks/use-attachment-preview-url";
+import { HtmlPreviewBody } from "./html-preview-body";
 import { CodeBlockStatic } from "./code-block-static";
 
 // ---------------------------------------------------------------------------
@@ -348,37 +349,53 @@ function PreviewContent({
   switch (kind) {
     case "image":
       return (
-        <div className="flex h-full w-full items-center justify-center bg-black/40 p-4">
-          <img
-            src={state.mediaUrl}
-            alt={state.filename}
-            className="h-full w-full rounded-lg object-contain"
-          />
-        </div>
+        <MediaPreview attachmentId={state.attachmentId} fallbackUrl={state.mediaUrl} onDownload={onDownload}>
+          {(url) => (
+            <div className="flex h-full w-full items-center justify-center bg-black/40 p-4">
+              <img
+                src={url}
+                alt={state.filename}
+                className="h-full w-full rounded-lg object-contain"
+              />
+            </div>
+          )}
+        </MediaPreview>
       );
     case "pdf":
       return (
-        <iframe
-          src={state.mediaUrl}
-          className="h-full w-full bg-background"
-          title={state.filename}
-        />
+        <MediaPreview attachmentId={state.attachmentId} fallbackUrl={state.mediaUrl} onDownload={onDownload}>
+          {(url) => (
+            <iframe
+              src={url}
+              className="h-full w-full bg-background"
+              title={state.filename}
+            />
+          )}
+        </MediaPreview>
       );
     case "video":
       return (
-        <div className="flex h-full w-full items-center justify-center bg-black">
-          <video
-            src={state.mediaUrl}
-            controls
-            className="h-full w-full object-contain"
-          />
-        </div>
+        <MediaPreview attachmentId={state.attachmentId} fallbackUrl={state.mediaUrl} onDownload={onDownload}>
+          {(url) => (
+            <div className="flex h-full w-full items-center justify-center bg-black">
+              <video
+                src={url}
+                controls
+                className="h-full w-full object-contain"
+              />
+            </div>
+          )}
+        </MediaPreview>
       );
     case "audio":
       return (
-        <div className="flex h-full w-full items-center justify-center p-8">
-          <audio src={state.mediaUrl} controls className="w-full max-w-xl" />
-        </div>
+        <MediaPreview attachmentId={state.attachmentId} fallbackUrl={state.mediaUrl} onDownload={onDownload}>
+          {(url) => (
+            <div className="flex h-full w-full items-center justify-center p-8">
+              <audio src={url} controls className="w-full max-w-xl" />
+            </div>
+          )}
+        </MediaPreview>
       );
     case "markdown":
       return (
@@ -400,16 +417,11 @@ function PreviewContent({
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
           render={(text) => (
-            <iframe
-              srcDoc={withFragmentNavShim(text)}
-              // `allow-scripts` without `allow-same-origin` — scripts run
-              // in an opaque origin and cannot read cookies / localStorage
-              // / parent state, nor escape via top-nav / popups / forms.
-              // Required so JS-driven charts (echarts / Plotly / vanilla
-              // SVG injection) render instead of showing a blank `<svg>`.
-              sandbox="allow-scripts"
-              className="h-full w-full bg-background"
+            <HtmlPreviewBody
+              source={{ kind: "inline", html: text }}
               title={state.filename}
+              className="h-full w-full"
+              iframeClassName="rounded-none border-0"
             />
           )}
         />
@@ -485,6 +497,47 @@ function TextBackedPreview({
   }
   if (!query.data) return null;
   return <>{render(query.data.text)}</>;
+}
+
+// ---------------------------------------------------------------------------
+// Media preview — fetches presigned URL on demand, then renders via children
+// ---------------------------------------------------------------------------
+
+function MediaPreview({
+  attachmentId,
+  fallbackUrl,
+  onDownload,
+  children,
+}: {
+  attachmentId: string | null;
+  fallbackUrl: string;
+  onDownload: () => void;
+  children: (url: string) => ReactNode;
+}) {
+  const { t } = useT("editor");
+  const query = useAttachmentPreviewURL(attachmentId);
+
+  if (!attachmentId) {
+    return <>{children(fallbackUrl)}</>;
+  }
+
+  if (query.isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="size-4 animate-spin" />
+        {t(($) => $.attachment.preview_loading)}
+      </div>
+    );
+  }
+  if (query.error || !query.data?.url) {
+    return (
+      <UnsupportedFallback
+        message={t(($) => $.attachment.preview_failed)}
+        onDownload={onDownload}
+      />
+    );
+  }
+  return <>{children(query.data.url)}</>;
 }
 
 // ---------------------------------------------------------------------------

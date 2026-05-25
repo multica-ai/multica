@@ -82,6 +82,19 @@ func (s *LocalStorage) KeyFromURL(rawURL string) string {
 	return rawURL
 }
 
+func (s *LocalStorage) HandlesURL(rawURL string) bool {
+	if rawURL == "" {
+		return false
+	}
+	if strings.HasPrefix(rawURL, "/uploads/") {
+		return true
+	}
+	if s.baseURL != "" && strings.HasPrefix(rawURL, s.baseURL+"/uploads/") {
+		return true
+	}
+	return false
+}
+
 // GetReader opens the underlying file for streaming. Refuses keys that
 // resolve outside uploadDir (defense against a stored key with traversal
 // components) and refuses the sidecar suffix so /content can't be coaxed
@@ -185,12 +198,11 @@ func (s *LocalStorage) ServeFile(w http.ResponseWriter, r *http.Request, filenam
 	// chose. Uploads from before the sidecar landed have no .meta.json on
 	// disk and fall through to the existing behavior.
 	if meta, ok := readLocalMeta(filePath); ok && meta.Filename != "" {
-		safe := sanitizeFilename(meta.Filename)
 		disposition := "attachment"
 		if isInlineContentType(meta.ContentType) {
 			disposition = "inline"
 		}
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`%s; filename="%s"`, disposition, safe))
+		w.Header().Set("Content-Disposition", contentDisposition(disposition, meta.Filename))
 	}
 
 	// Use http.ServeFile which has built-in path traversal protection

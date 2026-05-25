@@ -164,13 +164,9 @@ type DaemonRegisterRequest struct {
 	// Timezone is the daemon host's IANA timezone (e.g. "Asia/Shanghai"),
 	// detected client-side from time.Local. The server stores it on each
 	// agent_runtime row created for this daemon so token-usage rollups
-	// bucket by the operator's local calendar day instead of UTC. Empty
-	// or invalid values fall back to "UTC". The value is set ONLY on
-	// first-time registration; once a user overrides the tz via the web
-	// UI, the upsert query preserves that override on subsequent
-	// daemon reconnects (see UpsertAgentRuntime in runtime.sql).
+	// bucket by the operator's local calendar day instead of UTC.
 	Timezone   string `json:"timezone"`
-	HealthPort int    `json:"health_port"` // local daemon health/trace port
+	HealthPort int    `json:"health_port"`
 	Runtimes   []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
@@ -184,24 +180,6 @@ type daemonWorkspaceReposResponse struct {
 	Repos        []RepoData      `json:"repos"`
 	ReposVersion string          `json:"repos_version"`
 	Settings     json.RawMessage `json:"settings,omitempty"`
-}
-
-// normalizeRuntimeTimezone validates and normalizes the IANA timezone string
-// reported by a daemon during registration. The stored column is NOT NULL with
-// a 'UTC' default so any unparseable, blank, or trivially-invalid value is
-// quietly downgraded to "UTC" rather than rejected: a misconfigured daemon
-// host shouldn't take down registration just because its tz string is junk.
-// Real validation happens on the user-driven PATCH path where we surface the
-// error.
-func normalizeRuntimeTimezone(tz string) string {
-	tz = strings.TrimSpace(tz)
-	if tz == "" {
-		return "UTC"
-	}
-	if _, err := time.LoadLocation(tz); err != nil {
-		return "UTC"
-	}
-	return tz
 }
 
 func normalizeWorkspaceRepos(repos []RepoData) []RepoData {
@@ -357,7 +335,6 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			DeviceInfo:  deviceInfo,
 			Metadata:    metadata,
 			OwnerID:     ownerID,
-			Timezone:    normalizeRuntimeTimezone(req.Timezone),
 		})
 		if err != nil {
 			h.Analytics.Capture(analytics.RuntimeFailed(
@@ -388,7 +365,6 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt:      row.UpdatedAt,
 			OwnerID:        row.OwnerID,
 			LegacyDaemonID: row.LegacyDaemonID,
-			Timezone:       row.Timezone,
 		}
 
 		// Inserted is false for normal daemon reconnects/upserts, so
@@ -1200,24 +1176,24 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			Model:         agent.Model.String,
 			ThinkingLevel: agent.ThinkingLevel.String,
 			RuntimeConfig: agent.RuntimeConfig,
-	}
-
-	// Resolve the runtime owner's profile description so the daemon can
-	// inject "## Requesting User" into the brief. Empty fields short-circuit
-	// the heading entirely on the daemon side; cloud / system runtimes with
-	// no owner stay anonymous. Failure here must not block claim — the agent
-	// can still run without the user-context section.
-	if runtime.OwnerID.Valid {
-		if owner, err := h.Queries.GetUser(r.Context(), runtime.OwnerID); err == nil {
-			resp.RequestingUserName = owner.Name
-			resp.RequestingUserProfileDescription = owner.ProfileDescription
-		} else {
-			slog.Debug("failed to load runtime owner for brief injection",
-				"runtime_id", runtimeID,
-				"owner_id", uuidToString(runtime.OwnerID),
-				"error", err,
-			)
 		}
+
+		// Resolve the runtime owner's profile description so the daemon can
+		// inject "## Requesting User" into the brief. Empty fields short-circuit
+		// the heading entirely on the daemon side; cloud / system runtimes with
+		// no owner stay anonymous. Failure here must not block claim — the agent
+		// can still run without the user-context section.
+		if runtime.OwnerID.Valid {
+			if owner, err := h.Queries.GetUser(r.Context(), runtime.OwnerID); err == nil {
+				resp.RequestingUserName = owner.Name
+				resp.RequestingUserProfileDescription = owner.ProfileDescription
+			} else {
+				slog.Debug("failed to load runtime owner for brief injection",
+					"runtime_id", runtimeID,
+					"owner_id", uuidToString(runtime.OwnerID),
+					"error", err,
+				)
+			}
 		}
 	}
 
@@ -1232,31 +1208,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 
-			// Squad-leader briefing injection: when the issue is assigned
-			// to a squad and the claiming agent is that squad's current
-			// leader, append a full briefing (Operating Protocol + Roster
-			// + user Instructions) to the agent's own Instructions. We
-			// append (not replace) so per-agent instructions remain
-			// authoritative for general behavior; the squad briefing
-			// stacks on top as task-specific squad context.
-			if resp.Agent != nil && issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid {
-				if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
-					ID:          issue.AssigneeID,
-					WorkspaceID: issue.WorkspaceID,
-				}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
-					if strings.TrimSpace(resp.Agent.Instructions) == "" {
-						resp.Agent.Instructions = briefing
-					} else {
-						resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
-					}
-					slog.Debug("injected squad leader briefing",
-						"squad_id", uuidToString(squad.ID),
-						"squad_name", squad.Name,
-						"leader_agent_id", resp.Agent.ID,
-					)
-				}
-			}
+			// Squad-leader briefing injection for issue-bound tasks. This
+			// covers both the issue assignee=squad path and plain comment
+			// @squad mentions, where the issue assignee may remain a member
+			// but task.context carries the mentioned squad id.
+			h.injectIssueSquadLeaderBriefing(r.Context(), &resp, *task, issue)
 
 			var projectRepos []RepoData
 			if issue.ProjectID.Valid {
@@ -1374,26 +1330,28 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
-			// Resume chat sessions only when the stored pointer was produced
-			// by the same runtime as the claiming task. When the chat_session
-			// pointer is missing (legacy NULL runtime_id), stale (last task
-			// failed before reporting completion), or runtime-mismatched, fall
-			// back to the most recent task row that recorded a session_id —
-			// otherwise a single failed turn would silently drop the entire
-			// conversation memory on the next message. The fallback also
-			// requires runtime to match.
-			if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
-				resp.PriorSessionID = cs.SessionID.String
-			}
-			if cs.WorkDir.Valid {
-				resp.PriorWorkDir = cs.WorkDir.String
-			}
-			if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil && prior.SessionID.Valid {
-				if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
-					resp.PriorSessionID = prior.SessionID.String
+			if !task.ForceFreshSession {
+				// Resume chat sessions only when the stored pointer was produced
+				// by the same runtime as the claiming task. When the chat_session
+				// pointer is missing (legacy NULL runtime_id), stale (last task
+				// failed before reporting completion), or runtime-mismatched, fall
+				// back to the most recent task row that recorded a session_id —
+				// otherwise a single failed turn would silently drop the entire
+				// conversation memory on the next message. The fallback also
+				// requires runtime to match.
+				if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
+					resp.PriorSessionID = cs.SessionID.String
 				}
-				if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
-					resp.PriorWorkDir = prior.WorkDir.String
+				if cs.WorkDir.Valid {
+					resp.PriorWorkDir = cs.WorkDir.String
+				}
+				if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil && prior.SessionID.Valid {
+					if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
+						resp.PriorSessionID = prior.SessionID.String
+					}
+					if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
+						resp.PriorWorkDir = prior.WorkDir.String
+					}
 				}
 			}
 			// Load the latest user message for the chat prompt, plus any
@@ -1534,22 +1492,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						ID:          squadUUID,
 						WorkspaceID: wsUUID,
 					}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
-						if strings.TrimSpace(resp.Agent.Instructions) == "" {
-							resp.Agent.Instructions = briefing
-						} else {
-							resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
-						}
-						// Surface the squad identity to the daemon so the
-						// quick-create prompt defaults the new issue's
-						// assignee to the squad, not the leader agent.
-						resp.SquadID = uuidToString(squad.ID)
-						resp.SquadName = squad.Name
-						slog.Debug("injected squad leader briefing for quick-create",
-							"squad_id", uuidToString(squad.ID),
-							"squad_name", squad.Name,
-							"leader_agent_id", resp.Agent.ID,
-						)
+						h.appendSquadLeaderBriefing(r.Context(), &resp, squad, "quick-create")
 					}
 				}
 			}
@@ -1584,8 +1527,88 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Workspace-level Context (workspace.context DB column) — the per-workspace
+	// system prompt that workspace owners set in Settings → General. Inject it
+	// into the brief regardless of task kind (issue / chat / autopilot /
+	// quick-create) so every agent running in the workspace sees the same
+	// shared context. Empty string when the owner hasn't set one; the daemon
+	// skips rendering the heading in that case.
+	if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(resp.WorkspaceID)); err == nil {
+		if ws.Context.Valid {
+			resp.WorkspaceContext = ws.Context.String
+		}
+	} else {
+		slog.Warn("task claim: failed to load workspace for context injection",
+			"task_id", uuidToString(task.ID),
+			"workspace_id", resp.WorkspaceID,
+			"error", err,
+		)
+	}
+
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})
+}
+
+func (h *Handler) injectIssueSquadLeaderBriefing(ctx context.Context, resp *AgentTaskResponse, task db.AgentTaskQueue, issue db.Issue) {
+	if resp == nil || resp.Agent == nil {
+		return
+	}
+	if squad, ok := h.squadFromTaskContext(ctx, task, issue.WorkspaceID); ok {
+		if uuidToString(squad.LeaderID) == resp.Agent.ID {
+			h.appendSquadLeaderBriefing(ctx, resp, squad, "task-context")
+			return
+		}
+	}
+	if issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid {
+		if squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+			ID:          issue.AssigneeID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err == nil {
+			h.appendSquadLeaderBriefing(ctx, resp, squad, "issue-assignee")
+		}
+	}
+}
+
+func (h *Handler) squadFromTaskContext(ctx context.Context, task db.AgentTaskQueue, workspaceID pgtype.UUID) (db.Squad, bool) {
+	if task.Context == nil {
+		return db.Squad{}, false
+	}
+	var cfg service.TaskContext
+	if err := json.Unmarshal(task.Context, &cfg); err != nil || strings.TrimSpace(cfg.SquadID) == "" {
+		return db.Squad{}, false
+	}
+	squadUUID, err := util.ParseUUID(cfg.SquadID)
+	if err != nil {
+		return db.Squad{}, false
+	}
+	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+		ID:          squadUUID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return db.Squad{}, false
+	}
+	return squad, true
+}
+
+func (h *Handler) appendSquadLeaderBriefing(ctx context.Context, resp *AgentTaskResponse, squad db.Squad, source string) {
+	if resp == nil || resp.Agent == nil || uuidToString(squad.LeaderID) != resp.Agent.ID {
+		return
+	}
+	briefing := buildSquadLeaderBriefing(ctx, h.Queries, squad)
+	if strings.TrimSpace(resp.Agent.Instructions) == "" {
+		resp.Agent.Instructions = briefing
+	} else {
+		resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
+	}
+	resp.SquadID = uuidToString(squad.ID)
+	resp.SquadName = squad.Name
+	slog.Debug("injected squad leader briefing",
+		"squad_id", uuidToString(squad.ID),
+		"squad_name", squad.Name,
+		"leader_agent_id", resp.Agent.ID,
+		"source", source,
+	)
 }
 
 // ListPendingTasksByRuntime returns queued/dispatched tasks for a runtime.

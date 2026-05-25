@@ -150,8 +150,13 @@ func (q *Queries) DeleteChatMessage(ctx context.Context, id pgtype.UUID) error {
 }
 
 const deleteChatSession = `-- name: DeleteChatSession :exec
-DELETE FROM chat_session WHERE id = $1
+DELETE FROM chat_session WHERE id = $1 AND workspace_id = $2
 `
+
+type DeleteChatSessionParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
 
 // Hard delete. chat_message rows cascade via FK ON DELETE CASCADE; the
 // chat_session_id on agent_task_queue is set NULL by FK so completed/failed
@@ -159,9 +164,10 @@ DELETE FROM chat_session WHERE id = $1
 // the same transaction that holds LockChatSessionForDelete and that has
 // already cancelled any in-flight tasks (see CancelAgentTasksByChatSession)
 // so the daemon does not keep running work whose result has nowhere to
-// land.
-func (q *Queries) DeleteChatSession(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteChatSession, id)
+// land. workspace_id in the WHERE clause is a SQL-layer tenant guard; see
+// DeleteIssue.
+func (q *Queries) DeleteChatSession(ctx context.Context, arg DeleteChatSessionParams) error {
+	_, err := q.db.Exec(ctx, deleteChatSession, arg.ID, arg.WorkspaceID)
 	return err
 }
 
@@ -244,7 +250,14 @@ func (q *Queries) GetChatSessionInWorkspace(ctx context.Context, arg GetChatSess
 const getLastChatTaskSession = `-- name: GetLastChatTaskSession :one
 SELECT session_id, work_dir, runtime_id FROM agent_task_queue
 WHERE chat_session_id = $1
-  AND status IN ('completed', 'failed')
+  AND (
+    status = 'completed'
+    OR (
+      status = 'failed'
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity')
+      AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
+    )
+  )
   AND session_id IS NOT NULL
 ORDER BY completed_at DESC
 LIMIT 1
@@ -260,7 +273,9 @@ type GetLastChatTaskSessionRow struct {
 // session_id. Includes both completed and failed tasks: even a failed task
 // may have established a real agent session before failing, and we'd rather
 // resume there than start over and lose conversation memory. Used as a
-// fallback when chat_session.session_id is NULL.
+// fallback when chat_session.session_id is NULL. Resume-unsafe failures are
+// excluded because replaying those sessions deterministically reproduces the
+// same terminal state.
 func (q *Queries) GetLastChatTaskSession(ctx context.Context, chatSessionID pgtype.UUID) (GetLastChatTaskSessionRow, error) {
 	row := q.db.QueryRow(ctx, getLastChatTaskSession, chatSessionID)
 	var i GetLastChatTaskSessionRow

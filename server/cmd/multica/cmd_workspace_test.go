@@ -171,6 +171,88 @@ func TestResolveWorkspaceByIDOrSlug(t *testing.T) {
 			t.Errorf("got %q, want Beta", ws.Name)
 		}
 	})
+
+	t.Run("matches unique short UUID prefix", func(t *testing.T) {
+		ws, err := resolveWorkspaceByIDOrSlug(workspaces, "2222")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ws.Name != "Beta" {
+			t.Errorf("got %q, want Beta", ws.Name)
+		}
+	})
+
+	t.Run("short UUID prefix with dashes is accepted", func(t *testing.T) {
+		ws, err := resolveWorkspaceByIDOrSlug(workspaces, "1111-11")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ws.Name != "Alpha" {
+			t.Errorf("got %q, want Alpha", ws.Name)
+		}
+	})
+
+	t.Run("ambiguous prefix lists all matches", func(t *testing.T) {
+		ambiguous := []workspaceSummary{
+			{ID: "ab123456-0000-0000-0000-000000000001", Name: "First", Slug: "first"},
+			{ID: "ab129999-0000-0000-0000-000000000002", Name: "Second", Slug: "second"},
+		}
+		_, err := resolveWorkspaceByIDOrSlug(ambiguous, "ab12")
+		if err == nil {
+			t.Fatal("expected ambiguous prefix error")
+		}
+		if !strings.Contains(err.Error(), "ambiguous") {
+			t.Errorf("error = %q, want it to mention 'ambiguous'", err)
+		}
+		// Both candidate IDs must surface so the user can disambiguate without
+		// re-running `workspace list`.
+		if !strings.Contains(err.Error(), "ab123456") || !strings.Contains(err.Error(), "ab129999") {
+			t.Errorf("error = %q, want both candidate IDs", err)
+		}
+	})
+
+	t.Run("slug wins over colliding UUID prefix", func(t *testing.T) {
+		// If a workspace's slug equals another workspace's UUID prefix, the
+		// slug must take priority — that's the value users actually see in
+		// `workspace list`.
+		collision := []workspaceSummary{
+			{ID: "deadbeef-0000-0000-0000-000000000001", Name: "Hex", Slug: "hex"},
+			{ID: "feedface-0000-0000-0000-000000000002", Name: "Decoy", Slug: "deadbeef"},
+		}
+		ws, err := resolveWorkspaceByIDOrSlug(collision, "deadbeef")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ws.Name != "Decoy" {
+			t.Errorf("got %q, want Decoy (slug match should beat UUID prefix)", ws.Name)
+		}
+	})
+
+	t.Run("non-hex unknown target falls through to not-found", func(t *testing.T) {
+		// 'gamma' has letters outside the hex range, so it cannot reach the
+		// prefix branch — must surface the not-found error pointing the user
+		// at `workspace list`.
+		_, err := resolveWorkspaceByIDOrSlug(workspaces, "gamma")
+		if err == nil {
+			t.Fatal("expected error for unknown workspace")
+		}
+		if !strings.Contains(err.Error(), "workspace list") {
+			t.Errorf("error = %q, want it to reference 'workspace list'", err)
+		}
+	})
+
+	t.Run("prefix shorter than 4 hex chars is rejected", func(t *testing.T) {
+		// Too-short prefixes would collide with random hex substrings; the
+		// resolver must surface the not-found error rather than silently
+		// returning a wrong workspace.
+		_, err := resolveWorkspaceByIDOrSlug(workspaces, "11")
+		if err == nil {
+			t.Fatal("expected error for 2-char prefix")
+		}
+		if !strings.Contains(err.Error(), "workspace list") {
+			t.Errorf("error = %q, want it to reference 'workspace list'", err)
+		}
+	})
 }
 
 // resetWorkspaceUpdateFlags clears every flag on workspaceUpdateCmd and marks

@@ -222,6 +222,109 @@ describe("ApiClient", () => {
     expect(headers["X-Client-OS"]).toBeUndefined();
   });
 
+  it("uses the Cloud Runtime node API contract and forwards bootstrap PAT on create", async () => {
+    const node = {
+      id: "node-1",
+      owner_id: "user-1",
+      instance_id: "i-0123456789abcdef0",
+      region: "us-west-2",
+      instance_type: "g5.xlarge",
+      image_id: "ami-1",
+      subnet_id: "subnet-1",
+      name: "gpu-dev-01",
+      status: "launching",
+      tags: {},
+      metadata: {},
+      created_at: "2026-05-21T08:30:00Z",
+      updated_at: "2026-05-21T08:30:00Z",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(node), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.listCloudRuntimeNodes({ limit: 20, offset: 5 });
+    await client.createCloudRuntimeNode(
+      { instance_type: "g5.xlarge", name: "gpu-dev-01" },
+    );
+
+    const listCall = fetchMock.mock.calls[0]!;
+    const createCall = fetchMock.mock.calls[1]!;
+    expect(listCall[0]).toBe(
+      "https://api.example.test/api/cloud-runtime/nodes?limit=20&offset=5",
+    );
+    expect((listCall[1]!.headers as Record<string, string>)["X-User-PAT"]).toBeUndefined();
+    expect(createCall[0]).toBe(
+      "https://api.example.test/api/cloud-runtime/nodes",
+    );
+    expect(createCall[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        instance_type: "g5.xlarge",
+        name: "gpu-dev-01",
+      }),
+    });
+    expect((createCall[1]!.headers as Record<string, string>)["X-User-PAT"]).toBeUndefined();
+  });
+
+  it("falls back when Cloud Runtime node responses drift", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ id: 123 }]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 123 }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.listCloudRuntimeNodes()).resolves.toEqual([]);
+    await expect(
+      client.createCloudRuntimeNode({ instance_type: "g5.xlarge" }),
+    ).resolves.toMatchObject({ id: "", status: "" });
+  });
+
+  it("deleteCloudRuntimeNode sends DELETE with JSON body containing instance id", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(null, { status: 204 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.deleteCloudRuntimeNode("i-0123456789abcdef0");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, opts] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://api.example.test/api/cloud-runtime/nodes");
+    expect(opts).toMatchObject({
+      method: "DELETE",
+      body: JSON.stringify({ instance_id: "i-0123456789abcdef0" }),
+    });
+    expect((opts.headers as Record<string, string>)["Content-Type"]).toBe(
+      "application/json",
+    );
+  });
+
   describe("getAttachment", () => {
     it("returns the parsed attachment for a well-formed response", async () => {
       vi.stubGlobal(
@@ -332,15 +435,125 @@ describe("ApiClient", () => {
   });
 
   describe("chat attachment wiring", () => {
-    it("uploadFile includes chat_session_id in the FormData body", async () => {
+    it("uploadFile uses direct upload for chat attachments", async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              upload_url: "https://obs.example.test/object",
+              headers: { "Content-Type": "image/png" },
+              upload_token: "token-1",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        )
+        .mockResolvedValueOnce(new Response("", { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              id: "att-1",
+              workspace_id: "ws-1",
+              issue_id: null,
+              comment_id: null,
+              chat_session_id: "session-123",
+              chat_message_id: null,
+              uploader_type: "member",
+              uploader_id: "u-1",
+              filename: "hi.png",
+              url: "https://cdn/x",
+              download_url: "https://cdn/x",
+              content_type: "image/png",
+              size_bytes: 2,
+              created_at: "2026-05-21T00:00:00Z",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      const file = new File(["hi"], "hi.png", { type: "image/png" });
+      const attachment = await client.uploadFile(file, { chatSessionId: "session-123" });
+
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/attachments/upload/initiate");
+      expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+      expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
+        filename: "hi.png",
+        content_type: "image/png",
+        size_bytes: 2,
+        chat_session_id: "session-123",
+      });
+      expect(fetchMock.mock.calls[1]?.[0]).toBe("https://obs.example.test/object");
+      expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+        method: "PUT",
+        body: file,
+      });
+      expect(fetchMock.mock.calls[2]?.[0]).toBe("https://api.example.test/api/attachments/upload/complete");
+      expect(attachment.id).toBe("att-1");
+    });
+
+    it("uploadFile uses direct upload even without an attachment context", async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              upload_url: "https://obs.example.test/object",
+              headers: { "Content-Type": "image/png" },
+              upload_token: "token-1",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        )
+        .mockResolvedValueOnce(new Response("", { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              id: "att-1",
+              workspace_id: "ws-1",
+              issue_id: null,
+              comment_id: null,
+              chat_session_id: null,
+              chat_message_id: null,
+              uploader_type: "member",
+              uploader_id: "u-1",
+              filename: "hi.png",
+              url: "https://cdn/x",
+              download_url: "https://cdn/x",
+              content_type: "image/png",
+              size_bytes: 2,
+              created_at: "2026-05-21T00:00:00Z",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      const file = new File(["hi"], "hi.png", { type: "image/png" });
+      const attachment = await client.uploadFile(file);
+
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/attachments/upload/initiate");
+      expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
+        filename: "hi.png",
+        content_type: "image/png",
+        size_bytes: 2,
+        issue_id: null,
+        comment_id: null,
+        chat_session_id: null,
+      });
+      expect(fetchMock.mock.calls[1]?.[0]).toBe("https://obs.example.test/object");
+      expect(fetchMock.mock.calls[2]?.[0]).toBe("https://api.example.test/api/attachments/upload/complete");
+      expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/api/upload-file"))).toBe(false);
+      expect(attachment.id).toBe("att-1");
+    });
+
+    it("uploadFile does not fall back to /api/upload-file when direct upload is unsupported", async () => {
       const fetchMock = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({
-          id: "att-1",
-          url: "https://cdn/x",
-          download_url: "https://cdn/x",
-          filename: "hi.png",
-        }), {
-          status: 200,
+        new Response(JSON.stringify({ error: "direct upload not supported" }), {
+          status: 501,
+          statusText: "Not Implemented",
           headers: { "Content-Type": "application/json" },
         }),
       );
@@ -348,34 +561,214 @@ describe("ApiClient", () => {
 
       const client = new ApiClient("https://api.example.test");
       const file = new File(["hi"], "hi.png", { type: "image/png" });
-      await client.uploadFile(file, { chatSessionId: "session-123" });
 
+      await expect(client.uploadFile(file, { chatSessionId: "session-123" })).rejects.toMatchObject({
+        status: 501,
+        message: "direct upload not supported",
+      });
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      const [url, init] = fetchMock.mock.calls[0]!;
-      expect(url).toBe("https://api.example.test/api/upload-file");
-      expect(init?.method).toBe("POST");
-      const body = init?.body as FormData;
-      expect(body).toBeInstanceOf(FormData);
-      expect(body.get("chat_session_id")).toBe("session-123");
-      expect(body.get("issue_id")).toBeNull();
-      expect(body.get("comment_id")).toBeNull();
+      expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/attachments/upload/initiate");
+      expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/api/upload-file"))).toBe(false);
     });
 
-    it("uploadFile rejects malformed success responses instead of returning an empty attachment", async () => {
-      vi.stubGlobal(
-        "fetch",
-        vi.fn().mockResolvedValue(
+    it("uploadFile does not fall back to /api/upload-file when multipart direct upload is unsupported", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "direct upload not supported" }), {
+          status: 501,
+          statusText: "Not Implemented",
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      const file = new File([new Blob([new Uint8Array(64 * 1024 * 1024)])], "large.bin", {
+        type: "application/octet-stream",
+      });
+
+      await expect(client.uploadFile(file, { chatSessionId: "session-123" })).rejects.toMatchObject({
+        status: 501,
+        message: "direct upload not supported",
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/attachments/upload/multipart/initiate");
+      expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/api/upload-file"))).toBe(false);
+    });
+
+    it("uploadFile uses multipart direct upload for large unbound attachments", async () => {
+      const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/api/attachments/upload/multipart/initiate")) {
+          return new Response(
+            JSON.stringify({
+              session_id: "session-upload-1",
+              attachment_id: "att-1",
+              object_key: "workspaces/ws/att-1.bin",
+              upload_id: "upload-1",
+              part_size_bytes: 16 * 1024 * 1024,
+              part_count: 4,
+              expires_at: "2026-05-21T00:30:00Z",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url.endsWith("/api/attachments/upload/multipart/sign-parts")) {
+          const body = JSON.parse(init?.body as string) as { part_numbers: number[] };
+          const partNumber = body.part_numbers[0];
+          return new Response(
+            JSON.stringify({ parts: [{ part_number: partNumber, upload_url: `https://obs.example.test/part-${partNumber}` }] }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url.startsWith("https://obs.example.test/part-")) {
+          const partNumber = url.split("-").pop();
+          return new Response("", { status: 200, headers: { ETag: `"etag-${partNumber}"` } });
+        }
+        if (url.endsWith("/api/attachments/upload/multipart/complete")) {
+          return new Response(
+            JSON.stringify({
+              id: "att-1",
+              workspace_id: "ws-1",
+              issue_id: null,
+              comment_id: null,
+              chat_session_id: null,
+              chat_message_id: null,
+              uploader_type: "member",
+              uploader_id: "u-1",
+              filename: "large.bin",
+              url: "https://cdn/x",
+              download_url: "https://cdn/x",
+              content_type: "application/octet-stream",
+              size_bytes: 64 * 1024 * 1024,
+              created_at: "2026-05-21T00:00:00Z",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      const file = new File([new Blob([new Uint8Array(64 * 1024 * 1024)])], "large.bin", {
+        type: "application/octet-stream",
+      });
+      const attachment = await client.uploadFile(file);
+
+      expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/attachments/upload/multipart/initiate");
+      expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
+        filename: "large.bin",
+        content_type: "application/octet-stream",
+        size_bytes: 64 * 1024 * 1024,
+        issue_id: null,
+        comment_id: null,
+        chat_session_id: null,
+      });
+      expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/api/upload-file"))).toBe(false);
+      expect(attachment.id).toBe("att-1");
+    });
+
+    it("uploadFile uses multipart direct upload for large chat attachments", async () => {
+      const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/api/attachments/upload/multipart/initiate")) {
+          return new Response(
+            JSON.stringify({
+              session_id: "session-upload-1",
+              attachment_id: "att-1",
+              object_key: "workspaces/ws/att-1.bin",
+              upload_id: "upload-1",
+              part_size_bytes: 16 * 1024 * 1024,
+              part_count: 4,
+              expires_at: "2026-05-21T00:30:00Z",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url.endsWith("/api/attachments/upload/multipart/sign-parts")) {
+          const body = JSON.parse(init?.body as string) as { part_numbers: number[] };
+          const partNumber = body.part_numbers[0];
+          return new Response(
+            JSON.stringify({ parts: [{ part_number: partNumber, upload_url: `https://obs.example.test/part-${partNumber}` }] }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url.startsWith("https://obs.example.test/part-")) {
+          const partNumber = url.split("-").pop();
+          return new Response("", { status: 200, headers: { ETag: `"etag-${partNumber}"` } });
+        }
+        if (url.endsWith("/api/attachments/upload/multipart/complete")) {
+          return new Response(
+            JSON.stringify({
+              id: "att-1",
+              workspace_id: "ws-1",
+              issue_id: null,
+              comment_id: null,
+              chat_session_id: "session-123",
+              chat_message_id: null,
+              uploader_type: "member",
+              uploader_id: "u-1",
+              filename: "large.bin",
+              url: "https://cdn/x",
+              download_url: "https://cdn/x",
+              content_type: "application/octet-stream",
+              size_bytes: 64 * 1024 * 1024,
+              created_at: "2026-05-21T00:00:00Z",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      const file = new File([new Blob([new Uint8Array(64 * 1024 * 1024)])], "large.bin", {
+        type: "application/octet-stream",
+      });
+      const attachment = await client.uploadFile(file, { chatSessionId: "session-123" });
+
+      expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/attachments/upload/multipart/initiate");
+      expect(fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/api/attachments/upload/multipart/sign-parts"))).toHaveLength(4);
+      expect(fetchMock.mock.calls.filter((call) => String(call[0]).startsWith("https://obs.example.test/part-"))).toHaveLength(4);
+      const completeCall = fetchMock.mock.calls.find((call) => String(call[0]).endsWith("/api/attachments/upload/multipart/complete"));
+      expect(completeCall).toBeTruthy();
+      const completeBody = JSON.parse(completeCall?.[1]?.body as string);
+      expect(completeBody.parts).toHaveLength(4);
+      expect(attachment.id).toBe("att-1");
+    });
+
+    it("uploadFile falls back to an empty attachment when complete returns a malformed response", async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              upload_url: "https://obs.example.test/object",
+              headers: { "Content-Type": "image/png" },
+              upload_token: "token-1",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        )
+        .mockResolvedValueOnce(new Response("", { status: 200 }))
+        .mockResolvedValueOnce(
           new Response(JSON.stringify({ id: "", url: "https://cdn/x", filename: "hi.png" }), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           }),
-        ),
-      );
+        );
+      vi.stubGlobal("fetch", fetchMock);
 
       const client = new ApiClient("https://api.example.test");
       const file = new File(["hi"], "hi.png", { type: "image/png" });
+      const attachment = await client.uploadFile(file);
 
-      await expect(client.uploadFile(file)).rejects.toThrow("Invalid upload response");
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/attachments/upload/initiate");
+      expect(fetchMock.mock.calls[1]?.[0]).toBe("https://obs.example.test/object");
+      expect(fetchMock.mock.calls[2]?.[0]).toBe("https://api.example.test/api/attachments/upload/complete");
+      expect(attachment.id).toBe("");
+      expect(attachment.download_url).toBe("");
     });
 
     it("sendChatMessage serialises attachment_ids onto the JSON body when present", async () => {

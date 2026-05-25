@@ -7,8 +7,8 @@ import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import type { AgentTask, TaskFailureReason } from "@multica/core/types";
-import { timeAgo } from "@multica/core/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
+import { useTimeAgo } from "../../i18n";
 import {
   Tooltip,
   TooltipContent,
@@ -114,8 +114,8 @@ export function ExecutionLogSection({ issueId, onHighlightComment }: ExecutionLo
   const { data: tasks = [] } = useQuery({
     queryKey: issueKeys.tasks(issueId),
     queryFn: () => api.listTasksByIssue(issueId),
-    staleTime: 30_000,
-    refetchOnWindowFocus: true,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const agentColorMap = useAgentColorMap(tasks);
@@ -266,7 +266,6 @@ export function ExecutionLogSection({ issueId, onHighlightComment }: ExecutionLo
                     <PastRow
                       key={task.id}
                       task={task}
-                      issueId={issueId}
                       runIndex={taskIndexMap.get(task.id)}
                       colorClass={agentColorMap?.get(task.agent_id)}
                       onHighlightComment={onHighlightComment}
@@ -313,7 +312,7 @@ const STATUS_TONE: Record<AgentTask["status"], string> = {
 // Time anchor depends on status. Active rows want "Started 2m ago" /
 // "Queued 30s ago" — what's happening now. Past rows want "5m ago" — when
 // the verdict landed.
-function activeTimeText(task: AgentTask): string {
+function activeTimeText(task: AgentTask, timeAgo: (dateStr: string) => string): string {
   if (task.status === "running" && task.started_at) {
     return timeAgo(task.started_at);
   }
@@ -391,12 +390,13 @@ function ActiveRow({
   onHighlightComment?: (commentId: string) => void;
 }) {
   const { t } = useT("issues");
+  const timeAgo = useTimeAgo();
   const [cancelling, setCancelling] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
-  const time = activeTimeText(task);
+  const time = activeTimeText(task, timeAgo);
 
   // Transcript only meaningful once messages exist — pure-queued tasks
   // have nothing to show yet.
@@ -481,18 +481,18 @@ function ActiveRow({
 
 function PastRow({
   task,
-  issueId,
   runIndex,
   colorClass,
   onHighlightComment,
 }: {
   task: AgentTask;
-  issueId: string;
   runIndex?: number;
   colorClass?: string;
   onHighlightComment?: (commentId: string) => void;
 }) {
   const { t } = useT("issues");
+  const timeAgo = useTimeAgo();
+  const [_retrying, _setRetrying] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
@@ -506,26 +506,10 @@ function PastRow({
       ? `exit ${task.exit_code}`
       : null;
 
-  const [retrying, setRetrying] = useState(false);
-
   const handleTriggerClick =
     task.trigger_comment_id && onHighlightComment
       ? () => onHighlightComment(task.trigger_comment_id!)
       : undefined;
-
-  const canRetry = task.status === "failed" || task.status === "cancelled";
-
-  const handleRetry = async () => {
-    if (retrying) return;
-    setRetrying(true);
-    try {
-      await api.rerunIssue(issueId, task.id);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.retry_failed));
-    } finally {
-      setRetrying(false);
-    }
-  };
 
   return (
     <RowShell task={task} runIndex={runIndex} colorClass={colorClass}>

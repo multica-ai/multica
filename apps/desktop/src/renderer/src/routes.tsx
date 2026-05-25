@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import {
   createMemoryRouter,
-  Navigate,
   Outlet,
   useMatches,
   useParams,
@@ -15,9 +14,11 @@ import { AgentDetailPage } from "./pages/agent-detail-page";
 import { MemberDetailPage } from "./pages/member-detail-page";
 import { RuntimeDetailPage } from "./pages/runtime-detail-page";
 import { AttachmentPreviewRoute } from "./pages/attachment-preview-page";
+import { HtmlArtifactPreviewRoute } from "./pages/html-artifact-preview-page";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
 import { DashboardPage } from "@multica/views/dashboard";
+import { AgentDashboardPage } from "@multica/views/agent-dashboard";
 import { AutopilotsPage } from "@multica/views/autopilots/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
 import { SkillsPage } from "@multica/views/skills";
@@ -27,11 +28,39 @@ import { AgentsPage } from "@multica/views/agents";
 import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/views/squads/components";
 import { InboxPage } from "@multica/views/inbox";
 import { SettingsPage } from "@multica/views/settings";
+import { useT } from "@multica/views/i18n";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { Download, Server } from "lucide-react";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
 import { UpdatesSettingsTab } from "./components/updates-settings-tab";
 import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
+
+/**
+ * Wraps `SettingsPage` so the desktop-only extra tabs can pull their labels
+ * from i18n. The route element has to be a component (not a literal JSX
+ * value) for `useT` to run.
+ */
+function DesktopSettingsRoute() {
+  const { t } = useT("settings");
+  return (
+    <SettingsPage
+      extraAccountTabs={[
+        {
+          value: "daemon",
+          label: "Daemon",
+          icon: Server,
+          content: <DaemonSettingsTab />,
+        },
+        {
+          value: "updates",
+          label: t(($) => $.desktop.tabs.updates),
+          icon: Download,
+          content: <UpdatesSettingsTab />,
+        },
+      ]}
+    />
+  );
+}
 
 /**
  * Sets document.title from the deepest matched route's handle.title.
@@ -71,7 +100,7 @@ function WikiPageRoute() {
 /**
  * Route definitions shared by all tabs.
  *
- * Every tab path is workspace-scoped: `/{slug}/{route}/...`. Pre-workspace
+ * Every tab path is workspace-scoped: `/{slug}` or `/{slug}/{route}/...`. Pre-workspace
  * flows (create workspace, accept invite) are NOT routes — they render as a
  * window-level overlay via `WindowOverlay`, dispatched by the navigation
  * adapter's transition-path interception. The `activeWorkspaceSlug` in the
@@ -94,7 +123,7 @@ export const appRoutes: RouteObject[] = [
         path: ":workspaceSlug",
         element: <WorkspaceRouteLayout />,
         children: [
-          { index: true, element: <Navigate to="issues" replace /> },
+          { index: true, element: null, handle: { title: "Workspace" } },
           {
             path: "issues",
             element: (
@@ -176,30 +205,23 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Attachment" },
           },
           {
+            path: "html-preview",
+            element: <HtmlArtifactPreviewRoute />,
+            handle: { title: "HTML Preview" },
+          },
+          {
             path: "usage",
             element: <DashboardPage />,
             handle: { title: "Usage" },
           },
           {
+            path: "agent-dashboard",
+            element: <AgentDashboardPage />,
+            handle: { title: "Agent Runs" },
+          },
+          {
             path: "settings",
-            element: (
-              <SettingsPage
-                extraAccountTabs={[
-                  {
-                    value: "daemon",
-                    label: "Daemon",
-                    icon: Server,
-                    content: <DaemonSettingsTab />,
-                  },
-                  {
-                    value: "updates",
-                    label: "Updates",
-                    icon: Download,
-                    content: <UpdatesSettingsTab />,
-                  },
-                ]}
-              />
-            ),
+            element: <DesktopSettingsRoute />,
             handle: { title: "Settings" },
           },
         ],

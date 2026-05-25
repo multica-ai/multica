@@ -65,6 +65,21 @@ function stripBlobUrls(md: string): string {
   return md.replace(BLOB_IMAGE_RE, "");
 }
 
+function hasActiveUploadsInEditor(editor: {
+  state?: {
+    doc?: {
+      descendants?: (callback: (node: { attrs?: { uploading?: unknown } }) => boolean | undefined) => void;
+    };
+  };
+} | null | undefined): boolean {
+  let uploading = false;
+  editor?.state?.doc?.descendants?.((node) => {
+    if (node.attrs?.uploading) uploading = true;
+    return !uploading;
+  });
+  return uploading;
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -206,6 +221,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         if (!onUpdateRef.current) return;
         if (debounceRef.current) clearTimeout(debounceRef.current);
         debounceRef.current = setTimeout(() => {
+          if (hasActiveUploadsInEditor(ed)) return;
           const md = stripBlobUrls(ed.getMarkdown()).trimEnd();
           if (md === lastEmittedRef.current) return;
           lastEmittedRef.current = md;
@@ -354,13 +370,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         })();
       },
       hasActiveUploads: () => {
-        if (!editor) return false;
-        let uploading = false;
-        editor.state.doc.descendants((node) => {
-          if (node.attrs.uploading) uploading = true;
-          return !uploading;
-        });
-        return uploading;
+        return hasActiveUploadsInEditor(editor);
       },
     }));
 

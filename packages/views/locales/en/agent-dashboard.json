@@ -1,0 +1,77 @@
+{
+  "title": "Agent Runs",
+  "subtitle": "Workspace-level agent execution health, volume, failures, and recent run details.",
+  "filter": {
+    "all_agents": "All agents",
+    "agent_count": "{{count}} agents",
+    "mine": "Mine",
+    "all_owners": "All members",
+    "selected_owner": "Selected member",
+    "to": "to"
+  },
+  "kpi": {
+    "total_runs": "Runs in {{days}} days",
+    "success_rate": "Success rate",
+    "success_hint": "{{success}} completed / {{failed}} failed",
+    "active_agents": "Active agents",
+    "avg_duration": "Average duration"
+  },
+  "charts": {
+    "run_trend": "Run trend",
+    "success_trend": "Success rate trend",
+    "heatmap": "Hourly heatmap",
+    "failure_reasons": "Failure reasons",
+    "workday_weekend": "Workday vs weekend",
+    "retry_distribution": "Retry distribution",
+    "no_data": "No data"
+  },
+  "weekday": {
+    "sun": "Sun",
+    "mon": "Mon",
+    "tue": "Tue",
+    "wed": "Wed",
+    "thu": "Thu",
+    "fri": "Fri",
+    "sat": "Sat"
+  },
+  "agents": {
+    "title": "Agent details",
+    "count": "{{count}} agents",
+    "agent": "Agent",
+    "project": "Project",
+    "runs": "Runs",
+    "success": "Success",
+    "duration": "Avg. duration",
+    "last_run": "Last run",
+    "status": "Status",
+    "actions": "Actions",
+    "view_run": "View latest run",
+    "page": "Page {{page}} / {{total}}",
+    "prev": "Previous",
+    "next": "Next"
+  },
+  "failures": {
+    "title": "Recent failures",
+    "empty": "No failed runs in this range"
+  },
+  "recent": {
+    "title": "Recent runs",
+    "empty": "No recent runs in this range"
+  },
+  "detail": {
+    "title": "Run details",
+    "loading": "Loading run details",
+    "timeline": "Timeline",
+    "breakdown": "Duration breakdown",
+    "error": "Error stack",
+    "messages": "Task messages",
+    "no_messages": "No task messages",
+    "llm": "LLM reasoning",
+    "tools": "Tool calls",
+    "network": "Network wait"
+  },
+  "empty": {
+    "title": "No agent runs",
+    "body": "No runs match the current filters."
+  }
+}

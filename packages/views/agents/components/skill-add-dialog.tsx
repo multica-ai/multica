@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Agent, SkillSummary } from "@multica/core/types";
+import { agentDetailKeys } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -85,6 +86,7 @@ export function SkillAddDialog({
       ];
       await api.setAgentSkills(agent.id, { skill_ids: newIds });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      qc.invalidateQueries({ queryKey: agentDetailKeys.detail(wsId, agent.id) });
       handleOpenChange(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.tab_body.skills.add_failed_toast));

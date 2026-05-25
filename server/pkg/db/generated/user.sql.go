@@ -14,7 +14,7 @@ import (
 const createUser = `-- name: CreateUser :one
 INSERT INTO "user" (name, email, avatar_url)
 VALUES ($1, $2, $3)
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
 `
 
 type CreateUserParams struct {
@@ -40,12 +40,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.StarterContentState,
 		&i.Language,
 		&i.ProfileDescription,
+		&i.Timezone,
 	)
 	return i, err
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description FROM "user"
+SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone FROM "user"
 WHERE id = $1
 `
 
@@ -66,12 +67,13 @@ func (q *Queries) GetUser(ctx context.Context, id pgtype.UUID) (User, error) {
 		&i.StarterContentState,
 		&i.Language,
 		&i.ProfileDescription,
+		&i.Timezone,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description FROM "user"
+SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone FROM "user"
 WHERE email = $1
 `
 
@@ -92,6 +94,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.StarterContentState,
 		&i.Language,
 		&i.ProfileDescription,
+		&i.Timezone,
 	)
 	return i, err
 }
@@ -102,7 +105,7 @@ UPDATE "user" SET
     cloud_waitlist_reason = $3,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
 `
 
 type JoinCloudWaitlistParams struct {
@@ -131,6 +134,7 @@ func (q *Queries) JoinCloudWaitlist(ctx context.Context, arg JoinCloudWaitlistPa
 		&i.StarterContentState,
 		&i.Language,
 		&i.ProfileDescription,
+		&i.Timezone,
 	)
 	return i, err
 }
@@ -140,7 +144,7 @@ UPDATE "user" SET
     onboarded_at = COALESCE(onboarded_at, now()),
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
 `
 
 func (q *Queries) MarkUserOnboarded(ctx context.Context, id pgtype.UUID) (User, error) {
@@ -160,6 +164,7 @@ func (q *Queries) MarkUserOnboarded(ctx context.Context, id pgtype.UUID) (User, 
 		&i.StarterContentState,
 		&i.Language,
 		&i.ProfileDescription,
+		&i.Timezone,
 	)
 	return i, err
 }
@@ -169,7 +174,7 @@ UPDATE "user" SET
     onboarding_questionnaire = COALESCE($1, onboarding_questionnaire),
     updated_at = now()
 WHERE id = $2
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
 `
 
 type PatchUserOnboardingParams struct {
@@ -177,6 +182,10 @@ type PatchUserOnboardingParams struct {
 	ID            pgtype.UUID `json:"id"`
 }
 
+// Partial update of the user's onboarding decision fields. Currently only the
+// questionnaire JSONB is patchable — the v2 attempt at persisting Step 3
+// runtime choice on the user row was reverted; that state now lives in a
+// frontend Zustand transient store.
 func (q *Queries) PatchUserOnboarding(ctx context.Context, arg PatchUserOnboardingParams) (User, error) {
 	row := q.db.QueryRow(ctx, patchUserOnboarding, arg.Questionnaire, arg.ID)
 	var i User
@@ -194,6 +203,7 @@ func (q *Queries) PatchUserOnboarding(ctx context.Context, arg PatchUserOnboardi
 		&i.StarterContentState,
 		&i.Language,
 		&i.ProfileDescription,
+		&i.Timezone,
 	)
 	return i, err
 }
@@ -203,7 +213,7 @@ UPDATE "user" SET
     starter_content_state = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
 `
 
 type SetStarterContentStateParams struct {
@@ -233,6 +243,7 @@ func (q *Queries) SetStarterContentState(ctx context.Context, arg SetStarterCont
 		&i.StarterContentState,
 		&i.Language,
 		&i.ProfileDescription,
+		&i.Timezone,
 	)
 	return i, err
 }
@@ -243,9 +254,14 @@ UPDATE "user" SET
     avatar_url = COALESCE($3, avatar_url),
     language = COALESCE($4, language),
     profile_description = COALESCE($5, profile_description),
+    timezone = CASE
+        WHEN $6::text IS NULL THEN timezone
+        WHEN $6::text = ''    THEN NULL
+        ELSE $6::text
+    END,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
 `
 
 type UpdateUserParams struct {
@@ -254,8 +270,21 @@ type UpdateUserParams struct {
 	AvatarUrl          pgtype.Text `json:"avatar_url"`
 	Language           pgtype.Text `json:"language"`
 	ProfileDescription pgtype.Text `json:"profile_description"`
+	Timezone           pgtype.Text `json:"timezone"`
 }
 
+// Patches the user-controlled profile fields. Each parameter follows
+// COALESCE-on-NULL semantics so the handler can omit any field it
+// doesn't intend to write.
+//
+// `timezone` (Viewing-tz preference) participates in
+// the same shape but uses sqlc.narg + a sentinel-string convention:
+// the handler passes the empty string "" to mean "clear back to NULL"
+// (browser-detected fallback), an IANA name like "Asia/Shanghai" to
+// pin a value, and `sqlc.narg('timezone') IS NULL` (no value at all)
+// to leave the existing column untouched. Folding it into UpdateUser
+// rather than carrying a dedicated UpdateUserTimezone keeps the
+// profile-patch shape uniform between Preferences fields.
 func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error) {
 	row := q.db.QueryRow(ctx, updateUser,
 		arg.ID,
@@ -263,6 +292,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		arg.AvatarUrl,
 		arg.Language,
 		arg.ProfileDescription,
+		arg.Timezone,
 	)
 	var i User
 	err := row.Scan(
@@ -279,6 +309,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.StarterContentState,
 		&i.Language,
 		&i.ProfileDescription,
+		&i.Timezone,
 	)
 	return i, err
 }

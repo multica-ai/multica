@@ -6,7 +6,7 @@ import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, 
 import { useQuery, type QueryKey } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
-import type { Issue, IssueAssigneeGroup, IssueStatus, ProjectStatus, ProjectPriority, UpdateIssueRequest } from "@multica/core/types";
+import type { Issue, IssueAssigneeGroup, ProjectStatus, ProjectPriority, UpdateIssueRequest } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
@@ -18,6 +18,7 @@ import {
   projectGanttIssuesOptions,
   childIssueProgressOptions,
   type AssigneeGroupedIssuesFilter,
+  type IssueListFilter,
   type MyIssuesFilter,
 } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
@@ -31,6 +32,7 @@ import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { createIssueViewStore } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider, useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { filterIssues } from "../../issues/utils/filter";
+import { buildIssueListServerFilter } from "../../issues/utils/server-filter";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, useNavigation } from "../../navigation";
@@ -123,7 +125,7 @@ export function ProjectIssuesContent({
   assigneeGroupQueryKey?: QueryKey;
   assigneeGroupFilter?: AssigneeGroupedIssuesFilter;
   scope: string;
-  filter: MyIssuesFilter;
+  filter: IssueListFilter;
   ganttIssues: Issue[];
 }) {
   const { t } = useT("projects");
@@ -135,30 +137,7 @@ export function ProjectIssuesContent({
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
-
-  const issues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
-    [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
-  );
-
-  const hasClientSideFilters =
-    priorityFilters.length > 0 ||
-    assigneeFilters.length > 0 ||
-    includeNoAssignee ||
-    creatorFilters.length > 0 ||
-    labelFilters.length > 0;
-
-  const filteredBoardCounts = useMemo(() => {
-    if (!hasClientSideFilters) return undefined;
-    const counts: Partial<Record<IssueStatus, number>> = {};
-    for (const status of BOARD_STATUSES) counts[status] = 0;
-    for (const issue of issues) {
-      if (BOARD_STATUSES.includes(issue.status)) {
-        counts[issue.status] = (counts[issue.status] ?? 0) + 1;
-      }
-    }
-    return counts;
-  }, [hasClientSideFilters, issues]);
+  const issues = projectIssues;
 
   // Gantt rides its own dedicated query (scheduled-only) so it doesn't have
   // to wait for every status bucket to paginate in. View-store filters still
@@ -240,7 +219,6 @@ export function ProjectIssuesContent({
           myIssuesScope={scope}
           myIssuesFilter={filter}
           projectId={projectId}
-          columnCounts={filteredBoardCounts}
         />
       )}
       {viewMode === "list" && (
@@ -265,7 +243,7 @@ function ProjectIssuesSurface({
 }: {
   projectId: string;
   scope: string;
-  filter: MyIssuesFilter;
+  filter: IssueListFilter;
 }) {
   const wsId = useWorkspaceId();
   const viewMode = useViewStore((s) => s.viewMode);
@@ -278,6 +256,36 @@ function ProjectIssuesSurface({
   const labelFilters = useViewStore((s) => s.labelFilters);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
   const usesGantt = viewMode === "gantt";
+  const visibleStatuses = useMemo(() => {
+    if (statusFilters.length > 0)
+      return BOARD_STATUSES.filter((s) => statusFilters.includes(s));
+    return BOARD_STATUSES;
+  }, [statusFilters]);
+  const serverFilter = useMemo<IssueListFilter>(
+    () =>
+      buildIssueListServerFilter(
+        filter,
+        {
+          statusFilters,
+          priorityFilters,
+          assigneeFilters,
+          includeNoAssignee,
+          creatorFilters,
+          labelFilters,
+        },
+        visibleStatuses,
+      ),
+    [
+      assigneeFilters,
+      creatorFilters,
+      filter,
+      includeNoAssignee,
+      labelFilters,
+      priorityFilters,
+      statusFilters,
+      visibleStatuses,
+    ],
+  );
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
     () => ({
       ...filter,
@@ -301,7 +309,7 @@ function ProjectIssuesSurface({
   // the current view so switching to Gantt doesn't re-trigger the full
   // per-status fetch in the background.
   const statusIssuesQuery = useQuery({
-    ...myIssueListOptions(wsId, scope, filter),
+    ...myIssueListOptions(wsId, scope, serverFilter),
     enabled: !usesAssigneeBoard && !usesGantt,
   });
   const assigneeGroupsQuery = useQuery({
@@ -336,7 +344,7 @@ function ProjectIssuesSurface({
         assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
         assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
         scope={scope}
-        filter={filter}
+        filter={serverFilter}
         ganttIssues={ganttIssues}
       />
       <BatchActionToolbar />

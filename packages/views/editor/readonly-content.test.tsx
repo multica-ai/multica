@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -15,8 +15,15 @@ vi.mock("@multica/core/api", () => ({
 
 const pushSpy = vi.fn();
 const openInNewTabSpy = vi.fn();
+const originalCreateObjectURL = URL.createObjectURL;
+const originalRevokeObjectURL = URL.revokeObjectURL;
 
 vi.mock("@multica/core/paths", () => ({
+  paths: {
+    workspace: (slug: string) => ({
+      htmlArtifactPreview: (key: string) => `/${slug}/html-preview?key=${key}`,
+    }),
+  },
   useWorkspacePaths: () => ({
     issueDetail: (id: string) => `/test/issues/${id}`,
   }),
@@ -24,7 +31,36 @@ vi.mock("@multica/core/paths", () => ({
 }));
 
 vi.mock("../navigation", () => ({
-  useNavigation: () => ({ push: pushSpy, openInNewTab: openInNewTabSpy }),
+  useNavigation: () => ({
+    push: pushSpy,
+    openInNewTab: openInNewTabSpy,
+    getShareableUrl: (path: string) => `https://app.example${path}`,
+  }),
+}));
+
+vi.mock("../i18n", () => ({
+  useT: () => ({
+    t: (sel: (s: Record<string, Record<string, string>>) => string) =>
+      sel({
+        image: { download: "Download" },
+        attachment: {
+          preview: "Preview",
+          preview_loading: "Loading preview...",
+          preview_failed: "Couldn't load preview",
+          close: "Close",
+          open_in_new_tab: "Open in new tab",
+        },
+        code_block: {
+          copy_code: "Copy code",
+          show_preview: "Show preview",
+          show_source: "Show source",
+        },
+        mermaid: {
+          rendering: "Rendering diagram...",
+          render_error: "Unable to render Mermaid diagram.",
+        },
+      }),
+  }),
 }));
 
 vi.mock("../issues/components/issue-mention-card", () => ({
@@ -86,6 +122,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  URL.createObjectURL = originalCreateObjectURL;
+  URL.revokeObjectURL = originalRevokeObjectURL;
 });
 
 describe("ReadonlyContent memoization", () => {
@@ -279,6 +317,51 @@ describe("ReadonlyContent HTML block rendering", () => {
     expect(frame).not.toBeNull();
     expect(frame?.getAttribute("sandbox")).toBe("allow-scripts");
     expect(frame?.getAttribute("srcdoc")).toContain('<h1 id="x">hi</h1>');
+    expect(container.querySelector("pre")).toBeNull();
+  });
+
+  it("adds full-screen, new-tab, and download actions for inline HTML artifacts", () => {
+    const createObjectURL = vi.fn(() => "blob:artifact");
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = vi.fn();
+    const anchorClick = vi.fn();
+    vi.spyOn(document, "createElement").mockImplementation((tagName) => {
+      const element = document.createElementNS(
+        "http://www.w3.org/1999/xhtml",
+        tagName,
+      ) as HTMLElement;
+      if (tagName === "a") {
+        Object.defineProperty(element, "click", { value: anchorClick });
+      }
+      return element;
+    });
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      "33333333-3333-3333-3333-333333333333",
+    );
+
+    const { container } = render(
+      <ReadonlyContent
+        content={["```html", "<main>artifact</main>", "```"].join("\n")}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle("Preview"));
+    const frames = document.querySelectorAll<HTMLIFrameElement>("iframe");
+    expect(frames.length).toBe(2);
+    expect(frames[1]?.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(frames[1]?.getAttribute("srcdoc")).toContain("<main>artifact</main>");
+
+    fireEvent.click(screen.getAllByTitle("Open in new tab")[0]!);
+    expect(openInNewTabSpy).toHaveBeenCalledWith(
+      "/test/html-preview?key=33333333-3333-3333-3333-333333333333",
+      "html-artifact.html",
+      { activate: true },
+    );
+
+    fireEvent.click(screen.getAllByTitle("Download")[0]!);
+    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+    expect(anchorClick).toHaveBeenCalledTimes(1);
+
     expect(container.querySelector("pre")).toBeNull();
   });
 

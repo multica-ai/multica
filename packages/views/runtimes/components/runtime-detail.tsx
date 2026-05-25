@@ -39,8 +39,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { TimezoneSelect } from "../../common/timezone-select";
-import { AppLink } from "../../navigation";
+import { AppLink, useNavigation } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
 import { formatLastSeen } from "../utils";
 import { HealthBadge } from "./shared";
@@ -101,6 +100,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const user = useAuthStore((s) => s.user);
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
+  const navigation = useNavigation();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
@@ -130,8 +130,9 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const handleDelete = () => {
     deleteMutation.mutate(runtime.id, {
       onSuccess: () => {
-        toast.success(t(($) => $.detail.toast_deleted));
         setDeleteOpen(false);
+        navigation.replace(paths.runtimes());
+        toast.success(t(($) => $.detail.toast_deleted));
       },
       onError: (e) => {
         toast.error(e instanceof Error ? e.message : t(($) => $.detail.toast_delete_failed));
@@ -166,24 +167,6 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
               <Lock className="h-3 w-3" />
               {t(($) => $.detail.read_only)}
             </span>
-          )}
-          {canDelete && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => setDeleteOpen(true)}
-                    className="text-muted-foreground hover:text-destructive"
-                    aria-label={t(($) => $.detail.delete_aria)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                }
-              />
-              <TooltipContent>{t(($) => $.detail.delete_tooltip)}</TooltipContent>
-            </Tooltip>
           )}
         </div>
       </div>
@@ -501,6 +484,10 @@ function DiagnosticsCard({
 }) {
   const { t } = useT("runtimes");
   const isLocal = runtime.runtime_mode === "local";
+  // A live local daemon re-registers itself within seconds of a server-side
+  // delete (daemon self-heal, #2404), so deleting an online local runtime
+  // from the UI has no lasting effect — disable it and explain why.
+  const selfHealing = isLocal && runtime.status === "online";
   // canDelete here doubles as the "can edit runtime" predicate — it already
   // means "workspace owner/admin OR runtime owner", which is the same gate
   // the server enforces for the visibility PATCH.
@@ -520,16 +507,6 @@ function DiagnosticsCard({
             <VisibilityReadout runtime={runtime} />
           )}
         </div>
-        <div className="border-t pt-3">
-          <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
-            {t(($) => $.detail.diagnostics_timezone)}
-          </div>
-          {canDelete ? (
-            <TimezoneEditor runtime={runtime} />
-          ) : (
-            <TimezoneReadout runtime={runtime} />
-          )}
-        </div>
         {isLocal && (
           <div className="border-t pt-3">
             <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
@@ -545,15 +522,41 @@ function DiagnosticsCard({
         )}
         {canDelete && (
           <div className="border-t pt-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-full justify-start gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={onDelete}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              {t(($) => $.detail.delete_button)}
-            </Button>
+            {selfHealing ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    // Wrapping span keeps the trigger hoverable — a disabled
+                    // <button> swallows pointer events, so the tooltip would
+                    // never open if it were the trigger itself.
+                    <span className="block w-full">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled
+                        className="h-8 w-full justify-start gap-2 text-destructive"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        {t(($) => $.detail.delete_button)}
+                      </Button>
+                    </span>
+                  }
+                />
+                <TooltipContent>
+                  {t(($) => $.detail.delete_disabled_tooltip)}
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-full justify-start gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={onDelete}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t(($) => $.detail.delete_button)}
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -679,61 +682,5 @@ function VisibilityChoice({
       />
       <TooltipContent>{tooltip}</TooltipContent>
     </Tooltip>
-  );
-}
-
-function TimezoneReadout({ runtime }: { runtime: AgentRuntime }) {
-  const { t } = useT("runtimes");
-  return (
-    <div className="space-y-1.5">
-      <div className="rounded-md border bg-muted/30 px-2 py-1.5 font-mono text-xs">
-        {runtime.timezone || "UTC"}
-      </div>
-      <p className="text-[11px] leading-snug text-muted-foreground">
-        {t(($) => $.detail.timezone_hint)}
-      </p>
-    </div>
-  );
-}
-
-// TimezoneEditor renders the current runtime tz, a dropdown of supported IANA
-// zones (plus the runtime's current value if it is unusual), and commits the
-// change via PATCH /api/runtimes/:id. We deliberately don't gate this behind a
-// separate "edit" mode because the change is reversible.
-function TimezoneEditor({ runtime }: { runtime: AgentRuntime }) {
-  const { t } = useT("runtimes");
-  const wsId = useWorkspaceId();
-  const updateRuntime = useUpdateRuntime(wsId);
-  const current = runtime.timezone || "UTC";
-
-  const handleTimezoneChange = (next: string) => {
-    if (next === current) return;
-    updateRuntime.mutate(
-      { runtimeId: runtime.id, patch: { timezone: next } },
-      {
-        onSuccess: () =>
-          toast.success(t(($) => $.detail.timezone_toast_updated, { tz: next })),
-        onError: (err) =>
-          toast.error(
-            err instanceof Error && err.message
-              ? err.message
-              : t(($) => $.detail.timezone_toast_failed),
-          ),
-      },
-    );
-  };
-
-  return (
-    <div className="space-y-1.5">
-      <TimezoneSelect
-        value={current}
-        onValueChange={handleTimezoneChange}
-        browserSuffix={t(($) => $.detail.timezone_browser_suffix)}
-        disabled={updateRuntime.isPending}
-      />
-      <p className="text-[11px] leading-snug text-muted-foreground">
-        {t(($) => $.detail.timezone_hint)}
-      </p>
-    </div>
   );
 }

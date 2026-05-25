@@ -173,6 +173,37 @@ func TestLocalStorage_KeyFromURL_WithBaseURL(t *testing.T) {
 	}
 }
 
+func TestLocalStorage_HandlesURL(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+	t.Setenv("LOCAL_UPLOAD_BASE_URL", "https://multica.example")
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	tests := []struct {
+		name   string
+		rawURL string
+		want   bool
+	}{
+		{"relative uploads URL", "/uploads/workspaces/ws-1/file.txt", true},
+		{"configured base uploads URL", "https://multica.example/uploads/workspaces/ws-1/file.txt", true},
+		{"different host uploads URL", "https://cdn.example.com/uploads/workspaces/ws-1/file.txt", false},
+		{"non uploads relative URL", "/assets/file.txt", false},
+		{"empty URL", "", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := store.HandlesURL(tc.rawURL); got != tc.want {
+				t.Errorf("HandlesURL(%q) = %v, want %v", tc.rawURL, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestLocalStorage_DeleteKeys(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
@@ -258,6 +289,14 @@ func TestLocalStorage_ServeFile_ContentDispositionFromSidecar(t *testing.T) {
 			contentType: "text/plain",
 			filename:    "weird\";name.txt",
 			wantHeader:  `attachment; filename="weird__name.txt"`,
+		},
+		{
+			// SVG can carry <script>/onload — never serve inline.
+			name:        "attachment for svg (stored-XSS prevention)",
+			key:         "workspaces/ws-1/jkl.svg",
+			contentType: "image/svg+xml",
+			filename:    "logo.svg",
+			wantHeader:  `attachment; filename="logo.svg"`,
 		},
 	}
 

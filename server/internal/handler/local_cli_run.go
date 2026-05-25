@@ -137,8 +137,9 @@ func (h *Handler) CreateLocalCLIRun(w http.ResponseWriter, r *http.Request) {
 	if !req.NoStatusUpdate && (issue.Status == "backlog" || issue.Status == "todo") {
 		prevStatus := issue.Status
 		updatedIssue, err := h.Queries.UpdateIssueStatus(r.Context(), db.UpdateIssueStatusParams{
-			ID:     issue.ID,
-			Status: "in_progress",
+			ID:          issue.ID,
+			Status:      "in_progress",
+			WorkspaceID: issue.WorkspaceID,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to update issue status")
@@ -314,7 +315,7 @@ func (h *Handler) CreateLocalCLIMessage(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var commentID pgtype.UUID
-	createsReply := (req.Type == "final" || (req.Type == "user_input" && !localCLIMessageIsCommand(req)) || localCLIMessageIsCodexProposedPlan(req)) &&
+	createsReply := (req.Type == "final" || (req.Type == "user_input" && !localCLIMessageIsNonCommentableCommand(req)) || localCLIMessageIsCodexProposedPlan(req)) &&
 		run.CommentsMode == "thread" &&
 		run.TopCommentID.Valid &&
 		strings.TrimSpace(req.Content) != ""
@@ -372,12 +373,13 @@ func (h *Handler) loadLocalCLIMessageBySource(ctx context.Context, run localCLIR
 	return protocol.TaskMessagePayload{}, false, err
 }
 
-func localCLIMessageIsCommand(req createLocalCLIMessageRequest) bool {
+func localCLIMessageIsNonCommentableCommand(req createLocalCLIMessageRequest) bool {
 	if req.Input == nil {
 		return false
 	}
 	command, _ := req.Input["command"].(bool)
-	return command
+	commentable, _ := req.Input["commentable"].(bool)
+	return command && !commentable
 }
 
 func localCLIMessageIsCodexProposedPlan(req createLocalCLIMessageRequest) bool {

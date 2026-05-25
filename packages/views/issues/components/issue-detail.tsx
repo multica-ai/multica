@@ -63,6 +63,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
@@ -106,7 +107,7 @@ import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
-import { timeAgo } from "@multica/core/utils";
+import { useTimeAgo } from "../../i18n";
 import { cn } from "@multica/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
@@ -595,12 +596,14 @@ function ActivityBlock({
   onToggle,
   getActorName,
   t,
+  timeAgo,
 }: {
   entries: TimelineEntry[];
   expanded: boolean;
   onToggle: () => void;
   getActorName: (type: string, id: string) => string;
   t: ActivityT;
+  timeAgo: (dateStr: string) => string;
 }) {
   if (!expanded) {
     const count = entries.length;
@@ -822,6 +825,7 @@ export function IssueDetail({
   highlightCommentId,
 }: IssueDetailProps) {
   const { t, i18n } = useT("issues");
+  const timeAgo = useTimeAgo();
   // `issueId` is the raw route param — may be a UUID *or* a human-readable
   // identifier (e.g. "OPE-460") when the URL has been canonicalized.  We keep
   // it around only for the initial detail query (the API accepts both formats)
@@ -869,6 +873,7 @@ export function IssueDetail({
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
+  const [metadataOpen, setMetadataOpen] = useState(false);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
   const [previewLogs, setPreviewLogs] = useState<{ title: string; logs: string } | null>(null);
   const githubSettings = useGitHubSettings();
@@ -1998,6 +2003,37 @@ export function IssueDetail({
           </div>}
         </div>
       )}
+
+      {/* Metadata — agent-facing free-form KV bag. The values almost
+          never mean anything to humans, so the trigger row matches the
+          sibling section headers (Pull requests / Details / Parent issue)
+          but clicking opens a dialog with the raw JSON instead of expanding
+          inline — the payload can be large and pushing the rest of the
+          sidebar down was noisy. */}
+      {Object.keys(issue.metadata ?? {}).length > 0 && (
+        <>
+          <button
+            type="button"
+            className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
+            onClick={() => setMetadataOpen(true)}
+          >
+            {t(($) => $.detail.section_metadata)}
+            <span className="tabular-nums">
+              · {Object.keys(issue.metadata ?? {}).length}
+            </span>
+          </button>
+          <Dialog open={metadataOpen} onOpenChange={setMetadataOpen}>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>{t(($) => $.detail.section_metadata)}</DialogTitle>
+              </DialogHeader>
+              <pre className="max-h-[60vh] overflow-auto rounded-md bg-muted p-3 font-mono text-xs">
+                {JSON.stringify(issue.metadata ?? {}, null, 2)}
+              </pre>
+            </DialogContent>
+          </Dialog>
+        </>
+      )}
     </div>
   );
 
@@ -2060,6 +2096,7 @@ export function IssueDetail({
         onToggle={() => toggleActivityBlock(item.id, expanded)}
         getActorName={getActorName}
         t={t}
+        timeAgo={timeAgo}
       />
     );
   };

@@ -80,9 +80,8 @@
   "detail": {
     "all_runtimes": "全部运行时",
     "read_only": "只读",
-    "delete_aria": "删除运行时",
-    "delete_tooltip": "删除运行时",
     "delete_button": "删除运行时",
+    "delete_disabled_tooltip": "该运行时由正在运行的本地 daemon 托管，删除后会在数秒内自动重新注册。需停止 daemon 进程才能彻底移除。",
     "last_seen": "最后活跃 {{when}}",
     "fact_owner": "所有者",
     "fact_device": "设备",
@@ -96,7 +95,6 @@
     "diagnostics_title": "诊断",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "可见性",
-    "diagnostics_timezone": "时区",
     "visibility_label": {
       "private": "私有",
       "public": "公开"
@@ -107,10 +105,6 @@
     },
     "visibility_toast_updated": "可见性已设为「{{visibility}}」",
     "visibility_toast_failed": "更新可见性失败",
-    "timezone_browser_suffix": "（浏览器）",
-    "timezone_hint": "该 Runtime 的 Token 用量图表会按此时区进行日期分桶。",
-    "timezone_toast_updated": "时区已更新为 {{tz}}",
-    "timezone_toast_failed": "更新时区失败",
     "delete_dialog": {
       "title": "删除运行时",
       "description": "确定要删除\"{{name}}\"吗？此操作不可撤销。",
@@ -150,6 +144,46 @@
     "success_description": "电脑已经上线就绪。创建一个智能体，task 就可以派发到这里运行。",
     "view_runtime": "查看运行时",
     "create_agent": "创建智能体"
+  },
+  "cloud_runtime": {
+    "action": "Cloud Runtime",
+    "title": "Cloud Runtime",
+    "description": "创建托管云端节点，并查看它的 Fleet 状态。",
+    "create_title": "新节点",
+    "create_hint": "只需要填写名称、实例规格和磁盘大小，其余配置由 Fleet 默认处理。",
+    "nodes_title": "Fleet 节点",
+    "refresh": "刷新",
+    "nodes_empty": "还没有云端节点",
+    "nodes_failed": "Cloud Runtime 不可用",
+    "nodes_failed_hint": "Fleet 未返回节点列表。",
+    "node_fallback_name": "云端节点",
+    "create": "创建节点",
+    "creating": "创建中...",
+    "cancel": "取消",
+    "toast_created": "Cloud Runtime 节点已创建",
+    "toast_create_failed": "创建 Cloud Runtime 节点失败",
+    "delete": "删除节点",
+    "delete_confirm": "确定要删除此云节点吗？此操作无法撤销。",
+    "toast_deleted": "云节点已删除",
+    "toast_delete_failed": "删除云节点失败",
+    "fields": {
+      "name": "名称",
+      "instance_type": "实例规格",
+      "region": "Region",
+      "disk_size": "磁盘大小 GiB",
+      "image_id": "AMI ID",
+      "subnet_id": "Subnet ID",
+      "key_name": "Key pair",
+      "bootstrap_pat": "Bootstrap PAT"
+    },
+    "placeholders": {
+      "name": "cloud-dev-01",
+      "key_name": "dev-key"
+    },
+    "validation": {
+      "instance_type_required": "实例规格不能为空",
+      "disk_size_invalid": "磁盘大小必须是正整数"
+    }
   },
   "update": {
     "cli_version_label": "CLI 版本：",

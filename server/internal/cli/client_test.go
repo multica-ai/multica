@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -362,6 +364,191 @@ func TestUploadFileWithURL(t *testing.T) {
 			t.Errorf("unexpected error message: %s", err.Error())
 		}
 	})
+}
+
+func TestUploadFileToIssueDirectUpload(t *testing.T) {
+	var putCalled bool
+	putServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		putCalled = true
+		if r.Method != http.MethodPut {
+			t.Errorf("expected PUT, got %s", r.Method)
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/octet-stream" {
+			t.Errorf("expected signed Content-Type header, got %q", got)
+		}
+		data, _ := io.ReadAll(r.Body)
+		if string(data) != "hello" {
+			t.Errorf("unexpected PUT body: %q", string(data))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer putServer.Close()
+
+	paths := make([]string, 0, 2)
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/attachments/upload/initiate":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode initiate body: %v", err)
+			}
+			if body["issue_id"] != "OPE-921" {
+				t.Errorf("expected issue_id OPE-921, got %#v", body["issue_id"])
+			}
+			json.NewEncoder(w).Encode(directUploadInitiateResponse{
+				UploadURL:   putServer.URL + "/object",
+				UploadToken: "token-1",
+				Headers:     map[string]string{"Content-Type": "application/octet-stream"},
+			})
+		case "/api/attachments/upload/complete":
+			json.NewEncoder(w).Encode(AttachmentResponse{
+				ID:  "att-1",
+				URL: "https://cdn.example.com/file.txt",
+			})
+		default:
+			t.Fatalf("unexpected API path %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	client := NewAPIClient(apiServer.URL, "ws-1", "test-token")
+	id, url, err := client.UploadFileToIssue(context.Background(), []byte("hello"), "test.txt", "OPE-921")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !putCalled {
+		t.Fatal("expected direct PUT to be called")
+	}
+	if id != "att-1" || url != "https://cdn.example.com/file.txt" {
+		t.Fatalf("unexpected result id=%q url=%q", id, url)
+	}
+	if strings.Join(paths, ",") != "/api/attachments/upload/initiate,/api/attachments/upload/complete" {
+		t.Fatalf("unexpected API paths: %v", paths)
+	}
+}
+
+func TestUploadFileToIssueFallsBackWhenDirectUploadUnsupported(t *testing.T) {
+	var multipartCalled bool
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/attachments/upload/initiate":
+			w.WriteHeader(http.StatusNotImplemented)
+			io.WriteString(w, `{"error":"direct upload not supported"}`)
+		case "/api/upload-file":
+			multipartCalled = true
+			if ct := r.Header.Get("Content-Type"); !strings.Contains(ct, "multipart/form-data") {
+				t.Errorf("expected multipart content-type, got %s", ct)
+			}
+			if got := r.FormValue("issue_id"); got != "OPE-921" {
+				t.Errorf("expected issue_id OPE-921, got %q", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(AttachmentResponse{
+				ID:  "att-fallback",
+				URL: "https://cdn.example.com/fallback.txt",
+			})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	client := NewAPIClient(apiServer.URL, "ws-1", "test-token")
+	id, url, err := client.UploadFileToIssue(context.Background(), []byte("hello"), "test.txt", "OPE-921")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !multipartCalled {
+		t.Fatal("expected multipart fallback to be called")
+	}
+	if id != "att-fallback" || url != "https://cdn.example.com/fallback.txt" {
+		t.Fatalf("unexpected result id=%q url=%q", id, url)
+	}
+}
+
+func TestUploadFileToIssueMultipartDirectUpload(t *testing.T) {
+	var putBodies [][]byte
+	putServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Errorf("expected PUT, got %s", r.Method)
+		}
+		data, _ := io.ReadAll(r.Body)
+		putBodies = append(putBodies, data)
+		w.Header().Set("ETag", fmt.Sprintf(`"etag-%d"`, len(putBodies)))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer putServer.Close()
+
+	paths := make([]string, 0, 5)
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/attachments/upload/multipart/initiate":
+			json.NewEncoder(w).Encode(multipartUploadInitiateResponse{
+				SessionID:     "session-1",
+				AttachmentID:  "att-1",
+				UploadID:      "upload-1",
+				PartSizeBytes: int64(multipartUploadPartSizeBytes),
+				PartCount:     4,
+			})
+		case "/api/attachments/upload/multipart/sign-parts":
+			var body struct {
+				PartNumbers []int32 `json:"part_numbers"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode sign body: %v", err)
+			}
+			if len(body.PartNumbers) != 1 {
+				t.Fatalf("expected one part number, got %v", body.PartNumbers)
+			}
+			json.NewEncoder(w).Encode(multipartUploadSignPartsResponse{
+				Parts: []struct {
+					PartNumber int32             `json:"part_number"`
+					UploadURL  string            `json:"upload_url"`
+					Headers    map[string]string `json:"headers"`
+				}{{
+					PartNumber: body.PartNumbers[0],
+					UploadURL:  putServer.URL + "/part",
+				}},
+			})
+		case "/api/attachments/upload/multipart/complete":
+			var body struct {
+				Parts []multipartCompletedPart `json:"parts"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode complete body: %v", err)
+			}
+			if len(body.Parts) != 4 {
+				t.Fatalf("expected 4 completed parts, got %d", len(body.Parts))
+			}
+			json.NewEncoder(w).Encode(AttachmentResponse{
+				ID:  "att-1",
+				URL: "https://cdn.example.com/file.bin",
+			})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	fileData := bytes.Repeat([]byte("a"), multipartUploadThresholdBytes)
+	client := NewAPIClient(apiServer.URL, "ws-1", "test-token")
+	id, url, err := client.UploadFileToIssue(context.Background(), fileData, "large.bin", "OPE-921")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != "att-1" || url != "https://cdn.example.com/file.bin" {
+		t.Fatalf("unexpected result id=%q url=%q", id, url)
+	}
+	if len(putBodies) != 4 {
+		t.Fatalf("expected 4 PUTs, got %d", len(putBodies))
+	}
+	if strings.Join(paths, ",") != "/api/attachments/upload/multipart/initiate,/api/attachments/upload/multipart/sign-parts,/api/attachments/upload/multipart/sign-parts,/api/attachments/upload/multipart/sign-parts,/api/attachments/upload/multipart/sign-parts,/api/attachments/upload/multipart/complete" {
+		t.Fatalf("unexpected API paths: %v", paths)
+	}
 }
 
 func TestNormalizeGOOS(t *testing.T) {

@@ -298,6 +298,24 @@ func recordMentionDingTalkDelivery(
 	event db.NotificationEvent,
 	payloadSnapshot []byte,
 ) {
+	if event.CommentID.Valid {
+		exists, err := queries.ExistsDeliveryByCommentAndChannel(ctx, db.ExistsDeliveryByCommentAndChannelParams{
+			RecipientUserID: event.RecipientUserID,
+			CommentID:       event.CommentID,
+			Channel:         "dingtalk",
+		})
+		if err != nil {
+			slog.Error("failed to check dingtalk dedup",
+				"recipient_id", recipientID,
+				"comment_id", util.UUIDToString(event.CommentID),
+				"error", err,
+			)
+		}
+		if exists {
+			return
+		}
+	}
+
 	prefs, err := queries.ListNotificationChannelPreferencesByUser(ctx, parseUUID(recipientID))
 	if err != nil {
 		slog.Error("failed to load notification preferences for dingtalk delivery",
@@ -384,6 +402,24 @@ func recordDingTalkTaskDelivery(
 	event db.NotificationEvent,
 	payloadSnapshot []byte,
 ) {
+	if event.CommentID.Valid {
+		exists, err := queries.ExistsDeliveryByCommentAndChannel(ctx, db.ExistsDeliveryByCommentAndChannelParams{
+			RecipientUserID: event.RecipientUserID,
+			CommentID:       event.CommentID,
+			Channel:         "dingtalk",
+		})
+		if err != nil {
+			slog.Error("failed to check dingtalk task dedup",
+				"recipient_id", recipientID,
+				"comment_id", util.UUIDToString(event.CommentID),
+				"error", err,
+			)
+		}
+		if exists {
+			return
+		}
+	}
+
 	prefs, err := queries.ListNotificationChannelPreferencesByUser(ctx, parseUUID(recipientID))
 	if err != nil {
 		slog.Error("failed to load notification preferences for dingtalk task delivery",
@@ -594,6 +630,23 @@ func recordOpenclawWeixinDelivery(
 	}
 	if weixinPref == nil {
 		return
+	}
+
+	if event.CommentID.Valid {
+		exists, err := queries.ExistsOpenclawWeixinDeliveryByComment(ctx, db.ExistsOpenclawWeixinDeliveryByCommentParams{
+			RecipientUserID: event.RecipientUserID,
+			CommentID:       event.CommentID,
+		})
+		if err != nil {
+			slog.Error("failed to check openclaw_weixin dedup",
+				"recipient_id", recipientID,
+				"comment_id", util.UUIDToString(event.CommentID),
+				"error", err,
+			)
+		}
+		if exists {
+			return
+		}
 	}
 
 	bindings, err := queries.ListExternalAccountBindingsByUser(ctx, parseUUID(recipientID))
@@ -1469,7 +1522,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		// The comment payload can come as handler.CommentResponse from the
 		// HTTP handler, or as map[string]any from the agent comment path in
 		// task.go. Handle both.
-		var issueID, commentID, commentContent string
+		var issueID, commentID, commentContent, authorType string
 		var parentID string
 		switch c := payload["comment"].(type) {
 		case handler.CommentResponse:
@@ -1479,6 +1532,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			if c.ParentID != nil {
 				parentID = *c.ParentID
 			}
+			authorType = c.AuthorType
 		case map[string]any:
 			issueID, _ = c["issue_id"].(string)
 			commentID, _ = c["id"].(string)
@@ -1486,7 +1540,20 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			if pid, ok := c["parent_id"].(string); ok {
 				parentID = pid
 			}
+			authorType, _ = c["author_type"].(string)
 		default:
+			return
+		}
+
+		// Platform-authored system comments (MUL-2538 child-done parent
+		// notify) must NOT create inbox rows or parse mentions from their
+		// body — the comment is a controlled platform signal, not a human
+		// commenter. Mention parsing is the dangerous bit: if the body
+		// transcluded a child title containing `mention://member/<uuid>`,
+		// the parent's assignee inbox would light up via the generic path.
+		// Skip the listener entirely; the WS broadcast still delivers the
+		// comment to the issue timeline.
+		if authorType == "system" {
 			return
 		}
 
@@ -1740,7 +1807,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			Type:            "task_completed",
 			Severity:        "info",
 			IssueID:         parseUUID(issueID),
-			CommentID:       pgtype.UUID{},
+			CommentID:       optionalUUID(lastAgentCommentID),
 			ActorType:       util.StrToText("agent"),
 			ActorID:         parseUUID(agentID),
 			Title:           issue.Title,
@@ -1860,7 +1927,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				Type:            "task_failed",
 				Severity:        "action_required",
 				IssueID:         parseUUID(issueID),
-				CommentID:       pgtype.UUID{},
+				CommentID:       optionalUUID(lastAgentCommentID),
 				ActorType:       util.StrToText("agent"),
 				ActorID:         parseUUID(agentID),
 				Title:           issue.Title,

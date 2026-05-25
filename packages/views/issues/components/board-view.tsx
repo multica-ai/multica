@@ -20,7 +20,7 @@ import { Eye, MoreHorizontal } from "lucide-react";
 import type { Issue, IssueAssigneeGroup, IssueAssigneeType, IssueStatus, UpdateIssueRequest } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import type { AssigneeGroupedIssuesFilter, MyIssuesFilter } from "@multica/core/issues/queries";
+import type { AssigneeGroupedIssuesFilter, IssueListFilter } from "@multica/core/issues/queries";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -235,7 +235,7 @@ export function BoardView({
   childProgressMap?: Map<string, ChildProgress>;
   /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
   myIssuesScope?: string;
-  myIssuesFilter?: MyIssuesFilter;
+  myIssuesFilter?: IssueListFilter;
   /** When set, the per-column "+" pre-fills the project on the create form. */
   projectId?: string;
   /** Optional display count override for callers that apply client-side filters. */
@@ -246,7 +246,7 @@ export function BoardView({
   const sortDirection = useViewStore((s) => s.sortDirection);
   const grouping = useViewStore((s) => s.grouping);
   const { getActorName } = useActorName();
-  const myIssuesOpts = myIssuesScope
+  const issueListTarget = myIssuesScope || myIssuesFilter
     ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
     : undefined;
   const groupedIssues = useMemo(
@@ -484,7 +484,7 @@ export function BoardView({
                 issueIds={columns[group.id] ?? []}
                 issueMap={issueMapRef.current}
                 childProgressMap={childProgressMap}
-                myIssuesOpts={myIssuesOpts}
+                issueListTarget={issueListTarget}
                 projectId={projectId}
                 displayCount={columnCounts?.[group.status]}
               />
@@ -518,7 +518,7 @@ export function BoardView({
         {grouping === "status" && hiddenStatuses.length > 0 && (
           <HiddenColumnsPanel
             hiddenStatuses={hiddenStatuses}
-            myIssuesOpts={myIssuesOpts}
+            issueListTarget={issueListTarget}
             columnCounts={columnCounts}
           />
         )}
@@ -583,7 +583,7 @@ function PaginatedBoardColumn({
   issueIds,
   issueMap,
   childProgressMap,
-  myIssuesOpts,
+  issueListTarget,
   projectId,
   displayCount,
 }: {
@@ -591,13 +591,13 @@ function PaginatedBoardColumn({
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap?: Map<string, ChildProgress>;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  issueListTarget?: { scope?: string; filter?: IssueListFilter };
   projectId?: string;
   displayCount?: number;
 }) {
-  const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
+  const { loadMore, hasMore, isLoading, total, isLoaded } = useLoadMoreByStatus(
     group.status,
-    myIssuesOpts,
+    issueListTarget,
   );
   return (
     <BoardColumn
@@ -605,7 +605,7 @@ function PaginatedBoardColumn({
       issueIds={issueIds}
       issueMap={issueMap}
       childProgressMap={childProgressMap}
-      totalCount={displayCount ?? total}
+      totalCount={displayCount ?? (isLoaded ? total : issueIds.length)}
       projectId={projectId}
       footer={
         hasMore ? (
@@ -618,11 +618,11 @@ function PaginatedBoardColumn({
 
 function HiddenColumnsPanel({
   hiddenStatuses,
-  myIssuesOpts,
+  issueListTarget,
   columnCounts,
 }: {
   hiddenStatuses: IssueStatus[];
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  issueListTarget?: { scope?: string; filter?: IssueListFilter };
   columnCounts?: Partial<Record<IssueStatus, number>>;
 }) {
   const { t } = useT("issues");
@@ -638,7 +638,7 @@ function HiddenColumnsPanel({
           <HiddenColumnRow
             key={status}
             status={status}
-            myIssuesOpts={myIssuesOpts}
+            issueListTarget={issueListTarget}
             displayCount={columnCounts?.[status]}
           />
         ))}
@@ -649,16 +649,16 @@ function HiddenColumnsPanel({
 
 function HiddenColumnRow({
   status,
-  myIssuesOpts,
+  issueListTarget,
   displayCount,
 }: {
   status: IssueStatus;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  issueListTarget?: { scope?: string; filter?: IssueListFilter };
   displayCount?: number;
 }) {
   const { t } = useT("issues");
   const viewStoreApi = useViewStoreApi();
-  const { total } = useLoadMoreByStatus(status, myIssuesOpts);
+  const { total, isLoaded } = useLoadMoreByStatus(status, issueListTarget);
   return (
     <div className="flex items-center justify-between rounded-lg px-2.5 py-2 hover:bg-muted/50">
       <div className="flex items-center gap-2">
@@ -666,7 +666,9 @@ function HiddenColumnRow({
         <span className="text-sm">{t(($) => $.status[status])}</span>
       </div>
       <div className="flex items-center gap-1.5">
-        <span className="text-xs text-muted-foreground">{displayCount ?? total}</span>
+        <span className="text-xs text-muted-foreground">
+          {displayCount ?? (isLoaded ? total : "-")}
+        </span>
         <DropdownMenu>
           <DropdownMenuTrigger
             render={

@@ -16,6 +16,7 @@ import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
 import {
+  agentDetailKeys,
   agentTaskSnapshotKeys,
   agentActivityKeys,
   agentRunCountsKeys,
@@ -27,6 +28,7 @@ import {
   onIssueUpdated,
   onIssueDeleted,
   onIssueLabelsChanged,
+  onIssueMetadataChanged,
 } from "../issues/ws-updaters";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted } from "../inbox/ws-updaters";
 import { inboxKeys } from "../inbox/queries";
@@ -45,6 +47,7 @@ import type {
   IssueCreatedPayload,
   IssueDeletedPayload,
   IssueLabelsChangedPayload,
+  IssueMetadataChangedPayload,
   InboxNewPayload,
   CommentCreatedPayload,
   CommentUpdatedPayload,
@@ -73,6 +76,7 @@ import type {
 const chatWsLogger = createLogger("chat.ws");
 
 const logger = createLogger("realtime-sync");
+const TASK_LIFECYCLE_INVALIDATE_DELAY_MS = 2500;
 
 export function applyChatDoneToCache(
   qc: QueryClient,
@@ -140,6 +144,51 @@ export function applyWorkspaceUpdatedToCache(
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
+function invalidateActiveQueries(
+  qc: QueryClient,
+  queryKey: readonly unknown[],
+): void {
+  qc.invalidateQueries({ queryKey, refetchType: "active" });
+}
+
+export function invalidateWorkspaceTaskQueries(
+  qc: QueryClient,
+  wsId: string,
+): void {
+  invalidateActiveQueries(qc, agentTaskSnapshotKeys.list(wsId));
+  invalidateActiveQueries(qc, agentActivityKeys.last30d(wsId));
+  invalidateActiveQueries(qc, agentRunCountsKeys.last30d(wsId));
+  invalidateActiveQueries(qc, agentTasksKeys.all(wsId));
+  invalidateActiveQueries(qc, issueKeys.tasksAll());
+  invalidateActiveQueries(qc, issueKeys.usageAll());
+  invalidateActiveQueries(qc, workspaceKeys.squads(wsId));
+}
+
+export function createWorkspaceTaskInvalidator(
+  qc: QueryClient,
+  delayMs = TASK_LIFECYCLE_INVALIDATE_DELAY_MS,
+): { schedule: (wsId: string) => void; dispose: () => void } {
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  return {
+    schedule(wsId: string) {
+      const existing = timers.get(wsId);
+      if (existing) clearTimeout(existing);
+      timers.set(
+        wsId,
+        setTimeout(() => {
+          timers.delete(wsId);
+          invalidateWorkspaceTaskQueries(qc, wsId);
+        }, delayMs),
+      );
+    },
+    dispose() {
+      timers.forEach(clearTimeout);
+      timers.clear();
+    },
+  };
+}
+
 /**
  * Invalidates all workspace-scoped queries. Used after reconnect and when a
  * new WSClient instance is detected (workspace switch) to recover events
@@ -151,6 +200,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+    qc.invalidateQueries({ queryKey: agentDetailKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
@@ -204,6 +254,11 @@ export function useRealtimeSync(
   useEffect(() => {
     if (!ws) return;
 
+    const taskInvalidator = createWorkspaceTaskInvalidator(qc);
+    const scheduleTaskRefresh = (wsId: string) => {
+      taskInvalidator.schedule(wsId);
+    };
+
     const refreshMap: Record<string, () => void> = {
       inbox: () => {
         const wsId = getCurrentWsId();
@@ -213,6 +268,7 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) {
           qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+          qc.invalidateQueries({ queryKey: agentDetailKeys.all(wsId) });
           // Squad members status is derived per agent, so any agent
           // change (status flip, archive, runtime swap) needs to refresh
           // the per-squad members-status cache. Prefix-matches both the
@@ -295,12 +351,7 @@ export function useRealtimeSync(
       task: () => {
         const wsId = getCurrentWsId();
         if (!wsId) return;
-        qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
-        qc.invalidateQueries({ queryKey: agentActivityKeys.last30d(wsId) });
-        qc.invalidateQueries({ queryKey: agentRunCountsKeys.last30d(wsId) });
-        qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
-        qc.invalidateQueries({ queryKey: ["issues", "tasks"] });
-        qc.invalidateQueries({ queryKey: ["issues", "usage"] });
+        scheduleTaskRefresh(wsId);
       },
     };
 
@@ -321,7 +372,7 @@ export function useRealtimeSync(
     // Event types handled by specific handlers below -- skip generic refresh
     const specificEvents = new Set([
       "workspace:updated",
-      "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "inbox:new",
+      "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "issue_metadata:changed", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "comment:resolved", "comment:unresolved",
       "activity:created",
@@ -392,6 +443,13 @@ export function useRealtimeSync(
       if (!issue_id) return;
       const wsId = getCurrentWsId();
       if (wsId) onIssueLabelsChanged(qc, wsId, issue_id, labels ?? []);
+    });
+
+    const unsubIssueMetadataChanged = ws.on("issue_metadata:changed", (p) => {
+      const { issue_id, metadata } = p as IssueMetadataChangedPayload;
+      if (!issue_id) return;
+      const wsId = getCurrentWsId();
+      if (wsId) onIssueMetadataChanged(qc, wsId, issue_id, metadata ?? {});
     });
 
     const unsubInboxNew = ws.on("inbox:new", async (p) => {
@@ -785,11 +843,7 @@ export function useRealtimeSync(
       if (!payload.chat_session_id) {
         // Issue task: invalidate agent presence and task caches
         if (wsId) {
-          qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
-          qc.invalidateQueries({ queryKey: agentActivityKeys.last30d(wsId) });
-          qc.invalidateQueries({ queryKey: agentRunCountsKeys.last30d(wsId) });
-          qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
+          scheduleTaskRefresh(wsId);
         }
         return;
       }
@@ -808,11 +862,7 @@ export function useRealtimeSync(
         // Issue task: invalidate agent presence, task lists, and activity caches
         // so the execution log, agent cards, and activity charts refresh.
         if (wsId) {
-          qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
-          qc.invalidateQueries({ queryKey: agentActivityKeys.last30d(wsId) });
-          qc.invalidateQueries({ queryKey: agentRunCountsKeys.last30d(wsId) });
-          qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
+          scheduleTaskRefresh(wsId);
         }
         return;
       }
@@ -835,11 +885,7 @@ export function useRealtimeSync(
       if (!payload.chat_session_id) {
         // Issue task: same invalidation as task:completed
         if (wsId) {
-          qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
-          qc.invalidateQueries({ queryKey: agentActivityKeys.last30d(wsId) });
-          qc.invalidateQueries({ queryKey: agentRunCountsKeys.last30d(wsId) });
-          qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
+          scheduleTaskRefresh(wsId);
         }
         return;
       }
@@ -922,6 +968,7 @@ export function useRealtimeSync(
       unsubIssueCreated();
       unsubIssueDeleted();
       unsubIssueLabelsChanged();
+      unsubIssueMetadataChanged();
       unsubInboxNew();
       unsubCommentCreated();
       unsubCommentUpdated();
@@ -958,6 +1005,7 @@ export function useRealtimeSync(
       unsubChatSessionUpdated();
       timers.forEach(clearTimeout);
       timers.clear();
+      taskInvalidator.dispose();
     };
   }, [ws, qc, authStore, onToast]);
 

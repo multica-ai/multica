@@ -5,7 +5,7 @@ import {
   issueKeys,
   ISSUE_PAGE_SIZE,
   type AssigneeGroupedIssuesFilter,
-  type MyIssuesFilter,
+  type IssueListFilter,
 } from "./queries";
 import {
   addIssueToBuckets,
@@ -61,60 +61,63 @@ export type ToggleIssueReactionVars = {
 
 /**
  * Paginate one status column into the cache. Works for both the workspace
- * issue list and per-scope My Issues lists (pass `myIssues` to target the
- * latter).
+ * issue list and per-scope My Issues lists (pass `target.scope` to target the
+ * latter). The optional filter must match the query that owns the bucket.
  */
 export function useLoadMoreByStatus(
   status: IssueStatus,
-  myIssues?: { scope: string; filter: MyIssuesFilter },
+  target?: { scope?: string; filter?: IssueListFilter },
 ) {
   const wsId = useWorkspaceId();
-  return useLoadMoreByStatusForWorkspace(wsId, status, myIssues);
+  return useLoadMoreByStatusForWorkspace(wsId, status, target);
 }
 
 export function useLoadMoreByStatusForWorkspace(
   wsId: string,
   status: IssueStatus,
-  myIssues?: { scope: string; filter: MyIssuesFilter },
+  target?: { scope?: string; filter?: IssueListFilter },
 ) {
   const qc = useQueryClient();
   const [isLoading, setIsLoading] = useState(false);
 
-  const queryKey = myIssues
-    ? issueKeys.myList(wsId, myIssues.scope, myIssues.filter)
-    : issueKeys.list(wsId);
+  const requestFilter = target?.filter;
+  const queryKey = target?.scope
+    ? issueKeys.myList(wsId, target.scope, requestFilter ?? {})
+    : issueKeys.list(wsId, requestFilter);
   const cache = qc.getQueryData<ListIssuesCache>(queryKey);
   const bucket = cache?.byStatus[status];
   const loaded = bucket?.issues.length ?? 0;
   const total = bucket?.total ?? 0;
-  const hasMore = loaded < total;
+  const isLoaded = bucket !== undefined;
+  const hasMore = !isLoaded || loaded < total;
 
   const loadMore = useCallback(async () => {
     if (isLoading || !hasMore) return;
     setIsLoading(true);
     try {
+      const { statuses: _statuses, ...listParams } = requestFilter ?? {};
       const res = await api.listIssues({
         status,
         limit: ISSUE_PAGE_SIZE,
-        offset: loaded,
-        ...myIssues?.filter,
+        offset: isLoaded ? loaded : 0,
+        ...listParams,
       });
       qc.setQueryData<ListIssuesCache>(queryKey, (old) => {
-        if (!old) return old;
-        const prev = getBucket(old, status);
+        const current = old ?? { byStatus: {} };
+        const prev = getBucket(current, status);
         const existingIds = new Set(prev.issues.map((i) => i.id));
         const appended = res.issues.filter((i) => !existingIds.has(i.id));
-        return setBucket(old, status, {
-          issues: [...prev.issues, ...appended],
+        return setBucket(current, status, {
+          issues: isLoaded ? [...prev.issues, ...appended] : res.issues,
           total: res.total,
         });
       });
     } finally {
       setIsLoading(false);
     }
-  }, [qc, queryKey, status, loaded, hasMore, isLoading, myIssues?.filter]);
+  }, [hasMore, isLoaded, isLoading, loaded, qc, queryKey, requestFilter, status]);
 
-  return { loadMore, hasMore, isLoading, total };
+  return { loadMore, hasMore, isLoading, total, isLoaded };
 }
 
 export function useLoadMoreByAssigneeGroup(
@@ -192,7 +195,7 @@ export function useCreateIssue() {
       }
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.listAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
@@ -211,7 +214,7 @@ export function useUpdateIssue() {
       // cache update happens in the same tick as mutate(). Awaiting would
       // yield to the event loop, letting @dnd-kit reset its visual state
       // before the optimistic update lands.
-      qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
+      qc.cancelQueries({ queryKey: issueKeys.listAll(wsId) });
       const prevList = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
       const prevDetails = getIssueDetailCacheSnapshot(qc, wsId, id);
       const prevDetail = getIssueFromDetailCache(qc, wsId, id);
@@ -274,7 +277,7 @@ export function useUpdateIssue() {
     },
     onSettled: (data, _err, vars, ctx) => {
       invalidateIssueDetailQueries(qc, wsId, data?.id ?? vars.id);
-      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.listAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
@@ -312,7 +315,7 @@ export function useDeleteIssue() {
     mutationFn: (id: string) => api.deleteIssue(id),
     onMutate: async (id) => {
       await Promise.all([
-        qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
+        qc.cancelQueries({ queryKey: issueKeys.listAll(wsId) }),
         qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) }),
       ]);
       const metadata = collectDeletedIssueCacheMetadata(qc, wsId, id);
@@ -359,7 +362,7 @@ export function useDeleteIssue() {
       cleanupDeletedIssueCaches(qc, wsId, id, ctx?.metadata);
     },
     onSettled: (_data, _err, _id, ctx) => {
-      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.listAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
@@ -380,7 +383,7 @@ export function useBatchUpdateIssues() {
       updates: UpdateIssueRequest;
     }) => api.batchUpdateIssues(ids, updates),
     onMutate: async ({ ids, updates }) => {
-      await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
+      await qc.cancelQueries({ queryKey: issueKeys.listAll(wsId) });
       const prevList = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
       qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) => {
         if (!old) return old;
@@ -419,7 +422,7 @@ export function useBatchUpdateIssues() {
       }
     },
     onSettled: (_data, _err, _vars, ctx) => {
-      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.listAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
@@ -442,7 +445,7 @@ export function useBatchDeleteIssues() {
     mutationFn: (ids: string[]) => api.batchDeleteIssues(ids),
     onMutate: async (ids) => {
       await Promise.all([
-        qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
+        qc.cancelQueries({ queryKey: issueKeys.listAll(wsId) }),
         qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) }),
       ]);
       const metadataById = new Map(
@@ -522,7 +525,7 @@ export function useBatchDeleteIssues() {
       invalidateDeletedIssueDependentCaches(qc, wsId);
     },
     onSettled: (_data, _err, _ids, ctx) => {
-      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.listAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });

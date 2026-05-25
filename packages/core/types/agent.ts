@@ -26,7 +26,6 @@ export interface RuntimeDevice {
   owner_id: string | null;
   /** Defaults to "private" when the backend predates the visibility flag. */
   visibility: RuntimeVisibility;
-  timezone: string;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;
@@ -40,6 +39,7 @@ export type AgentRuntime = RuntimeDevice;
 export type TaskFailureReason =
   | "agent_error"
   | "timeout"
+  | "codex_semantic_inactivity"
   | "runtime_offline"
   | "runtime_recovery"
   | "manual";
@@ -155,6 +155,7 @@ export interface Agent {
   custom_env: Record<string, string>;
   custom_args: string[];
   custom_env_redacted: boolean;
+  custom_env_redacted_reason?: 'policy' | 'role';
   visibility: AgentVisibility;
   status: AgentStatus;
   max_concurrent_tasks: number;
@@ -519,6 +520,119 @@ export interface DashboardRunTimeDaily {
   total_seconds: number;
   task_count: number;
   failed_count: number;
+}
+
+export interface AgentRunDashboardSummary {
+  total_runs: number;
+  successful_runs: number;
+  failed_runs: number;
+  success_rate: number;
+  active_agent_count: number;
+  average_duration_seconds: number;
+}
+
+export interface AgentRunDashboardDaily {
+  date: string;
+  total_runs: number;
+  successful_runs: number;
+  failed_runs: number;
+  success_rate: number;
+}
+
+export interface AgentRunDashboardHeatmapCell {
+  weekday: number;
+  hour: number;
+  run_count: number;
+}
+
+export interface AgentRunDashboardFailureReason {
+  reason: string;
+  count: number;
+}
+
+export interface AgentRunDashboardAgent {
+  agent_id: string;
+  agent_name: string;
+  agent_status: string;
+  total_runs: number;
+  successful_runs: number;
+  failed_runs: number;
+  success_rate: number;
+  average_duration_seconds: number;
+  last_run_at: string | null;
+  last_task_id: string | null;
+  last_status: string | null;
+  project_id: string | null;
+  project_title: string | null;
+  project_count: number;
+  available_actions: string[];
+}
+
+export interface AgentRunDashboardRun {
+  id: string;
+  agent_id: string;
+  agent_name: string;
+  issue_id: string | null;
+  issue_title: string | null;
+  issue_number: number | null;
+  project_id: string | null;
+  project_title: string | null;
+  status: string;
+  run_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  duration_seconds: number;
+  failure_reason: string;
+  error: string | null;
+  attempt: number;
+  max_attempts: number;
+}
+
+export interface AgentRunDashboardRetryDistribution {
+  attempt: number;
+  count: number;
+}
+
+export interface AgentRunDashboard {
+  summary: AgentRunDashboardSummary;
+  daily: AgentRunDashboardDaily[];
+  heatmap: AgentRunDashboardHeatmapCell[];
+  failure_reasons: AgentRunDashboardFailureReason[];
+  agents: AgentRunDashboardAgent[];
+  recent_runs: AgentRunDashboardRun[];
+  recent_failures: AgentRunDashboardRun[];
+  retry_distribution: AgentRunDashboardRetryDistribution[];
+}
+
+export interface AgentRunTimelineEvent {
+  key: string;
+  label: string;
+  timestamp: string;
+}
+
+export interface AgentRunDurationBreakdown {
+  total_seconds: number;
+  llm_seconds: number;
+  tool_call_seconds: number;
+  network_wait_seconds: number;
+}
+
+export interface AgentRunMessage {
+  seq: number;
+  type: string;
+  tool?: string;
+  content?: string;
+  input?: Record<string, unknown>;
+  output?: string;
+  created_at: string;
+}
+
+export interface AgentRunDashboardRunDetail {
+  run: AgentRunDashboardRun;
+  timeline: AgentRunTimelineEvent[];
+  duration_breakdown: AgentRunDurationBreakdown;
+  messages: AgentRunMessage[];
+  result?: unknown;
 }
 
 export type RuntimeUpdateStatus =

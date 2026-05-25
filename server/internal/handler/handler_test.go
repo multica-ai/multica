@@ -1437,12 +1437,37 @@ func TestListIssuesSupportsCompoundMobileFilters(t *testing.T) {
 		"assignee_id":   testUserID,
 		"project_id":    projectID,
 	})
+	agentID := createHandlerTestAgent(t, "Mobile filter non-member agent", nil)
+	wrongAssigneeType := createIssue("Mobile filter wrong assignee type", map[string]any{
+		"priority":      "low",
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+		"project_id":    projectID,
+	})
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/labels?workspace_id="+testWorkspaceID, map[string]any{
+		"name":  "Compound filter label",
+		"color": "#3b82f6",
+	})
+	testHandler.CreateLabel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateLabel: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var label LabelResponse
+	json.NewDecoder(w.Body).Decode(&label)
+	attachReq := newRequest("POST", "/api/issues/"+assignedProject.ID+"/labels", map[string]any{
+		"label_id": label.ID,
+	})
+	attachReq = withURLParam(attachReq, "id", assignedProject.ID)
+	testHandler.AttachLabel(httptest.NewRecorder(), attachReq)
 
 	query := fmt.Sprintf(
-		"/api/issues?workspace_id=%s&status=blocked&priorities=urgent,low&assignees=member:%s&include_no_assignee=true&project_ids=%s&include_no_project=true&limit=1000",
+		"/api/issues?workspace_id=%s&status=blocked&priorities=urgent,low&assignee_types=member&assignees=member:%s&include_no_assignee=true&project_ids=%s&include_no_project=true&label_ids=%s&limit=1000",
 		testWorkspaceID,
 		testUserID,
 		projectID,
+		label.ID,
 	)
 	w = httptest.NewRecorder()
 	req = newRequest("GET", query, nil)
@@ -1465,11 +1490,14 @@ func TestListIssuesSupportsCompoundMobileFilters(t *testing.T) {
 	if !seen[assignedProject.ID] {
 		t.Fatalf("ListIssues: expected assigned project issue %s in results", assignedProject.ID)
 	}
-	if !seen[noAssigneeNoProject.ID] {
-		t.Fatalf("ListIssues: expected no-assignee/no-project issue %s in results", noAssigneeNoProject.ID)
+	if seen[noAssigneeNoProject.ID] {
+		t.Fatalf("ListIssues: did not expect unlabeled no-assignee/no-project issue %s in results", noAssigneeNoProject.ID)
 	}
 	if seen[wrongPriority.ID] {
 		t.Fatalf("ListIssues: did not expect wrong-priority issue %s in results", wrongPriority.ID)
+	}
+	if seen[wrongAssigneeType.ID] {
+		t.Fatalf("ListIssues: did not expect wrong-assignee-type issue %s in results", wrongAssigneeType.ID)
 	}
 }
 
@@ -1513,6 +1541,74 @@ func TestCreateIssueRejectsMalformedAttachmentIDBeforeWrite(t *testing.T) {
 	}
 	if after != before {
 		t.Fatalf("CreateIssue: malformed attachment_ids should not create issue, count before=%d after=%d", before, after)
+	}
+}
+
+func TestCreateIssueWithLabelIDs(t *testing.T) {
+	labelW := httptest.NewRecorder()
+	labelReq := newRequest("POST", "/api/labels", map[string]any{
+		"name":  "create-with-label",
+		"color": "#10b981",
+	})
+	testHandler.CreateLabel(labelW, labelReq)
+	if labelW.Code != http.StatusCreated {
+		t.Fatalf("CreateLabel: expected 201, got %d: %s", labelW.Code, labelW.Body.String())
+	}
+	var label LabelResponse
+	json.NewDecoder(labelW.Body).Decode(&label)
+	t.Cleanup(func() {
+		w := httptest.NewRecorder()
+		req := newRequest("DELETE", "/api/labels/"+label.ID, nil)
+		req = withURLParam(req, "id", label.ID)
+		testHandler.DeleteLabel(w, req)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":     "Create issue with labels",
+		"label_ids": []string{label.ID},
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	defer func() {
+		cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+		cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+		testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+	}()
+	if created.Labels == nil || len(*created.Labels) != 1 {
+		t.Fatalf("CreateIssue: expected 1 label in response, got %+v", created.Labels)
+	}
+	if (*created.Labels)[0].ID != label.ID {
+		t.Fatalf("CreateIssue: expected label id %s, got %s", label.ID, (*created.Labels)[0].ID)
+	}
+}
+
+func TestCreateIssueRejectsUnknownLabelIDBeforeWrite(t *testing.T) {
+	var before int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&before); err != nil {
+		t.Fatalf("count issues before: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":     "Unknown label issue",
+		"label_ids": []string{"11111111-1111-1111-1111-111111111111"},
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("CreateIssue: expected 404 for unknown label_ids, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var after int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&after); err != nil {
+		t.Fatalf("count issues after: %v", err)
+	}
+	if after != before {
+		t.Fatalf("CreateIssue: unknown label_ids should not create issue, count before=%d after=%d", before, after)
 	}
 }
 

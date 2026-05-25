@@ -10,7 +10,7 @@ import {
 } from "./view-store";
 import { registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 
-export type MyIssuesScope = "my" | "assigned" | "created" | "agents";
+export type MyIssuesScope = "all" | "assigned" | "created" | "agents";
 
 export interface MyIssuesViewState extends IssueViewState {
   scope: MyIssuesScope;
@@ -23,7 +23,7 @@ const _myIssuesViewStore = createStore<MyIssuesViewState>()(
   persist(
     (set) => ({
       ...viewStoreSlice(set as unknown as StoreApi<IssueViewState>["setState"]),
-      scope: "my" as MyIssuesScope,
+      scope: "assigned" as MyIssuesScope,
       setScope: (scope: MyIssuesScope) => set({ scope }),
     }),
     {

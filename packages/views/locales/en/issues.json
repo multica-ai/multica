@@ -142,6 +142,7 @@
     "section_properties": "Properties",
     "section_parent_issue": "Parent issue",
     "section_pull_requests": "Pull requests",
+    "section_metadata": "Metadata",
     "section_details": "Details",
     "section_token_usage": "Token usage",
     "pull_requests_loading": "Loading…",
@@ -293,6 +294,15 @@
     "expand_tooltip": "Expand",
     "collapse_tooltip": "Collapse"
   },
+  "agent_activity": {
+    "hover_header_one": "{{count}} agent working",
+    "hover_header_other": "{{count}} agents working",
+    "status_running": "Working",
+    "status_queued": "Queued",
+    "chip_label": "working",
+    "empty_hover": "No agents currently working",
+    "filter_active_label": "Viewing only working agents"
+  },
   "agent_live": {
     "is_working": "{{name}} is working",
     "is_queued": "{{name}} is queued",
@@ -358,7 +368,8 @@
     "cancel": "Cancel"
   },
   "card": {
-    "update_failed": "Failed to update issue"
+    "update_failed": "Failed to update issue",
+    "updated_ago": "Updated {{time}}"
   },
   "actions": {
     "status": "Status",
