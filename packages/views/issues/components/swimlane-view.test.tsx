@@ -366,40 +366,138 @@ describe("SwimLaneView", () => {
     );
   });
 
-  it("renders children whose parent is not in the loaded set under an 'Other parents' fallback lane", () => {
-    // Child with parent_issue_id pointing at an issue that isn't in the
-    // dataset (e.g. parent filtered out server-side by "assigned to me",
-    // or hidden by a status filter without an unfilteredIssues prop).
-    // Previously these silently disappeared from Swimlane.
-    const orphanChild: Issue = {
-      id: "lonely-child",
-      workspace_id: "ws-1",
-      number: 99,
-      identifier: "PROJ-99",
-      title: "Lonely Child",
-      description: null,
-      status: "todo",
-      priority: "medium",
-      assignee_type: "member",
-      assignee_id: "user-1",
-      creator_type: "member",
-      creator_id: "user-1",
-      parent_issue_id: "missing-parent",
-      project_id: null,
-      position: 400,
-      start_date: null,
-      due_date: null,
-      metadata: {},
-      created_at: "2026-01-01T00:00:00Z",
-      updated_at: "2026-01-01T00:00:00Z",
-    };
+  // Child whose parent_issue_id points at an issue not in the loaded set
+  // (e.g. parent filtered out server-side by "assigned to me", or hidden
+  // by a status filter without an unfilteredIssues prop). Falls into the
+  // "Other parents" display-only lane.
+  const orphanChild: Issue = {
+    id: "lonely-child",
+    workspace_id: "ws-1",
+    number: 99,
+    identifier: "PROJ-99",
+    title: "Lonely Child",
+    description: null,
+    status: "todo",
+    priority: "medium",
+    assignee_type: "member",
+    assignee_id: "user-1",
+    creator_type: "member",
+    creator_id: "user-1",
+    parent_issue_id: "missing-parent",
+    project_id: null,
+    position: 400,
+    start_date: null,
+    due_date: null,
+    metadata: {},
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
 
+  it("renders children whose parent is not in the loaded set under an 'Other parents' fallback lane", () => {
     renderWithI18n(
       <SwimLaneView issues={[orphanChild]} onMoveIssue={vi.fn()} />,
     );
 
     expect(screen.getByText("Other parents")).toBeInTheDocument();
     expect(screen.getByText("Lonely Child")).toBeInTheDocument();
+  });
+
+  it("does not render the add-issue button inside 'Other parents' cells", () => {
+    // The orphan lane is display-only: clicking + would create an issue
+    // with no parent context (it doesn't belong to any known parent),
+    // so the affordance is suppressed. mockIssues contains parent-1,
+    // child-1, orphan-1 — combine with orphanChild so both a real lane
+    // and the orphan lane are rendered.
+    renderWithI18n(
+      <SwimLaneView
+        issues={[...mockIssues, orphanChild]}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    // Real lanes still render + buttons (No parent + Parent Issue 1 lanes
+    // each have one per visible status column). The orphan lane adds
+    // zero buttons regardless of how many statuses are visible.
+    const realLaneCount = 2; // No parent + Parent Issue 1
+    const visibleStatusCount = 6; // BOARD_STATUSES default
+    expect(
+      screen.getAllByRole("button", { name: /add issue/i }).length,
+    ).toBe(realLaneCount * visibleStatusCount);
+  });
+
+  it("does not call onMoveIssue when a card is dropped into an 'Other parents' cell", () => {
+    // Round 2 review A1 — dropping onto the display-only lane previously
+    // committed a stealth re-position by computing position from
+    // unrelated cards.
+    const mockOnMoveIssue = vi.fn();
+    renderWithI18n(
+      <SwimLaneView
+        issues={[...mockIssues, orphanChild]}
+        onMoveIssue={mockOnMoveIssue}
+      />,
+    );
+
+    act(() => {
+      lastOnDragEnd({
+        active: { id: "orphan-1" },
+        over: { id: "swim:parent:__orphans__:todo" },
+      });
+    });
+
+    expect(mockOnMoveIssue).not.toHaveBeenCalled();
+  });
+
+  it("hides parent lanes whose only children are filtered out, while still rendering visible children of visible parents", () => {
+    // Round 2 review B — lane discovery walks the visible `issues` set,
+    // not the broader `unfilteredIssues`, so a status filter that hides
+    // all of a parent's children also hides that parent's lane (the
+    // parent itself can still render as a card via the unfilteredIssues
+    // path when the caller wires it through).
+    //
+    // Fixture: parent-1 + its only child (in_progress). With visibleStatuses
+    // restricted to ["todo"], child-1 isn't in `issues`, so parent-1's
+    // lane should disappear.
+    renderWithI18n(
+      <SwimLaneView
+        issues={mockIssues.filter((i) => i.status === "todo")}
+        unfilteredIssues={mockIssues}
+        visibleStatuses={["todo"]}
+        hiddenStatuses={["backlog", "in_progress", "in_review", "done", "blocked"]}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    // Parent Issue 1 — its only child (child-1) is in_progress (hidden),
+    // so its lane is dropped. Only the "No parent" lane should render,
+    // and parent-1 itself shows up as a card within it (status: todo,
+    // not a lane header because no visible children reference it).
+    expect(screen.queryByText("Child Issue 1")).not.toBeInTheDocument();
+    // Header still appears for "No parent"; "Parent Issue 1" is now a
+    // regular card.
+    const parentTitleMatches = screen.getAllByText("Parent Issue 1");
+    expect(parentTitleMatches).toHaveLength(1);
+  });
+
+  it("does not call onMoveIssue when a card is dragged out of 'Other parents'", () => {
+    // Same defense in the opposite direction — a card whose parent we
+    // don't know about must not be re-anchored to a different parent by
+    // accident.
+    const mockOnMoveIssue = vi.fn();
+    renderWithI18n(
+      <SwimLaneView
+        issues={[...mockIssues, orphanChild]}
+        onMoveIssue={mockOnMoveIssue}
+      />,
+    );
+
+    act(() => {
+      lastOnDragEnd({
+        active: { id: "lonely-child" },
+        over: { id: "swim:parent:parent-1:in_progress" },
+      });
+    });
+
+    expect(mockOnMoveIssue).not.toHaveBeenCalled();
   });
 
   it("renders an open-parent link for lanes with a real parent", () => {
@@ -687,6 +785,27 @@ describe("SwimLaneView", () => {
 
     // Drag lane parent-1 onto lane parent-2 — expect order to become
     // [parent-2, parent-1].
+    act(() => {
+      lastOnDragEnd({
+        active: { id: "lane:parent-1" },
+        over: { id: "lane:parent-2" },
+      });
+    });
+
+    expect(mockSetSwimlaneOrder).toHaveBeenCalledWith(["parent-2", "parent-1"]);
+  });
+
+  it("appends newly-visible parents to the persisted order on first reorder", () => {
+    // stored=[parent-1] (parent-2 is new in this view). User drags
+    // parent-1 below parent-2, so the visible order flips. Persisted
+    // result must include both — earlier logic dropped the new entry
+    // when its slot in `stored` had been consumed.
+    mockViewState.swimlaneOrder = ["parent-1"];
+
+    renderWithI18n(
+      <SwimLaneView issues={multiParentIssues} onMoveIssue={vi.fn()} />,
+    );
+
     act(() => {
       lastOnDragEnd({
         active: { id: "lane:parent-1" },

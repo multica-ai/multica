@@ -202,21 +202,23 @@ export function SwimLaneView({
   );
 
   const parentGroups = useMemo<ParentGroup[]>(() => {
-    const issueMap = new Map<string, Issue>();
+    // Metadata lookup spans the broader unfiltered set so a parent whose
+    // status is currently hidden still surfaces its identifier / title
+    // when one of its children is visible.
+    const metadataMap = new Map<string, Issue>();
     for (const issue of laneSourceIssues) {
-      issueMap.set(issue.id, issue);
+      metadataMap.set(issue.id, issue);
     }
 
-    // A parent earns a lane whenever any child references it — even if
-    // all those children are currently in hidden statuses, the lane
-    // stays so the user keeps the grouping context they came in with.
-    // (The parent's own visibility status is irrelevant here; the lane
-    // exists to group its children, not to render the parent itself.)
+    // Lane discovery drives off the visible `issues` set — a lane is
+    // only rendered when at least one visible card belongs in it. This
+    // avoids a stack of empty rows for parents whose children all live
+    // in currently-filtered-out statuses.
     const seen = new Map<string, ParentGroup>();
     let hasOrphan = false;
-    for (const issue of laneSourceIssues) {
+    for (const issue of issues) {
       if (issue.parent_issue_id === null) continue;
-      const parent = issueMap.get(issue.parent_issue_id);
+      const parent = metadataMap.get(issue.parent_issue_id);
       if (!parent) {
         hasOrphan = true;
         continue;
@@ -270,7 +272,7 @@ export function SwimLaneView({
     }
     groups.push(...ordered);
     return groups;
-  }, [laneSourceIssues, t, swimlaneOrder]);
+  }, [issues, laneSourceIssues, t, swimlaneOrder]);
 
   // Issues that act as swimlane headers (they have children in the loaded
   // set) should not also appear as cards in the "No parent" lane — that
@@ -440,6 +442,17 @@ export function SwimLaneView({
         ) {
           return prev;
         }
+        // The "Other parents" lane is display-only: never let a card
+        // enter or leave it via drag. The lane represents children whose
+        // canonical parent isn't loaded, so any cross-lane move would
+        // either lose that parent (when leaving) or invent a new one
+        // (when entering).
+        if (
+          activeCell.parentKey === ORPHAN_LANE_KEY ||
+          overCell.parentKey === ORPHAN_LANE_KEY
+        ) {
+          return prev;
+        }
 
         recentlyMovedRef.current = true;
 
@@ -520,24 +533,18 @@ export function SwimLaneView({
         const visibleNext = arrayMove(visibleOrder, fromIdx, toIdx);
 
         // Merge into the persisted order without clobbering entries that
-        // aren't currently visible (e.g. hidden by a status filter). Each
-        // visible slot in `stored` is overwritten with the next id from
-        // `visibleNext`; everything else stays exactly where it was.
+        // aren't currently visible (e.g. hidden by a status filter).
+        // Walk stored, overwriting each visible slot with the next id
+        // from `visibleNext`; non-visible entries pass through verbatim.
+        // Any remaining `visibleNext` ids (visible parents that weren't
+        // in stored at all) get appended at the end.
         const stored = viewStoreApi.getState().swimlaneOrder;
         const visibleSet = new Set(visibleOrder);
-        const merged: string[] = [];
         let cursor = 0;
-        for (const id of stored) {
-          if (visibleSet.has(id)) {
-            merged.push(visibleNext[cursor]!);
-            cursor++;
-          } else {
-            merged.push(id);
-          }
-        }
-        for (let i = cursor; i < visibleNext.length; i++) {
-          if (!stored.includes(visibleNext[i]!)) merged.push(visibleNext[i]!);
-        }
+        const merged = stored.map((id) =>
+          visibleSet.has(id) ? visibleNext[cursor++]! : id,
+        );
+        for (const id of visibleNext.slice(cursor)) merged.push(id);
 
         viewStoreApi.getState().setSwimlaneOrder(merged);
         return;
@@ -549,6 +556,18 @@ export function SwimLaneView({
       const activeCell = findCellIn(cols, cellSet, activeId);
       const overCell = findCellIn(cols, cellSet, overId);
       if (!activeCell || !overCell) {
+        reset();
+        return;
+      }
+
+      // The "Other parents" lane is display-only. Refuse any drop where
+      // either the source or the original target cell belongs to it —
+      // no re-parenting (we don't know the canonical parent), no
+      // position write (siblings here belong to different parents).
+      if (
+        activeCell.parentKey === ORPHAN_LANE_KEY ||
+        overCell.parentKey === ORPHAN_LANE_KEY
+      ) {
         reset();
         return;
       }
@@ -587,13 +606,8 @@ export function SwimLaneView({
       const newPosition = computePosition(finalIds, activeId, issueMapRef.current);
       const currentIssue = issueMapRef.current.get(activeId);
 
-      // Dropping into the "Other parents" fallback lane keeps the issue's
-      // existing parent — the lane is a display-only bucket for children
-      // whose parent isn't loaded, not a target you can re-parent into.
-      const droppedInOrphanLane = finalOverCell.parentKey === ORPHAN_LANE_KEY;
-      const expectedParent = droppedInOrphanLane
-        ? currentIssue?.parent_issue_id ?? null
-        : finalOverCell.parentKey === "parent:none"
+      const expectedParent =
+        finalOverCell.parentKey === "parent:none"
           ? null
           : finalOverCell.parentKey.replace("parent:", "");
 
@@ -876,6 +890,7 @@ function DraggableSwimLane({
                 status={status}
                 parentGroup={parent}
                 projectId={projectId}
+                readOnly={parent.key === ORPHAN_LANE_KEY}
               />
             );
           })}
@@ -893,6 +908,7 @@ function SwimLaneCell({
   status,
   parentGroup,
   projectId,
+  readOnly = false,
 }: {
   cellId: string;
   issueIds: string[];
@@ -901,8 +917,18 @@ function SwimLaneCell({
   status: IssueStatus;
   parentGroup: ParentGroup;
   projectId?: string;
+  /**
+   * Display-only cell — the create affordance is suppressed and drag-end
+   * upstream refuses to honour drops that would re-anchor a card to this
+   * lane. Used by the "Other parents" fallback lane whose contents
+   * belong to parents we don't have loaded.
+   */
+  readOnly?: boolean;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: cId });
+  // Hook is called unconditionally (rules of hooks), but readOnly cells
+  // discard the ref so dnd-kit never registers them — no `isOver`
+  // affordance, no collision detection target.
+  const { setNodeRef, isOver } = useDroppable({ id: cId, disabled: readOnly });
   const { t } = useT("issues");
   const cfg = STATUS_CONFIG[status];
 
@@ -945,23 +971,25 @@ function SwimLaneCell({
           </p>
         )}
       </div>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t(($) => $.board.add_issue_tooltip)}
-              className="mt-1 w-full rounded-md text-muted-foreground hover:text-foreground"
-              onClick={handleAdd}
-            >
-              <Plus className="size-3.5" />
-            </Button>
-          }
-        />
-        <TooltipContent>{t(($) => $.board.add_issue_tooltip)}</TooltipContent>
-      </Tooltip>
+      {!readOnly && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t(($) => $.board.add_issue_tooltip)}
+                className="mt-1 w-full rounded-md text-muted-foreground hover:text-foreground"
+                onClick={handleAdd}
+              >
+                <Plus className="size-3.5" />
+              </Button>
+            }
+          />
+          <TooltipContent>{t(($) => $.board.add_issue_tooltip)}</TooltipContent>
+        </Tooltip>
+      )}
     </div>
   );
 }
