@@ -239,10 +239,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// primary storage backend does not break existing local-upload URLs.
 	localFileStore := storage.NewLocalStorageFromEnv()
 	if localFileStore != nil {
-		r.Get("/uploads/*", func(w http.ResponseWriter, r *http.Request) {
+		h.LegacyLocalStorage = localFileStore
+		serveLocalUpload := func(w http.ResponseWriter, r *http.Request) {
 			file := strings.TrimPrefix(r.URL.Path, "/uploads/")
 			localFileStore.ServeFile(w, r, file)
-		})
+		}
+		r.Get("/uploads/*", serveLocalUpload)
+		r.Head("/uploads/*", serveLocalUpload)
 	}
 
 	// Auth (public) — per-IP rate limiting.
