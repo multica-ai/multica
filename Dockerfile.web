@@ -14,7 +14,10 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json .npmrc ./
 COPY apps/web/package.json apps/web/
 COPY packages packages
 
-RUN pnpm install --frozen-lockfile
+# --ignore-scripts: apps/web's postinstall (fumadocs-mdx) needs app source
+# (source.config.ts), which isn't in this manifest-only deps layer. The builder
+# stage re-runs install with full source, where postinstall succeeds.
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 # --- Build ---
 FROM node:22-alpine AS builder
