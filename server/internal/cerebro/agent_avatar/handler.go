@@ -13,9 +13,12 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/storage"
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 const defaultAvatarModel = "openai/gpt-5-image-mini"
@@ -30,15 +33,23 @@ var clothingColors = []string{
 	"plum", "rust orange", "teal", "cream white",
 }
 
+// workspaceLoader reads a workspace (for its gateway settings). *db.Queries
+// satisfies it; tests supply a stub.
+type workspaceLoader interface {
+	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
+}
+
 // Handler generates photorealistic agent avatars via the Firtal Data Registry AI Gateway.
 type Handler struct {
 	storage    storage.Storage
+	workspaces workspaceLoader
 	httpClient *http.Client
 }
 
-// New creates a Handler. store is used to persist the generated PNG.
-func New(store storage.Storage) *Handler {
-	return &Handler{storage: store, httpClient: http.DefaultClient}
+// New creates a Handler. store persists the generated PNG; workspaces supplies
+// the per-workspace gateway credentials (with env fallback).
+func New(store storage.Storage, workspaces workspaceLoader) *Handler {
+	return &Handler{storage: store, workspaces: workspaces, httpClient: http.DefaultClient}
 }
 
 type generateRequest struct {
@@ -66,7 +77,7 @@ func (h *Handler) Generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg := gatewayConfigFromEnv()
+	cfg := h.gatewayConfig(r.Context(), wsID)
 	if cfg.baseURL == "" || cfg.apiKey == "" {
 		writeError(w, http.StatusServiceUnavailable, "image generation not configured: data registry AI gateway URL/key unset")
 		return
@@ -175,6 +186,47 @@ func gatewayConfigFromEnv() gatewayConfig {
 		apiKey:  strings.TrimSpace(os.Getenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY")),
 		model:   model,
 	}
+}
+
+// workspaceGatewaySettings mirrors the firtal_gateway block of a workspace's
+// settings JSON — the same source the gateway runtime reads its credentials
+// from. Avatar generation must use this so the key configured in the workspace
+// Settings UI is honoured, instead of a separate (and easily stale) server env var.
+type workspaceGatewaySettings struct {
+	FirtalGateway *struct {
+		GatewayURL string `json:"gateway_url"`
+		APIKey     string `json:"api_key"`
+	} `json:"firtal_gateway"`
+}
+
+// gatewayConfig resolves credentials for the workspace: the workspace-settings
+// gateway URL/key take precedence, falling back to the server env (which also
+// supplies the model default). This mirrors FirtalGatewayConfigFromWorkspaceSettings
+// used by the gateway runtime, keeping avatar generation on the same credential.
+func (h *Handler) gatewayConfig(ctx context.Context, wsID string) gatewayConfig {
+	cfg := gatewayConfigFromEnv()
+	if h.workspaces == nil {
+		return cfg
+	}
+	id, err := util.ParseUUID(wsID)
+	if err != nil {
+		return cfg
+	}
+	ws, err := h.workspaces.GetWorkspace(ctx, id)
+	if err != nil || len(ws.Settings) == 0 {
+		return cfg
+	}
+	var s workspaceGatewaySettings
+	if err := json.Unmarshal(ws.Settings, &s); err != nil || s.FirtalGateway == nil {
+		return cfg
+	}
+	if u := strings.TrimRight(strings.TrimSpace(s.FirtalGateway.GatewayURL), "/"); u != "" {
+		cfg.baseURL = u
+	}
+	if k := strings.TrimSpace(s.FirtalGateway.APIKey); k != "" {
+		cfg.apiKey = k
+	}
+	return cfg
 }
 
 func callGateway(ctx context.Context, client *http.Client, cfg gatewayConfig, prompt string) ([]byte, error) {

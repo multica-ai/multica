@@ -327,8 +327,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroShareTokenHandler := cerebrosharetoken.NewHandler(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow handler instance; JEH-1108 PR3 wires the engine Service so the test-only /_test/cron-sweep endpoint can fire the sweeper synchronously.
 	cerebroWorkflowsHandler := cerebroworkflows.NewHandler(cerebroQueries).WithService(opts.WorkflowService)
-	// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation handler instance
-	cerebroAgentAvatarHandler := cerebroagentavatar.New(store)
+	// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation handler instance; FIR-2049 pass queries so avatar reads gateway creds from workspace settings
+	cerebroAgentAvatarHandler := cerebroagentavatar.New(store, queries)
 
 	r := chi.NewRouter()
 

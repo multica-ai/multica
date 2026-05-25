@@ -7,7 +7,58 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+type stubWorkspaceLoader struct {
+	settings []byte
+	err      error
+}
+
+func (s stubWorkspaceLoader) GetWorkspace(context.Context, pgtype.UUID) (db.Workspace, error) {
+	return db.Workspace{Settings: s.settings}, s.err
+}
+
+func TestGatewayConfigPrefersWorkspaceSettings(t *testing.T) {
+	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "https://env.example.com")
+	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_env")
+	t.Setenv("FIRTAL_DATA_REGISTRY_AVATAR_MODEL", "")
+
+	wsID := "11111111-1111-1111-1111-111111111111"
+
+	t.Run("workspace settings override env", func(t *testing.T) {
+		h := New(nil, stubWorkspaceLoader{settings: []byte(
+			`{"firtal_gateway":{"gateway_url":"https://ws.example.com/","api_key":"rk_workspace"}}`)})
+		cfg := h.gatewayConfig(context.Background(), wsID)
+		if cfg.baseURL != "https://ws.example.com" {
+			t.Fatalf("baseURL = %q, want workspace value", cfg.baseURL)
+		}
+		if cfg.apiKey != "rk_workspace" {
+			t.Fatalf("apiKey = %q, want workspace value", cfg.apiKey)
+		}
+		if cfg.model != defaultAvatarModel {
+			t.Fatalf("model = %q, want default", cfg.model)
+		}
+	})
+
+	t.Run("falls back to env when settings empty", func(t *testing.T) {
+		h := New(nil, stubWorkspaceLoader{settings: []byte(`{}`)})
+		cfg := h.gatewayConfig(context.Background(), wsID)
+		if cfg.baseURL != "https://env.example.com" || cfg.apiKey != "rk_env" {
+			t.Fatalf("expected env fallback, got url=%q key=%q", cfg.baseURL, cfg.apiKey)
+		}
+	})
+
+	t.Run("falls back to env when no loader", func(t *testing.T) {
+		h := New(nil, nil)
+		cfg := h.gatewayConfig(context.Background(), wsID)
+		if cfg.baseURL != "https://env.example.com" || cfg.apiKey != "rk_env" {
+			t.Fatalf("expected env fallback, got url=%q key=%q", cfg.baseURL, cfg.apiKey)
+		}
+	})
+}
 
 func TestGatewayConfigFromEnvUsesAvatarModelDefault(t *testing.T) {
 	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", " https://registry.example.com/ ")
