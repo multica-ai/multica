@@ -61,11 +61,12 @@ vi.mock("../../../i18n", () => ({
 import { LabelPicker } from "./label-picker";
 
 describe("LabelPicker", () => {
-  it("uses a compact icon-only add trigger when appended to an empty board card label row", () => {
+  it("uses a compact small-text add trigger when appended to an empty board card label row", () => {
     render(<LabelPicker issueId="issue-1" labels={[]} appendAddTrigger />);
 
     const trigger = screen.getByRole("button", { name: "Add label" });
     expect(trigger).toHaveAttribute("title", "Add label");
-    expect(trigger).not.toHaveTextContent("Add label");
+    expect(trigger).toHaveTextContent("Add label");
+    expect(trigger).toHaveClass("text-[10px]");
   });
 });

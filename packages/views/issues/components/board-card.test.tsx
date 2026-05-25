@@ -86,8 +86,9 @@ vi.mock("./pickers", async () => {
             labels?.length ? (
               <span data-testid="label-picker-add-trigger">{addTriggerLabel}</span>
             ) : (
-              <button type="button" aria-label={addTriggerLabel} data-testid="label-picker-add-trigger">
+              <button type="button" aria-label={addTriggerLabel} className="text-[10px]" data-testid="label-picker-add-trigger">
                 <Plus aria-hidden className="h-3 w-3" />
+                <span>{addTriggerLabel}</span>
               </button>
             )
           ) : null}
@@ -158,7 +159,8 @@ describe("BoardCardContent labels", () => {
 
     expect(screen.getByTestId("label-picker")).toHaveTextContent("issue-1:0");
     expect(screen.getByTestId("label-picker-add-trigger")).toHaveAccessibleName("Add label");
-    expect(screen.getByTestId("label-picker-add-trigger")).not.toHaveTextContent("Add label");
+    expect(screen.getByTestId("label-picker-add-trigger")).toHaveTextContent("Add label");
+    expect(screen.getByTestId("label-picker-add-trigger")).toHaveClass("text-[10px]");
   });
 
   it("does not prevent default events from portaled label management inputs", () => {

@@ -179,7 +179,7 @@ export function LabelPicker({
           ) : compactAddOnly ? (
             <button
               type="button"
-              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-dashed border-border bg-muted/40 text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-accent hover:text-foreground"
+              className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-dashed border-border bg-muted/40 px-1.5 text-[10px] leading-none text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-accent hover:text-foreground"
               aria-label={addLabelText}
               title={addLabelText}
             />
@@ -206,7 +206,10 @@ export function LabelPicker({
               )}
             </>
           ) : compactAddOnly ? (
-            <Plus className="h-3 w-3" />
+            <>
+              <Plus className="h-3 w-3 shrink-0" />
+              <span>{addLabelText}</span>
+            </>
           ) : (
             <>
               <Tag className="h-3.5 w-3.5 text-muted-foreground" />
