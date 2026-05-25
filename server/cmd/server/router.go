@@ -231,12 +231,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		realtime.HandleWebSocket(hub, mc, pr, slugResolver, w, r)
 	})
 
-	// Local file serving (when using local storage)
-	if local, ok := store.(*storage.LocalStorage); ok {
-		r.Get("/uploads/*", func(w http.ResponseWriter, r *http.Request) {
+	// Local file serving.
+	//
+	// Even when new uploads are written to S3/OBS, older installations may have
+	// persisted avatar and attachment URLs under /uploads/... on the local PVC.
+	// Keep this route available as a compatibility fallback so switching the
+	// primary storage backend does not break existing local-upload URLs.
+	localFileStore := storage.NewLocalStorageFromEnv()
+	if localFileStore != nil {
+		h.LegacyLocalStorage = localFileStore
+		serveLocalUpload := func(w http.ResponseWriter, r *http.Request) {
 			file := strings.TrimPrefix(r.URL.Path, "/uploads/")
-			local.ServeFile(w, r, file)
-		})
+			localFileStore.ServeFile(w, r, file)
+		}
+		r.Get("/uploads/*", serveLocalUpload)
+		r.Head("/uploads/*", serveLocalUpload)
 	}
 
 	// Auth (public) — per-IP rate limiting.

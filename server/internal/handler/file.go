@@ -1297,12 +1297,13 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.Storage == nil {
+	store := h.storageForURL(att.Url)
+	if store == nil {
 		writeError(w, http.StatusServiceUnavailable, "storage not configured")
 		return
 	}
-	key := h.Storage.KeyFromURL(att.Url)
-	reader, err := h.Storage.GetReader(r.Context(), key)
+	key := store.KeyFromURL(att.Url)
+	reader, err := store.GetReader(r.Context(), key)
 	if err != nil {
 		slog.Error("failed to open attachment for preview", "id", attachmentID, "key", key, "error", err)
 		writeError(w, http.StatusNotFound, "attachment object not found")
@@ -1463,7 +1464,7 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.deleteS3Object(r.Context(), att.Url)
+	h.deleteAttachmentObject(r.Context(), att.Url)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1495,22 +1496,46 @@ func (h *Handler) linkAttachmentsByIDs(ctx context.Context, commentID, issueID p
 	}
 }
 
-// deleteS3Object removes a single file from S3 by its CDN URL.
-func (h *Handler) deleteS3Object(ctx context.Context, url string) {
-	if h.Storage == nil || url == "" {
-		return
+func (h *Handler) storageForURL(url string) storage.Storage {
+	if h.LegacyLocalStorage != nil && h.LegacyLocalStorage.HandlesURL(url) {
+		return h.LegacyLocalStorage
 	}
-	h.Storage.Delete(ctx, h.Storage.KeyFromURL(url))
+	return h.Storage
 }
 
-// deleteS3Objects removes multiple files from S3 by their CDN URLs.
-func (h *Handler) deleteS3Objects(ctx context.Context, urls []string) {
-	if h.Storage == nil || len(urls) == 0 {
+// deleteAttachmentObject removes a single file by its stored URL.
+func (h *Handler) deleteAttachmentObject(ctx context.Context, url string) {
+	store := h.storageForURL(url)
+	if store == nil || url == "" {
 		return
 	}
-	keys := make([]string, len(urls))
-	for i, u := range urls {
-		keys[i] = h.Storage.KeyFromURL(u)
+	store.Delete(ctx, store.KeyFromURL(url))
+}
+
+// deleteAttachmentObjects removes multiple files by their stored URLs.
+func (h *Handler) deleteAttachmentObjects(ctx context.Context, urls []string) {
+	if len(urls) == 0 {
+		return
 	}
-	h.Storage.DeleteKeys(ctx, keys)
+	groupedKeys := map[storage.Storage][]string{}
+	for _, u := range urls {
+		store := h.storageForURL(u)
+		if store == nil || u == "" {
+			continue
+		}
+		groupedKeys[store] = append(groupedKeys[store], store.KeyFromURL(u))
+	}
+	for store, keys := range groupedKeys {
+		store.DeleteKeys(ctx, keys)
+	}
+}
+
+// deleteS3Object removes a single file from storage by its stored URL.
+func (h *Handler) deleteS3Object(ctx context.Context, url string) {
+	h.deleteAttachmentObject(ctx, url)
+}
+
+// deleteS3Objects removes multiple files from storage by their stored URLs.
+func (h *Handler) deleteS3Objects(ctx context.Context, urls []string) {
+	h.deleteAttachmentObjects(ctx, urls)
 }

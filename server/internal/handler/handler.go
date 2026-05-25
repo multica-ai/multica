@@ -100,6 +100,7 @@ type Handler struct {
 	LivenessStore         LivenessStore
 	HeartbeatScheduler    HeartbeatScheduler
 	Storage               storage.Storage
+	LegacyLocalStorage    *storage.LocalStorage
 	CFSigner              *auth.CloudFrontSigner
 	Analytics             analytics.Client
 	PATCache              *auth.PATCache
