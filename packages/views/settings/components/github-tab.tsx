@@ -63,6 +63,9 @@ export function GitHubTab() {
   const canManage = installationData?.can_manage === true;
   const connected = installations.length > 0;
   const primaryInstallation = installations[0] ?? null;
+  const connectedLogins = installations
+    .map((i) => i.account_login.trim())
+    .filter((login) => login && login.toLowerCase() !== "unknown");
 
   const flags = deriveGitHubSettings(workspace);
   const [savingKey, setSavingKey] = useState<SettingsKey | null>(null);
@@ -177,9 +180,11 @@ export function GitHubTab() {
                   {connected ? (
                     <>
                       <p className="text-xs text-muted-foreground">
-                        {t(($) => $.github.connected_to, {
-                          login: installations.map((i) => i.account_login).join(", "),
-                        })}
+                        {connectedLogins.length > 0
+                          ? t(($) => $.github.connected_to, {
+                              login: connectedLogins.join(", "),
+                            })
+                          : t(($) => $.github.connected_account_pending)}
                       </p>
                       {primaryInstallation?.connected_by && (
                         <p className="text-xs text-muted-foreground">
@@ -242,6 +247,8 @@ export function GitHubTab() {
               <p className="text-xs text-muted-foreground">
                 {t(($) => $.github.not_configured)}{" "}
                 <code className="rounded bg-muted px-1 py-0.5 text-[10px]">GITHUB_APP_SLUG</code>{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-[10px]">GITHUB_APP_ID</code>{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-[10px]">GITHUB_APP_PRIVATE_KEY</code>{" "}
                 {t(($) => $.github.not_configured_and)}{" "}
                 <code className="rounded bg-muted px-1 py-0.5 text-[10px]">GITHUB_WEBHOOK_SECRET</code>.
               </p>

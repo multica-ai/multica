@@ -4,10 +4,15 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -16,9 +21,16 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 func TestExtractIdentifiers(t *testing.T) {
 	cases := []struct {
@@ -90,6 +102,27 @@ func TestDerivePRState(t *testing.T) {
 	}
 }
 
+func TestParseGitHubPullRequestURL(t *testing.T) {
+	owner, repo, number, err := parseGitHubPullRequestURL("https://github.com/multica-ai/multica/pull/3019")
+	if err != nil {
+		t.Fatalf("parseGitHubPullRequestURL: %v", err)
+	}
+	if owner != "multica-ai" || repo != "multica" || number != 3019 {
+		t.Fatalf("got %s/%s#%d, want multica-ai/multica#3019", owner, repo, number)
+	}
+
+	for _, raw := range []string{
+		"",
+		"https://gitlab.com/acme/widget/-/merge_requests/1",
+		"https://github.com/acme/widget/issues/1",
+		"https://github.com/acme/widget/pull/nope",
+	} {
+		if _, _, _, err := parseGitHubPullRequestURL(raw); err == nil {
+			t.Fatalf("parseGitHubPullRequestURL(%q) expected error", raw)
+		}
+	}
+}
+
 func TestVerifyWebhookSignature(t *testing.T) {
 	secret := "shared-secret"
 	body := []byte(`{"action":"opened"}`)
@@ -148,6 +181,78 @@ func TestSignStateRequiresSecret(t *testing.T) {
 	t.Setenv("GITHUB_WEBHOOK_SECRET", "")
 	if _, err := signState("ws"); err == nil {
 		t.Error("signState should error when secret is unset")
+	}
+}
+
+func TestFetchInstallationAccountUsesGitHubAppJWT(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	privatePEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	})
+	t.Setenv("GITHUB_APP_ID", "12345")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", strings.ReplaceAll(string(privatePEM), "\n", `\n`))
+
+	oldClient := githubHTTPClient
+	t.Cleanup(func() { githubHTTPClient = oldClient })
+	authorized := false
+	githubHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/app/installations/987654" {
+			t.Fatalf("path = %q, want /app/installations/987654", req.URL.Path)
+		}
+		auth := req.Header.Get("Authorization")
+		if auth == "" {
+			return &http.Response{
+				StatusCode: http.StatusUnauthorized,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"message":"A JSON web token could not be decoded"}`)),
+			}, nil
+		}
+		if !strings.HasPrefix(auth, "Bearer ") {
+			t.Fatalf("authorization header = %q, want Bearer token", auth)
+		}
+		token, err := jwt.Parse(strings.TrimPrefix(auth, "Bearer "), func(token *jwt.Token) (any, error) {
+			if token.Method != jwt.SigningMethodRS256 {
+				return nil, fmt.Errorf("signing method = %v, want RS256", token.Method)
+			}
+			return &key.PublicKey, nil
+		})
+		if err != nil || !token.Valid {
+			t.Fatalf("invalid app jwt: valid=%v err=%v", token != nil && token.Valid, err)
+		}
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok || claims["iss"] != "12345" {
+			t.Fatalf("jwt issuer = %v, want 12345", claims["iss"])
+		}
+		authorized = true
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body: io.NopCloser(strings.NewReader(`{
+				"account": {
+					"login": "octo-org",
+					"type": "Organization",
+					"avatar_url": "https://avatars.githubusercontent.com/u/1"
+				}
+			}`)),
+		}, nil
+	})}
+
+	login, accountType, avatar := fetchInstallationAccount(context.Background(), 987654)
+	if !authorized {
+		t.Fatal("expected fetchInstallationAccount to authenticate with a GitHub App JWT")
+	}
+	if login != "octo-org" {
+		t.Fatalf("login = %q, want octo-org", login)
+	}
+	if accountType != "Organization" {
+		t.Fatalf("accountType = %q, want Organization", accountType)
+	}
+	if avatar == nil || *avatar != "https://avatars.githubusercontent.com/u/1" {
+		t.Fatalf("avatar = %v, want GitHub avatar URL", avatar)
 	}
 }
 
@@ -264,6 +369,110 @@ func TestWebhook_MergedPR_AdvancesLinkedIssueToDone(t *testing.T) {
 	}
 	if updated.Status != "done" {
 		t.Errorf("expected issue status 'done', got %q", updated.Status)
+	}
+}
+
+func TestLinkPullRequestForIssue_PublicGitHubPR(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/acme/widget/pulls/77" {
+			t.Fatalf("unexpected GitHub API path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"number":          77,
+			"html_url":        "https://github.com/acme/widget/pull/77",
+			"title":           "Public contribution",
+			"state":           "open",
+			"draft":           false,
+			"merged":          false,
+			"created_at":      "2026-05-01T00:00:00Z",
+			"updated_at":      "2026-05-02T00:00:00Z",
+			"mergeable_state": "clean",
+			"additions":       12,
+			"deletions":       3,
+			"changed_files":   2,
+			"head":            map[string]any{"ref": "contrib/pr", "sha": "abc123"},
+			"user":            map[string]any{"login": "octocat", "avatar_url": "https://example.test/avatar.png"},
+			"base": map[string]any{
+				"repo": map[string]any{
+					"name":  "widget",
+					"owner": map[string]any{"login": "acme"},
+				},
+			},
+		})
+	}))
+	oldAPIBaseURL, oldHTTPClient := githubAPIBaseURL, githubHTTPClient
+	githubAPIBaseURL, githubHTTPClient = api.URL, api.Client()
+	t.Cleanup(func() {
+		githubAPIBaseURL, githubHTTPClient = oldAPIBaseURL, oldHTTPClient
+		api.Close()
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "Manual public PR link",
+		"status": "in_progress",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM github_pull_request_check_suite WHERE pr_id IN (SELECT id FROM github_pull_request WHERE workspace_id = $1)`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	w = httptest.NewRecorder()
+	req = newRequest(http.MethodPost, "/api/issues/"+created.ID+"/pull-requests", map[string]any{
+		"url": "https://github.com/acme/widget/pull/77",
+	})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.LinkPullRequestForIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("LinkPullRequestForIssue: expected 201, got %d (%s)", w.Code, w.Body.String())
+	}
+	var resp struct {
+		PullRequest GitHubPullRequestResponse `json:"pull_request"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode link response: %v", err)
+	}
+	if resp.PullRequest.SyncSource != githubPullRequestSourcePublic {
+		t.Fatalf("sync_source = %q, want public", resp.PullRequest.SyncSource)
+	}
+	if resp.PullRequest.Title != "Public contribution" || resp.PullRequest.Additions != 12 || resp.PullRequest.ChangedFiles != 2 {
+		t.Fatalf("unexpected linked PR response: %+v", resp.PullRequest)
+	}
+
+	pr, err := testHandler.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
+		WorkspaceID: parseUUID(testWorkspaceID),
+		RepoOwner:   "acme",
+		RepoName:    "widget",
+		PrNumber:    77,
+	})
+	if err != nil {
+		t.Fatalf("GetGitHubPullRequest: %v", err)
+	}
+	if pr.InstallationID != 0 {
+		t.Fatalf("installation_id = %d, want 0 for public PR snapshot", pr.InstallationID)
+	}
+	linked, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(linked) != 1 {
+		t.Fatalf("expected one linked PR, got %d", len(linked))
 	}
 }
 
@@ -720,9 +929,9 @@ func TestAggregateChecksConclusion(t *testing.T) {
 		return *p
 	}
 	cases := []struct {
-		name                            string
+		name                           string
 		failed, passed, pending, total int64
-		want                            string
+		want                           string
 	}{
 		{"no_suites_nil", 0, 0, 0, 0, "<nil>"},
 		{"any_failure_wins", 1, 5, 0, 6, "failed"},
@@ -788,16 +997,21 @@ func firePullRequestWebhookWithHead(t *testing.T, secret, identifier string, ins
 
 func fireCheckSuiteWebhook(t *testing.T, secret string, installationID int64, repo string, prNumbers []int32, suiteID, appID int64, headSHA, conclusion, updatedAt string) {
 	t.Helper()
+	fireCheckSuiteWebhookWithStatus(t, secret, installationID, repo, prNumbers, suiteID, appID, headSHA, "completed", "completed", conclusion, updatedAt)
+}
+
+func fireCheckSuiteWebhookWithStatus(t *testing.T, secret string, installationID int64, repo string, prNumbers []int32, suiteID, appID int64, headSHA, action, status, conclusion, updatedAt string) {
+	t.Helper()
 	prRefs := make([]map[string]any, 0, len(prNumbers))
 	for _, n := range prNumbers {
 		prRefs = append(prRefs, map[string]any{"number": n})
 	}
 	payload := map[string]any{
-		"action": "completed",
+		"action": action,
 		"check_suite": map[string]any{
 			"id":            suiteID,
 			"head_sha":      headSHA,
-			"status":        "completed",
+			"status":        status,
 			"conclusion":    conclusion,
 			"updated_at":    updatedAt,
 			"app":           map[string]any{"id": appID},
@@ -887,6 +1101,46 @@ func TestWebhook_CheckSuite_AggregatesAcrossApps(t *testing.T) {
 	got := aggregateChecksConclusion(rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
 	if got == nil || *got != "failed" {
 		t.Errorf("expected aggregate failed, got %v (counts: failed=%d passed=%d pending=%d total=%d)",
+			got, rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
+	}
+}
+
+// TestWebhook_CheckSuite_PendingEventAggregates verifies queued/in-progress
+// suite deliveries are persisted and surfaced as pending until the same
+// suite reaches a completed conclusion.
+func TestWebhook_CheckSuite_PendingEventAggregates(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	const secret = "ci-pending-secret"
+	created, installationID := setupPRTestIssue(t, ctx, secret)
+
+	head := "pending123456"
+	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-pending", 12, "opened", head, "")
+	fireCheckSuiteWebhookWithStatus(t, secret, installationID, "ci-repo-pending", []int32{12}, 1201, 7201, head, "requested", "queued", "", "2026-05-01T00:00:00Z")
+
+	rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 PR row, got %d", len(rows))
+	}
+	got := aggregateChecksConclusion(rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
+	if got == nil || *got != "pending" {
+		t.Fatalf("expected aggregate pending, got %v (counts: failed=%d passed=%d pending=%d total=%d)",
+			got, rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
+	}
+
+	fireCheckSuiteWebhook(t, secret, installationID, "ci-repo-pending", []int32{12}, 1201, 7201, head, "success", "2026-05-01T00:02:00Z")
+	rows, err = testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue after completion: %v", err)
+	}
+	got = aggregateChecksConclusion(rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
+	if got == nil || *got != "passed" {
+		t.Errorf("expected aggregate passed after completion, got %v (counts: failed=%d passed=%d pending=%d total=%d)",
 			got, rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
 	}
 }

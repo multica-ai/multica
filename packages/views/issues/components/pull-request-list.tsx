@@ -1,19 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
   CircleDashed,
+  Globe2,
   GitMerge,
   GitPullRequest,
   GitPullRequestArrow,
   GitPullRequestClosed,
   GitPullRequestDraft,
+  Link2,
+  Loader2,
   TriangleAlert,
+  X,
   XCircle,
 } from "lucide-react";
 import {
+  githubKeys,
   issuePullRequestsOptions,
   derivePullRequestStatusKind,
   derivePullRequestProgressSegments,
@@ -26,6 +31,7 @@ import type {
   GitHubPullRequestChecksConclusion,
   GitHubPullRequestState,
 } from "@multica/core/types";
+import { api } from "@multica/core/api";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 
@@ -65,9 +71,12 @@ export function PullRequestList({ issueId }: { issueId: string }) {
   }
   if (prs.length === 0) {
     return (
-      <p className="text-xs text-muted-foreground px-2">
-        {t(($) => $.detail.pull_requests_empty)}
-      </p>
+      <div className="space-y-2">
+        <p className="text-xs text-muted-foreground px-2">
+          {t(($) => $.detail.pull_requests_empty)}
+        </p>
+        <LinkPullRequestControl issueId={issueId} defaultOpen />
+      </div>
     );
   }
 
@@ -100,7 +109,97 @@ export function PullRequestList({ issueId }: { issueId: string }) {
           </button>
         </div>
       ) : null}
+      <LinkPullRequestControl issueId={issueId} />
     </div>
+  );
+}
+
+function LinkPullRequestControl({
+  issueId,
+  defaultOpen = false,
+}: {
+  issueId: string;
+  defaultOpen?: boolean;
+}) {
+  const { t } = useT("issues");
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(defaultOpen);
+  const [url, setUrl] = useState("");
+  const mutation = useMutation({
+    mutationFn: (value: string) => api.linkIssuePullRequest(issueId, value),
+    onSuccess: async () => {
+      setUrl("");
+      setOpen(defaultOpen);
+      await queryClient.invalidateQueries({ queryKey: githubKeys.pullRequests(issueId) });
+    },
+  });
+  const pending = mutation.isPending;
+  const error = mutation.error instanceof Error ? mutation.error.message : null;
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+      >
+        <Link2 className="h-3.5 w-3.5" />
+        {t(($) => $.detail.pull_request_link_action)}
+      </button>
+    );
+  }
+
+  return (
+    <form
+      className="space-y-1 px-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const trimmed = url.trim();
+        if (!trimmed || pending) return;
+        mutation.mutate(trimmed);
+      }}
+    >
+      <div className="flex min-w-0 items-center gap-1">
+        <input
+          value={url}
+          disabled={pending}
+          onChange={(event) => setUrl(event.target.value)}
+          placeholder={t(($) => $.detail.pull_request_link_placeholder)}
+          className="h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-[11px] outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring disabled:opacity-60"
+          autoComplete="off"
+        />
+        <button
+          type="submit"
+          disabled={pending || url.trim().length === 0}
+          aria-label={t(($) => $.detail.pull_request_link_submit)}
+          title={t(($) => $.detail.pull_request_link_submit)}
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+        >
+          {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5" />}
+        </button>
+        {!defaultOpen ? (
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => {
+              setOpen(false);
+              setUrl("");
+              mutation.reset();
+            }}
+            aria-label={t(($) => $.detail.pull_request_link_cancel)}
+            title={t(($) => $.detail.pull_request_link_cancel)}
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
+      </div>
+      {error ? (
+        <p role="alert" className="text-[11px] leading-snug text-rose-600 dark:text-rose-400">
+          {error}
+        </p>
+      ) : null}
+    </form>
   );
 }
 
@@ -182,6 +281,7 @@ function PullRequestRowDetails({
   const { t } = useT("issues");
   const checksBadge = getChecksBadge(pr, t);
   const conflictsBadge = getConflictsBadge(pr, t);
+  const sourceBadge = getSourceBadge(pr, t);
   const isTerminal = statusKind === "closed" || statusKind === "merged";
   const showChecksBadge =
     !isTerminal &&
@@ -197,6 +297,7 @@ function PullRequestRowDetails({
       {showStats ? <PullRequestStats pr={pr} /> : null}
       <PullRequestProgressStrip segments={segments} />
       <span className="truncate">{statusText}</span>
+      {sourceBadge ? <PullRequestBadge badge={sourceBadge} /> : null}
       {showChecksBadge ? <PullRequestBadge badge={checksBadge} /> : null}
       {showConflictsBadge ? <PullRequestBadge badge={conflictsBadge} /> : null}
     </div>
@@ -294,6 +395,19 @@ function getChecksBadge(
             : checks === "failed"
               ? t(($) => $.detail.pull_request_checks_failed)
               : t(($) => $.detail.pull_request_checks_pending),
+      }
+    : null;
+}
+
+function getSourceBadge(
+  pr: GitHubPullRequest,
+  t: IssuesT,
+): PullRequestBadgeConfig | null {
+  return pr.sync_source === "public"
+    ? {
+        icon: Globe2,
+        label: t(($) => $.detail.pull_request_source_public),
+        className: "text-muted-foreground",
       }
     : null;
 }

@@ -98,9 +98,11 @@ Fill in:
 | **Subscribe to events** | Tick **Pull request**. |
 | **Where can this GitHub App be installed?** | Your choice. `Only on this account` is fine for single-org setups. |
 
-After **Create GitHub App**, note two things from the App's detail page:
+After **Create GitHub App**, note these values from the App's detail page:
 
 - The **public link** at the top — its tail is the slug. `https://github.com/apps/multica-acme` → slug = `multica-acme`.
+- The **App ID**.
+- A **private key** generated from the App's **Private keys** section. Store it as raw PEM, escaped-newline PEM, or base64-encoded PEM.
 - The **webhook secret** you just generated (you can't read it back from GitHub later — save it now).
 
 <Callout type="warning">
@@ -113,13 +115,17 @@ On the API server:
 
 ```dotenv
 GITHUB_APP_SLUG=multica-acme
+GITHUB_APP_ID=<the App ID from GitHub>
+GITHUB_APP_PRIVATE_KEY=<the private key PEM, escaped-newline PEM, or base64-encoded PEM>
 GITHUB_WEBHOOK_SECRET=<the webhook secret you generated>
 ```
 
-Both variables are required. If either is missing:
+All four variables are required for the Settings → GitHub connect flow. If any is missing:
 
 - `Connect GitHub` in Settings is **disabled** and shows a "not configured" hint.
-- The `/api/webhooks/github` endpoint returns **`503 github webhooks not configured`** — Multica refuses to process events with no secret, rather than silently treating every signature as valid.
+- The setup callback will not be offered until Multica can sign a GitHub App JWT and resolve the installed account name.
+
+The `/api/webhooks/github` endpoint specifically requires `GITHUB_WEBHOOK_SECRET`; if that secret is missing, it returns **`503 github webhooks not configured`** rather than silently treating every signature as valid.
 
 `FRONTEND_ORIGIN` must also be set (it already is for any production self-host); the setup callback bounces the user back to `<FRONTEND_ORIGIN>/settings?tab=github` after install.
 

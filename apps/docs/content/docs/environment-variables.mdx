@@ -176,17 +176,20 @@ For a full explanation of how each parameter affects daemon behavior, see [Daemo
 
 ## GitHub integration
 
-The [GitHub PR ↔ issue integration](/github-integration) needs two variables. Set both to enable Connect GitHub in Settings and accept incoming webhooks.
+The [GitHub PR ↔ issue integration](/github-integration) needs GitHub App install, JWT, and webhook credentials. Set all four to enable Connect GitHub in Settings and accept incoming webhooks.
 
 | Variable | Default | Description |
 |---|---|---|
 | `GITHUB_APP_SLUG` | empty | The slug of your GitHub App (the tail of `https://github.com/apps/<slug>`). Drives the Settings → GitHub install button URL |
+| `GITHUB_APP_ID` | empty | The numeric App ID from the GitHub App settings page. Used to sign the App JWT for installation lookups |
+| `GITHUB_APP_PRIVATE_KEY` | empty | A GitHub App private key as raw PEM, escaped-newline PEM, or base64-encoded PEM. Used with `GITHUB_APP_ID` to resolve installation account names |
 | `GITHUB_WEBHOOK_SECRET` | empty | The Webhook secret you set on the GitHub App. Used for HMAC-SHA256 verification of every `pull_request` / `installation` delivery, and as the HMAC key for the setup-callback state token |
 
-**Behavior when either is unset:**
+**Behavior when any connect-flow variable is unset:**
 
 - `Connect GitHub` in Settings → GitHub is **disabled** and shows a "not configured" hint to admins.
-- The `/api/webhooks/github` endpoint returns **`503 github webhooks not configured`** — Multica refuses to process events with no secret rather than treating every signature as valid.
+- The setup callback is not offered until Multica can sign a GitHub App JWT and resolve the installed account name.
+- The `/api/webhooks/github` endpoint specifically requires `GITHUB_WEBHOOK_SECRET`; when that secret is missing it returns **`503 github webhooks not configured`** rather than treating every signature as valid.
 
 **Note:** `GITHUB_WEBHOOK_SECRET` is reused as the signing key for the install-flow state token, so operators only need to manage one secret. It is **not** the GitHub App's *Client* secret — Client secrets are OAuth-related and not used by this integration. See [GitHub integration → Self-host setup](/github-integration#self-host-setup) for the full walkthrough.
 
@@ -203,6 +206,6 @@ By default, the server reports to Multica's official PostHog instance. To opt ou
 ## Next
 
 - [Sign-in and signup configuration](/auth-setup) — how to actually configure the auth-related variables above and where the traps are
-- [GitHub integration](/github-integration) — how to set up the GitHub App that backs `GITHUB_APP_SLUG` / `GITHUB_WEBHOOK_SECRET`
+- [GitHub integration](/github-integration) — how to set up the GitHub App that backs these variables
 - [Troubleshooting](/troubleshooting) — symptoms and fixes for common misconfigurations
 - [Daemon and runtimes](/daemon-runtimes) — what the `MULTICA_DAEMON_*` parameters actually do

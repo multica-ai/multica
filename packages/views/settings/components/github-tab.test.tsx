@@ -241,6 +241,18 @@ describe("GitHubTab", () => {
     expect(screen.queryByRole("button", { name: /^Disconnect$/ })).toBeNull();
   });
 
+  it("does not render the unknown placeholder as the connected account name", () => {
+    installationsRef.current = {
+      configured: true,
+      can_manage: true,
+      installations: [{ id: "inst-unknown", account_login: "unknown", installation_id: 99 }],
+    };
+    render(<GitHubTab />, { wrapper: I18nWrapper });
+
+    expect(screen.getByText(/Account name is still syncing/i)).toBeTruthy();
+    expect(screen.queryByText(/Connected to unknown/i)).toBeNull();
+  });
+
   it("non-admin with no connection sees the contact-admin hint", () => {
     membersRef.current = [{ user_id: "user-1", role: "member" }];
     installationsRef.current = {
