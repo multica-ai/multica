@@ -25,6 +25,10 @@ import {
   issueTimelineOptions,
   issueKeys,
 } from "@multica/core/issues/queries";
+import { getCurrentWsId } from "@multica/core/platform";
+import { workspaceKeys } from "@multica/core/workspace/queries";
+import { useAuthStore } from "@multica/core/auth";
+import { canAssignAgentToIssue } from "@multica/core/permissions";
 import {
   useCreateComment,
   useUpdateComment,
@@ -37,6 +41,11 @@ import { sortTimelineEntriesAsc } from "@multica/core/issues/timeline-sort";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
+import type { Agent, MemberWithUser } from "@multica/core/types";
+import {
+  normalizePlainMentions,
+  type PlainMentionTarget,
+} from "../utils/plain-mention-normalizer";
 
 type TLCache = TimelineEntry[];
 
@@ -62,6 +71,8 @@ function commentToTimelineEntry(c: Comment): TimelineEntry {
 export function useIssueTimeline(issueId: string, userId?: string) {
   const { t } = useT("issues");
   const qc = useQueryClient();
+  const qcRef = useRef(qc);
+  qcRef.current = qc;
 
   const query = useQuery(issueTimelineOptions(issueId));
   const { data, isLoading: loading } = query;
@@ -78,6 +89,46 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   const { mutateAsync: deleteCommentAsync } = useDeleteComment(issueId);
   const { mutateAsync: resolveCommentAsync } = useResolveComment(issueId);
   const { mutate: toggleCommentReaction } = useToggleCommentReaction(issueId);
+
+  const normalizeCommentContent = useCallback(
+    (content: string): string => {
+      const wsId = getCurrentWsId();
+      if (!wsId) return content;
+
+      const members: MemberWithUser[] =
+        qcRef.current.getQueryData(workspaceKeys.members(wsId)) ?? [];
+      const agents: Agent[] =
+        qcRef.current.getQueryData(workspaceKeys.agents(wsId)) ?? [];
+      const currentUserId = useAuthStore.getState().user?.id ?? null;
+      const role =
+        members.find((member) => member.user_id === currentUserId)?.role ?? null;
+
+      const targets: PlainMentionTarget[] = [
+        ...members.map((member) => ({
+          id: member.user_id,
+          name: member.name,
+          type: "member" as const,
+        })),
+        ...agents
+          .filter(
+            (agent) =>
+              !agent.archived_at &&
+              canAssignAgentToIssue(agent, {
+                userId: currentUserId,
+                role,
+              }).allowed,
+          )
+          .map((agent) => ({
+            id: agent.id,
+            name: agent.name,
+            type: "agent" as const,
+          })),
+      ];
+
+      return normalizePlainMentions(content, targets);
+    },
+    [],
+  );
 
   // Reconnect recovery: invalidate so the next render refetches the full
   // timeline. Cheaper than diffing across a possibly-long disconnect.
@@ -262,7 +313,10 @@ export function useIssueTimeline(issueId: string, userId?: string) {
     async (content: string, attachmentIds?: string[]) => {
       if (!content.trim() || !userId) return;
       try {
-        await createComment({ content, attachmentIds });
+        await createComment({
+          content: normalizeCommentContent(content),
+          attachmentIds,
+        });
       } catch (err) {
         toast.error(
           err instanceof Error && err.message
@@ -271,7 +325,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         );
       }
     },
-    [userId, createComment, t],
+    [userId, createComment, normalizeCommentContent, t],
   );
 
   const submitReply = useCallback(
@@ -279,7 +333,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       if (!content.trim() || !userId) return;
       try {
         await createComment({
-          content,
+          content: normalizeCommentContent(content),
           type: "comment",
           parentId,
           attachmentIds,
@@ -292,13 +346,17 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         );
       }
     },
-    [userId, createComment, t],
+    [userId, createComment, normalizeCommentContent, t],
   );
 
   const editComment = useCallback(
     async (commentId: string, content: string, attachmentIds: string[]) => {
       try {
-        await updateComment({ commentId, content, attachmentIds });
+        await updateComment({
+          commentId,
+          content: normalizeCommentContent(content),
+          attachmentIds,
+        });
       } catch (err) {
         toast.error(
           err instanceof Error && err.message
@@ -307,7 +365,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         );
       }
     },
-    [updateComment, t],
+    [updateComment, normalizeCommentContent, t],
   );
 
   const deleteComment = useCallback(
