@@ -110,7 +110,10 @@ describe("CerebroInspectorAvatar", () => {
     const { onUpdate } = renderInspectorAvatar({ canEdit: true });
 
     fireEvent.click(screen.getByText(/Generate AI/i));
-    fireEvent.click(screen.getByText(/^Generate$/i));
+    // The prompt + Generate button now live in a portalled modal, so wait for
+    // the dialog to mount before clicking the confirm button.
+    const generateButton = await screen.findByText(/^Generate$/i);
+    fireEvent.click(generateButton);
 
     await waitFor(() => {
       expect(generateAgentAvatar).toHaveBeenCalledWith("Existing Agent", undefined);

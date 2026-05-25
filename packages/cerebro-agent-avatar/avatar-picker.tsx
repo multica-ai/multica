@@ -11,7 +11,15 @@ import { toast } from "sonner";
 import { useT } from "@multica/views/i18n";
 import { api } from "@multica/core/api";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
-import { cn } from "@multica/ui/lib/utils";
+import { Button } from "@multica/ui/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
 import { AvatarPicker } from "@multica/views/agents/components/avatar-picker";
 
 interface CerebroAvatarPickerProps {
@@ -23,11 +31,11 @@ interface CerebroAvatarPickerProps {
 
 /**
  * Extends AvatarPicker with an optional AI generation button.
- * When cerebro_agent_avatar is enabled and OPENROUTER_API_KEY is set on the
- * server, a "Generate AI" trigger appears below the avatar square.
- * Clicking it reveals an optional prompt input — leaving it blank triggers
- * auto-generation with a Scandinavian-appearance prompt and a clothing
- * colour seeded from the agent name.
+ * When cerebro_agent_avatar is enabled and the Data Registry gateway is
+ * configured on the server, a "Generate AI" trigger appears below the avatar
+ * square. Clicking it opens a real centred modal with an optional prompt
+ * input — leaving it blank triggers auto-generation with a Scandinavian-
+ * appearance prompt and a background colour seeded from the agent name.
  */
 export function CerebroAvatarPicker({
   value,
@@ -37,8 +45,8 @@ export function CerebroAvatarPicker({
 }: CerebroAvatarPickerProps) {
   const { t } = useT("cerebro-agent-avatar");
   const enabled = useFeatureFlag("cerebro_agent_avatar");
+  const [open, setOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [expanded, setExpanded] = useState(false);
   const [prompt, setPrompt] = useState("");
 
   const handleGenerate = async () => {
@@ -49,7 +57,7 @@ export function CerebroAvatarPicker({
         prompt || undefined,
       );
       onChange(result.url);
-      setExpanded(false);
+      setOpen(false);
       setPrompt("");
     } catch (err) {
       toast.error(
@@ -61,18 +69,17 @@ export function CerebroAvatarPicker({
   };
 
   return (
-    // `relative` anchors the expanded popover; the column itself stays the
-    // avatar's width so it doesn't disturb the surrounding layout. The popover
-    // is positioned absolutely so its own width never gets clipped by this
-    // narrow column (the previous minWidth-inside-56px caused the clipped input).
-    <div className="relative shrink-0 flex flex-col items-center gap-1.5" style={{ width: size }}>
+    <div
+      className="flex shrink-0 flex-col items-center gap-1.5"
+      style={{ width: size }}
+    >
       <AvatarPicker value={value} onChange={onChange} size={size} />
 
       {enabled && (
         <>
           <button
             type="button"
-            onClick={() => setExpanded((v) => !v)}
+            onClick={() => setOpen(true)}
             disabled={generating}
             className="flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
           >
@@ -84,43 +91,62 @@ export function CerebroAvatarPicker({
             {generating ? t(($) => $.generating) : t(($) => $.generate_ai)}
           </button>
 
-          {expanded && !generating && (
-            <div className="absolute top-full left-1/2 z-50 mt-1.5 flex w-56 -translate-x-1/2 flex-col gap-1.5 rounded-md border bg-popover p-2 text-popover-foreground shadow-md">
+          <Dialog
+            open={open}
+            onOpenChange={(next) => {
+              // Don't let a backdrop click or Esc abandon an in-flight
+              // generation — the request keeps running server-side (~45s) and
+              // its result/toast would resolve against a closed dialog.
+              if (!generating) setOpen(next);
+            }}
+          >
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>{t(($) => $.modal_title)}</DialogTitle>
+                <DialogDescription>
+                  {t(($) => $.modal_description)}
+                </DialogDescription>
+              </DialogHeader>
+
               <input
                 autoFocus
                 type="text"
                 value={prompt}
+                disabled={generating}
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder={t(($) => $.prompt_placeholder)}
-                className="h-7 w-full rounded border bg-background px-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                className="h-9 w-full rounded-md border bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") void handleGenerate();
-                  if (e.key === "Escape") setExpanded(false);
+                  if (e.key === "Enter" && !generating) void handleGenerate();
                 }}
               />
-              <div className="flex gap-1">
-                <button
+
+              <DialogFooter>
+                <Button
                   type="button"
-                  onClick={() => void handleGenerate()}
+                  variant="outline"
                   disabled={generating}
-                  className={cn(
-                    "flex flex-1 items-center justify-center gap-1 rounded bg-primary px-2 py-1 text-[11px] text-primary-foreground transition-opacity",
-                    "hover:opacity-90 disabled:opacity-50",
-                  )}
+                  onClick={() => setOpen(false)}
                 >
-                  <Sparkles className="h-3 w-3" />
-                  {t(($) => $.generate_button)}
-                </button>
-                <button
+                  {t(($) => $.cancel)}
+                </Button>
+                <Button
                   type="button"
-                  onClick={() => setExpanded(false)}
-                  className="rounded border px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted"
+                  disabled={generating}
+                  onClick={() => void handleGenerate()}
                 >
-                  ✕
-                </button>
-              </div>
-            </div>
-          )}
+                  {generating ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-4 w-4" />
+                  )}
+                  {generating
+                    ? t(($) => $.generating)
+                    : t(($) => $.generate_button)}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </>
       )}
     </div>
