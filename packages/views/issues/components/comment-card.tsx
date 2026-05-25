@@ -434,6 +434,7 @@ function CommentRow({
               )}
               <FileUploadButton
                 size="sm"
+                multiple
                 onSelect={(file) => editEditorRef.current?.uploadFile(file)}
               />
             </div>
@@ -760,6 +761,7 @@ function CommentCardImpl({
                     )}
                     <FileUploadButton
                       size="sm"
+                      multiple
                       onSelect={(file) => editEditorRef.current?.uploadFile(file)}
                     />
                   </div>
