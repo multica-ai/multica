@@ -8,6 +8,10 @@
 .rich-text-editor.ProseMirror {
   color: var(--foreground);
   caret-color: var(--foreground);
+  /* Cap measure at ~70ch (Bringhurst / Nielsen Norman readability range);
+     wide elements (tables, code blocks, images) still overflow horizontally
+     via their own rules. */
+  max-width: min(100%, 70ch);
 }
 
 .rich-text-editor.ProseMirror:focus {
