@@ -402,6 +402,8 @@ const mockIssue: Issue = {
   creator_id: "user-1",
   parent_issue_id: null,
   project_id: null,
+  workflow_id: null,
+  workflow_run_id: null,
   position: 0,
   start_date: null,
   due_date: "2026-06-01T00:00:00Z",

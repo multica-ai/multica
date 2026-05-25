@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -46,6 +47,8 @@ type IssueResponse struct {
 	DueDate       *string                 `json:"due_date"`
 	CreatedAt     string                  `json:"created_at"`
 	UpdatedAt     string                  `json:"updated_at"`
+	WorkflowID    *string                 `json:"workflow_id"`
+	WorkflowRunID *string                 `json:"workflow_run_id"`
 	// Metadata is the per-issue KV map (see issue_metadata.go). Always emitted
 	// (empty object when unset) so frontend code can `issue.metadata[key]`
 	// without nil-guarding the parent field.
@@ -83,6 +86,8 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
+		WorkflowID:    uuidToPtr(i.WorkflowID),
+		WorkflowRunID: uuidToPtr(i.WorkflowRunID),
 		Metadata:      parseIssueMetadata(i.Metadata),
 	}
 }
@@ -1693,6 +1698,7 @@ func duplicateIssueMessage(issue IssueResponse) string {
 }
 
 func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	var req CreateIssueRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1861,6 +1867,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var issue db.Issue
+	var workflowID pgtype.UUID
+	if assigneeType.Valid && assigneeType.String == "workflow" {
+		workflowID = assigneeID
+	}
 	if originType.Valid {
 		issue, err = qtx.CreateIssueWithOrigin(r.Context(), db.CreateIssueWithOriginParams{
 			WorkspaceID:   wsUUID,
@@ -1880,6 +1890,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			ProjectID:     projectID,
 			OriginType:    originType,
 			OriginID:      originID,
+			WorkflowID:    workflowID,
 		})
 	} else {
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
@@ -1898,6 +1909,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			DueDate:       dueDate,
 			Number:        issueNumber,
 			ProjectID:     projectID,
+			WorkflowID:    workflowID,
 		})
 	}
 	if err != nil {
@@ -1986,9 +1998,50 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+			// When created with a workflow assignee, start the workflow run and
+			// create sub-issues for each node.
+			if issue.AssigneeType.Valid && issue.AssigneeType.String == "workflow" && workflowID.Valid {
+				workflow, err := h.Queries.GetWorkflow(ctx, workflowID)
+				if err != nil {
+					slog.Warn("failed to load workflow for new issue", "issue_id", uuidToString(issue.ID), "error", err)
+				} else {
+					run, nodeRuns, err := h.WorkflowService.StartRunForIssue(ctx, workflow, issue, creatorType, actualCreatorID)
+					if err != nil {
+						slog.Warn("failed to start workflow run for new issue", "issue_id", uuidToString(issue.ID), "error", err)
+					} else {
+						for _, nr := range nodeRuns {
+							childNum, err := h.Queries.IncrementIssueCounter(ctx, wsUUID)
+							if err != nil {
+								slog.Warn("failed to increment issue counter for sub-issue", "error", err)
+								continue
+							}
+							_, err = h.createWorkflowSubIssue(ctx, h.Queries, issue, nr, wsUUID, childNum)
+							if err != nil {
+								slog.Warn("failed to create sub-issue for node run", "node_run_id", uuidToString(nr.ID), "error", err)
+							}
+						}
+						_, err = h.Queries.UpdateIssue(ctx, db.UpdateIssueParams{
+							ID:            issue.ID,
+							AssigneeType:  issue.AssigneeType,
+							AssigneeID:    issue.AssigneeID,
+							StartDate:     issue.StartDate,
+							DueDate:       issue.DueDate,
+							ParentIssueID: issue.ParentIssueID,
+							ProjectID:     issue.ProjectID,
+							WorkflowID:    workflowID,
+							WorkflowRunID: run.ID,
+						})
+						if err != nil {
+							slog.Warn("failed to set workflow_run_id on parent issue", "issue_id", uuidToString(issue.ID), "error", err)
+						} else {
+							resp.WorkflowRunID = uuidToPtr(run.ID)
+						}
+					}
+				}
+			}
+
 	writeJSON(w, http.StatusCreated, resp)
 }
-
 type UpdateIssueRequest struct {
 	Title         *string  `json:"title"`
 	Description   *string  `json:"description"`
@@ -2009,6 +2062,7 @@ type UpdateIssueRequest struct {
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	id := chi.URLParam(r, "id")
 	prevIssue, ok := h.loadIssueForUser(w, r, id)
 	if !ok {
@@ -2237,6 +2291,53 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		if h.shouldEnqueueSquadLeaderOnAssign(r.Context(), issue) {
 			h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, actorType, actorID)
 		}
+		// Workflow assign: start a workflow run and create sub-issues.
+		if issue.AssigneeType.Valid && issue.AssigneeType.String == "workflow" && !issue.WorkflowRunID.Valid {
+			workflow, wfErr := h.Queries.GetWorkflow(ctx, issue.AssigneeID)
+			if wfErr != nil {
+				slog.Warn("failed to load workflow for issue assignee change", "issue_id", uuidToString(issue.ID), "error", wfErr)
+			} else {
+				run, nodeRuns, wfErr := h.WorkflowService.StartRunForIssue(ctx, workflow, issue, actorType, actorID)
+				if wfErr != nil {
+					slog.Warn("failed to start workflow run on assignee change", "issue_id", uuidToString(issue.ID), "error", wfErr)
+				} else {
+					for _, nr := range nodeRuns {
+						childNum, cerr := h.Queries.IncrementIssueCounter(ctx, prevIssue.WorkspaceID)
+						if cerr != nil {
+							slog.Warn("failed to increment issue counter for sub-issue", "error", cerr)
+							continue
+						}
+						_, cerr = h.createWorkflowSubIssue(ctx, h.Queries, issue, nr, prevIssue.WorkspaceID, childNum)
+						if cerr != nil {
+							slog.Warn("failed to create sub-issue for node run", "node_run_id", uuidToString(nr.ID), "error", cerr)
+						}
+					}
+					_, cerr := h.Queries.UpdateIssue(ctx, db.UpdateIssueParams{
+						ID:            issue.ID,
+						AssigneeType:  issue.AssigneeType,
+						AssigneeID:    issue.AssigneeID,
+						StartDate:     issue.StartDate,
+						DueDate:       issue.DueDate,
+						ParentIssueID: issue.ParentIssueID,
+						ProjectID:     issue.ProjectID,
+						WorkflowID:    issue.AssigneeID,
+						WorkflowRunID: run.ID,
+					})
+					if cerr != nil {
+						slog.Warn("failed to set workflow_run_id on parent issue", "issue_id", uuidToString(issue.ID), "error", cerr)
+					} else {
+						resp.WorkflowRunID = uuidToPtr(run.ID)
+					}
+				}
+			}
+		}
+
+		// Cancel a running workflow run when re-assigning away from workflow.
+		if prevIssue.WorkflowRunID.Valid {
+			if cerr := h.WorkflowService.CancelRun(ctx, prevIssue.WorkflowRunID); cerr != nil {
+				slog.Warn("failed to cancel workflow run on reassign", "run_id", uuidToString(prevIssue.WorkflowRunID), "error", cerr)
+			}
+		}
 	}
 
 	// Trigger the assigned agent when a member moves an issue out of backlog.
@@ -2335,8 +2436,29 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 			return http.StatusBadRequest, "squad leader is archived; cannot assign to this squad"
 		}
 		return 0, ""
+	case "workflow":
+		workflow, err := h.Queries.GetWorkflowInWorkspace(ctx, db.GetWorkflowInWorkspaceParams{
+			ID:          assigneeID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			return http.StatusBadRequest, "assignee_id does not refer to a workflow in this workspace"
+		}
+		if workflow.Status != "active" {
+			return http.StatusBadRequest, "workflow is not active"
+		}
+		nodes, err := h.Queries.ListWorkflowNodes(ctx, assigneeID)
+		if err != nil {
+			return http.StatusInternalServerError, "failed to list workflow nodes"
+		}
+		for _, node := range nodes {
+			if node.WorkerType == "" {
+				return http.StatusBadRequest, fmt.Sprintf("workflow node %q has no worker_type", node.Title)
+			}
+		}
+		return 0, ""
 	default:
-		return http.StatusBadRequest, "assignee_type must be 'member', 'agent', or 'squad'"
+		return http.StatusBadRequest, "assignee_type must be 'member', 'agent', 'squad', or 'workflow'"
 	}
 }
 
@@ -2760,4 +2882,142 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("batch delete issues", append(logger.RequestAttrs(r), "count", deleted)...)
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted})
+}
+
+// createWorkflowSubIssue creates a sub-issue for a workflow node run.
+func (h *Handler) createWorkflowSubIssue(
+	ctx context.Context,
+	qtx *db.Queries,
+	parentIssue db.Issue,
+	nodeRun db.WorkflowNodeRun,
+	wsUUID pgtype.UUID,
+	issueNumber int32,
+) (db.Issue, error) {
+	node, err := qtx.GetWorkflowNode(ctx, nodeRun.WorkflowNodeID)
+	if err != nil {
+		return db.Issue{}, fmt.Errorf("get workflow node: %w", err)
+	}
+
+	subTitle := fmt.Sprintf("%s — %s", parentIssue.Title, node.Title)
+
+	var assigneeType pgtype.Text
+	var assigneeID pgtype.UUID
+	if node.WorkerType != "" {
+		switch node.WorkerType {
+		case "human":
+			assigneeType = pgtype.Text{String: "member", Valid: true}
+		case "agent":
+			assigneeType = pgtype.Text{String: "agent", Valid: true}
+		case "squad":
+			assigneeType = pgtype.Text{String: "squad", Valid: true}
+		}
+		assigneeID = node.WorkerID
+	}
+
+	return qtx.CreateIssue(ctx, db.CreateIssueParams{
+		WorkspaceID:   wsUUID,
+		Title:         subTitle,
+		Description:   parentIssue.Description,
+		Status:        "todo",
+		Priority:      parentIssue.Priority,
+		AssigneeType:  assigneeType,
+		AssigneeID:    assigneeID,
+		CreatorType:   "system",
+		CreatorID:     parentIssue.CreatorID,
+		ParentIssueID: parentIssue.ID,
+		Position:      0,
+		Number:        issueNumber,
+		ProjectID:     parentIssue.ProjectID,
+	})
+}
+
+// syncSubIssueForNodeRun maps a node run status to the corresponding sub-issue
+// status and updates it in the database.
+func (h *Handler) syncSubIssueForNodeRun(ctx context.Context, nodeRun db.WorkflowNodeRun) {
+	run, err := h.Queries.GetWorkflowRun(ctx, nodeRun.WorkflowRunID)
+	if err != nil {
+		slog.Warn("syncSubIssueForNodeRun: failed to get workflow run", "node_run_id", uuidToString(nodeRun.ID), "error", err)
+		return
+	}
+
+	issue, err := h.Queries.GetIssueByOrigin(ctx, db.GetIssueByOriginParams{
+		WorkspaceID: run.WorkspaceID,
+		OriginType:  pgtype.Text{String: "workflow", Valid: true},
+		OriginID:    nodeRun.ID,
+	})
+	if err != nil {
+		slog.Warn("syncSubIssueForNodeRun: failed to find sub-issue", "node_run_id", uuidToString(nodeRun.ID), "error", err)
+		return
+	}
+
+	status := nodeRunStatusToIssueStatus(nodeRun.Status)
+	if status == "" || status == issue.Status {
+		return
+	}
+
+	_, err = h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID:          issue.ID,
+		Status:      status,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		slog.Warn("syncSubIssueForNodeRun: failed to update sub-issue status", "issue_id", uuidToString(issue.ID), "error", err)
+	}
+}
+
+// handleWorkflowRunTerminal auto-completes or leaves the parent issue when a
+// workflow run reaches a terminal state.
+func (h *Handler) handleWorkflowRunTerminal(ctx context.Context, run db.WorkflowRun, status string) {
+	// Find the parent issue by scanning for a sub-issue whose parent has this
+	// workflow run. We look up the sub-issue via origin, then follow parent_issue_id.
+	nodeRuns, err := h.Queries.ListWorkflowNodeRunsByRun(ctx, run.ID)
+	if err != nil || len(nodeRuns) == 0 {
+		return
+	}
+
+	// Use the first node run to find the parent issue via sub-issue.
+	subIssue, err := h.Queries.GetIssueByOrigin(ctx, db.GetIssueByOriginParams{
+		WorkspaceID: run.WorkspaceID,
+		OriginType:  pgtype.Text{String: "workflow", Valid: true},
+		OriginID:    nodeRuns[0].ID,
+	})
+	if err != nil || !subIssue.ParentIssueID.Valid {
+		return
+	}
+
+	if status == service.RunStatusCompleted {
+		_, err = h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ID:          subIssue.ParentIssueID,
+			Status:      "done",
+			WorkspaceID: run.WorkspaceID,
+		})
+		if err != nil {
+			slog.Warn("handleWorkflowRunTerminal: failed to complete parent issue", "parent_issue_id", uuidToString(subIssue.ParentIssueID), "error", err)
+		}
+	}
+	// For failed/cancelled, leave the parent issue in its current status —
+	// the user should decide what to do.
+}
+
+// nodeRunStatusToIssueStatus maps a workflow node run status to an issue status.
+func nodeRunStatusToIssueStatus(nodeRunStatus string) string {
+	switch nodeRunStatus {
+	case service.NodeRunStatusPending, service.NodeRunStatusFormatChecking,
+		service.NodeRunStatusFormatOk, service.NodeRunStatusWorkerAssigned:
+		return "todo"
+	case service.NodeRunStatusWorking:
+		return "in_progress"
+	case service.NodeRunStatusAwaitingCritic, service.NodeRunStatusCriticReviewing:
+		return "in_review"
+	case service.NodeRunStatusCriticApproved, service.NodeRunStatusCompleted:
+		return "done"
+	case service.NodeRunStatusFailed, service.NodeRunStatusFormatFailed:
+		return "blocked"
+	case service.NodeRunStatusBlocked:
+		return "blocked"
+	case service.NodeRunStatusSkipped, service.NodeRunStatusCancelled:
+		return "cancelled"
+	default:
+		return ""
+	}
 }

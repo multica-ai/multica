@@ -73,9 +73,11 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
-    parent_issue_id, position, start_date, due_date, number, project_id
+    parent_issue_id, position, start_date, due_date, number, project_id,
+    workflow_id, workflow_run_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+    sqlc.narg('workflow_id'), sqlc.narg('workflow_run_id')
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one
@@ -95,6 +97,8 @@ UPDATE issue SET
     due_date = sqlc.narg('due_date'),
     parent_issue_id = sqlc.narg('parent_issue_id'),
     project_id = sqlc.narg('project_id'),
+    workflow_id = sqlc.narg('workflow_id'),
+    workflow_run_id = sqlc.narg('workflow_run_id'),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -112,10 +116,11 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    origin_type, origin_id
+    origin_type, origin_id, workflow_id, workflow_run_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    sqlc.narg('origin_type'), sqlc.narg('origin_id')
+    sqlc.narg('origin_type'), sqlc.narg('origin_id'),
+    sqlc.narg('workflow_id'), sqlc.narg('workflow_run_id')
 ) RETURNING *;
 
 -- name: LockIssueDuplicateKey :exec

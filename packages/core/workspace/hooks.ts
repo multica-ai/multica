@@ -4,12 +4,15 @@ import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "../hooks";
 import { memberListOptions, agentListOptions, squadListOptions } from "./queries";
+import { workflowListOptions } from "../workflows/queries";
 
 export function useActorName() {
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const { data: workflowsList } = useQuery(workflowListOptions(wsId));
+  const workflows = workflowsList?.workflows ?? [];
 
   const getMemberName = useCallback((userId: string) => {
     const m = members.find((m) => m.user_id === userId);
@@ -26,13 +29,19 @@ export function useActorName() {
     return s?.name ?? "Unknown Squad";
   }, [squads]);
 
+  const getWorkflowName = useCallback((workflowId: string) => {
+    const w = workflows.find((w) => w.id === workflowId);
+    return w?.title ?? "Workflow";
+  }, [workflows]);
+
   const getActorName = useCallback((type: string, id: string) => {
     if (type === "member") return getMemberName(id);
     if (type === "agent") return getAgentName(id);
     if (type === "squad") return getSquadName(id);
+    if (type === "workflow") return getWorkflowName(id);
     if (type === "system") return "Multica";
     return "System";
-  }, [getAgentName, getMemberName, getSquadName]);
+  }, [getAgentName, getMemberName, getSquadName, getWorkflowName]);
 
   const getActorInitials = useCallback((type: string, id: string) => {
     const name = getActorName(type, id);

@@ -3,7 +3,7 @@
 import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Play, Save, Plus, Wand, Trash2 } from "lucide-react";
+import { Save, Plus, Wand, Trash2, Power } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   workflowDetailOptions,
@@ -14,7 +14,6 @@ import {
   useUpdateNode,
   useCreateEdge,
   useUpdateWorkflow,
-  useStartWorkflowRun,
   useDeleteWorkflow,
 } from "@multica/core/workflows/queries";
 import { useWorkflowEditorStore } from "@multica/core/workflows/store";
@@ -53,7 +52,6 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
   const updateNodeMutation = useUpdateNode(wsId, id!);
   const createEdgeMutation = useCreateEdge(wsId, id!);
   const updateWorkflowMutation = useUpdateWorkflow(wsId);
-  const startRunMutation = useStartWorkflowRun(wsId);
   const deleteWorkflowMutation = useDeleteWorkflow(wsId);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
@@ -105,13 +103,13 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
     }
   };
 
-  const handleStartRun = async () => {
+  const handleActivateWorkflow = async () => {
+    if (!workflow) return;
+    const newStatus = workflow.status === "active" ? "draft" : "active";
     try {
-      const run = await startRunMutation.mutateAsync({ workflowId: id! });
-      toast.success(t(($) => $.detail.toast_run_started));
-      navigation.push(wsPaths.workflowRunDetail(id!, run.id));
+      await updateWorkflowMutation.mutateAsync({ id: id!, status: newStatus as WorkflowStatus });
     } catch {
-      toast.error(t(($) => $.detail.toast_run_failed));
+      // silent
     }
   };
 
@@ -194,14 +192,12 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
           </Button>
           <Button
             size="sm"
-            variant="outline"
-            onClick={handleStartRun}
-            disabled={startRunMutation.isPending}
+            variant={workflow?.status === "active" ? "secondary" : "default"}
+            onClick={handleActivateWorkflow}
+            disabled={updateWorkflowMutation.isPending}
           >
-            <Play className="h-3.5 w-3.5 mr-1" />
-            {startRunMutation.isPending
-              ? t(($) => $.detail.starting_run)
-              : t(($) => $.detail.start_run)}
+            <Power className="h-3.5 w-3.5 mr-1" />
+            {workflow?.status === "active" ? "Active" : "Activate"}
           </Button>
         </div>
       </PageHeader>

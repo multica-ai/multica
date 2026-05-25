@@ -336,12 +336,6 @@ jobs:
         with:
           version: ${{ env.HELM_VERSION }}
 
-      - name: Login to GHCR (Helm OCI)
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} \
-            --username ${{ github.actor }} \
-            --password-stdin
-
       - name: Update Chart version
         working-directory: helm/multica
         run: |
@@ -358,17 +352,29 @@ jobs:
         run: |
           helm package multica
 
-      - name: Push Helm Chart to GHCR
-        working-directory: helm
+      - name: Create Release if not exists
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          chart_file=$(ls multica-*.tgz | head -n 1)
-          helm push "$chart_file" oci://${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/helm-charts
+          tag="${{ needs.prepare.outputs.tag_name }}"
+          if ! gh release view "$tag" --repo ${{ github.repository }} > /dev/null 2>&1; then
+            echo "Release $tag does not exist. Creating..."
+            gh release create "$tag" \
+              --repo ${{ github.repository }} \
+              --title "Release $tag" \
+              --generate-notes
+          else
+            echo "Release $tag already exists."
+          fi
 
-      - name: Tag as latest (optional)
-        if: needs.prepare.outputs.is_latest == 'true'
+      - name: Upload Helm Chart to Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         working-directory: helm
         run: |
           chart_file=$(ls multica-*.tgz | head -n 1)
-          # Helm OCI does not support mutable tags; latest is a separate push
-          # We re-package with the same content but helm handles digest-based storage
-          echo "Chart pushed. To use latest, reference the specific version or tag manually."
+          echo "Uploading $chart_file to release ${{ needs.prepare.outputs.tag_name }}..."
+          gh release upload "${{ needs.prepare.outputs.tag_name }}" \
+            --repo ${{ github.repository }} \
+            "$chart_file" \
+            --clobber

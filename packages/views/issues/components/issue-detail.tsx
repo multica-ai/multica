@@ -48,6 +48,7 @@ import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
+import { WorkflowDagViewer } from "./workflow-dag-viewer";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
@@ -1830,6 +1831,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               </div>
             );
           })()}
+
+          {/* Workflow DAG — shown when the issue is assigned to a workflow */}
+          {issue.assignee_type === "workflow" && issue.assignee_id && (
+            <div className="mt-10">
+              <WorkflowDagViewer
+                workflowId={issue.assignee_id}
+                runId={issue.workflow_run_id}
+                wsId={wsId}
+              />
+            </div>
+          )}
 
           <div className="my-8 border-t" />
 

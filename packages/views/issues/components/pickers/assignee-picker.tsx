@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Lock, UserMinus } from "lucide-react";
+import { GitBranch, Lock, UserMinus } from "lucide-react";
 import type { Agent, IssueAssigneeType, UpdateIssueRequest } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -9,6 +9,7 @@ import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, squadListOptions, assigneeFrequencyOptions } from "@multica/core/workspace/queries";
+import { workflowActiveListOptions } from "@multica/core/workflows/queries";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import {
   PropertyPicker,
@@ -66,6 +67,7 @@ export function AssigneePicker({
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const { data: activeWorkflows = [] } = useQuery(workflowActiveListOptions(wsId));
   const { data: frequency = [] } = useQuery(assigneeFrequencyOptions(wsId));
   const { getActorName } = useActorName();
 
@@ -93,6 +95,9 @@ export function AssigneePicker({
   const filteredSquads = squads
     .filter((s) => !s.archived_at && (s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)))
     .sort((a, b) => getFreq("squad", b.id) - getFreq("squad", a.id));
+  const filteredWorkflows = activeWorkflows
+    .filter((w) => w.title.toLowerCase().includes(query) || matchesPinyin(w.title, query))
+    .sort((a, b) => getFreq("workflow", b.id) - getFreq("workflow", a.id));
 
   const isSelected = (type: string, id: string) =>
     assigneeType === type && assigneeId === id;
@@ -225,9 +230,32 @@ export function AssigneePicker({
         </PickerSection>
       )}
 
+      {/* Workflows */}
+      {filteredWorkflows.length > 0 && (
+        <PickerSection label={t(($) => $.pickers.assignee.workflows_group)}>
+          {filteredWorkflows.map((w) => (
+            <PickerItem
+              key={w.id}
+              selected={isSelected("workflow", w.id)}
+              onClick={() => {
+                onUpdate({
+                  assignee_type: "workflow",
+                  assignee_id: w.id,
+                });
+                setOpen(false);
+              }}
+            >
+              <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="truncate">{w.title}</span>
+            </PickerItem>
+          ))}
+        </PickerSection>
+      )}
+
       {filteredMembers.length === 0 &&
         filteredAgents.length === 0 &&
         filteredSquads.length === 0 &&
+        filteredWorkflows.length === 0 &&
         filter && <PickerEmpty />}
     </PropertyPicker>
   );
