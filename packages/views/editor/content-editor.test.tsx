@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 const mockFocus = vi.hoisted(() => vi.fn());
 const mockSetContent = vi.hoisted(() => vi.fn());
 const mockSetTextSelection = vi.hoisted(() => vi.fn());
+const mockDispatch = vi.hoisted(() => vi.fn());
 const editorState = vi.hoisted(() => ({
   isFocused: false,
   isDestroyed: false,
@@ -17,6 +18,14 @@ vi.mock("@tanstack/react-query", () => ({
 
 vi.mock("./extensions", () => ({
   createEditorExtensions: () => [],
+}));
+
+vi.mock("@tiptap/core", () => ({
+  Extension: {
+    create: (definition: unknown) => ({
+      configure: () => definition,
+    }),
+  },
 }));
 
 vi.mock("./extensions/file-upload", () => ({
@@ -54,6 +63,14 @@ vi.mock("@tiptap/react", () => ({
           setTextSelection: mockSetTextSelection,
         },
         getMarkdown: () => editorState.markdown,
+        storage: {
+          attachmentDisplay: {
+            hideAttachments: false,
+          },
+        },
+        view: {
+          dispatch: mockDispatch,
+        },
         state: {
           doc: {
             content: { size: 0 },
@@ -62,6 +79,7 @@ vi.mock("@tiptap/react", () => ({
             },
           },
           selection: { empty: true, from: 0, to: 0 },
+          tr: { setMeta: vi.fn(() => ({})) },
         },
         __triggerUpdate: () => options?.onUpdate?.({ editor: editorRef.current }),
       };
@@ -209,5 +227,17 @@ describe("ContentEditor", () => {
     vi.advanceTimersByTime(100);
 
     expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it("stores the hide-attachments display flag without changing markdown", () => {
+    editorState.markdown = "!file[report.pdf](https://cdn.example/report.pdf)";
+    render(<ContentEditor defaultValue={editorState.markdown} hideAttachments />);
+
+    const editor = editorRef.current as {
+      storage: { attachmentDisplay: { hideAttachments: boolean } };
+      getMarkdown: () => string;
+    };
+    expect(editor.storage.attachmentDisplay.hideAttachments).toBe(true);
+    expect(editor.getMarkdown()).toBe("!file[report.pdf](https://cdn.example/report.pdf)");
   });
 });

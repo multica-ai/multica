@@ -38,6 +38,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
+import { Extension } from "@tiptap/core";
 import { cn } from "@multica/ui/lib/utils";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { useWorkspaceSlug } from "@multica/core/paths";
@@ -80,6 +81,24 @@ function hasActiveUploadsInEditor(editor: {
   return uploading;
 }
 
+const AttachmentDisplayExtension = Extension.create<{ hideAttachments: boolean }>({
+  name: "attachmentDisplay",
+  addOptions() {
+    return { hideAttachments: false };
+  },
+  addStorage() {
+    return {
+      hideAttachments: this.options.hideAttachments,
+    };
+  },
+});
+
+type AttachmentDisplayStorage = {
+  attachmentDisplay?: {
+    hideAttachments: boolean;
+  };
+};
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -120,6 +139,8 @@ interface ContentEditorProps {
    * available (NodeView buttons fall back to opening the raw URL).
    */
   attachments?: Attachment[];
+  /** Hide attachment nodes in this editor while preserving markdown output. */
+  hideAttachments?: boolean;
   /** Optional actions for quoting the current editor selection into issue comments. */
   selectionQuoteActions?: SelectionQuoteActions;
 }
@@ -173,6 +194,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       currentIssueId,
       disableMentions = false,
       attachments,
+      hideAttachments = false,
       selectionQuoteActions,
     },
     ref,
@@ -216,7 +238,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         onUploadFileRef,
         submitOnEnter,
         disableMentions,
-      }),
+      }).concat(AttachmentDisplayExtension.configure({ hideAttachments })),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;
         if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -264,6 +286,15 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // Tiptap v3 `useEditor` reads `content` only at mount (ueberdosis/tiptap#5831);
     // without this effect, a WS-driven description update keeps the editor
     // showing stale content until the issue is closed and reopened.
+    useEffect(() => {
+      if (!editor || editor.isDestroyed) return;
+      const storage = editor.storage as AttachmentDisplayStorage;
+      if (storage.attachmentDisplay) {
+        storage.attachmentDisplay.hideAttachments = hideAttachments;
+      }
+      editor.view.dispatch(editor.state.tr.setMeta("attachmentDisplay", hideAttachments));
+    }, [editor, hideAttachments]);
+
     useEffect(() => {
       if (!editor || editor.isDestroyed) return;
 

@@ -1286,7 +1286,7 @@ func (h *Handler) GetAttachmentPreviewURL(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	signed := h.signedDownloadURL(att.Url)
+	signed := h.signedPreviewURL(att)
 	expires := time.Now().Add(30 * time.Minute).Unix()
 	writeJSON(w, http.StatusOK, previewURLResponse{URL: signed, ExpiresAt: expires})
 }
@@ -1306,6 +1306,27 @@ func (h *Handler) signedDownloadURL(rawURL string) string {
 		}
 	}
 	return rawURL
+}
+
+func (h *Handler) signedPreviewURL(att db.Attachment) string {
+	if h.CFSigner != nil {
+		return h.CFSigner.SignedURL(att.Url, time.Now().Add(30*time.Minute))
+	}
+	key := h.Storage.KeyFromURL(att.Url)
+	if key == "" {
+		return att.Url
+	}
+	if ps, ok := h.Storage.(storage.PresignedInlineGetStorage); ok {
+		if signed, err := ps.PresignedInlineGetURL(context.Background(), key, att.ContentType, att.Filename, 30*time.Minute); err == nil {
+			return signed
+		}
+	}
+	if ps, ok := h.Storage.(storage.PresignedGetStorage); ok {
+		if signed, err := ps.PresignedGetURL(context.Background(), key, 30*time.Minute); err == nil {
+			return signed
+		}
+	}
+	return att.Url
 }
 
 // ---------------------------------------------------------------------------

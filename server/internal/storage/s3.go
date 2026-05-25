@@ -442,6 +442,25 @@ func (s *S3Storage) PresignedGetURL(ctx context.Context, key string, expires tim
 	return out.URL, nil
 }
 
+func (s *S3Storage) PresignedInlineGetURL(ctx context.Context, key string, contentType string, filename string, expires time.Duration) (string, error) {
+	presigner := s3.NewPresignClient(s.client)
+	input := &s3.GetObjectInput{
+		Bucket:                     aws.String(s.bucket),
+		Key:                        aws.String(key),
+		ResponseContentDisposition: aws.String(contentDisposition("inline", filename)),
+	}
+	if strings.TrimSpace(contentType) != "" {
+		input.ResponseContentType = aws.String(contentType)
+	}
+	out, err := presigner.PresignGetObject(ctx, input, func(o *s3.PresignOptions) {
+		o.Expires = expires
+	})
+	if err != nil {
+		return "", fmt.Errorf("s3 presign inline GetObject: %w", err)
+	}
+	return out.URL, nil
+}
+
 func virtualHostedEndpointURL(endpointURL string, bucket string, key string) (string, bool) {
 	parsed, err := url.Parse(endpointURL)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
