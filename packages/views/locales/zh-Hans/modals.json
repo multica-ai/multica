@@ -131,6 +131,7 @@
     "toast_created": "已创建 issue",
     "view_issue": "查看 issue",
     "toast_failed": "创建 issue 失败",
+    "toast_uploading": "请等待附件上传完成。",
     "project_required": "创建 issue 前请选择项目。",
     "attachment_upload_failed": "附件上传失败，请重试。",
     "attachment_state_invalid": "附件状态异常，请重新上传后再创建 issue。",
