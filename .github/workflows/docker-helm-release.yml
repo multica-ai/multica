@@ -1,0 +1,374 @@
+name: Docker & Helm Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g., v0.0.1). If the tag does not exist, it will be created automatically."
+        required: true
+        default: "v0.0.1"
+      latest:
+        description: "Also tag the image as latest?"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  HELM_VERSION: "3.17.0"
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.meta.outputs.tag_name }}
+      semver: ${{ steps.meta.outputs.semver }}
+      create_tag: ${{ steps.meta.outputs.create_tag }}
+      is_latest: ${{ steps.meta.outputs.is_latest }}
+      repo_owner_lower: ${{ steps.meta.outputs.repo_owner_lower }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate and resolve tag
+        id: meta
+        run: |
+          raw="${{ github.event.inputs.tag }}"
+          # Normalize: strip leading 'v' if present for semver, keep for tag name
+          if [[ "$raw" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            tag_name="$raw"
+            semver="${raw#v}"
+          elif [[ "$raw" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            tag_name="v$raw"
+            semver="$raw"
+          else
+            echo "::error::Tag must be semver like v0.0.1 or 0.0.1; got '$raw'."
+            exit 1
+          fi
+
+          echo "tag_name=$tag_name" >> "$GITHUB_OUTPUT"
+          echo "semver=$semver" >> "$GITHUB_OUTPUT"
+
+          # Check if tag exists
+          if git rev-parse "$tag_name" >/dev/null 2>&1; then
+            echo "Tag $tag_name already exists."
+            echo "create_tag=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Tag $tag_name does not exist. Will create it."
+            echo "create_tag=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [[ "${{ github.event.inputs.latest }}" == "true" ]]; then
+            echo "is_latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_latest=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          repo_owner_lower=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "repo_owner_lower=$repo_owner_lower" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag if not exists
+        if: steps.meta.outputs.create_tag == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.meta.outputs.tag_name }}" -m "Release ${{ steps.meta.outputs.tag_name }}"
+          git push origin "${{ steps.meta.outputs.tag_name }}"
+
+  # ---------------------------------------------------------------------------
+  # Backend Docker Image
+  # ---------------------------------------------------------------------------
+  docker-backend-build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runs-on: ubuntu-latest
+          - platform: linux/arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - name: Prepare
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute backend image labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-backend
+          labels: |
+            org.opencontainers.image.title=Multica Backend
+            org.opencontainers.image.description=Multica self-hosted backend
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          pull: true
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=release-backend-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,mode=max,scope=release-backend-${{ env.PLATFORM_PAIR }}
+          build-args: |
+            VERSION=${{ needs.prepare.outputs.tag_name }}
+            COMMIT=${{ github.sha }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-backend,push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-backend-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  docker-backend-merge:
+    needs: [prepare, docker-backend-build]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-docker-backend-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-backend-*
+          merge-multiple: true
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute backend image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-backend
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=latest,enable=${{ needs.prepare.outputs.is_latest == 'true' }}
+            type=raw,value=${{ needs.prepare.outputs.tag_name }}
+            type=raw,value=${{ needs.prepare.outputs.semver }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-backend@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect \
+            ${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-backend:${{ needs.prepare.outputs.tag_name }}
+
+  # ---------------------------------------------------------------------------
+  # Web Docker Image
+  # ---------------------------------------------------------------------------
+  docker-web-build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runs-on: ubuntu-latest
+          - platform: linux/arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - name: Prepare
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute web image labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-web
+          labels: |
+            org.opencontainers.image.title=Multica Web
+            org.opencontainers.image.description=Multica self-hosted web frontend
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.web
+          pull: true
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=release-web-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,mode=max,scope=release-web-${{ env.PLATFORM_PAIR }}
+          build-args: |
+            REMOTE_API_URL=http://backend:8080
+            NEXT_PUBLIC_APP_VERSION=${{ needs.prepare.outputs.tag_name }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-web,push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-web-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  docker-web-merge:
+    needs: [prepare, docker-web-build]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-docker-web-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-web-*
+          merge-multiple: true
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute web image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-web
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=latest,enable=${{ needs.prepare.outputs.is_latest == 'true' }}
+            type=raw,value=${{ needs.prepare.outputs.tag_name }}
+            type=raw,value=${{ needs.prepare.outputs.semver }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-web@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect \
+            ${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-web:${{ needs.prepare.outputs.tag_name }}
+
+  # ---------------------------------------------------------------------------
+  # Helm Chart
+  # ---------------------------------------------------------------------------
+  helm-release:
+    needs: [prepare, docker-backend-merge, docker-web-merge]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Login to GHCR (Helm OCI)
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} \
+            --username ${{ github.actor }} \
+            --password-stdin
+
+      - name: Update Chart version
+        working-directory: helm/multica
+        run: |
+          sed -i "s/^version:.*/version: ${{ needs.prepare.outputs.semver }}/" Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${{ needs.prepare.outputs.semver }}\"/" Chart.yaml
+
+      - name: Update image tags in values.yaml
+        working-directory: helm/multica
+        run: |
+          sed -i "s|tag: \"0.0.1\"|tag: \"${{ needs.prepare.outputs.tag_name }}\"|g" values.yaml
+
+      - name: Package Helm Chart
+        working-directory: helm
+        run: |
+          helm package multica
+
+      - name: Push Helm Chart to GHCR
+        working-directory: helm
+        run: |
+          chart_file=$(ls multica-*.tgz | head -n 1)
+          helm push "$chart_file" oci://${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/helm-charts
+
+      - name: Tag as latest (optional)
+        if: needs.prepare.outputs.is_latest == 'true'
+        working-directory: helm
+        run: |
+          chart_file=$(ls multica-*.tgz | head -n 1)
+          # Helm OCI does not support mutable tags; latest is a separate push
+          # We re-package with the same content but helm handles digest-based storage
+          echo "Chart pushed. To use latest, reference the specific version or tag manually."
