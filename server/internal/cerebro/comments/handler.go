@@ -227,7 +227,7 @@ func (h *Handler) MoveToSubIssue(w http.ResponseWriter, r *http.Request) {
 	// Delete the replies on the host issue. The root comment is rewritten,
 	// not deleted, so it can carry the breadcrumb.
 	for _, reply := range replies {
-		if err := qtx.DeleteComment(r.Context(), reply.ID); err != nil {
+		if err := qtx.DeleteComment(r.Context(), db.DeleteCommentParams{ID: reply.ID, WorkspaceID: wsUUID}); err != nil {
 			slog.Error("move-to-subissue: delete reply failed", "reply_id", util.UUIDToString(reply.ID), "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to remove reply from host issue")
 			return
