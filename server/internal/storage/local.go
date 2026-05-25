@@ -82,6 +82,19 @@ func (s *LocalStorage) KeyFromURL(rawURL string) string {
 	return rawURL
 }
 
+func (s *LocalStorage) HandlesURL(rawURL string) bool {
+	if rawURL == "" {
+		return false
+	}
+	if strings.HasPrefix(rawURL, "/uploads/") {
+		return true
+	}
+	if s.baseURL != "" && strings.HasPrefix(rawURL, s.baseURL+"/uploads/") {
+		return true
+	}
+	return false
+}
+
 // GetReader opens the underlying file for streaming. Refuses keys that
 // resolve outside uploadDir (defense against a stored key with traversal
 // components) and refuses the sidecar suffix so /content can't be coaxed

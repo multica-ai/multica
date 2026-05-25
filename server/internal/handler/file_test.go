@@ -9,11 +9,14 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/storage"
 )
 
 // createHandlerTestChatSession seeds a chat_session row owned by testUserID
@@ -60,7 +63,13 @@ func (m *mockStorage) Delete(_ context.Context, key string) {
 	defer m.mu.Unlock()
 	delete(m.files, key)
 }
-func (m *mockStorage) DeleteKeys(_ context.Context, _ []string) {}
+func (m *mockStorage) DeleteKeys(_ context.Context, keys []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, key := range keys {
+		delete(m.files, key)
+	}
+}
 func (m *mockStorage) KeyFromURL(rawURL string) string {
 	const prefix = "https://cdn.example.com/"
 	if strings.HasPrefix(rawURL, prefix) {
@@ -80,8 +89,13 @@ func (m *mockStorage) GetReader(_ context.Context, key string) (io.ReadCloser, e
 
 func TestUploadFileForeignWorkspace(t *testing.T) {
 	origStorage := testHandler.Storage
+	origLegacyLocalStorage := testHandler.LegacyLocalStorage
 	testHandler.Storage = &mockStorage{}
-	defer func() { testHandler.Storage = origStorage }()
+	testHandler.LegacyLocalStorage = nil
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.LegacyLocalStorage = origLegacyLocalStorage
+	}()
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -115,8 +129,13 @@ func TestUploadFileForeignWorkspace(t *testing.T) {
 // in the attachment table, invisible to the UI.
 func TestUploadFileResolvesWorkspaceViaSlugHeader(t *testing.T) {
 	origStorage := testHandler.Storage
+	origLegacyLocalStorage := testHandler.LegacyLocalStorage
 	testHandler.Storage = &mockStorage{}
-	defer func() { testHandler.Storage = origStorage }()
+	testHandler.LegacyLocalStorage = nil
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.LegacyLocalStorage = origLegacyLocalStorage
+	}()
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -183,8 +202,13 @@ func TestUploadFileResolvesWorkspaceViaSlugHeader(t *testing.T) {
 // the refactor. Prevents a regression in the CLI/daemon compat branch.
 func TestUploadFileResolvesWorkspaceViaIDHeaderStill(t *testing.T) {
 	origStorage := testHandler.Storage
+	origLegacyLocalStorage := testHandler.LegacyLocalStorage
 	testHandler.Storage = &mockStorage{}
-	defer func() { testHandler.Storage = origStorage }()
+	testHandler.LegacyLocalStorage = nil
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.LegacyLocalStorage = origLegacyLocalStorage
+	}()
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -222,8 +246,13 @@ func TestUploadFileResolvesWorkspaceViaIDHeaderStill(t *testing.T) {
 // session (chat_message_id remains NULL — it is back-filled on send).
 func TestUploadFile_AttachesToChatSession(t *testing.T) {
 	origStorage := testHandler.Storage
+	origLegacyLocalStorage := testHandler.LegacyLocalStorage
 	testHandler.Storage = &mockStorage{}
-	defer func() { testHandler.Storage = origStorage }()
+	testHandler.LegacyLocalStorage = nil
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.LegacyLocalStorage = origLegacyLocalStorage
+	}()
 
 	agentID := createHandlerTestAgent(t, "ChatUploadAgent", []byte("[]"))
 	sessionID := createHandlerTestChatSession(t, agentID)
@@ -295,8 +324,13 @@ func TestUploadFile_AttachesToChatSession(t *testing.T) {
 // cross-tenant attachment binding.
 func TestUploadFile_RejectsForeignChatSession(t *testing.T) {
 	origStorage := testHandler.Storage
+	origLegacyLocalStorage := testHandler.LegacyLocalStorage
 	testHandler.Storage = &mockStorage{}
-	defer func() { testHandler.Storage = origStorage }()
+	testHandler.LegacyLocalStorage = nil
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.LegacyLocalStorage = origLegacyLocalStorage
+	}()
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -472,8 +506,13 @@ VALUES
 func TestGetAttachmentContent_HappyPath_Markdown(t *testing.T) {
 	store := &mockStorage{}
 	origStorage := testHandler.Storage
+	origLegacyLocalStorage := testHandler.LegacyLocalStorage
 	testHandler.Storage = store
-	defer func() { testHandler.Storage = origStorage }()
+	testHandler.LegacyLocalStorage = nil
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.LegacyLocalStorage = origLegacyLocalStorage
+	}()
 
 	body := []byte("# heading\n\nbody text\n")
 	id := seedPreviewAttachment(t, store, "preview-md-key.md", "preview.md", "text/markdown", body)
@@ -498,13 +537,70 @@ func TestGetAttachmentContent_HappyPath_Markdown(t *testing.T) {
 	}
 }
 
+func TestGetAttachmentContent_UsesLegacyLocalStorageForUploadsURL(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+	t.Setenv("LOCAL_UPLOAD_BASE_URL", "https://multica.example")
+
+	localStore := storage.NewLocalStorageFromEnv()
+	if localStore == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+	s3Store := &mockStorage{}
+	origStorage := testHandler.Storage
+	origLegacyLocalStorage := testHandler.LegacyLocalStorage
+	testHandler.Storage = s3Store
+	testHandler.LegacyLocalStorage = localStore
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.LegacyLocalStorage = origLegacyLocalStorage
+	}()
+
+	key := filepath.Join("workspaces", testWorkspaceID, "legacy.md")
+	path := filepath.Join(tmpDir, key)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("# legacy\n\nfrom local PVC\n")
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var id string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO attachment (workspace_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
+		VALUES ($1, 'member', $2, 'legacy.md', $3, 'text/markdown', $4)
+		RETURNING id::text
+	`, testWorkspaceID, testUserID, "/uploads/"+filepath.ToSlash(key), len(body)).Scan(&id); err != nil {
+		t.Fatalf("seed attachment row: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id = $1`, id)
+	})
+
+	req, w := newPreviewRequest(t, id, testWorkspaceID)
+	testHandler.GetAttachmentContent(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Body.String(); got != string(body) {
+		t.Errorf("body = %q, want %q", got, body)
+	}
+}
+
 // Even when http.DetectContentType returned "text/plain" instead of "text/markdown"
 // (a known sniffer quirk), the extension whitelist still grants access.
 func TestGetAttachmentContent_AcceptsByExtensionWhenContentTypeIsGeneric(t *testing.T) {
 	store := &mockStorage{}
 	origStorage := testHandler.Storage
+	origLegacyLocalStorage := testHandler.LegacyLocalStorage
 	testHandler.Storage = store
-	defer func() { testHandler.Storage = origStorage }()
+	testHandler.LegacyLocalStorage = nil
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.LegacyLocalStorage = origLegacyLocalStorage
+	}()
 
 	body := []byte("package main\n")
 	id := seedPreviewAttachment(t, store, "main-go-key.go", "main.go", "application/octet-stream", body)
@@ -519,8 +615,13 @@ func TestGetAttachmentContent_AcceptsByExtensionWhenContentTypeIsGeneric(t *test
 func TestGetAttachmentContent_Unsupported_PDF(t *testing.T) {
 	store := &mockStorage{}
 	origStorage := testHandler.Storage
+	origLegacyLocalStorage := testHandler.LegacyLocalStorage
 	testHandler.Storage = store
-	defer func() { testHandler.Storage = origStorage }()
+	testHandler.LegacyLocalStorage = nil
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.LegacyLocalStorage = origLegacyLocalStorage
+	}()
 
 	id := seedPreviewAttachment(t, store, "pdf-key.pdf", "manual.pdf", "application/pdf", []byte("%PDF-1.4\n"))
 
@@ -534,8 +635,13 @@ func TestGetAttachmentContent_Unsupported_PDF(t *testing.T) {
 func TestGetAttachmentContent_TooLarge(t *testing.T) {
 	store := &mockStorage{}
 	origStorage := testHandler.Storage
+	origLegacyLocalStorage := testHandler.LegacyLocalStorage
 	testHandler.Storage = store
-	defer func() { testHandler.Storage = origStorage }()
+	testHandler.LegacyLocalStorage = nil
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.LegacyLocalStorage = origLegacyLocalStorage
+	}()
 
 	// One byte over the limit. Allocate ASCII so io.ReadAll has work to do.
 	big := bytes.Repeat([]byte("a"), maxPreviewTextSize+1)
@@ -551,8 +657,13 @@ func TestGetAttachmentContent_TooLarge(t *testing.T) {
 func TestGetAttachmentContent_ForeignWorkspace(t *testing.T) {
 	store := &mockStorage{}
 	origStorage := testHandler.Storage
+	origLegacyLocalStorage := testHandler.LegacyLocalStorage
 	testHandler.Storage = store
-	defer func() { testHandler.Storage = origStorage }()
+	testHandler.LegacyLocalStorage = nil
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.LegacyLocalStorage = origLegacyLocalStorage
+	}()
 
 	id := seedPreviewAttachment(t, store, "ws-mismatch.md", "note.md", "text/markdown", []byte("# secret\n"))
 
@@ -568,13 +679,127 @@ func TestGetAttachmentContent_ForeignWorkspace(t *testing.T) {
 func TestGetAttachmentContent_NotFound(t *testing.T) {
 	store := &mockStorage{}
 	origStorage := testHandler.Storage
+	origLegacyLocalStorage := testHandler.LegacyLocalStorage
 	testHandler.Storage = store
-	defer func() { testHandler.Storage = origStorage }()
+	testHandler.LegacyLocalStorage = nil
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.LegacyLocalStorage = origLegacyLocalStorage
+	}()
 
 	req, w := newPreviewRequest(t, "00000000-0000-0000-0000-000000000abc", testWorkspaceID)
 	testHandler.GetAttachmentContent(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestDeleteAttachment_RemovesLegacyLocalUploadsFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+	t.Setenv("LOCAL_UPLOAD_BASE_URL", "https://multica.example")
+
+	localStore := storage.NewLocalStorageFromEnv()
+	if localStore == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+	s3Store := &mockStorage{}
+	origStorage := testHandler.Storage
+	origLegacyLocalStorage := testHandler.LegacyLocalStorage
+	testHandler.Storage = s3Store
+	testHandler.LegacyLocalStorage = localStore
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.LegacyLocalStorage = origLegacyLocalStorage
+	}()
+
+	key := filepath.Join("workspaces", testWorkspaceID, "delete-legacy.txt")
+	path := filepath.Join(tmpDir, key)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("legacy body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var id string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO attachment (workspace_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
+		VALUES ($1, 'member', $2, 'delete-legacy.txt', $3, 'text/plain', 11)
+		RETURNING id::text
+	`, testWorkspaceID, testUserID, "/uploads/"+filepath.ToSlash(key)).Scan(&id); err != nil {
+		t.Fatalf("seed attachment row: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id = $1`, id)
+	})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/attachments/"+id, nil)
+	req = withURLParam(req, "id", id)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+
+	w := httptest.NewRecorder()
+	testHandler.DeleteAttachment(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("legacy local file should be deleted, stat err=%v", err)
+	}
+
+	var count int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM attachment WHERE id = $1`, id).Scan(&count); err != nil {
+		t.Fatalf("count attachment row: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("attachment row count = %d, want 0", count)
+	}
+}
+
+func TestDeleteS3ObjectsRoutesLegacyUploadsURLsToLocalStorage(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+	t.Setenv("LOCAL_UPLOAD_BASE_URL", "https://multica.example")
+
+	localStore := storage.NewLocalStorageFromEnv()
+	if localStore == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+	s3Store := &mockStorage{}
+	origStorage := testHandler.Storage
+	origLegacyLocalStorage := testHandler.LegacyLocalStorage
+	testHandler.Storage = s3Store
+	testHandler.LegacyLocalStorage = localStore
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.LegacyLocalStorage = origLegacyLocalStorage
+	}()
+
+	localKey := filepath.Join("workspaces", testWorkspaceID, "batch-delete-legacy.txt")
+	localPath := filepath.Join(tmpDir, localKey)
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(localPath, []byte("legacy"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s3URL, err := s3Store.Upload(context.Background(), "s3-object.txt", []byte("cloud"), "text/plain", "s3-object.txt")
+	if err != nil {
+		t.Fatalf("seed s3 upload: %v", err)
+	}
+
+	testHandler.deleteS3Objects(context.Background(), []string{
+		"/uploads/" + filepath.ToSlash(localKey),
+		s3URL,
+	})
+
+	if _, err := os.Stat(localPath); !os.IsNotExist(err) {
+		t.Fatalf("legacy local file should be deleted, stat err=%v", err)
+	}
+	if _, err := s3Store.GetReader(context.Background(), "s3-object.txt"); err == nil {
+		t.Fatal("s3 object should be deleted")
 	}
 }
 
