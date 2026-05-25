@@ -20,7 +20,7 @@ export function NoAccessPage() {
   const logout = useLogout();
 
   // Clear stale `last_workspace_slug` cookie. The web proxy redirects `/` to
-  // `/<lastSlug>/issues` based on this cookie alone (no access check). When
+  // `/<lastSlug>` based on this cookie alone (no access check). When
   // the cookie points at a workspace the user has just lost access to, the
   // user gets trapped in a loop: NoAccessPage → click "Go to my workspaces"
   // → `/` → proxy redirects back to the same bad slug → NoAccessPage.
