@@ -173,6 +173,13 @@ func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 	}
 	if h.CFSigner != nil {
 		resp.DownloadURL = h.CFSigner.SignedURL(a.Url, time.Now().Add(30*time.Minute))
+	} else if ps, ok := h.Storage.(storage.PresignedGetStorage); ok {
+		key := h.Storage.KeyFromURL(a.Url)
+		if key != "" {
+			if signed, err := ps.PresignedGetURL(context.Background(), key, 30*time.Minute); err == nil {
+				resp.DownloadURL = signed
+			}
+		}
 	}
 	if a.IssueID.Valid {
 		s := uuidToString(a.IssueID)

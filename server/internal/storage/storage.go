@@ -34,6 +34,10 @@ type DirectUploadStorage interface {
 	PublicURL(key string) string
 }
 
+type PresignedGetStorage interface {
+	PresignedGetURL(ctx context.Context, key string, expires time.Duration) (string, error)
+}
+
 type MultipartUploadPart struct {
 	PartNumber int32
 	ETag       string
