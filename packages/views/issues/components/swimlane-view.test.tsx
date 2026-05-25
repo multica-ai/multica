@@ -76,16 +76,24 @@ vi.mock("@multica/core/issues/config", () => ({
   },
 }));
 
-// Mock @multica/core/issues/mutations for hidden column status counts
+// Default mock returns hasMore=false so the load-more sentinels render
+// as no-op divs and don't pull IntersectionObserver into JSDOM.
+const mockLoadMore = vi.fn();
+const useLoadMoreByStatusMock = vi.fn(
+  (_status: string, _opts?: unknown) => ({
+    total: 0,
+    loaded: 0,
+    hasMore: false,
+    isLoading: false,
+    loadMore: mockLoadMore,
+  }),
+);
 vi.mock("@multica/core/issues/mutations", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/issues/mutations")>();
   return {
     ...actual,
-    useLoadMoreByStatus: (status: string) => {
-      if (status === "backlog") return { total: 1, loaded: 1, hasMore: false, isLoading: false, loadMore: vi.fn() };
-      if (status === "blocked") return { total: 0, loaded: 0, hasMore: false, isLoading: false, loadMore: vi.fn() };
-      return { total: 0, loaded: 0, hasMore: false, isLoading: false, loadMore: vi.fn() };
-    },
+    useLoadMoreByStatus: (status: string, opts?: unknown) =>
+      useLoadMoreByStatusMock(status, opts),
   };
 });
 
@@ -265,6 +273,13 @@ describe("SwimLaneView", () => {
     // collapsed state from one test doesn't leak into the next.
     mockViewState.swimlaneOrder = [];
     mockViewState.collapsedSwimlanes = [];
+    useLoadMoreByStatusMock.mockImplementation(() => ({
+      total: 0,
+      loaded: 0,
+      hasMore: false,
+      isLoading: false,
+      loadMore: mockLoadMore,
+    }));
   });
 
   it("renders status columns as headers", () => {
@@ -304,13 +319,15 @@ describe("SwimLaneView", () => {
       />,
     );
 
-    // Orphan Issue 1 is in "No parent" + Backlog
+    // Orphan-1 is a true orphan → card in "No parent" + Backlog.
     expect(screen.getByText("Orphan Issue 1")).toBeInTheDocument();
 
-    // Parent Issue 1 is in "No parent" + Todo
-    expect(screen.getAllByText("Parent Issue 1").length).toBeGreaterThanOrEqual(1);
+    // Parent Issue 1 is promoted to a lane header (has child-1 as a
+    // sub-issue) and must NOT also render as a card in "No parent".
+    const parentTitleMatches = screen.getAllByText("Parent Issue 1");
+    expect(parentTitleMatches).toHaveLength(1);
+    expect(parentTitleMatches[0]!.closest("div")?.textContent).toContain("PROJ-1");
 
-    // Child Issue 1 is in "Parent Issue 1" + In Progress
     expect(screen.getByText("Child Issue 1")).toBeInTheDocument();
   });
 
@@ -329,6 +346,60 @@ describe("SwimLaneView", () => {
 
     fireEvent.click(addButtons[0]!);
     expect(mockOpenModal).toHaveBeenCalledWith("create-issue", expect.any(Object));
+  });
+
+  it("includes project_id in the create payload when projectId prop is set", () => {
+    renderWithI18n(
+      <SwimLaneView
+        issues={mockIssues}
+        onMoveIssue={vi.fn()}
+        projectId="proj-42"
+      />,
+    );
+
+    const addButtons = screen.getAllByRole("button", { name: /add issue/i });
+    fireEvent.click(addButtons[0]!);
+
+    expect(mockOpenModal).toHaveBeenCalledWith(
+      "create-issue",
+      expect.objectContaining({ project_id: "proj-42" }),
+    );
+  });
+
+  it("renders children whose parent is not in the loaded set under an 'Other parents' fallback lane", () => {
+    // Child with parent_issue_id pointing at an issue that isn't in the
+    // dataset (e.g. parent filtered out server-side by "assigned to me",
+    // or hidden by a status filter without an unfilteredIssues prop).
+    // Previously these silently disappeared from Swimlane.
+    const orphanChild: Issue = {
+      id: "lonely-child",
+      workspace_id: "ws-1",
+      number: 99,
+      identifier: "PROJ-99",
+      title: "Lonely Child",
+      description: null,
+      status: "todo",
+      priority: "medium",
+      assignee_type: "member",
+      assignee_id: "user-1",
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: "missing-parent",
+      project_id: null,
+      position: 400,
+      start_date: null,
+      due_date: null,
+      metadata: {},
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+
+    renderWithI18n(
+      <SwimLaneView issues={[orphanChild]} onMoveIssue={vi.fn()} />,
+    );
+
+    expect(screen.getByText("Other parents")).toBeInTheDocument();
+    expect(screen.getByText("Lonely Child")).toBeInTheDocument();
   });
 
   it("renders an open-parent link for lanes with a real parent", () => {
@@ -460,10 +531,9 @@ describe("SwimLaneView", () => {
     );
   });
 
-  it("renders count for hidden statuses based on in-memory issues", () => {
-    // statusTotals must count every issue's status, including statuses that
-    // are not currently rendered as columns. mockIssues has 1 `backlog` and
-    // 0 `blocked`. Hide both and assert the panel shows the right counts.
+  it("renders count for hidden statuses from in-memory statusTotals", () => {
+    // mockIssues: 1 backlog (orphan-1), 0 blocked. parent-1 is a lane
+    // header so it's excluded from totals.
     renderWithI18n(
       <SwimLaneView
         issues={mockIssues}
@@ -474,11 +544,42 @@ describe("SwimLaneView", () => {
     );
 
     const panel = screen.getByText("Hidden columns").parentElement!.parentElement!;
-    // Backlog row should show "1"; Blocked row should show "0".
     expect(panel).toHaveTextContent("Backlog");
     expect(panel).toHaveTextContent("Blocked");
     expect(panel).toHaveTextContent("1");
     expect(panel).toHaveTextContent("0");
+  });
+
+  it("hidden-column totals come from unfilteredIssues when provided", () => {
+    // Without unfilteredIssues, a status-filtered `issues` prop would
+    // make hidden statuses always read 0.
+    const unfiltered: Issue[] = [
+      ...mockIssues,
+      {
+        ...mockIssues[2]!,
+        id: "blocked-1",
+        identifier: "PROJ-99",
+        title: "Blocked Issue",
+        status: "blocked",
+        position: 500,
+      },
+    ];
+
+    renderWithI18n(
+      <SwimLaneView
+        issues={mockIssues}
+        unfilteredIssues={unfiltered}
+        visibleStatuses={["todo", "in_progress", "in_review", "done"]}
+        hiddenStatuses={["backlog", "blocked"]}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    const panel = screen.getByText("Hidden columns").parentElement!.parentElement!;
+    expect(panel).toHaveTextContent("Backlog");
+    expect(panel).toHaveTextContent("Blocked");
+    const counts = [...panel.querySelectorAll("span")].map((el) => el.textContent);
+    expect(counts.filter((c) => c === "1").length).toBeGreaterThanOrEqual(2);
   });
 
   // ------------------------------------------------------------------
@@ -594,6 +695,31 @@ describe("SwimLaneView", () => {
     });
 
     expect(mockSetSwimlaneOrder).toHaveBeenCalledWith(["parent-2", "parent-1"]);
+  });
+
+  it("preserves persisted entries that aren't currently visible during a reorder", () => {
+    // Persisted order contains two ids (filtered-a, filtered-b) that are
+    // not in the currently rendered set — they must keep their slots
+    // when the user reorders the visible lanes.
+    mockViewState.swimlaneOrder = ["filtered-a", "parent-1", "filtered-b", "parent-2"];
+
+    renderWithI18n(
+      <SwimLaneView issues={multiParentIssues} onMoveIssue={vi.fn()} />,
+    );
+
+    act(() => {
+      lastOnDragEnd({
+        active: { id: "lane:parent-1" },
+        over: { id: "lane:parent-2" },
+      });
+    });
+
+    expect(mockSetSwimlaneOrder).toHaveBeenCalledWith([
+      "filtered-a",
+      "parent-2",
+      "filtered-b",
+      "parent-1",
+    ]);
   });
 
   it("does not call setSwimlaneOrder when a lane is dropped onto itself", () => {

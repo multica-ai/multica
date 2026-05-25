@@ -123,9 +123,10 @@
     "add_issue_tooltip": "新建 issue"
   },
   "swimlane": {
-    "parent_column": "父级",
     "no_parent": "无父级",
-    "open_parent": "打开父级 issue"
+    "other_parents": "其他父级",
+    "open_parent": "打开父级 issue",
+    "toggle_collapse": "切换泳道"
   },
   "board": {
     "hidden_columns_label": "隐藏的列",

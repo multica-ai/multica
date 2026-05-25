@@ -39,6 +39,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { Button } from "@multica/ui/components/ui/button";
 import { StatusHeading } from "./status-heading";
 import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
+import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 import { AppLink } from "../../navigation";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
@@ -117,6 +118,9 @@ function cellId(parentKey: string, status: IssueStatus): string {
 
 const LANE_ID_PREFIX = "lane:";
 
+/** Sentinel key for the "Other parents" fallback lane. */
+const ORPHAN_LANE_KEY = "parent:__orphans__";
+
 /** Sortable id for a draggable swimlane header (parents only). */
 function laneId(parentIssueId: string): string {
   return `${LANE_ID_PREFIX}${parentIssueId}`;
@@ -150,20 +154,30 @@ const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 
 export function SwimLaneView({
   issues,
+  unfilteredIssues,
   visibleStatuses = BOARD_STATUSES,
   hiddenStatuses = [],
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
   myIssuesScope,
   myIssuesFilter,
+  projectId,
 }: {
   issues: Issue[];
+  /**
+   * Status-unfiltered companion set used for lane discovery and status
+   * totals — without it, children whose parent sits in a hidden status
+   * would vanish and hidden-column counts would always read 0.
+   */
+  unfilteredIssues?: Issue[];
   visibleStatuses?: IssueStatus[];
   hiddenStatuses?: IssueStatus[];
   onMoveIssue: (issueId: string, updates: SwimLaneMoveUpdates) => void;
   childProgressMap?: Map<string, ChildProgress>;
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
+  /** Pre-fills `project_id` on the create form for the in-cell "+" button. */
+  projectId?: string;
 }) {
   const { t } = useT("issues");
   const paths = useWorkspacePaths();
@@ -171,6 +185,8 @@ export function SwimLaneView({
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const swimlaneOrder = useViewStore((s) => s.swimlaneOrder);
+
+  const laneSourceIssues = unfilteredIssues ?? issues;
 
   const myIssuesOpts = useMemo(
     () =>
@@ -186,38 +202,36 @@ export function SwimLaneView({
   );
 
   const parentGroups = useMemo<ParentGroup[]>(() => {
-    const seen = new Map<string, ParentGroup>();
     const issueMap = new Map<string, Issue>();
-    for (const issue of issues) {
+    for (const issue of laneSourceIssues) {
       issueMap.set(issue.id, issue);
     }
 
-    for (const issue of issues) {
-      if (issue.parent_issue_id) {
-        const key = `parent:${issue.parent_issue_id}`;
-        if (!seen.has(key)) {
-          const parent = issueMap.get(issue.parent_issue_id);
-          // If the parent issue was deleted (not in the loaded set), skip
-          // the entire lane — its orphaned sub-issues are just noise.
-          if (!parent) continue;
-          seen.set(key, {
-            key,
-            parentIssueId: issue.parent_issue_id,
-            identifier: parent.identifier,
-            title: parent.title,
-            issue: parent,
-          });
-        }
+    // A parent earns a lane whenever any child references it — even if
+    // all those children are currently in hidden statuses, the lane
+    // stays so the user keeps the grouping context they came in with.
+    // (The parent's own visibility status is irrelevant here; the lane
+    // exists to group its children, not to render the parent itself.)
+    const seen = new Map<string, ParentGroup>();
+    let hasOrphan = false;
+    for (const issue of laneSourceIssues) {
+      if (issue.parent_issue_id === null) continue;
+      const parent = issueMap.get(issue.parent_issue_id);
+      if (!parent) {
+        hasOrphan = true;
+        continue;
+      }
+      const key = `parent:${issue.parent_issue_id}`;
+      if (!seen.has(key)) {
+        seen.set(key, {
+          key,
+          parentIssueId: issue.parent_issue_id,
+          identifier: parent.identifier,
+          title: parent.title,
+          issue: parent,
+        });
       }
     }
-
-    const noParentGroup: ParentGroup = {
-      key: "parent:none",
-      parentIssueId: null,
-      identifier: "",
-      title: t(($) => $.swimlane.no_parent),
-      issue: null,
-    };
 
     // Apply user-defined lane order: stored entries first (in the order they
     // were saved), then any newly-introduced parents that aren't in the
@@ -236,8 +250,27 @@ export function SwimLaneView({
       return 0; // both unstored → preserve insertion order
     });
 
-    return [noParentGroup, ...ordered];
-  }, [issues, t, swimlaneOrder]);
+    const groups: ParentGroup[] = [
+      {
+        key: "parent:none",
+        parentIssueId: null,
+        identifier: "",
+        title: t(($) => $.swimlane.no_parent),
+        issue: null,
+      },
+    ];
+    if (hasOrphan) {
+      groups.push({
+        key: ORPHAN_LANE_KEY,
+        parentIssueId: null,
+        identifier: "",
+        title: t(($) => $.swimlane.other_parents),
+        issue: null,
+      });
+    }
+    groups.push(...ordered);
+    return groups;
+  }, [laneSourceIssues, t, swimlaneOrder]);
 
   // Issues that act as swimlane headers (they have children in the loaded
   // set) should not also appear as cards in the "No parent" lane — that
@@ -256,10 +289,22 @@ export function SwimLaneView({
       }
       const parentIssues = sortIssues(
         issues.filter((issue) => {
+          // Issues that are themselves lane headers are rendered by the
+          // header, not as a card — avoids a double render for multi-level
+          // nesting (a parent that also has a grandparent).
+          if (parentIssueIds.has(issue.id)) return false;
+          if (parent.key === ORPHAN_LANE_KEY) {
+            // Fallback bucket: children whose parent isn't in the loaded
+            // set (deleted, or filtered out by a server-side scope like
+            // "assigned to me"). Catches them so they don't silently
+            // vanish from Swimlane while still visible in Board/List.
+            return (
+              issue.parent_issue_id !== null &&
+              !parentIssueIds.has(issue.parent_issue_id)
+            );
+          }
           if (parent.parentIssueId === null) {
-            // "No parent" lane: include only orphans that are not themselves
-            // a parent (those already have their own swimlane).
-            return issue.parent_issue_id === null && !parentIssueIds.has(issue.id);
+            return issue.parent_issue_id === null;
           }
           return issue.parent_issue_id === parent.parentIssueId;
         }),
@@ -287,30 +332,19 @@ export function SwimLaneView({
     return ids;
   }, [parentGroups, sortedStatuses]);
 
-  // The set of parent-group keys lets us quickly test whether an issue
-  // belongs to any displayed lane (its parent exists and has a lane, OR it
-  // belongs to "No parent" and isn't itself a parent promoted to a header).
-  const parentGroupKeys = useMemo(
-    () => new Set(parentGroups.map((g) => g.key)),
-    [parentGroups],
-  );
-
-  // Count only issues that would be rendered as cards in the swimlane —
-  // across ALL statuses (visible + hidden).  This ensures hidden-column
-  // counts match the number of cards the user would see if the column were
-  // un-hidden, while still excluding parent-header issues and orphaned
-  // sub-issues of deleted parents.
+  // Drives both visible status-header counts AND hidden-column panel rows,
+  // so both sides agree on a single semantic. Counts what would render as a
+  // card — every issue minus those promoted to lane headers. Children
+  // whose parent isn't loaded still count because they land in the
+  // "Other parents" fallback lane.
   const statusTotals = useMemo(() => {
     const totals = new Map<IssueStatus, number>();
-    for (const issue of issues) {
-      // Skip issues promoted to lane headers
+    for (const issue of laneSourceIssues) {
       if (parentIssueIds.has(issue.id)) continue;
-      // Skip issues whose parent was deleted (no lane for them)
-      if (issue.parent_issue_id && !parentGroupKeys.has(`parent:${issue.parent_issue_id}`)) continue;
       totals.set(issue.status, (totals.get(issue.status) ?? 0) + 1);
     }
     return totals;
-  }, [issues, parentIssueIds, parentGroupKeys]);
+  }, [laneSourceIssues, parentIssueIds]);
 
   // Collapsed swimlanes — persisted per-workspace via the view store.
   // The store keys are raw parent issue ids (or "none" for the "No parent"
@@ -472,24 +506,42 @@ export function SwimLaneView({
       const activeId = active.id as string;
       const overId = over.id as string;
 
-      // Lane reorder branch — runs before the card-move logic because lane
-      // ids don't resolve to any cell, so we must handle them explicitly.
+      // Lane reorder runs before the card-move logic because lane ids
+      // don't resolve to any cell.
       const activeParentId = parseLaneId(activeId);
       const overParentId = parseLaneId(overId);
       if (activeParentId && overParentId && activeParentId !== overParentId) {
-        // Build the new order from the currently rendered parent lanes
-        // (excluding "No parent"), then arrayMove between active/over.
-        const currentOrder = parentGroups
+        const visibleOrder = parentGroups
           .filter((g) => g.parentIssueId !== null)
           .map((g) => g.parentIssueId!);
-        const fromIdx = currentOrder.indexOf(activeParentId);
-        const toIdx = currentOrder.indexOf(overParentId);
+        const fromIdx = visibleOrder.indexOf(activeParentId);
+        const toIdx = visibleOrder.indexOf(overParentId);
         if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return;
-        const nextOrder = arrayMove(currentOrder, fromIdx, toIdx);
-        viewStoreApi.getState().setSwimlaneOrder(nextOrder);
+        const visibleNext = arrayMove(visibleOrder, fromIdx, toIdx);
+
+        // Merge into the persisted order without clobbering entries that
+        // aren't currently visible (e.g. hidden by a status filter). Each
+        // visible slot in `stored` is overwritten with the next id from
+        // `visibleNext`; everything else stays exactly where it was.
+        const stored = viewStoreApi.getState().swimlaneOrder;
+        const visibleSet = new Set(visibleOrder);
+        const merged: string[] = [];
+        let cursor = 0;
+        for (const id of stored) {
+          if (visibleSet.has(id)) {
+            merged.push(visibleNext[cursor]!);
+            cursor++;
+          } else {
+            merged.push(id);
+          }
+        }
+        for (let i = cursor; i < visibleNext.length; i++) {
+          if (!stored.includes(visibleNext[i]!)) merged.push(visibleNext[i]!);
+        }
+
+        viewStoreApi.getState().setSwimlaneOrder(merged);
         return;
       }
-      // Defensive: if only one side is a lane id, treat as no-op.
       if (activeParentId || overParentId) return;
 
       const cols = localCellsRef.current;
@@ -535,8 +587,13 @@ export function SwimLaneView({
       const newPosition = computePosition(finalIds, activeId, issueMapRef.current);
       const currentIssue = issueMapRef.current.get(activeId);
 
-      const expectedParent =
-        finalOverCell.parentKey === "parent:none"
+      // Dropping into the "Other parents" fallback lane keeps the issue's
+      // existing parent — the lane is a display-only bucket for children
+      // whose parent isn't loaded, not a target you can re-parent into.
+      const droppedInOrphanLane = finalOverCell.parentKey === ORPHAN_LANE_KEY;
+      const expectedParent = droppedInOrphanLane
+        ? currentIssue?.parent_issue_id ?? null
+        : finalOverCell.parentKey === "parent:none"
           ? null
           : finalOverCell.parentKey.replace("parent:", "");
 
@@ -636,6 +693,7 @@ export function SwimLaneView({
                 childProgressMap={childProgressMap}
                 gridStyle={gridStyle}
                 paths={paths}
+                projectId={projectId}
               />
             ))}
           <SortableContext
@@ -658,16 +716,24 @@ export function SwimLaneView({
                   childProgressMap={childProgressMap}
                   gridStyle={gridStyle}
                   paths={paths}
+                  projectId={projectId}
                 />
               ))}
           </SortableContext>
+
+          {/* Per-status load-more sentinels — same bucketed cache as Board. */}
+          <SwimLaneLoadMoreRow
+            sortedStatuses={sortedStatuses}
+            gridStyle={gridStyle}
+            myIssuesOpts={myIssuesOpts}
+          />
         </div>
         </div>
 
         {hiddenStatuses.length > 0 && (
           <SwimLaneHiddenColumnsPanel
             hiddenStatuses={hiddenStatuses}
-            myIssuesOpts={myIssuesOpts}
+            statusTotals={statusTotals}
           />
         )}
       </div>
@@ -706,6 +772,7 @@ function DraggableSwimLane({
   childProgressMap,
   gridStyle,
   paths,
+  projectId,
 }: {
   parent: ParentGroup;
   isCollapsed: boolean;
@@ -716,6 +783,7 @@ function DraggableSwimLane({
   childProgressMap: Map<string, ChildProgress>;
   gridStyle: React.CSSProperties;
   paths: ReturnType<typeof useWorkspacePaths>;
+  projectId?: string;
 }) {
   const { t } = useT("issues");
   const isNoParent = parent.parentIssueId === null;
@@ -736,40 +804,45 @@ function DraggableSwimLane({
     0,
   );
 
-  // Stop pointer events from bubbling into the sortable's pointer listener
-  // so clicking interactive elements (open-parent link) does not start a drag.
-  const stopPointer = (e: React.SyntheticEvent) => e.stopPropagation();
-
   return (
     <div ref={setNodeRef} style={style} className={`flex flex-col ${isDragging ? "opacity-50" : ""}`}>
-      {/* Lane header — full width above the row. Spread `listeners` so the
-          header itself acts as the drag affordance; the leading GripVertical
-          icon is a visual hint, not a separate handle. */}
-      <button
-        type="button"
-        className="mb-2 flex w-full items-center gap-2 rounded-md px-1 py-1 text-left transition-colors hover:bg-accent/70"
-        onClick={onToggleCollapse}
+      {/* Non-interactive container — the inner collapse button and the
+          open-parent link are independent controls so we don't nest an
+          <a> inside a <button>. The drag listeners attach here so the
+          whole header row is the drag surface. */}
+      <div
+        className="mb-2 flex w-full items-center gap-2 rounded-md px-1 py-1"
         {...attributes}
         {...listeners}
       >
         {!isNoParent && (
-          <GripVertical className="!size-3 shrink-0 cursor-grab text-muted-foreground/60" />
+          <GripVertical
+            className="!size-3 shrink-0 cursor-grab text-muted-foreground/60"
+            aria-hidden
+          />
         )}
-        <ChevronRight
-          className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${isCollapsed ? "" : "rotate-90"}`}
-        />
-        {parent.issue && (
-          <StatusIcon status={parent.issue.status} className="size-3.5" />
-        )}
-        <span className="truncate text-sm font-semibold">{parent.title}</span>
-        {parent.identifier && (
-          <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">
-            {parent.identifier}
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          aria-label={t(($) => $.swimlane.toggle_collapse)}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-md text-left transition-colors hover:bg-accent/70"
+        >
+          <ChevronRight
+            className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${isCollapsed ? "" : "rotate-90"}`}
+          />
+          {parent.issue && (
+            <StatusIcon status={parent.issue.status} className="size-3.5" />
+          )}
+          <span className="truncate text-sm font-semibold">{parent.title}</span>
+          {parent.identifier && (
+            <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">
+              {parent.identifier}
+            </span>
+          )}
+          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+            {laneTotal}
           </span>
-        )}
-        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-          {laneTotal}
-        </span>
+        </button>
         {parent.parentIssueId && (
           <Tooltip>
             <TooltipTrigger
@@ -778,8 +851,6 @@ function DraggableSwimLane({
                   href={paths.issueDetail(parent.parentIssueId)}
                   aria-label={t(($) => $.swimlane.open_parent)}
                   className="inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                  onClick={stopPointer}
-                  onPointerDown={stopPointer}
                 >
                   <Pencil className="size-3" />
                 </AppLink>
@@ -788,7 +859,7 @@ function DraggableSwimLane({
             <TooltipContent>{t(($) => $.swimlane.open_parent)}</TooltipContent>
           </Tooltip>
         )}
-      </button>
+      </div>
       {/* Cells row — each cell mirrors a BoardColumn body */}
       {!isCollapsed && (
         <div style={gridStyle}>
@@ -804,6 +875,7 @@ function DraggableSwimLane({
                 childProgressMap={childProgressMap}
                 status={status}
                 parentGroup={parent}
+                projectId={projectId}
               />
             );
           })}
@@ -820,6 +892,7 @@ function SwimLaneCell({
   childProgressMap,
   status,
   parentGroup,
+  projectId,
 }: {
   cellId: string;
   issueIds: string[];
@@ -827,6 +900,7 @@ function SwimLaneCell({
   childProgressMap: Map<string, ChildProgress>;
   status: IssueStatus;
   parentGroup: ParentGroup;
+  projectId?: string;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: cId });
   const { t } = useT("issues");
@@ -843,11 +917,10 @@ function SwimLaneCell({
 
   const handleAdd = useCallback(() => {
     const data: Record<string, unknown> = { status };
-    if (parentGroup.parentIssueId) {
-      data.parent_issue_id = parentGroup.parentIssueId;
-    }
+    if (parentGroup.parentIssueId) data.parent_issue_id = parentGroup.parentIssueId;
+    if (projectId) data.project_id = projectId;
     useModalStore.getState().open("create-issue", data);
-  }, [status, parentGroup]);
+  }, [status, parentGroup, projectId]);
 
   return (
     <div className={`flex min-h-[120px] flex-col rounded-xl ${cfg?.columnBg ?? "bg-muted/40"} p-2`}>
@@ -893,39 +966,57 @@ function SwimLaneCell({
   );
 }
 
-function SwimLaneHiddenColumnRow({
+function SwimLaneHiddenColumnsPanel({
+  hiddenStatuses,
+  statusTotals,
+}: {
+  hiddenStatuses: IssueStatus[];
+  statusTotals: Map<IssueStatus, number>;
+}) {
+  return (
+    <HiddenColumnsPanel
+      hiddenStatuses={hiddenStatuses}
+      renderRow={(status) => (
+        <HiddenColumnRow
+          key={status}
+          status={status}
+          total={statusTotals.get(status) ?? 0}
+        />
+      )}
+    />
+  );
+}
+
+function SwimLaneLoadMoreRow({
+  sortedStatuses,
+  gridStyle,
+  myIssuesOpts,
+}: {
+  sortedStatuses: IssueStatus[];
+  gridStyle: React.CSSProperties;
+  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+}) {
+  return (
+    <div style={gridStyle}>
+      {sortedStatuses.map((status) => (
+        <SwimLaneLoadMoreCell
+          key={status}
+          status={status}
+          myIssuesOpts={myIssuesOpts}
+        />
+      ))}
+    </div>
+  );
+}
+
+function SwimLaneLoadMoreCell({
   status,
   myIssuesOpts,
 }: {
   status: IssueStatus;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
 }) {
-  const { total } = useLoadMoreByStatus(status, myIssuesOpts);
-  return <HiddenColumnRow status={status} total={total} />;
-}
-
-/**
- * Swimlane-specific wrapper around the shared {@link HiddenColumnsPanel}.
- * Uses `useLoadMoreByStatus` to get accurate cached/live status counts from
- * the React Query cache, mirroring the board's hidden column behavior.
- */
-function SwimLaneHiddenColumnsPanel({
-  hiddenStatuses,
-  myIssuesOpts,
-}: {
-  hiddenStatuses: IssueStatus[];
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
-}) {
-  return (
-    <HiddenColumnsPanel
-      hiddenStatuses={hiddenStatuses}
-      renderRow={(status) => (
-        <SwimLaneHiddenColumnRow
-          key={status}
-          status={status}
-          myIssuesOpts={myIssuesOpts}
-        />
-      )}
-    />
-  );
+  const { loadMore, hasMore, isLoading } = useLoadMoreByStatus(status, myIssuesOpts);
+  if (!hasMore) return <div />;
+  return <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />;
 }

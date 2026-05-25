@@ -125,9 +125,10 @@
     "add_issue_tooltip": "Add issue"
   },
   "swimlane": {
-    "parent_column": "Parent",
     "no_parent": "No parent",
-    "open_parent": "Open parent issue"
+    "other_parents": "Other parents",
+    "open_parent": "Open parent issue",
+    "toggle_collapse": "Toggle lane"
   },
   "board": {
     "hidden_columns_label": "Hidden columns",

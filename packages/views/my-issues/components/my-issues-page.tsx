@@ -147,6 +147,24 @@ export function MyIssuesPage() {
     [myIssues, statusFilters, priorityFilters, agentRunningFilter, runningIssueIds],
   );
 
+  // Status-unfiltered companion for Swimlane.
+  const swimlaneIssues = useMemo(
+    () =>
+      filterIssues(myIssues, {
+        statusFilters: [],
+        priorityFilters,
+        assigneeFilters: [],
+        includeNoAssignee: false,
+        creatorFilters: [],
+        projectFilters: [],
+        includeNoProject: false,
+        labelFilters: [],
+        agentRunningFilter,
+        runningIssueIds,
+      }),
+    [myIssues, priorityFilters, agentRunningFilter, runningIssueIds],
+  );
+
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
 
   const visibleStatuses = useMemo(() => {
@@ -259,6 +277,7 @@ export function MyIssuesPage() {
             ) : viewMode === "swimlane" ? (
               <SwimLaneView
                 issues={issues}
+                unfilteredIssues={swimlaneIssues}
                 visibleStatuses={visibleStatuses}
                 hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}
