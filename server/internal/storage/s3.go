@@ -428,6 +428,20 @@ func (s *S3Storage) uploadedURL(key string) string {
 	return fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s.bucket, s.region, key)
 }
 
+func (s *S3Storage) PresignedGetURL(ctx context.Context, key string, expires time.Duration) (string, error) {
+	presigner := s3.NewPresignClient(s.client)
+	out, err := presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	}, func(o *s3.PresignOptions) {
+		o.Expires = expires
+	})
+	if err != nil {
+		return "", fmt.Errorf("s3 presign GetObject: %w", err)
+	}
+	return out.URL, nil
+}
+
 func virtualHostedEndpointURL(endpointURL string, bucket string, key string) (string, bool) {
 	parsed, err := url.Parse(endpointURL)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {

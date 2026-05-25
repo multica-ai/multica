@@ -1688,8 +1688,9 @@ func (s *TaskService) blockIssueForFailedTask(ctx context.Context, qtx *db.Queri
 
 	prevStatus := issue.Status
 	blockedIssue, err := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-		ID:     issue.ID,
-		Status: "blocked",
+		ID:          issue.ID,
+		Status:      "blocked",
+		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
 		return db.Issue{}, "", false, fmt.Errorf("block issue for failed task: %w", err)

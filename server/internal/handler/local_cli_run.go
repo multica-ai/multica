@@ -137,8 +137,9 @@ func (h *Handler) CreateLocalCLIRun(w http.ResponseWriter, r *http.Request) {
 	if !req.NoStatusUpdate && (issue.Status == "backlog" || issue.Status == "todo") {
 		prevStatus := issue.Status
 		updatedIssue, err := h.Queries.UpdateIssueStatus(r.Context(), db.UpdateIssueStatusParams{
-			ID:     issue.ID,
-			Status: "in_progress",
+			ID:          issue.ID,
+			Status:      "in_progress",
+			WorkspaceID: issue.WorkspaceID,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to update issue status")
