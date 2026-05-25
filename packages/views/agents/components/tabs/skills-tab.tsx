@@ -5,6 +5,7 @@ import { FileText, Info, Plus, Trash2 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Agent } from "@multica/core/types";
+import { agentDetailKeys } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -44,6 +45,7 @@ export function SkillsTab({
         .map((s) => s.id);
       await api.setAgentSkills(agent.id, { skill_ids: newIds });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      qc.invalidateQueries({ queryKey: agentDetailKeys.detail(wsId, agent.id) });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.tab_body.skills.remove_failed_toast));
     } finally {
