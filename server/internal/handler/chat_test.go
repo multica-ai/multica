@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -52,7 +53,8 @@ func newChatRequest(method, path, userID string, body any) *http.Request {
 func createWorkspaceMemberUser(t *testing.T, role string) string {
 	t.Helper()
 
-	email := "chat-vis-" + t.Name() + "-" + role + "@multica.ai"
+	// CEREBRO-PATCH(handler-test-fixtures): keep chat fixture users isolated across repeated runs.
+	email := "chat-vis-" + t.Name() + "-" + role + "-" + uuid.NewString() + "@multica.ai"
 	ctx := context.Background()
 
 	var userID string

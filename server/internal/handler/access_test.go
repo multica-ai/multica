@@ -6,6 +6,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -17,13 +18,13 @@ import (
 // creator + admins.
 
 type accessFixture struct {
-	ownerUserID    string
-	adminUserID    string
-	memberUserID   string
-	outsideUserID  string
-	workspaceID    string
-	openProjectID  string
-	restrictedID   string
+	ownerUserID   string
+	adminUserID   string
+	memberUserID  string
+	outsideUserID string
+	workspaceID   string
+	openProjectID string
+	restrictedID  string
 }
 
 func setupAccessFixture(t *testing.T) accessFixture {
@@ -50,10 +51,12 @@ func setupAccessFixture(t *testing.T) accessFixture {
 		}
 	}
 
-	owner := mkUser("Access Owner", "access-owner@multica.test")
-	admin := mkUser("Access Admin", "access-admin@multica.test")
-	member := mkUser("Access Member", "access-member@multica.test")
-	outside := mkUser("Access Outside", "access-outside@multica.test")
+	// CEREBRO-PATCH(handler-test-fixtures): keep database-backed access tests isolated across repeated runs.
+	suffix := uuid.NewString()
+	owner := mkUser("Access Owner", "access-owner-"+suffix+"@multica.test")
+	admin := mkUser("Access Admin", "access-admin-"+suffix+"@multica.test")
+	member := mkUser("Access Member", "access-member-"+suffix+"@multica.test")
+	outside := mkUser("Access Outside", "access-outside-"+suffix+"@multica.test")
 	mkMember(owner, "owner")
 	mkMember(admin, "admin")
 	mkMember(member, "member")
