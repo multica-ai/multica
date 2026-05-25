@@ -247,6 +247,6 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     key: "cerebro_agent_avatar",
     label: "AI agent avatar generation",
     description:
-      "Show a 'Generate AI avatar' button in the agent creation dialog. Uses OpenRouter gpt-5-image-mini with a Scandinavian-appearance prompt. Requires OPENROUTER_API_KEY.",
+      "Show a 'Generate AI avatar' button in the agent creation dialog. Uses the Firtal Data Registry AI Gateway with a Scandinavian-appearance prompt. Requires FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL and FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY.",
   },
 ];

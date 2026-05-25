@@ -18,8 +18,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/storage"
 )
 
-const openRouterModel = "openai/gpt-5-image-mini"
-const openRouterEndpoint = "https://openrouter.ai/api/v1/chat/completions"
+const defaultAvatarModel = "openai/gpt-5-image-mini"
+const gatewayChatCompletionsPath = "/api/ai/proxy/v1/chat/completions"
 
 // clothingColors drives visual diversity across agents. The color for each
 // agent is derived deterministically from its name so the result is stable
@@ -30,14 +30,15 @@ var clothingColors = []string{
 	"plum", "rust orange", "teal", "cream white",
 }
 
-// Handler generates photorealistic agent avatars via OpenRouter gpt-5-image-mini.
+// Handler generates photorealistic agent avatars via the Firtal Data Registry AI Gateway.
 type Handler struct {
-	storage storage.Storage
+	storage    storage.Storage
+	httpClient *http.Client
 }
 
 // New creates a Handler. store is used to persist the generated PNG.
 func New(store storage.Storage) *Handler {
-	return &Handler{storage: store}
+	return &Handler{storage: store, httpClient: http.DefaultClient}
 }
 
 type generateRequest struct {
@@ -65,14 +66,14 @@ func (h *Handler) Generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apiKey := os.Getenv("OPENROUTER_API_KEY")
-	if apiKey == "" {
-		writeError(w, http.StatusServiceUnavailable, "image generation not configured: OPENROUTER_API_KEY unset")
+	cfg := gatewayConfigFromEnv()
+	if cfg.baseURL == "" || cfg.apiKey == "" {
+		writeError(w, http.StatusServiceUnavailable, "image generation not configured: data registry AI gateway URL/key unset")
 		return
 	}
 
 	prompt := buildPrompt(req.AgentName, req.CustomPrompt)
-	imgBytes, err := callOpenRouter(r.Context(), apiKey, prompt)
+	imgBytes, err := callGateway(r.Context(), h.httpClient, cfg, prompt)
 	if err != nil {
 		slog.Error("avatar generation failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "image generation failed")
@@ -118,7 +119,7 @@ func nameColorIndex(name string) int {
 	return h % len(clothingColors)
 }
 
-type openRouterResponse struct {
+type gatewayResponse struct {
 	Choices []struct {
 		Message struct {
 			Images  []string `json:"images"`
@@ -127,9 +128,30 @@ type openRouterResponse struct {
 	} `json:"choices"`
 }
 
-func callOpenRouter(ctx context.Context, apiKey, prompt string) ([]byte, error) {
+type gatewayConfig struct {
+	baseURL string
+	apiKey  string
+	model   string
+}
+
+func gatewayConfigFromEnv() gatewayConfig {
+	model := strings.TrimSpace(os.Getenv("FIRTAL_DATA_REGISTRY_AVATAR_MODEL"))
+	if model == "" {
+		model = defaultAvatarModel
+	}
+	return gatewayConfig{
+		baseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL")), "/"),
+		apiKey:  strings.TrimSpace(os.Getenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY")),
+		model:   model,
+	}
+}
+
+func callGateway(ctx context.Context, client *http.Client, cfg gatewayConfig, prompt string) ([]byte, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
 	body := map[string]any{
-		"model":      openRouterModel,
+		"model":      cfg.model,
 		"modalities": []string{"image"},
 		"messages": []map[string]any{
 			{"role": "user", "content": prompt},
@@ -140,17 +162,18 @@ func callOpenRouter(ctx context.Context, apiKey, prompt string) ([]byte, error) 
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, openRouterEndpoint, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.baseURL+gatewayChatCompletionsPath, bytes.NewReader(raw))
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Authorization", "Bearer "+cfg.apiKey)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("HTTP-Referer", "https://multica.io")
+	req.Header.Set("x-trace-name", "agent-avatar-generate")
+	req.Header.Set("x-tags", "multica,agent-avatar")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("call openrouter: %w", err)
+		return nil, fmt.Errorf("call data registry AI gateway: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -159,15 +182,15 @@ func callOpenRouter(ctx context.Context, apiKey, prompt string) ([]byte, error) 
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("openrouter returned HTTP %d: %.512s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("data registry AI gateway returned HTTP %d: %.512s", resp.StatusCode, string(respBody))
 	}
 
-	var parsed openRouterResponse
+	var parsed gatewayResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
 	if len(parsed.Choices) == 0 || len(parsed.Choices[0].Message.Images) == 0 {
-		return nil, fmt.Errorf("no image in OpenRouter response")
+		return nil, fmt.Errorf("no image in data registry AI gateway response")
 	}
 
 	imgData := parsed.Choices[0].Message.Images[0]

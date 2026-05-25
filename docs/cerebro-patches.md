@@ -724,7 +724,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `autopilot-detail-nav-no-dialog` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | JEH-1766 — remove edit dialog render block from detail page. |
 | `comment-create-transaction` | server/internal/handler/comment.go | 1 | FIR-1914 follow-up: comment creation keeps the existing transaction shape after durable notification rows were removed. |
 | `issue-update-transaction` | server/internal/handler/issue.go | 1 | FIR-1914 follow-up: issue updates keep the existing transaction shape after durable notification rows were removed. |
-| `agent-avatar-generate` | server/internal/cerebro/agent_avatar/handler.go | 174 | JEH-1563 — net-new fork file: POST /api/agents/generate-avatar calls OpenRouter gpt-5-image-mini, uploads PNG to storage, returns URL. |
+| `agent-avatar-generate` | server/internal/cerebro/agent_avatar/handler.go | 174 | JEH-1563/FIR-2049 — fork file: POST /api/agents/generate-avatar calls the Firtal Data Registry AI Gateway, uploads PNG to storage, returns URL. |
 | `agent-avatar-generate` | server/cmd/server/router.go | 2 | JEH-1563 — import cerebroagentavatar, instantiate handler with storage, mount POST /api/agents/generate-avatar. |
 | `agent-avatar-generate` | packages/core/api/client.ts | 4 | JEH-1563 — `generateAgentAvatar(agentName, customPrompt?)` method on ApiClient. FIR-1918 compressed the wrapper to keep the patch block ≤5 lines. |
 | `agent-avatar-generate` | packages/cerebro-feature-flags/registry.ts | 3 | JEH-1563 — `cerebro_agent_avatar` flag (default true). |
