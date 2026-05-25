@@ -445,6 +445,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/contact-sales",
+      "exempt": "pre-auth — public marketing inquiry form, rate-limited by IP + business-email validation at handler layer"
+    },
+    {
       "id": "POST /api/daemon/accounts/{id}/usage",
       "gate": "daemon_auth"
     },
