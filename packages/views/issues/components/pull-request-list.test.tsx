@@ -71,6 +71,13 @@ async function waitForRender() {
 }
 
 describe("PullRequestList sidebar rows", () => {
+  it("shows a public GitHub PR URL input in the empty state", async () => {
+    mockPRs = [];
+    renderList();
+    expect(await screen.findByPlaceholderText("GitHub PR URL")).toBeInTheDocument();
+    expect(screen.getByText(/paste a public GitHub PR URL/)).toBeInTheDocument();
+  });
+
   it("uses the sidebar list-row surface instead of a card surface", async () => {
     mockPRs = [makePR({ title: "Visual row" })];
     renderList();
@@ -85,6 +92,13 @@ describe("PullRequestList sidebar rows", () => {
     renderList();
     await waitForRender();
     expect(screen.getByText("All checks passed")).toBeInTheDocument();
+  });
+
+  it("marks manually linked public PR snapshots", async () => {
+    mockPRs = [makePR({ sync_source: "public" })];
+    renderList();
+    await waitForRender();
+    expect(screen.getByText("Public data")).toBeInTheDocument();
   });
 
   it("renders Some-checks-failed when any failed count is non-zero", async () => {

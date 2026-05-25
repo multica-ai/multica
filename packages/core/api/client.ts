@@ -1814,4 +1814,11 @@ export class ApiClient {
   async listIssuePullRequests(issueId: string): Promise<{ pull_requests: GitHubPullRequest[] }> {
     return this.fetch(`/api/issues/${issueId}/pull-requests`);
   }
+
+  async linkIssuePullRequest(issueId: string, url: string): Promise<{ pull_request: GitHubPullRequest }> {
+    return this.fetch(`/api/issues/${issueId}/pull-requests`, {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    });
+  }
 }
