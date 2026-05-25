@@ -5,14 +5,14 @@ RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
 
 WORKDIR /app
 
-# Copy workspace config and all package.json files for dependency resolution
+# Copy workspace config and all package.json files for dependency resolution.
+# The cerebro fork's web app depends on ~25 @multica/cerebro-* workspace
+# packages (upstream only had core/ui/views), so the original 6-manifest copy
+# left the frozen install unable to resolve the graph. Copy every workspace
+# package; source is overlaid again in the builder stage.
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json .npmrc ./
 COPY apps/web/package.json apps/web/
-COPY packages/core/package.json packages/core/
-COPY packages/ui/package.json packages/ui/
-COPY packages/views/package.json packages/views/
-COPY packages/tsconfig/package.json packages/tsconfig/
-COPY packages/eslint-config/package.json packages/eslint-config/
+COPY packages packages
 
 RUN pnpm install --frozen-lockfile
 
