@@ -926,18 +926,30 @@ func processOpenclawWeixinDelivery(ctx context.Context, queries *db.Queries, dae
 			summary,
 		)
 	} else {
-		// Detail: full body (legacy behavior)
-		if title != "" && body != "" {
-			content = fmt.Sprintf("[%s] %s\n\n%s", eventPayload.Type, title, body)
-		} else if title != "" {
-			content = fmt.Sprintf("[%s] %s", eventPayload.Type, title)
-		} else if body != "" {
-			content = body
-		} else {
-			content = fmt.Sprintf("[%s] Notification from Multica", eventPayload.Type)
+		// Detail: emoji prefix + markdown issue link + full body
+		label := EventTypeLabel(eventPayload.Type)
+		issueRef := ""
+		if eventPayload.IssueIdentifier != "" && link != "" {
+			issueRef = "[" + eventPayload.IssueIdentifier + "](" + link + ")"
+		} else if eventPayload.IssueIdentifier != "" {
+			issueRef = eventPayload.IssueIdentifier
 		}
-		if link != "" {
-			content += "\n\n" + link
+		actorName := strings.TrimSpace(eventPayload.ActorName)
+		headerParts := []string{label}
+		if actorName != "" {
+			headerParts = append(headerParts, actorName)
+		}
+		if issueRef != "" {
+			headerParts = append(headerParts, issueRef)
+		}
+		header := strings.Join(headerParts, " ")
+		if title != "" {
+			header += ": " + title
+		}
+		if body != "" {
+			content = header + "\n\n" + body
+		} else {
+			content = header
 		}
 	}
 

@@ -61,15 +61,38 @@ WHERE task_id = $1
 ORDER BY model;
 
 -- name: GetIssueUsageSummary :one
+WITH usage_rows AS (
+    SELECT
+        'task'::text AS source,
+        tu.task_id AS run_id,
+        tu.input_tokens,
+        tu.output_tokens,
+        tu.cache_read_tokens,
+        tu.cache_write_tokens
+    FROM task_usage tu
+    JOIN agent_task_queue atq ON atq.id = tu.task_id
+    WHERE atq.issue_id = $1
+
+    UNION ALL
+
+    SELECT
+        'local'::text AS source,
+        lcu.run_id,
+        lcu.input_tokens,
+        lcu.output_tokens,
+        lcu.cache_read_tokens,
+        lcu.cache_write_tokens
+    FROM local_cli_usage lcu
+    JOIN local_cli_run lcr ON lcr.id = lcu.run_id
+    WHERE lcr.issue_id = $1
+)
 SELECT
-    COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
-    COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
-    COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
-    COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
-    COUNT(DISTINCT tu.task_id)::int AS task_count
-FROM task_usage tu
-JOIN agent_task_queue atq ON atq.id = tu.task_id
-WHERE atq.issue_id = $1;
+    COALESCE(SUM(input_tokens), 0)::bigint AS total_input_tokens,
+    COALESCE(SUM(output_tokens), 0)::bigint AS total_output_tokens,
+    COALESCE(SUM(cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
+    COALESCE(SUM(cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
+    COUNT(DISTINCT source || ':' || run_id::text)::int AS task_count
+FROM usage_rows;
 
 -- name: ListDashboardUsageDaily :many
 -- Daily per-(date, model) token aggregates for the workspace, served
