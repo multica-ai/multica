@@ -8,6 +8,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
+	"time"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
@@ -351,16 +353,16 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		if skills, ok := skillMap[resp.ID]; ok {
 			resp.Skills = skills
 		}
-		// Redact sensitive fields for users who are not the agent owner or workspace owner/admin,
-		// or unconditionally when the workspace opts into always_redact_env.
+		// custom_env values are always redacted in list/get; use agent reveal-env for plaintext.
+		redactEnv(&resp)
 		if alwaysRedact {
-			redactEnv(&resp)
-			redactMcpConfig(&resp)
 			resp.CustomEnvRedactedReason = "policy"
-		} else if !canViewAgentEnv(a, userID, member.Role) {
-			redactEnv(&resp)
 			redactMcpConfig(&resp)
-			resp.CustomEnvRedactedReason = "role"
+		} else {
+			resp.CustomEnvRedactedReason = "default"
+			if !canViewAgentEnv(a, userID, member.Role) {
+				redactMcpConfig(&resp)
+			}
 		}
 		visible = append(visible, resp)
 	}
@@ -405,8 +407,7 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Redact sensitive fields for users who are not the agent owner or workspace owner/admin,
-	// or unconditionally when the workspace opts into always_redact_env.
+	// custom_env values are always redacted in list/get; use agent reveal-env for plaintext.
 	userID := requestUserID(r)
 	var alwaysRedact bool
 	ws, err := h.Queries.GetWorkspace(r.Context(), agent.WorkspaceID)
@@ -416,16 +417,17 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	alwaysRedact = workspaceAlwaysRedactEnv(ws.Settings)
+	redactEnv(&resp)
 	if alwaysRedact {
-		redactEnv(&resp)
-		redactMcpConfig(&resp)
 		resp.CustomEnvRedactedReason = "policy"
+		redactMcpConfig(&resp)
 	} else if member, ok := ctxMember(r.Context()); ok {
+		resp.CustomEnvRedactedReason = "default"
 		if !canViewAgentEnv(agent, userID, member.Role) {
-			redactEnv(&resp)
 			redactMcpConfig(&resp)
-			resp.CustomEnvRedactedReason = "role"
 		}
+	} else {
+		resp.CustomEnvRedactedReason = "default"
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -699,6 +701,87 @@ func redactMcpConfig(resp *AgentResponse) {
 		resp.McpConfig = nil
 		resp.McpConfigRedacted = true
 	}
+}
+
+type revealAgentEnvRequest struct {
+	Keys []string `json:"keys,omitempty"`
+}
+
+type revealAgentEnvResponse struct {
+	CustomEnv  map[string]string `json:"custom_env"`
+	RevealedAt string            `json:"revealed_at"`
+}
+
+// RevealAgentEnv returns the plaintext custom_env values for an agent. Access
+// requires agent-owner or workspace owner/admin role. Every call writes a
+// structured audit log entry capturing the actor, agent, and revealed keys.
+func (h *Handler) RevealAgentEnv(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	a, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	userID := requestUserID(r)
+	wsID := uuidToString(a.WorkspaceID)
+	member, ok := h.workspaceMember(w, r, wsID)
+	if !ok {
+		return
+	}
+
+	if !canViewAgentEnv(a, userID, member.Role) {
+		writeError(w, http.StatusForbidden, "only the agent owner or a workspace admin can reveal environment variables")
+		return
+	}
+
+	var req revealAgentEnvRequest
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+
+	var customEnv map[string]string
+	if a.CustomEnv != nil {
+		if err := json.Unmarshal(a.CustomEnv, &customEnv); err != nil {
+			slog.Warn("failed to unmarshal agent custom_env for reveal", "agent_id", uuidToString(a.ID), "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to read agent env")
+			return
+		}
+	}
+	if customEnv == nil {
+		customEnv = map[string]string{}
+	}
+
+	revealed := customEnv
+	if len(req.Keys) > 0 {
+		filtered := make(map[string]string, len(req.Keys))
+		for _, k := range req.Keys {
+			if v, exists := customEnv[k]; exists {
+				filtered[k] = v
+			}
+		}
+		revealed = filtered
+	}
+
+	revealedKeys := make([]string, 0, len(revealed))
+	for k := range revealed {
+		revealedKeys = append(revealedKeys, k)
+	}
+	sort.Strings(revealedKeys)
+	slog.Info("agent env revealed",
+		"agent_id", uuidToString(a.ID),
+		"workspace_id", wsID,
+		"actor_id", userID,
+		"actor_role", member.Role,
+		"revealed_keys", revealedKeys,
+	)
+
+	writeJSON(w, http.StatusOK, revealAgentEnvResponse{
+		CustomEnv:  revealed,
+		RevealedAt: time.Now().UTC().Format(time.RFC3339),
+	})
 }
 
 // canManageAgent checks whether the current user can update or archive an agent.

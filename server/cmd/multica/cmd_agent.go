@@ -78,6 +78,13 @@ var agentAvatarCmd = &cobra.Command{
 
 // Agent skills subcommands.
 
+var agentRevealEnvCmd = &cobra.Command{
+	Use:   "reveal-env <agent-id>",
+	Short: "Reveal plaintext custom_env values for an agent (writes an audit log entry)",
+	Args:  exactArgs(1),
+	RunE:  runAgentRevealEnv,
+}
+
 var agentSkillsCmd = &cobra.Command{
 	Use:   "skills",
 	Short: "Manage agent skill assignments",
@@ -106,6 +113,7 @@ func init() {
 	agentCmd.AddCommand(agentRestoreCmd)
 	agentCmd.AddCommand(agentTasksCmd)
 	agentCmd.AddCommand(agentAvatarCmd)
+	agentCmd.AddCommand(agentRevealEnvCmd)
 	agentCmd.AddCommand(agentSkillsCmd)
 
 	agentSkillsCmd.AddCommand(agentSkillsListCmd)
@@ -167,6 +175,10 @@ func init() {
 	// agent avatar
 	agentAvatarCmd.Flags().String("file", "", "Path to the avatar image file (required)")
 	agentAvatarCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// agent reveal-env
+	agentRevealEnvCmd.Flags().StringSlice("key", nil, "Key(s) to reveal (comma-separated or repeated). Omit to reveal all keys.")
+	agentRevealEnvCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// agent skills list
 	agentSkillsListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -350,6 +362,45 @@ func runAgentGet(cmd *cobra.Command, args []string) error {
 		strVal(agent, "avatar_url"),
 		strVal(agent, "description"),
 	}}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runAgentRevealEnv(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	body := map[string]any{}
+	if keys, _ := cmd.Flags().GetStringSlice("key"); len(keys) > 0 {
+		body["keys"] = keys
+	}
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/agents/"+args[0]+"/reveal-env", body, &result); err != nil {
+		return fmt.Errorf("reveal env: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	customEnv, _ := result["custom_env"].(map[string]any)
+	if len(customEnv) == 0 {
+		fmt.Fprintln(os.Stdout, "No custom_env variables configured for this agent.")
+		return nil
+	}
+
+	headers := []string{"KEY", "VALUE"}
+	rows := make([][]string, 0, len(customEnv))
+	for k, v := range customEnv {
+		rows = append(rows, []string{k, fmt.Sprintf("%v", v)})
+	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
 }

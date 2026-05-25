@@ -680,6 +680,45 @@ multica autopilot trigger-delete <autopilot-id> <trigger-id>
 
 Only cron-based `schedule` triggers are currently exposed via the CLI. The data model also defines `webhook` and `api` kinds, but there is no server endpoint that fires them yet, so they're not surfaced here.
 
+## Agent Environment Variables
+
+### Redaction by default
+
+`multica agent list` and `multica agent get` **always** return masked values (`"****"`) for `custom_env` keys. This protects secrets (API keys, service credentials) from appearing in command output, log aggregators, or shell history.
+
+```json
+{
+  "custom_env": { "ANTHROPIC_API_KEY": "****", "SUPABASE_URL": "****" },
+  "custom_env_redacted": true,
+  "custom_env_redacted_reason": "default"
+}
+```
+
+Keys are always returned so you can see what variables are configured; only the values are masked.
+
+The `custom_env_redacted_reason` field explains why values are masked:
+- `"default"` — redacted by default in all list/get responses
+- `"policy"` — workspace has `always_redact_env: true` in settings (unconditional)
+
+> **Deprecated:** The per-record `custom_env_redacted` database flag no longer controls the response path. It is ignored on reads and will be removed in a future release. Do not rely on it to gate plaintext access.
+
+### Revealing plaintext values
+
+To view plaintext `custom_env` values, use the dedicated reveal command. This requires agent-owner or workspace owner/admin role, and every call writes a structured audit log entry (actor, agent, keys revealed, timestamp):
+
+```bash
+# Reveal all custom_env values for an agent
+multica agent reveal-env <agent-id>
+
+# Reveal specific keys only
+multica agent reveal-env <agent-id> --key ANTHROPIC_API_KEY --key SUPABASE_URL
+
+# JSON output for scripting
+multica agent reveal-env <agent-id> --output json
+```
+
+The reveal command hits `POST /api/agents/{id}/reveal-env`. The server logs each call to the structured application log (`agent env revealed`) so workspace owners can audit who accessed which secrets and when.
+
 ## Other Commands
 
 ```bash

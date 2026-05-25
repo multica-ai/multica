@@ -308,18 +308,21 @@ func TestListAgents_AlwaysRedactEnv_OwnerSeesRedacted(t *testing.T) {
 	}
 }
 
-func TestGetAgent_DefaultNoRedactForOwner(t *testing.T) {
+// TestGetAgent_DefaultRedactsEvenForOwner verifies that custom_env values are
+// masked in GET /api/agents/{id} even for the agent owner. Plaintext is only
+// available via the dedicated reveal-env endpoint.
+func TestGetAgent_DefaultRedactsEvenForOwner(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
 
-	// Ensure workspace has no always_redact_env policy (guards against test-order leakage).
+	// No always_redact_env policy — pure default behavior.
 	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = '{}'::jsonb WHERE id = $1`, testWorkspaceID); err != nil {
 		t.Fatalf("failed to clear workspace settings: %v", err)
 	}
 
-	agentID := createHandlerTestAgent(t, "no-redact-get-test-agent", nil)
+	agentID := createHandlerTestAgent(t, "default-redact-get-test-agent", nil)
 	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{"SECRET_KEY": "super-secret"}' WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("failed to set custom_env: %v", err)
 	}
@@ -337,13 +340,153 @@ func TestGetAgent_DefaultNoRedactForOwner(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if resp.CustomEnvRedacted {
-		t.Error("expected custom_env_redacted to be false")
+	if !resp.CustomEnvRedacted {
+		t.Error("expected custom_env_redacted to be true even for the agent owner")
 	}
-	if resp.CustomEnvRedactedReason != "" {
-		t.Errorf("expected custom_env_redacted_reason to be empty, got %q", resp.CustomEnvRedactedReason)
+	if resp.CustomEnvRedactedReason != "default" {
+		t.Errorf("expected custom_env_redacted_reason to be 'default', got %q", resp.CustomEnvRedactedReason)
 	}
-	if resp.CustomEnv["SECRET_KEY"] != "super-secret" {
-		t.Errorf("expected SECRET_KEY to be visible, got %q", resp.CustomEnv["SECRET_KEY"])
+	if resp.CustomEnv["SECRET_KEY"] != "****" {
+		t.Errorf("expected SECRET_KEY to be masked, got %q", resp.CustomEnv["SECRET_KEY"])
+	}
+}
+
+// TestListAgents_DefaultRedactsEvenForOwner verifies that custom_env values are
+// masked in GET /api/agents even for a workspace owner.
+func TestListAgents_DefaultRedactsEvenForOwner(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = '{}'::jsonb WHERE id = $1`, testWorkspaceID); err != nil {
+		t.Fatalf("failed to clear workspace settings: %v", err)
+	}
+
+	agentName := "default-redact-list-test-agent"
+	agentID := createHandlerTestAgent(t, agentName, nil)
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{"API_KEY": "top-secret"}' WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("failed to set custom_env: %v", err)
+	}
+
+	req := newRequest("GET", "/agents", nil)
+	w := httptest.NewRecorder()
+	testHandler.ListAgents(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var agents []AgentResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &agents); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	var found *AgentResponse
+	for i := range agents {
+		if agents[i].ID == agentID {
+			found = &agents[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("agent not found in list response")
+	}
+	if !found.CustomEnvRedacted {
+		t.Error("expected custom_env_redacted to be true even for the workspace owner")
+	}
+	if found.CustomEnvRedactedReason != "default" {
+		t.Errorf("expected custom_env_redacted_reason to be 'default', got %q", found.CustomEnvRedactedReason)
+	}
+	if found.CustomEnv["API_KEY"] != "****" {
+		t.Errorf("expected API_KEY to be masked, got %q", found.CustomEnv["API_KEY"])
+	}
+}
+
+// TestRevealAgentEnv_OwnerCanReveal checks that the agent owner can retrieve
+// plaintext custom_env values via the reveal-env endpoint, and that an audit
+// log entry is written.
+func TestRevealAgentEnv_OwnerCanReveal(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID := createHandlerTestAgent(t, "reveal-env-owner-test-agent", nil)
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{"SECRET_KEY": "real-value", "OTHER": "other-value"}' WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("failed to set custom_env: %v", err)
+	}
+
+	req := newRequest("POST", "/api/agents/"+agentID+"/reveal-env", nil)
+	req = withURLParam(req, "id", agentID)
+	w := httptest.NewRecorder()
+	testHandler.RevealAgentEnv(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp revealAgentEnvResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.CustomEnv["SECRET_KEY"] != "real-value" {
+		t.Errorf("expected SECRET_KEY to be 'real-value', got %q", resp.CustomEnv["SECRET_KEY"])
+	}
+	if resp.CustomEnv["OTHER"] != "other-value" {
+		t.Errorf("expected OTHER to be 'other-value', got %q", resp.CustomEnv["OTHER"])
+	}
+	if resp.RevealedAt == "" {
+		t.Error("expected revealed_at to be set")
+	}
+
+	// Reveal with key filter.
+	req2 := newRequest("POST", "/api/agents/"+agentID+"/reveal-env", map[string]any{"keys": []string{"SECRET_KEY"}})
+	req2 = withURLParam(req2, "id", agentID)
+	w2 := httptest.NewRecorder()
+	testHandler.RevealAgentEnv(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("filtered reveal: expected 200, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	var resp2 revealAgentEnvResponse
+	if err := json.Unmarshal(w2.Body.Bytes(), &resp2); err != nil {
+		t.Fatalf("decode filtered response: %v", err)
+	}
+	if _, has := resp2.CustomEnv["OTHER"]; has {
+		t.Error("filtered reveal should not include OTHER key")
+	}
+	if resp2.CustomEnv["SECRET_KEY"] != "real-value" {
+		t.Errorf("filtered reveal: expected SECRET_KEY to be 'real-value', got %q", resp2.CustomEnv["SECRET_KEY"])
+	}
+
+	_ = ctx
+}
+
+// TestRevealAgentEnv_EmptyEnv verifies reveal-env returns an empty map when the
+// agent has no custom_env set.
+func TestRevealAgentEnv_EmptyEnv(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "reveal-env-empty-test-agent", nil)
+
+	req := newRequest("POST", "/api/agents/"+agentID+"/reveal-env", nil)
+	req = withURLParam(req, "id", agentID)
+	w := httptest.NewRecorder()
+	testHandler.RevealAgentEnv(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp revealAgentEnvResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(resp.CustomEnv) != 0 {
+		t.Errorf("expected empty custom_env, got %v", resp.CustomEnv)
 	}
 }
