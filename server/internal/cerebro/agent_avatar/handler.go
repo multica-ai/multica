@@ -122,10 +122,41 @@ func nameColorIndex(name string) int {
 type gatewayResponse struct {
 	Choices []struct {
 		Message struct {
-			Images  []string `json:"images"`
-			Content any      `json:"content"`
+			Images  []imageRef `json:"images"`
+			Content any        `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
+}
+
+// imageRef extracts a base64 data URL from a gateway image entry. OpenRouter
+// (which the Data Registry gateway proxies) returns each image as an object
+// shaped like {"type":"image_url","image_url":{"url":"data:image/png;base64,…"}}.
+// Some providers/tests emit a bare string instead, so accept both forms.
+type imageRef struct {
+	URL string
+}
+
+func (r *imageRef) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		r.URL = s
+		return nil
+	}
+	var obj struct {
+		URL      string `json:"url"`
+		ImageURL struct {
+			URL string `json:"url"`
+		} `json:"image_url"`
+	}
+	if err := json.Unmarshal(b, &obj); err != nil {
+		return err
+	}
+	if obj.ImageURL.URL != "" {
+		r.URL = obj.ImageURL.URL
+	} else {
+		r.URL = obj.URL
+	}
+	return nil
 }
 
 type gatewayConfig struct {
@@ -193,7 +224,7 @@ func callGateway(ctx context.Context, client *http.Client, cfg gatewayConfig, pr
 		return nil, fmt.Errorf("no image in data registry AI gateway response")
 	}
 
-	imgData := parsed.Choices[0].Message.Images[0]
+	imgData := parsed.Choices[0].Message.Images[0].URL
 	// Strip "data:image/png;base64," prefix when present.
 	if idx := strings.Index(imgData, ","); idx != -1 {
 		imgData = imgData[idx+1:]

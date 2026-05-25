@@ -29,51 +29,71 @@ func TestGatewayConfigFromEnvUsesAvatarModelDefault(t *testing.T) {
 
 func TestCallGatewayPostsToDataRegistryAndDecodesImage(t *testing.T) {
 	wantImage := []byte("png-bytes")
+	dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(wantImage)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != gatewayChatCompletionsPath {
-			t.Fatalf("path = %q", r.URL.Path)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer rk_test" {
-			t.Fatalf("Authorization = %q", got)
-		}
-		if got := r.Header.Get("x-trace-name"); got != "agent-avatar-generate" {
-			t.Fatalf("x-trace-name = %q", got)
-		}
-
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("decode body: %v", err)
-		}
-		if body["model"] != "openai/gpt-5-image-mini" {
-			t.Fatalf("model = %v", body["model"])
-		}
-		messages, ok := body["messages"].([]any)
-		if !ok || len(messages) != 1 {
-			t.Fatalf("messages = %#v", body["messages"])
-		}
-
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []map[string]any{
-				{
-					"message": map[string]any{
-						"images": []string{"data:image/png;base64," + base64.StdEncoding.EncodeToString(wantImage)},
-					},
-				},
+	// The Data Registry gateway proxies OpenRouter, which returns each image as
+	// an {"type":"image_url","image_url":{"url":"data:…"}} object. A few
+	// providers emit a bare string instead, so both shapes must decode.
+	cases := []struct {
+		name   string
+		images any
+	}{
+		{
+			name: "openrouter_object_form",
+			images: []map[string]any{
+				{"type": "image_url", "image_url": map[string]any{"url": dataURL}},
 			},
-		})
-	}))
-	defer server.Close()
-
-	got, err := callGateway(context.Background(), server.Client(), gatewayConfig{
-		baseURL: server.URL,
-		apiKey:  "rk_test",
-		model:   "openai/gpt-5-image-mini",
-	}, "make an avatar")
-	if err != nil {
-		t.Fatalf("callGateway returned error: %v", err)
+		},
+		{
+			name:   "bare_string_form",
+			images: []string{dataURL},
+		},
 	}
-	if string(got) != string(wantImage) {
-		t.Fatalf("image = %q, want %q", got, wantImage)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != gatewayChatCompletionsPath {
+					t.Fatalf("path = %q", r.URL.Path)
+				}
+				if got := r.Header.Get("Authorization"); got != "Bearer rk_test" {
+					t.Fatalf("Authorization = %q", got)
+				}
+				if got := r.Header.Get("x-trace-name"); got != "agent-avatar-generate" {
+					t.Fatalf("x-trace-name = %q", got)
+				}
+
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatalf("decode body: %v", err)
+				}
+				if body["model"] != "openai/gpt-5-image-mini" {
+					t.Fatalf("model = %v", body["model"])
+				}
+				messages, ok := body["messages"].([]any)
+				if !ok || len(messages) != 1 {
+					t.Fatalf("messages = %#v", body["messages"])
+				}
+
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"choices": []map[string]any{
+						{"message": map[string]any{"images": tc.images}},
+					},
+				})
+			}))
+			defer server.Close()
+
+			got, err := callGateway(context.Background(), server.Client(), gatewayConfig{
+				baseURL: server.URL,
+				apiKey:  "rk_test",
+				model:   "openai/gpt-5-image-mini",
+			}, "make an avatar")
+			if err != nil {
+				t.Fatalf("callGateway returned error: %v", err)
+			}
+			if string(got) != string(wantImage) {
+				t.Fatalf("image = %q, want %q", got, wantImage)
+			}
+		})
 	}
 }
