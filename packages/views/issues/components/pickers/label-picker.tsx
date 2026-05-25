@@ -26,6 +26,7 @@ import { useT } from "../../../i18n";
 interface LabelPickerProps {
   issueId: string;
   labels?: Label[];
+  projectId?: string | null;
   /** Optional controlled open state (for tests / cmd+k integration). */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -75,6 +76,7 @@ function pickInlineColor(name: string): string {
 export function LabelPicker({
   issueId,
   labels,
+  projectId,
   open: controlledOpen,
   onOpenChange,
   align = "start",
@@ -100,14 +102,15 @@ export function LabelPicker({
   const creatingRef = useRef(false);
 
   const wsId = useWorkspaceId();
-  const { data: allLabels = [] } = useQuery(labelListOptions(wsId));
+  const labelListScope = useMemo(() => ({ projectId: projectId ?? null }), [projectId]);
+  const { data: allLabels = [] } = useQuery(labelListOptions(wsId, labelListScope));
   const initialLabels = useMemo(() => labels ? { labels } : undefined, [labels]);
   const { data: attachedLabels = labels ?? [] } = useQuery({
     ...issueLabelsOptions(wsId, issueId),
     initialData: initialLabels,
   });
 
-  const attach = useAttachLabel(issueId);
+  const attach = useAttachLabel(issueId, labelListScope);
   const detach = useDetachLabel(issueId);
   const create = useCreateLabel();
 
@@ -135,7 +138,7 @@ export function LabelPicker({
     creatingRef.current = true;
     const name = query;
     create.mutate(
-      { name, color: pickInlineColor(name) },
+      { name, color: pickInlineColor(name), project_id: projectId ?? null },
       {
         onSuccess: (label) => {
           attach.mutate(label.id);
@@ -253,7 +256,7 @@ export function LabelPicker({
       <Dialog open={manageOpen} onOpenChange={setManageOpen}>
         <DialogContent className="max-w-2xl">
           <DialogTitle className="text-lg font-semibold">{t(($) => $.pickers.label.manage_dialog_title)}</DialogTitle>
-          <LabelsPanel />
+          <LabelsPanel projectId={projectId ?? null} />
         </DialogContent>
       </Dialog>
     </div>

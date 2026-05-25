@@ -31,10 +31,10 @@ const DEFAULT_COLOR_DEFAULT = "#3b82f6";
  * Workspace-wide labels management surface. Opened from the Manage labels…
  * footer in the label picker.
  */
-export function LabelsPanel() {
+export function LabelsPanel({ projectId = null }: { projectId?: string | null }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
-  const { data: labels = [], isLoading } = useQuery(labelListOptions(wsId));
+  const { data: labels = [], isLoading } = useQuery(labelListOptions(wsId, { projectId }));
 
   const create = useCreateLabel();
   const update = useUpdateLabel();
@@ -54,7 +54,7 @@ export function LabelsPanel() {
     const name = newName.trim();
     if (!name) return;
     create.mutate(
-      { name, color: newColor },
+      { name, color: newColor, project_id: projectId },
       {
         onSuccess: () => {
           setNewName("");

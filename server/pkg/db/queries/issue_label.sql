@@ -3,13 +3,19 @@ SELECT * FROM issue_label
 WHERE workspace_id = $1
 ORDER BY LOWER(name) ASC;
 
+-- name: ListLabelsByProject :many
+SELECT * FROM issue_label
+WHERE workspace_id = sqlc.arg('workspace_id')::uuid
+  AND (project_id IS NULL OR project_id = sqlc.arg('project_id')::uuid)
+ORDER BY LOWER(name) ASC;
+
 -- name: GetLabel :one
 SELECT * FROM issue_label
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateLabel :one
-INSERT INTO issue_label (workspace_id, name, color)
-VALUES ($1, $2, $3)
+INSERT INTO issue_label (workspace_id, project_id, name, color)
+VALUES ($1, sqlc.narg('project_id'), $2, $3)
 RETURNING *;
 
 -- name: UpdateLabel :one
@@ -34,16 +40,27 @@ RETURNING id;
 INSERT INTO issue_to_label (issue_id, label_id)
 SELECT sqlc.arg('issue_id')::uuid, sqlc.arg('label_id')::uuid
 WHERE EXISTS (
-    SELECT 1 FROM issue i
+    SELECT 1
+    FROM issue i
+    JOIN issue_label l ON l.id = sqlc.arg('label_id')::uuid
     WHERE i.id = sqlc.arg('issue_id')::uuid
       AND i.workspace_id = sqlc.arg('workspace_id')::uuid
-)
-AND EXISTS (
-    SELECT 1 FROM issue_label l
-    WHERE l.id = sqlc.arg('label_id')::uuid
       AND l.workspace_id = sqlc.arg('workspace_id')::uuid
+      AND (
+        l.project_id IS NULL
+        OR l.project_id IS NOT DISTINCT FROM i.project_id
+      )
 )
 ON CONFLICT DO NOTHING;
+
+-- name: DeleteIssueProjectScopedLabels :execrows
+DELETE FROM issue_to_label itl
+USING issue_label l
+WHERE itl.label_id = l.id
+  AND itl.issue_id = sqlc.arg('issue_id')::uuid
+  AND l.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND l.project_id IS NOT NULL
+  AND l.project_id IS DISTINCT FROM sqlc.arg('project_id')::uuid;
 
 -- name: DetachLabelFromIssue :exec
 -- Workspace-guarded DELETE: only deletes if the issue is in the given

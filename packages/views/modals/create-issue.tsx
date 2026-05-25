@@ -35,7 +35,7 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multi
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
-import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, DueDatePicker } from "../issues/components";
+import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
 import { BacklogAgentHintContent } from "../issues/components/backlog-agent-hint-dialog";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { projectListOptions } from "@multica/core/projects/queries";
@@ -152,7 +152,7 @@ export function ManualCreatePanel({
   // overflow ⋯ menu. Clicking the menu item flips this open, which both
   // mounts the inline pill (the popover's anchor) AND opens the calendar.
   // When the popover closes without a value set, the pill unmounts again.
-  const [_startDatePickerOpen, setStartDatePickerOpen] = useState(false);
+  const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
   // Children live as full Issue objects — the picker always returns the whole
   // object, and we never need to hydrate from an ID the way we do for parent.
   const [childIssues, setChildIssues] = useState<Issue[]>([]);
@@ -183,7 +183,8 @@ export function ManualCreatePanel({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
-  const { data: workspaceLabels = [] } = useQuery(labelListOptions(wsId));
+  const labelListScope = useMemo(() => ({ projectId: projectId ?? null }), [projectId]);
+  const { data: workspaceLabels = [] } = useQuery(labelListOptions(wsId, labelListScope));
   const createLabelMutation = useCreateLabel();
   const [labelIds, setLabelIds] = useState<string[]>([]);
   const [labelSearch, setLabelSearch] = useState("");
@@ -194,11 +195,15 @@ export function ManualCreatePanel({
     if (parentInheritedRef.current) return;
     if (!parentIssue) return;
     parentInheritedRef.current = true;
-    if (parentIssue.labels && parentIssue.labels.length > 0) {
-      setLabelIds(parentIssue.labels.map((l) => l.id));
-    }
     if (parentIssue.project_id && !initialProjectId) {
       setProjectId(parentIssue.project_id);
+    }
+    if (parentIssue.labels && parentIssue.labels.length > 0) {
+      setLabelIds(
+        parentIssue.labels
+          .filter((label) => !label.project_id || label.project_id === (parentIssue.project_id ?? null))
+          .map((l) => l.id),
+      );
     }
   }, [parentIssue, initialProjectId]);
 
@@ -240,11 +245,19 @@ export function ManualCreatePanel({
     return !workspaceLabels.some((label) => label.name.toLowerCase() === q);
   }, [createLabelMutation.isPending, labelSearchTrimmed, workspaceLabels]);
 
+  useEffect(() => {
+    const available = new Set(workspaceLabels.map((label) => label.id));
+    setLabelIds((prev) => {
+      if (prev.length === 0) return prev;
+      return prev.filter((id) => available.has(id));
+    });
+  }, [workspaceLabels]);
+
   const createInlineLabel = () => {
     if (!canCreateLabel) return;
     const name = labelSearchTrimmed;
     createLabelMutation.mutate(
-      { name, color: pickInlineLabelColor(name) },
+      { name, color: pickInlineLabelColor(name), project_id: projectId ?? null },
       {
         onSuccess: (label) => {
           setLabelIds((prev) => (prev.includes(label.id) ? prev : [...prev, label.id]));
@@ -611,6 +624,25 @@ export function ManualCreatePanel({
                 triggerRender={<PillButton />}
                 align="start"
               />
+
+              {(startDate || startDatePickerOpen) && (
+                <StartDatePicker
+                  startDate={startDate}
+                  onUpdate={(u) => {
+                    setStartDate(u.start_date ?? null);
+                    setDraft({ startDate: u.start_date ?? null });
+                  }}
+                  open={startDatePickerOpen}
+                  onOpenChange={(open) => {
+                    setStartDatePickerOpen(open);
+                    if (!open && !startDate) {
+                      setStartDatePickerOpen(false);
+                    }
+                  }}
+                  triggerRender={<PillButton />}
+                  align="start"
+                />
+              )}
 
               {/* Project */}
               <ProjectPicker

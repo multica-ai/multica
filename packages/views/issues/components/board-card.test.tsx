@@ -52,6 +52,7 @@ vi.mock("../actions", () => ({
 }));
 
 vi.mock("../../i18n", () => ({
+  useTimeAgo: () => () => "just now",
   useT: () => ({
     t: (selector: any) =>
       selector({
@@ -129,6 +130,7 @@ describe("BoardCardContent labels", () => {
             {
               id: "label-1",
               workspace_id: "ws-test",
+              project_id: null,
               name: "Bug",
               color: "#ef4444",
               created_at: "2026-01-01T00:00:00Z",

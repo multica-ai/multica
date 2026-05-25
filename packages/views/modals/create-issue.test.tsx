@@ -89,12 +89,12 @@ vi.mock("@multica/core/projects/queries", () => ({
 }));
 
 vi.mock("@multica/core/labels", () => ({
-  labelListOptions: (wsId: string) => ({
-    queryKey: ["labels", wsId],
+  labelListOptions: (wsId: string, scope?: { projectId?: string | null }) => ({
+    queryKey: ["labels", wsId, "list", scope?.projectId ? "project" : "workspace", scope?.projectId ?? null],
     queryFn: () =>
       Promise.resolve([
-        { id: "label-1", name: "bug", color: "#ef4444" },
-        { id: "label-2", name: "feature", color: "#22c55e" },
+        { id: "label-1", workspace_id: wsId, project_id: null, name: "bug", color: "#ef4444" },
+        { id: "label-2", workspace_id: wsId, project_id: null, name: "feature", color: "#22c55e" },
       ]),
   }),
   useCreateLabel: () => ({ mutate: mockCreateLabel, isPending: false }),
@@ -360,8 +360,17 @@ describe("CreateIssueModal", () => {
       mockQuickCreateStore.keepOpen = v;
     });
     mockCreateLabel.mockImplementation(
-      (_data: { name: string; color: string }, opts?: { onSuccess?: (label: { id: string }) => void }) => {
-        opts?.onSuccess?.({ id: "label-new" });
+      (
+        data: { name: string; color: string; project_id?: string | null },
+        opts?: { onSuccess?: (label: { id: string; workspace_id: string; project_id: string | null; name: string; color: string }) => void },
+      ) => {
+        opts?.onSuccess?.({
+          id: "label-new",
+          workspace_id: "ws-test",
+          project_id: data.project_id ?? null,
+          name: data.name,
+          color: data.color,
+        });
       },
     );
     // Reset the shared draft mock so per-test assignee seeding (squad / agent)
