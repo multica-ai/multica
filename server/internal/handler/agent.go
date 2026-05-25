@@ -31,33 +31,34 @@ import (
 const maxAgentDescriptionLength = 255
 
 type AgentResponse struct {
-	ID                     string              `json:"id"`
-	WorkspaceID            string              `json:"workspace_id"`
-	RuntimeID              string              `json:"runtime_id"`
-	Name                   string              `json:"name"`
-	Description            string              `json:"description"`
-	Instructions           string              `json:"instructions"`
-	AvatarURL              *string             `json:"avatar_url"`
-	RuntimeMode            string              `json:"runtime_mode"`
-	RuntimeConfig          any                 `json:"runtime_config"`
-	CustomEnv              map[string]string   `json:"custom_env"`
-	CustomArgs             []string            `json:"custom_args"`
-	McpConfig              json.RawMessage     `json:"mcp_config"`
-	CustomEnvRedacted      bool                `json:"custom_env_redacted"`
-	McpConfigRedacted      bool                `json:"mcp_config_redacted"`
-	Visibility             string              `json:"visibility"`
-	Status                 string              `json:"status"`
-	MaxConcurrentTasks     int32               `json:"max_concurrent_tasks"`
-	Model                  string              `json:"model"`
-	ThinkingLevel          string              `json:"thinking_level"`
-	OwnerID                *string             `json:"owner_id"`
-	AllowedUserIDs         []string            `json:"allowed_user_ids"`
-	Skills                 []AgentSkillSummary `json:"skills"`
-	CreatedAt              string              `json:"created_at"`
-	UpdatedAt              string              `json:"updated_at"`
-	ArchivedAt             *string             `json:"archived_at"`
-	ArchivedBy             *string             `json:"archived_by"`
-	CustomEnvCopiedPending bool                `json:"custom_env_copied_pending"`
+	ID                      string              `json:"id"`
+	WorkspaceID             string              `json:"workspace_id"`
+	RuntimeID               string              `json:"runtime_id"`
+	Name                    string              `json:"name"`
+	Description             string              `json:"description"`
+	Instructions            string              `json:"instructions"`
+	AvatarURL               *string             `json:"avatar_url"`
+	RuntimeMode             string              `json:"runtime_mode"`
+	RuntimeConfig           any                 `json:"runtime_config"`
+	CustomEnv               map[string]string   `json:"custom_env"`
+	CustomArgs              []string            `json:"custom_args"`
+	McpConfig               json.RawMessage     `json:"mcp_config"`
+	CustomEnvRedacted       bool                `json:"custom_env_redacted"`
+	CustomEnvRedactedReason string              `json:"custom_env_redacted_reason,omitempty"`
+	McpConfigRedacted       bool                `json:"mcp_config_redacted"`
+	Visibility              string              `json:"visibility"`
+	Status                  string              `json:"status"`
+	MaxConcurrentTasks      int32               `json:"max_concurrent_tasks"`
+	Model                   string              `json:"model"`
+	ThinkingLevel           string              `json:"thinking_level"`
+	OwnerID                 *string             `json:"owner_id"`
+	AllowedUserIDs          []string            `json:"allowed_user_ids"`
+	Skills                  []AgentSkillSummary `json:"skills"`
+	CreatedAt               string              `json:"created_at"`
+	UpdatedAt               string              `json:"updated_at"`
+	ArchivedAt              *string             `json:"archived_at"`
+	ArchivedBy              *string             `json:"archived_by"`
+	CustomEnvCopiedPending  bool                `json:"custom_env_copied_pending"`
 }
 
 type AgentAllowedPrincipalResponse struct {
@@ -186,11 +187,17 @@ type ProjectResourceData struct {
 }
 
 type AgentTaskResponse struct {
-	ID                      string                `json:"id"`
-	AgentID                 string                `json:"agent_id"`
-	RuntimeID               string                `json:"runtime_id"`
-	IssueID                 string                `json:"issue_id"`
-	WorkspaceID             string                `json:"workspace_id"`
+	ID          string `json:"id"`
+	AgentID     string `json:"agent_id"`
+	RuntimeID   string `json:"runtime_id"`
+	IssueID     string `json:"issue_id"`
+	WorkspaceID string `json:"workspace_id"`
+	// WorkspaceContext is the workspace-level system prompt set in workspace
+	// settings (`workspace.context` DB column). Injected into the agent brief
+	// as `## Workspace Context` so every agent running in this workspace —
+	// regardless of issue / chat / autopilot / quick-create — sees the same
+	// shared context. Empty when the workspace owner hasn't set it.
+	WorkspaceContext        string                `json:"workspace_context,omitempty"`
 	Status                  string                `json:"status"`
 	Priority                int32                 `json:"priority"`
 	DispatchedAt            *string               `json:"dispatched_at"`
@@ -237,7 +244,7 @@ type AgentTaskResponse struct {
 	// is empty.
 	RequestingUserName               string `json:"requesting_user_name,omitempty"`
 	RequestingUserProfileDescription string `json:"requesting_user_profile_description,omitempty"`
-	Kind                    string                `json:"kind"`                                // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+	Kind                             string `json:"kind"` // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
 }
 
 // ChatAttachmentMeta is the structured attachment metadata embedded in
@@ -440,6 +447,16 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		allowedUserMap[agentID] = append(allowedUserMap[agentID], uuidToString(row.PrincipalID))
 	}
 
+	// Check workspace-level always-redact setting.
+	var alwaysRedact bool
+	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		slog.Warn("GetWorkspace failed for redact check", "workspace_id", workspaceID, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	alwaysRedact = workspaceAlwaysRedactEnv(ws.Settings)
+
 	// Resolve the request actor once. Agents bypass the private-agent gate
 	// to preserve A2A collaboration; members must be allowed to see private
 	// agents by ownership, workspace role, or the explicit allowlist.
@@ -463,10 +480,16 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		if allowedUserIDs, ok := allowedUserMap[resp.ID]; ok {
 			resp.AllowedUserIDs = allowedUserIDs
 		}
-		// Redact sensitive fields for users who are not the agent owner or workspace owner/admin.
-		if !canViewAgentEnv(a, userID, member.Role) {
+		// Redact sensitive fields: unconditionally when workspace opts into always_redact_env,
+		// or for users who are not the agent owner or workspace owner/admin.
+		if alwaysRedact {
 			redactEnv(&resp)
 			redactMcpConfig(&resp)
+			resp.CustomEnvRedactedReason = "policy"
+		} else if !canViewAgentEnv(a, userID, member.Role) {
+			redactEnv(&resp)
+			redactMcpConfig(&resp)
+			resp.CustomEnvRedactedReason = "role"
 		}
 		visible = append(visible, resp)
 	}
@@ -520,18 +543,27 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 		resp.AllowedUserIDs = append(resp.AllowedUserIDs, uuidToString(row.PrincipalID))
 	}
 
-	// Redact sensitive fields for users who are not the agent owner or workspace owner/admin.
-	// Use workspaceMember (with DB fallback) instead of bare ctxMember so redaction
-	// is never silently skipped if the middleware context is missing.
+	// Redact sensitive fields for users who are not the agent owner or workspace owner/admin,
+	// or unconditionally when the workspace opts into always_redact_env.
 	userID := requestUserID(r)
-	wsID := uuidToString(agent.WorkspaceID)
-	member, ok := h.workspaceMember(w, r, wsID)
-	if !ok {
+	var alwaysRedact bool
+	ws, err := h.Queries.GetWorkspace(r.Context(), agent.WorkspaceID)
+	if err != nil {
+		slog.Warn("GetWorkspace failed for redact check", "workspace_id", uuidToString(agent.WorkspaceID), "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
-	if !canViewAgentEnv(agent, userID, member.Role) {
+	alwaysRedact = workspaceAlwaysRedactEnv(ws.Settings)
+	if alwaysRedact {
 		redactEnv(&resp)
 		redactMcpConfig(&resp)
+		resp.CustomEnvRedactedReason = "policy"
+	} else if member, ok := ctxMember(r.Context()); ok {
+		if !canViewAgentEnv(agent, userID, member.Role) {
+			redactEnv(&resp)
+			redactMcpConfig(&resp)
+			resp.CustomEnvRedactedReason = "role"
+		}
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -933,6 +965,24 @@ type UpdateAgentRequest struct {
 	// Distinguishing those modes is why this is a pointer; the raw-fields
 	// map captured at decode time tells us whether the key was sent.
 	ThinkingLevel *string `json:"thinking_level"`
+}
+
+// workspaceAlwaysRedactEnv checks whether the workspace has opted into
+// unconditional redaction of custom_env and mcp_config on read responses,
+// regardless of the caller's role. This is useful for single-tenant
+// self-hosts or security-conscious teams that never want plaintext secrets
+// returned from the API.
+func workspaceAlwaysRedactEnv(settings []byte) bool {
+	if len(settings) == 0 {
+		return false
+	}
+	var s struct {
+		AlwaysRedactEnv bool `json:"always_redact_env"`
+	}
+	if err := json.Unmarshal(settings, &s); err != nil {
+		return false
+	}
+	return s.AlwaysRedactEnv
 }
 
 // canViewAgentEnv checks whether the requesting user is allowed to see the

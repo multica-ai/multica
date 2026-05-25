@@ -53,3 +53,66 @@ func TestBuildPiArgsCustomArgsAppended(t *testing.T) {
 		t.Errorf("custom --tools should pass through via custom_args, got: %v", args)
 	}
 }
+
+func TestStripPiToolCallMarkup(t *testing.T) {
+	tests := map[string]string{
+		`before call:bash{command:<|"|>cd repo/path && ls -F<|"|>}<tool_call|> after`:                           "before  after",
+		`before call:read{path:<|"|>repo/path/roles/example/verify.yml<|"|>} after`:                             "before  after",
+		`before response:bash{command:<|"|>multica issue comment list issue-id --all --output json<|"|>} after`: "before  after",
+		`before call:bash{command:<|"|>printf '{"key":"value"}'<|"|>} after`:                                    "before  after",
+		`before <|turn>model after`: "before  after",
+	}
+	for in, want := range tests {
+		got := stripPiToolCallMarkup(in)
+		if got != want {
+			t.Fatalf("unexpected stripped text: %q, want %q", got, want)
+		}
+	}
+}
+
+func TestDrainPiTextBufferSplitToolCall(t *testing.T) {
+	chunks := []string{
+		"before ca",
+		`ll:bash{command:<|"|>ls -R repo/path`,
+		`/roles/example<|"|>}`,
+		" after",
+	}
+	var buf strings.Builder
+	var got strings.Builder
+	for _, chunk := range chunks {
+		got.WriteString(drainPiTextBuffer(&buf, chunk))
+	}
+	got.WriteString(flushPiTextBuffer(&buf))
+	if got.String() != "before  after" {
+		t.Fatalf("unexpected streamed text: %q", got.String())
+	}
+}
+
+func TestDrainPiTextBufferSplitControlToken(t *testing.T) {
+	chunks := []string{"before <|tu", "rn>model after"}
+	var buf strings.Builder
+	var got strings.Builder
+	for _, chunk := range chunks {
+		got.WriteString(drainPiTextBuffer(&buf, chunk))
+	}
+	got.WriteString(flushPiTextBuffer(&buf))
+	if got.String() != "before  after" {
+		t.Fatalf("unexpected streamed text: %q", got.String())
+	}
+}
+
+func TestFlushPiTextBufferKeepsUnmatchedToolPrefixes(t *testing.T) {
+	tests := []string{
+		"plain response: see below",
+		"plain call: see below",
+		`plain call:bash{command:<|"|>unterminated`,
+	}
+	for _, want := range tests {
+		var buf strings.Builder
+		got := drainPiTextBuffer(&buf, want)
+		got += flushPiTextBuffer(&buf)
+		if got != want {
+			t.Fatalf("unexpected flushed text: %q, want %q", got, want)
+		}
+	}
+}

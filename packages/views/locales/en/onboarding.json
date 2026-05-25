@@ -179,19 +179,61 @@
     "add_more_hint": "Add more agents anytime. A small team of specialized agents beats one jack-of-all-trades.",
     "docs_link": "Creating your first agent →"
   },
-  "step_teammate": {
-    "eyebrow": "First teammate",
-    "headline": "Create your first teammate: Multica Helper",
-    "lede": "Multica Helper is a starter agent connected to {{runtime}}. It will open your first guided issue and help you learn the core workflow.",
-    "avatar_label": "Multica Helper avatar",
-    "name": "Multica Helper",
-    "role": "Onboarding guide",
-    "point_issue": "Starts from one onboarding issue",
-    "point_context": "Uses your workspace context and issue details",
-    "point_customize": "You can rename or replace it later",
-    "footer_hint": "We'll create one agent and one onboarding issue.",
-    "create_action": "Create Multica Helper",
-    "create_failed": "Failed to create Multica Helper"
+  "welcome_after_onboarding": {
+    "loading_helper": "Preparing your Helper…",
+    "error_title": "Couldn't finish setup",
+    "error_generic": "Something went wrong. Try again.",
+    "retry": "Try again",
+    "dismiss_error": "Dismiss",
+    "error_close": "Close",
+    "user_context_heading": "About me",
+    "user_context_role_label": "Role",
+    "user_context_use_case_label": "What I want to do with Multica",
+    "runtime": {
+      "greeting": "Hi, welcome to Multica",
+      "subtitle": "I'm your first Agent assistant.",
+      "capabilities": "Ask me anything about how to use Multica. You can also have me get things done in your workspace — create issues, set up cron tasks, build new agents…",
+      "section_label": "Pick one or more tasks to start with:",
+      "assign_empty": "Pick one or more",
+      "assign_count": "Assign {{count}} task to me →",
+      "assign_count_plural": "Assign {{count}} tasks to me →",
+      "cards": {
+        "intro": {
+          "subtitle": "Let me explain in 1–2 paragraphs what Multica is and what it can do."
+        },
+        "tour": {
+          "subtitle": "I'll walk you through how issue, agent, squad, autopilot fit together."
+        },
+        "welcome_page": {
+          "subtitle": "I'll build you a single-file HTML slide deck — tailored to your role, ready to copy and open in a browser."
+        }
+      },
+      "success": {
+        "title": "All set!",
+        "subtitle": "Sit tight — your {{agentName}} is on it ☕",
+        "tip_inbox": "When there's progress, you'll see it in your Inbox.",
+        "tip_chat": "Want to chat live? Click the chat bubble at the bottom-right.",
+        "got_it": "Got it →"
+      }
+    },
+    "skip": {
+      "loading": "Setting up your workspace…",
+      "title": "Welcome to Multica!",
+      "subtitle": "We've added two tasks to help you with the next step.",
+      "got_it": "Got it",
+      "status_in_progress": "In progress",
+      "status_todo": "Todo",
+      "cards": {
+        "install_runtime": {
+          "title": "Connect a runtime",
+          "subtitle": "Install Codex or Kimi to bring agents online."
+        },
+        "create_agent": {
+          "title": "Create your first agent",
+          "subtitle": "Once a runtime is online, build your first Multica agent."
+        }
+      }
+    }
   },
   "step_workspace": {
     "eyebrow_first": "Your first workspace",
@@ -284,7 +326,8 @@
     "hint_selected": "Selected: {{name}}",
     "hint_pick": "Pick an agent runtime above to continue.",
     "hint_waiting": "Waiting for the first result…",
-    "hint_skip_or_refresh": "Refresh after installing one, or skip to enter your workspace."
+    "hint_skip_or_refresh": "Refresh after installing one, or skip to enter your workspace.",
+    "start_exploring": "Start exploring"
   },
   "step_platform": {
     "eyebrow": "Connect a computer",

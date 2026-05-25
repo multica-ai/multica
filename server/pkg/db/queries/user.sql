@@ -46,6 +46,10 @@ WHERE id = $1
 RETURNING *;
 
 -- name: PatchUserOnboarding :one
+-- Partial update of the user's onboarding decision fields. Currently only the
+-- questionnaire JSONB is patchable — the v2 attempt at persisting Step 3
+-- runtime choice on the user row was reverted; that state now lives in a
+-- frontend Zustand transient store.
 UPDATE "user" SET
     onboarding_questionnaire = COALESCE(sqlc.narg('questionnaire'), onboarding_questionnaire),
     updated_at = now()

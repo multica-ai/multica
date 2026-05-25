@@ -10,13 +10,13 @@ import { StepRole } from "./step-role";
 const TEST_RESOURCES = { en: { common: enCommon, onboarding: enOnboarding } };
 
 const EMPTY: QuestionnaireAnswers = {
-  source: null,
+  source: [],
   source_other: null,
   source_skipped: false,
   role: null,
   role_other: null,
   role_skipped: false,
-  use_case: null,
+  use_case: [],
   use_case_other: null,
   use_case_skipped: false,
   version: 2,

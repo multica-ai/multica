@@ -1,0 +1,54 @@
+# Regression and Acceptance Convention
+
+This file defines project-level regression rules for Multica PR acceptance, upstream merge verification, and release verification. It complements `.ci/deploy.md`.
+
+## Principles
+
+1. **Project docs own project-specific testing workflow.** Tester agents provide generic QA ability, but Multica-specific environment, fixtures, testcase layout, and reporting rules live in this repository.
+2. **Browser behavior requires browser evidence.** Typecheck, build, unit tests, and code review are not substitutes for UI acceptance when the changed behavior is user-visible.
+3. **Correct branch only.** PR acceptance must validate the PR branch/worktree or target release branch. An unrelated `main` dev server is only baseline evidence.
+4. **BLOCKED is not PASS.** Blocked cases must be listed and either resolved, explicitly accepted by the user, or kept as release risk.
+
+## Required reading for tester agents
+
+Before executing Multica browser regression, read:
+
+- `AGENTS.md` / `CLAUDE.md`
+- `testcase/browser-regression-guide.md`
+- Relevant `testcase/case/tc-*.md`
+- `testcase/fixtures/README.md` when a case needs test data setup
+
+## Acceptance gates
+
+For PR / upstream merge / release acceptance:
+
+1. Perform testcase coverage gap analysis against Issue, PR, diff, and recent Fork-specific changes.
+2. Add or update testcase docs when a user-visible or Fork-specific change lacks coverage.
+3. Run selected impacted browser cases against the correct build.
+4. Upload report and evidence to the Multica Issue when the task is executed through Multica.
+5. Report PASS / PARTIAL PASS / BLOCKED / FAIL with exact blockers and failed-case handback.
+
+## Agent-run-dependent cases
+
+Cases that depend on task runs, execution logs, retry, plan mode, failed tasks, or notifications must follow `testcase/fixtures/README.md` before they can be marked BLOCKED.
+
+At minimum, the tester must attempt to:
+
+- check or restart the local profile daemon for local/self-host testing,
+- ensure a suitable test agent/runtime exists,
+- create a task run via markdown agent mention or `multica issue rerun`,
+- report the exact setup step that failed if still blocked.
+
+## Reporting
+
+Reports must include:
+
+- tested URL,
+- worktree path,
+- branch,
+- commit SHA and/or PR number,
+- selected cases and selection mode,
+- build/typecheck/test results when applicable,
+- browser regression result,
+- screenshots/report attachments,
+- failed or blocked cases with exact reasons.

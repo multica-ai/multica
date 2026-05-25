@@ -327,7 +327,7 @@ function CloudRuntimeNodeRow({ node, wsId }: { node: CloudRuntimeNode; wsId: str
           disabled={deleteNode.isPending}
           onClick={() => {
             if (!confirm(t(($) => $.cloud_runtime.delete_confirm))) return;
-            deleteNode.mutate(node.id, {
+            deleteNode.mutate(node.instance_id, {
               onSuccess: () => toast.success(t(($) => $.cloud_runtime.toast_deleted)),
               onError: (err) =>
                 toast.error(

@@ -30,6 +30,7 @@ const (
 	EventOnboardingCompleted           = "onboarding_completed"
 	EventCloudWaitlistJoined           = "cloud_waitlist_joined"
 	EventFeedbackSubmitted             = "feedback_submitted"
+	EventContactSalesSubmitted         = "contact_sales_submitted"
 )
 
 const EventSchemaVersion = 2
@@ -393,16 +394,29 @@ func TeamInviteAccepted(inviteeID, workspaceID string, daysSinceInvite int64) Ev
 // The handler drives this transition — we emit from PatchOnboarding so
 // the single emission site stays honest even if the frontend retries.
 //
+// `source` and `useCase` are multi-select (users can pick several);
+// `role` stays single-select. Empty slice = no answer (skip is
+// captured separately via the *Skipped booleans).
+//
 // The three answers are also mirrored into person properties via $set
 // so cohorting by source / role / use_case works across every event
-// on the same user without re-joining back to the DB.
+// on the same user without re-joining back to the DB. PostHog accepts
+// array property values; breakdowns on a multi-value property treat
+// each element as a separate group.
 //
-// `*Skipped` booleans capture per-question skip intent (the new v2
-// signal). `*HasOther` are presence booleans for the free-text "other"
-// override; the free-text content is kept in the DB for product
-// research but not broadcast via analytics (PII risk + low cardinality
-// ask).
-func OnboardingQuestionnaireSubmitted(userID, source, role, useCase string, sourceSkipped, roleSkipped, useCaseSkipped, sourceHasOther, roleHasOther, useCaseHasOther bool) Event {
+// `*Skipped` booleans capture per-question skip intent. `*HasOther`
+// are presence booleans for the free-text "other" override; the
+// free-text content is kept in the DB for product research but not
+// broadcast via analytics (PII risk + low cardinality ask).
+func OnboardingQuestionnaireSubmitted(userID string, source []string, role string, useCase []string, sourceSkipped, roleSkipped, useCaseSkipped, sourceHasOther, roleHasOther, useCaseHasOther bool) Event {
+	// Normalize nil slices to [] so PostHog property values are stable
+	// (avoids null vs [] mixing in property type inference).
+	if source == nil {
+		source = []string{}
+	}
+	if useCase == nil {
+		useCase = []string{}
+	}
 	return Event{
 		Name:       EventOnboardingQuestionnaireSubmit,
 		DistinctID: userID,
@@ -525,6 +539,28 @@ func FeedbackSubmitted(userID, workspaceID string, messageLen int, hasImages boo
 			UserID:      userID,
 			WorkspaceID: workspaceID,
 			Source:      "ops_feedback",
+		}),
+	}
+}
+
+// ContactSalesSubmitted fires after a contact-sales inquiry is recorded.
+// The form is public and unauthenticated, so DistinctID is empty (PostHog
+// will treat it as an anonymous event). We carry the coarse company size,
+// country, and intended use case so sales / marketing can split inbound
+// volume without having to query the operational DB.
+func ContactSalesSubmitted(inquiryID, companySize, countryRegion, useCase string, hasGoals bool) Event {
+	props := map[string]any{
+		"inquiry_id":     inquiryID,
+		"company_size":   companySize,
+		"country_region": countryRegion,
+		"use_case":       useCase,
+		"has_goals":      hasGoals,
+	}
+	return Event{
+		Name:       EventContactSalesSubmitted,
+		DistinctID: inquiryID,
+		Properties: withCoreProperties(props, CoreProperties{
+			Source: "marketing_contact_sales",
 		}),
 	}
 }

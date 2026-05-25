@@ -84,9 +84,8 @@
   "detail": {
     "all_runtimes": "All runtimes",
     "read_only": "Read-only",
-    "delete_aria": "Delete runtime",
-    "delete_tooltip": "Delete runtime",
     "delete_button": "Delete runtime",
+    "delete_disabled_tooltip": "This runtime is managed by a running local daemon and will re-register itself within seconds. Stop the daemon process to remove it permanently.",
     "last_seen": "last seen {{when}}",
     "fact_owner": "Owner",
     "fact_device": "Device",
