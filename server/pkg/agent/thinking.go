@@ -421,7 +421,10 @@ func annotateCodebuddyThinking(ctx context.Context, models []Model, executablePa
 }
 
 func codebuddyEffortSuperset(ctx context.Context, executablePath string) []string {
-	cmd := exec.CommandContext(ctx, executablePath, "--help")
+	// CodeBuddy's --help is slow (~30s); use a generous timeout.
+	runCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, executablePath, "--help")
 	hideAgentWindow(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

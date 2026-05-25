@@ -1333,11 +1333,15 @@ func discoverCodebuddyModels(ctx context.Context, executablePath string) ([]Mode
 	if _, err := exec.LookPath(executablePath); err != nil {
 		return codebuddyStaticModels(), nil
 	}
-	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// CodeBuddy's --help is slow (~30s) because it fetches remote model
+	// metadata on startup. 35s accommodates that while still bounding the
+	// wait. The result is cached (modelCacheTTL) so subsequent calls are
+	// instant until the cache expires.
+	runCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "--help")
 	hideAgentWindow(cmd)
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return codebuddyStaticModels(), nil
 	}
