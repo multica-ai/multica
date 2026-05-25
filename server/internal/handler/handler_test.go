@@ -579,6 +579,20 @@ func TestCreateSubIssueInheritsParentProject(t *testing.T) {
 	}
 }
 
+func TestCreateIssue_ProjectIDRequired(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "No project issue",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "project_id is required") {
+		t.Fatalf("expected project_id error, got: %s", w.Body.String())
+	}
+}
+
 func TestCreateSubIssueUsesExplicitProjectOverParentProject(t *testing.T) {
 	var parentProjectID, childProjectID, parentID, childID string
 	defer func() {
