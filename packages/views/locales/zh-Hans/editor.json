@@ -16,8 +16,10 @@
       "heading_3": "标题 3"
     },
     "list_dropdown": {
+      "_comment_cerebro_patch": "CEREBRO-PATCH(todo-list-editor-locale-zh): task-list menu label",
       "bullet_list": "无序列表",
-      "ordered_list": "有序列表"
+      "ordered_list": "有序列表",
+      "task_list": "待办列表"
     },
     "sub_issue": {
       "tooltip": "用选中内容创建子 issue",

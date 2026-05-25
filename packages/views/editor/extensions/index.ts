@@ -27,6 +27,8 @@ import Placeholder from "@tiptap/extension-placeholder";
 import Link from "@tiptap/extension-link";
 import Typography from "@tiptap/extension-typography";
 import Image from "@tiptap/extension-image";
+import TaskItem from "@tiptap/extension-task-item"; // CEREBRO-PATCH(todo-list-editor): register editable task list nodes.
+import TaskList from "@tiptap/extension-task-list";
 import TableRow from "@tiptap/extension-table-row";
 import TableHeader from "@tiptap/extension-table-header";
 import TableCell from "@tiptap/extension-table-cell";
@@ -131,6 +133,8 @@ export function createEditorExtensions(
     // markdownPaste's handlePaste is a catch-all that returns true.
     LinkExtension,
     ImageExtension,
+    TaskList,
+    TaskItem.configure({ nested: true }),
     Table.configure({ resizable: false }),
     TableRow,
     TableHeader,

@@ -16,8 +16,10 @@
       "heading_3": "Heading 3"
     },
     "list_dropdown": {
+      "_comment_cerebro_patch": "CEREBRO-PATCH(todo-list-editor-locale-en): task-list menu label",
       "bullet_list": "Bullet List",
-      "ordered_list": "Ordered List"
+      "ordered_list": "Ordered List",
+      "task_list": "Todo List"
     },
     "sub_issue": {
       "tooltip": "Create sub-issue from selection",

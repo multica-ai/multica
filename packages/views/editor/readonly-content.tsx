@@ -65,12 +65,27 @@ const lowlight = createLowlight(common);
 
 const sanitizeSchema = {
   ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), "input"], // CEREBRO-PATCH(todo-list-editor): allow readonly checkbox markup from GFM task lists.
   protocols: {
     ...defaultSchema.protocols,
     href: [...(defaultSchema.protocols?.href ?? []), "mention"],
   },
   attributes: {
     ...defaultSchema.attributes,
+    ul: [
+      ...(defaultSchema.attributes?.ul ?? []),
+      ["className", "contains-task-list"],
+    ],
+    li: [
+      ...(defaultSchema.attributes?.li ?? []),
+      ["className", "task-list-item"],
+    ],
+    input: [
+      ...(defaultSchema.attributes?.input ?? []),
+      ["type", "checkbox"],
+      "checked",
+      "disabled",
+    ],
     div: [
       ...(defaultSchema.attributes?.div ?? []),
       "dataType",
