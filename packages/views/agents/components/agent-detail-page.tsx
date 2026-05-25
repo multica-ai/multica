@@ -15,6 +15,8 @@ import type { Agent, CreateAgentRequest, UpdateAgentRequest } from "@multica/cor
 import {
   agentAllowedPrincipalKeys,
   agentAllowedPrincipalsOptions,
+  agentDetailKeys,
+  agentDetailOptions,
   type AgentPresenceDetail,
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
@@ -72,6 +74,16 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     error: agentsError,
     refetch: refetchAgents,
   } = useQuery(agentListOptions(wsId));
+  const {
+    data: detailAgent,
+    isLoading: detailLoading,
+    error: detailError,
+    refetch: refetchDetailAgent,
+  } = useQuery({
+    ...agentDetailOptions(wsId, agentId),
+    enabled: !!agentId,
+    retry: false,
+  });
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
 
@@ -79,20 +91,10 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   // The hook owns the 30s tick so the failed-window auto-clears here too.
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
 
-  const agent = agents.find((a) => a.id === agentId) ?? null;
+  const listAgent = agents.find((a) => a.id === agentId) ?? null;
+  const agent = detailAgent ?? listAgent ?? null;
   const presence: AgentPresenceDetail | null =
     agent ? presenceMap.get(agent.id) ?? null : null;
-
-  // Fallback fetch: when the agent is missing from the workspace list, hit
-  // GET /api/agents/{id} directly to disambiguate "doesn't exist" (404) from
-  // "you can't see this private agent" (403). Only fires after the list has
-  // settled, so the common path makes zero extra requests.
-  const { error: detailError } = useQuery({
-    queryKey: ["agent-detail-probe", wsId, agentId],
-    queryFn: () => api.getAgent(agentId),
-    enabled: !agentsLoading && !agent && !!agentId,
-    retry: false,
-  });
   const isForbidden =
     detailError instanceof ApiError && detailError.status === 403;
 
@@ -124,38 +126,55 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
       }
     }
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+    qc.setQueryData(agentDetailKeys.detail(wsId, created.id), created);
     setShowDuplicate(false);
     navigation.push(paths.agentDetail(created.id));
   };
 
   const handleUpdate = async (id: string, data: Record<string, unknown>) => {
     if (!canEdit.allowed) return;
-    // Optimistic update
-    const queryKey = workspaceKeys.agents(wsId);
-    const prevAgents = qc.getQueryData<Agent[]>(queryKey);
+    // Optimistic update: keep the detail cache authoritative while also
+    // patching the list cache so surrounding views stay in sync.
+    const listQueryKey = workspaceKeys.agents(wsId);
+    const detailQueryKey = agentDetailKeys.detail(wsId, id);
+    const prevAgents = qc.getQueryData<Agent[]>(listQueryKey);
     const prevAgent = prevAgents?.find((a) => a.id === id);
+    const prevDetailAgent = qc.getQueryData<Agent>(detailQueryKey);
+    const baseAgent = prevDetailAgent ?? prevAgent ?? null;
     const prevFields: Record<string, unknown> = {};
-    if (prevAgent) {
+    if (baseAgent) {
       for (const key of Object.keys(data)) {
-        prevFields[key] = (prevAgent as unknown as Record<string, unknown>)[key];
+        prevFields[key] = (baseAgent as unknown as Record<string, unknown>)[key];
       }
     }
-    qc.setQueryData<Agent[]>(queryKey, (old) =>
+    qc.setQueryData<Agent[]>(listQueryKey, (old) =>
       old?.map((a) => (a.id === id ? ({ ...a, ...data } as Agent) : a)),
     );
+    if (baseAgent) {
+      qc.setQueryData<Agent>(detailQueryKey, { ...baseAgent, ...data } as Agent);
+    }
     try {
-      await api.updateAgent(id, data as UpdateAgentRequest);
-      qc.invalidateQueries({ queryKey });
+      const updated = await api.updateAgent(id, data as UpdateAgentRequest);
+      qc.setQueryData<Agent>(detailQueryKey, updated);
+      qc.setQueryData<Agent[]>(listQueryKey, (old) =>
+        old?.map((a) => (a.id === id ? ({ ...a, ...updated } as Agent) : a)),
+      );
+      qc.invalidateQueries({ queryKey: listQueryKey });
+      qc.invalidateQueries({ queryKey: detailQueryKey });
       toast.success(t(($) => $.detail.agent_updated_toast));
     } catch (e) {
       if (prevAgent) {
-        qc.setQueryData<Agent[]>(queryKey, (old) =>
+        qc.setQueryData<Agent[]>(listQueryKey, (old) =>
           old?.map((a) =>
             a.id === id ? ({ ...a, ...prevFields } as Agent) : a,
           ),
         );
       }
-      qc.invalidateQueries({ queryKey });
+      if (prevDetailAgent) {
+        qc.setQueryData<Agent>(detailQueryKey, prevDetailAgent);
+      }
+      qc.invalidateQueries({ queryKey: listQueryKey });
+      qc.invalidateQueries({ queryKey: detailQueryKey });
       toast.error(e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast));
       throw e;
     }
@@ -170,6 +189,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           queryKey: agentAllowedPrincipalKeys.detail(wsId, agent.id),
         }),
         qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) }),
+        qc.invalidateQueries({ queryKey: agentDetailKeys.detail(wsId, agent.id) }),
       ]);
       toast.success(t(($) => $.detail.agent_updated_toast));
     } catch (e) {
@@ -182,6 +202,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     try {
       await api.archiveAgent(id);
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      qc.invalidateQueries({ queryKey: agentDetailKeys.detail(wsId, id) });
       toast.success(t(($) => $.detail.agent_archived_toast));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.detail.archive_failed_toast));
@@ -192,6 +213,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     try {
       await api.restoreAgent(id);
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      qc.invalidateQueries({ queryKey: agentDetailKeys.detail(wsId, id) });
       toast.success(t(($) => $.detail.agent_restored_toast));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.detail.restore_failed_toast));
@@ -199,7 +221,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   };
 
   // --- Loading ---
-  if (agentsLoading && !agent) {
+  if ((agentsLoading || detailLoading) && !agent) {
     return <DetailLoadingSkeleton />;
   }
 
@@ -238,7 +260,9 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           <div>
             <p className="text-sm font-medium">{t(($) => $.detail.not_found_title)}</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {agentsError instanceof Error
+              {detailError instanceof Error
+                ? detailError.message
+                : agentsError instanceof Error
                 ? agentsError.message
                 : t(($) => $.detail.not_found_default)}
             </p>
@@ -248,7 +272,10 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => refetchAgents()}
+              onClick={() => {
+                void refetchAgents();
+                void refetchDetailAgent();
+              }}
             >
               {t(($) => $.detail.try_again)}
             </Button>
