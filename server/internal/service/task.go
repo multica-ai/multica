@@ -1486,6 +1486,8 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 		return 0
 	}
 
+	slog.Info("handle failed tasks batch", "count", len(tasks))
+
 	affectedAgents := make(map[string]pgtype.UUID)
 	processedIssues := make(map[string]bool)
 	retriedIssues := make(map[string]bool)

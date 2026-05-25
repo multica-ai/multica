@@ -547,6 +547,7 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("deregister: failed to set offline", "runtime_id", rid, "error", err)
 			continue
 		}
+		slog.Info("deregister runtime", "runtime_id", rid)
 		h.Analytics.Capture(analytics.RuntimeOffline(
 			uuidToString(rt.OwnerID),
 			wsID,
