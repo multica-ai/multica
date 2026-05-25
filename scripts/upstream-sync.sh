@@ -64,6 +64,23 @@ ensure_remote() {
     || die "missing git remote '$name'"
 }
 
+# Resolve the GitHub `owner/repo` for the fork from the `origin` remote URL.
+# Required because `gh` would otherwise default to whatever `gh repo view`
+# resolves to (often `upstream`/`multica-ai/multica` in a checkout that has
+# both remotes), which makes `gh pr list` miss fork PRs and breaks the
+# in-flight guard (see FIR-2169 QA on PR #594).
+origin_repo() {
+  local url
+  url="$(git remote get-url "$ORIGIN_REMOTE" 2>/dev/null)" || return 1
+  # strip optional scheme/host and trailing .git so both
+  # https://github.com/<owner>/<repo>.git and git@github.com:<owner>/<repo>.git work
+  url="${url#git@github.com:}"
+  url="${url#https://github.com/}"
+  url="${url#http://github.com/}"
+  url="${url%.git}"
+  printf '%s' "$url"
+}
+
 write_status_json() {
   local status="$1" pr_url="${2:-}" conflict_count="${3:-0}" upstream_sha="${4:-}" message="${5:-}"
   mkdir -p "$REPORT_DIR"
@@ -99,10 +116,32 @@ dry_run() {
 
 # Look up an open PR with the same head branch — exact match avoids
 # accidentally treating a different branch ("foo-rolling") as the same PR.
+# Pin to the fork repo so checkouts with both `origin` (fork) and `upstream`
+# (multica-ai/multica) remotes still scope this lookup to the fork.
 existing_pr_url() {
   command -v gh >/dev/null 2>&1 || return 0
-  gh pr list --head "$ROLLING_BRANCH" --state open --limit 1 \
+  local repo
+  repo="$(origin_repo 2>/dev/null)" || return 0
+  [[ -z "$repo" ]] && return 0
+  gh pr list --repo "$repo" --head "$ROLLING_BRANCH" --state open --limit 1 \
     --json url --jq '.[0].url // ""' 2>/dev/null || true
+}
+
+# Look up any open upstream-sync PR in flight — the bot's own rolling branch
+# OR a human-driven catch-up branch named `upstream-sync/*`. Used to skip a
+# nightly run when a previous batch (manual or bot) is still being merged,
+# so the bot does not create a duplicate conflict report on the same commits.
+# Pin to the fork repo — `gh` would otherwise default to `upstream` in a
+# checkout that has both remotes (FIR-2169 QA on PR #594).
+existing_inflight_pr_url() {
+  command -v gh >/dev/null 2>&1 || return 0
+  local repo
+  repo="$(origin_repo 2>/dev/null)" || return 0
+  [[ -z "$repo" ]] && return 0
+  gh pr list --repo "$repo" --state open --limit 50 \
+    --json headRefName,url \
+    --jq "[.[] | select(.headRefName == \"$ROLLING_BRANCH\" or (.headRefName | startswith(\"upstream-sync/\")))] | .[0].url // \"\"" \
+    2>/dev/null || true
 }
 
 nightly() {
@@ -132,6 +171,18 @@ nightly() {
   local behind
   behind="$(git rev-list --count "$ORIGIN_REMOTE/$BASE_BRANCH..$UPSTREAM_REMOTE/$BASE_BRANCH")"
   log "fork is $behind commits behind upstream ($upstream_sha)"
+
+  # In-flight guard: if any upstream-sync PR is already open — the bot's own
+  # rolling branch OR a manual catch-up on `upstream-sync/*` — skip this run.
+  # Without this, the bot races a human-driven catch-up and escalates a
+  # duplicate conflict report on the same commits (see FIR-2169 / FIR-2197).
+  local inflight_url
+  inflight_url="$(existing_inflight_pr_url || true)"
+  if [[ -n "$inflight_url" ]]; then
+    log "upstream-sync PR already in flight: $inflight_url — skipping"
+    write_status_json "noop" "$inflight_url" 0 "$upstream_sha" "Upstream-sync PR already in flight: $inflight_url"
+    return 0
+  fi
 
   # Idempotency: if an open PR already exists for this exact branch +
   # this exact upstream SHA, exit early — we already shipped this batch.
@@ -248,8 +299,10 @@ push_and_open_pr() {
   body="$(printf 'Nightly upstream sync from \x60multica-ai/multica\x60.\n\n- Outcome: %s\n- Upstream HEAD: \x60%s\x60\n- Commits in batch: %s\n\nAuto-opened by the upstream-sync bot. Review and merge as part of normal QA.\n' \
     "$outcome" "$upstream_sha" "$behind")"
 
-  local pr_url
+  local pr_url repo
+  repo="$(origin_repo 2>/dev/null || true)"
   if pr_url="$(gh pr create \
+    ${repo:+--repo "$repo"} \
     --base "$BASE_BRANCH" \
     --head "$ROLLING_BRANCH" \
     --title "$title" \

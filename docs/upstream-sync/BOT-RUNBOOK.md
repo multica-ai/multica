@@ -32,6 +32,12 @@ issue created by the upstream-sync autopilot.
 - Running the script twice in one day is safe: if the rolling branch already
   contains the current `upstream/main` HEAD, the script exits with `status=noop`
   and the bot reports "already shipped this batch".
+- The script also skips the entire merge attempt when **any** open
+  upstream-sync PR is already in flight — both the bot's own rolling-branch
+  PR and a human-driven catch-up on `upstream-sync/*`. This prevents the bot
+  from racing a manual catch-up and escalating a duplicate conflict report on
+  the same batch (the FIR-2197 incident). The `last-run.json` `message` field
+  names the in-flight PR URL so the heartbeat can link to it.
 
 ## Recovery
 
