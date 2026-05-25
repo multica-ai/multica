@@ -117,8 +117,11 @@ var issueUpdateCmd = &cobra.Command{
 var issueAssignCmd = &cobra.Command{
 	Use:   "assign <id>",
 	Short: "Assign an issue to a member, agent, or squad",
-	Args:  exactArgs(1),
-	RunE:  runIssueAssign,
+	Long: "Update an issue's assignee. NOTE: this only changes the assignee field — " +
+		"it does not queue a fresh task for the assigned agent to wake on. " +
+		"To re-enqueue a task (e.g., after a failed agent run), use `multica issue rerun <id>`.",
+	Args: exactArgs(1),
+	RunE: runIssueAssign,
 }
 
 var issueStatusCmd = &cobra.Command{
@@ -203,8 +206,12 @@ var issueRunMessagesCmd = &cobra.Command{
 var issueRerunCmd = &cobra.Command{
 	Use:   "rerun <id>",
 	Short: "Re-enqueue an issue's current agent assignment as a fresh task",
-	Args:  exactArgs(1),
-	RunE:  runIssueRerun,
+	Long: "Queue a fresh task for the issue's current assignee. Use this when an agent " +
+		"run failed (e.g., empty output, timeout) and the daemon is no longer polling " +
+		"for work. To change WHICH agent is assigned, use `multica issue assign <id> --to <name>` " +
+		"first, then rerun.",
+	Args: exactArgs(1),
+	RunE: runIssueRerun,
 }
 
 var issueCancelTaskCmd = &cobra.Command{
