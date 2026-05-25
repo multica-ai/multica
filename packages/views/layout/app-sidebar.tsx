@@ -152,9 +152,18 @@ const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[]
   { key: "settings", labelKey: "settings", icon: Settings },
 ];
 
-export function getCreateIssueModalData(pathname: string) {
+export function getCreateIssueModalData(
+  pathname: string,
+  currentIssueProjectId?: string | null,
+) {
   const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
-  return projectMatch ? { project_id: projectMatch[1] } : undefined;
+  if (projectMatch) return { project_id: decodeURIComponent(projectMatch[1]!) };
+  return currentIssueProjectId ? { project_id: currentIssueProjectId } : undefined;
+}
+
+function getIssueIdFromPathname(pathname: string) {
+  const match = pathname.match(/^\/[^/]+\/issues\/([^/]+)$/);
+  return match ? decodeURIComponent(match[1]!) : null;
 }
 
 function DraftDot() {
@@ -373,12 +382,19 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     ...pinListOptions(wsId ?? "", userId ?? ""),
     enabled: !!wsId && !!userId,
   });
+  const currentIssueId = getIssueIdFromPathname(pathname);
+  const { data: currentIssue } = useQuery({
+    ...issueDetailOptions(wsId ?? "", currentIssueId ?? ""),
+    enabled: !!wsId && !!currentIssueId,
+  });
   const deletePin = useDeletePin();
   const reorderPins = useReorderPins();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const openCreateIssueModal = useCallback(() => {
-    openCreateIssueWithPreference(getCreateIssueModalData(pathname));
-  }, [pathname]);
+    openCreateIssueWithPreference(
+      getCreateIssueModalData(pathname, currentIssue?.project_id),
+    );
+  }, [currentIssue?.project_id, pathname]);
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const sidebarFadeStyle = useScrollFade(sidebarScrollRef, 24);
 

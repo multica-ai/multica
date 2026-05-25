@@ -183,4 +183,29 @@ describe("PinRow", () => {
       project_id: "project-1",
     });
   });
+
+  it("opens manual create issue with the current issue project on the global shortcut", () => {
+    pathname.current = "/acme/issues/MUL-1";
+    detail.current = {
+      isPending: false,
+      isError: false,
+      data: {
+        id: "issue-1",
+        identifier: "MUL-1",
+        title: "Project issue",
+        status: "todo",
+        project_id: "project-1",
+      },
+      error: null,
+    };
+    render(<AppSidebar />);
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "c" }));
+    });
+
+    expect(openModal).toHaveBeenCalledWith("create-issue", {
+      project_id: "project-1",
+    });
+  });
 });

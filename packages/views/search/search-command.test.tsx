@@ -369,6 +369,34 @@ describe("SearchCommand", () => {
     expect(useSearchStore.getState().open).toBe(false);
   });
 
+  it("opens New Issue from an issue detail page and preserves that issue's project", async () => {
+    const user = userEvent.setup();
+    mockPathname.current = "/ws-test/issues/MUL-1";
+    mockAllIssues.current = [
+      {
+        id: "MUL-1",
+        identifier: "MUL-1",
+        title: "Project issue",
+        status: "todo",
+        project_id: "project-1",
+      },
+    ];
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "new");
+
+    const newIssue = await screen.findByText(
+      (_, el) => el?.textContent === "New Issue" && el?.tagName === "SPAN",
+    );
+    await user.click(newIssue);
+
+    expect(mockOpenModal).toHaveBeenCalledWith("quick-create-issue", {
+      project_id: "project-1",
+    });
+    expect(useSearchStore.getState().open).toBe(false);
+  });
+
   it("hides copy-link commands when not on an issue detail route", async () => {
     const user = userEvent.setup();
     mockPathname.current = "/ws-test/projects";

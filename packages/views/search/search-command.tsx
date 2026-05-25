@@ -161,9 +161,13 @@ interface SearchResults {
   projects: SearchProjectResult[];
 }
 
-function getCreateIssueModalData(pathname: string) {
+function getCreateIssueModalData(
+  pathname: string,
+  currentIssueProjectId?: string | null,
+) {
   const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
-  return projectMatch ? { project_id: projectMatch[1] } : undefined;
+  if (projectMatch) return { project_id: decodeURIComponent(projectMatch[1]!) };
+  return currentIssueProjectId ? { project_id: currentIssueProjectId } : undefined;
 }
 
 export function SearchCommand() {
@@ -244,7 +248,9 @@ export function SearchCommand() {
         icon: Plus,
         keywords: ["new", "issue", "create", "add"],
         onSelect: () => {
-          openCreateIssueWithPreference(getCreateIssueModalData(pathname));
+          openCreateIssueWithPreference(
+            getCreateIssueModalData(pathname, currentIssue?.project_id),
+          );
           setOpen(false);
         },
       },
