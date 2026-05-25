@@ -40,7 +40,7 @@ describe("createSkillSuggestion", () => {
     listSkillsMock.mockReset();
   });
 
-  it("loads workspace skills on the first /skill popup when the cache is cold", async () => {
+  it("loads workspace skills on the first / popup when the cache is cold", async () => {
     listSkillsMock.mockResolvedValue([
       makeSkill({ id: "skill-release", name: "Release notes" }),
       makeSkill({

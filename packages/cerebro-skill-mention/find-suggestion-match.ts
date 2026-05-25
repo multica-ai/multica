@@ -2,24 +2,21 @@ import type { ResolvedPos } from "@tiptap/pm/model";
 import type { SuggestionMatch } from "@tiptap/suggestion";
 
 /**
- * Custom matcher for the `/skill` trigger.
+ * Custom matcher for the `/` slash-command trigger.
  *
- * Why not `char: "/skill"` on the default matcher? @tiptap/suggestion's
- * default builds the regex `\/skill[^\s\/skill]*`, whose character class
- * excludes `/`, `s`, `k`, `i`, `l` — so any query containing those letters
- * (which is most real skill names) terminates the match prematurely.
+ * Why not the default matcher with `char: "/"`? @tiptap/suggestion's default
+ * builds the regex `\/[^\s\/]*` but does not enforce the leading word-boundary
+ * we need (so `apps/skills` would trigger). Doing it ourselves also gives a
+ * single place to evolve the rules.
  *
  * Rules enforced here:
- * - `/skill` must start the text node OR be preceded by whitespace, so it
- *   doesn't fire inside other tokens (e.g. `apps/skills/foo`).
- * - Case-insensitive trigger (`/Skill`, `/SKILL` all work).
- * - The trigger requires a word-boundary: typing `/skills` (extra `s`) does
- *   NOT match — `$` only anchors when nothing else follows `/skill` besides
- *   an optional whitespace + query.
- * - Query starts after the first whitespace following `/skill`; leading
- *   whitespace is trimmed (so `/skill   foo` matches `foo`).
+ * - `/` must start the text node OR be preceded by whitespace, so it doesn't
+ *   fire inside paths or URLs (e.g. `apps/foo`, `https://x`).
+ * - Query is whatever follows `/` up to the cursor; it stops at whitespace
+ *   or another `/`. Typing a space closes the popover (Slack/Notion UX).
+ * - Empty query is valid — bare `/` opens the menu with the full skill list.
  */
-const SKILL_TRIGGER = /(^|\s)(\/skill)(?:\s(.*))?$/i;
+const SKILL_TRIGGER = /(^|\s)(\/)([^\s\/]*)$/;
 
 export function findSkillSuggestionMatch(config: {
   $position: ResolvedPos;
@@ -33,19 +30,16 @@ export function findSkillSuggestionMatch(config: {
 
   const leadingWs = match[1] ?? "";
   const trigger = match[2] ?? "";
-  const queryPart = match[3];
+  const queryPart = match[3] ?? "";
 
   const matchIndex = (match.index ?? 0) + leadingWs.length;
   const textFrom = config.$position.before() + 1;
   const from = textFrom + matchIndex;
   const to = textFrom + text.length;
 
-  const query = (queryPart ?? "").trimStart();
-  const matchedText = trigger + (queryPart === undefined ? "" : ` ${queryPart}`);
-
   return {
     range: { from, to },
-    query,
-    text: matchedText,
+    query: queryPart,
+    text: trigger + queryPart,
   };
 }

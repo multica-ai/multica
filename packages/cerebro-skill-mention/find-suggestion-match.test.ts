@@ -17,21 +17,41 @@ function mockPosition(text: string | null, before = 0): ResolvedPos {
 }
 
 describe("findSkillSuggestionMatch", () => {
-  it("matches /skill at the start of the text node", () => {
-    const match = findSkillSuggestionMatch({ $position: mockPosition("/skill") });
+  it("matches a bare / at the start of the text node (empty query)", () => {
+    const match = findSkillSuggestionMatch({ $position: mockPosition("/") });
     expect(match).not.toBeNull();
     expect(match?.query).toBe("");
-    expect(match?.text).toBe("/skill");
+    expect(match?.text).toBe("/");
   });
 
-  it("matches /skill after whitespace", () => {
-    const match = findSkillSuggestionMatch({ $position: mockPosition("hi /skill") });
+  it("matches a bare / after whitespace", () => {
+    const match = findSkillSuggestionMatch({ $position: mockPosition("hi /") });
     expect(match).not.toBeNull();
     expect(match?.query).toBe("");
-    expect(match?.text).toBe("/skill");
+    expect(match?.text).toBe("/");
   });
 
-  it("does not match /skill mid-token (path-like prefix)", () => {
+  it("filters by whatever follows / (slash-command UX)", () => {
+    const match = findSkillSuggestionMatch({ $position: mockPosition("/foo") });
+    expect(match?.query).toBe("foo");
+    expect(match?.text).toBe("/foo");
+  });
+
+  it("supports filtering by skill-name substring", () => {
+    const match = findSkillSuggestionMatch({
+      $position: mockPosition("/agent"),
+    });
+    expect(match?.query).toBe("agent");
+  });
+
+  it("legacy /skill input still matches (skill as the filter query)", () => {
+    const match = findSkillSuggestionMatch({
+      $position: mockPosition("/skill"),
+    });
+    expect(match?.query).toBe("skill");
+  });
+
+  it("does not match / mid-token (paths)", () => {
     expect(
       findSkillSuggestionMatch({ $position: mockPosition("apps/skills/foo") }),
     ).toBeNull();
@@ -40,44 +60,25 @@ describe("findSkillSuggestionMatch", () => {
     ).toBeNull();
   });
 
-  it("matches case-insensitively", () => {
+  it("does not match inside a URL", () => {
     expect(
-      findSkillSuggestionMatch({ $position: mockPosition("/Skill") })?.text,
-    ).toBe("/Skill");
-    expect(
-      findSkillSuggestionMatch({ $position: mockPosition("/SKILL") })?.text,
-    ).toBe("/SKILL");
-  });
-
-  it("does not match /skills (extra letter — word boundary)", () => {
-    expect(
-      findSkillSuggestionMatch({ $position: mockPosition("/skills") }),
-    ).toBeNull();
-    expect(
-      findSkillSuggestionMatch({ $position: mockPosition("/skillz") }),
+      findSkillSuggestionMatch({ $position: mockPosition("https://example") }),
     ).toBeNull();
   });
 
-  it("extracts the query after a single whitespace separator", () => {
-    const match = findSkillSuggestionMatch({
-      $position: mockPosition("/skill foo"),
-    });
-    expect(match?.query).toBe("foo");
-    expect(match?.text).toBe("/skill foo");
+  it("typing a space after the query closes the popover", () => {
+    expect(
+      findSkillSuggestionMatch({ $position: mockPosition("/foo ") }),
+    ).toBeNull();
+    expect(
+      findSkillSuggestionMatch({ $position: mockPosition("/foo bar") }),
+    ).toBeNull();
   });
 
-  it("preserves multi-word queries", () => {
-    const match = findSkillSuggestionMatch({
-      $position: mockPosition("/skill foo bar"),
-    });
-    expect(match?.query).toBe("foo bar");
-  });
-
-  it("trims leading whitespace inside the query", () => {
-    const match = findSkillSuggestionMatch({
-      $position: mockPosition("/skill   foo"),
-    });
-    expect(match?.query).toBe("foo");
+  it("typing a second / closes the popover", () => {
+    expect(
+      findSkillSuggestionMatch({ $position: mockPosition("/foo/bar") }),
+    ).toBeNull();
   });
 
   it("returns null when the node before the cursor is not a text node", () => {
@@ -95,21 +96,21 @@ describe("findSkillSuggestionMatch", () => {
   it("computes the replacement range relative to the resolved position", () => {
     // `before()` returns the offset of the parent node before the cursor; the
     // function adds 1 to land on the first character inside that node. A
-    // /skill at the very start of the text should rewrite `[before+1, end]`.
+    // `/foo` at the very start of the text should rewrite `[before+1, end]`.
     const match = findSkillSuggestionMatch({
-      $position: mockPosition("/skill foo", 10),
+      $position: mockPosition("/foo", 10),
     });
     expect(match?.range.from).toBe(11);
-    expect(match?.range.to).toBe(21);
+    expect(match?.range.to).toBe(15);
   });
 
-  it("computes the range past the leading whitespace when /skill follows text", () => {
-    // For "hi /skill" the trigger starts at index 3; with before()=10 the
-    // text starts at offset 11, so `/skill` starts at 14.
+  it("computes the range past the leading whitespace when / follows text", () => {
+    // For "hi /foo" the trigger starts at index 3; with before()=10 the
+    // text starts at offset 11, so `/foo` starts at 14.
     const match = findSkillSuggestionMatch({
-      $position: mockPosition("hi /skill", 10),
+      $position: mockPosition("hi /foo", 10),
     });
     expect(match?.range.from).toBe(14);
-    expect(match?.range.to).toBe(20);
+    expect(match?.range.to).toBe(18);
   });
 });

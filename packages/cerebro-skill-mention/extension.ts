@@ -72,8 +72,8 @@ export function createSkillSuggestion(
   }
 
   return {
-    char: "/skill",
-    allowSpaces: true,
+    char: "/",
+    allowSpaces: false,
     startOfLine: false,
     findSuggestionMatch: findSkillSuggestionMatch,
 
@@ -171,7 +171,10 @@ export function createSkillSuggestion(
 }
 
 /**
- * TipTap extension that adds the `/skill` trigger.
+ * TipTap extension that adds the `/` slash-command trigger for skills.
+ *
+ * Typing `/` opens the popover; continuing to type filters the list. Space
+ * or another `/` closes the popover.
  *
  * Does NOT define its own node — selecting a skill inserts the upstream
  * `mention` node (defined by BaseMentionExtension) with `type: "skill"`,
