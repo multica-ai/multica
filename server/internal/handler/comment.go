@@ -930,8 +930,9 @@ func (h *Handler) markIssueInProgressForComment(ctx context.Context, qtx *db.Que
 
 	prevStatus := issue.Status
 	updatedIssue, err := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-		ID:     issue.ID,
-		Status: "in_progress",
+		ID:          issue.ID,
+		Status:      "in_progress",
+		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
 		return nil, "", err
