@@ -136,7 +136,7 @@ helm install multica deploy/helm/multica -n multica
 
 默认主机名是 `multica.dev.lan`（web）和 `api.multica.dev.lan`（backend）。把它们加进 `/etc/hosts`（或者本地 DNS），指向任意一个 Ingress 可达的节点 IP 就行。要换主机名，就把 `deploy/helm/multica/values.yaml` 复制一份，改掉 `ingress.frontend.host` / `ingress.backend.host`，再把 `backend.config.appUrl` / `frontendOrigin` / `localUploadBaseUrl` / `googleRedirectUri` 改成相应的地址，然后 `helm install ... -f my-values.yaml`。
 
-Backend pod 在等 Postgres 起来之前可能会重启 1–2 次——属于正常现象。等它 `Running` 之后：
+冷集群上 backend 可能会 `Running` 但 `Not Ready` 持续几分钟，等 Postgres 起来并跑完 migration——startupProbe 会兜住这一段，pod 不会被 liveness 重启。等它 `Ready` 之后：
 
 ```bash
 curl -H "Host: api.multica.dev.lan" http://<ingress-ip>/healthz

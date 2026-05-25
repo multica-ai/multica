@@ -137,7 +137,7 @@ helm install multica deploy/helm/multica -n multica
 
 Defaults assume the hostnames `multica.dev.lan` (web) and `api.multica.dev.lan` (backend). Add them to `/etc/hosts` (or local DNS) pointing at any node IP where your Ingress is reachable. To use different hostnames, copy `deploy/helm/multica/values.yaml`, edit `ingress.frontend.host` / `ingress.backend.host` and the matching `backend.config.appUrl` / `frontendOrigin` / `localUploadBaseUrl` / `googleRedirectUri`, then install with `-f my-values.yaml`.
 
-The backend pod may restart 1–2 times while waiting on Postgres — that's expected. Once it's `Running`:
+On a cold cluster the backend can stay `Running` but not `Ready` for a few minutes while it waits on Postgres and runs migrations — a startupProbe absorbs this, so the pod should not restart. Once it's `Ready`:
 
 ```bash
 curl -H "Host: api.multica.dev.lan" http://<ingress-ip>/healthz
