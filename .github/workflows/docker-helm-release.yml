@@ -28,6 +28,7 @@ jobs:
       semver: ${{ steps.meta.outputs.semver }}
       create_tag: ${{ steps.meta.outputs.create_tag }}
       is_latest: ${{ steps.meta.outputs.is_latest }}
+      repo_owner_lower: ${{ steps.meta.outputs.repo_owner_lower }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -69,6 +70,9 @@ jobs:
             echo "is_latest=false" >> "$GITHUB_OUTPUT"
           fi
 
+          repo_owner_lower=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "repo_owner_lower=$repo_owner_lower" >> "$GITHUB_OUTPUT"
+
       - name: Create tag if not exists
         if: steps.meta.outputs.create_tag == 'true'
         run: |
@@ -104,7 +108,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/multica-backend
+          images: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-backend
           labels: |
             org.opencontainers.image.title=Multica Backend
             org.opencontainers.image.description=Multica self-hosted backend
@@ -133,7 +137,7 @@ jobs:
           build-args: |
             VERSION=${{ needs.prepare.outputs.tag_name }}
             COMMIT=${{ github.sha }}
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ github.repository_owner }}/multica-backend,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-backend,push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
         run: |
@@ -170,7 +174,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/multica-backend
+          images: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-backend
           flavor: |
             latest=false
           tags: |
@@ -190,12 +194,12 @@ jobs:
         run: |
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.REGISTRY }}/${{ github.repository_owner }}/multica-backend@sha256:%s ' *)
+            $(printf '${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-backend@sha256:%s ' *)
 
       - name: Inspect image
         run: |
           docker buildx imagetools inspect \
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/multica-backend:${{ needs.prepare.outputs.tag_name }}
+            ${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-backend:${{ needs.prepare.outputs.tag_name }}
 
   # ---------------------------------------------------------------------------
   # Web Docker Image
@@ -224,7 +228,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/multica-web
+          images: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-web
           labels: |
             org.opencontainers.image.title=Multica Web
             org.opencontainers.image.description=Multica self-hosted web frontend
@@ -253,7 +257,7 @@ jobs:
           build-args: |
             REMOTE_API_URL=http://backend:8080
             NEXT_PUBLIC_APP_VERSION=${{ needs.prepare.outputs.tag_name }}
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ github.repository_owner }}/multica-web,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-web,push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
         run: |
@@ -290,7 +294,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/multica-web
+          images: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-web
           flavor: |
             latest=false
           tags: |
@@ -310,12 +314,12 @@ jobs:
         run: |
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.REGISTRY }}/${{ github.repository_owner }}/multica-web@sha256:%s ' *)
+            $(printf '${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-web@sha256:%s ' *)
 
       - name: Inspect image
         run: |
           docker buildx imagetools inspect \
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/multica-web:${{ needs.prepare.outputs.tag_name }}
+            ${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-web:${{ needs.prepare.outputs.tag_name }}
 
   # ---------------------------------------------------------------------------
   # Helm Chart
@@ -358,7 +362,7 @@ jobs:
         working-directory: helm
         run: |
           chart_file=$(ls multica-*.tgz | head -n 1)
-          helm push "$chart_file" oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/helm-charts
+          helm push "$chart_file" oci://${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/helm-charts
 
       - name: Tag as latest (optional)
         if: needs.prepare.outputs.is_latest == 'true'
