@@ -358,6 +358,98 @@ func parseCodexDebugModels(raw []byte) map[string]*ModelThinking {
 	return out
 }
 
+// ── CodeBuddy ────────────────────────────────────────────────────────
+//
+// CodeBuddy uses the same `--effort <level>` flag as Claude but with a
+// different level set (no `max`). Discovery parses `--help` identically
+// to the claude approach. All models get the same effort levels since
+// CodeBuddy doesn't document per-model restrictions.
+
+var codebuddyEffortRe = regexp.MustCompile(`--effort\s*(?:<[^>]+>)?\s*[^(]*\(([^)]+)\)`)
+
+var codebuddyEffortLabel = map[string]string{
+	"low":    "Low",
+	"medium": "Medium",
+	"high":   "High",
+	"xhigh":  "Extra high",
+}
+
+var codebuddyStaticEffortFallback = []string{"low", "medium", "high", "xhigh"}
+
+func annotateCodebuddyThinking(ctx context.Context, models []Model, executablePath string) {
+	if executablePath == "" {
+		executablePath = "codebuddy"
+	}
+	version, _ := DetectVersion(ctx, executablePath)
+	key := thinkingCacheKey{provider: "codebuddy", executablePath: executablePath, cliVersion: version}
+	if cached, ok := thinkingCacheGet(key); ok {
+		for i := range models {
+			if t, ok := cached[models[i].ID]; ok && t != nil {
+				models[i].Thinking = t
+			}
+		}
+		return
+	}
+
+	levels := codebuddyEffortSuperset(ctx, executablePath)
+	thinkingLevels := make([]ThinkingLevel, 0, len(levels))
+	for _, value := range levels {
+		label, ok := codebuddyEffortLabel[value]
+		if !ok {
+			label = strings.Title(value) //nolint:staticcheck
+		}
+		thinkingLevels = append(thinkingLevels, ThinkingLevel{Value: value, Label: label})
+	}
+
+	result := map[string]*ModelThinking{}
+	if len(thinkingLevels) > 0 {
+		thinking := &ModelThinking{
+			SupportedLevels: thinkingLevels,
+			DefaultLevel:    "medium",
+		}
+		for _, m := range models {
+			result[m.ID] = thinking
+		}
+	}
+	thinkingCachePut(key, result)
+
+	for i := range models {
+		if t, ok := result[models[i].ID]; ok && t != nil {
+			models[i].Thinking = t
+		}
+	}
+}
+
+func codebuddyEffortSuperset(ctx context.Context, executablePath string) []string {
+	cmd := exec.CommandContext(ctx, executablePath, "--help")
+	hideAgentWindow(cmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return append([]string(nil), codebuddyStaticEffortFallback...)
+	}
+	parsed := parseCodebuddyEffortHelp(string(out))
+	if len(parsed) == 0 {
+		return append([]string(nil), codebuddyStaticEffortFallback...)
+	}
+	return parsed
+}
+
+func parseCodebuddyEffortHelp(helpText string) []string {
+	match := codebuddyEffortRe.FindStringSubmatch(helpText)
+	if len(match) < 2 {
+		return nil
+	}
+	var out []string
+	for _, raw := range strings.Split(match[1], ",") {
+		token := strings.TrimSpace(raw)
+		if token == "" {
+			continue
+		}
+		out = append(out, token)
+	}
+	return out
+}
+
 // ── Shared validation ────────────────────────────────────────────────
 
 // ValidateThinkingLevel reports whether `value` is in the supported
@@ -468,6 +560,12 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"medium":  true,
 		"high":    true,
 		"xhigh":   true,
+	},
+	"codebuddy": {
+		"low":    true,
+		"medium": true,
+		"high":   true,
+		"xhigh":  true,
 	},
 }
 

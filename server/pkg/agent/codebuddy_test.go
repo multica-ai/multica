@@ -396,6 +396,51 @@ func TestParseCodebuddyModels_Malformed(t *testing.T) {
 	}
 }
 
+func TestParseCodebuddyEffortHelp(t *testing.T) {
+	t.Parallel()
+	helpOutput := `  --effort <level>                                 Reasoning effort level (low, medium, high, xhigh)`
+	levels := parseCodebuddyEffortHelp(helpOutput)
+	expected := []string{"low", "medium", "high", "xhigh"}
+	if len(levels) != len(expected) {
+		t.Fatalf("expected %d levels, got %d: %v", len(expected), len(levels), levels)
+	}
+	for i, l := range levels {
+		if l != expected[i] {
+			t.Errorf("level[%d]: expected %q, got %q", i, expected[i], l)
+		}
+	}
+}
+
+func TestParseCodebuddyEffortHelp_Missing(t *testing.T) {
+	t.Parallel()
+	levels := parseCodebuddyEffortHelp("no effort line here")
+	if len(levels) != 0 {
+		t.Fatalf("expected nil for missing effort line, got %v", levels)
+	}
+}
+
+func TestIsKnownThinkingValue_Codebuddy(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		value string
+		want  bool
+	}{
+		{"", true},
+		{"low", true},
+		{"medium", true},
+		{"high", true},
+		{"xhigh", true},
+		{"max", false},
+		{"none", false},
+	}
+	for _, tc := range cases {
+		got := IsKnownThinkingValue("codebuddy", tc.value)
+		if got != tc.want {
+			t.Errorf("IsKnownThinkingValue(codebuddy, %q) = %v, want %v", tc.value, got, tc.want)
+		}
+	}
+}
+
 func TestCodebuddyHandleUserToolResult(t *testing.T) {
 	t.Parallel()
 

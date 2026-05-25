@@ -144,7 +144,12 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		})
 	case "codebuddy":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
-			return discoverCodebuddyModels(ctx, executablePath)
+			models, err := discoverCodebuddyModels(ctx, executablePath)
+			if err != nil {
+				return nil, err
+			}
+			annotateCodebuddyThinking(ctx, models, executablePath)
+			return models, nil
 		})
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q", providerType)
