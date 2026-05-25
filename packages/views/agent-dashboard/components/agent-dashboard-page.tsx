@@ -326,6 +326,21 @@ function buildTrendRows(daily: AgentRunDashboardDaily[]) {
   }));
 }
 
+export function ownerFilterDisplayLabel({
+  selectedOwnerId,
+  selectedMember,
+  allOwnersLabel,
+  selectedOwnerFallback,
+}: {
+  selectedOwnerId: string | null;
+  selectedMember: Pick<MemberWithUser, "name" | "email"> | null;
+  allOwnersLabel: string;
+  selectedOwnerFallback: string;
+}): string {
+  if (!selectedOwnerId) return allOwnersLabel;
+  return selectedMember?.name || selectedMember?.email || selectedOwnerFallback;
+}
+
 function useDashboardUrlState() {
   const navigation = useNavigation();
   const initial = navigation.searchParams;
@@ -649,6 +664,12 @@ function OwnerFilter({
   const selectedMember = selectedOwnerId
     ? members.find((member) => member.user_id === selectedOwnerId) ?? null
     : null;
+  const selectedOwnerLabel = ownerFilterDisplayLabel({
+    selectedOwnerId,
+    selectedMember,
+    allOwnersLabel: t(($) => $.filter.all_owners),
+    selectedOwnerFallback: t(($) => $.filter.selected_owner),
+  });
   const mineActive = !!currentUserId && selectedOwnerId === currentUserId;
 
   return (
@@ -670,7 +691,7 @@ function OwnerFilter({
       >
         <SelectTrigger size="sm" className="w-44 max-w-[46vw]">
           <Users className="h-3.5 w-3.5 text-muted-foreground" />
-          <SelectValue />
+          <SelectValue>{selectedOwnerLabel}</SelectValue>
         </SelectTrigger>
         <SelectContent alignItemWithTrigger={false}>
           <SelectItem value="all">{t(($) => $.filter.all_owners)}</SelectItem>
