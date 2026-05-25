@@ -137,7 +137,7 @@ describe("AccessPage", () => {
     expect(screen.getByRole("tab", { name: /Pending/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /^Permissions$/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Audit/i })).toBeInTheDocument();
-  }, 15_000);
+  });
 
   it("shows access denied for non-admin members", async () => {
     // Use mockReturnValue (not Once) so all re-renders from React Query refetch also see "member"
@@ -150,7 +150,7 @@ describe("AccessPage", () => {
     const { ui } = makePage();
     render(ui);
     expect(await screen.findByText(/Access denied/i)).toBeInTheDocument();
-  }, 15_000);
+  });
 
   it("Pending tab shows empty state when no pending asks", async () => {
     const user = userEvent.setup();
@@ -159,7 +159,7 @@ describe("AccessPage", () => {
 
     await user.click(await screen.findByRole("tab", { name: /Pending/i }));
     expect(await screen.findByText(/Nothing waiting for approval/i)).toBeInTheDocument();
-  }, 15_000);
+  });
 
   it("Grants tab renders table when switched to", async () => {
     const user = userEvent.setup();
@@ -175,7 +175,7 @@ describe("AccessPage", () => {
     await user.click(await screen.findByRole("tab", { name: /^Permissions$/i }));
     expect(await screen.findByText("Fætta")).toBeInTheDocument();
     expect(screen.getByText("issue.read")).toBeInTheDocument();
-  }, 15_000);
+  });
 
   it("Audit tab renders empty state when no audit events", async () => {
     const user = userEvent.setup();
@@ -184,7 +184,7 @@ describe("AccessPage", () => {
 
     await user.click(await screen.findByRole("tab", { name: /Audit/i }));
     expect(await screen.findByText(/No audit events/i)).toBeInTheDocument();
-  }, 15_000);
+  });
 
   it("Audit tab passes capability filter to the API", async () => {
     const user = userEvent.setup();
@@ -200,7 +200,7 @@ describe("AccessPage", () => {
       const lastCall = calls[calls.length - 1];
       expect(lastCall?.[1]).toMatchObject({ capability: "issue.read" });
     });
-  }, 15_000);
+  });
 
   it("Audit tab passes date range filters to the API", async () => {
     const user = userEvent.setup();
@@ -217,7 +217,7 @@ describe("AccessPage", () => {
       const lastCall = calls[calls.length - 1];
       expect(lastCall?.[1]?.since).toBeTruthy();
     });
-  }, 15_000);
+  });
 
   it("Audit tab pagination: next/previous buttons are rendered and disabled when at bounds", async () => {
     const user = userEvent.setup();
@@ -232,7 +232,7 @@ describe("AccessPage", () => {
     const nextBtn = screen.getByRole("button", { name: /Next/i });
     expect(prevBtn).toBeDisabled();
     expect(nextBtn).toBeDisabled();
-  }, 15_000);
+  });
 
   it("Audit tab pagination: next page fires API with incremented offset", async () => {
     const user = userEvent.setup();
@@ -270,7 +270,7 @@ describe("AccessPage", () => {
       const offsets = calls.map((c) => c[1]?.offset);
       expect(offsets).toContain(50);
     });
-  }, 15_000);
+  });
 
   it("Audit tab: clicking an entry shows detail panel", async () => {
     const user = userEvent.setup();
@@ -302,7 +302,7 @@ describe("AccessPage", () => {
     expect(screen.getByText("api")).toBeInTheDocument();
     const summaryMatches = screen.getAllByText("Grant created");
     expect(summaryMatches.length).toBeGreaterThan(0);
-  }, 15_000);
+  });
 
   it("falls back gracefully when audit API returns malformed data", async () => {
     mockAudit.mockResolvedValueOnce({ broken: "data" });
@@ -315,5 +315,5 @@ describe("AccessPage", () => {
     await waitFor(() =>
       expect(screen.getByText(/No audit events/i)).toBeInTheDocument(),
     );
-  }, 15_000);
+  });
 });

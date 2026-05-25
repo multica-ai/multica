@@ -137,7 +137,7 @@ describe("PermissionsPage", () => {
     render(ui);
     expect(await screen.findByText(/No grants match/i)).toBeInTheDocument();
     expect(mockListGrants).toHaveBeenCalled();
-  }, 15_000);
+  });
 
   it("renders the empty state with no grants", async () => {
     mockListGrants.mockResolvedValueOnce({
@@ -153,7 +153,7 @@ describe("PermissionsPage", () => {
       expect(screen.getByText(/No grants match/i)).toBeInTheDocument(),
     );
     expect(screen.getByRole("button", { name: /New grant/i })).toBeInTheDocument();
-  }, 15_000);
+  });
 
   it("renders a row for each grant", async () => {
     mockListGrants.mockResolvedValueOnce({
@@ -169,7 +169,7 @@ describe("PermissionsPage", () => {
     expect(screen.getByText("issue.read")).toBeInTheDocument();
     // Subject-type chip
     expect(screen.getByText("group")).toBeInTheDocument();
-  }, 15_000);
+  });
 
   it("revokes an existing grant from the drawer instead of hard-deleting it", async () => {
     const user = userEvent.setup();
@@ -207,7 +207,7 @@ describe("PermissionsPage", () => {
       }),
     );
     expect(mockDeleteGrant).not.toHaveBeenCalled();
-  }, 10_000);
+  });
 
   it("opens the create-grant dialog when 'New grant' is clicked", async () => {
     const user = userEvent.setup();
@@ -229,7 +229,7 @@ describe("PermissionsPage", () => {
     expect(screen.getByRole("combobox", { name: "Capability" })).toHaveTextContent(
       "Run a shell command",
     );
-  }, 10_000);
+  });
 
   it("create-grant dialog renders a submit-button form so create fires on submit", async () => {
     // Regression: JEH-1529 — earlier code wired `onClick={handleSubmit}`
@@ -262,7 +262,7 @@ describe("PermissionsPage", () => {
     const form = submitBtn.closest("form");
     expect(form).not.toBeNull();
     expect(form?.tagName).toBe("FORM");
-  }, 10_000);
+  });
 
   it("falls back to an empty list when the API returns malformed data", async () => {
     // parseWithFallback should swallow the bad shape and the page should
@@ -274,7 +274,7 @@ describe("PermissionsPage", () => {
     await waitFor(() =>
       expect(screen.getByText(/No grants match/i)).toBeInTheDocument(),
     );
-  }, 15_000);
+  });
 
   it("renders 'Access denied' when the current member is not admin/owner", async () => {
     mockUseCurrentMember.mockReturnValueOnce({
@@ -289,7 +289,7 @@ describe("PermissionsPage", () => {
       await screen.findByText(/Access denied/i),
     ).toBeInTheDocument();
     expect(mockListGrants).not.toHaveBeenCalled();
-  }, 15_000);
+  });
 
   it("switches to the Audit tab when clicked", async () => {
     const user = userEvent.setup();
@@ -304,5 +304,5 @@ describe("PermissionsPage", () => {
 
     await user.click(screen.getByRole("tab", { name: "Audit" }));
     expect(await screen.findByText(/No audit events/i)).toBeInTheDocument();
-  }, 15_000);
+  });
 });

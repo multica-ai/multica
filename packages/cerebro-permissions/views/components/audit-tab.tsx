@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlertCircle, FileClock, X } from "lucide-react";
 import { Badge } from "@multica/ui/components/ui/badge";
@@ -27,12 +27,19 @@ export function AuditTab({ wsId }: AuditTabProps) {
   const [offset, setOffset] = useState(0);
   const [selectedEntry, setSelectedEntry] = useState<GrantAuditEntry | null>(null);
 
+  // Debounce text/date inputs — offset is not debounced (pagination is always immediate)
+  const [debouncedInputs, setDebouncedInputs] = useState({ subjectId, capability, since, until });
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedInputs({ subjectId, capability, since, until }), 300);
+    return () => clearTimeout(id);
+  }, [subjectId, capability, since, until]);
+
   const filter: AuditFilter = {
-    subjectId: subjectId.trim() || null,
+    subjectId: debouncedInputs.subjectId.trim() || null,
     grantId: null,
-    capability: capability.trim() || null,
-    since: since || null,
-    until: until || null,
+    capability: debouncedInputs.capability.trim() || null,
+    since: debouncedInputs.since || null,
+    until: debouncedInputs.until || null,
     limit: PAGE_SIZE,
     offset,
   };
@@ -51,6 +58,7 @@ export function AuditTab({ wsId }: AuditTabProps) {
     setSince("");
     setUntil("");
     setOffset(0);
+    setDebouncedInputs({ subjectId: "", capability: "", since: "", until: "" });
   }
 
   return (
