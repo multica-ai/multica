@@ -9,6 +9,12 @@ describe("getCreateIssueModalData", () => {
     });
   });
 
+  it("prefills the project from the current issue when on an issue detail route", () => {
+    expect(getCreateIssueModalData("/acme/issues/MUL-1", "project-123")).toEqual({
+      project_id: "project-123",
+    });
+  });
+
   it("does not prefill outside a project detail route", () => {
     expect(getCreateIssueModalData("/acme/issues")).toBeUndefined();
     expect(getCreateIssueModalData("/acme/projects")).toBeUndefined();

@@ -2,6 +2,7 @@ import { forwardRef, useRef, useState, useImperativeHandle } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useActiveIssueContextStore } from "@multica/core/issues/stores/active-issue-context-store";
 import type { Issue, TimelineEntry } from "@multica/core/types";
 import type { ComponentProps } from "react";
 
@@ -607,6 +608,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listAgents.mockResolvedValue([]);
     window.getSelection()?.removeAllRanges();
     mockApiObj.getProject.mockReset();
+    useActiveIssueContextStore.setState({ current: null });
   });
 
   it("shows loading skeleton while data is loading", () => {
@@ -696,6 +698,24 @@ describe("IssueDetail (shared)", () => {
     // The whole project segment is a single AppLink pointing at the project
     // detail route under the active workspace slug.
     expect(projectLink.closest("a")).toHaveAttribute("href", "/test/projects/p-1");
+  });
+
+  it("publishes and clears active issue context for embedded creation entrypoints", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "p-1" });
+
+    const view = renderIssueDetail();
+
+    await waitFor(() => {
+      expect(useActiveIssueContextStore.getState().current).toEqual({
+        issueId: "issue-1",
+        identifier: "TES-1",
+        projectId: "p-1",
+      });
+    });
+
+    view.unmount();
+
+    expect(useActiveIssueContextStore.getState().current).toBeNull();
   });
 
   it("shows an Unknown project placeholder when the project query fails", async () => {
