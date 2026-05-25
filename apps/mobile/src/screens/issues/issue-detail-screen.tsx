@@ -88,6 +88,7 @@ type Props = NativeStackScreenProps<RootStackParamList, "IssueDetail">;
 type ReactionLike = Pick<Reaction | IssueReaction, "actor_id" | "actor_type" | "emoji">;
 type DocumentPickerModule = typeof import("expo-document-picker");
 declare const require: (moduleName: string) => unknown;
+const emptyTimeline: TimelineEntry[] = [];
 type DetailListItem = {
   key: string;
   node: React.ReactElement;
@@ -178,7 +179,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   } = useLiveIssueTasks(workspace.id, issueId);
   const { data: taskRuns = [] } = useIssueTaskRuns(workspace.id, issueId);
   const { data: timelineData } = useIssueTimelineEntries(workspace.id, issueId);
-  const timeline = Array.isArray(timelineData) ? timelineData : [];
+  const timeline = Array.isArray(timelineData) ? timelineData : emptyTimeline;
   const createComment = useCreateComment(issueId);
   const updateComment = useUpdateComment(issueId);
   const deleteComment = useDeleteComment(issueId);
@@ -217,7 +218,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     setDescriptionSheetOpen(false);
     setDescriptionDraft(issue?.description ?? "");
     setIssueEditError(null);
-  }, [issue?.id]);
+  }, [issue?.description, issue?.id, issue?.title]);
 
   useEffect(() => {
     if (!editingTitle) return;
