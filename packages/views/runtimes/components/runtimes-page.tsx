@@ -42,6 +42,17 @@ import { HealthDot, HealthIcon, useHealthLabel } from "./shared";
 import { useT } from "../../i18n";
 
 const MACHINE_FILTERS: RuntimeMachineFilter[] = ["all", "online", "issues"];
+type RuntimeScope = "mine" | "all";
+
+export function filterRuntimesByScope<T extends { owner_id?: string | null }>(
+  runtimes: T[],
+  scope: RuntimeScope,
+  currentUserId: string | null | undefined,
+) {
+  if (scope !== "mine") return runtimes;
+  if (!currentUserId) return [];
+  return runtimes.filter((runtime) => runtime.owner_id === currentUserId);
+}
 
 interface RuntimesPageProps {
   /** Desktop-only daemon id used to mark the row for this Mac. */
@@ -86,8 +97,10 @@ export function RuntimesPage({
   bootstrapping,
 }: RuntimesPageProps = {}) {
   const isLoading = useAuthStore((s) => s.isLoading);
+  const currentUserId = useAuthStore((s) => s.user?.id);
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
+  const [scope, setScope] = useState<RuntimeScope>("mine");
   const [machineFilter, setMachineFilter] =
     useState<RuntimeMachineFilter>("all");
   const [machineSearch, setMachineSearch] = useState("");
@@ -127,9 +140,13 @@ export function RuntimesPage({
     [agents, snapshot],
   );
 
+  const scopedRuntimes = useMemo(() => {
+    return filterRuntimesByScope(runtimes, scope, currentUserId);
+  }, [runtimes, scope, currentUserId]);
+
   const machines = useMemo(
     () =>
-      buildRuntimeMachines(runtimes, {
+      buildRuntimeMachines(scopedRuntimes, {
         now,
         localDaemonId,
         localMachineName,
@@ -137,7 +154,7 @@ export function RuntimesPage({
         ensureLocalMachine: hasLocalMachine,
       }),
     [
-      runtimes,
+      scopedRuntimes,
       now,
       localDaemonId,
       localMachineName,
@@ -197,6 +214,8 @@ export function RuntimesPage({
         <div className="flex min-h-0 flex-1 flex-col border-t bg-background">
           <MachineSidebar
             machines={filteredMachines}
+            scope={scope}
+            setScope={setScope}
             totalMachines={machines.length}
             counts={machineCounts}
             selectedMachineId={selectedMachine?.id ?? null}
@@ -233,6 +252,8 @@ export function RuntimesPage({
             >
               <MachineSidebar
                 machines={filteredMachines}
+                scope={scope}
+                setScope={setScope}
                 totalMachines={machines.length}
                 counts={machineCounts}
                 selectedMachineId={selectedMachine?.id ?? null}
@@ -301,6 +322,8 @@ function PageHeaderBar({
 
 function MachineSidebar({
   machines,
+  scope,
+  setScope,
   totalMachines,
   counts,
   selectedMachineId,
@@ -312,6 +335,8 @@ function MachineSidebar({
   className,
 }: {
   machines: RuntimeMachine[];
+  scope: RuntimeScope;
+  setScope: (value: RuntimeScope) => void;
   totalMachines: number;
   counts: { all: number; online: number; issues: number };
   selectedMachineId: string | null;
@@ -357,6 +382,9 @@ function MachineSidebar({
             placeholder={t(($) => $.machine.search_placeholder)}
             className="h-9 pl-8 text-sm"
           />
+        </div>
+        <div className="mt-2">
+          <ScopeSegment scope={scope} setScope={setScope} />
         </div>
         <div className="mt-2 flex items-center gap-1.5 overflow-x-auto">
           {MACHINE_FILTERS.map((key) => (
@@ -407,6 +435,44 @@ function MachineSidebar({
         )}
       </div>
     </aside>
+  );
+}
+
+function ScopeSegment({
+  scope,
+  setScope,
+}: {
+  scope: RuntimeScope;
+  setScope: (value: RuntimeScope) => void;
+}) {
+  const { t } = useT("runtimes");
+  return (
+    <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
+      <button
+        type="button"
+        onClick={() => setScope("mine")}
+        className={cn(
+          "rounded px-2.5 py-1 text-xs font-medium transition-colors",
+          scope === "mine"
+            ? "bg-background text-foreground shadow-sm"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        {t(($) => $.page.scope_mine)}
+      </button>
+      <button
+        type="button"
+        onClick={() => setScope("all")}
+        className={cn(
+          "rounded px-2.5 py-1 text-xs font-medium transition-colors",
+          scope === "all"
+            ? "bg-background text-foreground shadow-sm"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        {t(($) => $.page.scope_all)}
+      </button>
+    </div>
   );
 }
 
