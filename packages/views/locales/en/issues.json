@@ -262,6 +262,8 @@
     "send_tooltip": "Send",
     "expand_tooltip": "Expand",
     "collapse_tooltip": "Collapse",
+    "show_more": "Show more",
+    "show_less": "Show less",
     "resolve": {
       "resolve_action": "Resolve thread",
       "unresolve_action": "Unresolve thread",

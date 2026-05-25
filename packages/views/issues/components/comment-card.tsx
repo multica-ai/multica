@@ -158,6 +158,52 @@ export function AttachmentList({ attachments, content, className }: { attachment
   );
 }
 
+const LONG_COMMENT_CHAR_THRESHOLD = 1600;
+const LONG_COMMENT_LINE_THRESHOLD = 18;
+
+function isLongCommentContent(content: string): boolean {
+  return (
+    content.length > LONG_COMMENT_CHAR_THRESHOLD ||
+    content.split("\n").length > LONG_COMMENT_LINE_THRESHOLD
+  );
+}
+
+function LongCommentContent({
+  content,
+  attachments,
+  className,
+}: {
+  content: string;
+  attachments?: Attachment[];
+  className?: string;
+}) {
+  const { t } = useT("issues");
+  const [expanded, setExpanded] = useState(false);
+  const isLong = isLongCommentContent(content);
+
+  return (
+    <div className={className}>
+      <div className={cn("relative", isLong && !expanded && "max-h-80 overflow-hidden")}>
+        <ReadonlyContent content={content} attachments={attachments} />
+        {isLong && !expanded && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-b from-transparent to-card" />
+        )}
+      </div>
+      {isLong && (
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          className="mt-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+        >
+          {expanded
+            ? t(($) => $.comment.show_less)
+            : t(($) => $.comment.show_more)}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Single comment row (used for both parent and replies within the same Card)
 // ---------------------------------------------------------------------------
@@ -379,9 +425,11 @@ function CommentRow({
         </div>
       ) : (
         <>
-          <div className="mt-1.5 pl-8 text-sm leading-relaxed text-foreground/85">
-            <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
-          </div>
+          <LongCommentContent
+            content={entry.content ?? ""}
+            attachments={entry.attachments}
+            className="mt-1.5 pl-8 text-sm leading-relaxed text-foreground/85"
+          />
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8" />
           {!isTemp && (
             <ReactionBar
@@ -678,9 +726,11 @@ function CommentCardImpl({
               </div>
             ) : (
               <>
-                <div className="pl-10 text-sm leading-relaxed text-foreground/85">
-                  <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
-                </div>
+                <LongCommentContent
+                  content={entry.content ?? ""}
+                  attachments={entry.attachments}
+                  className="pl-10 text-sm leading-relaxed text-foreground/85"
+                />
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
                 {!isTemp && (
                   <ReactionBar
