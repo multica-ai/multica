@@ -29,12 +29,15 @@ require_env() {
 }
 
 config="$(
-  FRONTEND_PORT=3100 BACKEND_PORT=9100 \
-  JWT_SECRET=ci-jwt-secret-padding-padding-padding-padding-padding-padding-pad \
-  docker compose \
-    --env-file .env.example \
-    -f docker-compose.selfhost.yml \
-    config
+  env -i \
+    PATH="$PATH" \
+    HOME="$HOME" \
+    FRONTEND_PORT=3100 BACKEND_PORT=9100 \
+    JWT_SECRET=ci-jwt-secret-padding-padding-padding-padding-padding-padding-pad \
+    docker compose \
+      --env-file .env.example \
+      -f docker-compose.selfhost.yml \
+      config
 )"
 
 require_config "$config" 'published: "3100"'
