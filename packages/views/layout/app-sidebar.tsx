@@ -42,6 +42,7 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui
 import { StatusIcon } from "../issues/components/status-icon";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores/create-mode-store";
+import { useActiveIssueContextStore } from "@multica/core/issues/stores/active-issue-context-store";
 import {
   Sidebar,
   SidebarContent,
@@ -164,6 +165,15 @@ export function getCreateIssueModalData(
 function getIssueIdFromPathname(pathname: string) {
   const match = pathname.match(/^\/[^/]+\/issues\/([^/]+)$/);
   return match ? decodeURIComponent(match[1]!) : null;
+}
+
+function issueContextMatchesPath(
+  context: { issueId: string; identifier: string } | null,
+  issueIdFromPath: string | null,
+) {
+  if (!context) return false;
+  if (!issueIdFromPath) return true;
+  return context.issueId === issueIdFromPath || context.identifier === issueIdFromPath;
 }
 
 function DraftDot() {
@@ -387,14 +397,21 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     ...issueDetailOptions(wsId ?? "", currentIssueId ?? ""),
     enabled: !!wsId && !!currentIssueId,
   });
+  const activeIssueContext = useActiveIssueContextStore((s) => s.current);
+  const activeIssueProjectId = issueContextMatchesPath(activeIssueContext, currentIssueId)
+    ? activeIssueContext?.projectId
+    : null;
   const deletePin = useDeletePin();
   const reorderPins = useReorderPins();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const openCreateIssueModal = useCallback(() => {
     openCreateIssueWithPreference(
-      getCreateIssueModalData(pathname, currentIssue?.project_id),
+      getCreateIssueModalData(
+        pathname,
+        currentIssue?.project_id ?? activeIssueProjectId,
+      ),
     );
-  }, [currentIssue?.project_id, pathname]);
+  }, [activeIssueProjectId, currentIssue?.project_id, pathname]);
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const sidebarFadeStyle = useScrollFade(sidebarScrollRef, 24);
 

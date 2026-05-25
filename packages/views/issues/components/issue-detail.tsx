@@ -98,6 +98,7 @@ import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
+import { useActiveIssueContextStore } from "@multica/core/issues/stores/active-issue-context-store";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
@@ -1007,6 +1008,23 @@ export function IssueDetail({
       return cached?.description != null ? cached : undefined;
     },
   });
+  const setActiveIssueContext = useActiveIssueContextStore((s) => s.setCurrent);
+  const clearActiveIssueContext = useActiveIssueContextStore((s) => s.clearCurrent);
+  useEffect(() => {
+    if (!issue) return;
+    setActiveIssueContext({
+      issueId: issue.id,
+      identifier: issue.identifier,
+      projectId: issue.project_id,
+    });
+    return () => clearActiveIssueContext(issue.id);
+  }, [
+    issue?.id,
+    issue?.identifier,
+    issue?.project_id,
+    setActiveIssueContext,
+    clearActiveIssueContext,
+  ]);
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
   useEffect(() => {

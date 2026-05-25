@@ -3,7 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { AppSidebar } from "./app-sidebar";
 
-const { detail, deletePin, pins, pathname, openModal } = vi.hoisted(() => ({
+const { activeIssueContext, detail, deletePin, pins, pathname, openModal } = vi.hoisted(() => ({
+  activeIssueContext: {
+    current: null as null | {
+      issueId: string;
+      identifier: string;
+      projectId: string | null;
+    },
+  },
   detail: { current: { isPending: false, isError: false, data: null as unknown, error: null as unknown } },
   deletePin: vi.fn(),
   openModal: vi.fn(),
@@ -123,6 +130,10 @@ vi.mock("@multica/core/issues/stores/create-mode-store", () => ({
   openCreateIssueWithPreference: (data?: Record<string, unknown> | null) =>
     openModal("create-issue", data ?? null),
 }));
+vi.mock("@multica/core/issues/stores/active-issue-context-store", () => ({
+  useActiveIssueContextStore: (selector: (state: typeof activeIssueContext) => unknown) =>
+    selector(activeIssueContext),
+}));
 vi.mock("@multica/core/issues/stores/draft-store", () => ({ useIssueDraftStore: () => false }));
 vi.mock("@multica/core/modals", () => ({ useModalStore: { getState: () => ({ modal: null, open: openModal }) } }));
 vi.mock("@multica/core/pins/mutations", () => ({ useDeletePin: () => ({ mutate: deletePin }), useReorderPins: () => ({ mutate: vi.fn() }) }));
@@ -149,6 +160,7 @@ describe("PinRow", () => {
   beforeEach(() => {
     deletePin.mockReset();
     openModal.mockReset();
+    activeIssueContext.current = null;
     pathname.current = "/acme/issues";
     detail.current = { isPending: false, isError: false, data: null, error: null };
   });
@@ -197,6 +209,24 @@ describe("PinRow", () => {
         project_id: "project-1",
       },
       error: null,
+    };
+    render(<AppSidebar />);
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "c" }));
+    });
+
+    expect(openModal).toHaveBeenCalledWith("create-issue", {
+      project_id: "project-1",
+    });
+  });
+
+  it("opens manual create issue with the active embedded issue project on the global shortcut", () => {
+    pathname.current = "/acme/inbox";
+    activeIssueContext.current = {
+      issueId: "issue-1",
+      identifier: "MUL-1",
+      projectId: "project-1",
     };
     render(<AppSidebar />);
 
