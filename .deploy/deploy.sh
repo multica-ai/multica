@@ -3,7 +3,11 @@
 # and restarts launchd jobs. Triggered by webhook tool.
 set -euo pipefail
 
-REPO=/Users/sara/code/firtal-cerebro
+# Derive the repo root from this script's own location (.deploy/deploy.sh ->
+# repo root) so the deploy works regardless of which user account or path the
+# repo is checked out under. Previously hardcoded to /Users/sara/code/... which
+# silently no-op'd on any host without that exact user (FIR-2049).
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="$REPO/.deploy/logs"
 mkdir -p "$LOG_DIR"
 
@@ -59,7 +63,9 @@ echo "=== deploy started: $(date -Iseconds) ==="
 
 cd "$REPO"
 
-export PATH="/Users/sara/.nvm/versions/node/v24.13.1/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+# Resolve node/pnpm/go from Homebrew + system paths rather than a hardcoded
+# per-user nvm directory (FIR-2049).
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 # LAST_OK_SHA records the SHA of the last fully-successful deploy.
 # Written only once every step (install / backend build / frontend

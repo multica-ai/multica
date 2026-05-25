@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO=/Users/sara/code/firtal-cerebro
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 LOG_NAME=frontend
 # shellcheck source=_log-rotation.sh
@@ -14,11 +14,11 @@ set -a
 source .env
 set +a
 
-export PATH="/Users/sara/.nvm/versions/node/v24.13.1/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 export PORT="${FRONTEND_PORT:-4200}"
 
 cd "$REPO/apps/web"
-FRONTEND_CMD=(/Users/sara/.nvm/versions/node/v24.13.1/bin/pnpm start --port "$PORT")
+FRONTEND_CMD=(pnpm start --port "$PORT")
 
 if [ -n "${INFISICAL_UNIVERSAL_AUTH_CLIENT_ID:-}" ] && [ -n "${INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET:-}" ]; then
   exec infisical run \

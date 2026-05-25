@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO=/Users/sara/code/firtal-cerebro
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 LOG_NAME=daemon
 # shellcheck source=_log-rotation.sh
@@ -14,10 +14,12 @@ set -a
 source .env
 set +a
 
-export PATH="/Users/sara/.nvm/versions/node/v24.13.1/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 # Claude-agenter spawned af denne daemon bruger Max-kontoen jesperhvejsel@gmail.com.
-export CLAUDE_CONFIG_DIR=/Users/sara/.claude-accounts/jesperhvejsel@gmail.com
+# Per-host overridable; defaults under the running user's home rather than a
+# hardcoded /Users/sara path (FIR-2049).
+export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude-accounts/jesperhvejsel@gmail.com}"
 
 # FIR-2192: the daemon no longer talks to Infisical. Per-agent secrets are
 # resolved server-side via the scoped-per-user Infisical machine identity and

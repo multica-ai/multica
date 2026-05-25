@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO=/Users/sara/code/firtal-cerebro
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 LOG_NAME=backend
 # shellcheck source=_log-rotation.sh
