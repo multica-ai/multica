@@ -456,26 +456,42 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
       return syncItems;
     },
 
-    render: () => {
-      return {
-        onStart: (props: SuggestionProps<MentionItem>) => {
-          renderer = new ReactRenderer(MentionList, {
-            props: {
-              items: props.items,
-              query: props.query,
-              command: props.command,
+        render: () => {
+          let outsideClickCleanup: (() => void) | null = null;
+
+          return {
+            onStart: (props: SuggestionProps<MentionItem>) => {
+              renderer = new ReactRenderer(MentionList, {
+                props: {
+                  items: props.items,
+                  query: props.query,
+                  command: props.command,
+                },
+                editor: props.editor,
+              });
+
+              popup = document.createElement("div");
+              popup.style.position = "fixed";
+              popup.style.zIndex = "50";
+              popup.appendChild(renderer.element);
+              document.body.appendChild(popup);
+
+              updatePosition(popup, props.clientRect);
+
+              // Close on outside click — mirror the bubble-menu pattern
+              const handleOutsideClick = (e: MouseEvent) => {
+                const target = e.target as HTMLElement;
+                if (props.editor.view.dom.contains(target)) return;
+                if (popup?.contains(target)) return;
+                cleanup();
+              };
+              document.addEventListener("mousedown", handleOutsideClick);
+
+              // Store cleanup for later removal
+              outsideClickCleanup = () => {
+                document.removeEventListener("mousedown", handleOutsideClick);
+              };
             },
-            editor: props.editor,
-          });
-
-          popup = document.createElement("div");
-          popup.style.position = "fixed";
-          popup.style.zIndex = "50";
-          popup.appendChild(renderer.element);
-          document.body.appendChild(popup);
-
-          updatePosition(popup, props.clientRect);
-        },
 
         onUpdate: (props: SuggestionProps<MentionItem>) => {
           renderer?.updateProps({
@@ -518,6 +534,11 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
       }
 
       function cleanup() {
+        // Call outside click cleanup if available
+        if (outsideClickCleanup) {
+          outsideClickCleanup();
+          outsideClickCleanup = null;
+        }
         renderer?.destroy();
         renderer = null;
         popup?.remove();
